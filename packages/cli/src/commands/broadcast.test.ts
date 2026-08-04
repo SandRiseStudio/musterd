@@ -31,6 +31,7 @@ import {
   killGroup,
   makeFramePump,
   parseOptions,
+  PULSE_SINK,
   resolveSink,
   makeEncoderFeed,
   STALL_BYTES,
@@ -67,6 +68,49 @@ describe('broadcast parseOptions', () => {
       /needs a number/,
     );
     expect(() => parseOptions({ team: 't', out: 'x.mp4', bitrate: 'lots' }, 'darwin')).toThrow();
+  });
+});
+
+describe('audio (ADR 228)', () => {
+  it('leaves the default path byte-identical — the regression that matters most', () => {
+    const opts = parseOptions({ team: 't', out: 'x.mp4' }, 'linux');
+    expect(opts.audio).toBe(false);
+    const args = ffmpegArgs(opts, { kind: 'file', target: 'x.mp4' });
+    expect(args).toContain('anullsrc=r=44100:cl=stereo');
+    expect(args.join(' ')).not.toContain('pulse');
+    expect(args.join(' ')).not.toContain('aresample');
+  });
+
+  it('--audio swaps the silent input for the pulse monitor and follows the video clock', () => {
+    const opts = parseOptions({ team: 't', twitch: true, audio: true }, 'linux');
+    expect(opts.audio).toBe(true);
+    const args = ffmpegArgs(opts, { kind: 'rtmp', target: 'rtmp://x' });
+    expect(args.join(' ')).not.toContain('anullsrc');
+    expect(args).toContain('pulse');
+    expect(args).toContain(`${PULSE_SINK}.monitor`);
+    // Video timestamps come from frame COUNT, pulse audio from wall clock — audio must follow.
+    expect(args).toContain('aresample=async=1');
+  });
+
+  it('keeps an audio track either way — RTMP ingests reject video-only', () => {
+    for (const audio of [false, true]) {
+      const opts = parseOptions(
+        { team: 't', twitch: true, ...(audio ? { audio: true } : {}) },
+        'linux',
+      );
+      expect(ffmpegArgs(opts, { kind: 'rtmp', target: 'rtmp://x' })).toContain('aac');
+    }
+  });
+
+  it('only adds the autoplay override when audio is on — a stream never gets a click', () => {
+    const stage = { width: 1280, height: 720 };
+    expect(chromeArgs(9222, '/tmp/p', 'linux', stage, true)).toContain(
+      '--autoplay-policy=no-user-gesture-required',
+    );
+    expect(chromeArgs(9222, '/tmp/p', 'linux', stage, false).join(' ')).not.toContain('autoplay');
+    expect(chromeArgs(9222, '/tmp/p', 'linux', stage)).toEqual(
+      chromeArgs(9222, '/tmp/p', 'linux', stage, false),
+    );
   });
 });
 

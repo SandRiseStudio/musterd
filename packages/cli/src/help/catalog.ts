@@ -145,7 +145,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'broadcast',
     signature:
-      '--team <slug> (--out <file.mp4> | --twitch | --rtmp <url>) [--server <url>] [--fps 30] [--bitrate 4500k] [--duration <s>] [--encoder videotoolbox|libx264] | --status | --stop',
+      '--team <slug> (--out <file.mp4> | --twitch | --rtmp <url>) [--server <url>] [--fps 30] [--bitrate 4500k] [--duration <s>] [--encoder videotoolbox|libx264] [--audio] | --status | --stop',
     summary: 'stream the animated office — headless capture of /broadcast, no OBS',
     group: 'setup',
     primary: false,
@@ -160,8 +160,10 @@ export const CATALOG: readonly CommandEntry[] = [
       'anything is streaming and on which build. Waits for the page’s readiness probe before ' +
       'encoding, so a dead daemon fails fast instead of streaming a blank page. Restarts itself on ' +
       'the new code when the daemon is rebuilt under it (ADR 159), and ends the stream rather than ' +
-      'buffering without limit if the encoder stops keeping up. This runs the capture on THIS ' +
-      'machine — to run it on a rented one instead, see `musterd stream`.',
+      'buffering without limit if the encoder stops keeping up. `--audio` captures the page’s own ' +
+      'sound from a PulseAudio sink instead of muxing silence — hosted Linux only; the sink must ' +
+      'already exist, which the hosted entrypoint guarantees (ADR 228). This runs the capture on ' +
+      'THIS machine — to run it on a rented one instead, see `musterd stream`.',
   },
   {
     name: 'stream',

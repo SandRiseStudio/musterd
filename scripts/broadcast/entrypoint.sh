@@ -61,6 +61,39 @@ curl -sf --max-time 2 "$SERVER/health" >/dev/null || {
   exit 1
 }
 
+# ── the sound card ───────────────────────────────────────────────────────────────────────────────
+#
+# The container has no audio device, so Chrome's WebAudio graph would render into nothing and the
+# stream would carry ffmpeg's silence generator (ADR 228). A null sink gives Chrome somewhere to
+# play and gives ffmpeg a `.monitor` source to capture.
+#
+# System mode because this container runs as root and PulseAudio refuses a root session daemon;
+# --disallow-exit because the daemon must outlive the idle gap between stream generations.
+export PULSE_SERVER=unix:/var/run/pulse/native
+mkdir -p /var/run/pulse
+pulseaudio --system --disallow-exit --exit-idle-time=-1 --daemonize=yes \
+  --log-target=file:/tmp/pulseaudio.log 2>/dev/null || true
+
+for _ in $(seq 1 15); do
+  pactl info >/dev/null 2>&1 && break
+  sleep 1
+done
+
+pactl load-module module-null-sink sink_name=musterd \
+  sink_properties=device.description=musterd >/dev/null 2>&1 || true
+pactl set-default-sink musterd >/dev/null 2>&1 || true
+
+# Fail loud, for the same reason the tailnet and daemon checks above do — and more so. A missing
+# sink does not look like a failure: the stream goes live, the office animates, and it carries
+# silence. Nobody finds out until a human listens, which on a 4-hour unattended stream is hours.
+pactl list short sources 2>/dev/null | grep -q 'musterd\.monitor' || {
+  echo "✗ no PulseAudio sink — the stream would go live carrying silence"
+  echo "  pactl info:"; pactl info 2>&1 | head -5
+  echo "  daemon log:"; tail -20 /tmp/pulseaudio.log 2>/dev/null
+  exit 1
+}
+echo "▸ audio sink up · musterd.monitor"
+
 # Warm chromium once: the first launch in a fresh container builds font/GPU caches and can miss the
 # capturer's 10s CDP window (learned on the bench box).
 timeout 15 "$CHROME_BIN" --headless=new --no-sandbox --disable-dev-shm-usage \
@@ -104,6 +137,7 @@ while :; do
     --resolution 720p \
     --fps 25 \
     --encoder libx264 \
+    --audio \
     ${BROADCAST_ARGS:-}
   code=$?
   set -e

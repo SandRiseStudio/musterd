@@ -53,6 +53,10 @@ const OptionsSchema = z.object({
    * the hosting spec's run D showed the render is serial and single-thread-bound — a quarter of the
    * pixels is the one lever that changes what hardware can hold the stream. */
   resolution: z.enum(['720p', '1080p']).default('1080p'),
+  /** Capture the page's audio from the container's PulseAudio sink instead of muxing silence.
+   * Hosted-Linux only (ADR 228): the macOS arm has no Pulse, and adding one was explicitly out of
+   * scope. Off by default, so every existing invocation keeps producing byte-identical ffmpeg args. */
+  audio: z.boolean().default(false),
 });
 export type BroadcastOptions = z.infer<typeof OptionsSchema>;
 
@@ -86,6 +90,7 @@ export function parseOptions(
     out: str('out'),
     rtmp: str('rtmp'),
     twitch: flags['twitch'] === true,
+    audio: flags['audio'] === true,
     // VideoToolbox is the whole point on the laptop (hardware encode); libx264 elsewhere.
     encoder: str('encoder') ?? (platform === 'darwin' ? 'videotoolbox' : 'libx264'),
     resolution: str('resolution'),
@@ -196,6 +201,9 @@ export function keychainLookup(service: string): Promise<string | null> {
  * silence is cheaper than explaining that in a runbook. Keyframe every 2s (`-g 2*fps`), the spacing
  * Twitch asks for. File mode keeps the same encode so a local proof exercises the streaming path.
  */
+/** The null sink the hosted entrypoint creates. Chrome plays into it; ffmpeg reads its monitor. */
+export const PULSE_SINK = 'musterd';
+
 export function ffmpegArgs(
   opts: BroadcastOptions,
   sink: { kind: 'file' | 'rtmp'; target: string },
@@ -218,11 +226,11 @@ export function ffmpegArgs(
     String(opts.fps),
     '-i',
     '-',
-    // audio: silence (ingests require an audio track)
-    '-f',
-    'lavfi',
-    '-i',
-    'anullsrc=r=44100:cl=stereo',
+    // audio: the page's own output when --audio (a Pulse null sink the entrypoint created), else
+    // silence — ingests require an audio track either way.
+    ...(opts.audio
+      ? ['-f', 'pulse', '-i', `${PULSE_SINK}.monitor`]
+      : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']),
     '-c:v',
     vcodec,
     '-b:v',
@@ -239,6 +247,10 @@ export function ffmpegArgs(
     'aac',
     '-b:a',
     '128k',
+    // Two clocks with no shared reference: image2pipe synthesizes video timestamps from frame COUNT
+    // while pulse timestamps are wall-clock, so over a four-hour stream they separate. This makes
+    // audio the follower and lets ffmpeg absorb the difference. Only meaningful with a real source.
+    ...(opts.audio ? ['-af', 'aresample=async=1'] : []),
     // End when the *video* pipe ends. `anullsrc` is an infinite source, so without this ffmpeg keeps
     // muxing silence after stdin closes and never exits — which made the graceful stop unreachable:
     // every Ctrl-C fell through to the 5s force-kill, and a file capture lost its moov atom because
@@ -668,6 +680,7 @@ export function chromeArgs(
   profileDir: string,
   platform: NodeJS.Platform = process.platform,
   stage: { width: number; height: number } = { width: 1920, height: 1080 },
+  audio = false,
 ): string[] {
   return [
     '--headless=new',
@@ -683,6 +696,9 @@ export function chromeArgs(
     // disk mid-capture. Both are container facts, not Linux facts, but every Linux host this runs on
     // is a container, and neither flag costs anything on a machine whose only job is the capture.
     ...(platform === 'darwin' ? [] : ['--no-sandbox', '--disable-dev-shm-usage']),
+    // A capture box has no user to click, and autoplay policy needs one before an AudioContext may
+    // start. Without this the page's WebAudio graph is born suspended and the sink stays silent.
+    ...(audio ? ['--autoplay-policy=no-user-gesture-required'] : []),
     'about:blank',
   ];
 }
@@ -958,10 +974,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
 
   // `detached: true` makes each child its own process-group leader, which is what lets the
   // stop path kill *everything* it spawned with one group signal — see killGroup.
-  const chrome = spawn(chromeBin, chromeArgs(debugPort, profile, process.platform, stage), {
-    stdio: 'ignore',
-    detached: true,
-  });
+  const chrome = spawn(
+    chromeBin,
+    chromeArgs(debugPort, profile, process.platform, stage, opts.audio),
+    {
+      stdio: 'ignore',
+      detached: true,
+    },
+  );
   const ffmpeg: ChildProcess = spawn('ffmpeg', ffmpegArgs(opts, sink), {
     stdio: ['pipe', 'inherit', 'inherit'],
     detached: true,

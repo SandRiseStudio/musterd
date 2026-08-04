@@ -3,8 +3,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import broadcastCss from '../live/Broadcast.css?url';
 import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
+import { AsksReel } from '../live/AsksReel';
 import { OfficeScene } from '../live/OfficeScene';
 import { acquireObserver, forgetObserver, type LiveConfig } from '../live/client';
+import { firehoseSound, roomTone } from '../live/sound';
 import type { OfficeHandle } from '../live/office-scene';
 import { useLiveStream } from '../live/useLiveStream';
 import { officeRoom } from '../live/officeRoom';
@@ -100,6 +102,16 @@ function BroadcastPage() {
   }, []);
   const [captureFps] = useState(captureFpsFromUrl);
 
+  // Sound on, unless the URL says otherwise. Both engines default OFF and normally need a click;
+  // a capture box never gets one, which is what `--autoplay-policy=no-user-gesture-required` and
+  // `enableForBroadcast` between them solve (ADR 228). Neither call persists — a stream must not
+  // rewrite the preferences a human set on this machine.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('audio') === '0') return;
+    firehoseSound.enableForBroadcast();
+    roomTone.enableForBroadcast();
+  }, []);
+
   // A stream has no operator to click "reconnect": if the observer credential goes stale (daemon reset,
   // 24h observer TTL — ADR 064), drop it and mint a fresh one. `recovering` is a one-at-a-time guard,
   // not a give-up counter — an unattended capture should keep trying rather than dead-end on screen.
@@ -181,6 +193,7 @@ function BroadcastPage() {
             broadcast
             captureFps={captureFps}
             workCues="stack"
+            topSlot={<AsksReel envelopes={envelopes} roster={roster} />}
             onReady={onSceneReady}
           />
         )}

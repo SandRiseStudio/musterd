@@ -90,10 +90,28 @@ const CUES: Record<string, Note[]> = {
   ],
 };
 
+/**
+ * Minimum gap between broadcast act cues, ms. The stream fires the whole team's acts at one
+ * listener who cannot mute them, and the cue set was tuned for a person at a desk with sparse
+ * arrivals — unthrottled, a busy minute is a slot machine.
+ *
+ * A dropped cue plays nothing later: the visual channel (speech bubble, stream panel) already
+ * carries every act, so the audio does not owe the viewer completeness.
+ */
+const BROADCAST_CUE_GAP_MS = 700;
+
+/** Pure gate for the broadcast cue throttle — a burst coalesces to one cue rather than queueing. */
+export function shouldChime(now: number, last: number, minGapMs = BROADCAST_CUE_GAP_MS): boolean {
+  return now - last >= minGapMs;
+}
+
 class FirehoseSound {
   enabled = false;
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Throttle the cues (broadcast only — /live's tuning is unchanged and out of scope). */
+  private throttled = false;
+  private lastCueAt = -Infinity;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -114,6 +132,19 @@ class FirehoseSound {
       /* private mode / disabled storage — fine, just don't persist */
     }
     if (on) this.ensureContext();
+  }
+
+  /**
+   * Turn sound on for a capture, without persisting. `/broadcast` only (ADR 228).
+   *
+   * Separate from `setEnabled` deliberately, rather than a `persist?: boolean` parameter: a stream
+   * source must never rewrite the preference a human set on this machine, and the call site should
+   * say so in its own name.
+   */
+  enableForBroadcast(): void {
+    this.enabled = true;
+    this.throttled = true;
+    this.ensureContext();
   }
 
   private ensureContext(): void {
@@ -138,6 +169,11 @@ class FirehoseSound {
   /** Play the cue for an act. No-op unless enabled and the audio graph is live. */
   chime(act: string): void {
     if (!this.enabled) return;
+    if (this.throttled) {
+      const now = Date.now();
+      if (!shouldChime(now, this.lastCueAt)) return;
+      this.lastCueAt = now;
+    }
     this.ensureContext();
     const ctx = this.ctx;
     const master = this.master;
@@ -362,6 +398,8 @@ class RoomTone {
   private sources: AudioScheduledSourceNode[] = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
   private watching = false;
+  /** Broadcast mode — see `enableForBroadcast`. Set before `start()`, never cleared. */
+  private broadcast = false;
   /** What the scene last told us about who is near whom. Starts empty: an empty office is quiet. */
   private occupancy: LifeContext = EMPTY_LIFE;
 
@@ -395,6 +433,26 @@ class RoomTone {
    */
   resumeIfEnabled(): void {
     if (this.enabled) this.start();
+  }
+
+  /**
+   * Turn the bed on for a capture, without persisting, and without the visibility gate (ADR 228).
+   *
+   * The gate exists so a bed left running in a background tab is not the most annoying possible
+   * version of this feature. A capture box has no tab and no listener whose attention could wander
+   * — it is the same reason broadcast already ignores `prefers-reduced-motion`. Non-theoretical:
+   * headless and embedded Chrome surfaces have been observed reporting `document.hidden === true`
+   * for their whole lifetime, which would suspend the bed for the entire stream.
+   */
+  enableForBroadcast(): void {
+    this.broadcast = true;
+    this.enabled = true;
+    this.start();
+  }
+
+  /** Visibility, as broadcast sees it: never hidden. */
+  private isHidden(): boolean {
+    return !this.broadcast && document.hidden;
   }
 
   /** The scene pushes who is near whom (and where the dog is). One-way by design — see LifeContext. */
@@ -473,7 +531,8 @@ class RoomTone {
     this.armLife();
 
     // A bed left playing to a tab nobody is looking at is the worst version of this feature.
-    if (!this.watching) {
+    // (A broadcast capture has no watcher to gate on, so it never registers the listener at all.)
+    if (!this.watching && !this.broadcast) {
       this.watching = true;
       document.addEventListener('visibilitychange', this.onVisibility);
     }
@@ -481,12 +540,12 @@ class RoomTone {
     // the tab is *already* hidden when the bed starts — a preference restored on a background tab,
     // or a viewer who switched away between the click and the context opening. Check the state we
     // are actually in, rather than waiting for it to be announced.
-    if (document.hidden) void ctx.suspend();
+    if (this.isHidden()) void ctx.suspend();
   }
 
   private onVisibility = (): void => {
     if (!this.ctx || !this.enabled) return;
-    if (document.hidden) void this.ctx.suspend();
+    if (this.isHidden()) void this.ctx.suspend();
     else void this.ctx.resume();
   };
 
@@ -524,7 +583,7 @@ class RoomTone {
     clearTimeout(this.timer);
     const wait = LIFE_GAP[0] + Math.random() * (LIFE_GAP[1] - LIFE_GAP[0]);
     this.timer = setTimeout(() => {
-      if (this.bus && this.ctx?.state === 'running' && !document.hidden) this.life();
+      if (this.bus && this.ctx?.state === 'running' && !this.isHidden()) this.life();
       this.armLife();
     }, wait * 1000);
   }

@@ -1,12 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   EMPTY_LIFE,
+  firehoseSound,
+  roomTone,
   keyboardFor,
   keypressPlan,
   LIFE_EVENTS,
   type LifeContext,
   panFor,
   pickLifeEvent,
+  shouldChime,
 } from './sound';
 
 // These tests cover the parts of the room-tone layer that are LOGIC — which event fires, under what
@@ -114,5 +117,55 @@ describe('the keyboard', () => {
     for (const seed of [1, 2, 3, 4, 5]) {
       expect(keyboardFor(seed).body).toBeLessThan(1400);
     }
+  });
+});
+
+describe('enableForBroadcast (ADR 228)', () => {
+  it('turns each engine on without touching the operator’s stored preference', () => {
+    // Node env: stub just enough browser for the persistence check to be meaningful.
+    const store = new Map<string, string>([
+      ['musterd.live.sound', '0'],
+      ['musterd.live.roomtone', '0'],
+    ]);
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    vi.stubGlobal('document', { hidden: true, addEventListener: () => {} });
+    try {
+      firehoseSound.enableForBroadcast();
+      roomTone.enableForBroadcast();
+      expect(firehoseSound.enabled).toBe(true);
+      expect(roomTone.enabled).toBe(true);
+      // A stream source must never rewrite the preference a human set on this machine.
+      expect(store.get('musterd.live.sound')).toBe('0');
+      expect(store.get('musterd.live.roomtone')).toBe('0');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('shouldChime (the broadcast cue throttle)', () => {
+  it('passes a cue clear of the gap and holds one inside it', () => {
+    expect(shouldChime(1000, 0)).toBe(true); // 1000ms since the last — clear
+    expect(shouldChime(1000, 900)).toBe(false); // 100ms since — inside
+  });
+
+  it('reopens exactly at the gap, not a millisecond before', () => {
+    expect(shouldChime(1000, 300)).toBe(true); // exactly 700ms
+    expect(shouldChime(1000, 301)).toBe(false); // 699ms
+  });
+
+  it('coalesces a burst to one cue rather than queueing', () => {
+    // -Infinity is the never-fired sentinel the engine starts at, so the first act always sounds.
+    let last = -Infinity;
+    const fired = [0, 10, 20, 30, 40, 50].filter((t) => {
+      if (!shouldChime(t, last)) return false;
+      last = t;
+      return true;
+    });
+    expect(fired).toEqual([0]);
   });
 });

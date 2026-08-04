@@ -38,5 +38,9 @@
 // primer. Same rationale as epoch 4 — the ADR 168 downgrade guard only refuses a *newer* epoch, so
 // without the bump an older checkout's `init` would rewrite the trimmed hooks back to the fat text.
 // An older seat is unaffected: it just carries the longer nudges.
-export const FEATURE_EPOCH = 5 as const;
+// Epoch 6 — ADR 228: broadcast audio (`musterd broadcast --audio` + the page's enableForBroadcast
+// path) and the AsksReel stream chrome. A daemon behind this epoch serves a /broadcast that neither
+// sounds nor shows asks — the roster's calm `behind` chip (ADR 148) is the operator's cue that the
+// stream is running older capability than the capturer expects.
+export const FEATURE_EPOCH = 6 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

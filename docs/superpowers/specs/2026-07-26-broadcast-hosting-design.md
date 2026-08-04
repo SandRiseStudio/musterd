@@ -19,7 +19,7 @@ making the code faster:
   degrades over four hours, and the failure mode is the encoder falling behind — the same wedge the
   capture-perf instrumentation (#389) exists to detect.
 
-VideoToolbox does make the *encode* nearly free in CPU terms on this machine. That is a real
+VideoToolbox does make the _encode_ nearly free in CPU terms on this machine. That is a real
 advantage and it is also irrelevant to both problems above: hardware encoding gives back no RAM and
 no thermal headroom.
 
@@ -55,11 +55,11 @@ stream's lifetime. Leave everything else where it is.**
 
 The CLI is already substantially portable, which was verified rather than assumed:
 
-| concern    | today                                                | on Linux                                   |
-| ---------- | ---------------------------------------------------- | ------------------------------------------ |
-| encoder    | `videotoolbox` on darwin (`broadcast.ts:77`)         | falls through to `libx264` already         |
-| Chrome path| hardcoded macOS default                              | `CHROME_BIN` env override already exists   |
-| stream key | macOS Keychain                                       | `MUSTERD_STREAM_KEY` is checked *first*     |
+| concern     | today                                        | on Linux                                 |
+| ----------- | -------------------------------------------- | ---------------------------------------- |
+| encoder     | `videotoolbox` on darwin (`broadcast.ts:77`) | falls through to `libx264` already       |
+| Chrome path | hardcoded macOS default                      | `CHROME_BIN` env override already exists |
+| stream key  | macOS Keychain                               | `MUSTERD_STREAM_KEY` is checked _first_  |
 
 No code change is required to run the capture on Linux. What changes is that the encode stops being
 free: `libx264` is software, so the rented box pays for it in cores. **Sizing for that encode, not for
@@ -88,12 +88,12 @@ is specifically weak — VideoToolbox means it never pays for the encode, so no 
 predicts what `libx264` costs on an Ampere or x86 core. **The candidates get measured by renting them
 for an hour and running the real capture**, at a cost of roughly €0.20.
 
-| run | machine                | encoder        | answers                                                |
-| --- | ---------------------- | -------------- | ------------------------------------------------------ |
-| D   | Fly Performance, 1 h   | `libx264`      | **first** — x86 dedicated sizing, and the draws/delivered question on a machine where delivered is not depressed by contention |
-| C   | Hetzner CAX (ARM), 1 h | `libx264`      | does Ampere hold 1080p30, and does Chromium run at all; gated on an account existing |
-| A   | the Air (opportunistic)| `videotoolbox` | the local baseline — today's true numbers on the machine as it actually is |
-| B   | the Air (opportunistic)| `libx264`      | what losing hardware encode costs, on known hardware      |
+| run | machine                 | encoder        | answers                                                                                                                        |
+| --- | ----------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| D   | Fly Performance, 1 h    | `libx264`      | **first** — x86 dedicated sizing, and the draws/delivered question on a machine where delivered is not depressed by contention |
+| C   | Hetzner CAX (ARM), 1 h  | `libx264`      | does Ampere hold 1080p30, and does Chromium run at all; gated on an account existing                                           |
+| A   | the Air (opportunistic) | `videotoolbox` | the local baseline — today's true numbers on the machine as it actually is                                                     |
+| B   | the Air (opportunistic) | `libx264`      | what losing hardware encode costs, on known hardware                                                                           |
 
 **Pass/fail is queue growth, not CPU%.** The harness already treats `queueGrowthBytesPerSec` as the
 margin metric: flat means the encoder is keeping up, rising means it is wedging regardless of how the
@@ -133,13 +133,13 @@ D lands.
 
 `QUIET_LOAD_MAX = 2.0` is an absolute number on an 8-core machine, chosen reactively (the harness
 comment records load "swung between 5 and 63" during the contaminated session). A better gate would
-likely normalize per core and check *stability* rather than level — a steady load of 5 supports a
+likely normalize per core and check _stability_ rather than level — a steady load of 5 supports a
 sounder comparison than one swinging 1→9, because variance within and between runs is what actually
 corrupts these numbers.
 
 **That change is not being made here.** Loosening a gate because it keeps returning no is precisely
 the failure the gate exists to prevent, and renting quiet removes the pressure to do it. If the
-threshold is ever revised it should be because per-core normalization is *more correct*, argued on its
+threshold is ever revised it should be because per-core normalization is _more correct_, argued on its
 own merits and recorded — not because a red light was inconvenient.
 
 ### Increment 0 is largely DONE — on the laptop after all (amended 2026-07-27)
@@ -155,11 +155,11 @@ wrong, and the fix was to change what was measured rather than where.** Two move
 
 Everything the local arms could answer is answered, and it changed the plan (PR #393):
 
-| question | answer |
-|---|---|
-| draws/delivered — is the double-paint real? | Yes: 60 painted, 60 delivered, **30 encoded**. |
-| Is candidate #1 (draw-rate cap) worth building? | **No — reverted.** ~4 points of CPU, inside the run-to-run spread. The painting was never the expense. |
-| Where does Chrome's cost actually live? | The **JPEG encode of every composited frame**. `everyNthFrame` derived from `--fps` took Chrome 139.8% → 92.9% (n=4). |
+| question                                        | answer                                                                                                                |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| draws/delivered — is the double-paint real?     | Yes: 60 painted, 60 delivered, **30 encoded**.                                                                        |
+| Is candidate #1 (draw-rate cap) worth building? | **No — reverted.** ~4 points of CPU, inside the run-to-run spread. The painting was never the expense.                |
+| Where does Chrome's cost actually live?         | The **JPEG encode of every composited frame**. `everyNthFrame` derived from `--fps` took Chrome 139.8% → 92.9% (n=4). |
 
 **The sizing number moved twice, downward both times.** The pipeline was reported as ~2.8 cores
 (a tree total misread as a leaf), then measured at ~1.7, and after the screencast fix it is
@@ -170,14 +170,14 @@ is oversized.
 
 - **`libx264` cost on the target box.** Unchanged in kind: this Mac never pays for its own encode, so
   ffmpeg's ~15% here says nothing about software encode on an Ampere or x86 core.
-- **The compositor-Hz assumption.** `everyNthFrame` counts *composited* frames, so the shipped
+- **The compositor-Hz assumption.** `everyNthFrame` counts _composited_ frames, so the shipped
   derivation assumes ~60Hz. It held here (delivery landed on 30.0 every run). A slower box could
-  composite below 2× the encode rate, and delivery would fall *under* fps with the pump padding the
+  composite below 2× the encode rate, and delivery would fall _under_ fps with the pump padding the
   shortfall with duplicates. **This must be re-checked on the rented candidate**, and it is now the
   main reason to rent at all.
 
 **A metric that did not survive, recorded so it is not re-derived:** `mpdecimate` unique-frame counts
-cannot compare configurations across separate runs. Four runs of an *identical* config gave
+cannot compare configurations across separate runs. Four runs of an _identical_ config gave
 971 / 861 / 644 / 637 — the count tracks how much the room happened to animate, not the config.
 
 ### Run D happened — and the box fails on the render, not the encode (amended 2026-07-27)
@@ -186,11 +186,11 @@ One hour of Fly `performance-4x` (4 dedicated x86 cores, 8 GB, sjc) answered bot
 questions, one of them in a direction that changes the plan. Three 45–60s captures against a
 6-seat synthetic fixture (`scripts/perf/broadcast-bench-fixture.sh`), all quiet, all agreeing:
 
-| run | delivered fps | draw fps | encoded | queue growth | chrome % | ffmpeg % |
-| --- | --- | --- | --- | --- | --- | --- |
-| 1080p30 | 10.2 | 19.2 | 30.0 | 0.5 KB/s | 177.4 | 80.7 |
-| 1080p30 repeat | 10.6 | 20.8 | 30.0 | −1.1 KB/s | — | — |
-| 1080p30 + `--disable-gpu` | 10.3 | 20.2 | 30.0 | −0.3 KB/s | 186.5 | 85.4 |
+| run                       | delivered fps | draw fps | encoded | queue growth | chrome % | ffmpeg % |
+| ------------------------- | ------------- | -------- | ------- | ------------ | -------- | -------- |
+| 1080p30                   | 10.2          | 19.2     | 30.0    | 0.5 KB/s     | 177.4    | 80.7     |
+| 1080p30 repeat            | 10.6          | 20.8     | 30.0    | −1.1 KB/s    | —        | —        |
+| 1080p30 + `--disable-gpu` | 10.3          | 20.2     | 30.0    | −0.3 KB/s    | 186.5    | 85.4     |
 
 - **Q1 (libx264 cost): answered, and it is fine.** ~0.85 of a core at 1080p30 with a flat queue.
   Software encode was never going to be the problem on a dedicated core.
@@ -234,16 +234,16 @@ second rented hour on the identical machine class (Fly `performance-4x`) turned 
 - **`--resolution 720p`** (PR #407) sizes the whole path — the page's stage itself via `?h=720`
   (a CSS-scaled 1080p render would keep paying the raster cost the rung exists to remove), Chrome's
   window, the viewport override, and the screencast bounds. 1080p stays the ADR 157 default.
-- **`everyNthFrame` stopped assuming 60Hz off darwin.** The skip derivation counts *composited*
+- **`everyNthFrame` stopped assuming 60Hz off darwin.** The skip derivation counts _composited_
   frames; this box composites at ~20–26Hz, so `floor(60/fps)=2` threw away half the frames it could
   actually produce. Same render cost, delivery 14 → 26.5fps. `compositorHz()` is now a platform
   fact: 60 on darwin (measured true), 30 elsewhere.
 
-| run (performance-4x, libx264) | delivered | draws | encoded | queue |
-| --- | --- | --- | --- | --- |
-| 720p30, skip-from-60Hz | 14.0 | 27.6 | 30.0 | flat |
-| 720p30, every frame | 26.5 | 25.1 | 30.0 | flat |
-| **720p25, every frame** | **27.4** | 26.4 | **25.0** | **0.00 MB peak** |
+| run (performance-4x, libx264) | delivered | draws | encoded  | queue            |
+| ----------------------------- | --------- | ----- | -------- | ---------------- |
+| 720p30, skip-from-60Hz        | 14.0      | 27.6  | 30.0     | flat             |
+| 720p30, every frame           | 26.5      | 25.1  | 30.0     | flat             |
+| **720p25, every frame**       | **27.4**  | 26.4  | **25.0** | **0.00 MB peak** |
 
 **720p25 delivers above its encode rate with a flat-zero queue — the first passing configuration on
 rentable hardware.** 720p30 lands at ~26 delivered (~12% duplicate padding); acceptable, but 25fps
@@ -264,8 +264,8 @@ operator guide `docs/guides/hosted-broadcast.md`.
 Decisions inside, all downstream of earlier ones:
 
 - **The daemon stays loopback-bound; `tailscale serve` forwards :4849 onto the tailnet.** The ADR 040
-  *bind* guard never comes into play. **"Zero daemon changes" was wrong** and the first live run
-  disproved it: the ADR 040 *upgrade* gate refuses a WebSocket whose `Host` is neither loopback, the
+  _bind_ guard never comes into play. **"Zero daemon changes" was wrong** and the first live run
+  disproved it: the ADR 040 _upgrade_ gate refuses a WebSocket whose `Host` is neither loopback, the
   bound host, nor in `MUSTERD_ALLOWED_HOSTS` — and the capture page is served over the tailnet
   address. The daemon must allow-list the tailnet IP and name, which is a config change plus a
   restart. Everything downstream (observer provisioning, the page, the encoder) works untouched.
@@ -281,6 +281,16 @@ Decisions inside, all downstream of earlier ones:
 Remaining operator steps (credentials — deliberately not automatable by an agent): install Tailscale
 on the Air + `tailscale serve`, mint the auth key, `fly apps create` + `fly secrets set`, then
 `live.sh build` once.
+
+## Increment 1a — the sound card (amended 2026-08-04, ADR 228)
+
+The image gains PulseAudio and the entrypoint a third preflight stage: a `musterd` null sink is
+created and **verified** before the capture loop starts (`▸ audio sink up · musterd.monitor`, or a
+loud refusal). The stream invocation adds `--audio`, which swaps ffmpeg's `anullsrc` for the sink
+monitor and lets the page's WebAudio (act cues + room tone, throttled and non-persisting) reach the
+ingest. Same fail-loud rationale as the tailnet and `/health` gates: a missing sink is _worse_ than
+a black stage, because a silent stream looks exactly like a working one. Full design:
+`2026-08-04-broadcast-audio-and-asks-design.md`.
 
 ## Risks recorded, not solved
 

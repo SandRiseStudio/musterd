@@ -12,12 +12,15 @@
 # tailscale is here, the fixture toolchain is not, and the entrypoint streams instead of idling.
 FROM node:22-bookworm-slim
 
-# chromium + ffmpeg are the pipeline; fonts stop the office rendering tofu; tailscale is the
-# reachability layer (ADR 039 topology B). python3/make/g++ exist only for better-sqlite3's
-# node-gyp build during pnpm install.
+# chromium + ffmpeg are the pipeline; pulseaudio is the sound card the container does not otherwise
+# have (ADR 228 — without a sink, Chrome's WebAudio renders into nothing and the stream carries
+# anullsrc); fonts stop the office rendering tofu; tailscale is the reachability layer (ADR 039
+# topology B). python3/make/g++ exist only for better-sqlite3's node-gyp build during pnpm install.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       ffmpeg \
+      pulseaudio \
+      pulseaudio-utils \
       ca-certificates \
       curl \
       procps \
