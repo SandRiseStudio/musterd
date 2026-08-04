@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HostRegistryEntry } from '../host/registry.js';
-import { registryDrift } from './residency.js';
+import { harnessDrift, registryDrift } from './residency.js';
 
 /**
  * The drift lines are the remediation, so their wording is the contract (ADR 131 §1). Both faults
@@ -66,5 +66,43 @@ describe('registryDrift — the enrollment↔registry cross-check', () => {
     const lines = registryDrift(enrolled, otherTeam, 'revive', 'mac.lan', () => true);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('missing from this machine');
+  });
+});
+
+/**
+ * ADR 221. Once a missing harness binary defers instead of failing, the act stops dying after three
+ * attempts — it waits, correctly, but it waits *silently and indefinitely*. That trade is only
+ * honest if the condition is visible, so this line is the other half of the fix, not decoration.
+ */
+describe('harnessDrift — can this host actually actuate what it is enrolled for', () => {
+  const here = [{ seat: 'gptbot', host: 'mac.lan', harness: 'codex' }];
+
+  it('says nothing when the harness resolves', () => {
+    expect(harnessDrift(here, 'mac.lan', () => true)).toEqual([]);
+  });
+
+  it('names the seat, the harness, and the consequence when it does not resolve', () => {
+    const [line] = harnessDrift(here, 'mac.lan', () => false);
+    expect(line).toContain('gptbot');
+    expect(line).toContain('codex');
+    // The reader's next action has to be in the sentence — that is what made the 2026-08-04
+    // incident cost a manual round-trip instead of being self-serve.
+    expect(line).toMatch(/defer/i);
+  });
+
+  // Only this machine's problem is this machine's business. A seat enrolled elsewhere resolving
+  // nothing here is not drift — it is someone else's host, and warning about it trains the reader
+  // to ignore the line.
+  it('ignores seats enrolled to another host', () => {
+    const elsewhere = [{ seat: 'ryder', host: 'other.lan', harness: 'claude-code' }];
+    expect(harnessDrift(elsewhere, 'mac.lan', () => false)).toEqual([]);
+  });
+
+  it('reports each unresolvable harness once, not once per seat sharing it', () => {
+    const two = [
+      { seat: 'a', host: 'mac.lan', harness: 'codex' },
+      { seat: 'b', host: 'mac.lan', harness: 'codex' },
+    ];
+    expect(harnessDrift(two, 'mac.lan', () => false)).toHaveLength(1);
   });
 });

@@ -194,9 +194,13 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
     async wake(spec, ctx): Promise<WakeActuation> {
       const bin = await (deps.resolveBin ?? resolveCodexBin)();
       if (!bin)
+        // DEFERRED, not failed (ADR 221) — see the claude backend for the full rationale. A host
+        // that cannot resolve its harness must not spend the act's attempt budget on a condition
+        // local to the machine.
         return {
           outcome: {
             occupied: false,
+            deferred: true,
             reason: 'codex CLI not found (PATH + known install locations)',
           },
           settled: Promise.resolve(undefined),

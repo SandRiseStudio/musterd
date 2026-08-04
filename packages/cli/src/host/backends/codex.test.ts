@@ -79,6 +79,19 @@ describe('Codex residency argv', () => {
 });
 
 describe('codexBackend', () => {
+  // Same rule as the claude backend (ADR 221): a host that cannot resolve the binary has not
+  // failed the wake, it cannot attempt it. Failing here spends an attempt against attempt_cap and
+  // marches the act toward terminal exhaustion for a condition on THIS MACHINE. gptbot hit exactly
+  // this on 2026-08-04 with `codex CLI not found`.
+  it('codex not found: DEFERS with a named reason, nothing spawned, no attempt spent', async () => {
+    const backend = codexBackend({ resolveBin: async () => null });
+    const result = await backend.wake(spec, ctx);
+    expect(result.outcome.occupied).toBe(false);
+    expect(result.outcome.deferred).toBe(true);
+    expect(result.outcome.reason).toMatch(/codex CLI not found/);
+    await result.settled;
+  });
+
   it('requires exact streamed identity and fresh wake Presence before crediting a fresh session', async () => {
     const child = new Child();
     let recorded: string | undefined;
