@@ -51,14 +51,16 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 
 /**
  * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]
- * [--dispatch-loop on|off] [--ask-slack-webhook <url|off>]` — show or set the team governance policy (admin-only, audited
- * `policy.change`). ADR 146: `--reseat-known-agents on` opts the team into dogfood-mode re-seat — an
- * already-held agent seat re-occupies without an admin decision. ADR 147:
- * `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to non-admin humans past its
- * tier timeout. ADR 149: `--ask-slack-webhook <url>` points the ask stream's loud reach at a Slack
- * incoming webhook (`off` clears it); the URL is a secret, so the display masks it to its host. Reads
- * → merges the named knob(s) → POSTs the policy (the residency-policy read-merge-write pattern), so
- * setting one knob never clobbers the wake-policy defaults.
+ * [--review-loop on|off] [--dispatch-loop on|off] [--ask-slack-webhook <url|off>]` — show or set the
+ * team governance policy (admin-only, audited `policy.change`). ADR 146: `--reseat-known-agents on`
+ * opts the team into dogfood-mode re-seat — an already-held agent seat re-occupies without an admin
+ * decision. ADR 147: `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to
+ * non-admin humans past its tier timeout. ADR 191: `--review-loop on` arms the review work-order
+ * loop; ADR 199: `--dispatch-loop on` arms the dispatch work-order loop. ADR 149:
+ * `--ask-slack-webhook <url>` points the ask stream's loud reach at a Slack incoming webhook (`off`
+ * clears it); the URL is a secret, so the display masks it to its host. Reads → merges the named
+ * knob(s) → POSTs the policy (the residency-policy read-merge-write pattern), so setting one knob
+ * never clobbers the wake-policy defaults.
  */
 async function teamPolicy(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
@@ -84,8 +86,14 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     merged.ask_fallback_to_nonadmin = askFallback;
     changed = true;
   }
-  // ADR 199: dispatch work-orders remain dark until a Team admin explicitly arms this loop. Preserve
-  // the other loop switches (and every unrelated sparse policy setting) while changing only dispatch.
+  // ADR 191 / 199: work-order loops remain dark until a Team admin explicitly arms each one.
+  // Preserve the sibling loop switch (and every unrelated sparse policy setting) while changing only
+  // the named one — never clobber review when flipping dispatch, or vice versa.
+  const reviewLoop = onOff(parsed.flags['review-loop'], '--review-loop');
+  if (reviewLoop !== undefined) {
+    merged.loops = { ...merged.loops, review: reviewLoop };
+    changed = true;
+  }
   const dispatchLoop = onOff(parsed.flags['dispatch-loop'], '--dispatch-loop');
   if (dispatchLoop !== undefined) {
     merged.loops = { ...merged.loops, dispatch: dispatchLoop };
@@ -116,7 +124,7 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     const { policy: updated } = await http.setPolicy(team, merged);
     process.stdout.write(
       success(
-        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}, ask fallback to non-admins ${updated.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}, dispatch loop ${updated.loops.dispatch ? theme.accent('on') : 'off'}`,
+        `team policy updated — ${team}: re-seat known agents ${updated.standing_reseat_known_agents ? theme.accent('on') : 'off'}, ask fallback to non-admins ${updated.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}, review loop ${updated.loops.review ? theme.accent('on') : 'off'}, dispatch loop ${updated.loops.dispatch ? theme.accent('on') : 'off'}`,
       ) + '\n',
     );
     if (updated.standing_reseat_known_agents)
@@ -164,6 +172,9 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     `  ask fallback to non-admins: ${current.ask_fallback_to_nonadmin ? theme.accent('on') : 'off'}${inherited(stored, 'ask_fallback_to_nonadmin')}\n`,
   );
   process.stdout.write(
+    `  review loop: ${current.loops.review ? theme.accent('on') : 'off'}${inherited(stored.loops, 'review')}\n`,
+  );
+  process.stdout.write(
     `  dispatch loop: ${current.loops.dispatch ? theme.accent('on') : 'off'}${inherited(stored.loops, 'dispatch')}\n`,
   );
   process.stdout.write(
@@ -190,6 +201,7 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
       theme.meta('  every value is inherited — this team tracks the shipped defaults') + '\n',
     );
   process.stdout.write(theme.meta('  set: musterd team policy --reseat-known-agents on') + '\n');
+  process.stdout.write(theme.meta('       musterd team policy --review-loop on') + '\n');
   process.stdout.write(theme.meta('       musterd team policy --dispatch-loop on') + '\n');
   process.stdout.write(
     theme.meta(
