@@ -1038,6 +1038,14 @@ async function refreshDaemon(
   fail: (step: string, r: RunResult) => never,
   sleep?: (ms: number) => Promise<void>,
   baseline?: DaemonHealth,
+  /**
+   * Fired once, immediately before the bounce — after the sync and the build have both succeeded.
+   * The auto-refresher uses it to announce the reconnect to the operator. Deliberately NOT called
+   * up front: everything before this point can throw (dirty checkout, failed build) and leave the
+   * daemon exactly where it was, so an early announcement is a promise about a bounce that may
+   * never happen — and it stacks with the failure notice for the same tip (#631).
+   */
+  announce?: () => void,
 ): Promise<number> {
   // The checkout the daemon ACTUALLY runs from — read back from its installed plist, not derived
   // from where this CLI was invoked. `restart` already cycles the daemon by launchd label, but the
@@ -1119,6 +1127,7 @@ async function refreshDaemon(
   }
   ok('rebuilt dist');
 
+  announce?.();
   const r = restart(ctx);
   if (r.status !== 0) fail('restart', r);
   ok(`restarted the musterd daemon on ${after}`);
@@ -1166,7 +1175,8 @@ function fileAutoState(): { read: () => string | null; write: (sha: string) => v
  *      build that failed), skip until a new commit lands, so a broken `main` doesn't rebuild every
  *      interval forever (mirrors the /live publisher's `.published-sha`).
  *   3. **Quiet period** — with live sessions connected: `idle` defers (retries next tick); `notice`
- *      fires an OS notice to the operator, then force-refreshes (the announced, conscious bounce —
+ *      force-refreshes and fires an OS notice to the operator at the bounce itself, once the build
+ *      has landed, so one merge is one notification (the announced, conscious bounce —
  *      the team-facing announcement belongs to the future platform-guardian seat, not this schedule).
  *      With no live sessions, refresh straight through (the ADR 047 guard passes cleanly).
  */
@@ -1272,17 +1282,23 @@ async function autoRefreshTick(
     return 0;
   }
   const force = conns > 0; // notice mode with live sessions → announced, forced bounce
-  if (force) {
-    notify({
-      id: 'musterd-autorefresh',
-      title: 'musterd auto-refresh',
-      body: `Updating the daemon to latest main (${behind} commit${s(behind)} behind); ${conns} live session${s(conns)} will briefly reconnect.`,
-    });
-    ok(`${conns} live session${s(conns)} — notified the operator, forcing the bounce`);
-  }
+  // Announced at the bounce, not at the decision: the announcement is "your session is about to
+  // reconnect", which is only true once the sync and build have landed. Firing it up front made one
+  // merge cost the operator up to three notifications — announce, failure, then announce again on
+  // the retry — for a daemon that never moved (#631).
+  const announce = force
+    ? () => {
+        notify({
+          id: 'musterd-autorefresh',
+          title: 'musterd auto-refresh',
+          body: `Updating the daemon to latest main (${behind} commit${s(behind)} behind); ${conns} live session${s(conns)} will briefly reconnect.`,
+        });
+        ok(`${conns} live session${s(conns)} — notified the operator, forcing the bounce`);
+      }
+    : undefined;
   if (tip) autoState.write(tip); // mark the attempt BEFORE building, so a failed build debounces next tick
   try {
-    return await refreshDaemon(ctx, health, force, ok, fail, undefined, health0);
+    return await refreshDaemon(ctx, health, force, ok, fail, undefined, health0, announce);
   } catch (err) {
     // A failed tick is the one state nothing else surfaces. The debounce then parks it, so the
     // daemon stays pinned on old code across every later merge while /health answers cheerfully —
