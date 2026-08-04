@@ -17,8 +17,14 @@ import {
   saveObserver,
   forgetObserver,
   genObserverName,
+  acquireObserver,
   acquireWatchLinkObserver,
 } from '../live/client';
+import {
+  forgetMemberIdentity,
+  loadMemberIdentity,
+  saveMemberIdentity,
+} from '../live/memberIdentity';
 import { firehoseSound, roomTone } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 import { officeRoom } from '../live/officeRoom';
@@ -52,6 +58,11 @@ function LivePage() {
   const [team, setTeam] = useState('');
   const [advanced, setAdvanced] = useState({ open: false, as: '', token: '' });
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
+  /** True when `cfg` is a real member (ADR 220) rather than an observer or a watch-link seat — the
+   *  difference between an office you can act in and one you can only read. */
+  const [signedIn, setSignedIn] = useState(false);
+  /** Connected via an explicit watch link — read-only by the team's choice, not by accident. */
+  const [watchLink, setWatchLink] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Collapsed>(NO_COLLAPSE);
@@ -93,6 +104,20 @@ function LivePage() {
     const staleToken = cfg?.token;
     if (!team || !staleToken) return;
     if (recoveredToken.current === staleToken) return; // already handling this exact credential
+    // A signed-in human is NOT silently demoted to an observer (ADR 220). Doing that would take the
+    // answer buttons away again with no explanation — the exact defect this arc exists to fix — so a
+    // dead member credential drops back to watching and says why.
+    if (signedIn) {
+      recoveredToken.current = staleToken;
+      forgetMemberIdentity(team);
+      setSignedIn(false);
+      setFormError('your sign-in expired — sign in again to answer asks');
+      void acquireObserver(team).then(setCfg, (e: unknown) => {
+        setFormError(e instanceof Error ? e.message : String(e));
+        setCfg(null);
+      });
+      return;
+    }
     if (recoverAttempts.current >= 2) {
       forgetObserver(team);
       setFormError('the live observer keeps being rejected — reconnect or check the daemon');
@@ -113,7 +138,7 @@ function LivePage() {
         setCfg(null);
       }
     })();
-  }, [cfg?.team, cfg?.token]);
+  }, [cfg?.team, cfg?.token, signedIn]);
   const armRecovery = useCallback(() => {
     recoverAttempts.current = 0;
   }, []);
@@ -129,6 +154,37 @@ function LivePage() {
   const board = useWorkingOn(cfg, envelopes);
   const entries = roomEntries(roster, board);
 
+  /**
+   * Route back to the credential form (ADR 220). The sign-in fields live on the connect screen, so
+   * an already-connected observer has to return to it — which is exactly the dead end the rail was
+   * reporting: there was no way back at all once a seat was cached.
+   */
+  const promptSignIn = useCallback(() => {
+    setAdvanced({ open: true, as: '', token: '' });
+    setFormError(null);
+    setCfg(null);
+  }, []);
+
+  /** Become yourself on this browser: remember the identity and reconnect as it (ADR 220). */
+  const signIn = useCallback((slug: string, id: { as: string; token: string }) => {
+    saveMemberIdentity(slug, id);
+    setSignedIn(true);
+    setFormError(null);
+    setCfg({ team: slug, as: id.as, token: id.token });
+  }, []);
+
+  /** Hand the screen back: drop the identity and fall back to watching. The escape hatch a cached
+   *  seat never had — before ADR 220 the only way out was clearing localStorage by hand. */
+  const signOut = useCallback(() => {
+    const slug = cfg?.team;
+    if (!slug) return;
+    forgetMemberIdentity(slug);
+    setSignedIn(false);
+    void acquireObserver(slug).then(setCfg, (e: unknown) =>
+      setFormError(e instanceof Error ? e.message : String(e)),
+    );
+  }, [cfg?.team]);
+
   const watch = async (explicit?: string) => {
     setFormError(null);
     const slug = (explicit ?? team).trim();
@@ -138,11 +194,21 @@ function LivePage() {
 
     // Advanced: connect as a specific seat the operator supplied (a credential authenticates HTTP + WS).
     if (!explicit && advanced.open && advanced.as.trim() && advanced.token.trim()) {
-      setCfg({ team: slug, as: advanced.as.trim(), token: advanced.token.trim() });
+      signIn(slug, { as: advanced.as.trim(), token: advanced.token.trim() });
+      return;
+    }
+
+    // A remembered member identity outranks this browser's observer (ADR 220): once you have signed
+    // in on this browser you are yourself, on every surface, until you say otherwise.
+    const member = loadMemberIdentity(slug);
+    if (member) {
+      setSignedIn(true);
+      setCfg({ team: slug, as: member.as, token: member.token });
       return;
     }
 
     // Default: reuse this browser's observer seat for the team, or provision one.
+    setSignedIn(false);
     let creds = loadObserver(slug);
     if (!creds) {
       setProvisioning(true);
@@ -217,6 +283,10 @@ function LivePage() {
       } catch {
         /* private mode */
       }
+      setWatchLink(true);
+      // A watch link outranks a stored member identity (ADR 220) and is explicitly NOT you: handing
+      // the office to someone else must never hand them whoever last signed in on this browser.
+      setSignedIn(false);
       setCfg({ team: urlTeam, as: urlAs, token: watchTok });
     } else if (urlTeam) {
       void watch(urlTeam);
@@ -320,7 +390,17 @@ function LivePage() {
               onBoardHover={preloadBoard}
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
-              topSlot={<AsksStrip envelopes={envelopes} roster={roster} cfg={cfg!} />}
+              topSlot={
+                <AsksStrip
+                  envelopes={envelopes}
+                  roster={roster}
+                  cfg={cfg!}
+                  watchLink={watchLink}
+                  localIdentity={null}
+                  onSignIn={promptSignIn}
+                  onSignOut={signOut}
+                />
+              }
               workCues={WORK_CUES}
             />
             <RosterPanel

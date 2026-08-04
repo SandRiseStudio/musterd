@@ -4444,6 +4444,39 @@
   font-family: var(--font-mono, monospace);
   font-size: 10px;
 }
+
+/* ─── the way in, and who you are (ADR 220) ───────────────────────────────────────────────────────
+   The sign-in button occupies the slot Approve/Deny will occupy, so signing in swaps it in place and
+   the rail never reflows. Accent rather than success/danger on purpose: it is the way to an answer,
+   not an answer, and the two irreversible colours stay reserved for the two irreversible acts. */
+.lc-asks__signin {
+  color: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-accent) 50%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 12%, var(--lc-surface-2));
+  font-weight: 600;
+}
+/* Off this machine there is no one-click path to offer, so the invitation drops to a ghost rather
+   than dressing a credential form up as something it is not. It borrows `.lc-asks__link`, the rail's
+   existing ghost — same weight, same restraint, no new rule on a CSS budget with 8 bytes to spare. */
+.lc-asks__signin--ghost {
+  background: transparent;
+  border-color: transparent;
+}
+/* The seat chip: present in every state, because "who am I about to approve as?" must never be a
+   question the reader has to go and answer somewhere else. Rides `.lc-ask__btn` for its shape and
+   states only the three things that differ — the rail already carries enough CSS to sit against the
+   budget ceiling, and restating a pill costs bytes every viewer pays for. */
+.lc-asks__me {
+  font-size: 10px;
+  padding: var(--lc-1) 7px;
+  border-color: var(--lc-border);
+}
+@media (hover: hover) and (pointer: fine) {
+  .lc-asks__signin:hover:not(:disabled) {
+    border-color: var(--lc-accent);
+    background: color-mix(in srgb, var(--lc-accent) 22%, var(--lc-surface-2));
+  }
+}
 @media (hover: hover) and (pointer: fine) {
   .lc-ask__btn--accept:hover:not(:disabled) {
     border-color: var(--lc-success);

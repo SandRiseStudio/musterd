@@ -27,10 +27,20 @@ export function AsksStrip({
   envelopes,
   roster,
   cfg,
+  watchLink = false,
+  localIdentity = null,
+  onSignIn,
+  onSignOut,
 }: {
   envelopes: Envelope[];
   roster: MemberSummary[];
   cfg: LiveConfig;
+  /** Arrived by watch link — the team handed this viewer a read-only view deliberately (ADR 063). */
+  watchLink?: boolean;
+  /** The seat this machine can sign in as with one click, when the daemon says it has one. */
+  localIdentity?: string | null;
+  onSignIn?: () => void;
+  onSignOut?: () => void;
 }) {
   // Answers this browser just sent: the firehose deliberately skips the sender, so the POST ack is the
   // only copy this client sees — fold it into the derivation so the card settles immediately.
@@ -91,6 +101,20 @@ export function AsksStrip({
 
   // Answerable iff the connected seat is a real member (observers are hidden from the roster).
   const canAnswer = roster.some((m) => m.name === cfg.as);
+
+  /**
+   * What the action slot holds when you cannot answer (ADR 220). Before this, it held nothing: the
+   * buttons were absent and the silence unexplained, so a read-only rail was pixel-identical to an
+   * answerable one with nothing open.
+   *
+   * - `offer` — the daemon confirmed an identity on THIS machine; one click and you are yourself.
+   * - `paste` — off-machine, or no CLI identity here. The one-click route correctly refuses off
+   *   this machine (it returns a credential), so the honest fallback is the credential form, which
+   *   does work over the network.
+   * - `none`  — a watch link. The team gave this viewer a read-only view on purpose; inviting them
+   *   to sign in would be a nag aimed at someone with no seat to sign into.
+   */
+  const wayIn: 'offer' | 'paste' | 'none' = watchLink ? 'none' : localIdentity ? 'offer' : 'paste';
 
   const answer = useCallback(
     async (ask: AskView, kind: 'accept' | 'decline' | 'deciding') => {
@@ -185,6 +209,28 @@ export function AsksStrip({
                 </button>
               </span>
             )}
+            {/* The way in sits exactly where the answer will sit, so one click swaps this for
+                Approve/Deny in place and the rail never moves (ADR 220). */}
+            {askIsLoud(lead.state) && !canAnswer && wayIn === 'offer' && (
+              <button
+                type="button"
+                className="lc-ask__btn lc-asks__signin"
+                onClick={onSignIn}
+                title={`sign in as ${localIdentity} on this machine`}
+              >
+                Sign in as {localIdentity} to answer
+              </button>
+            )}
+            {askIsLoud(lead.state) && !canAnswer && wayIn === 'paste' && (
+              <button
+                type="button"
+                className="lc-ask__btn lc-asks__link lc-asks__signin--ghost"
+                onClick={onSignIn}
+                title="sign in with your seat credential to answer asks"
+              >
+                sign in with a credential →
+              </button>
+            )}
           </>
         ) : (
           <span className="lc-asks__lead lc-asks__lead--quiet">
@@ -215,6 +261,24 @@ export function AsksStrip({
         <a className="lc-asks__link" href="/approvals" title="Seat-claim approvals (admin)">
           seat approvals →
         </a>
+
+        {/* Who you are about to answer as (ADR 220). Not decoration: with several teams on one
+            machine you may be a different person on each, and approving as the wrong identity is
+            unrecoverable — so the connected seat is never implicit. Signed in, it is also the way
+            back out, the escape a cached seat never had. */}
+        <button
+          type="button"
+          className="lc-ask__btn lc-asks__me"
+          onClick={canAnswer ? onSignOut : undefined}
+          disabled={!canAnswer}
+          title={
+            canAnswer
+              ? `signed in as ${cfg.as} on ${cfg.team} — watch as an observer instead`
+              : 'watching — not signed in as a seat'
+          }
+        >
+          {canAnswer ? `${cfg.as} · ${cfg.team}` : 'watching'}
+        </button>
       </div>
 
       {error && <div className="lc-asks__error">{error}</div>}
