@@ -36,15 +36,27 @@ describe('reviewRouting — human_required abstains rather than asserting a nega
     const { db, team } = seed();
     ready(db, team.id, { lane: 'a', reviewer: 'gee', human_required: true });
     ready(db, team.id, { lane: 'b', reviewer: 'gee', human_required: false });
-    expect(reviewRouting(db, team.id, 'a')).toEqual({ routed: true, human_required: true });
+    expect(reviewRouting(db, team.id, 'a')).toEqual({
+      routed: true,
+      human_required: true,
+      promised_ms: undefined,
+    });
     // An explicit false is knowledge, not absence — it must NOT become undefined.
-    expect(reviewRouting(db, team.id, 'b')).toEqual({ routed: true, human_required: false });
+    expect(reviewRouting(db, team.id, 'b')).toEqual({
+      routed: true,
+      human_required: false,
+      promised_ms: undefined,
+    });
   });
 
   it('abstains on a legacy row that predates the field (#462), rather than reading "not required"', () => {
     const { db, team } = seed();
     ready(db, team.id, { lane: 'a', reviewer: 'gee' }); // routed, but human_required never written
-    expect(reviewRouting(db, team.id, 'a')).toEqual({ routed: true, human_required: undefined });
+    expect(reviewRouting(db, team.id, 'a')).toEqual({
+      routed: true,
+      human_required: undefined,
+      promised_ms: undefined,
+    });
   });
 
   // The `catch` was unreachable and the real behavior was worse than the lane reported: the WHERE
@@ -58,6 +70,7 @@ describe('reviewRouting — human_required abstains rather than asserting a nega
     expect(reviewRouting(db, team.id, 'a')).toEqual({
       routed: undefined,
       human_required: undefined,
+      promised_ms: undefined,
     });
   });
 
@@ -69,7 +82,11 @@ describe('reviewRouting — human_required abstains rather than asserting a nega
     ready(db, team.id, { lane: 'bad', reviewer: 'gee' });
     ready(db, team.id, { lane: 'good', reviewer: 'gee', human_required: true });
     db.prepare(`UPDATE audit SET detail = '{not json' WHERE target = 'bad'`).run();
-    expect(reviewRouting(db, team.id, 'good')).toEqual({ routed: true, human_required: true });
+    expect(reviewRouting(db, team.id, 'good')).toEqual({
+      routed: true,
+      human_required: true,
+      promised_ms: undefined,
+    });
   });
 
   it('abstains when there is no ready row at all', () => {
@@ -77,6 +94,7 @@ describe('reviewRouting — human_required abstains rather than asserting a nega
     expect(reviewRouting(db, team.id, 'never-ready')).toEqual({
       routed: undefined,
       human_required: undefined,
+      promised_ms: undefined,
     });
   });
 
@@ -86,6 +104,47 @@ describe('reviewRouting — human_required abstains rather than asserting a nega
   it('a row with a routing outcome but no requirement abstains on the requirement only', () => {
     const { db, team } = seed();
     ready(db, team.id, { lane: 'a', no_candidate: true });
-    expect(reviewRouting(db, team.id, 'a')).toEqual({ routed: false, human_required: undefined });
+    expect(reviewRouting(db, team.id, 'a')).toEqual({
+      routed: false,
+      human_required: undefined,
+      promised_ms: undefined,
+    });
+  });
+
+  // ADR 217: the promised window rides the same read, under the same discipline. It is the input
+  // the close edge grades `time_in_review_ms` against, so an absent or nonsense value has to abstain
+  // — a zero-or-negative window would grade EVERY close as an honoured wait, silently converting the
+  // impatience count this ADR exists to expose into a clean zero.
+  it('reads a recorded promised window, and abstains on every shape that is not one', () => {
+    const { db, team } = seed();
+    ready(db, team.id, {
+      lane: 'ok',
+      reviewer: 'gee',
+      human_required: false,
+      ask_timeout_ms: 300_000,
+    });
+    ready(db, team.id, { lane: 'legacy', reviewer: 'gee', human_required: false });
+    ready(db, team.id, { lane: 'zero', reviewer: 'gee', human_required: false, ask_timeout_ms: 0 });
+    ready(db, team.id, { lane: 'neg', reviewer: 'gee', human_required: false, ask_timeout_ms: -1 });
+    ready(db, team.id, {
+      lane: 'str',
+      reviewer: 'gee',
+      human_required: false,
+      ask_timeout_ms: '5m',
+    });
+    expect(reviewRouting(db, team.id, 'ok').promised_ms).toBe(300_000);
+    expect(reviewRouting(db, team.id, 'legacy').promised_ms).toBeUndefined();
+    expect(reviewRouting(db, team.id, 'zero').promised_ms).toBeUndefined();
+    expect(reviewRouting(db, team.id, 'neg').promised_ms).toBeUndefined();
+    expect(reviewRouting(db, team.id, 'str').promised_ms).toBeUndefined();
+  });
+
+  // A no-candidate ready row promised nobody anything. It must not carry a window — and if some
+  // future writer puts one there, the close edge still never reaches the grading branch, because
+  // `routed: false` lands on no_candidate/human_review_missed first.
+  it('a no-candidate row carries no promised window', () => {
+    const { db, team } = seed();
+    ready(db, team.id, { lane: 'nobody', no_candidate: true, human_required: false });
+    expect(reviewRouting(db, team.id, 'nobody').promised_ms).toBeUndefined();
   });
 });

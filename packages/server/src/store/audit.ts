@@ -380,8 +380,14 @@ export function reviewRouting(
   db: Database,
   teamId: string,
   laneId: string,
-): { routed: boolean | undefined; human_required: boolean | undefined } {
-  const unknown = { routed: undefined, human_required: undefined };
+): {
+  routed: boolean | undefined;
+  human_required: boolean | undefined;
+  /** ADR 217: the wait the acceptor was promised (the ask tier's timeout), or `undefined` when the
+   *  ready row predates the field — an abstention the close edge must not resolve by guessing. */
+  promised_ms: number | undefined;
+} {
+  const unknown = { routed: undefined, human_required: undefined, promised_ms: undefined };
   const row = db
     .prepare<[string, string], { detail: string | null }>(
       `SELECT detail FROM audit
@@ -395,13 +401,24 @@ export function reviewRouting(
       reviewer?: string;
       no_candidate?: boolean;
       human_required?: boolean;
+      ask_timeout_ms?: number;
     };
     // An explicit `false` is knowledge and survives as `false`; only a missing field abstains.
     const human_required = typeof d.human_required === 'boolean' ? d.human_required : undefined;
-    if (d.no_candidate === true) return { routed: false, human_required };
+    // ADR 217: same discipline. A finite positive number is the promise; anything else — missing on
+    // a pre-ADR row, or unparseable — abstains, and the close keeps the older `review_timeout`
+    // label rather than being graded against a window nobody recorded.
+    const promised_ms =
+      typeof d.ask_timeout_ms === 'number' &&
+      Number.isFinite(d.ask_timeout_ms) &&
+      d.ask_timeout_ms > 0
+        ? d.ask_timeout_ms
+        : undefined;
+    if (d.no_candidate === true) return { routed: false, human_required, promised_ms };
     if (typeof d.reviewer === 'string' && d.reviewer.length > 0)
-      return { routed: true, human_required };
-    return { routed: undefined, human_required }; // pre-fix row: recorded neither — we do not know
+      return { routed: true, human_required, promised_ms };
+    // pre-fix row: recorded neither — we do not know
+    return { routed: undefined, human_required, promised_ms };
   } catch {
     return unknown; // reachable now that the query no longer parses the JSON for us
   }

@@ -3581,9 +3581,12 @@ describe('two-stage close (ADR 169)', () => {
     });
   });
 
-  it('owner self-close from review derives verified:false / review_timeout; legacy direct close derives self_close', async () => {
+  it('owner self-close from review derives verified:false / review_cut_short; legacy direct close derives self_close', async () => {
     const { nickTok, ada } = await setup();
-    // Lane A: through review, then self-closed by the owner (the timeout degradation).
+    // Lane A: through review, then self-closed by the owner (the ADR 145 degradation). It closes in
+    // milliseconds, far inside the `standard` window the acceptor was promised — so ADR 217 grades
+    // it `review_cut_short`, not the `review_timeout` this test asserted while the reason consulted
+    // no clock at all.
     const a = await post('/teams/dawn/lanes', { title: 'lane a', claim: true }, ada);
     await patchLane(a.json.lane.id, { state: 'ready_for_review' }, ada);
     await patchLane(a.json.lane.id, { state: 'done' }, ada);
@@ -3595,7 +3598,11 @@ describe('two-stage close (ADR 169)', () => {
     const rows = await auditRows(nickTok, 'lane.closed');
     const byLane = Object.fromEntries(rows.map((r: any) => [r.detail.lane, r.detail]));
     expect(byLane[a.json.lane.id].verified).toBe(false);
-    expect(byLane[a.json.lane.id].reason).toBe('review_timeout');
+    expect(byLane[a.json.lane.id].reason).toBe('review_cut_short');
+    // ADR 217: the promise is carried on the close row, so the grading is auditable without
+    // re-reading the ready edge.
+    expect(byLane[a.json.lane.id].promised_wait_ms).toBe(5 * 60_000);
+    expect(byLane[a.json.lane.id].time_in_review_ms).toBeLessThan(5 * 60_000);
     expect(byLane[b.json.lane.id].verified).toBe(false);
     expect(byLane[b.json.lane.id].reason).toBe('self_close');
   });
@@ -3643,8 +3650,10 @@ describe('two-stage close (ADR 169)', () => {
     expect(r0.detail.reviewer).toBeUndefined();
   });
 
-  it('a routed review that the owner closes anyway still derives review_timeout', async () => {
-    // The other side of the same coin: here an ask WAS sent, so a timeout is the honest label.
+  it('a routed review that the owner closes anyway derives review_cut_short', async () => {
+    // The other side of the same coin: here an ask WAS sent, so the close is honestly about the
+    // wait — and ADR 217 says which way. Closing immediately is the owner cutting its own promise
+    // short, which is a different failure from a window that genuinely elapsed.
     const { nickTok, ada } = await setup();
     const lane = await post('/teams/dawn/lanes', { title: 'routed', claim: true }, ada);
     const ready = await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
@@ -3653,11 +3662,44 @@ describe('two-stage close (ADR 169)', () => {
 
     const rows = await auditRows(nickTok, 'lane.closed');
     const closed = rows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
-    expect(closed.detail.reason).toBe('review_timeout');
+    expect(closed.detail.reason).toBe('review_cut_short');
     const readyRows = await auditRows(nickTok, 'lane.ready_for_review');
     const r0 = readyRows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
     expect(r0.detail.reviewer).toBeTruthy();
     expect(r0.detail.no_candidate).toBeUndefined();
+    // ADR 217: the promise is recorded at the ready edge, where the tier is decided — the close edge
+    // has no business re-deriving it later from a roster that has moved on.
+    expect(r0.detail.ask_tier).toBe('standard');
+    expect(r0.detail.ask_timeout_ms).toBe(5 * 60_000);
+  });
+
+  it('an owner that WAITS the promised window derives review_unanswered, not cut_short (ADR 217)', async () => {
+    // The other half of the split, and the one that makes it worth having: same edges, same actors,
+    // same unconfirmed close — only the elapsed wait differs. If both shapes still landed on one
+    // reason, no remedy aimed at either could ever be measured.
+    const { nickTok, ada } = await setup();
+    const lane = await post('/teams/dawn/lanes', { title: 'patient', claim: true }, ada);
+    const ready = await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
+    expect(ready.json.review.reviewer).toBeTruthy();
+
+    // Past the `standard` window the acceptor was promised. Faked rather than waited: the point is
+    // the comparison, and a real 5-minute test is a 5-minute test.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 5 * 60_000 + 1_000));
+    try {
+      await patchLane(lane.json.lane.id, { state: 'done' }, ada);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const rows = await auditRows(nickTok, 'lane.closed');
+    const closed = rows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
+    expect(closed.detail.reason).toBe('review_unanswered');
+    expect(closed.detail.promised_wait_ms).toBe(5 * 60_000);
+    expect(closed.detail.time_in_review_ms).toBeGreaterThanOrEqual(5 * 60_000);
+    // Still never a wedge (ADR 145): waiting longer changes the LABEL, never the owner's ability to
+    // close, and never the verified-ness the close derives.
+    expect(closed.detail.verified).toBe(false);
   });
 
   it('reviewer send-back audits lane.review_sent_back and the lane resumes', async () => {
@@ -3782,9 +3824,10 @@ describe('two-stage close (ADR 169)', () => {
     expect(closed.status).toBe(200);
     const rows = await auditRowsFor(bossTok, 'risky', 'lane.closed');
     const row = rows.find((r: any) => r.detail.lane === laneId)!;
-    // ADR 188: a peer WAS asked (gee), so the unanswered close is honestly a review_timeout — and
-    // the human miss is carried by its own flag, not folded into the reason.
-    expect(row.detail.reason).toBe('review_timeout');
+    // ADR 188: a peer WAS asked (gee), so the close is honestly about the wait — and the human miss
+    // is carried by its own flag, not folded into the reason. ADR 217: the owner closed instantly,
+    // so the wait was cut short rather than exhausted.
+    expect(row.detail.reason).toBe('review_cut_short');
     expect(row.detail.human_review_missed).toBe(true);
     expect(row.detail.peer_review).toBe('none');
     expect(row.detail.verified).toBe(false);

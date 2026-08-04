@@ -409,6 +409,8 @@ export function deriveReviewMetrics(
       total: 0,
       counterpart_confirm: 0,
       review_timeout: 0,
+      review_unanswered: 0,
+      review_cut_short: 0,
       no_candidate: 0,
       human_review_missed: 0,
       human_required_unknown: 0,
@@ -443,6 +445,11 @@ export function deriveReviewMetrics(
       const reason = d.reason;
       if (reason === 'counterpart_confirm') m.closed.counterpart_confirm++;
       else if (reason === 'review_timeout') m.closed.review_timeout++;
+      // ADR 217: the two halves the old label conflated — a wait the owner honoured, and one it cut
+      // short. Matched explicitly, like every other recorded reason, so neither can fall to the
+      // `else` and be counted as an unknown it is not.
+      else if (reason === 'review_unanswered') m.closed.review_unanswered++;
+      else if (reason === 'review_cut_short') m.closed.review_cut_short++;
       else if (reason === 'no_candidate') m.closed.no_candidate++;
       // ADR 172's counter-metric needs its own bucket: without one it fell to the `else` and was
       // counted as a self-close — "never entered review" said of a lane that entered review and

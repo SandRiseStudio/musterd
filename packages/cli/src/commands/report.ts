@@ -466,7 +466,23 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   w(`    ${theme.ok('accepted')} ${c.counterpart_confirm}${verifiedPct}\n`);
   w(`    ${theme.meta('self-closed')} ${c.self_close} · never entered acceptance\n`);
   w(`    ${theme.meta('no counterpart')} ${c.no_candidate} · sanctioned, nobody was asked\n`);
-  w(`    ${theme.meta('acceptance timed out')} ${c.review_timeout} · asked, unanswered\n`);
+  // ADR 217: the old single line said "asked, unanswered" of every owner-close out of acceptance,
+  // including the ones that closed after 8 seconds. Three lines now, because they call for three
+  // different remedies — and the cut-short count is warn-coloured: it is the only one of the three
+  // the owner could simply have chosen not to do.
+  w(
+    `    ${theme.meta('acceptance unanswered')} ${c.review_unanswered} · waited the promised window\n`,
+  );
+  if (c.review_cut_short > 0) {
+    w(
+      `    ${theme.warn('acceptance cut short')} ${c.review_cut_short} · owner closed before the window it promised\n`,
+    );
+  }
+  if (c.review_timeout > 0) {
+    w(
+      `    ${theme.meta('acceptance window unknown')} ${c.review_timeout} · asked, but no promised window was recorded (pre-ADR 217)\n`,
+    );
+  }
   // ADR 172's counter-metric, warn-coloured because it is the one close shape that is nobody's
   // sanctioned degradation: the lane declared a risk, the risk demanded a human, no human came.
   if (c.human_review_missed > 0) {

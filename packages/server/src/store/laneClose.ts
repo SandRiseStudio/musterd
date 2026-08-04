@@ -50,7 +50,22 @@ export function recordLaneClose(
     : {
         routed: undefined as boolean | undefined,
         human_required: undefined as boolean | undefined,
+        promised_ms: undefined as number | undefined,
       };
+  // ADR 217: how long the owner actually left the lane in review. Same approximation ADR 169 uses
+  // for `time_in_review_ms` — entering review was the lane's last update before the close — and it
+  // is computed once so the reason and the recorded duration can never disagree.
+  const timeInReviewMs = isAwaitingAcceptance(before.state)
+    ? Date.now() - before.updated_at
+    : undefined;
+  // ADR 217: grade the wait against the window the acceptor was PROMISED, not against a fixed
+  // number. `undefined` on either side abstains — see `reviewTimeoutReason`.
+  const waitVerdict =
+    routing.promised_ms !== undefined && timeInReviewMs !== undefined
+      ? timeInReviewMs >= routing.promised_ms
+        ? ('review_unanswered' as const)
+        : ('review_cut_short' as const)
+      : ('review_timeout' as const);
   // ADR 172: even a verified close can miss the requirement — an agent counterpart confirming a
   // risky lane is a real review, but not the HUMAN one the risk demanded. `=== true`, never
   // truthiness: an abstaining read must not assert the flag (ADR 173 clause 3 — a consumer that
@@ -95,7 +110,12 @@ export function recordLaneClose(
                   routing.human_required === true
                   ? 'human_review_missed'
                   : 'no_candidate'
-                : 'review_timeout'
+                : // ADR 217: an ask WAS sent and the owner closed it themselves — but "timeout" was
+                  // asserting an elapsed wait nobody had measured. 11 of the first 18 such closes
+                  // happened inside five minutes, the fastest after 8 seconds, while the median
+                  // successful confirm took 22 minutes. The reason now says which of the two
+                  // opposite failures this was, and abstains when the promise is unknowable.
+                  waitVerdict
               : 'self_close',
       // ADR 172: flagged even on a verified close — an agent counterpart's confirm on a risky lane
       // is a real review, but not the human one the risk tag demanded.
@@ -131,9 +151,10 @@ export function recordLaneClose(
           })()
         : {}),
       // Approximation: entering review was this lane's last update before the close.
-      ...(isAwaitingAcceptance(before.state)
-        ? { time_in_review_ms: Date.now() - before.updated_at }
-        : {}),
+      ...(timeInReviewMs !== undefined ? { time_in_review_ms: timeInReviewMs } : {}),
+      // ADR 217: the window the wait was graded against, carried so the derivation is auditable
+      // from this row alone — without re-reading the ready edge that recorded the promise.
+      ...(routing.promised_ms !== undefined ? { promised_wait_ms: routing.promised_ms } : {}),
     },
   });
   // ADR 109: a branch-carrying lane landed — record the seat→SHA→authorizer join. The detail is
