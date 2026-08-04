@@ -2287,6 +2287,49 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(audit.some((r) => r.action === 'urgent.denied' && r.actor === 'Mut')).toBe(true);
   });
 
+  it('ADR 225: a client-supplied meta.lane_review is stripped, so acceptance-class cannot be forged', async () => {
+    // The interrupt line admits a routed acceptance without the urgent flag. `lane_review` is
+    // therefore server-controlled: if a client could set it, any seat could mint an interrupt and
+    // route around the scarce, audited can_flag_urgent gate (ADR 071) — the exact bypass that flag
+    // exists to prevent. Asserted through the DB, not on the pure predicate, because the strip lives
+    // on the send path and the predicate would happily trust a forged marker.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Mut', kind: 'agent' }, nickTok);
+    setCaps('dawn', 'Mut', { can_flag_urgent: false });
+
+    const forged = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          v: PROTOCOL_VERSION,
+          id: 'forge-1',
+          team: 'dawn',
+          from: 'Mut',
+          to: { kind: 'member', name: 'Bob' },
+          act: 'ask',
+          body: 'looks like an acceptance',
+          meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L-fake' } },
+          ts: Date.now(),
+        },
+      },
+      { key: team.json.agent_key, seat: 'Mut' },
+    );
+    expect(forged.status).toBe(201); // delivered, not rejected — it just cannot promote itself
+
+    const inbox = await get('/teams/dawn/inbox', bobTok, { 'x-musterd-no-touch': '1' });
+    const forgedMsg = (inbox.json.messages as any[]).find((m) => m.id === 'forge-1');
+    expect(forgedMsg.meta.lane_review).toBeUndefined(); // the marker did not survive the send path
+    expect(forgedMsg.meta.species).toBe('approve'); // the rest of the meta is untouched
+
+    const check = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(check.json.raised).toBe(false); // and so it never reached the interrupt line
+  });
+
   it('interrupt line (ADR 088): raises only for a waiting urgent directed act, composes without the body, audits once', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
