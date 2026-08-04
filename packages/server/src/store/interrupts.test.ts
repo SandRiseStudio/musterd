@@ -156,4 +156,85 @@ describe('pendingInterrupts (ADR 088)', () => {
     ];
     expect(pendingInterrupts(msgs, 'me').map((m) => m.id)).toEqual(['s2']);
   });
+
+  /**
+   * ADR 225 decision 1: a routed acceptance is obligation-class, so it reaches a LIVE acceptor on the
+   * free ADR 088 rail instead of resting in an inbox until they volunteer to look. Measured 2026-08-04:
+   * five routed acceptances reached a live, heads-down seat only when a human typed "check messages",
+   * and two of them produced a crossed handoff — two seats re-assigning one lane twelve minutes apart
+   * on unread inboxes. No wake addresses that; both seats were alive throughout.
+   */
+  describe('obligation class — a routed acceptance (ADR 225)', () => {
+    const review = { species: 'approve', tier: 'standard', lane_review: { lane: 'L1' } };
+
+    it('is OFF by default, so the wake rail keeps its ADR 191 policy gate', () => {
+      // Regression: claimWakeLeases shares this predicate to pick IMMEDIATE wakes, which cost money
+      // and whose review path is gated on loops.review + flow:auto. Admitting obligations by default
+      // routed a paid wake around its own gate — caught by residency.test's two negative cases.
+      const msgs = [env({ id: 'ask', from: 'miley', to: toMe, act: 'ask', meta: review })];
+      expect(pendingInterrupts(msgs, 'me')).toEqual([]);
+    });
+
+    it('raises a routed acceptance ask that carries NO urgent flag', () => {
+      const msgs = [env({ id: 'ask', from: 'miley', to: toMe, act: 'ask', meta: review })];
+      expect(pendingInterrupts(msgs, 'me', { obligations: true }).map((m) => m.id)).toEqual([
+        'ask',
+      ]);
+    });
+
+    it('does NOT raise a plain directed ask — only a lane_review one is obligation-class', () => {
+      const msgs = [
+        env({ id: 'plain', from: 'miley', to: toMe, act: 'ask', meta: { tier: 'standard' } }),
+      ];
+      expect(pendingInterrupts(msgs, 'me', { obligations: true })).toEqual([]);
+    });
+
+    it('does not raise an acceptance routed to someone else, or my own echo', () => {
+      const msgs = [
+        env({
+          id: 'theirs',
+          from: 'miley',
+          to: { kind: 'member', name: 'jo' },
+          act: 'ask',
+          meta: review,
+        }),
+        env({
+          id: 'mine',
+          from: 'me',
+          to: { kind: 'member', name: 'jo' },
+          act: 'ask',
+          meta: review,
+        }),
+      ];
+      expect(pendingInterrupts(msgs, 'me', { obligations: true })).toEqual([]);
+    });
+
+    it('stops raising once its thread is resolved', () => {
+      const msgs = [
+        env({ id: 'ask', from: 'miley', to: toMe, act: 'ask', thread: 'r1', meta: review, ts: 10 }),
+        env({ id: 'done', from: 'me', to: { kind: 'team' }, act: 'resolve', thread: 'r1', ts: 20 }),
+      ];
+      expect(pendingInterrupts(msgs, 'me', { obligations: true })).toEqual([]);
+    });
+
+    it('does not supersede: two open acceptances are two obligations, unlike steers', () => {
+      // A steer is a *direction* (newest wins, ADR 103). An acceptance is an *obligation* against a
+      // specific lane — a second one does not discharge the first, so both must stay on the line.
+      const msgs = [
+        env({ id: 'a1', from: 'miley', to: toMe, act: 'ask', meta: review, ts: 10 }),
+        env({
+          id: 'a2',
+          from: 'izzo',
+          to: toMe,
+          act: 'ask',
+          meta: { ...review, lane_review: { lane: 'L2' } },
+          ts: 20,
+        }),
+      ];
+      expect(pendingInterrupts(msgs, 'me', { obligations: true }).map((m) => m.id)).toEqual([
+        'a2',
+        'a1',
+      ]);
+    });
+  });
 });

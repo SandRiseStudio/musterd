@@ -187,8 +187,24 @@ export function countInbox(db: Database, member: { id: string; team_id: string }
  * either **flagged urgent** (`meta.urgent === true`, which the send path only ever leaves set when the
  * sender's `can_flag_urgent` passed the ADR 071 gate — so the capability check is already enforced
  * upstream) **or a `steer`** (ADR 103: a directive is interrupt-class by definition, so it raises the
- * line whether or not it is flagged urgent; `challenge`/`defer` stay behind the urgent tier). A
- * terminal `resolve` never interrupts.
+ * line whether or not it is flagged urgent; `challenge`/`defer` stay behind the urgent tier) **or a
+ * routed acceptance** (ADR 225: an `ask` carrying `meta.lane_review`). A terminal `resolve` never
+ * interrupts.
+ *
+ * Obligation class (ADR 225 decision 1). Acceptance was structurally invisible here: it is an `ask`
+ * at `tier:'standard'` and never carries `urgent`, so the free rail this predicate feeds skipped the
+ * one act that blocks another seat's lane. Measured 2026-08-04 — five routed acceptances reached a
+ * live, heads-down acceptor only when a human typed "check messages", and two produced a *crossed
+ * handoff*: two seats re-assigning one lane twelve minutes apart, each on an inbox the other's act
+ * had not reached. Both were alive throughout, so no wake addresses it; the gap yields contradiction,
+ * not merely silence. `meta.lane_review` is the marker because the daemon sets it on the review
+ * route — and `routeEnvelope` strips any client-supplied copy, so this cannot become an ungated
+ * back door around the scarce `can_flag_urgent` flag (ADR 071).
+ *
+ * Obligations do NOT supersede each other, which is the one place they part company with steers: a
+ * steer is a *direction* (newest wins, ADR 103), while an acceptance is an obligation against one
+ * specific lane — a second one does not discharge the first, so every open acceptance stays on the
+ * line.
  *
  * Steer supersession (ADR 103, borrowing ADR 017's newest-wins primitive applied to *direction*): only
  * the newest steer directed at me survives — older steers are superseded so a late-waking agent sees
@@ -201,11 +217,28 @@ export function countInbox(db: Database, member: { id: string; team_id: string }
  * it is trivially testable and the "daemon-composed, never the raw body" line (§4) is built from its
  * structured fields, not from `env.body`.
  */
-export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] {
+export function pendingInterrupts(
+  messages: Envelope[],
+  me: string,
+  /** ADR 225: admit obligation-class acts (a routed acceptance). **Off by default, and that default
+   *  is load-bearing** — this predicate has two consumers with opposite needs. The ADR 088 interrupt
+   *  line feeds a LIVE seat and is free, so it opts in. `claimWakeLeases` uses the same predicate to
+   *  pick *immediate wakes*, which cost ADR 131 `wake_cost` and whose review path is deliberately
+   *  gated on `loops.review` + `flow:auto` (ADR 191); admitting acceptance there would route a paid
+   *  wake around its own policy gate. That the same predicate cannot serve both rails is precisely
+   *  ADR 225's thesis — live and offline want different instruments — appearing in the code. */
+  opts: { obligations?: boolean } = {},
+): Envelope[] {
   const resolved = new Set<string>();
   for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
   const isUrgent = (m: Envelope) =>
     (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true;
+  // ADR 225: a routed acceptance is obligation-class. Keyed on the daemon-set `lane_review` marker,
+  // never on act+tier alone — a plain directed `ask` must not raise the line.
+  const isObligation = (m: Envelope) =>
+    opts.obligations === true &&
+    m.act === 'ask' &&
+    (m.meta as { lane_review?: unknown } | null | undefined)?.['lane_review'] != null;
   const actionNeeded = (m: Envelope) =>
     m.act !== 'resolve' &&
     (m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me));
@@ -229,7 +262,7 @@ export function pendingInterrupts(messages: Envelope[], me: string): Envelope[] 
       (m) =>
         m.from !== me &&
         actionNeeded(m) &&
-        (isUrgent(m) || m.act === 'steer') &&
+        (isUrgent(m) || m.act === 'steer' || isObligation(m)) &&
         !resolved.has(m.thread ?? m.id) &&
         // Newest steer wins: any steer that isn't the single winner is superseded — it neither
         // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).

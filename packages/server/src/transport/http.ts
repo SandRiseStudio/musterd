@@ -445,8 +445,18 @@ function assertSeatCanRead(member: MemberRow): void {
  * can raise the line without the `urgent` flag; everything else that raises is `urgent`. Named on the
  * line and in the audit so "who grabbed the mic, and by what right" stays legible.
  */
-function raiseClass(latest: Envelope): 'steer' | 'urgent' {
-  return latest.act === 'steer' ? 'steer' : 'urgent';
+function raiseClass(latest: Envelope): 'steer' | 'urgent' | 'acceptance' {
+  if (latest.act === 'steer') return 'steer';
+  // ADR 225: a routed acceptance raises on its own class, not on `urgent` — the noun has to say so,
+  // or a seat reads "urgent" for a standard-tier obligation and the urgent signal loses its meaning
+  // on the very line that makes it scarce. `lane_review` is server-controlled (routeEnvelope strips
+  // any client copy), so this noun cannot be minted by a sender.
+  if (
+    latest.act === 'ask' &&
+    (latest.meta as { lane_review?: unknown } | null | undefined)?.['lane_review'] != null
+  )
+    return 'acceptance';
+  return 'urgent';
 }
 
 /**
@@ -694,7 +704,7 @@ function deliverLaneAct(
       body,
       meta,
     });
-    routeEnvelope(ctx, team, from, env);
+    routeEnvelope(ctx, team, from, env, undefined, true);
   } catch {
     /* advisory only — the lane verb already succeeded */
   }
@@ -727,7 +737,7 @@ function deliverLaneAskAct(
       body,
       meta,
     });
-    routeEnvelope(ctx, team, from, env);
+    routeEnvelope(ctx, team, from, env, undefined, true);
   } catch {
     /* advisory only — the lane verb already succeeded */
   }
@@ -797,7 +807,7 @@ function deliverLaneTeamAct(
     body,
     meta,
   });
-  routeEnvelope(ctx, team, from, env);
+  routeEnvelope(ctx, team, from, env, undefined, true);
 }
 
 /**
@@ -2980,7 +2990,9 @@ export async function handleHttp(
           const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
           return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
         });
-        const pending = pendingInterrupts(messages, member.name);
+        // obligations: true — this is the live rail (ADR 225). A routed acceptance belongs on it and
+        // costs nothing here; the wake rail keeps its ADR 191 policy gate by NOT passing this.
+        const pending = pendingInterrupts(messages, member.name, { obligations: true });
         recordInterruptCheck(pending.length > 0 ? 'raised' : 'silent');
         if (pending.length === 0) return sendJson(res, 200, { raised: false });
         const latest = pending[0]!;

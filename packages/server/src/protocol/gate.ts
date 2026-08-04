@@ -142,7 +142,7 @@ function emitGateAsk(ctx: GateContext): string {
       gate: { class: req.class, fingerprint: req.fingerprint },
     },
   });
-  routeEnvelope(srv, team, member, env);
+  routeEnvelope(srv, team, member, env, undefined, true);
   return id;
 }
 

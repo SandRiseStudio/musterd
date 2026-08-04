@@ -50,8 +50,15 @@ export function routeEnvelope(
    *  *this* session's attestation, not the member's newest presence. Omitted on the stateless HTTP
    *  message paths (no live occupancy), which fall back to the member's freshest attested presence. */
   senderPresenceId?: string,
+  /** ADR 225: the envelope was composed by the daemon, not received from a client, so its
+   *  server-controlled meta (`lane_review`) is authentic and survives. **Defaults to false so the
+   *  strip fails closed** — a new client-facing route that forgets this cannot mint interrupts, and a
+   *  daemon route that forgets it merely loses the interrupt (visible in tests, not exploitable). */
+  daemonComposed = false,
 ): RouteResult {
-  return withEnvelopeSpan(env, () => routeEnvelopeInner(ctx, team, sender, env, senderPresenceId));
+  return withEnvelopeSpan(env, () =>
+    routeEnvelopeInner(ctx, team, sender, env, senderPresenceId, daemonComposed),
+  );
 }
 
 function routeEnvelopeInner(
@@ -60,6 +67,7 @@ function routeEnvelopeInner(
   sender: MemberRow,
   env: Envelope,
   senderPresenceId?: string,
+  daemonComposed = false,
 ): RouteResult {
   if (env.from !== sender.name || env.team !== team.slug) {
     throw new MusterdError('forbidden', 'envelope from/team must match the authenticated member');
@@ -153,6 +161,16 @@ function routeEnvelopeInner(
         detail,
       });
     }
+  }
+
+  // ADR 225: `lane_review` is **server-controlled**, on the same grounds as `meta.model` below. The
+  // daemon sets it on the review route, and ADR 225 makes it obligation-class in `pendingInterrupts`
+  // — so a client-supplied copy would be a free interrupt, routing around the scarce, audited
+  // `can_flag_urgent` gate (ADR 071) that every other non-`steer` raise must pass. Stripped silently
+  // rather than rejected: the act still lands, it just cannot promote itself to the interrupt line.
+  if (!daemonComposed && outgoingEnv.meta && 'lane_review' in outgoingEnv.meta) {
+    const { lane_review: _clientLaneReview, ...restMeta } = outgoingEnv.meta;
+    outgoingEnv = { ...outgoingEnv, meta: restMeta };
   }
 
   // Per-act model stamp (ADR 101): the occupancy attestation is the *source*, the stamp on each act
@@ -391,7 +409,8 @@ function fireGatedHumanAsk(
       },
     },
   });
-  routeEnvelope(ctx, team, owner, ask);
+  // daemonComposed: the daemon authored this ask, so its `lane_review` is authentic (ADR 225).
+  routeEnvelope(ctx, team, owner, ask, undefined, true);
   return true;
 }
 
