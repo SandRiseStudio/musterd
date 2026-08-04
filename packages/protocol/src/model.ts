@@ -177,6 +177,7 @@ export const WAKEABILITIES = [
   'not_enrolled',
   'enrolled_dead_workspace',
   'enrolled_host_stale',
+  'enrolled_seat_busy',
 ] as const;
 export type Wakeability = (typeof WAKEABILITIES)[number];
 
@@ -189,16 +190,29 @@ export interface WakeabilityFacts {
   workspace_readable?: boolean;
   /** Host-only (or future host-heartbeat): is the enrolled host reachable / polling? */
   host_reachable?: boolean;
+  /**
+   * Quiescence (ADR 215): has this seat been quiet, by the caller's own line? `false` means the
+   * audit trail shows it acting *just now* — presence calls it idle, the evidence disagrees.
+   * OMIT when unknown; `unknown` is not quiet (ADR 169/189), and passing `true` for "I have not
+   * checked" would spend a wake on a seat that is already up.
+   */
+  seat_quiet?: boolean;
 }
 
 /**
  * Shared wakeability predicate (ADR 189). Pure: same facts ⇒ same reason, on server or host.
  * Enrollment is the first gate; host refinements only apply to enrolled seats.
+ *
+ * Ordering is by what the reader can act on. The reachability defects come first — they name a
+ * broken pointer an operator fixes — and `enrolled_seat_busy` comes last, because it is the one
+ * transient reason: nothing is wrong with the seat, it is simply not a *spend* right now. A seat
+ * that is both busy and unreachable must report the defect, not the weather.
  */
 export function wakeabilityFromFacts(facts: WakeabilityFacts): Wakeability {
   if (!facts.enrolled) return 'not_enrolled';
   if (facts.workspace_readable === false) return 'enrolled_dead_workspace';
   if (facts.host_reachable === false) return 'enrolled_host_stale';
+  if (facts.seat_quiet === false) return 'enrolled_seat_busy';
   return 'wakeable';
 }
 
@@ -215,7 +229,9 @@ export function wakeabilityFromFacts(facts: WakeabilityFacts): Wakeability {
  *
  * `wakeability` is mark-not-filter: unenrolled cross-family seats stay in the pool (so the posture
  * still names the diversity gap) but are marked `not_enrolled` so ADR 179 increment 5 does not spend
- * a wake on a name dispatch cannot reach.
+ * a wake on a name dispatch cannot reach. ADR 219 adds the transient case to the same mark: a seat
+ * whose audit trail shows it acting just now is `enrolled_seat_busy` — presence calls it idle, the
+ * evidence disagrees, and waking it would buy a duplicate rather than a remedy.
  */
 export interface WakeCandidate {
   seat: string;

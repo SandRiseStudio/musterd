@@ -121,7 +121,12 @@ import {
   listReclaimableMemberIds,
   touchAmbientPresence,
 } from '../store/presence.js';
-import { quietestBusyMs } from '../store/quiescence.js';
+import {
+  lastActionByActor,
+  quietestBusyMs,
+  resolveQuiescence,
+  QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
+} from '../store/quiescence.js';
 import { unblockerReachable } from '../store/reachability.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import {
@@ -956,6 +961,11 @@ function summarize(
   // Steering marks you present (ADR 155 Inc 1): the humans named as `driver` on a live agent seat.
   // Derived here at read time — no synthetic presence row for the steering human (ADR 155 decision 1).
   const liveDrivers = listLiveDrivers(ctx.db, teamId, ctx.config.presenceTimeoutMs);
+  // Quiescence (ADR 219): the decision-grade busy read, beside — never folded into — the
+  // display fields below. One audit read for the whole roster; a seat with no evidence is absent
+  // from the map and reports `unknown` rather than borrowing the shape of quiet.
+  const lastAction = lastActionByActor(ctx.db, teamId);
+  const quiescenceNow = Date.now();
   return listPresence(ctx.db, teamId, ctx.config.presenceTimeoutMs).map((s) => {
     // Two-clocks rule (M2): liveness from presence, working-label from the latest status_update — plus
     // steering (ADR 155): a human steering a live agent seat reads working + present without their own
@@ -999,6 +1009,11 @@ function summarize(
       reclaimable: isReclaimable,
       wakeable: residency.has(s.member.id),
       resumable_at: residency.get(s.member.id) ?? null,
+      quiescence: resolveQuiescence(
+        lastAction.get(s.member.name) ?? null,
+        quiescenceNow,
+        QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
+      ),
     };
   });
 }

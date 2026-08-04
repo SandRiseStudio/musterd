@@ -385,6 +385,35 @@ describe('HTTP API', () => {
     expect(adaRow?.presences?.[0]?.surface).toBe('claude-code');
   });
 
+  it('the roster carries quiescence beside the display fields, unknown when unevidenced (ADR 219)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickTok);
+    // Claiming a lane IS audited (`lane.claimed`); Lin has done nothing audited at all.
+    await post(
+      '/teams/dawn/lanes',
+      { title: 'the thing ada is mid-doing', claim: true },
+      { key: team.json.agent_key, seat: 'Ada' },
+    );
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const rowFor = (n: string) => roster.json.members.find((m: any) => m.name === n);
+
+    // A seat that has never acted is UNKNOWABLE, not quiet — and `quiet_for_ms` is null rather
+    // than a large number, so no consumer can read "very quiet" off an absence of evidence.
+    expect(rowFor('Lin')?.quiescence).toEqual({
+      state: 'unknown',
+      quiet_for_ms: null,
+      source: 'audit',
+    });
+
+    // Ada just acted, so the audit tier can answer for her.
+    expect(rowFor('Ada')?.quiescence?.state).toBe('busy');
+    expect(rowFor('Ada')?.quiescence?.source).toBe('audit');
+    expect(rowFor('Ada')?.quiescence?.quiet_for_ms).toBeLessThan(120_000);
+  });
+
   it('ambient presence: a live watcher sees the offline→online transition event (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

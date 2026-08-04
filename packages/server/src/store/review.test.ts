@@ -164,6 +164,90 @@ describe('the wake pool reads the durable attestation record (ADR 187)', () => {
     ]);
   });
 
+  /**
+   * ADR 219. The wake pool is everyone presence calls offline — but presence lapses for
+   * reasons other than going away. A seat whose audit trail shows it acting seconds ago is not
+   * idle; it is mid-something with a stale heartbeat, and waking it buys a duplicate, not a
+   * remedy. Marked, never filtered: the seat stays in the pool so the diversity gap is still
+   * named, exactly as ADR 189 does for unenrolled seats.
+   */
+  describe('quiescence marks a busy seat unspendable (ADR 219)', () => {
+    const acted = (
+      db: ReturnType<typeof seed>['db'],
+      team: { id: string },
+      actor: string,
+      at: number,
+    ) =>
+      db
+        .prepare(
+          `INSERT INTO audit (id, team_id, actor, action, target, result, ts, created_at)
+           VALUES (?, ?, ?, 'x.did', NULL, 'allow', ?, ?)`,
+        )
+        .run(`aud-${actor}-${String(at)}`, team.id, actor, at, at);
+
+    it('an enrolled seat acting seconds ago is enrolled_seat_busy, and stays in the pool', () => {
+      const { db, team } = seed();
+      agent(db, team, 'grokbot');
+      const row = db
+        .prepare<[string], { id: string }>('SELECT id FROM members WHERE name = ?')
+        .get('grokbot')!;
+      enrollResidency(db, team.id, {
+        member_id: row.id,
+        harness: 'claude-code',
+        host: 'h',
+        grant_id: null,
+        authorized_by: null,
+      });
+      acted(db, team, 'grokbot', Date.now() - 5_000);
+      const p = teamFamilyPosture(db, team.id, TIMEOUT);
+      expect(p.wake_pool.map((c) => c.seat)).toEqual(['grokbot']); // marked, NOT filtered
+      expect(p.wake_pool[0]?.wakeability).toBe('enrolled_seat_busy');
+    });
+
+    it('the same seat quiet past the line is wakeable again — the mark is transient', () => {
+      const { db, team } = seed();
+      agent(db, team, 'grokbot');
+      const row = db
+        .prepare<[string], { id: string }>('SELECT id FROM members WHERE name = ?')
+        .get('grokbot')!;
+      enrollResidency(db, team.id, {
+        member_id: row.id,
+        harness: 'claude-code',
+        host: 'h',
+        grant_id: null,
+        authorized_by: null,
+      });
+      acted(db, team, 'grokbot', Date.now() - 10 * 60_000);
+      expect(teamFamilyPosture(db, team.id, TIMEOUT).wake_pool[0]?.wakeability).toBe('wakeable');
+    });
+
+    it('no audited action leaves the seat exactly as it read before the fact existed', () => {
+      const { db, team } = seed();
+      agent(db, team, 'grokbot');
+      const row = db
+        .prepare<[string], { id: string }>('SELECT id FROM members WHERE name = ?')
+        .get('grokbot')!;
+      enrollResidency(db, team.id, {
+        member_id: row.id,
+        harness: 'claude-code',
+        host: 'h',
+        grant_id: null,
+        authorized_by: null,
+      });
+      // unknown → omit the fact (ADR 169/189). Never "quiet by absence of evidence".
+      expect(teamFamilyPosture(db, team.id, TIMEOUT).wake_pool[0]?.wakeability).toBe('wakeable');
+    });
+
+    it('a reachability defect outranks busy — the operator gets the actionable reason', () => {
+      const { db, team } = seed();
+      agent(db, team, 'grokbot'); // never enrolled
+      acted(db, team, 'grokbot', Date.now() - 5_000);
+      expect(teamFamilyPosture(db, team.id, TIMEOUT).wake_pool[0]?.wakeability).toBe(
+        'not_enrolled',
+      );
+    });
+  });
+
   it('a seat that never attested stays unknown — the record cannot invent one', () => {
     const { db, team } = seed();
     agent(db, team, 'ghost'); // enrolled, never attached, never attested
