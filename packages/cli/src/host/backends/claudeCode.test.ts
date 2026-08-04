@@ -350,13 +350,19 @@ describe('claudeCodeBackend.wake', () => {
     await actuation.settled;
   });
 
-  it('claude not found: fails with a named reason, nothing spawned', async () => {
+  // A host that cannot spawn is DEFERRED, never FAILED (ADR 221). A failure consumes an attempt
+  // against attempt_cap and an hourly-cap slot; three of them retire the act as
+  // residency.wake_exhausted — terminally undeliverable, with the seat reading as if it refused.
+  // The act is fine and the seat is fine; this machine simply cannot actuate, which is the same
+  // shape as the local-session guard and must be budget-neutral for the same reason.
+  it('claude not found: DEFERS with a named reason, nothing spawned, no attempt spent', async () => {
     const backend = claudeCodeBackend({ resolveBin: async () => null });
     const actuation = await backend.wake(
       spec(),
       ctx(async () => ({ occupied: true })),
     );
     expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.deferred).toBe(true);
     expect(actuation.outcome.reason).toMatch(/claude CLI not found/);
   });
 });

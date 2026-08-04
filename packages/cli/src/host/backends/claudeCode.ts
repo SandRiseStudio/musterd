@@ -488,10 +488,15 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       const seat = spec.order.seat;
       const bin = await (deps.resolveBin ?? resolveClaudeBin)();
       if (!bin) {
+        // DEFERRED, not failed (ADR 221). The act is deliverable and the seat is fine — THIS HOST
+        // cannot actuate, which is a property of the machine, not of the work. A failure would
+        // consume an attempt against `attempt_cap` and an hourly-cap slot, and three would retire
+        // the act as `residency.wake_exhausted`: terminally undeliverable, with the seat reading as
+        // if it refused. Same shape and same budget-neutrality as the local-session guard below.
         return {
           outcome: {
             occupied: false,
-            session: 'fresh',
+            deferred: true,
             reason: 'claude CLI not found (PATH + known install locations)',
           },
           settled: Promise.resolve(undefined),

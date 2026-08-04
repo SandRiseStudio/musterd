@@ -11,7 +11,8 @@ import {
   type ResidencyPolicyOverride,
 } from '@musterd/protocol';
 import { flagStr, fmtBytes, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
-import { codexCapability } from '../codexBin.js';
+import { resolveClaudeBin } from '../claudeBin.js';
+import { codexCapability, resolveCodexBin } from '../codexBin.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
@@ -68,6 +69,49 @@ const ENROLL_HINT = 'musterd residency on --as <admin>';
  * more than it looks: these strings ARE the remediation, and both faults they distinguish have now
  * been hit for real on the dogfood machine. `existsSync` is injectable for the same reason.
  */
+/** Harness class → its binary resolver (ADR 221). Unlisted classes are not checked. */
+const HARNESS_BIN_RESOLVERS: Record<string, () => Promise<string | null>> = {
+  'claude-code': resolveClaudeBin,
+  codex: resolveCodexBin,
+};
+
+/**
+ * ADR 221 — can this machine actually spawn what it is enrolled to spawn?
+ *
+ * A host missing its harness binary now DEFERS every wake rather than failing it, which stops the
+ * act being retired as `wake_exhausted` for a fault local to the machine. The cost of that trade is
+ * silence: the act waits instead of dying, and waits indefinitely if nobody notices. This line is
+ * what converts that wait back into something an operator can see and fix — so it names the seat,
+ * the harness, and the consequence, not just "missing".
+ *
+ * Scoped to enrollments whose host is THIS machine: another host's unresolvable harness is not this
+ * reader's problem, and warning about it would train them to skip the line.
+ */
+export function harnessDrift(
+  residency: readonly Pick<Residency, 'seat' | 'host' | 'harness'>[],
+  hostLabel: string,
+  resolvable: (harness: string) => boolean,
+): string[] {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const r of residency) {
+    if (r.host !== hostLabel) continue;
+    if (seen.has(r.harness)) continue;
+    if (resolvable(r.harness)) continue;
+    seen.add(r.harness);
+    const sharing = residency
+      .filter((o) => o.host === hostLabel && o.harness === r.harness)
+      .map((o) => `"${o.seat}"`);
+    lines.push(
+      `! cannot actuate: ${sharing.join(', ')} enrolled here for harness "${r.harness}", but no ` +
+        `${r.harness} binary resolves on this host — every wake DEFERS (never fails, so no attempt ` +
+        `is spent), and the act waits until this is fixed. Install it on the host's PATH, or ` +
+        `re-enroll the seat to a machine that has it.`,
+    );
+  }
+  return lines;
+}
+
 export function registryDrift(
   residency: readonly Pick<Residency, 'seat' | 'host'>[],
   entries: readonly HostRegistryEntry[],
@@ -468,6 +512,23 @@ async function statusCommand(parsed: Parsed): Promise<number> {
   // label this machine has answered to must have a registry entry, or `musterd host` here will be
   // handed a wake order it cannot map to a workspace.
   const registry = loadHostRegistry();
+  // ADR 221: resolve each harness this machine is enrolled for, once, and report the ones it
+  // cannot spawn. Resolution is async and a miss is uncached by design (installing the CLI while
+  // the host runs must become visible), so it is done here and handed to the pure check as a map.
+  const myHarnesses = [
+    ...new Set(residency.filter((r) => r.host === hostname()).map((r) => r.harness)),
+  ];
+  const resolved = new Map<string, boolean>();
+  for (const h of myHarnesses) {
+    const resolver = HARNESS_BIN_RESOLVERS[h];
+    // An unknown harness class is not a fault to report — backends are pluggable (ADR 131 §7) and
+    // this machine simply may not be its actuator. Silence beats a wrong accusation.
+    resolved.set(h, resolver === undefined ? true : (await resolver()) !== null);
+  }
+  for (const line of harnessDrift(residency, hostname(), (h) => resolved.get(h) !== false)) {
+    process.stdout.write(theme.warn(line) + '\n');
+  }
+
   for (const line of registryDrift(residency, registry.entries, team, hostname())) {
     process.stdout.write(theme.warn(line) + '\n');
   }
