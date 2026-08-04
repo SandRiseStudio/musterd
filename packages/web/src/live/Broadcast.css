@@ -62,11 +62,14 @@
    stage. Type runs ~1.5× /live's rail so it survives the 720p encode (the reason this is not
    simply .lc-asks reused). */
 
-/* The slot: /live gives topSlot the full top edge (its rail is a full-width pill). On the
-   broadcast stage that read as emptiness — cap it and anchor left, diagonal to the floor card. */
+/* The slot spans the room, inset by one gutter each side — the same edge the floor card sits on,
+   so the two read as opposite corners of one frame rather than two floating objects. The first cut
+   capped this at 62% left-anchored; on a 1920 stage that left a third of the top edge empty and the
+   gist truncating with room to spare beside it (nick, 2026-08-04). Full width is also what buys the
+   ask its sentence: the gist is the only element that grows, so every pixel here becomes readable
+   body text before the ellipsis. */
 .bc .lc-office__asks {
-  inset: var(--lc-5) auto auto var(--lc-5);
-  width: min(880px, 62%);
+  inset: var(--lc-5) var(--lc-5) auto var(--lc-5);
 }
 
 .bc-reel {
