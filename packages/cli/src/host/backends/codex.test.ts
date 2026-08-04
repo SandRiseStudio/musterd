@@ -121,6 +121,51 @@ describe('codexBackend', () => {
     child.exit();
     await result.settled;
   });
+  it('portable fresh orders bypass resume even with a valid local capture', async () => {
+    const child = new Child();
+    const calls: string[][] = [];
+    const lines: string[] = [];
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      readSession: () => ({
+        state: 'resumable',
+        source: 'slot',
+        session: { harness: 'codex', id: 'old', started_at: 1 },
+        transcriptBytes: 4096,
+        transcriptMtime: Date.now() - 1_000,
+      }),
+      recordFreshThread: () => undefined,
+      spawn: ((_bin: string, args: string[]) => {
+        calls.push(args);
+        return child;
+      }) as never,
+    });
+    const wake = backend.wake(
+      {
+        ...spec,
+        order: {
+          ...order,
+          intended_delivery: 'fresh',
+          continuity_requirement: 'portable',
+        },
+      },
+      { ...ctx, log: (line) => lines.push(line) },
+    );
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(buildCodexFreshArgs('wake line', '/ws'));
+    expect(result.outcome).toMatchObject({
+      occupied: true,
+      session: 'fresh',
+      delivery_outcome: 'fresh',
+      transcript_bytes: 4096,
+    });
+    expect(lines.join('\n')).toMatch(/portable delivery .* fresh spawn \(resume bypassed\)/);
+    child.exit();
+    await result.settled;
+  });
   it('never credits a nonzero child exit, even if a stale roster probe says occupied', async () => {
     const child = new Child();
     const backend = codexBackend({
