@@ -129,7 +129,15 @@ One calibration pass at implementation time: capture to a file sink with `--audi
 `ffmpeg -af ebur128`, set a single broadcast master gain, and record the measured value here in the
 form `LIFE_GAIN` is recorded in `sound.ts` — the number plus what was measured to get it.
 
-> **Broadcast master gain: _(unmeasured — filled in by the calibration pass)_**
+> **Broadcast master gain: ×4 (+12 dB) — `BROADCAST_MASTER_GAIN` in `sound.ts`.** Measured
+> 2026-08-04 on the real hosted pipeline (Fly performance-4x sjc, session-mode PulseAudio null
+> sink → `--audio` → libx264/aac, 120 s file capture of the live revive office): the unscaled mix
+> integrated at **−42.8 LUFS, LRA 1.8 LU** — a real signal (silence floor is −70), but ~25 dB
+> under where even deliberate ambience should sit on a stream. ×4 lands the bed near −30 LUFS:
+> audible at normal viewer volume, still unmistakably background. This is ambience, not program —
+> do **not** normalize it toward −14 LUFS speech loudness. The same pass also corrected the Pulse
+> invocation: system mode denies root clients (`pulse-access` gating, observed live as the
+> preflight refusing to start); a root _session_ daemon warns and works.
 
 ---
 

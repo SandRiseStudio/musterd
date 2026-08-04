@@ -67,12 +67,15 @@ curl -sf --max-time 2 "$SERVER/health" >/dev/null || {
 # stream would carry ffmpeg's silence generator (ADR 228). A null sink gives Chrome somewhere to
 # play and gives ffmpeg a `.monitor` source to capture.
 #
-# System mode because this container runs as root and PulseAudio refuses a root session daemon;
-# --disallow-exit because the daemon must outlive the idle gap between stream generations.
-export PULSE_SERVER=unix:/var/run/pulse/native
-mkdir -p /var/run/pulse
-pulseaudio --system --disallow-exit --exit-idle-time=-1 --daemonize=yes \
-  --log-target=file:/tmp/pulseaudio.log 2>/dev/null || true
+# A SESSION daemon as root, not system mode — measured, not guessed (calibration run,
+# 2026-08-04): system mode gates clients on pulse-access group membership, so every pactl from
+# root got "Access denied" and the preflight below refused to go live. A root session daemon
+# prints a warning and works, and every client here (pactl, Chrome, ffmpeg) is the same root
+# user. --exit-idle-time=-1 keeps it alive across the idle gap between stream generations.
+export XDG_RUNTIME_DIR=/tmp/pulse-runtime
+mkdir -p "$XDG_RUNTIME_DIR"
+pulseaudio --daemonize=yes --exit-idle-time=-1 \
+  --log-target=file:/tmp/pulseaudio.log >/dev/null 2>&1 || true
 
 for _ in $(seq 1 15); do
   pactl info >/dev/null 2>&1 && break
