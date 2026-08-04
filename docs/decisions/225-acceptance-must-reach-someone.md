@@ -2,7 +2,8 @@
 
 - Status: proposed
 - Date: 2026-08-04
-- Deciders: nick (directed), stanley
+- Deciders: nick (directed), stanley, ryder (residency-split amendment, bimodality finding, and the
+  falsifier correction — from an acceptance review of this ADR)
 - Amends: [ADR 192](192-outcome-acceptance.md) (the acceptor's job and the two-stage close stand
   unchanged; this ADR changes how the ask is delivered and what is promised for it) and
   [ADR 188](188-graded-review-ladder.md) (the grading ladder is untouched)
@@ -66,8 +67,39 @@ Three failures hide inside the one statistic, and they need different fixes:
 
 ## Decision
 
-**1. Acceptance actuates _reliably_.** A routed acceptance must emit a wake for the acceptor rather
-than resting in an inbox.
+**1. Acceptance actuates _reliably_, by the instrument the acceptor's state calls for.** A routed
+acceptance must reach the acceptor rather than resting in an inbox — **and the right instrument
+depends on whether they are live:**
+
+| Acceptor state | Instrument                                  | Cost                |
+| -------------- | ------------------------------------------- | ------------------- |
+| **live**       | the ADR 088 interrupt line                  | free — already runs |
+| **offline**    | a wake, with a `derivation` of its own      | ADR 131 `wake_cost` |
+| **neither**    | `no_reachable_acceptor`, declared at submit | none                |
+
+> **Amendment (2026-08-04, same day), from ryder's acceptance review of this ADR.** The first draft
+> made decision 1 "emit a wake," full stop. That buys the wrong primitive for the majority case, and
+> ryder's evidence is the sharpest in this document because it is the one episode where the whole
+> causal chain is visible.
+
+**The mechanism gap, verified in code.** `pendingInterrupts`
+(`packages/server/src/store/messages.ts`) filters on `isUrgent(m) || m.act === 'steer'`. A routed
+acceptance is `act:'ask'` with `meta {species:'approve', tier:'standard'}` and carries no urgent flag
+— correctly, since urgent is `can_flag_urgent`-gated and scarce by construction. So **acceptance asks
+are structurally invisible to the ADR 088 interrupt line**, which already runs on every PostToolUse
+and costs nothing. The delivery rail exists, is free, and acceptance is not on it.
+
+**ryder's four data points, 2026-08-04.** Two acceptance asks routed to them at 13:49 and 13:50
+closed `review_unanswered` at 13:57 — they were live and heads-down the entire window and never saw
+them. Two more routed at 14:11 and 14:13 were answered at 14:21, in 8 and 10 minutes, one of them
+finding a defect. What changed between the pairs was not a wake: it was a human typing "check
+messages" into their session. ryder's lifetime acceptance-wake count is zero. They are
+simultaneously this ADR's 92%-reached-nobody statistic and its 36%-answered statistic, and the
+delivery mechanism that worked was a person.
+
+Buying wakes for live seats is paying ADR 131 prices for an ADR 088 problem. It also makes
+`no_reachable_acceptor` a real predicate — _neither live-and-interruptible nor wakeable_ — rather
+than the presence proxy this ADR was written to condemn.
 
 > **Correction (2026-08-04, same day).** The first draft of this ADR said the wake ledger contained
 > "no `review`-derived wake in its entire history." That was **wrong**, and dolly's ADR 199 Eval
@@ -81,10 +113,12 @@ fire occasionally; what does not exist is any guarantee that routing one wakes a
 concrete instance is this ADR's own origin: lane `01KZ75AXZK`'s acceptance ask to gptbot (13:00:57)
 leased **zero** wakes, which is why a live, pinged acceptor never answered.
 
-That correction sharpens the decision rather than removing it. The fix is not "add wakes to a path
-that has none"; it is "make the wake unconditional on the routing, and give it a derivation of its
-own so this question is answerable without a join." ADR 209 already classes review wakes as
-portable, so the contract exists and is applied inconsistently.
+That correction sharpens the decision rather than removing it, and combines with ryder's: the fix is
+not "add wakes to a path that has none," nor "wake everyone." It is that **delivery is unconditional
+on the routing while the instrument is conditional on the acceptor's state** — interrupt line when
+live, wake when offline — with the wake carrying a `derivation` of its own so this question is
+answerable without a join. ADR 209 already classes review wakes as portable, so that contract exists
+and is applied inconsistently.
 
 **2. The promise matches the measurement.** `promised_wait_ms` of five minutes is falsified by every
 successful acceptance in the ledger. The submit-time promise must be set from the measured
@@ -119,30 +153,54 @@ today both collapse into an unverified close.
 
 ## Observability & Evaluation
 
-**Traces.** A `review`-derived `residency.wake_leased` for each routed acceptance, and a new
-`no_reachable_acceptor` reason on `lane.closed`. Both ride existing schemas.
+**Traces.** A `review`-derived `residency.wake_leased` for each acceptance routed to an _offline_
+acceptor; an interrupt-line delivery record for each routed to a _live_ one, so the two instruments
+are separable in the ledger rather than pooled; and a new `no_reachable_acceptor` reason on
+`lane.closed`. All ride existing schemas.
 
-**Eval.** The measurable claim is that acceptance rises because the ask arrives. Baseline is stated
-above and is unusually well-recorded: **16 of 146 closes verified (11%); 16 of 44 routed acceptances
-answered (36%); confirms at a 73-minute mean against a 5-minute promise; timeouts at a 12.3-hour
-mean.** Success is the routed answer rate rising materially above 36% and the confirm latency falling
-toward the promise once the promise is honest.
+**Eval — and the blended number must not be the headline.** ryder's second finding is that the
+routed closes are **bimodal**, not one distribution with variance. Re-measured 2026-08-04:
 
-**Early evidence against this ADR, recorded because it exists.** Of the 3 acceptance asks that _did_
-lease a wake, the two whose lanes can be identified closed `review_timeout` and `review_unanswered`
-respectively — woken, and still not answered. That is n=2 and proves nothing on its own, but it
-points squarely at the falsifier below rather than away from it, and anyone running this Eval should
-start from the possibility that delivery is not the binding constraint.
+| Reason                | n   | Mean time in review | Range        |
+| --------------------- | --- | ------------------- | ------------ |
+| `review_unanswered`   | 7   | **12.4 min**        | 6.5–20.5 min |
+| `counterpart_confirm` | 19  | 62.3 min            | 1.6–423 min  |
+| `review_timeout`      | 22  | **737.6 min**       | 0.1–5589 min |
 
-The pre-registered decision rule, stated now: **if routed acceptances are woken and the answer rate
-does not move, the problem is not delivery and this ADR is wrong.** In that case the conclusion is
-that acceptance is not valued by the seats being asked — and the honest response is to make the
-two-stage close advisory in name as well as in fact, not to add a third delivery mechanism. A rise in
-answer rate with a rise in `wake_cost` is the expected outcome and is a trade to be judged on the
-numbers, not a failure.
+A 12-minute give-up and a 12-hour give-up are not the same failure with different luck. The tight
+`review_unanswered` cluster looks like ryder's 13:49 case — a live seat, asked, never told, worker
+gives up fast. The 12-hour tail looks like nobody was there at all. **The original "36% answered"
+pooled these two populations, which is precisely why a single primitive looked sufficient.**
 
-**Experiment.** Worth running, unlike the recent ADRs. Acceptance wakes can be enabled per-team, and
-the roster is large enough to hold an arm back: seats on the control arm keep inbox-only delivery
-while the treatment arm wakes. The measurement is the routed answer rate, and the confound to avoid
-is the one ADR 056 keeps hitting — do not let the arms differ in model family, since the ladder
-already sorts acceptors by decorrelation grade.
+So the Eval reports the answer rate **split by acceptor state at submit time** — live versus offline
+— never blended. If that split does not separate the two clusters, ryder's live-vs-offline argument
+collapses and the single-primitive framing was right; that check comes before the experiment is
+designed, not after.
+
+(Note also that the baseline drifts: the first draft's 16 confirms became 19 within the hour as a
+human answered four pending asks. These are snapshots of a live ledger, not fixtures.)
+
+**Early evidence, and why it is weaker than it looked.** Of the 3 acceptance asks that _did_ lease a
+wake, the two identifiable ones closed `review_timeout` and `review_unanswered` — woken, and still
+not answered. The first draft filed this as evidence against the ADR. It is weaker than that:
+**a wake resumes a session, which is a far heavier and slower event than an in-loop interrupt.**
+Against it stands ryder's n=4 in the other direction — told-while-live produced an answer in 8 and 10
+minutes, twice, one finding a defect. Both are small. Neither settles anything.
+
+The pre-registered decision rule, **restated to fix a confound in the original**: the first version
+said _if routed acceptances are woken and the answer rate does not move, delivery is not the binding
+constraint._ That is unsound, because a wakes-only test does not test delivery — it tests
+**resumption**, and those are different claims. A wakes-only null result would have falsified
+"delivery matters" when only "resumption matters" had been measured.
+
+The corrected rule: **if acceptance is delivered by the instrument matching the acceptor's state —
+interrupt line when live, wake when offline — and the answer rate still does not move, then delivery
+is not the binding constraint and this ADR is wrong.** The honest response then is to make the
+two-stage close advisory in name as well as in fact, not to add a further mechanism.
+
+**Experiment.** Worth running, and it needs **three arms, not two**: control (inbox only), live-seat
+interrupt-line delivery, and wake delivery. On present evidence the interrupt-line arm is both the
+cheap one and the one that works, so an experiment that omits it would price the expensive primitive
+against a straw control. Report the routed answer rate separately per acceptor state, per arm. The
+confound to avoid is the one ADR 056 keeps hitting — do not let the arms differ in model family,
+since the ladder already sorts acceptors by decorrelation grade.
