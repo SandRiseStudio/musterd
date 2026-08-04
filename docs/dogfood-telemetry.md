@@ -4,20 +4,20 @@ The dogfood daemon boots OpenTelemetry by default so the **next multi-agent sess
 instead of reconstructed forensically (lab-notebook finding 001). Layer 1 (ADR 015) already emits the
 envelope span + coordination metrics; this wires it to a local sink on the machine that runs the daemon.
 
-> **Scope.** This is the *dogfood* posture — the daemons we operate. The **product** default stays
+> **Scope.** This is the _dogfood_ posture — the daemons we operate. The **product** default stays
 > off / no-phone-home (users opt in via the standard OTel env vars, `observability.md` §config). The
 > sink here is a throwaway **local OTLP collector** (ADR 082): emission is pure OTLP, so any real
-> collector — including a future parked batond product (ADR 194) — replaces the *endpoint*, never the
+> collector — including a future parked batond product (ADR 194) — replaces the _endpoint_, never the
 > instrumentation.
 
 ## What's wired (machine-local, not committed)
 
 Two LaunchAgents under `~/Library/LaunchAgents/` (macOS):
 
-| LaunchAgent | Role |
-| --- | --- |
-| `studio.sandrise.musterd.plist` | the daemon; its `EnvironmentVariables` now set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` (and `OTEL_METRIC_EXPORT_INTERVAL=5000` for a snappy dogfood cadence) |
-| `studio.sandrise.musterd-otel-sink.plist` | runs [`scripts/dev-otel-sink.mjs`](../scripts/dev-otel-sink.mjs) — a minimal OTLP/HTTP receiver on `:4318` that logs spans + metric data points to `~/.musterd/otel-sink.log` |
+| LaunchAgent                               | Role                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `studio.sandrise.musterd.plist`           | the daemon; its `EnvironmentVariables` now set `OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318` (and `OTEL_METRIC_EXPORT_INTERVAL=5000` for a snappy dogfood cadence)                                                                                                                                                                                                |
+| `studio.sandrise.musterd-otel-sink.plist` | runs [`scripts/dev-otel-sink.mjs`](../scripts/dev-otel-sink.mjs) — a minimal OTLP/HTTP receiver on `:4318` that logs spans + metric data points to `~/.musterd/otel-sink.log`. It mirrors those lines to stdout **only** when stdout is a TTY, so under the LaunchAgent the plist's `StandardOutPath` holds crashes rather than a byte-identical second copy of the log |
 
 The daemon's L1 SDK (`packages/server/src/telemetry.ts`) uses the **OTLP/HTTP (JSON)** exporters, so it
 POSTs to `.../v1/traces` and `.../v1/metrics` — which the dev sink parses directly (no protobuf, no
@@ -79,7 +79,11 @@ skipped so the CLI guard doesn't drown the log.
 Any sender can self-report its harness token usage by attaching **`meta.usage`** to any act:
 
 ```jsonc
-{ "act": "status_update", "body": "…", "meta": { "usage": { "input_tokens": 12000, "output_tokens": 800, "model": "claude-opus-4-8" } } }
+{
+  "act": "status_update",
+  "body": "…",
+  "meta": { "usage": { "input_tokens": 12000, "output_tokens": 800, "model": "claude-opus-4-8" } },
+}
 ```
 
 The route path emits it as **`musterd.agent.tokens`** (counter, by `musterd.member` /
