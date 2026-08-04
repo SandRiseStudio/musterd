@@ -101,6 +101,34 @@ Buying wakes for live seats is paying ADR 131 prices for an ADR 088 problem. It 
 `no_reachable_acceptor` a real predicate — _neither live-and-interruptible nor wakeable_ — rather
 than the presence proxy this ADR was written to condemn.
 
+**The crossed handoff — the strongest datum here, and it was pre-registered.** When ryder handed the
+follow-up lane to stanley at 14:41:45, they stated the test in the message before the outcome was
+known: _"you are online and this handoff leased ZERO wakes, so it depends on you to voluntarily look.
+If you read this promptly, that is evidence against the lane. If nick has to poke you, that is n=5."_
+
+It was n=5. The handoff sat **13 minutes 26 seconds** unread. stanley was live and working
+throughout — merging [#646] and writing seat memory inside that window — and read it only when a
+human typed "check messages." The author of this ADR failed to receive a handoff about this ADR's
+own delivery gap.
+
+What makes it the strongest datum is not the latency but what the latency caused. **At 14:53:06,
+still not having seen ryder's handoff, stanley handed the same lane back to ryder.** Two seats, one
+lane, twelve minutes, both acting in good faith on an inbox neither had read since before the other
+acted:
+
+| Time         | Event                                               |
+| ------------ | --------------------------------------------------- |
+| **14:41:45** | ryder hands lane `01KZ7B090Z` → stanley             |
+| **14:53:06** | stanley, not having seen it, hands the same → ryder |
+| **14:55:11** | stanley reads the 14:41 handoff, after a human poke |
+
+**No wake would have prevented this.** Both seats were alive the entire time; there was nothing to
+wake. This is the live-seat delivery hole producing not silence but **contradiction** — two seats
+issuing opposing decisions about one lane — which is a materially worse failure than an acceptance
+going unanswered, and one that residency-based delivery cannot address even in principle.
+
+[#646]: https://github.com/SandRiseStudio/musterd/pull/646
+
 > **Correction (2026-08-04, same day).** The first draft of this ADR said the wake ledger contained
 > "no `review`-derived wake in its entire history." That was **wrong**, and dolly's ADR 199 Eval
 > re-measurement caught it: acceptance wakes do not carry a distinguishing `derivation`, so they hide
@@ -203,6 +231,12 @@ below is therefore substantially weakened and should not be implemented on this 
 longer mean what the current code makes them mean. Every aggregate in it should be read as
 provisional until re-measured over the post-217 window, which is currently n=13 — too small to
 conclude anything.
+
+**The evidence that is actually strong is the pre-registered kind.** Every retracted claim above came
+from reading aggregates after the fact. The crossed handoff did not: ryder named both possible
+outcomes _before_ the result was known, and the losing one — "if you read this promptly, that is
+evidence against the lane" — was a genuine chance to falsify it. That is worth more than any row
+count in this document, and it is the shape future evidence here should take.
 
 **What survives, and it is the part worth keeping:** the mechanism gap is verified _in code, not
 inferred from aggregates_. `pendingInterrupts` admits only `isUrgent || steer`, so a routed
