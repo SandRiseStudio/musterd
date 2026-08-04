@@ -21,6 +21,20 @@ import type { Database } from '../db/open.js';
 /** How far back the audit read looks. Beyond this, evidence is stale enough to call `unknown`. */
 export const QUIESCENCE_LOOKBACK_MS = 60 * 60_000;
 
+/**
+ * The default busy/quiet line, used only where the shape demands a *label* the caller did not
+ * choose: the roster's `quiescence.state` and the wake pool's `seat_quiet` fact. Deliberately the
+ * same 120s as the auto-refresher's `--quiet-floor` default, so the two server-side readers of this
+ * signal do not quietly disagree about what "busy" means.
+ *
+ * This is not the server-side threshold the design rules out. That prohibition is about *taking a
+ * decision away from the consumer* — and it holds: `quiet_for_ms` rides the wire beside the label,
+ * so any reader with its own line recomputes and ignores this one. What a constant cannot do is
+ * make `state` optional; some number has to draw it, and an undocumented one drawn ad-hoc at each
+ * call site would be strictly worse than one named here.
+ */
+export const QUIESCENCE_DEFAULT_QUIET_AFTER_MS = 120_000;
+
 /** The pure verdict. `quietAfterMs` is the caller's line; `lastActionAt: null` means no evidence. */
 export function resolveQuiescence(
   lastActionAt: number | null,
@@ -36,6 +50,38 @@ export function resolveQuiescence(
     quiet_for_ms: quietFor,
     source: 'audit',
   };
+}
+
+/**
+ * Per-seat newest audited action for one team: `actor name → ts`. One query for the whole roster —
+ * the caller renders every member, and a per-member query would turn a roster read into N of them.
+ *
+ * An actor with no audited action inside the lookback is **absent from the map**, never present
+ * with a zero or a floor value. Absence is how `unknown` survives the trip to the caller: a `Map`
+ * miss is unambiguous in a way a sentinel number is not, and the ADR 169/189 discipline only works
+ * if "I have no evidence" cannot be mistaken for "I have evidence of quiet".
+ *
+ * Unlike {@link quietestBusyMs} this does not narrow to live agent seats. The narrowing there is
+ * the /health consumer's (a bounce is an agent cost); here the callers are the roster — which
+ * renders humans too — and the wake pool, which reads only the offline seats it was already
+ * considering. Filtering belongs to whoever knows why.
+ */
+export function lastActionByActor(
+  db: Database,
+  teamId: string,
+  opts: { now?: number; lookbackMs?: number } = {},
+): Map<string, number> {
+  const now = opts.now ?? Date.now();
+  const lookback = opts.lookbackMs ?? QUIESCENCE_LOOKBACK_MS;
+  const rows = db
+    .prepare<[string, number], { actor: string; last_ts: number }>(
+      `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
+         FROM audit a
+        WHERE a.team_id = ? AND a.ts > ?
+        GROUP BY a.actor`,
+    )
+    .all(teamId, now - lookback);
+  return new Map(rows.map((r) => [r.actor, r.last_ts]));
 }
 
 /**

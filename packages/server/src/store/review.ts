@@ -12,6 +12,11 @@ import {
 import type { Database } from 'better-sqlite3';
 import { listMembers } from './members.js';
 import { hasLivePresence } from './presence.js';
+import {
+  lastActionByActor,
+  resolveQuiescence,
+  QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
+} from './quiescence.js';
 import { listWakeableMemberIds } from './residency.js';
 import { type MemberRow } from './rows.js';
 
@@ -165,6 +170,12 @@ export function teamFamilyPosture(
   const wake_pool: WakeCandidate[] = [];
   const durable = durableAttestations(db, teamId);
   const enrolled = listWakeableMemberIds(db, teamId);
+  // ADR 219: the wake pool is built from seats PRESENCE calls offline — but presence lapses
+  // for reasons other than going away, and a seat whose audit trail shows it acting seconds ago is
+  // not idle, it is mid-something with a stale heartbeat. Waking it is not a remedy, it is a
+  // duplicate. Read once for the whole roster; the per-seat lookup below is a Map hit.
+  const lastAction = lastActionByActor(db, teamId);
+  const now = Date.now();
   let attesting = 0;
   let unattested = 0;
   let humans_live = 0;
@@ -181,11 +192,23 @@ export function teamFamilyPosture(
       // ADR 189: mark whether dispatch can wake it (enrollment), never filter it out — an unenrolled
       // cross-family seat is still the diversity gap, just not a spend target yet.
       const last = durable.get(m.name) ?? NO_ATTESTATION;
+      // ADR 215: omit the fact when there is no evidence — `unknown` is not quiet, and asserting
+      // quiet-by-absence here would be exactly the license-to-act the absent-vs-unknown rule bans.
+      const actedAt = lastAction.get(m.name);
       wake_pool.push({
         seat: m.name,
         family: modelFamily(last.model),
         attested_at: last.at,
-        wakeability: wakeabilityFromFacts({ enrolled: enrolled.has(m.id) }),
+        wakeability: wakeabilityFromFacts({
+          enrolled: enrolled.has(m.id),
+          ...(actedAt === undefined
+            ? {}
+            : {
+                seat_quiet:
+                  resolveQuiescence(actedAt, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state ===
+                  'quiet',
+              }),
+        }),
       });
       continue;
     }

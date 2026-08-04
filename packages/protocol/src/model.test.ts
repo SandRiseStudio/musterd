@@ -141,6 +141,27 @@ describe('wakeabilityFromFacts (ADR 189)', () => {
       }),
     ).toBe('enrolled_dead_workspace');
   });
+
+  it('a seat the audit says is mid-something is marked busy, not wakeable (ADR 219)', () => {
+    expect(wakeabilityFromFacts({ enrolled: true, seat_quiet: false })).toBe('enrolled_seat_busy');
+    expect(wakeabilityFromFacts({ enrolled: true, seat_quiet: true })).toBe('wakeable');
+  });
+
+  it('omitted quiescence changes nothing — unknown is not evidence of quiet (ADR 169/189)', () => {
+    expect(wakeabilityFromFacts({ enrolled: true })).toBe('wakeable');
+    expect(wakeabilityFromFacts({ enrolled: true, seat_quiet: undefined })).toBe('wakeable');
+  });
+
+  it('busy is the softest reason — every reachability defect outranks it', () => {
+    // A busy-but-unreachable seat must name the defect the operator can act on, not "busy".
+    expect(wakeabilityFromFacts({ enrolled: false, seat_quiet: false })).toBe('not_enrolled');
+    expect(
+      wakeabilityFromFacts({ enrolled: true, workspace_readable: false, seat_quiet: false }),
+    ).toBe('enrolled_dead_workspace');
+    expect(wakeabilityFromFacts({ enrolled: true, host_reachable: false, seat_quiet: false })).toBe(
+      'enrolled_host_stale',
+    );
+  });
 });
 
 describe('describeFamilyPosture (ADR 172) — one bounded line', () => {

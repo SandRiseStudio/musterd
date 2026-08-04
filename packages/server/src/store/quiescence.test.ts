@@ -3,7 +3,12 @@ import { openDb } from '../db/open.js';
 import { appendAudit } from './audit.js';
 import { addMember } from './members.js';
 import { attach } from './presence.js';
-import { resolveQuiescence, quietestBusyMs } from './quiescence.js';
+import {
+  resolveQuiescence,
+  quietestBusyMs,
+  lastActionByActor,
+  QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
+} from './quiescence.js';
 import { createTeam } from './teams.js';
 
 /**
@@ -118,5 +123,73 @@ describe('quietestBusyMs (db read for /health)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)', () => {
+  function seed() {
+    const db = openDb(':memory:');
+    const team = createTeam(db, { slug: 'revive' });
+    addMember(db, team, { name: 'ada', kind: 'agent' });
+    addMember(db, team, { name: 'lin', kind: 'agent' });
+    addMember(db, team, { name: 'nick', kind: 'human' });
+    return { db, team };
+  }
+  const act = (db: any, teamId: string, actor: string, at: number) => {
+    vi.setSystemTime(at);
+    appendAudit(db, teamId, { actor, action: 'x.did', target: null, result: 'allow' });
+  };
+
+  it('maps each actor to its NEWEST action, and omits actors with none', () => {
+    vi.useFakeTimers();
+    try {
+      const { db, team } = seed();
+      const now = 10_000_000;
+      act(db, team.id, 'ada', now - 300_000);
+      act(db, team.id, 'ada', now - 20_000); // newest wins
+      act(db, team.id, 'nick', now - 1_000);
+      vi.setSystemTime(now);
+      const seen = lastActionByActor(db, team.id, { now });
+      expect(seen.get('ada')).toBe(now - 20_000);
+      // Humans are included here (unlike /health): the roster renders every seat, and the
+      // agents-only narrowing is the WAKE consumer's, not this read's.
+      expect(seen.get('nick')).toBe(now - 1_000);
+      // Absent, never zero — an actor with no audited action is unknowable, not quiet.
+      expect(seen.has('lin')).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops evidence older than the lookback, and never leaks across teams', () => {
+    vi.useFakeTimers();
+    try {
+      const { db, team } = seed();
+      const other = createTeam(db, { slug: 'other' });
+      addMember(db, other, { name: 'ada', kind: 'agent' });
+      const now = 10_000_000;
+      act(db, team.id, 'ada', now - 3 * 60 * 60_000); // stale evidence is no evidence
+      act(db, other.id, 'lin', now - 5_000); // another team's seat, same daemon
+      vi.setSystemTime(now);
+      const seen = lastActionByActor(db, team.id, { now, lookbackMs: 60 * 60_000 });
+      expect(seen.has('ada')).toBe(false);
+      expect(seen.has('lin')).toBe(false);
+      expect(lastActionByActor(db, other.id, { now }).get('lin')).toBe(now - 5_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('feeds resolveQuiescence at the documented default line', () => {
+    // The default exists so the wire's `state` label means something; `quiet_for_ms` stays the
+    // authority for any consumer drawing its own line.
+    expect(QUIESCENCE_DEFAULT_QUIET_AFTER_MS).toBe(120_000);
+    const now = 10_000_000;
+    expect(resolveQuiescence(now - 10_000, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state).toBe(
+      'busy',
+    );
+    expect(resolveQuiescence(now - 600_000, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state).toBe(
+      'quiet',
+    );
   });
 });
