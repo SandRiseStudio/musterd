@@ -99,7 +99,6 @@ import {
   setMemberGovernance,
   teamHasAdmin,
 } from '../store/members.js';
-import { listRoles } from '../store/roles.js';
 import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
 import {
   countInbox,
@@ -152,6 +151,7 @@ import {
   teamFamilyPosture,
   verifiedCloses,
 } from '../store/review.js';
+import { listRoles } from '../store/roles.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
   hasFullMessageVisibility,
