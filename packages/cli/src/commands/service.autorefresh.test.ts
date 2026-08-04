@@ -307,6 +307,59 @@ describe('service refresh --auto (the tick)', () => {
     expect(bounce).toBeGreaterThan(build);
   });
 
+  // The tick runs unattended and its log is read after the fact, by a human asking why their
+  // machine just did something. Undated lines cannot answer that: #631 was reported as "three
+  // notifications per merge" and the log could neither confirm nor refute it, because nothing in it
+  // said WHEN, and a fired notification left no trace at all.
+  it('stamps every tick line with the local wall clock', async () => {
+    const { out } = await tick({
+      ctx: ctx(autoRunner({ behind: 0 })),
+      health: async () => ({ connections: 0, build: 'newtip1111' }),
+    });
+    expect(out).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} .*up to date/m);
+  });
+
+  it('records every OS notification it fires, so the log can be checked against the screen', async () => {
+    const { out } = await tick({
+      argv: ['refresh', '--auto', '--mode', 'notice'],
+      ctx: ctx(autoRunner({ behind: 1 })),
+      health: async () => ({ connections: 4, build: 'oldsha0' }),
+      notify: vi.fn(),
+    });
+    const ledger = out.split('\n').filter((l) => l.includes('notified the operator:'));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /);
+    expect(ledger[0]).toContain('musterd auto-refresh');
+    expect(ledger[0]).toContain('4 live sessions'); // the body the operator actually saw
+  });
+
+  it('records the failure notice too — the one notification with no ✓ line of its own', async () => {
+    const chunks: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => {
+      chunks.push(String(c));
+      return true;
+    });
+    try {
+      await expect(
+        serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'notice']), {
+          platform: 'darwin',
+          ctx: ctx(autoRunner({ behind: 1, tip: 'freshtip77', buildStatus: 1 })),
+          health: async () => ({ connections: 4, build: 'oldsha0' }),
+          notify: vi.fn(),
+          autoState: memState(null),
+        }),
+      ).rejects.toThrow(/build failed/);
+    } finally {
+      spy.mockRestore();
+    }
+    const ledger = chunks
+      .join('')
+      .split('\n')
+      .filter((l) => l.includes('notified the operator:'));
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toContain('failed');
+  });
+
   it('keeps the full confirmation budget after a known-healthy daemon bounces', async () => {
     let probes = 0;
     const health = async () => {

@@ -6,7 +6,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { configPath, loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { loadHostRegistry } from '../host/registry.js';
-import { osNotify } from '../notify/os.js';
+import { osNotify, type NotifyItem } from '../notify/os.js';
 import { theme } from '../render/theme.js';
 import { MIN_NODE_MAJOR } from '../runtime.js';
 import {
@@ -309,6 +309,17 @@ function commitTime(dir: string, rev: string, run: Runner, oldestSince?: string)
   const first = r.stdout.trim().split('\n')[0];
   const n = Number(first);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * Local wall-clock prefix for one line of unattended log (`YYYY-MM-DD HH:MM:SS`, the /live
+ * publisher's format so both service logs read alike). Local, not UTC: the reader is a human at
+ * this machine correlating a log line against something they just watched happen on this screen.
+ */
+function stamp(when: Date = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  const d = `${when.getFullYear()}-${p(when.getMonth() + 1)}-${p(when.getDate())}`;
+  return theme.meta(`${d} ${p(when.getHours())}:${p(when.getMinutes())}:${p(when.getSeconds())}`);
 }
 
 /** Where the auto-refresher records the last origin/main tip it *attempted* to refresh onto, so a
@@ -849,9 +860,24 @@ export async function serviceCommand(
         capSeconds: parseSeconds(parsed, 'settle-cap', DEFAULT_AUTOREFRESH_SETTLE_CAP),
         quietFloorSeconds: parseSeconds(parsed, 'quiet-floor', DEFAULT_AUTOREFRESH_QUIET_FLOOR),
       };
-      const notify = deps.notify ?? osNotify;
       const autoState = deps.autoState ?? fileAutoState();
-      return autoRefreshTick(ctx, health, mode, settle, notify, autoState, ok, fail);
+      // Unattended output: stamp it and record what the operator was actually shown. `refresh.log`
+      // is read after the fact, by a human asking "why did my machine just do that?" — and it
+      // answered neither half. Every line looked alike whether it was emitted 2 minutes or 2 days
+      // ago (StartInterval appends, launchd writes no timestamps), and a fired OS notification left
+      // no trace at all, so a report of three notices could not be checked against the log that
+      // caused them (#631, diagnosed by reasoning because the evidence did not exist).
+      const okStamped = (s: string) => process.stdout.write(`${stamp()} ${theme.ok('✓')} ${s}\n`);
+      const notifier = deps.notify ?? osNotify;
+      const notify = (n: NotifyItem) => {
+        notifier(n);
+        // A ledger entry, not a step — the failure notice has no ✓ line of its own, so this is the
+        // only place the log ever admits the operator's screen was interrupted.
+        process.stdout.write(
+          `${stamp()} ${theme.meta(`· notified the operator: "${n.title}" — ${n.body}`)}\n`,
+        );
+      };
+      return autoRefreshTick(ctx, health, mode, settle, notify, autoState, okStamped, fail);
     }
     const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
     return autoRefreshServiceCommand(sub, arCtx, parsed, ok, fail);
