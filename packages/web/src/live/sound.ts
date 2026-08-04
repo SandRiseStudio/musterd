@@ -100,6 +100,19 @@ const CUES: Record<string, Note[]> = {
  */
 const BROADCAST_CUE_GAP_MS = 700;
 
+/**
+ * Broadcast master gain, linear — the ADR 228 §1.6 calibration number, measured not guessed.
+ *
+ * The engines are tuned for headphones at a desk, and rendered through the real hosted pipeline
+ * (Fly performance-4x, null sink → ffmpeg aac, 2026-08-04) the whole mix integrated at
+ * **−42.8 LUFS (LRA 1.8 LU)** — real audio, ~25 dB under where even deliberate ambience should sit
+ * on a stream; a viewer at normal volume hears roughly nothing. ×4 (+12 dB) lands the bed near
+ * −30 LUFS: clearly audible, still unmistakably background (this is ambience, not program — do NOT
+ * normalize it toward −14 LUFS speech loudness). Retune HERE, never by scattering factors through
+ * the synths — the LIFE_GAIN lesson. /live is untouched: this applies only via enableForBroadcast.
+ */
+const BROADCAST_MASTER_GAIN = 4;
+
 /** Pure gate for the broadcast cue throttle — a burst coalesces to one cue rather than queueing. */
 export function shouldChime(now: number, last: number, minGapMs = BROADCAST_CUE_GAP_MS): boolean {
   return now - last >= minGapMs;
@@ -112,6 +125,8 @@ class FirehoseSound {
   /** Throttle the cues (broadcast only — /live's tuning is unchanged and out of scope). */
   private throttled = false;
   private lastCueAt = -Infinity;
+  /** Applied to the master bus when the graph is (re)built — see BROADCAST_MASTER_GAIN. */
+  private masterScale = 1;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -144,7 +159,9 @@ class FirehoseSound {
   enableForBroadcast(): void {
     this.enabled = true;
     this.throttled = true;
+    this.masterScale = BROADCAST_MASTER_GAIN;
     this.ensureContext();
+    if (this.master) this.master.gain.value = 0.85 * this.masterScale;
   }
 
   private ensureContext(): void {
@@ -155,7 +172,7 @@ class FirehoseSound {
       this.ctx = new Ctor();
       // master bus → gentle lowpass for warmth → speakers
       const master = this.ctx.createGain();
-      master.gain.value = 0.85;
+      master.gain.value = 0.85 * this.masterScale;
       const lp = this.ctx.createBiquadFilter();
       lp.type = 'lowpass';
       lp.frequency.value = 3600;
@@ -476,7 +493,11 @@ class RoomTone {
     // Faded in over a second and a half. Room tone that snaps on announces itself as an effect; the
     // whole illusion is that it was always there and you only just noticed.
     bus.gain.setValueAtTime(0.0001, ctx.currentTime);
-    bus.gain.exponentialRampToValueAtTime(ROOM_GAIN, ctx.currentTime + 1.5);
+    // The broadcast master gain rides the same bed ramp — one number, applied at the one bus.
+    bus.gain.exponentialRampToValueAtTime(
+      ROOM_GAIN * (this.broadcast ? BROADCAST_MASTER_GAIN : 1),
+      ctx.currentTime + 1.5,
+    );
     bus.connect(ctx.destination);
     this.bus = bus;
 
