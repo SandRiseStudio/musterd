@@ -36,25 +36,26 @@ wake meets an exact registry binding that also passes the existing byte/age/rate
 
 ## Lane coordination
 
-`packages/cli/src/host/backends/**` is owned by gptbot (harness residency increment 6). The registry
-itself is therefore a **new uncontended module** (`packages/cli/src/session/continuity.ts`), which is
-the right shape regardless: the backends need a contract, not an implementation. Task 4's backend
-diff is deliberately the smallest edit in its task so it can wait on that lane without blocking the
-rest.
+**Resolved 2026-08-04 — both dependencies cleared.** `packages/cli/src/host/backends/**` was owned by
+gptbot (harness residency increment 6); that work landed as ADR 216 (#621), so Task 4's backend diff
+proceeded. `packages/cli/src/commands/session.ts` was released by izzo on 2026-08-03.
 
-`packages/cli/src/commands/session.ts` was released by izzo on 2026-08-03 — their surface-drift lane
-turned out not to touch it (the transcript parser is chosen by `session.harness`, a per-hook
-constant, not by `binding.surface`). Task 3 may proceed there.
+The recorded Codex blocker is also resolved, but not as written: it said `captureSession` hardcodes
+`claude-code` and there is **no Codex hook path**, so a Codex seat could never hold a binding. ADR 216
+landed a Codex backend that is its own harness authority and writes `binding.session` directly,
+without a hook. The lane that named the hook gap is still open but is about Codex model/surface
+attestation, not this.
 
-**Harness dependency (izzo, 2026-08-03).** `captureSession` hardcodes harness `claude-code` and
-`observeCursorSession` hardcodes `cursor`; there is **no Codex hook path at all**, so a Codex seat
-never writes `binding.session`. Since the registry fills from that capture, a harness with no hook
-path can never hold a binding and every one of its wakes stays fresh — the correct failure direction,
-and no correctness risk. But it means ADR 210's "all harnesses implement the shared binding contract
-before any harness advertises resume capability" **cannot be satisfied for Codex** until izzo's lane
-(`Codex seats have no hook path, so their model and surface are declaration-only forever`) lands.
-Task 5 therefore ships the registry off by default and records this as a named blocker on advertising
-resume capability, rather than quietly shipping a claude-code-only resume path that reads as general.
+**The precondition it guarded is still unmet for a sharper reason**, now recorded in ADR 210's
+Consequences: `codex.ts` resumes on its slot capture unconditionally, consulting neither
+`intended_delivery` nor `resume_eligible`. Inert while the switch is off; a causality violation the
+moment it is flipped on. `exact_match_resume` must not be enabled until the Codex backend routes
+eligible wakes through the same exact-match rung — raised to gptbot rather than patched here.
+
+**Discovered during Task 4:** the wake order carried `resume_eligible` but no `thread_id`, and the
+registry is keyed by thread — so the mark was unusable on its own. Task 4 therefore also added
+`thread_id` to `WakeOrder`, sent only alongside the mark. This is the safe direction of travel: the
+daemon already owns thread ids, and the invariant it must never cross is the reverse one.
 
 ---
 

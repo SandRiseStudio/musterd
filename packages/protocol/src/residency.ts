@@ -348,6 +348,12 @@ export const WakeOrderSchema = z
      *  never an instruction. The host resumes only if it can also prove an exact local thread
      *  match; a host that ignores this bit entirely stays correct, because fresh always is. */
     resume_eligible: z.boolean().optional(),
+    /** ADR 210: the thread whose dialogue this wake answers — the key the host's local continuity
+     *  registry is keyed by, and useless without. Sent ONLY alongside `resume_eligible`, because
+     *  that is the only case the host may act on it. This is the safe direction of travel: the
+     *  daemon already owns thread ids, and the invariant it must never cross is the REVERSE one —
+     *  session id, transcript path, and workspace stay on the host and are never reported back. */
+    thread_id: z.string().min(1).optional(),
     /** ADR 209: daemon intent; host reports the observed delivery separately. */
     intended_delivery: WakeDeliverySchema.optional(),
     /** Why this wake was derived (ADR 191). Absent ⇒ treat as the `lane` value (older daemons). */

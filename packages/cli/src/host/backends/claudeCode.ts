@@ -1,8 +1,15 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
+import { matchBinding, type ContinuityRegistry } from '@musterd/protocol';
 import { fmtBytes } from '../../args.js';
 import { invalidateClaudeBinCache, resolveClaudeBin } from '../../claudeBin.js';
-import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
+import { readRegistry, type RegistryOwner } from '../../session/continuity.js';
+import {
+  localSessionLiveness,
+  RESUME_GC_HORIZON_MS,
+  type LocalSessionLiveness,
+} from '../../session/liveness.js';
 import type {
   ActuatorBackend,
   BackendContext,
@@ -108,6 +115,51 @@ export interface ClaudeCodeDeps {
   invalidateBin?: () => void;
   resumeVerifyWindowMs?: number;
   confirmBeatMs?: number;
+  /** Injectable continuity-registry read (default: {@link readRegistry}) — ADR 210. */
+  readContinuity?: (dir: string, owner: RegistryOwner) => ContinuityRegistry;
+  /** Injectable transcript stat (default: the real filesystem) for the ADR 210 byte/age ladder. */
+  statTranscript?: (path: string) => { bytes: number; mtimeMs: number } | undefined;
+}
+
+/** Stat a transcript for the exact-match ladder; a missing/unreadable file reads as absent. */
+function statTranscriptOnDisk(path: string): { bytes: number; mtimeMs: number } | undefined {
+  try {
+    const st = statSync(path);
+    return { bytes: st.size, mtimeMs: st.mtimeMs };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * ADR 210's exact-match rung, and the ONLY resume path a `resume_eligible` wake may take.
+ *
+ * The daemon marked this wake as *worth considering*; proving causality is entirely local. A hit
+ * must clear the same byte/age hygiene the ADR 131 ladder applies, because an exact match to a
+ * bloated or ancient transcript is still a resume that costs more than a fresh boot. Every failure
+ * returns a skip, never a guess — "cannot prove" is answered with fresh, which is always valid.
+ */
+function exactMatchRung(
+  deps: ClaudeCodeDeps,
+  spec: WakeSpec,
+  transcriptMaxBytes: number,
+  now: number,
+): { id: string } | { skip: string } {
+  const threadId = spec.order.thread_id;
+  if (threadId === undefined) return { skip: 'eligible but the order named no thread' };
+  const owner: RegistryOwner = { team: spec.team, seat: spec.order.seat };
+  const registry = (deps.readContinuity ?? readRegistry)(spec.workspace, owner);
+  const hit = matchBinding(registry, { ...owner, thread_id: threadId, harness: 'claude-code' });
+  if (!hit) return { skip: 'no local binding for this thread (missing)' };
+  const stat = (deps.statTranscript ?? statTranscriptOnDisk)(hit.transcript_path);
+  if (!stat) return { skip: 'the bound transcript is missing' };
+  if (stat.bytes > transcriptMaxBytes)
+    return {
+      skip: `bound transcript is ${fmtBytes(stat.bytes)} (hygiene bound ${fmtBytes(transcriptMaxBytes)})`,
+    };
+  if (now - stat.mtimeMs > RESUME_GC_HORIZON_MS)
+    return { skip: 'the bound transcript is past the GC horizon' };
+  return { id: hit.session_id };
 }
 
 /**
@@ -480,17 +532,33 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       const wantsResume = spec.order.intended_delivery !== 'fresh';
       let resumeAttempted = false;
 
-      // ── The resume upgrade (increment 4) ──────────────────────────────────────────────────
-      const rung = wantsResume
-        ? resumeLadder(liveness, spec.order.transcript_max_bytes ?? RESUME_TRANSCRIPT_MAX_BYTES)
+      // ADR 210: the daemon may mark a wake eligible for an EXACT local thread match. This is
+      // checked before the ADR 209 delivery gate on purpose — the daemon sends `intended_delivery:
+      // 'fresh'` alongside the mark, because portability is what it can reason about and exactness
+      // is what only the host can prove. Not eligible ⇒ the registry is never read at all: the
+      // daemon's bit gates the local lookup, never the other way round.
+      const bound = spec.order.transcript_max_bytes ?? RESUME_TRANSCRIPT_MAX_BYTES;
+      const exactEligible = spec.order.resume_eligible === true;
+      const exact = exactEligible
+        ? exactMatchRung(deps, spec, bound, Date.now())
         : { skip: null as string | null };
-      if (!wantsResume) {
+
+      // ── The resume upgrade (increment 4) ──────────────────────────────────────────────────
+      const rung = exactEligible
+        ? exact
+        : wantsResume
+          ? resumeLadder(liveness, bound)
+          : { skip: null as string | null };
+      if (exactEligible && 'skip' in rung) {
+        if (rung.skip)
+          ctx.log(`exact-match resume skipped for ${seat}: ${rung.skip} — fresh spawn`);
+      } else if (!exactEligible && !wantsResume) {
         ctx.log(`portable delivery for ${seat}: fresh spawn (resume bypassed)`);
       } else if ('skip' in rung) {
         if (rung.skip) ctx.log(`resume skipped for ${seat}: ${rung.skip} — fresh spawn`);
       } else {
         resumeAttempted = true;
-        if (rung.via === 'enumerated')
+        if ('via' in rung && rung.via === 'enumerated')
           ctx.log(
             `resume target for ${seat} from enumeration (${rung.id}) — the slot named nothing usable`,
           );

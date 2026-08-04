@@ -986,6 +986,21 @@ describe('claimWakeLeases — resume eligibility (ADR 210 exact-match continuity
     expect(order).toMatchObject({ resume_eligible: true, intended_delivery: 'fresh' });
   });
 
+  // The mark alone is unusable: the local registry is keyed by thread, so a host that is told
+  // "you may consider a resume" but not WHICH thread has nothing to match against. The thread id
+  // travels daemon→host only; the reverse direction (session id, transcript path, workspace) is
+  // what ADR 210's privacy invariant forbids, and it stays forbidden.
+  it('carries the thread id the host needs to find its local binding, only when eligible', () => {
+    const { db, team } = threadedReply();
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, soon);
+    expect(order).toMatchObject({ resume_eligible: true, thread_id: 'T1' });
+
+    // Past the horizon the wake is not eligible — so the thread id is not sent either.
+    const late = REPLY_TS + WAKE_POLICY_DEFAULTS.resume_eligible_ms + 1;
+    const [stale] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS, late);
+    expect(stale).not.toHaveProperty('thread_id');
+  });
+
   it('does not mark a reply older than the eligibility horizon', () => {
     const { db, team } = threadedReply();
     const late = REPLY_TS + WAKE_POLICY_DEFAULTS.resume_eligible_ms + 1;

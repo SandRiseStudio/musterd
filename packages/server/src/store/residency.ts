@@ -943,7 +943,11 @@ export function claimWakeLeases(
           ...(isPortable
             ? { continuity_requirement: 'portable' as const, intended_delivery: 'fresh' as const }
             : {}),
-          ...(isResumeEligible(candidate, policy, now) ? { resume_eligible: true as const } : {}),
+          // The mark and the key it needs travel together: an eligible wake carries the thread id
+          // so the host can look for an exact local binding. Never audited, never returned.
+          ...(isResumeEligible(candidate, policy, now)
+            ? { resume_eligible: true as const, thread_id: candidate.thread_id! }
+            : {}),
           derivation: candidate.derivation,
           ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
         });

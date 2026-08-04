@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import type { WakeOrder } from '@musterd/protocol';
+import type { ContinuityBinding, ContinuityRegistry, WakeOrder } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import type { LocalSessionLiveness } from '../../session/liveness.js';
 import type { BackendContext, WakeSpec } from '../backend.js';
@@ -774,5 +774,142 @@ describe('WakeCompletion (inc 5): settled resolves the run summary; fast-fail me
     const completion = await actuation.settled;
     expect(completion?.cost_usd).toBeCloseTo(1.0);
     expect(completion?.duration_ms).toBe(30_800);
+  });
+});
+
+describe('claudeCodeBackend.wake — exact-match local continuity (ADR 210)', () => {
+  const THREAD = 'T1';
+  const binding = (over: Partial<ContinuityBinding> = {}): ContinuityBinding => ({
+    thread_id: THREAD,
+    harness: 'claude-code',
+    session_id: 'thread-session-9',
+    transcript_path: '/ws/scout/.claude/thread.jsonl',
+    bound_at: Date.now() - 60_000,
+    captured_at: Date.now() - 120_000,
+    ...over,
+  });
+  const registry = (bindings: ContinuityBinding[]): ContinuityRegistry => ({
+    v: 1,
+    team: 'dawn',
+    seat: 'scout',
+    bindings,
+  });
+  const eligible = (over: Partial<WakeOrder> = {}) =>
+    order({
+      resume_eligible: true,
+      thread_id: THREAD,
+      intended_delivery: 'fresh',
+      continuity_requirement: 'portable',
+      ...over,
+    });
+  /** A transcript small and recent enough to clear the byte/age ladder. */
+  const healthyStat = () => ({ bytes: 4096, mtimeMs: Date.now() - 60_000 });
+
+  it('an exact match resumes THAT thread’s session — not the slot capture', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable(), // slot holds a DIFFERENT session (cap-1234)
+      readContinuity: () => registry([binding()]),
+      statTranscript: healthyStat,
+    });
+    const actuation = await backend.wake(
+      spec({ order: eligible() }),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--resume') + 1]).toBe('thread-session-9');
+    expect(actuation.outcome).toMatchObject({ occupied: true, session: 'resumed' });
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('a non-eligible order never reads the registry at all — the daemon’s bit gates the lookup', async () => {
+    const child = new FakeChild();
+    let reads = 0;
+    const { backend, calls } = harness(child, {
+      readSession: () => ({ state: 'none' }),
+      readContinuity: () => {
+        reads += 1;
+        return registry([binding()]);
+      },
+      statTranscript: healthyStat,
+    });
+    const actuation = await backend.wake(
+      spec({ order: order({ intended_delivery: 'fresh', continuity_requirement: 'portable' }) }),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(reads).toBe(0);
+    expect(calls[0]!.args).not.toContain('--resume');
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('eligible but no binding for that thread: fresh, and it says the match was missing', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable(),
+      readContinuity: () => registry([binding({ thread_id: 'a-different-thread' })]),
+      statTranscript: healthyStat,
+    });
+    const c = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec({ order: eligible() }), c);
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(actuation.outcome).toMatchObject({ occupied: true, session: 'fresh' });
+    expect(c.lines.join('\n')).toMatch(/missing/i);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('an exact match failing the byte bound degrades to fresh, naming the bound', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable(),
+      readContinuity: () => registry([binding()]),
+      statTranscript: () => ({ bytes: 5_000_000, mtimeMs: Date.now() }),
+    });
+    const c = ctx(async () => ({ occupied: true, provenance: 'wake' }));
+    const actuation = await backend.wake(spec({ order: eligible() }), c);
+    expect(calls[0]!.args).not.toContain('--resume');
+    expect(c.lines.join('\n')).toMatch(/hygiene bound/i);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('an exact match whose transcript is gone degrades to fresh', async () => {
+    const child = new FakeChild();
+    const { backend, calls } = harness(child, {
+      readSession: () => resumable(),
+      readContinuity: () => registry([binding()]),
+      statTranscript: () => undefined, // the file is not there any more
+    });
+    const actuation = await backend.wake(
+      spec({ order: eligible() }),
+      ctx(async () => ({ occupied: true, provenance: 'wake' })),
+    );
+    expect(calls[0]!.args).not.toContain('--resume');
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it('an exact match whose resume never occupies still falls back fresh in the same lease', async () => {
+    const resumeChild = new FakeChild();
+    const freshChild = new FakeChild();
+    let call = 0;
+    const { backend, calls } = harness([resumeChild, freshChild], {
+      readSession: () => resumable(),
+      readContinuity: () => registry([binding()]),
+      statTranscript: healthyStat,
+      resumeVerifyWindowMs: 10,
+    });
+    const actuation = await backend.wake(
+      spec({ order: eligible() }),
+      ctx(async () => ({ occupied: ++call > 1, provenance: 'wake' })),
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!.args).toContain('--resume');
+    expect(calls[1]!.args).not.toContain('--resume');
+    expect(actuation.outcome).toMatchObject({ occupied: true, session: 'fresh' });
+    resumeChild.exit(1);
+    freshChild.exit(0);
+    await actuation.settled;
   });
 });
