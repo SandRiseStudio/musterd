@@ -151,6 +151,9 @@ function exactMatchRung(
   const registry = (deps.readContinuity ?? readRegistry)(spec.workspace, owner);
   const hit = matchBinding(registry, { ...owner, thread_id: threadId, harness: 'claude-code' });
   if (!hit) return { skip: 'no local binding for this thread (missing)' };
+  // `bindThread` refuses to write a binding without a transcript path, so this is a registry that
+  // was hand-edited or written by an older shape. Unprovable either way — fresh.
+  if (hit.transcript_path === undefined) return { skip: 'the local binding names no transcript' };
   const stat = (deps.statTranscript ?? statTranscriptOnDisk)(hit.transcript_path);
   if (!stat) return { skip: 'the bound transcript is missing' };
   if (stat.bytes > transcriptMaxBytes)
