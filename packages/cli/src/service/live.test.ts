@@ -68,6 +68,21 @@ describe('buildLiveBuildScript', () => {
     expect(s).toMatch(/worktree missing/);
     expect(s).toMatch(/exit 1/);
   });
+  // 395 successful builds wrote 4.6 MB of vite asset tables that nobody has ever read (measured
+  // 2026-08-04). A successful publish is a one-line fact. A FAILED build is the opposite — the
+  // transcript is the whole reason the log exists — so failure still dumps everything.
+  it('holds the build transcript aside and prints it only when the build fails', () => {
+    expect(s).toContain('BUILD_OUT="$(mktemp -t musterd-live-build)"');
+    expect(s).toContain('pnpm --filter @musterd/protocol build >> "$BUILD_OUT" 2>&1');
+    expect(s).toContain('pnpm --filter @musterd/web build >> "$BUILD_OUT" 2>&1');
+    expect(s).toContain('pnpm install --prefer-offline --silent > "$BUILD_OUT" 2>&1');
+    // The success path names the sha and nothing else; only the failure path cats the transcript.
+    const [ok, failed] = s.split('web build failed') as [string, string];
+    expect(ok).not.toContain('cat "$BUILD_OUT"');
+    expect(failed).toContain('cat "$BUILD_OUT"');
+    expect(s).toContain(`trap 'rm -f "$BUILD_OUT"' EXIT`); // no temp file left behind on any exit
+  });
+
   it('puts node + git + pnpm on PATH (pnpm lives under $HOME/Library/pnpm)', () => {
     expect(s).toContain('/opt/node/bin');
     expect(s).toContain('/opt/git/bin');

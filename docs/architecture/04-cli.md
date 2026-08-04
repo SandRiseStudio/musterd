@@ -66,6 +66,7 @@ src/
     host.ts           // `service --wake`: the wake actuator (`musterd host`) as a KeepAlive LaunchAgent — residency survives reboots (ADR 131 inc 5)
     autorefresh.ts    // `service --auto`: the daemon auto-refresher as a StartInterval LaunchAgent — runs `refresh --auto` on a poll (ADR 152)
     sweep.ts          // `service --sweep`: the ADR 166 liveness sweep as a StartInterval LaunchAgent — read-only, every 5 min (≤ the 10-min window a demotion persists for, so it cannot miss one)
+    logTrim.ts        // pure-ish: size-capped retention for the service logs (ADR 224) — copy-truncate to `<name>.1`, run by the auto-refresh tick; an explicit log list, never a `*.log` glob (the musterd home is a shared temp dir under test isolation)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165)

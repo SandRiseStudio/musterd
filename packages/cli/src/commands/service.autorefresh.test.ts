@@ -360,6 +360,39 @@ describe('service refresh --auto (the tick)', () => {
     expect(ledger[0]).toContain('failed');
   });
 
+  // ADR 224. Log hygiene runs independently of the skew check, because the logs grow from the
+  // daemon's own traffic rather than from refreshes — a machine that is perfectly up to date is
+  // exactly the one whose logs nobody would otherwise be bounding.
+  it('trims oversized service logs even on a tick that finds nothing to refresh', async () => {
+    const trimLogs = vi.fn(() => [{ path: '/home/.musterd/daemon.log', before: 34_007_194 }]);
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'notice']), {
+        platform: 'darwin',
+        ctx: ctx(autoRunner({ behind: 0 })),
+        health: async () => ({ connections: 0, build: 'newtip1111' }),
+        autoState: memState(),
+        trimLogs,
+      }),
+    );
+    expect(trimLogs).toHaveBeenCalledOnce();
+    expect(out).toContain('up to date'); // the tick itself still no-ops
+    expect(out).toMatch(/trimmed \/home\/\.musterd\/daemon\.log — 32\.4 MB over the cap/);
+    expect(out).toContain('daemon.log.1');
+  });
+
+  it('says nothing about logs when they are all under the cap', async () => {
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'notice']), {
+        platform: 'darwin',
+        ctx: ctx(autoRunner({ behind: 0 })),
+        health: async () => ({ connections: 0, build: 'newtip1111' }),
+        autoState: memState(),
+        trimLogs: () => [],
+      }),
+    );
+    expect(out).not.toContain('trimmed');
+  });
+
   it('keeps the full confirmation budget after a known-healthy daemon bounces', async () => {
     let probes = 0;
     const health = async () => {
