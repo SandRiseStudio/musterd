@@ -70,9 +70,20 @@ the shared binding contract before any harness advertises resume capability.
 
 **Traces.** `residency.wake_leased` carries the daemon's `resume_eligible` mark;
 `residency.woke` and `residency.wake_cost` carry the host's exact-match result
-(`bound` / `missing` / `stale` / `mismatched`), the resulting `delivery_outcome`, and non-content
+(`bound` / `missing` / `mismatched` / `stale`), the resulting `delivery_outcome`, and non-content
 byte/age measurements. No local session ID, transcript path, or workspace path crosses the host
 boundary into audit, telemetry, the workspace manifest, or a prompt.
+
+_Landed 2026-08-04._ The exact-match result was specified here from the start but **not emitted** by
+the increment that shipped the rung: `WakeReportBody` carried only `delivery_outcome`
+(`fresh` / `resumed` / `fresh_fallback`), which says what happened and never why — so an eligible
+wake that spawned fresh was indistinguishable from one that was never eligible, and the Eval below
+could not be run at all. `exact_match` now rides every outcome the wake produces and both audit
+rows. It is absent exactly when the order was not `resume_eligible`, so absence is meaningful rather
+than missing data. The four values partition the rung: `bound` is the only one implying a resume was
+attempted; the unusable-hit cases collapse into `stale` on purpose, because the distinction that
+matters to the Eval is bound-vs-not and splitting it four ways would invite tuning the bounds on
+noise (the precise cause still reaches the operator in the host log).
 
 **Eval.** Dataset: wakes marked `resume_eligible` over one dogfood cohort, split by observed
 delivery outcome. Baseline: the ADR 209 portable/fresh reply cohort measured under the same wake

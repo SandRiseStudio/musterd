@@ -1794,6 +1794,7 @@ export async function handleHttp(
                 ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
                 ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
                 ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
+                ...(body.exact_match ? { exact_match: body.exact_match } : {}),
                 ...(body.transcript_bytes !== undefined
                   ? { transcript_bytes: body.transcript_bytes }
                   : {}),
@@ -1843,6 +1844,9 @@ export async function handleHttp(
             ...(enrollment?.grant_id ? { grant_id: enrollment.grant_id } : {}),
             ...(body.session ? { session: body.session } : {}),
             ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
+            // ADR 210: WHY an eligible wake resumed or did not. `delivery_outcome` says what
+            // happened; without this the Eval cannot split the eligible cohort.
+            ...(body.exact_match ? { exact_match: body.exact_match } : {}),
             ...(body.transcript_bytes !== undefined
               ? { transcript_bytes: body.transcript_bytes }
               : {}),

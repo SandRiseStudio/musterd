@@ -1,7 +1,11 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { matchBinding, type ContinuityRegistry } from '@musterd/protocol';
+import {
+  matchBinding,
+  type ContinuityRegistry,
+  type WakeExactMatchResult,
+} from '@musterd/protocol';
 import { fmtBytes } from '../../args.js';
 import { invalidateClaudeBinCache, resolveClaudeBin } from '../../claudeBin.js';
 import { readRegistry, type RegistryOwner } from '../../session/continuity.js';
@@ -144,25 +148,39 @@ function exactMatchRung(
   spec: WakeSpec,
   transcriptMaxBytes: number,
   now: number,
-): { id: string } | { skip: string } {
+): { id: string; result: WakeExactMatchResult } | { skip: string; result: WakeExactMatchResult } {
   const threadId = spec.order.thread_id;
-  if (threadId === undefined) return { skip: 'eligible but the order named no thread' };
+  // An eligible order with no thread is a daemon older than the thread_id field: nothing to look
+  // up, and nothing that reads as a local miss either.
+  if (threadId === undefined)
+    return { skip: 'eligible but the order named no thread', result: 'missing' };
   const owner: RegistryOwner = { team: spec.team, seat: spec.order.seat };
   const registry = (deps.readContinuity ?? readRegistry)(spec.workspace, owner);
   const hit = matchBinding(registry, { ...owner, thread_id: threadId, harness: 'claude-code' });
-  if (!hit) return { skip: 'no local binding for this thread (missing)' };
-  // `bindThread` refuses to write a binding without a transcript path, so this is a registry that
-  // was hand-edited or written by an older shape. Unprovable either way — fresh.
-  if (hit.transcript_path === undefined) return { skip: 'the local binding names no transcript' };
+  if (!hit) {
+    // `readRegistry` already discards a registry belonging to another team/seat (ADR 143 posture),
+    // so a foreign one arrives here as empty and reads `missing`. The mismatch still visible at this
+    // point is harness drift: this thread IS bound, but to a session of another harness class.
+    const otherHarness = registry.bindings.some((b) => b.thread_id === threadId);
+    return otherHarness
+      ? { skip: 'this thread is bound to another harness', result: 'mismatched' }
+      : { skip: 'no local binding for this thread', result: 'missing' };
+  }
+  // Everything below is an exact hit that cannot be USED — one bucket (`stale`) on purpose: the
+  // distinction that matters to the Eval is bound-vs-not, and splitting unusable four ways would
+  // invite tuning the bounds on noise. The precise cause still reaches the operator via the log.
+  if (hit.transcript_path === undefined)
+    return { skip: 'the local binding names no transcript', result: 'stale' };
   const stat = (deps.statTranscript ?? statTranscriptOnDisk)(hit.transcript_path);
-  if (!stat) return { skip: 'the bound transcript is missing' };
+  if (!stat) return { skip: 'the bound transcript is missing', result: 'stale' };
   if (stat.bytes > transcriptMaxBytes)
     return {
       skip: `bound transcript is ${fmtBytes(stat.bytes)} (hygiene bound ${fmtBytes(transcriptMaxBytes)})`,
+      result: 'stale',
     };
   if (now - stat.mtimeMs > RESUME_GC_HORIZON_MS)
-    return { skip: 'the bound transcript is past the GC horizon' };
-  return { id: hit.session_id };
+    return { skip: 'the bound transcript is past the GC horizon', result: 'stale' };
+  return { id: hit.session_id, result: 'bound' };
 }
 
 /**
@@ -519,21 +537,6 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         ...(spec.bounds.max_turns !== undefined ? { maxTurns: spec.bounds.max_turns } : {}),
       };
       const deliveryTracked = spec.order.intended_delivery !== undefined;
-      const deliveryMetadata = () =>
-        !deliveryTracked
-          ? {}
-          : {
-              ...(liveness.transcriptBytes !== undefined
-                ? { transcript_bytes: liveness.transcriptBytes }
-                : {}),
-              ...(liveness.transcriptMtime !== undefined
-                ? { transcript_age_ms: Math.max(0, Date.now() - liveness.transcriptMtime) }
-                : {}),
-            };
-      // Absent is legacy: mixed daemon/host versions retain the existing resume ladder. An explicit
-      // portable/fresh order bypasses every transcript read decision and spawns fresh immediately.
-      const wantsResume = spec.order.intended_delivery !== 'fresh';
-      let resumeAttempted = false;
 
       // ADR 210: the daemon may mark a wake eligible for an EXACT local thread match. This is
       // checked before the ADR 209 delivery gate on purpose — the daemon sends `intended_delivery:
@@ -545,6 +548,27 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       const exact = exactEligible
         ? exactMatchRung(deps, spec, bound, Date.now())
         : { skip: null as string | null };
+
+      // `exact_match` rides EVERY outcome this wake can produce, and is deliberately outside the
+      // `deliveryTracked` gate: it is the axis ADR 210's Eval splits eligible wakes on, so an
+      // eligible wake that ended fresh has to say WHY. Absent ⇒ the wake was never eligible.
+      const deliveryMetadata = () => ({
+        ...('result' in exact ? { exact_match: exact.result } : {}),
+        ...(!deliveryTracked
+          ? {}
+          : {
+              ...(liveness.transcriptBytes !== undefined
+                ? { transcript_bytes: liveness.transcriptBytes }
+                : {}),
+              ...(liveness.transcriptMtime !== undefined
+                ? { transcript_age_ms: Math.max(0, Date.now() - liveness.transcriptMtime) }
+                : {}),
+            }),
+      });
+      // Absent is legacy: mixed daemon/host versions retain the existing resume ladder. An explicit
+      // portable/fresh order bypasses every transcript read decision and spawns fresh immediately.
+      const wantsResume = spec.order.intended_delivery !== 'fresh';
+      let resumeAttempted = false;
 
       // ── The resume upgrade (increment 4) ──────────────────────────────────────────────────
       const rung = exactEligible
