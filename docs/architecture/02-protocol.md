@@ -201,7 +201,13 @@ export const PendingFrame = z.object({ type:'pending', request_id, message });
 // ADR 018/075/080 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
 export const WorkspaceSpec = z.object({ server:string, team:string, surface:Surface, claim?:ClaimPolicy });  // the committed, secret-free `.musterd/workspace.json`
 export const Binding = WorkspaceSpec.extend({ agent_key?:string, grant?:string });                          // gitignored `.musterd/binding.json` = spec + the two secrets
+
+// ADR 210 — the local continuity registry (continuity.ts). Host-only: NOT a wire type, ever.
+export const ContinuityBinding = z.object({ thread_id, harness, session_id, transcript_path?, bound_at:int, captured_at:int }).strict();
+export const ContinuityRegistry = z.object({ version:1, team, seat, bindings:ContinuityBinding[0..64] }).strict();
 ```
+
+`ContinuityRegistry` (ADR 210) lives in `@musterd/protocol` for its schema and its two pure functions (`matchBinding`, `pruneRegistry`), but it is **not part of the wire contract** — it is a host-local cache in the gitignored 0600 `.musterd/continuity.json`, and the session id and transcript path it holds never reach the daemon, telemetry, the audit log, or a prompt. `matchBinding` requires team, seat, thread, and harness to agree exactly, with no most-recent fallback: a near-miss means the host cannot prove that a transcript is the dialogue a wake is answering, and the correct answer to "cannot prove" is a fresh wake. `continuity.test.ts` asserts the boundary behaviourally — `WakeOrder` and `WakeReportBody` strip local session identity rather than forwarding it.
 
 `actMetaRules` is the single place encoding the per-act `meta` requirements from the table above; both server and clients import it so validation is identical everywhere. **Changing any of these schemas requires an ADR** (`00-overview.md` hard rule).
 

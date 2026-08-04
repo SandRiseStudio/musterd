@@ -22,11 +22,25 @@ describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE p
       timeout_ms: 300_000,
       transcript_max_bytes: 256 * 1024,
       portable_inbox_replies: false,
+      exact_match_resume: false,
+      resume_eligible_ms: 300_000,
       flow: 'manual',
       // ADR 214: a raised deferral is not a wake reason until a seat opts in.
       raised_deferral_wakes: false,
       work_timeout_ms: 30 * 60_000,
     });
+  });
+
+  it('ships exact-match resume OFF — ADR 210 enables it per cohort, never by default', () => {
+    expect(ResidencyPolicySchema.parse({}).exact_match_resume).toBe(false);
+  });
+
+  it('holds the resume-eligibility horizon inside 1min–15min', () => {
+    expect(ResidencyPolicySchema.safeParse({ resume_eligible_ms: 59_999 }).success).toBe(false);
+    expect(ResidencyPolicySchema.safeParse({ resume_eligible_ms: 900_001 }).success).toBe(false);
+    expect(ResidencyPolicySchema.parse({ resume_eligible_ms: 60_000 }).resume_eligible_ms).toBe(
+      60_000,
+    );
   });
 
   it('the hygiene bound sits below the measured resume/fresh crossover (2026-07-29)', () => {

@@ -40,6 +40,31 @@ the shared binding contract before any harness advertises resume capability.
 - The resume path becomes a measured local optimization instead of a server guess.
 - Local registry pruning removes bindings for missing/expired transcripts, resolved threads, and
   workspace/team/seat mismatch.
+- 2026-08-03 rollout: shipped **off**. `residency.exact_match_resume` defaults false, so the daemon
+  marks nothing eligible and every wake stays on ADR 209's portable/fresh path. No numeric bound was
+  tuned; the binding horizon reuses the existing `RESUME_GC_HORIZON_MS`, past which a resume would
+  fail anyway. **The Eval comparison below has not run** — it needs an ADR 209 fresh-path baseline
+  that does not exist yet, since that path merged the same day. No cost or byte figures are recorded
+  here because none have been measured.
+- **The all-harnesses precondition, restated 2026-08-04.** The original blocker recorded here — that
+  no Codex hook path existed, so a Codex seat could never hold a binding — **is resolved**, but not
+  the way it was written. ADR 216 landed a Codex CLI residency backend that is _its own harness
+  authority_ and writes `binding.session` directly rather than through a hook, so a Codex seat does
+  now produce the capture the registry fills from. The lane that named the hook gap is still open and
+  is about a narrower thing (Codex model/surface attestation); it is no longer what gates this ADR.
+- **The precondition is still unmet, for a different and sharper reason.** `codex.ts` resumes on its
+  slot capture unconditionally: it consults neither `intended_delivery` nor `resume_eligible`. While
+  `residency.exact_match_resume` is off this is inert, because nothing is ever marked eligible. But
+  flipping that switch on today would hand a Codex seat an eligible threaded wake and have it resume
+  a session with **no proof that session holds that thread** — precisely the causal guess this ADR
+  exists to forbid, reintroduced on the one harness that does not implement the gate. Therefore:
+  **`exact_match_resume` must not be enabled until the Codex backend routes eligible wakes through
+  the same exact-match rung** (`packages/cli/src/host/backends/**` is another seat's surface, so this
+  is recorded and raised rather than patched here). Claude Code implements the gate as of this
+  increment; Codex does not; resume capability stays unadvertised until it does.
+- Thread resolution is daemon knowledge, so the host prunes resolved threads only when a caller
+  supplies them. The two conditions the host can check itself — missing transcript, past horizon —
+  are checked against the real filesystem on every bind and on session end.
 
 ## Observability & Evaluation
 

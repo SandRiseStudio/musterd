@@ -592,7 +592,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'session',
     signature:
-      'show [--json]  |  start --stdin | end --stdin  |  resolve-labels --stdin  |  label-nudge',
+      'show [--json]  |  start --stdin | end --stdin  |  bind --thread <id>  |  resolve-labels --stdin  |  label-nudge',
     summary: 'this workspace’s captured harness session — what a wake would resume (ADR 131)',
     group: 'admin',
     detail:
@@ -605,8 +605,17 @@ export const CATALOG: readonly CommandEntry[] = [
       '`resolve-labels` is the sidebar-sweep decision engine (ADR 160): session-list JSON in, ' +
       '`{apply, skipped}` out — the label-sessions skill pipes through it and applies the renames; ' +
       'it also stamps the machine-wide last-sweep file. `label-nudge` is the hook-driven other ' +
-      'half: one imperative line while that stamp is missing/stale (>4h), silence otherwise.',
-    examples: ['musterd session show', 'musterd session show --json'],
+      'half: one imperative line while that stamp is missing/stale (>4h), silence otherwise. ' +
+      '`bind --thread <id>` is ADR 210 repair: a threaded send binds this session to that thread ' +
+      'automatically, and this re-binds when that never happened (capture arrived late, inherited ' +
+      'session, dialogue moved). It binds the CURRENT capture only — a hand-named session is the ' +
+      'unprovable claim exact-match continuity exists to refuse. No capture means nothing to bind ' +
+      'and wakes on that thread stay fresh.',
+    examples: [
+      'musterd session show',
+      'musterd session show --json',
+      'musterd session bind --thread 01KZ4C4R8NDZ1F7N7NJET2MG9K',
+    ],
   },
   {
     name: 'host',
