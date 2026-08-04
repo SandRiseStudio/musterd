@@ -237,7 +237,7 @@ function scanCodexTree(root: string): ScannedTranscript[] | undefined {
 }
 
 /**
- * Read-only Codex rollout enumeration (ADR 204). Codex's session_meta record supplies the exact
+ * Read-only Codex rollout enumeration (ADR 216). Codex's session_meta record supplies the exact
  * `codex exec resume` identity and cwd; the rollout filename and session-index display data are not
  * identity evidence. As for Claude, `undefined` means "cannot tell", never "no sessions".
  */

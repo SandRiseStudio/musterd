@@ -2,9 +2,9 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { makeEnvelope } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
-import { afterEach, describe, expect, it } from 'vitest';
 import { resolveCodexBin } from '../packages/cli/src/codexBin.js';
 import { parseCodexThreadLine } from '../packages/cli/src/host/backends/codex.js';
 

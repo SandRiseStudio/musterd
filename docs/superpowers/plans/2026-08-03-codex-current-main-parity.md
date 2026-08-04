@@ -29,7 +29,7 @@
 
 - Modify: `content/roadmap.data.ts`
 - Regenerate: `ROADMAP.md`
-- Create: `docs/decisions/204-codex-cli-residency-backend.md`
+- Create: `docs/decisions/216-codex-cli-residency-backend.md`
 - Test: `content/roadmap.data.test.ts`
 
 **Interfaces:**
@@ -61,9 +61,9 @@ Expected: FAIL because no item has that id.
 
 Insert the declared item beside `harness-residency`. It must state that CLI parity is a current-main implementation using the host backend seam, and that desktop wake is manual until stable app control is proven. It must reference the new ADR and [the approved design](../specs/2026-08-03-codex-current-main-parity-design.md). Run `pnpm roadmap:gen`; do not edit generated `ROADMAP.md` by hand.
 
-- [ ] **Step 4: Write ADR 204**
+- [ ] **Step 4: Write ADR 216**
 
-Run `pnpm adr-numbers:check` immediately before creating the file. ADR 203 is the current high-water mark, so create ADR 204; if the gate reports a collision, stop this Lane and allocate the next free number before proceeding. The ADR must establish:
+Run `pnpm adr-numbers:check` immediately before creating the file. ADR 203 is the current high-water mark, so create ADR 216; if the gate reports a collision, stop this Lane and allocate the next free number before proceeding. The ADR must establish:
 
 ```markdown
 ## Decision
@@ -84,9 +84,9 @@ Expected: PASS; the generated roadmap is in sync and ADR numbering is valid.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add content/roadmap.data.ts content/roadmap.data.test.ts ROADMAP.md docs/decisions/204-codex-cli-residency-backend.md
+git add content/roadmap.data.ts content/roadmap.data.test.ts ROADMAP.md docs/decisions/216-codex-cli-residency-backend.md
 git commit -m "docs: declare current-main Codex parity" \
-  -m "Refs ADR-204" \
+  -m "Refs ADR-216" \
   -m "Co-authored-by: revive <revive@revive.musterd>"
 ```
 
@@ -156,7 +156,7 @@ Expected: PASS with no process invocation beyond injected test doubles.
 
 ```bash
 git add packages/cli/src/codexBin.ts packages/cli/src/codexBin.test.ts packages/cli/src/session/codex.ts packages/cli/src/session/codex.test.ts packages/cli/src/session/liveness.ts packages/cli/src/session/liveness.test.ts packages/cli/src/onboard/harnesses/codex.ts packages/cli/src/onboard/harnesses/codex.test.ts
-git commit -m "feat(cli): probe and enumerate Codex CLI sessions" -m "Refs ADR-204" -m "Co-authored-by: revive <revive@revive.musterd>"
+git commit -m "feat(cli): probe and enumerate Codex CLI sessions" -m "Refs ADR-216" -m "Co-authored-by: revive <revive@revive.musterd>"
 ```
 
 ### Task 3: Add the bounded Codex CLI wake backend
@@ -223,7 +223,7 @@ Expected: PASS; no test launches a real Codex turn.
 
 ```bash
 git add packages/cli/src/host/backends/codex.ts packages/cli/src/host/backends/codex.test.ts packages/cli/src/commands/host.ts packages/cli/src/commands/host.test.ts packages/cli/src/commands/residency.ts packages/cli/src/commands/residency.test.ts packages/cli/src/host/loop.test.ts
-git commit -m "feat(host): wake Codex CLI seats" -m "Refs ADR-204" -m "Co-authored-by: revive <revive@revive.musterd>"
+git commit -m "feat(host): wake Codex CLI seats" -m "Refs ADR-216" -m "Co-authored-by: revive <revive@revive.musterd>"
 ```
 
 ### Task 4: Make capture, model observation, and stale-session protection Codex-aware
@@ -265,7 +265,7 @@ Expected: PASS with session ids absent from daemon request assertions.
 
 ```bash
 git add packages/cli/src/commands/session.ts packages/cli/src/commands/session.test.ts packages/mcp/src/sessionLiveness.ts packages/mcp/src/sessionLiveness.test.ts packages/mcp/src/binding.ts packages/mcp/src/binding.test.ts packages/cli/src/onboard/harnesses/codex.ts
-git commit -m "feat(session): capture Codex CLI continuity locally" -m "Refs ADR-204" -m "Co-authored-by: revive <revive@revive.musterd>"
+git commit -m "feat(session): capture Codex CLI continuity locally" -m "Refs ADR-216" -m "Co-authored-by: revive <revive@revive.musterd>"
 ```
 
 ### Task 5: Add the owner-gated real Codex CLI acceptance rig
@@ -318,7 +318,7 @@ MUSTERD_REAL_CODEX=1 MUSTERD_REAL_CODEX_CONFIRM=1 pnpm test:codex-cli-real
 
 ```bash
 git add scripts/harnesses/codex-cli-smoke.mjs tests/codex-cli.acceptance.test.ts package.json docs/architecture/06-testing.md
-git commit -m "test: add gated real Codex CLI acceptance" -m "Refs ADR-204" -m "Co-authored-by: revive <revive@revive.musterd>"
+git commit -m "test: add gated real Codex CLI acceptance" -m "Refs ADR-216" -m "Co-authored-by: revive <revive@revive.musterd>"
 ```
 
 ### Task 6: Publish desktop evidence and synchronize current documentation
@@ -366,7 +366,7 @@ Expected: all default checks green; no real Codex process is launched.
 
 ```bash
 git add tests/codex-desktop.md docs/design/harness-residency.md docs/architecture/04-cli.md docs/architecture/05-mcp.md docs/architecture/06-testing.md docs/implementation-plan.md
-git commit -m "docs: define Codex CLI and desktop evidence" -m "Refs ADR-204" -m "Co-authored-by: revive <revive@revive.musterd>"
+git commit -m "docs: define Codex CLI and desktop evidence" -m "Refs ADR-216" -m "Co-authored-by: revive <revive@revive.musterd>"
 ```
 
 ## Final review gate

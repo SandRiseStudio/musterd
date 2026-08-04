@@ -108,7 +108,7 @@ describe('enumerateClaudeSessions (ADR 166)', () => {
   });
 });
 
-describe('enumerateCodexSessions (ADR 204)', () => {
+describe('enumerateCodexSessions (ADR 216)', () => {
   let home: string;
   let ws: string;
 

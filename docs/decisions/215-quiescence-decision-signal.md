@@ -1,4 +1,4 @@
-# 214 — Quiescence: a decision-grade "busy right now" read, split from display activity
+# 215 — Quiescence: a decision-grade "busy right now" read, split from display activity
 
 - Status: accepted
 - Date: 2026-08-03

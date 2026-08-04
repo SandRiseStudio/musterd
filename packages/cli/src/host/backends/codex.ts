@@ -1,9 +1,9 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import { findBinding, saveBinding } from '../../config.js';
+import { z } from 'zod';
 import { resolveCodexBin } from '../../codexBin.js';
+import { findBinding, saveBinding } from '../../config.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
 import type { ActuatorBackend, BackendContext, WakeActuation, WakeSpec } from '../backend.js';
-import { z } from 'zod';
 
 const KILL_GRACE_MS = 10_000;
 const RESUME_VERIFY_WINDOW_MS = 30_000;

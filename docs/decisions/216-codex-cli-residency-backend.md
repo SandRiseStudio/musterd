@@ -1,4 +1,4 @@
-# 204 — Codex CLI residency backend and desktop evidence boundary
+# 216 — Codex CLI residency backend and desktop evidence boundary
 
 - Status: accepted
 - Date: 2026-08-03

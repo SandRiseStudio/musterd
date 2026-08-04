@@ -75,7 +75,7 @@ pnpm --filter @musterd/server test -- --watch
 pnpm test:scenarios  # just tests/scenarios (root script)
 ```
 
-## Codex harness evidence (ADR 204)
+## Codex harness evidence (ADR 216)
 
 Codex CLI has hermetic backend tests under `packages/cli/src/host/backends/codex.test.ts`. Its
 owner-gated real acceptance test is deliberately excluded from CI and requires a built workspace:

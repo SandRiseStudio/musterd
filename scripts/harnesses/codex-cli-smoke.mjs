@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Owner gate for the real Codex CLI acceptance test (ADR 204).
+ * Owner gate for the real Codex CLI acceptance test (ADR 216).
  *
  * This deliberately does not start Codex itself: the Vitest acceptance fixture owns the isolated
  * daemon and workspace. Keeping the spend gate in this tiny executable makes the opt-in auditable

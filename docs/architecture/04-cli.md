@@ -25,7 +25,7 @@ src/
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
-  codexBin.ts         // PATH-robust, shell-free `codex` binary resolution plus read-only `--version`/help capability probe; an unresolved or incompatible install stays non-wakeable (ADR 204)
+  codexBin.ts         // PATH-robust, shell-free `codex` binary resolution plus read-only `--version`/help capability probe; an unresolved or incompatible install stays non-wakeable (ADR 216)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
@@ -52,7 +52,7 @@ src/
     pinnedBin.ts      // a wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
     backends/
       claudeCode.ts   // backend #1: explicit portable/fresh orders bypass resume; legacy orders retain the resume ladder (`--resume <captured id>`, 30d GC + transcript-hygiene rungs) degrading to fresh `claude -p` in the same lease; reports actual delivery + local byte/age metadata only (ADR 131 §5 / ADR 209)
-      codex.ts        // backend #2: exact JSONL thread identity; `exec resume` in the workspace cwd then one fresh `exec -C` fallback, each requiring wake-provenance Presence; sanitized environment and no bypass flags (ADR 204)
+      codex.ts        // backend #2: exact JSONL thread identity; `exec resume` in the workspace cwd then one fresh `exec -C` fallback, each requiring wake-provenance Presence; sanitized environment and no bypass flags (ADR 216)
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     liveness.ts       // localSessionLiveness(workspace): harness-selected binding/session scan + transcript stat → none|live|resumable|gc-expired; shared by the host guard and `session show`, with registry harness outranking stale capture provenance (ADR 166/204)
     enumerate.ts      // harness-owned read-only session scan: Claude transcripts and Codex rollouts are attributed only by their RECORDED cwd and exact identity (never filename/path guesses); undefined = "cannot tell" (never laundered into "none")
@@ -132,6 +132,12 @@ src/
     uninstall.ts      // per-folder uninstall — unwinds what init wrote (ADR 027)
     helpers.ts        // shared command helpers (active-identity resolution, ADR 036)
 ```
+
+Codex desktop is not a `musterd host` backend. Its acceptance evidence is the manual matrix in
+[`tests/codex-desktop.md`](../../tests/codex-desktop.md): project MCP load, explicit join,
+delivery/drain, reload/reconnect, isolation, and model/build attestation. Manual reopen and
+`/mcp reload` remain manual resume, not daemon wake, until a versioned supported desktop API proves
+exact task targeting, lifecycle observation, and safe resume (ADR 216).
 
 ## Config file `~/.musterd/config.json`
 
