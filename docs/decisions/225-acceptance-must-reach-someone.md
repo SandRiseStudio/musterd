@@ -182,7 +182,7 @@ routed closes are bimodal, not one distribution with variance.~~** ~~Re-measured
 | `counterpart_confirm` | 19  | 62.3 min            | 1.6–423 min  |
 | `review_timeout`      | 22  | **737.6 min**       | 0.1–5589 min |
 
-## What this ADR's evidence is actually worth
+**What this ADR's evidence is actually worth.**
 
 Chasing the retraction above showed the same flaw runs deeper, and it takes a second headline claim
 with it. **Only 13 of 152 recorded closes carry a `promised_wait_ms` at all** — the rest predate
