@@ -123,6 +123,7 @@ src/
     goal.ts           // declare/list team Goals — the declared-outcome layer above lanes (ADR 048/084)
     report.ts         // the insight report at ic/team/exec altitudes: flow, coordination, steering (ADR 050/084/125), waiting-on, Goal board
     board.ts          // musterd board: open /board signed in as yourself — stages a one-shot 60s nonce with the daemon and opens it in the fragment, so no human ever handles a credential (ADR 170)
+    live.ts           // musterd live: the same one-shot relay pointed at /live, so the office a human actually leaves open is one they can answer asks from (ADR 222)
     archaeology.ts    // musterd archaeology --start <sha>: wasted-work % from git alone (ADR 123 predicate set v1)
     unbind.ts         // release this folder's own seat — clears bound_at + presence, keeps it declared (ADR 058)
     reload.ts         // SIGHUP the service daemon to re-resolve roster roots + reconcile (ADR 058)

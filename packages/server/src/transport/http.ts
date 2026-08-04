@@ -1305,7 +1305,11 @@ export async function handleHttp(
           });
           throw new MusterdError(
             'not_found',
-            'that sign-in link was already used or has expired — run `musterd board` again',
+            // Names both surfaces (ADR 222): a nonce carries no record of which one staged it, and
+            // telling someone who ran `musterd live` to run `musterd board` sends them to the wrong
+            // page. The remedy is the same command they used, whichever it was.
+            'that sign-in link was already used or has expired — run `musterd board` or ' +
+              '`musterd live` again',
           );
         }
         appendAudit(ctx.db, team.id, {

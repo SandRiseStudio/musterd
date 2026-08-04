@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
@@ -19,6 +19,7 @@ import {
   genObserverName,
   acquireObserver,
   acquireWatchLinkObserver,
+  redeemSignin,
 } from '../live/client';
 import {
   fetchLocalIdentity,
@@ -56,6 +57,7 @@ type Collapsed = Record<PanelId, boolean>;
 const NO_COLLAPSE: Collapsed = { office: false, roster: false, stream: false };
 
 function LivePage() {
+  const router = useRouter();
   const [team, setTeam] = useState('');
   const [advanced, setAdvanced] = useState({ open: false, as: '', token: '' });
   const [cfg, setCfg] = useState<LiveConfig | null>(null);
@@ -313,6 +315,35 @@ function LivePage() {
     // fades in rather than zooming (see BoardOverlay's `origin`).
     const urlLane = params.get('lane');
     if (urlLane) setBoardLane(urlLane);
+    // `#s=<nonce>` — `musterd live` walked us here (ADR 222). Outranks the watch link below: they
+    // never appear together, and if they somehow did, your own identity is the right answer.
+    const nonce = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('s');
+    if (urlTeam && nonce) {
+      setTeam(urlTeam);
+      try {
+        window.localStorage.setItem(TEAM_KEY, urlTeam);
+      } catch {
+        /* private mode */
+      }
+      // Strip through the ROUTER's history, not `window.history.replaceState`. The raw call cleans
+      // the address bar but leaves the router's own location — captured at hydration, hash included
+      // — stale; on the success path the post-connect render settles the router, re-syncs its
+      // location and puts the spent nonce back in the bar (izzo's find, ADR 174 acceptance run).
+      // Replacing via the router updates both copies. Still before the redeem is sent, per ADR 170's
+      // guarantee that a slow response cannot leave a nonce on screen for a shoulder to read.
+      router.history.replace(`${window.location.pathname}${window.location.search}`);
+      setProvisioning(true);
+      void redeemSignin(urlTeam, nonce)
+        .then(({ as, credential }) => signIn(urlTeam, { as, token: credential }))
+        .catch((e: unknown) => {
+          // An expired or already-opened link is ordinary, not exceptional: say so in the daemon's
+          // own words and fall through to watching rather than dead-ending on a blank office.
+          setFormError(e instanceof Error ? e.message : String(e));
+          void watch(urlTeam);
+        })
+        .finally(() => setProvisioning(false));
+      return;
+    }
     const watchTok = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('w');
     if (urlTeam && urlAs && watchTok) {
       setTeam(urlTeam);

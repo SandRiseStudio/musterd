@@ -20,6 +20,7 @@ import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { joinCommand } from './commands/join.js';
 import { laneCommand, lanesCommand } from './commands/lane.js';
+import { liveCommand } from './commands/live.js';
 import { memoryCommand } from './commands/memory.js';
 import { nextCommand } from './commands/next.js';
 import { notifyCommand } from './commands/notify.js';
@@ -215,6 +216,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return reportCommand(rest);
     case 'board':
       return boardCommand(rest);
+    case 'live':
+      return liveCommand(rest);
     case 'inbox':
       return inboxCommand(rest);
     case 'nudge':
