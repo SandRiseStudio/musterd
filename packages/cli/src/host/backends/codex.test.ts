@@ -121,7 +121,7 @@ describe('codexBackend', () => {
     child.exit();
     await result.settled;
   });
-  it("portable fresh orders bypass resume even with a valid local capture", async () => {
+  it('portable fresh orders bypass resume even with a valid local capture', async () => {
     const child = new Child();
     const calls: string[][] = [];
     const lines: string[] = [];
