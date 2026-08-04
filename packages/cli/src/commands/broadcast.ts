@@ -974,10 +974,14 @@ export async function broadcastCommand(parsed: Parsed): Promise<number> {
 
   // `detached: true` makes each child its own process-group leader, which is what lets the
   // stop path kill *everything* it spawned with one group signal — see killGroup.
-  const chrome = spawn(chromeBin, chromeArgs(debugPort, profile, process.platform, stage, opts.audio), {
-    stdio: 'ignore',
-    detached: true,
-  });
+  const chrome = spawn(
+    chromeBin,
+    chromeArgs(debugPort, profile, process.platform, stage, opts.audio),
+    {
+      stdio: 'ignore',
+      detached: true,
+    },
+  );
   const ffmpeg: ChildProcess = spawn('ffmpeg', ffmpegArgs(opts, sink), {
     stdio: ['pipe', 'inherit', 'inherit'],
     detached: true,

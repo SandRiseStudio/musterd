@@ -102,9 +102,10 @@ export function OfficeScene({
   /** Handed the scene handle once it mounts (and `null` on teardown) — the broadcast route publishes it
    * as `window.__office` so a capturer can probe the scene. */
   onReady?: (handle: OfficeHandle | null) => void;
-  /** Interactive chrome floated over the TOP of the room — `/live` seats the asks & approvals rail
-   * here (nick's call: the office frames its own asks; the page above the panels stays quiet).
-   * `/broadcast` passes nothing: a stream cannot answer an ask. */
+  /** Chrome floated over the TOP of the room. `/live` seats the answerable asks & approvals rail
+   * here (nick's call: the office frames its own asks; the page above the panels stays quiet), and
+   * `/broadcast` seats `AsksReel` — the same asks, read-only and cycling, because a stream cannot
+   * answer one but should still show that thirteen are waiting (ADR 226). */
   topSlot?: ReactNode;
   /**
    * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts WorkStack

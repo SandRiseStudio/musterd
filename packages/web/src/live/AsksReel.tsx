@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Envelope, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol';
 import { askIsLoud, byUrgency, deriveAsks, type AskView } from './asks';
@@ -40,7 +40,7 @@ export function AsksReel({
 
   // One clock drives both the rotation and the countdowns. It ticks only while something is loud —
   // idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs for hours.
-  const mountedAt = useRef(Date.now());
+  const [mountedAt] = useState(() => Date.now());
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (loud.length === 0) return;
@@ -48,9 +48,13 @@ export function AsksReel({
     return () => clearInterval(id);
   }, [loud.length]);
 
-  if (cards.length === 0) return null;
+  // Null only when the timeline holds no asks at all — same rule as /live's strip. With everything
+  // settled, /live shows a quiet "nothing waiting" row rather than vanishing, and the stream keeps
+  // that: the counts are office chrome, and a bar that blinks out whenever the last ask closes
+  // reads as breakage on a video.
+  if (asks.length === 0) return null;
 
-  const shown = cards[reelIndex(cards.length, now - mountedAt.current)]!;
+  const shown = cards.length > 0 ? cards[reelIndex(cards.length, now - mountedAt)]! : null;
   const idx = new Map(roster.map((m) => [m.name, m]));
 
   return (
@@ -59,6 +63,41 @@ export function AsksReel({
       aria-label="asks and approvals"
     >
       <BellIcon />
+      {shown === null ? (
+        <span className="bc-reel__lead bc-reel__lead--quiet">
+          <b>asks &amp; approvals</b>
+          <span className="bc-reel__verb">nothing waiting on a human</span>
+        </span>
+      ) : (
+        <ShownAsk shown={shown} idx={idx} now={now} />
+      )}
+      <span className="bc-reel__spacer" />
+      {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
+      {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
+      {settled > 0 && <span className="bc-reel__meta">{settled} settled</span>}
+      {shown !== null && cards.length > 1 && (
+        <span className="bc-reel__dots" aria-hidden="true">
+          {cards.map((c) => (
+            <i key={c.env.id} className={c.env.id === shown.env.id ? 'is-on' : undefined} />
+          ))}
+        </span>
+      )}
+    </section>
+  );
+}
+
+/** The rotating slot: who wants what, how urgent, how long left. */
+function ShownAsk({
+  shown,
+  idx,
+  now,
+}: {
+  shown: AskView;
+  idx: Map<string, MemberSummary>;
+  now: number;
+}) {
+  return (
+    <>
       <span
         className="bc-reel__who"
         style={{ background: memberColor(shown.env.from, kindOf(shown.env.from, idx)) }}
@@ -75,18 +114,7 @@ export function AsksReel({
       </span>
       <span className={`bc-reel__tier bc-reel__tier--${shown.tier}`}>{shown.tier}</span>
       <ReelClock ask={shown} now={now} />
-      <span className="bc-reel__spacer" />
-      {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
-      {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
-      {settled > 0 && <span className="bc-reel__meta">{settled} settled</span>}
-      {cards.length > 1 && (
-        <span className="bc-reel__dots" aria-hidden="true">
-          {cards.map((c) => (
-            <i key={c.env.id} className={c.env.id === shown.env.id ? 'is-on' : undefined} />
-          ))}
-        </span>
-      )}
-    </section>
+    </>
   );
 }
 

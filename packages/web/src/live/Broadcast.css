@@ -159,3 +159,6 @@
     transform: translateY(4px);
   }
 }
+.bc-reel__lead--quiet {
+  opacity: 0.75;
+}

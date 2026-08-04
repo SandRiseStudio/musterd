@@ -94,7 +94,10 @@ describe('audio (ADR 226)', () => {
 
   it('keeps an audio track either way — RTMP ingests reject video-only', () => {
     for (const audio of [false, true]) {
-      const opts = parseOptions({ team: 't', twitch: true, ...(audio ? { audio: true } : {}) }, 'linux');
+      const opts = parseOptions(
+        { team: 't', twitch: true, ...(audio ? { audio: true } : {}) },
+        'linux',
+      );
       expect(ffmpegArgs(opts, { kind: 'rtmp', target: 'rtmp://x' })).toContain('aac');
     }
   });
