@@ -892,6 +892,26 @@ describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin cr
     expect(m.closed.no_candidate).toBe(0); // a timeout is NOT a missing counterpart
   });
 
+  // ADR 217: the two halves the old `review_timeout` conflated each get a bucket, and the old label
+  // survives as the abstention for rows whose promised window was never recorded. All three must be
+  // matched EXPLICITLY — if either new reason fell to the `else` it would be counted as
+  // `unknown_reason`, and the metric would report ignorance about rows that stated themselves
+  // plainly (the ADR 173 failure this projection has already made twice).
+  it('counts the cut-short and unanswered halves apart, and keeps the abstention distinct', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.closed', { lane: 'a', reason: 'review_unanswered', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'b', reason: 'review_cut_short', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'c', reason: 'review_cut_short', verified: false });
+    row(db, team.id, 'lane.closed', { lane: 'd', reason: 'review_timeout', verified: false });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.closed.review_unanswered).toBe(1);
+    expect(m.closed.review_cut_short).toBe(2);
+    expect(m.closed.review_timeout).toBe(1);
+    expect(m.closed.unknown_reason).toBe(0);
+    expect(m.closed.total).toBe(4);
+  });
+
   it('legacy rows abstain from the routed/no-candidate split rather than being guessed', () => {
     const { db, team } = seed();
     // Written before the routing outcome was recorded (pre-#450): neither field present.

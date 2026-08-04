@@ -31,6 +31,7 @@ import {
   ActorAttestationSchema,
   GateCheckRequestSchema,
   AskTierSchema,
+  type AskTier,
   askContract,
   LANE_TERMINAL_STATES,
   isAwaitingAcceptance,
@@ -2708,6 +2709,15 @@ export async function handleHttp(
           // looked like, and the remedy (wake an enrolled seat vs. enroll one) is undecidable later.
           // Keep posture on wake_queued / breaker rows too — the remedy list still matters.
           const postureForAudit = pick && !wakeQueued && !breakerTripped ? undefined : posture;
+          // ADR 217: the tier is decided HERE rather than at the ask, so the ready row can record
+          // the wait the acceptor was actually promised. Without it the close edge has nothing to
+          // compare `time_in_review_ms` against, and an owner closing after 8 seconds is recorded
+          // as a timeout — which is what `review_timeout` measured for its whole life.
+          const acceptanceTier: AskTier = breakerTripped
+            ? 'blocking'
+            : humanRequired && pick?.grade === 'human'
+              ? 'blocking'
+              : 'standard';
           appendAudit(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.ready_for_review',
@@ -2751,6 +2761,15 @@ export async function handleHttp(
               // row — which is what forced the read to serve a legacy row as a confident no. With
               // the boolean always present, absence means exactly "legacy", and the read can abstain.
               human_required: humanRequired,
+              // ADR 217: the promised wait, written only where an ask was actually sent — a
+              // `no_candidate` row promised nobody anything, and stamping a window on it would
+              // invite the close edge to grade a wait that never began.
+              ...(pick
+                ? {
+                    ask_tier: acceptanceTier,
+                    ask_timeout_ms: askContract(acceptanceTier).timeout_ms,
+                  }
+                : {}),
               ...(postureForAudit
                 ? {
                     family_posture: {
@@ -2780,8 +2799,9 @@ export async function handleHttp(
                 // ADR 172/188: the HUMAN acceptance ask carries the holding tier (required has
                 // teeth); a risky lane's stage-one PEER ask rides standard like any peer
                 // acceptance — the blocking ask is composed at stage two, when the peer's accept
-                // lands (route.ts).
-                tier: humanRequired && pick.grade === 'human' ? 'blocking' : 'standard',
+                // lands (route.ts). ADR 217: same value the ready row recorded as the promise —
+                // one variable, so the promise and the ask can never drift apart.
+                tier: acceptanceTier,
                 lane_review: {
                   lane: lane.id,
                   title: lane.title,

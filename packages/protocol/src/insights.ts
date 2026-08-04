@@ -263,8 +263,19 @@ export const ReviewMetricsSchema = z.object({
     total: z.number().int().nonnegative(),
     /** Closed by a different seat after review — the only `verified: true` shape. */
     counterpart_confirm: z.number().int().nonnegative(),
-    /** Owner closed after a review WAS routed and went unanswered. */
+    /**
+     * ADR 217's abstention: a review WAS routed and the owner closed it, but the ready row recorded
+     * no promised window, so whether the wait elapsed is unknowable. Every pre-ADR-214 row carries
+     * this label — it asserted "asked, unanswered" while measuring only state, and 11 of the first
+     * 18 closed inside five minutes. Kept as the unknown bucket rather than retired, because
+     * history is derived, never rewritten (ADR 169).
+     */
     review_timeout: z.number().int().nonnegative(),
+    /** ADR 217: the owner waited at least the window the acceptor was promised. A real silence. */
+    review_unanswered: z.number().int().nonnegative(),
+    /** ADR 217: the owner closed BEFORE the window it promised the acceptor — impatience, not
+     *  silence, and the opposite remedy from `review_unanswered`. */
+    review_cut_short: z.number().int().nonnegative(),
     /** Owner closed where no counterpart existed — sanctioned, and not a timeout. */
     no_candidate: z.number().int().nonnegative(),
     /** ADR 172's counter-metric: a risky lane whose REQUIRED human review never happened — a
