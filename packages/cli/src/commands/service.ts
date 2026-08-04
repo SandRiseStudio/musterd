@@ -52,6 +52,7 @@ import {
   uninstallLive,
   type LiveCtx,
 } from '../service/live.js';
+import { mb, trimServiceLogs, type TrimmedLog } from '../service/logTrim.js';
 import {
   install,
   restart,
@@ -788,6 +789,8 @@ export async function serviceCommand(
     autoState?: { read: () => string | null; write: (sha: string) => void };
     /** Sleep between post-bounce `/health` polls (injected so tests never actually wait). */
     sleep?: (ms: number) => Promise<void>;
+    /** ADR 224 log trim (injected so the tick's tests never touch the real ~/.musterd logs). */
+    trimLogs?: () => TrimmedLog[];
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -868,6 +871,13 @@ export async function serviceCommand(
       // no trace at all, so a report of three notices could not be checked against the log that
       // caused them (#631, diagnosed by reasoning because the evidence did not exist).
       const okStamped = (s: string) => process.stdout.write(`${stamp()} ${theme.ok('✓')} ${s}\n`);
+      // Log hygiene (ADR 224) runs BEFORE the skew check and independently of it: the logs grow
+      // from the daemon's own traffic, not from refreshes, so a machine that is perfectly up to
+      // date is exactly the one whose logs nobody is bounding. Silent under the cap.
+      for (const t of deps.trimLogs?.() ?? trimServiceLogs(dirname(configPath())))
+        okStamped(
+          `trimmed ${t.path} — ${mb(t.before)} over the cap; previous contents in ${t.path}.1`,
+        );
       const notifier = deps.notify ?? osNotify;
       const notify = (n: NotifyItem) => {
         notifier(n);
