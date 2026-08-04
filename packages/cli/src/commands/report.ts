@@ -171,6 +171,28 @@ function renderWake(k: NonNullable<Report['wake']>, w: (s: string) => void): voi
       `  cost $${k.cost_usd_total.toFixed(2)} total · $${k.cost_usd_per_wake!.toFixed(2)}/wake ${theme.meta(`(${k.cost_reported} of ${k.wakes} reported)`)}\n`,
     );
   }
+  // ADR 209/210 Eval split. Printed only when something was actually measured — a cohort of zero
+  // must not render as a row of zeros, which reads like a measured result rather than no data. When
+  // wakes exist but none reported a delivery, say so plainly: that is the ADR 209 baseline's real
+  // state, and the sentence a reader needs in order not to trust an empty table.
+  if (k.delivery_measured > 0) {
+    const d = k.delivery;
+    w(
+      `  delivery: ${d.fresh} fresh · ${d.resumed} resumed · ${d.fresh_fallback} fresh-fallback ` +
+        theme.meta(`(${k.delivery_measured} of ${k.wakes} measured)`) +
+        '\n',
+    );
+  } else if (k.wakes > 0) {
+    w(theme.meta(`  delivery: unmeasured — no wake in the window reported one (ADR 209)`) + '\n');
+  }
+  if (k.exact_match_measured > 0) {
+    const e = k.exact_match;
+    w(
+      `  exact match: ${e.bound} bound · ${e.missing} missing · ${e.mismatched} mismatched · ${e.stale} stale ` +
+        theme.meta(`(${k.exact_match_measured} eligible)`) +
+        '\n',
+    );
+  }
   const quiet: string[] = [];
   if (k.failed > 0) quiet.push(`${k.failed} failed attempt${k.failed === 1 ? '' : 's'}`);
   if (k.deferred > 0) quiet.push(`${k.deferred} deferred (live local session)`);

@@ -836,6 +836,101 @@ describe('deriveWakeMetrics (ADR 131 inc 5) — latency, answer rate, cost, budg
     expect(report.wake).toBeDefined();
     expect(report.wake!.window_days).toBe(7);
   });
+
+  // The ADR 209/210 Eval split. The property that matters is NOT the counts — it is that an
+  // unmeasured cohort stays distinguishable from a measured-zero one. Every wake in the real ledger
+  // on 2026-08-04 predated ADR 209 and reported no delivery; if that rendered as `0 fresh`, a
+  // baseline doc would record a measured result where there was no measurement at all.
+  it('splits woken acts by delivery outcome and exact-match result', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'message', 'a1', NOW - 60_000);
+    directed(db, team, nick, ada, 'message', 'a2', NOW - 60_000);
+    directed(db, team, nick, ada, 'message', 'a3', NOW - 60_000);
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'a1', lease_id: 'L1', delivery_outcome: 'fresh', exact_match: 'missing' },
+      NOW - 50_000,
+    );
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'a2', lease_id: 'L2', delivery_outcome: 'resumed', exact_match: 'bound' },
+      NOW - 50_000,
+    );
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'a3', lease_id: 'L3', delivery_outcome: 'fresh_fallback', exact_match: 'stale' },
+      NOW - 50_000,
+    );
+
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.wakes).toBe(3);
+    expect(k.delivery).toEqual({ fresh: 1, resumed: 1, fresh_fallback: 1 });
+    expect(k.delivery_measured).toBe(3);
+    expect(k.exact_match).toEqual({ bound: 1, missing: 1, mismatched: 0, stale: 1 });
+    expect(k.exact_match_measured).toBe(3);
+  });
+
+  it('reports an UNMEASURED cohort as measured=0, not as a row of zeros', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'message', 'b1', NOW - 60_000);
+    // A pre-ADR-209 wake: it occupied, but carried no delivery axis at all.
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'b1', lease_id: 'L9', session: 'fresh' },
+      NOW - 50_000,
+    );
+
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.wakes).toBe(1);
+    // The counts are zero AND the denominator is zero — the pair is what says "no data".
+    expect(k.delivery).toEqual({ fresh: 0, resumed: 0, fresh_fallback: 0 });
+    expect(k.delivery_measured).toBe(0);
+    expect(k.exact_match_measured).toBe(0);
+  });
+
+  it('a supplementary wake_cost row restating the delivery does not double-count', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'message', 'c1', NOW - 60_000);
+    residencyRow(
+      db,
+      team.id,
+      'residency.woke',
+      'ada',
+      { act: 'c1', lease_id: 'L5', delivery_outcome: 'resumed', exact_match: 'bound' },
+      NOW - 50_000,
+    );
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_cost',
+      'ada',
+      {
+        act: 'c1',
+        lease_id: 'L5',
+        cost_usd: 1.2,
+        delivery_outcome: 'resumed',
+        exact_match: 'bound',
+      },
+      NOW - 40_000,
+    );
+
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.delivery_measured).toBe(1);
+    expect(k.exact_match_measured).toBe(1);
+    expect(k.delivery.resumed).toBe(1);
+  });
 });
 
 describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin credential', () => {
