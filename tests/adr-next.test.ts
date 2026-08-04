@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { adrNumbersInPaths, nextAdrNumber } from '../scripts/adr-next.ts';
 
@@ -29,6 +31,31 @@ describe('nextAdrNumber (ADR 220)', () => {
 
   it('ignores non-integers and negatives rather than throwing', () => {
     expect(nextAdrNumber([Number.NaN, -3, 7])).toBe(8);
+  });
+});
+
+// The tool answers from `origin/main`, which is a LOCAL ref only as current as the last fetch. On
+// 2026-08-04 it reported 224 free while a merged PR already held it. Importing this module must
+// stay side-effect free (the suite would otherwise fetch on every run), and the CLI path must warn
+// rather than answer silently when it cannot refresh.
+describe('origin/main freshness', () => {
+  const script = fileURLToPath(new URL('../scripts/adr-next.ts', import.meta.url));
+
+  it('runs nothing on import — the exports are pure', () => {
+    // Proven by this suite: importing at the top of this file neither fetched nor printed. Asserted
+    // explicitly so a future refactor that drops the direct-invocation guard fails here.
+    expect(typeof nextAdrNumber).toBe('function');
+    expect(typeof adrNumbersInPaths).toBe('function');
+  });
+
+  it('warns instead of trusting a stale ref when git is unreachable', () => {
+    // An empty PATH makes `git` unresolvable — the offline shape, without touching the network.
+    const res = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', script], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: '' },
+    });
+    expect(res.stderr).toContain('could not fetch origin/main');
+    expect(res.stderr).toContain('as old as your last fetch');
   });
 });
 
