@@ -9,6 +9,7 @@ import {
   type LifeContext,
   panFor,
   pickLifeEvent,
+  shouldChime,
 } from './sound';
 
 // These tests cover the parts of the room-tone layer that are LOGIC — which event fires, under what
@@ -143,5 +144,28 @@ describe('enableForBroadcast (ADR 226)', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('shouldChime (the broadcast cue throttle)', () => {
+  it('passes a cue clear of the gap and holds one inside it', () => {
+    expect(shouldChime(1000, 0)).toBe(true); // 1000ms since the last — clear
+    expect(shouldChime(1000, 900)).toBe(false); // 100ms since — inside
+  });
+
+  it('reopens exactly at the gap, not a millisecond before', () => {
+    expect(shouldChime(1000, 300)).toBe(true); // exactly 700ms
+    expect(shouldChime(1000, 301)).toBe(false); // 699ms
+  });
+
+  it('coalesces a burst to one cue rather than queueing', () => {
+    // -Infinity is the never-fired sentinel the engine starts at, so the first act always sounds.
+    let last = -Infinity;
+    const fired = [0, 10, 20, 30, 40, 50].filter((t) => {
+      if (!shouldChime(t, last)) return false;
+      last = t;
+      return true;
+    });
+    expect(fired).toEqual([0]);
   });
 });

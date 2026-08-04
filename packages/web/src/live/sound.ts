@@ -90,10 +90,28 @@ const CUES: Record<string, Note[]> = {
   ],
 };
 
+/**
+ * Minimum gap between broadcast act cues, ms. The stream fires the whole team's acts at one
+ * listener who cannot mute them, and the cue set was tuned for a person at a desk with sparse
+ * arrivals — unthrottled, a busy minute is a slot machine.
+ *
+ * A dropped cue plays nothing later: the visual channel (speech bubble, stream panel) already
+ * carries every act, so the audio does not owe the viewer completeness.
+ */
+const BROADCAST_CUE_GAP_MS = 700;
+
+/** Pure gate for the broadcast cue throttle — a burst coalesces to one cue rather than queueing. */
+export function shouldChime(now: number, last: number, minGapMs = BROADCAST_CUE_GAP_MS): boolean {
+  return now - last >= minGapMs;
+}
+
 class FirehoseSound {
   enabled = false;
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** Throttle the cues (broadcast only — /live's tuning is unchanged and out of scope). */
+  private throttled = false;
+  private lastCueAt = -Infinity;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -125,6 +143,7 @@ class FirehoseSound {
    */
   enableForBroadcast(): void {
     this.enabled = true;
+    this.throttled = true;
     this.ensureContext();
   }
 
@@ -150,6 +169,11 @@ class FirehoseSound {
   /** Play the cue for an act. No-op unless enabled and the audio graph is live. */
   chime(act: string): void {
     if (!this.enabled) return;
+    if (this.throttled) {
+      const now = Date.now();
+      if (!shouldChime(now, this.lastCueAt)) return;
+      this.lastCueAt = now;
+    }
     this.ensureContext();
     const ctx = this.ctx;
     const master = this.master;
