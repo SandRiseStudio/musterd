@@ -270,6 +270,43 @@ describe('service refresh --auto (the tick)', () => {
     ).toBe(false);
   });
 
+  // One merge must cost the operator ONE notification. Announcing up front spent a second one on a
+  // tick that then failed, and a third when the retry finally landed — three OS notices for a daemon
+  // that moved once (#631). The announcement is "your session is about to reconnect", so it belongs
+  // after the build, where that is finally true.
+  it('does NOT announce a bounce that never happens — a failed build notifies once, not twice', async () => {
+    const notify = vi.fn();
+    await expect(
+      serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'notice']), {
+        platform: 'darwin',
+        ctx: ctx(autoRunner({ behind: 1, tip: 'freshtip77', buildStatus: 1 })),
+        health: async () => ({ connections: 4, build: 'oldsha0' }), // live sessions → notice mode
+        notify,
+        autoState: memState(null),
+      }),
+    ).rejects.toThrow(/build failed/);
+    expect(notify).toHaveBeenCalledOnce();
+    expect((notify.mock.calls[0]![0] as { title: string }).title).toContain('failed');
+  });
+
+  it('announces the bounce only after the build lands (so the notice is true when it fires)', async () => {
+    const notify = vi.fn();
+    const { code } = await tick({
+      argv: ['refresh', '--auto', '--mode', 'notice'],
+      ctx: ctx(autoRunner({ behind: 1 })),
+      health: async () => ({ connections: 4, build: 'oldsha0' }),
+      notify,
+    });
+    expect(code).toBe(0);
+    expect(notify).toHaveBeenCalledOnce();
+    // The build ran before the operator was told anything; the restart came after.
+    const order = calls.map((x) => `${x.cmd} ${x.args.join(' ')}`);
+    const build = order.findIndex((c) => c.startsWith('pnpm') && c.includes('build'));
+    const bounce = order.findIndex((c) => c.includes('kickstart') || c.includes('bootstrap'));
+    expect(build).toBeGreaterThanOrEqual(0);
+    expect(bounce).toBeGreaterThan(build);
+  });
+
   it('keeps the full confirmation budget after a known-healthy daemon bounces', async () => {
     let probes = 0;
     const health = async () => {
