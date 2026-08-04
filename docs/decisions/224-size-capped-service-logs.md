@@ -82,14 +82,24 @@ rather keep everything than have a policy applied to them.
 
 ## Observability & Evaluation
 
-**Signals**
+**Traces.** No new span: this is machine housekeeping on the operator's own disk, not an agent
+action, and it emits nothing an agent can read. The two signals it leaves are files:
 
 - Each trim writes a marker line into the trimmed log (`trimmed by musterd: N MB exceeded the M MB
 cap`) and a stamped `✓ trimmed <path> — N MB over the cap` line into `autorefresh/refresh.log`.
 - The absence of trim lines over a long window is itself a signal: either the caps are generous
   relative to real volume, or the tick is not running (which ADR 118/130's own liveness covers).
 
-**Evaluation** — re-measure `~/.musterd` after two weeks of normal dogfood operation:
+**Experiment.** Already run, and it decided the design rather than validating it afterwards: a
+throwaway LaunchAgent appending once per second, truncated mid-stream, to establish whether launchd
+opens `StandardOutPath` with `O_APPEND`. Result: 64 bytes — four clean lines — four seconds later,
+no sparse hole. A negative result would have killed truncate-in-place outright and left only
+`newsyslog`-with-`sudo`, or nothing. Re-run it if this is ever ported to another service backend
+(systemd, Windows): the answer is platform-specific and load-bearing.
+
+**Eval** — dataset: `~/.musterd` itself, baselined by the 2026-08-04 measurement in the table above
+(`daemon.log` 34.0 MB, `otel-sink.log` 10.6 MB, `live/build.log` 4.6 MB, ~50 MB total). Re-measure
+after two weeks of normal dogfood operation:
 
 - **Pass:** no log exceeds `2 × cap`; `daemon.log` is bounded; and every trim that occurred is
   accounted for by a marker line, i.e. no history vanished without saying so.
