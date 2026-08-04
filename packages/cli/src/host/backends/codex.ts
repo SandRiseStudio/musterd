@@ -213,8 +213,25 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
           settled: Promise.resolve(undefined),
         };
       const deadline = Date.now() + spec.bounds.timeout_ms;
+      // Absent is legacy: mixed daemon/host versions retain the existing resume path. An explicit
+      // portable/fresh order bypasses resume and spawns fresh immediately (ADR 209).
+      const deliveryTracked = spec.order.intended_delivery !== undefined;
+      const wantsResume = spec.order.intended_delivery !== 'fresh';
+      const deliveryMetadata = () =>
+        !deliveryTracked
+          ? {}
+          : {
+              ...(liveness.transcriptBytes !== undefined
+                ? { transcript_bytes: liveness.transcriptBytes }
+                : {}),
+              ...(liveness.transcriptMtime !== undefined
+                ? { transcript_age_ms: Math.max(0, Date.now() - liveness.transcriptMtime) }
+                : {}),
+            };
       const captured = capturedId(liveness);
-      if (captured) {
+      let resumeAttempted = false;
+      if (captured && wantsResume) {
+        resumeAttempted = true;
         const resumed = await attempt(
           deps,
           bin,
@@ -226,15 +243,31 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
           spec.bounds.timeout_ms,
         );
         if (resumed.occupied)
-          return { outcome: { occupied: true, session: 'resumed' }, settled: resumed.settled };
+          return {
+            outcome: {
+              occupied: true,
+              session: 'resumed',
+              ...(deliveryTracked ? { delivery_outcome: 'resumed' as const } : {}),
+              ...deliveryMetadata(),
+            },
+            settled: resumed.settled,
+          };
         if (resumed.exactCleanWithoutPresence)
           return {
-            outcome: { occupied: false, session: 'resumed', reason: resumed.reason },
+            outcome: {
+              occupied: false,
+              session: 'resumed',
+              reason: resumed.reason,
+              ...(deliveryTracked ? { delivery_outcome: 'resumed' as const } : {}),
+              ...deliveryMetadata(),
+            },
             settled: resumed.settled,
           };
         ctx.log(
           `resume failed for ${spec.order.seat} (${resumed.reason}) — fresh fallback in the same lease`,
         );
+      } else if (captured && !wantsResume) {
+        ctx.log(`portable delivery for ${spec.order.seat}: fresh spawn (resume bypassed)`);
       }
       const fresh = await attempt(
         deps,
@@ -250,6 +283,14 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
         outcome: {
           occupied: fresh.occupied,
           session: 'fresh',
+          ...(deliveryTracked
+            ? {
+                delivery_outcome: resumeAttempted
+                  ? ('fresh_fallback' as const)
+                  : ('fresh' as const),
+              }
+            : {}),
+          ...deliveryMetadata(),
           ...(fresh.occupied ? {} : { reason: fresh.reason }),
         },
         settled: fresh.settled,
