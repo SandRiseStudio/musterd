@@ -26,14 +26,14 @@ Its first act is to fetch `/health`. If that throws, it does this:
 
 A ✓, and exit 0. Measured on the live machine, 2026-08-04, from `~/.musterd/autorefresh/refresh.log`:
 
-| signal                                          | count                                   |
-| ----------------------------------------------- | --------------------------------------- |
-| `✓ daemon unreachable — nothing to refresh` ticks | **1,136**                               |
-| contiguous outage blocks                        | **29**                                  |
-| block lengths (ticks → elapsed at 120s)          | 3 → ~6 min, 4 → ~8 min, 6 → ~12 min, 13 → ~26 min, plus two very long blocks |
+| signal                                            | count                                                                        |
+| ------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `✓ daemon unreachable — nothing to refresh` ticks | **1,136**                                                                    |
+| contiguous outage blocks                          | **29**                                                                       |
+| block lengths (ticks → elapsed at 120s)           | 3 → ~6 min, 4 → ~8 min, 6 → ~12 min, 13 → ~26 min, plus two very long blocks |
 
 So the machine's only watcher of prod has reported success, more than a thousand times, in the
-exact condition it exists to notice. Nobody was misled by a wrong *fact* — the line is literally
+exact condition it exists to notice. Nobody was misled by a wrong _fact_ — the line is literally
 true, the daemon was unreachable and there was indeed nothing to refresh. The defect is that
 "nothing to refresh" is the report of a **healthy no-op**, and it is being used for an **outage**.
 Same glyph, same exit code, same log shape as the 8,000 ticks where everything was fine.
@@ -63,8 +63,11 @@ every ordinary bounce and train the operator to ignore the one channel that matt
 Escalation requires both:
 
 - **two consecutive** failed `/health` probes — at the 120s tick, ~4 minutes of continuous absence;
-  the run counter persists across ticks (each tick is a separate `launchd` invocation) beside the
-  existing attempted-tip debounce state; **and**
+  the run counter persists across ticks, because each tick is a separate `launchd` invocation with no
+  memory of the last. It lives in **its own file** (`autorefresh/.outage`), deliberately _not_ in the
+  existing attempted-tip stamp: writing TDD tests for this surfaced that sharing one slot would let
+  an outage clobber the broken-`main` build debounce, so a daemon that died mid-build-attempt would
+  come back and rebuild a known-broken tip every tick. Two lifetimes, two files. **and**
 - **`launchctl` agreeing** the daemon job is not running healthily — an independent source, not a
   second opinion from the same one.
 
@@ -73,26 +76,34 @@ normal, not an incident.
 
 ### 2. Autonomy — one restart attempt, then tell the human, then stop
 
-On confirmed-down the tick attempts `service restart`. This is deliberately *not* a new power: the
+On confirmed-down the tick attempts `service restart`. This is deliberately _not_ a new power: the
 tick **already** stops and starts the daemon on every ordinary refresh, under the same guards, and
 restarting a daemon that is already dead is strictly less disruptive than the bounce it performs
 routinely (no live session to drop — there is nothing to drop).
 
-- **Recovered** → a stamped log line + an audit row. No notification: a self-healed outage that
+- **Recovered** → a stamped `refresh.log` line. No notification: a self-healed outage that
   interrupts the operator has just moved the cost rather than removed it.
-- **Still down** → `musterd notify` (ADR 035) + an audit row, and **stop attempting**. One restart
-  per outage block. A watcher that retries a failing restart every two minutes is a restart storm
-  wearing a helpful expression.
+- **Still down** → `musterd notify` (ADR 035) + its ledger line, and **stop attempting**. One
+  restart per outage block. A watcher that retries a failing restart every two minutes is a restart
+  storm wearing a helpful expression.
+
+**There is deliberately no audit row here, and the reason is structural:** the ADR 071 audit log
+lives _inside the daemon_, so an outage is exactly the event it cannot record. Reaching for it would
+either fail silently or make the escalation depend on the thing being escalated about. The durable
+record of a daemon outage is therefore the operator-owned file — `refresh.log`, which is itself
+bounded and retained by ADR 224 — and that is the honest place for it. If daemon-down events ever
+need to reach the team's governance record, they must be _back-filled after recovery_, not written
+during the outage; that is a separate decision and is not made here.
 
 ### 3. What it must not do
 
-**Never spend a wake.** Waking a seat costs real money, and a woken seat coordinates *through the
-daemon* — the thing that is down. Escalation to a live platform-holding seat stays a later
+**Never spend a wake.** Waking a seat costs real money, and a woken seat coordinates _through the
+daemon_ — the thing that is down. Escalation to a live platform-holding seat stays a later
 increment, gated on evidence that notification alone leaves outages open.
 
 **Never widen its remit here.** The seed's fuller incident surface — `crashloop`, `build_skew`,
 `publisher_failed`, `schema_drift`, `error_rate`, `presence_churn` — stays captured in the seed doc
-and lands later as promotions of *this* seam, not as a second watcher racing this one.
+and lands later as promotions of _this_ seam, not as a second watcher racing this one.
 
 ## Consequences
 
@@ -107,12 +118,14 @@ and lands later as promotions of *this* seam, not as a second watcher racing thi
 
 ## Observability & Evaluation
 
-**Traces.** Three signals, all on rails that already exist: a stamped `refresh.log` line naming the
-confirmed outage and what was attempted (`✗ daemon down (confirmed 2 probes + launchctl) — restarting`
-/ `✓ daemon recovered on restart` / `✗ restart did not recover it — notified the operator, standing
-down`); an audit row per escalation (ADR 071); and the existing `musterd notify` push, which now
-also leaves its ledger line (#631's fix) so a report of a notice can be checked against the log that
-caused it.
+**Traces.** Two signals, both on rails that already exist and — per the Decision — both _outside_
+the daemon, because the daemon is the thing that is down: a stamped `refresh.log` line naming each
+stage of the ladder (`one failed probe, waiting for a second` / `launchctl reports the job running —
+holding off` / `daemon down (confirmed …) — restarting` / `daemon recovered on restart` / `restart
+did not recover it — notified the operator, standing down`), and the `musterd notify` push, which
+leaves its own ledger line (#631's fix) so a reported notice can be checked against the log that
+caused it. Each rung is a distinct string on purpose: the whole defect being fixed is one message
+covering several different states.
 
 **Eval** — dataset: `~/.musterd/autorefresh/refresh.log` itself, baselined by the measurement in the
 Context table (1,136 unreachable ticks / 29 blocks / longest short block 13 ticks). Re-measure after

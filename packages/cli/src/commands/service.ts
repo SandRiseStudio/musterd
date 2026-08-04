@@ -789,6 +789,9 @@ export async function serviceCommand(
     notify?: (n: { id: string; title: string; body: string }) => void;
     /** The attempted-tip debounce store (injected in tests; defaults to a file under ~/.musterd). */
     autoState?: { read: () => string | null; write: (sha: string) => void };
+    /** ADR 229: the outage run/escalation marker — SEPARATE from the build debounce, so an outage
+     *  can never clobber the broken-`main` attempted-tip marker (or be clobbered by it). */
+    outageState?: { read: () => string | null; write: (s: string) => void };
     /** Sleep between post-bounce `/health` polls (injected so tests never actually wait). */
     sleep?: (ms: number) => Promise<void>;
     /** ADR 224 log trim (injected so the tick's tests never touch the real ~/.musterd logs). */
@@ -868,6 +871,7 @@ export async function serviceCommand(
         quietFloorSeconds: parseSeconds(parsed, 'quiet-floor', DEFAULT_AUTOREFRESH_QUIET_FLOOR),
       };
       const autoState = deps.autoState ?? fileAutoState();
+      const outageState = deps.outageState ?? fileOutageState();
       // Unattended output: stamp it and record what the operator was actually shown. `refresh.log`
       // is read after the fact, by a human asking "why did my machine just do that?" — and it
       // answered neither half. Every line looked alike whether it was emitted 2 minutes or 2 days
@@ -891,7 +895,17 @@ export async function serviceCommand(
           `${stamp()} ${theme.meta(`· notified the operator: "${n.title}" — ${n.body}`)}\n`,
         );
       };
-      return autoRefreshTick(ctx, health, mode, settle, notify, autoState, okStamped, fail);
+      return autoRefreshTick(
+        ctx,
+        health,
+        mode,
+        settle,
+        notify,
+        autoState,
+        outageState,
+        okStamped,
+        fail,
+      );
     }
     const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
     return autoRefreshServiceCommand(sub, arCtx, parsed, ok, fail);
@@ -1189,6 +1203,30 @@ async function refreshDaemon(
   return 0;
 }
 
+/** File-backed outage marker for the ADR 229 escalation ladder — its own file beside the attempted-tip
+ *  stamp, so the two lifecycles (a broken build vs. a dead daemon) can never overwrite each other. */
+function fileOutageState(): { read: () => string | null; write: (s: string) => void } {
+  const p = join(dirname(configPath()), 'autorefresh', '.outage');
+  return {
+    read: () => {
+      try {
+        return readFileSync(p, 'utf8').trim() || null;
+      } catch {
+        return null;
+      }
+    },
+    write: (v: string) => {
+      try {
+        mkdirSync(dirname(p), { recursive: true });
+        writeFileSync(p, v, 'utf8');
+      } catch {
+        // best-effort: a marker we cannot persist degrades to "first miss every tick", which is
+        // silent-and-safe (it never escalates), exactly like the pre-229 behaviour.
+      }
+    },
+  };
+}
+
 /** File-backed attempted-tip store for the auto-refresher debounce (§ {@link autoRefreshStampPath}). */
 function fileAutoState(): { read: () => string | null; write: (sha: string) => void } {
   const p = autoRefreshStampPath();
@@ -1230,6 +1268,91 @@ function fileAutoState(): { read: () => string | null; write: (sha: string) => v
  *      the team-facing announcement belongs to the future platform-guardian seat, not this schedule).
  *      With no live sessions, refresh straight through (the ADR 047 guard passes cleanly).
  */
+/**
+ * A dead daemon is not a success (ADR 229).
+ *
+ * The tick used to log `✓ unreachable — nothing to refresh` and exit 0 — the report of a healthy
+ * no-op, used for an outage. Measured on the live machine 2026-08-04: **1,136 such ticks across 29
+ * contiguous blocks** at the verified 120s interval, i.e. the only unattended actor on running
+ * infrastructure reporting success in exactly the condition it exists to notice.
+ *
+ * Escalating needs TWO independent sources, never one probe — ADR 205 exists because a single
+ * transient miss produced a false failure report, and repeating that here would fire a notification
+ * during every ordinary bounce and train the operator to ignore the one channel that matters:
+ *
+ *   1. two CONSECUTIVE failed `/health` probes (~4 min at the tick interval), counted in a store
+ *      that survives across ticks (each tick is a separate launchd invocation); and
+ *   2. `launchctl` agreeing the job is not running — a different source, not a second opinion from
+ *      the same one. A daemon mid-restart fails a probe while launchctl is content; that is normal.
+ *
+ * On confirmation: ONE `kickstart` attempt (the tick already bounces the daemon on every ordinary
+ * refresh under the same guards — restarting a daemon that is already dead drops no session because
+ * there is none to drop), then either a quiet recovery or one OS notice, and then it stands down.
+ * A watcher that retries a failing restart every two minutes is a restart storm wearing a helpful
+ * expression. It never spends a wake: a woken seat would coordinate through the daemon that is down.
+ */
+async function handleUnreachable(
+  ctx: ServiceCtx,
+  health: () => Promise<DaemonHealth>,
+  notify: (n: { id: string; title: string; body: string }) => void,
+  outageState: { read: () => string | null; write: (s: string) => void },
+  ok: (s: string) => void,
+): Promise<number> {
+  const prior = outageState.read() ?? '';
+  // Already escalated in this outage — say nothing further and touch nothing. The stop rule.
+  if (prior.startsWith('down:notified')) {
+    ok('daemon still unreachable — already notified this outage, standing down');
+    return 0;
+  }
+  // First miss: record the run and wait for corroboration. A single probe is a shrug.
+  if (!prior.startsWith('down:')) {
+    outageState.write('down:1');
+    ok('daemon unreachable — one failed probe, waiting for a second before calling it down');
+    return 0;
+  }
+  // Second consecutive miss. Ask the independent source before acting.
+  if (!jobIsDown(ctx)) {
+    ok(
+      'daemon unreachable, but launchctl reports the job running — holding off ' +
+        '(a bouncing daemon looks like this; one source is never enough)',
+    );
+    return 0;
+  }
+
+  ok(
+    `daemon down (confirmed: ${prior.replace('down:', '')} failed probes + launchctl) — restarting`,
+  );
+  ctx.run('launchctl', kickstartArgs(ctx.uid, ctx.label));
+  try {
+    await health();
+    outageState.write(''); // recovered — the outage is over, and the next one starts from zero
+    ok('daemon recovered on restart');
+    return 0;
+  } catch {
+    outageState.write('down:notified');
+    notify({
+      id: 'musterd-daemon-down',
+      title: 'musterd daemon is down',
+      // Self-contained on purpose: a push body is read on a lock screen where the title may be
+      // truncated or absent, so it names WHAT is down rather than relying on "it".
+      body: 'The musterd daemon did not answer /health and a restart did not recover it. The auto-refresher has stood down.',
+    });
+    ok('restart did not recover it — notified the operator, standing down');
+    return 0;
+  }
+}
+
+/**
+ * Does `launchctl` agree the daemon job is not running? The independent second source behind the
+ * ADR 229 confirmation. `launchctl print` exits non-zero when the service is unknown/unloaded; a
+ * loaded-but-crashlooping job still prints, so this is deliberately the CONSERVATIVE half — it says
+ * "down" only when launchd itself has nothing running, and a false "up" merely withholds an
+ * escalation rather than causing one.
+ */
+function jobIsDown(ctx: ServiceCtx): boolean {
+  return ctx.run('launchctl', ['print', `gui/${String(ctx.uid)}/${ctx.label}`]).status !== 0;
+}
+
 async function autoRefreshTick(
   ctx: ServiceCtx,
   health: () => Promise<DaemonHealth>,
@@ -1237,6 +1360,7 @@ async function autoRefreshTick(
   settle: { seconds: number; capSeconds: number; quietFloorSeconds: number },
   notify: (n: { id: string; title: string; body: string }) => void,
   autoState: { read: () => string | null; write: (sha: string) => void },
+  outageState: { read: () => string | null; write: (s: string) => void },
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
 ): Promise<number> {
@@ -1245,9 +1369,12 @@ async function autoRefreshTick(
   try {
     health0 = await health();
   } catch {
-    ok('daemon unreachable — nothing to refresh');
-    return 0;
+    return handleUnreachable(ctx, health, notify, outageState, ok);
   }
+  // Reachable: whatever outage we were tracking is over (ADR 229). Clearing here — rather than only
+  // on the up-to-date path — is what makes the run counter mean "consecutive", so a blip between two
+  // healthy ticks can never accumulate into a false confirmation.
+  if (outageState.read()) outageState.write('');
   if (!health0.build) {
     ok('daemon reports no build ref (not running from a checkout) — skipping');
     return 0;
