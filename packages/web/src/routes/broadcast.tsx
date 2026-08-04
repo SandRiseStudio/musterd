@@ -104,7 +104,7 @@ function BroadcastPage() {
 
   // Sound on, unless the URL says otherwise. Both engines default OFF and normally need a click;
   // a capture box never gets one, which is what `--autoplay-policy=no-user-gesture-required` and
-  // `enableForBroadcast` between them solve (ADR 226). Neither call persists — a stream must not
+  // `enableForBroadcast` between them solve (ADR 228). Neither call persists — a stream must not
   // rewrite the preferences a human set on this machine.
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('audio') === '0') return;

@@ -54,7 +54,7 @@
   font-size: 15px;
 }
 
-/* The asks reel (ADR 226). Sized for a 720p encode, not a desk: the stage is 1080p and the stream
+/* The asks reel (ADR 228). Sized for a 720p encode, not a desk: the stage is 1080p and the stream
    is downscaled ×0.667, so /live's 11.5px rail would land near 7.7px before Twitch's encoder. This
    is why the reel is not styled off .lc-asks — the two answer to different resolutions. */
 .bc-reel {

@@ -13,7 +13,7 @@
 FROM node:22-bookworm-slim
 
 # chromium + ffmpeg are the pipeline; pulseaudio is the sound card the container does not otherwise
-# have (ADR 226 — without a sink, Chrome's WebAudio renders into nothing and the stream carries
+# have (ADR 228 — without a sink, Chrome's WebAudio renders into nothing and the stream carries
 # anullsrc); fonts stop the office rendering tofu; tailscale is the reachability layer (ADR 039
 # topology B). python3/make/g++ exist only for better-sqlite3's node-gyp build during pnpm install.
 RUN apt-get update && apt-get install -y --no-install-recommends \

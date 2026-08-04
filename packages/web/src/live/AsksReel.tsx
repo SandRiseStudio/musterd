@@ -12,7 +12,7 @@ const SPECIES_VERB = {
 } as const;
 
 /**
- * The asks rail as stream chrome (ADR 226) — what `AsksStrip` is to `/live`, minus every part that
+ * The asks rail as stream chrome (ADR 228) — what `AsksStrip` is to `/live`, minus every part that
  * takes input.
  *
  * **Why a separate component rather than a `broadcast` prop on `AsksStrip`.** Two reasons, and the

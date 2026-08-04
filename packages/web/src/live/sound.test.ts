@@ -120,7 +120,7 @@ describe('the keyboard', () => {
   });
 });
 
-describe('enableForBroadcast (ADR 226)', () => {
+describe('enableForBroadcast (ADR 228)', () => {
   it('turns each engine on without touching the operator’s stored preference', () => {
     // Node env: stub just enough browser for the persistence check to be meaningful.
     const store = new Map<string, string>([

@@ -54,7 +54,7 @@ const OptionsSchema = z.object({
    * pixels is the one lever that changes what hardware can hold the stream. */
   resolution: z.enum(['720p', '1080p']).default('1080p'),
   /** Capture the page's audio from the container's PulseAudio sink instead of muxing silence.
-   * Hosted-Linux only (ADR 226): the macOS arm has no Pulse, and adding one was explicitly out of
+   * Hosted-Linux only (ADR 228): the macOS arm has no Pulse, and adding one was explicitly out of
    * scope. Off by default, so every existing invocation keeps producing byte-identical ffmpeg args. */
   audio: z.boolean().default(false),
 });

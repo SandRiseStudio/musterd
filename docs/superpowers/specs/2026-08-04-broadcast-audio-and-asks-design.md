@@ -1,7 +1,7 @@
 # Broadcast gets a voice — page audio on the stream, and the asks rail on /broadcast
 
 **Date:** 2026-08-04 · **Seat:** miley · **Lane:** 01KZ7A7H7NC0HT2K6AYPYNKRQ5
-**Branch:** `feat/broadcast-audio-and-asks` · **ADR:** 226
+**Branch:** `feat/broadcast-audio-and-asks` · **ADR:** 228
 
 ## The problem
 
@@ -17,17 +17,17 @@ would still receive `anullsrc`.
 
 **2 · `/broadcast` deliberately omits the asks rail.** `/live` passes `AsksStrip` as `topSlot` to
 `OfficeScene`; `/broadcast` passes nothing, on the stated grounds that "a stream cannot answer an
-ask" (`OfficeScene.tsx`). The reasoning is sound for the *answering*, but it threw away the
-*reporting* with it: a viewer cannot see that thirteen asks are waiting on a human.
+ask" (`OfficeScene.tsx`). The reasoning is sound for the _answering_, but it threw away the
+_reporting_ with it: a viewer cannot see that thirteen asks are waiting on a human.
 
 ## Decisions taken (nick, 2026-08-04)
 
-| Question | Decision |
-| --- | --- |
-| How does audio reach the encoder? | **Virtual sound card in the container** (PulseAudio null sink + `-f pulse`), not in-page `MediaRecorder`. |
-| Which arms get audio? | **Hosted (Linux) only.** The local `h264_videotoolbox` arm stays silent; no BlackHole/avfoundation work. |
-| What does the stream sound like? | **Both engines, act cues rate-limited.** Room tone as a continuous bed, act cues over it, throttled so a burst is not a slot machine. |
-| Multiple open asks with nobody to click "see all"? | **Cycle the lead** — one ask at a time in a single-line rail, rotating by urgency. |
+| Question                                           | Decision                                                                                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| How does audio reach the encoder?                  | **Virtual sound card in the container** (PulseAudio null sink + `-f pulse`), not in-page `MediaRecorder`.                             |
+| Which arms get audio?                              | **Hosted (Linux) only.** The local `h264_videotoolbox` arm stays silent; no BlackHole/avfoundation work.                              |
+| What does the stream sound like?                   | **Both engines, act cues rate-limited.** Room tone as a continuous bed, act cues over it, throttled so a burst is not a slot machine. |
+| Multiple open asks with nobody to click "see all"? | **Cycle the lead** — one ask at a time in a single-line rail, rotating by urgency.                                                    |
 
 ## Non-goals
 
@@ -56,7 +56,7 @@ Before the capture loop, and after the existing tailnet/daemon preflight:
    root in a container is the likeliest thing here to break, and its failure mode is silent: the
    stream goes live and carries silence, indistinguishable to the operator from a working stream
    until someone listens. The entrypoint already holds the precedent — it refuses to start when the
-   tailnet is down or the daemon is unreachable, on the stated grounds that "failing loud *before*
+   tailnet is down or the daemon is unreachable, on the stated grounds that "failing loud _before_
    going live beats a stream that opens on a black stage." The sink joins that block.
 
 > **Correction to the brainstormed design.** This check was first proposed for
@@ -83,7 +83,7 @@ When set:
 - `anullsrc` remains the default path. The "ingests require an audio track" guarantee is untouched.
 
 **Why `aresample=async=1` is not optional.** Video timestamps are synthesized by ffmpeg from frame
-*count* (`image2pipe` + `-framerate`); Pulse audio arrives on wall clock. Two clocks, no shared
+_count_ (`image2pipe` + `-framerate`); Pulse audio arrives on wall clock. Two clocks, no shared
 reference — over a four-hour stream they separate. `aresample=async=1` makes audio the follower and
 lets ffmpeg absorb the difference by stretching or dropping samples. The existing drift-compensating
 pump keeps video near real time, which keeps the correction small.
@@ -137,7 +137,7 @@ form `LIFE_GAIN` is recorded in `sound.ts` — the number plus what was measured
 
 ### 2.1 A new component, not a mode flag
 
-`AsksStrip` is ~460 lines of *answerability*: `sendAct`, sign-in offers, the Escape/click-outside
+`AsksStrip` is ~460 lines of _answerability_: `sendAct`, sign-in offers, the Escape/click-outside
 sheet, `document.title` mutation. Threading a `broadcast` branch through it makes both jobs harder to
 read and couples a stream chyron to a form.
 
@@ -161,7 +161,7 @@ as pure functions over the envelope timeline. So:
 ### 2.3 Sized for a 720p stream, not a desk
 
 `.lc-asks__rail` is `font-size: 11.5px`, with several elements smaller again. The stage is 1080p and
-the stream is encoded at 720p (×0.667), landing that near 7.7px *before* Twitch's encoder. Ported
+the stream is encoded at 720p (×0.667), landing that near 7.7px _before_ Twitch's encoder. Ported
 as-is the panel would be present and unreadable — worse than absent, because it costs stage area and
 returns nothing.
 
@@ -200,16 +200,16 @@ budget (ADR 183). `AsksReel` reuses `asks.ts` and adds no dependency, so the exp
 
 ## Documentation
 
-- **ADR 226**, with its required `## Observability & Evaluation` section (`pnpm gates`).
+- **ADR 228**, with its required `## Observability & Evaluation` section (`pnpm gates`).
 - `FEATURE_EPOCH` bump — this is a client-visible capability change (ADR 148).
 - Update the broadcast hosting spec for the container's new audio stage.
 
 ## Risks
 
-| Risk | Mitigation |
-| --- | --- |
+| Risk                                                                              | Mitigation                                                                                                  |
+| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | PulseAudio-as-root fails, and fails **silently** — a live stream carrying silence | Entrypoint preflight refuses to start without a verified sink; capturer fails the run on a dead Pulse input |
-| A/V drift over a multi-hour stream (frame-count vs wall-clock timestamps) | `-af aresample=async=1`; the drift-compensating pump keeps the correction small |
-| The mix is inaudible, or too loud, after Twitch's loudness handling | One measured `ebur128` calibration pass; the number recorded in §1.6, not guessed |
-| Byte budget breach on `/broadcast` | Reuses `asks.ts`, no new dependency; if it breaches, delete rather than raise |
-| The reel is unreadable at 720p | Its own type scale, verified by screenshot at stream resolution before merge |
+| A/V drift over a multi-hour stream (frame-count vs wall-clock timestamps)         | `-af aresample=async=1`; the drift-compensating pump keeps the correction small                             |
+| The mix is inaudible, or too loud, after Twitch's loudness handling               | One measured `ebur128` calibration pass; the number recorded in §1.6, not guessed                           |
+| Byte budget breach on `/broadcast`                                                | Reuses `asks.ts`, no new dependency; if it breaches, delete rather than raise                               |
+| The reel is unreadable at 720p                                                    | Its own type scale, verified by screenshot at stream resolution before merge                                |

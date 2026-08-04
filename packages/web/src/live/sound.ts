@@ -135,7 +135,7 @@ class FirehoseSound {
   }
 
   /**
-   * Turn sound on for a capture, without persisting. `/broadcast` only (ADR 226).
+   * Turn sound on for a capture, without persisting. `/broadcast` only (ADR 228).
    *
    * Separate from `setEnabled` deliberately, rather than a `persist?: boolean` parameter: a stream
    * source must never rewrite the preference a human set on this machine, and the call site should
@@ -436,7 +436,7 @@ class RoomTone {
   }
 
   /**
-   * Turn the bed on for a capture, without persisting, and without the visibility gate (ADR 226).
+   * Turn the bed on for a capture, without persisting, and without the visibility gate (ADR 228).
    *
    * The gate exists so a bed left running in a background tab is not the most annoying possible
    * version of this feature. A capture box has no tab and no listener whose attention could wander

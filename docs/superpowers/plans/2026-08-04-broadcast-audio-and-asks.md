@@ -16,7 +16,7 @@ reuses `asks.ts` and rides `/broadcast`'s `topSlot`.
 Debian bookworm container on Fly.
 
 **Spec:** `docs/superpowers/specs/2026-08-04-broadcast-audio-and-asks-design.md`
-**Lane:** `01KZ7A7H7NC0HT2K6AYPYNKRQ5` · **Branch:** `feat/broadcast-audio-and-asks` · **ADR:** 226
+**Lane:** `01KZ7A7H7NC0HT2K6AYPYNKRQ5` · **Branch:** `feat/broadcast-audio-and-asks` · **ADR:** 228
 
 ## Global Constraints
 
@@ -29,7 +29,7 @@ Debian bookworm container on Fly.
 - **Perf gate:** `pnpm perf:check` must pass. On breach, delete code — do **not** raise a budget
   (ADR 183, `packages/web/AGENTS.md`).
 - **Gates:** `pnpm gates` = install → build → typecheck → coverage → format:check + doc gates. Build
-  before typecheck. ADR 226 needs an `## Observability & Evaluation` section.
+  before typecheck. ADR 228 needs an `## Observability & Evaluation` section.
 - **Never run `pnpm format`.** Use `pnpm exec prettier --write <your files>`.
 - **Vitest runs from the repo root only.**
 - Commit messages end with `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`.
@@ -38,35 +38,37 @@ Debian bookworm container on Fly.
 
 ## File Structure
 
-| File | Responsibility |
-| --- | --- |
-| `packages/cli/src/commands/broadcast.ts` | `audio` option; `chromeArgs` autoplay flag; `ffmpegArgs` Pulse input |
-| `packages/cli/src/commands/broadcast.test.ts` | unit coverage for both arg builders, both variants |
-| `packages/cli/src/help/catalog.ts` | `--audio` in the broadcast usage line |
-| `scripts/broadcast/hosted.Dockerfile` | `pulseaudio` + `pulseaudio-utils` |
-| `scripts/broadcast/entrypoint.sh` | start the sink, verify it, pass `--audio` |
-| `packages/web/src/live/sound.ts` | non-persisting enable, visibility bypass, `shouldChime` |
-| `packages/web/src/live/sound.test.ts` | `shouldChime` coverage |
-| `packages/web/src/live/useLiveStream.ts` | route the chime through the throttle |
-| `packages/web/src/live/reel.ts` | **new** — `reelIndex`, pure cycling math |
-| `packages/web/src/live/reel.test.ts` | **new** |
-| `packages/web/src/live/AsksReel.tsx` | **new** — read-only cycling rail |
-| `packages/web/src/live/Broadcast.css` | reel type scale, sized for 720p |
-| `packages/web/src/routes/broadcast.tsx` | audio enable + `topSlot={<AsksReel …/>}` |
-| `packages/web/src/live/OfficeScene.tsx` | correct the now-false `topSlot` doc comment |
-| `packages/protocol/src/feature-epoch.ts` | bump 5 → 6 |
-| `docs/decisions/226-broadcast-audio-and-asks.md` | **new** ADR |
+| File                                             | Responsibility                                                       |
+| ------------------------------------------------ | -------------------------------------------------------------------- |
+| `packages/cli/src/commands/broadcast.ts`         | `audio` option; `chromeArgs` autoplay flag; `ffmpegArgs` Pulse input |
+| `packages/cli/src/commands/broadcast.test.ts`    | unit coverage for both arg builders, both variants                   |
+| `packages/cli/src/help/catalog.ts`               | `--audio` in the broadcast usage line                                |
+| `scripts/broadcast/hosted.Dockerfile`            | `pulseaudio` + `pulseaudio-utils`                                    |
+| `scripts/broadcast/entrypoint.sh`                | start the sink, verify it, pass `--audio`                            |
+| `packages/web/src/live/sound.ts`                 | non-persisting enable, visibility bypass, `shouldChime`              |
+| `packages/web/src/live/sound.test.ts`            | `shouldChime` coverage                                               |
+| `packages/web/src/live/useLiveStream.ts`         | route the chime through the throttle                                 |
+| `packages/web/src/live/reel.ts`                  | **new** — `reelIndex`, pure cycling math                             |
+| `packages/web/src/live/reel.test.ts`             | **new**                                                              |
+| `packages/web/src/live/AsksReel.tsx`             | **new** — read-only cycling rail                                     |
+| `packages/web/src/live/Broadcast.css`            | reel type scale, sized for 720p                                      |
+| `packages/web/src/routes/broadcast.tsx`          | audio enable + `topSlot={<AsksReel …/>}`                             |
+| `packages/web/src/live/OfficeScene.tsx`          | correct the now-false `topSlot` doc comment                          |
+| `packages/protocol/src/feature-epoch.ts`         | bump 5 → 6                                                           |
+| `docs/decisions/228-broadcast-audio-and-asks.md` | **new** ADR                                                          |
 
 ---
 
 ## Task 1: `--audio` reaches ffmpeg and Chrome
 
 **Files:**
+
 - Modify: `packages/cli/src/commands/broadcast.ts` (`OptionsSchema` ~line 38, `parseOptions` ~line 67, `ffmpegArgs` ~line 199, `chromeArgs` ~line 666)
 - Modify: `packages/cli/src/help/catalog.ts:148`
 - Test: `packages/cli/src/commands/broadcast.test.ts`
 
 **Interfaces:**
+
 - Produces: `BroadcastOptions['audio']: boolean`; `chromeArgs(port, profileDir, platform, stage, audio?: boolean)`; `PULSE_SINK = 'musterd'` exported from `broadcast.ts`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -95,7 +97,12 @@ describe('audio', () => {
 
   it('keeps an audio track either way — RTMP ingests reject video-only', () => {
     for (const audio of [false, true]) {
-      const opts = parseOptions({ team: 't', twitch: true, encoder: 'libx264', ...(audio ? { audio: true } : {}) });
+      const opts = parseOptions({
+        team: 't',
+        twitch: true,
+        encoder: 'libx264',
+        ...(audio ? { audio: true } : {}),
+      });
       expect(ffmpegArgs(opts, { kind: 'rtmp', target: 'rtmp://x' })).toContain('aac');
     }
   });
@@ -106,7 +113,9 @@ describe('audio', () => {
       '--autoplay-policy=no-user-gesture-required',
     );
     expect(chromeArgs(9222, '/tmp/p', 'linux', stage, false).join(' ')).not.toContain('autoplay');
-    expect(chromeArgs(9222, '/tmp/p', 'linux', stage)).toEqual(chromeArgs(9222, '/tmp/p', 'linux', stage, false));
+    expect(chromeArgs(9222, '/tmp/p', 'linux', stage)).toEqual(
+      chromeArgs(9222, '/tmp/p', 'linux', stage, false),
+    );
   });
 });
 ```
@@ -122,7 +131,7 @@ In `OptionsSchema`, after `resolution`:
 
 ```ts
   /** Capture the page's audio from the container's PulseAudio sink instead of muxing silence.
-   * Hosted-Linux only (ADR 226): the macOS arm has no Pulse, and adding one was explicitly out of
+   * Hosted-Linux only (ADR 228): the macOS arm has no Pulse, and adding one was explicitly out of
    * scope. Off by default, so every existing invocation keeps producing byte-identical ffmpeg args. */
   audio: z.boolean().default(false),
 ```
@@ -217,6 +226,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 2: A sound card in the capture container
 
 **Files:**
+
 - Modify: `scripts/broadcast/hosted.Dockerfile`
 - Modify: `scripts/broadcast/entrypoint.sh`
 
@@ -236,7 +246,7 @@ and extend the comment above the block:
 
 ```
 # chromium + ffmpeg are the pipeline; pulseaudio is the sound card the container does not otherwise
-# have (ADR 226 — without a sink, Chrome's WebAudio renders into nothing and the stream carries
+# have (ADR 228 — without a sink, Chrome's WebAudio renders into nothing and the stream carries
 # anullsrc); fonts stop the office rendering tofu; tailscale is the reachability layer.
 ```
 
@@ -248,7 +258,7 @@ In `entrypoint.sh`, after the daemon-reachability preflight and **before** the c
 # ── the sound card ───────────────────────────────────────────────────────────────────────────────
 #
 # The container has no audio device, so Chrome's WebAudio graph would render into nothing and the
-# stream would carry ffmpeg's silence generator (ADR 226). A null sink gives Chrome somewhere to
+# stream would carry ffmpeg's silence generator (ADR 228). A null sink gives Chrome somewhere to
 # play and gives ffmpeg a `.monitor` source to capture.
 #
 # System mode because this container runs as root and PulseAudio refuses a root session daemon;
@@ -310,10 +320,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 3: The page may make a sound without a click, and without rewriting your prefs
 
 **Files:**
+
 - Modify: `packages/web/src/live/sound.ts` (`FirehoseSound` ~line 93, `RoomTone` ~line 355)
 - Test: `packages/web/src/live/sound.test.ts`
 
 **Interfaces:**
+
 - Produces: `firehoseSound.enableForBroadcast(): void`, `roomTone.enableForBroadcast(): void`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -413,11 +425,13 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 4: A burst of acts is one cue, not twenty
 
 **Files:**
+
 - Modify: `packages/web/src/live/sound.ts`
 - Modify: `packages/web/src/live/useLiveStream.ts:11` (import) and the chime call site
 - Test: `packages/web/src/live/sound.test.ts`
 
 **Interfaces:**
+
 - Produces: `shouldChime(now: number, last: number, minGapMs?: number): boolean` (pure, exported);
   `firehoseSound.chime` gains internal throttling active only after `enableForBroadcast`.
 
@@ -426,13 +440,13 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```ts
 describe('shouldChime', () => {
   it('passes a cue clear of the gap and holds one inside it', () => {
-    expect(shouldChime(1000, 0)).toBe(true);       // 1000ms since the last — clear
-    expect(shouldChime(1000, 900)).toBe(false);    // 100ms since — inside
+    expect(shouldChime(1000, 0)).toBe(true); // 1000ms since the last — clear
+    expect(shouldChime(1000, 900)).toBe(false); // 100ms since — inside
   });
 
   it('reopens exactly at the gap, not a millisecond before', () => {
-    expect(shouldChime(1000, 300)).toBe(true);     // exactly 700ms
-    expect(shouldChime(1000, 301)).toBe(false);    // 699ms
+    expect(shouldChime(1000, 300)).toBe(true); // exactly 700ms
+    expect(shouldChime(1000, 301)).toBe(false); // 699ms
   });
 
   it('coalesces a burst to one cue rather than queueing', () => {
@@ -487,11 +501,11 @@ In `enableForBroadcast`, add `this.throttled = true;`.
 At the top of `chime(act: string)`, after the `if (!this.enabled) return;`:
 
 ```ts
-    if (this.throttled) {
-      const now = Date.now();
-      if (!shouldChime(now, this.lastCueAt)) return;
-      this.lastCueAt = now;
-    }
+if (this.throttled) {
+  const now = Date.now();
+  if (!shouldChime(now, this.lastCueAt)) return;
+  this.lastCueAt = now;
+}
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -513,10 +527,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 5: The reel's cycling math
 
 **Files:**
+
 - Create: `packages/web/src/live/reel.ts`
 - Create: `packages/web/src/live/reel.test.ts`
 
 **Interfaces:**
+
 - Produces: `reelIndex(count: number, elapsedMs: number, dwellMs?: number): number`, and
   `REEL_DWELL_MS: number`.
 
@@ -607,10 +623,12 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 6: `AsksReel` — the read-only rail
 
 **Files:**
+
 - Create: `packages/web/src/live/AsksReel.tsx`
 - Modify: `packages/web/src/live/Broadcast.css`
 
 **Interfaces:**
+
 - Consumes: `deriveAsks`, `askIsLoud`, `byUrgency`, `AskView` from `./asks`; `reelIndex`,
   `REEL_DWELL_MS` from `./reel`; `initial`, `memberColor`, `kindOf` from `./format`;
   `askTierHolds` from `@musterd/protocol`.
@@ -633,7 +651,7 @@ const SPECIES_VERB = {
 } as const;
 
 /**
- * The asks rail as stream chrome (ADR 226) — what `AsksStrip` is to `/live`, minus every part that
+ * The asks rail as stream chrome (ADR 228) — what `AsksStrip` is to `/live`, minus every part that
  * takes input.
  *
  * **Why a separate component rather than a `broadcast` prop on `AsksStrip`.** Two reasons, and the
@@ -752,7 +770,7 @@ Step 2 — if the final CSS hard-codes it instead, drop the import rather than l
 Append to `packages/web/src/live/Broadcast.css`:
 
 ```css
-/* The asks reel (ADR 226). Sized for a 720p encode, not a desk: the stage is 1080p and the stream
+/* The asks reel (ADR 228). Sized for a 720p encode, not a desk: the stage is 1080p and the stream
    is downscaled ×0.667, so /live's 11.5px rail would land near 7.7px before Twitch's encoder. This
    is why the reel is not styled off .lc-asks — the two answer to different resolutions. */
 .bc-reel {
@@ -877,6 +895,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ## Task 7: Wire both halves into `/broadcast`
 
 **Files:**
+
 - Modify: `packages/web/src/routes/broadcast.tsx`
 - Modify: `packages/web/src/live/OfficeScene.tsx:105-108` (the `topSlot` doc comment)
 
@@ -892,15 +911,15 @@ import { firehoseSound, roomTone } from '../live/sound';
 and add a mount effect beside the stage effect:
 
 ```tsx
-  // Sound on, unless the URL says otherwise. Both engines default OFF and normally need a click;
-  // a capture box never gets one, which is what `--autoplay-policy=no-user-gesture-required` and
-  // `enableForBroadcast` between them solve (ADR 226). Neither call persists — a stream must not
-  // rewrite the preferences a human set on this machine.
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('audio') === '0') return;
-    firehoseSound.enableForBroadcast();
-    roomTone.enableForBroadcast();
-  }, []);
+// Sound on, unless the URL says otherwise. Both engines default OFF and normally need a click;
+// a capture box never gets one, which is what `--autoplay-policy=no-user-gesture-required` and
+// `enableForBroadcast` between them solve (ADR 228). Neither call persists — a stream must not
+// rewrite the preferences a human set on this machine.
+useEffect(() => {
+  if (new URLSearchParams(window.location.search).get('audio') === '0') return;
+  firehoseSound.enableForBroadcast();
+  roomTone.enableForBroadcast();
+}, []);
 ```
 
 - [ ] **Step 2: Seat the reel**
@@ -916,10 +935,10 @@ In the `<OfficeScene …>` props, after `workCues="stack"`:
 Replace lines 105-108 with:
 
 ```tsx
-  /** Chrome floated over the TOP of the room. `/live` seats the answerable asks & approvals rail
-   * here (nick's call: the office frames its own asks; the page above the panels stays quiet), and
-   * `/broadcast` seats `AsksReel` — the same asks, read-only and cycling, because a stream cannot
-   * answer one but should still show that thirteen are waiting (ADR 226). */
+/** Chrome floated over the TOP of the room. `/live` seats the answerable asks & approvals rail
+ * here (nick's call: the office frames its own asks; the page above the panels stays quiet), and
+ * `/broadcast` seats `AsksReel` — the same asks, read-only and cycling, because a stream cannot
+ * answer one but should still show that thirteen are waiting (ADR 228). */
 ```
 
 - [ ] **Step 4: Verify in the browser at stage size**
@@ -952,23 +971,24 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 8: ADR 226, the epoch bump, and the measured mix
+## Task 8: ADR 228, the epoch bump, and the measured mix
 
 **Files:**
-- Create: `docs/decisions/226-broadcast-audio-and-asks.md`
+
+- Create: `docs/decisions/228-broadcast-audio-and-asks.md`
 - Modify: `packages/protocol/src/feature-epoch.ts:41`
 - Modify: `docs/superpowers/specs/2026-08-04-broadcast-audio-and-asks-design.md` (§1.6)
 - Modify: the broadcast hosting spec (`docs/design/broadcast-hosting-design.md`)
 
 - [ ] **Step 1: Open the draft PR before writing the ADR**
 
-ADR 223: push the branch as a draft PR *before* writing the ADR, so 226 is visible to the next seat.
+ADR 223: push the branch as a draft PR _before_ writing the ADR, so 228 is visible to the next seat.
 
 ```bash
 git push -u origin feat/broadcast-audio-and-asks
-gh pr create --draft --title "Broadcast gets a voice — page audio on the stream, and the asks rail on /broadcast (ADR 226)" --body "Spec: docs/superpowers/specs/2026-08-04-broadcast-audio-and-asks-design.md
+gh pr create --draft --title "Broadcast gets a voice — page audio on the stream, and the asks rail on /broadcast (ADR 228)" --body "Spec: docs/superpowers/specs/2026-08-04-broadcast-audio-and-asks-design.md
 
-Lane 01KZ7A7H7NC0HT2K6AYPYNKRQ5. Claims ADR 226.
+Lane 01KZ7A7H7NC0HT2K6AYPYNKRQ5. Claims ADR 228.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)"
 ```
@@ -993,9 +1013,9 @@ If integrated loudness is far from a broadcast-sane target, add a single master 
 `enableForBroadcast` on both engines and re-measure. Then fill §1.6 of the spec with the measured
 value **and** what was measured to get it, in the form `LIFE_GAIN` uses in `sound.ts`.
 
-- [ ] **Step 4: Write ADR 226**
+- [ ] **Step 4: Write ADR 228**
 
-`docs/decisions/226-broadcast-audio-and-asks.md`, H1 exactly `# 226 — Broadcast audio and the asks
+`docs/decisions/228-broadcast-audio-and-asks.md`, H1 exactly `# 228 — Broadcast audio and the asks
 reel`. Must include `## Observability & Evaluation` (`pnpm check:obs-evals`). Cover: the stream had
 no audio path at all rather than a disabled one; PulseAudio over in-page `MediaRecorder` and why;
 hosted-only; the throttle; the reel as a separate component; and the entrypoint preflight as the
@@ -1009,14 +1029,14 @@ guard against a silent live stream.
 - [ ] **Step 6: Full gates, then undraft**
 
 ```bash
-pnpm exec prettier --write docs/decisions/226-broadcast-audio-and-asks.md docs/superpowers/specs/2026-08-04-broadcast-audio-and-asks-design.md
+pnpm exec prettier --write docs/decisions/228-broadcast-audio-and-asks.md docs/superpowers/specs/2026-08-04-broadcast-audio-and-asks-design.md
 pnpm gates && pnpm lint && pnpm adr-numbers:check
 ```
 
 Expected: all green. `pnpm lint` is a separate gate from `format:check` — run both.
 
 ```bash
-git add -A && git commit -m "docs: ADR 226 — broadcast audio and the asks reel
+git add -A && git commit -m "docs: ADR 228 — broadcast audio and the asks reel
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 git push

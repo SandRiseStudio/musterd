@@ -64,7 +64,7 @@ curl -sf --max-time 2 "$SERVER/health" >/dev/null || {
 # ── the sound card ───────────────────────────────────────────────────────────────────────────────
 #
 # The container has no audio device, so Chrome's WebAudio graph would render into nothing and the
-# stream would carry ffmpeg's silence generator (ADR 226). A null sink gives Chrome somewhere to
+# stream would carry ffmpeg's silence generator (ADR 228). A null sink gives Chrome somewhere to
 # play and gives ffmpeg a `.monitor` source to capture.
 #
 # System mode because this container runs as root and PulseAudio refuses a root session daemon;

@@ -71,7 +71,7 @@ describe('broadcast parseOptions', () => {
   });
 });
 
-describe('audio (ADR 226)', () => {
+describe('audio (ADR 228)', () => {
   it('leaves the default path byte-identical — the regression that matters most', () => {
     const opts = parseOptions({ team: 't', out: 'x.mp4' }, 'linux');
     expect(opts.audio).toBe(false);

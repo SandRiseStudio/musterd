@@ -162,7 +162,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'the new code when the daemon is rebuilt under it (ADR 159), and ends the stream rather than ' +
       'buffering without limit if the encoder stops keeping up. `--audio` captures the page’s own ' +
       'sound from a PulseAudio sink instead of muxing silence — hosted Linux only; the sink must ' +
-      'already exist, which the hosted entrypoint guarantees (ADR 226). This runs the capture on ' +
+      'already exist, which the hosted entrypoint guarantees (ADR 228). This runs the capture on ' +
       'THIS machine — to run it on a rented one instead, see `musterd stream`.',
   },
   {

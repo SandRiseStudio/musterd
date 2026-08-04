@@ -105,7 +105,7 @@ export function OfficeScene({
   /** Chrome floated over the TOP of the room. `/live` seats the answerable asks & approvals rail
    * here (nick's call: the office frames its own asks; the page above the panels stays quiet), and
    * `/broadcast` seats `AsksReel` — the same asks, read-only and cycling, because a stream cannot
-   * answer one but should still show that thirteen are waiting (ADR 226). */
+   * answer one but should still show that thirteen are waiting (ADR 228). */
   topSlot?: ReactNode;
   /**
    * Chrome seated in a strip BENEATH the room rather than floated over it — `/live` puts WorkStack
