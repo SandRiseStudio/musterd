@@ -95,7 +95,7 @@ What your change needs depends entirely on _what you changed_:
 When you find an error, contradiction, missing field, or a better approach:
 
 1. **Do not silently deviate.**
-2. Write `docs/decisions/NNN-<slug>.md` (sequential N; template in `07-conventions.md`): Context, Problem, Decision, Consequences.
+2. Write `docs/decisions/NNN-<slug>.md` — **get NNN from `pnpm adr:next`, never by reading `origin/main` yourself** (ADR 220: a number is free only if no *open PR* claims it either). Template in `07-conventions.md`: Context, Problem, Decision, Consequences.
 3. Make the **smallest correct change**.
 4. Update the affected doc(s) **in the same commit**, referencing the ADR in the commit footer (`Refs ADR-00N`).
 

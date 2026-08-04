@@ -8,6 +8,10 @@
  * parallel can each claim the same next number (`152`, `153`, …) and the collision only surfaces at
  * merge — or silently clobbers one ADR with the other. This gate turns that into a build failure the
  * moment both files coexist in a tree, so a number clash is caught in CI, not discovered after the fact.
+ *
+ * This gate is the BACKSTOP, not the fix: it is deliberately offline and deterministic, so it can
+ * only see numbers that already coexist in one tree — by which point someone has burned a red CI
+ * run. Prevention is `pnpm adr:next` (ADR 220), which consults open PRs as well as origin/main.
  * (It does NOT require a contiguous sequence — gaps from abandoned/renumbered ADRs are fine; only
  * *collisions* and *self-inconsistent* files are errors.)
  *
@@ -91,9 +95,9 @@ for (const { file, num } of adrs) {
 
 if (failed) {
   process.stderr.write(
-    `\nADR numbers must be unique and match their heading. Pick the next free number ` +
-      `(check origin/main first — a parallel branch may have taken it), and keep the ` +
-      `\`# NNN — …\` H1 in step with the filename.\n`,
+    `\nADR numbers must be unique and match their heading. Run \`pnpm adr:next\` for a number ` +
+      `that no open PR has already claimed (reading origin/main alone is what caused this), and ` +
+      `keep the \`# NNN — …\` H1 in step with the filename.\n`,
   );
   process.exit(1);
 }
