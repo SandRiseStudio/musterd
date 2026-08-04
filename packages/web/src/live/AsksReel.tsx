@@ -62,25 +62,28 @@ export function AsksReel({
       className={`bc-reel${loud.length > 0 ? ' bc-reel--loud' : ''}`}
       aria-label="asks and approvals"
     >
-      <BellIcon />
+      {/* The eyebrow row — the same shape as the floor card's "ON THE FLOOR" head: mono label,
+          counts pushed right, the amber hairline underneath. The card announces WHAT it is here so
+          the ask line below can be nothing but the ask. */}
+      <header className="bc-reel__head">
+        <BellIcon />
+        <span className="bc-reel__label">Asks &amp; approvals</span>
+        <span className="bc-reel__spacer" />
+        {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
+        {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
+        {settled > 0 && <span className="bc-reel__meta bc-reel__meta--dim">{settled} settled</span>}
+        {shown !== null && cards.length > 1 && (
+          <span className="bc-reel__dots" aria-hidden="true">
+            {cards.map((c) => (
+              <i key={c.env.id} className={c.env.id === shown.env.id ? 'is-on' : undefined} />
+            ))}
+          </span>
+        )}
+      </header>
       {shown === null ? (
-        <span className="bc-reel__lead bc-reel__lead--quiet">
-          <b>asks &amp; approvals</b>
-          <span className="bc-reel__verb">nothing waiting on a human</span>
-        </span>
+        <div className="bc-reel__row bc-reel__row--quiet">nothing waiting on a human</div>
       ) : (
         <ShownAsk shown={shown} idx={idx} now={now} />
-      )}
-      <span className="bc-reel__spacer" />
-      {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
-      {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
-      {settled > 0 && <span className="bc-reel__meta">{settled} settled</span>}
-      {shown !== null && cards.length > 1 && (
-        <span className="bc-reel__dots" aria-hidden="true">
-          {cards.map((c) => (
-            <i key={c.env.id} className={c.env.id === shown.env.id ? 'is-on' : undefined} />
-          ))}
-        </span>
       )}
     </section>
   );
@@ -97,7 +100,9 @@ function ShownAsk({
   now: number;
 }) {
   return (
-    <>
+    // Keyed on the envelope id so React remounts on rotation and the entry animation replays —
+    // without it the text swaps in place and the change is easy to miss on a stream.
+    <div className="bc-reel__row" key={shown.env.id}>
       <span
         className="bc-reel__who"
         style={{ background: memberColor(shown.env.from, kindOf(shown.env.from, idx)) }}
@@ -105,16 +110,14 @@ function ShownAsk({
       >
         {initial(shown.env.from)}
       </span>
-      {/* Keyed on the envelope id so React remounts on rotation and the entry animation replays —
-          without it the text swaps in place and the change is easy to miss on a stream. */}
-      <span className="bc-reel__lead" key={shown.env.id}>
+      <span className="bc-reel__lead">
         <b>{shown.env.from}</b>
         <span className="bc-reel__verb">{SPECIES_VERB[shown.species]}</span>
         {shown.env.body && <span className="bc-reel__gist">{shown.env.body}</span>}
       </span>
       <span className={`bc-reel__tier bc-reel__tier--${shown.tier}`}>{shown.tier}</span>
       <ReelClock ask={shown} now={now} />
-    </>
+    </div>
   );
 }
 
