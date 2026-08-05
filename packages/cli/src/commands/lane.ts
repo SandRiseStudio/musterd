@@ -144,12 +144,23 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     if (submit) {
       // ADR 192: report the acceptor routing — who was asked, or that self-close is sanctioned.
       if (res.review?.reviewer) {
+        // ADR 235: the advice follows the backstop. "Self-close on silence" was right while an
+        // unaccepted lane hung forever; with a sweep armed it is what turns a recoverable wait into
+        // a permanent unverified close — measured, the acceptor came back 20 of 20 times, an
+        // average 106.8 minutes after the owner had already shut the lane.
+        const backstop = res.review.backstop;
         process.stdout.write(
           `acceptance asked of ${theme.memberName(res.review.reviewer, 'agent')} ` +
             theme.meta(
-              `(${res.review.route}) — wait ≤5m; accept closes the lane, reject resumes it; ` +
-                `on silence, \`musterd lane resolve\` yourself (recorded unconfirmed). ` +
-                `Acceptor judges intent/principles/usable/feel — not a code review.`,
+              backstop?.armed
+                ? `(${res.review.route}) — you are done; leave it with them. Do NOT self-close on ` +
+                    `silence: the daemon sweeps an unanswered lane after ` +
+                    `${Math.round(backstop.grace_ms / 3_600_000)}h. \`musterd lane resolve\` still ` +
+                    `works if you need it shut now, and records unconfirmed. ` +
+                    `Acceptor judges intent/principles/usable/feel — not a code review.`
+                : `(${res.review.route}) — wait ≤5m; accept closes the lane, reject resumes it; ` +
+                    `on silence, \`musterd lane resolve\` yourself (recorded unconfirmed). ` +
+                    `Acceptor judges intent/principles/usable/feel — not a code review.`,
             ) +
             '\n',
         );

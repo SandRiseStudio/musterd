@@ -210,6 +210,19 @@ export const LaneResultSchema = z.object({
       reviewer: z.string().optional(),
       route: z.enum(['human_admin', 'cross_family']).optional(),
       self_close_sanctioned: z.boolean().optional(),
+      /**
+       * ADR 235: this team has an acceptance backstop, so an unanswered lane gets collected rather
+       * than hanging — which is what makes "leave it with them" safe advice instead of a way to
+       * strand work. Present only when an acceptor was actually asked AND the team armed
+       * `loops.sweep`.
+       *
+       * Absent means "no backstop to rely on", which is also what an older daemon sends — so the
+       * fallback is the pre-235 advice, and the degradation is toward the safe answer rather than
+       * toward telling a seat to wait for a sweep that will never run.
+       */
+      backstop: z
+        .object({ armed: z.boolean(), grace_ms: z.number().int().nonnegative() })
+        .optional(),
     })
     .optional(),
 });

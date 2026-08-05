@@ -246,12 +246,29 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         state: 'awaiting_acceptance',
         ...(Object.keys(merged).length ? { merged } : {}),
       });
-      const hint = review?.reviewer
-        ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — wait ≤5m; ` +
-          `accept closes the lane, reject resumes it; on silence, lane_resolve yourself ` +
-          `(recorded unconfirmed). Acceptor judges intent/principles/usable/feel — not the diff.`
-        : `\n\nno eligible acceptor is live — self-close sanctioned: ` +
-          `lane_resolve when ready (recorded unconfirmed).`;
+      // ADR 235. The old advice — "wait ≤5m; on silence, lane_resolve yourself" — was correct while
+      // an unaccepted lane hung forever: self-close was the only escape. With a backstop armed it
+      // became the thing destroying verdicts. Measured over 20 such closes: the owner closed after
+      // 8.5 minutes and the named acceptor came back online in 20 of 20 cases, 55% inside an hour,
+      // 100% inside the 24h grace, an average 106.8 minutes after the lane was already shut.
+      //
+      // So the recommendation follows the backstop, and self-close stays POSSIBLE either way — this
+      // changes which action is advised, never which is allowed (ADR 145: degrade, never wedge).
+      const hint = !review?.reviewer
+        ? // Nobody was asked, so no verdict is coming and waiting out a grace would be pure delay.
+          // This branch keeps its sanction whether or not a sweep is armed.
+          `\n\nno eligible acceptor is live — self-close sanctioned: ` +
+          `lane_resolve when ready (recorded unconfirmed).`
+        : review.backstop?.armed
+          ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — you are done; leave it ` +
+            `with them. Do NOT self-close on silence: acceptors who were offline at submit came ` +
+            `back 20 of 20 times, and the daemon sweeps an unanswered lane after ` +
+            `${Math.round(review.backstop.grace_ms / 3_600_000)}h anyway. lane_resolve still works ` +
+            `if you genuinely need it shut now, and records unconfirmed. Acceptor judges ` +
+            `intent/principles/usable/feel — not the diff.`
+          : `\n\nacceptance asked of ${review.reviewer} (${review.route}) — wait ≤5m; ` +
+            `accept closes the lane, reject resumes it; on silence, lane_resolve yourself ` +
+            `(recorded unconfirmed). Acceptor judges intent/principles/usable/feel — not the diff.`;
       return laneResult('lane submitted for acceptance', lane, warnings, hint);
     } catch (err) {
       return errorResult(err);
@@ -265,8 +282,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         'Your work is technically complete and merged — move the lane to awaiting_acceptance (ADR 192) ' +
         'and attest the landed merge (pr/sha/authorized_by). This is OUTCOME ACCEPTANCE, not a code ' +
         'review: musterd asks an acceptor to judge intent/principles/usable/feel of the landed ' +
-        'artifact. Wait ≤5m — accept closes the lane, reject returns it to active; on silence, ' +
-        'lane_resolve yourself (recorded unconfirmed, sanctioned). Auto-merge first; then submit.',
+        'artifact. Accept closes the lane, reject returns it to active. The response tells you ' +
+        'whether to wait or to self-close — follow it rather than a fixed timer (ADR 235). ' +
+        'Auto-merge first; then submit.',
       inputSchema: {
         id: z.string().describe('lane id'),
         pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
