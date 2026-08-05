@@ -6,7 +6,7 @@ import { parseArgs } from '../args.js';
 import type { AutoRefreshCtx } from '../service/autorefresh.js';
 import { AUTOREFRESH_LABEL } from '../service/launchd.js';
 import type { RunResult, Runner, ServiceCtx } from '../service/manage.js';
-import { serviceCommand } from './service.js';
+import { serviceCommand, touchServicePresence } from './service.js';
 
 /**
  * The `service refresh --auto` tick (ADR 118/130 fast-follow) — the quiet-period policy, exercised
@@ -126,6 +126,7 @@ describe('service refresh --auto (the tick)', () => {
     notify?: (n: { id: string; title: string; body: string }) => void;
     autoState?: { read: () => string | null; write: (sha: string) => void };
     outageState?: { read: () => string | null; write: (s: string) => void };
+    touch?: (ok: (s: string) => void) => Promise<void>;
   }) =>
     capture(() =>
       serviceCommand(parseArgs(over.argv ?? ['refresh', '--auto', '--mode', 'notice']), {
@@ -133,6 +134,9 @@ describe('service refresh --auto (the tick)', () => {
         ctx: over.ctx,
         health: over.health,
         notify: over.notify,
+        // Default to a no-op heartbeat so tests never read the dev machine's real seat token
+        // (the default touch would otherwise POST presence to a live daemon from a test run).
+        touch: over.touch ?? (async () => {}),
         // Default to a fresh in-memory store so tests never touch (or share) the real ~/.musterd stamp.
         autoState: over.autoState ?? memState(),
         // ADR 230: the outage run/escalation marker — a SEPARATE store from the build debounce, so
@@ -156,6 +160,56 @@ describe('service refresh --auto (the tick)', () => {
     expect(out).toContain('up to date');
     expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
     expect(calls.some((x) => x.args.includes('switch'))).toBe(false);
+  });
+
+  describe('the §3-amendment heartbeat (one presence touch per reachable tick)', () => {
+    it('touches presence on a no-op tick — a healthy service must stay audible', async () => {
+      const touch = vi.fn(async () => {});
+      const { code, out } = await tick({
+        ctx: ctx(autoRunner({ behind: 0 })),
+        health: async () => ({ connections: 5, build: 'newtip1111' }),
+        touch,
+      });
+      expect(code).toBe(0);
+      expect(out).toContain('up to date');
+      expect(touch).toHaveBeenCalledOnce();
+    });
+
+    it('does NOT touch when the daemon is unreachable — an outage must read as staleness', async () => {
+      const touch = vi.fn(async () => {});
+      const { code } = await tick({
+        ctx: ctx(autoRunner({ behind: 0 })),
+        health: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        touch,
+      });
+      expect(code).toBe(0);
+      expect(touch).not.toHaveBeenCalled();
+    });
+
+    it('a throwing heartbeat never fails the tick — the seam enforces best-effort', async () => {
+      const { code, out } = await tick({
+        ctx: ctx(autoRunner({ behind: 0 })),
+        health: async () => ({ connections: 0, build: 'newtip1111' }),
+        touch: async () => {
+          throw new Error('daemon said no');
+        },
+      });
+      expect(code).toBe(0);
+      expect(out).toContain('up to date');
+    });
+
+    it('touches on a bounce tick too — the announcement is not the heartbeat', async () => {
+      const touch = vi.fn(async () => {});
+      const { code } = await tick({
+        ctx: ctx(autoRunner({ behind: 2 })),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        touch,
+      });
+      expect(code).toBe(0);
+      expect(touch).toHaveBeenCalledOnce();
+    });
   });
 
   it('refreshes straight through when the daemon is behind and idle (0 connections)', async () => {
@@ -745,5 +799,22 @@ describe('service <verb> --auto (lifecycle dispatch)', () => {
     expect(out).toContain('installed + started the daemon auto-refresher');
     expect(out).toContain('every 90s');
     expect(out).toContain('idle only'); // the mode's quiet-period summary
+  });
+});
+
+describe('touchServicePresence (the default heartbeat)', () => {
+  it('skips silently when the seat is unprovisioned — pre-232 installs stay bit-identical', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    vi.stubEnv('MUSTERD_SERVICE_TOKEN_FILE', join(tmpdir(), 'no-such-dir', 'seat-token'));
+    try {
+      const ok = vi.fn();
+      await touchServicePresence(ok);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(ok).not.toHaveBeenCalled(); // silence, not a warning — unprovisioned is a valid state
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
   });
 });
