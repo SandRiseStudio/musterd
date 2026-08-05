@@ -186,13 +186,14 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_handoff',
     {
       description:
-        'Hand a lane to another seat, carrying its branch so the work arrives as an artifact, ' +
-        'not a description. Lands in the recipient’s inbox as a handoff act — and if they are ' +
-        'offline and host-enrolled, it is wake-eligible.',
+        'Hand a lane to another seat with its branch, so work arrives as an artifact. Put the ' +
+        'why in `note` — it rides the same act, so no second send. Wake-eligible if they are ' +
+        'offline + host-enrolled.',
       inputSchema: {
         id: z.string().describe('lane id'),
-        to: z.string().describe('recipient seat name'),
-        branch: z.string().optional().describe('the branch/artifact carrying the work'),
+        to: z.string().describe('recipient seat'),
+        branch: z.string().optional().describe('branch carrying the work'),
+        note: z.string().optional().describe('why you are handing it over'),
       },
     },
     async (args) => {
@@ -200,6 +201,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         const { lane, warnings } = await client.updateLane(args.id, {
           owner_seat: args.to,
           ...(args.branch ? { branch: args.branch } : {}),
+          ...(args.note ? { handoff_note: args.note } : {}),
         });
         return laneResult(`lane handed to ${args.to}`, lane, warnings);
       } catch (err) {

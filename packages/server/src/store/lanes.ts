@@ -11,6 +11,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
+import type { AuditRow } from './audit.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — store CRUD + the two warn-only contention checks.
@@ -237,9 +238,17 @@ export function listLanes(
  * lane-less handoff, which is legal and stays silent.
  */
 export type HandoffLaneDerivation =
-  | { kind: 'attach'; lane: Lane }
-  | { kind: 'ambiguous'; candidates: Lane[] }
+  | { kind: 'attach'; lane: Lane; basis: HandoffLaneBasis }
+  | { kind: 'ambiguous'; candidates: Lane[]; basis: HandoffLaneBasis }
   | { kind: 'none' };
+
+/**
+ * Which evidence answered (ADR 243) — audited, never on the wire. `handed_to_recipient` is the
+ * strong fact (this sender gave that seat this lane, and they still hold it); `held` is ADR 231's
+ * original fallback. Recorded so the two rules can be told apart in a month: a derived population
+ * still dominated by `held` means the fallback is doing the real work.
+ */
+export type HandoffLaneBasis = 'handed_to_recipient' | 'held';
 
 /**
  * Derive the lane a `handoff` from `seat` is about, from the lanes that seat actually holds.
@@ -255,19 +264,85 @@ export type HandoffLaneDerivation =
  * ambiguity: unlike the un-threaded `accept` (send.ts), where a wrong guess writes a verdict onto
  * the wrong lane and cannot be recovered, declining to attach here leaves the message exactly as it
  * is today — unjudgeable, but never wrong. A message is worth more than a derived field.
+ *
+ * ADR 243 CORRECTION. Held lanes are the WEAKER evidence and are now the fallback, because
+ * `lane_handoff` transfers ownership *before* the explanatory act is sent: the lane the sender means
+ * has already left the held set and could never be derived, while an unrelated lane they still hold
+ * could — silently, in the confident single-candidate branch. The stronger fact is the pairing the
+ * sender just created: `recipient` is who this act is directed at, so a lane this sender handed to
+ * THAT seat, which that seat still holds, has an unambiguous referent that "a lane I hold" cannot
+ * see. Preferred, not merged into one pool: a held lane must never dilute a handed one into a
+ * false ambiguity, and a handed one must never be outvoted by lanes that have nothing to do with
+ * this recipient.
  */
 export function deriveHandoffLane(
   db: Database,
   teamId: string,
   teamSlug: string,
   seat: string,
+  /** The seat this handoff act is directed at, when it is directed at one. */
+  recipient?: string,
 ): HandoffLaneDerivation {
+  if (recipient !== undefined && recipient !== seat) {
+    const handed = lanesHandedTo(db, teamId, teamSlug, seat, recipient);
+    const basis = 'handed_to_recipient' as const;
+    if (handed.length === 1) return { kind: 'attach', lane: handed[0]!, basis };
+    if (handed.length > 1) return { kind: 'ambiguous', candidates: handed, basis };
+  }
   const held = listLanes(db, teamId, teamSlug, { owner: seat }).filter(
     (l) => !LANE_TERMINAL_STATES.has(l.state),
   );
   if (held.length === 0) return { kind: 'none' };
-  if (held.length === 1) return { kind: 'attach', lane: held[0]! };
-  return { kind: 'ambiguous', candidates: held };
+  if (held.length === 1) return { kind: 'attach', lane: held[0]!, basis: 'held' };
+  return { kind: 'ambiguous', candidates: held, basis: 'held' };
+}
+
+/** How far back the handed-lane read scans the ledger. Ordered by ts DESC, so this is a page size
+ *  and not a time window — the qualifying test is current ownership, never age. */
+const HANDOFF_LEDGER_SCAN = 200;
+
+/**
+ * Lanes `sender` handed to `recipient` that `recipient` still holds and has not closed (ADR 243).
+ *
+ * Read from the acquisition ledger (ADR 203), which is the only record that distinguishes a handoff
+ * from a self-claim — the lane row afterwards shows only who owns it, not who gave it to them. The
+ * qualifying condition is deliberately **current state, not recency**: the recipient still owns it
+ * and it is still live. An old transfer the recipient has since resolved, released or passed on is
+ * gone from the set because the fact stopped being true, not because a timer expired it — the same
+ * reason ADR 231 refused to age out an old handoff.
+ *
+ * `detail` is parsed in JS rather than filtered with `json_extract`, on ADR 173's evidence: a single
+ * malformed `detail` makes SQLite raise from the QUERY and takes down every read that scans it.
+ */
+function lanesHandedTo(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  sender: string,
+  recipient: string,
+): Lane[] {
+  const rows = db
+    .prepare<[string, string, number], AuditRow>(
+      `SELECT * FROM audit WHERE team_id = ? AND action = 'lane.claimed' AND actor = ?
+       ORDER BY ts DESC, id DESC LIMIT ?`,
+    )
+    .all(teamId, sender, HANDOFF_LEDGER_SCAN);
+  const handedIds = new Set<string>();
+  for (const row of rows) {
+    let detail: { kind?: unknown; owner?: unknown; lane?: unknown };
+    try {
+      detail = JSON.parse(row.detail ?? '{}') as typeof detail;
+    } catch {
+      continue; // an unreadable row is not evidence of anything; never let it break the read
+    }
+    if (detail.kind !== 'handoff' || detail.owner !== recipient) continue;
+    const lane = typeof detail.lane === 'string' ? detail.lane : row.target;
+    if (lane) handedIds.add(lane);
+  }
+  if (handedIds.size === 0) return [];
+  return listLanes(db, teamId, teamSlug, { owner: recipient }).filter(
+    (l) => handedIds.has(l.id) && !LANE_TERMINAL_STATES.has(l.state),
+  );
 }
 
 /** Lanes joined to a Goal (ADR 084) — the input to {@link deriveGoalStatus}. */

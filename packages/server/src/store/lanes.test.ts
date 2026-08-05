@@ -1,6 +1,7 @@
 import type { Lane } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
+import { appendAudit } from './audit.js';
 import {
   boardWarnings,
   deriveGoalStatus,
@@ -22,6 +23,30 @@ function seed() {
   const db = openDb(':memory:');
   const team = createTeam(db, { slug: 'bravo' });
   return { db, team };
+}
+
+/**
+ * Transfer a lane the way the PATCH handler does: the store move plus the `lane.claimed` audit row
+ * that marks it a handoff rather than a self-claim. The audit row is the only record of WHO handed
+ * WHAT to WHOM, so a derivation that reads it must be tested against the real pair, not the move
+ * alone.
+ */
+function recordHandoff(
+  db: ReturnType<typeof openDb>,
+  teamId: string,
+  teamSlug: string,
+  laneId: string,
+  from: string,
+  to: string,
+): void {
+  updateLane(db, teamId, laneId, teamSlug, { owner_seat: to });
+  appendAudit(db, teamId, {
+    actor: from,
+    action: 'lane.claimed',
+    target: laneId,
+    result: 'allow',
+    detail: { lane: laneId, owner: to, previous_owner: from, kind: 'handoff' },
+  });
 }
 
 describe('globsOverlap (cheap prefix intersection, ADR 083)', () => {
@@ -455,5 +480,95 @@ describe('deriveHandoffLane (ADR 231) — a handoff act names the lane it hands 
       claim: true,
     });
     expect(deriveHandoffLane(db, team.id, 'bravo', 'June').kind).toBe('none');
+  });
+
+  // ADR 243. The candidate set was "lanes the sender still HOLDS", but `lane_handoff` transfers
+  // ownership BEFORE the explanatory act is sent — so the intended lane is never a candidate, and a
+  // sender who holds exactly one OTHER lane lands in the confident single-candidate branch.
+  describe('a lane just handed to this recipient outranks a lane the sender still holds', () => {
+    /** The live 2026-08-05 shape: hand one lane away, keep another, then explain the handoff. */
+    function handedAndHeld() {
+      const { db, team } = seed();
+      const handed = openLane(db, team.id, 'bravo', 'June', {
+        title: 'the lane actually handed over',
+        project: 'musterd',
+        branch: 'june/handed',
+        claim: true,
+      });
+      recordHandoff(db, team.id, 'bravo', handed.id, 'June', 'Cleo');
+      const kept = openLane(db, team.id, 'bravo', 'June', {
+        title: 'my unrelated lane in acceptance',
+        project: 'musterd',
+        claim: true,
+      });
+      return { db, team, handed, kept };
+    }
+
+    it('attaches the handed lane, not the held one', () => {
+      const { db, team, handed } = handedAndHeld();
+      const derived = deriveHandoffLane(db, team.id, 'bravo', 'June', 'Cleo');
+      expect(derived.kind).toBe('attach');
+      if (derived.kind !== 'attach') throw new Error('unreachable');
+      expect(derived.lane.id).toBe(handed.id);
+      expect(derived.lane.branch).toBe('june/handed');
+    });
+
+    it('falls back to the held lane when nothing was handed to THIS recipient', () => {
+      const { db, team, kept } = handedAndHeld();
+      const derived = deriveHandoffLane(db, team.id, 'bravo', 'June', 'Dara');
+      expect(derived.kind).toBe('attach');
+      if (derived.kind !== 'attach') throw new Error('unreachable');
+      expect(derived.lane.id).toBe(kept.id);
+    });
+
+    it('is ambiguous when several lanes went to the same recipient — one referent or none', () => {
+      const { db, team } = handedAndHeld();
+      const second = openLane(db, team.id, 'bravo', 'June', {
+        title: 'a second lane handed to Cleo',
+        project: 'musterd',
+        claim: true,
+      });
+      recordHandoff(db, team.id, 'bravo', second.id, 'June', 'Cleo');
+      const derived = deriveHandoffLane(db, team.id, 'bravo', 'June', 'Cleo');
+      expect(derived.kind).toBe('ambiguous');
+      if (derived.kind !== 'ambiguous') throw new Error('unreachable');
+      expect(derived.candidates).toHaveLength(2);
+    });
+
+    it('ignores a handed lane the recipient no longer owns — the fact expired, not aged out', () => {
+      const { db, team, handed, kept } = handedAndHeld();
+      updateLane(db, team.id, handed.id, 'bravo', { owner_seat: 'Dara' });
+      const derived = deriveHandoffLane(db, team.id, 'bravo', 'June', 'Cleo');
+      expect(derived.kind).toBe('attach');
+      if (derived.kind !== 'attach') throw new Error('unreachable');
+      expect(derived.lane.id).toBe(kept.id);
+    });
+
+    it('ignores a handed lane that has since gone terminal', () => {
+      const { db, team, handed, kept } = handedAndHeld();
+      updateLane(db, team.id, handed.id, 'bravo', { state: 'done' });
+      const derived = deriveHandoffLane(db, team.id, 'bravo', 'June', 'Cleo');
+      expect(derived.kind).toBe('attach');
+      if (derived.kind !== 'attach') throw new Error('unreachable');
+      expect(derived.lane.id).toBe(kept.id);
+    });
+
+    it('ignores a lane the RECIPIENT claimed for themselves — a claim is not a handoff', () => {
+      const { db, team } = seed();
+      const claimed = openLane(db, team.id, 'bravo', 'June', {
+        title: 'Cleo took this one herself',
+        project: 'musterd',
+        claim: true,
+      });
+      updateLane(db, team.id, claimed.id, 'bravo', { owner_seat: 'Cleo' });
+      appendAudit(db, team.id, {
+        actor: 'Cleo',
+        action: 'lane.claimed',
+        target: claimed.id,
+        result: 'allow',
+        detail: { lane: claimed.id, owner: 'Cleo', previous_owner: 'June', kind: 'claim' },
+      });
+      expect(deriveHandoffLane(db, team.id, 'bravo', 'June', 'Cleo').kind).toBe('none');
+    });
   });
 });
