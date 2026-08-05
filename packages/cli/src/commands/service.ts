@@ -789,7 +789,7 @@ export async function serviceCommand(
     notify?: (n: { id: string; title: string; body: string }) => void;
     /** The attempted-tip debounce store (injected in tests; defaults to a file under ~/.musterd). */
     autoState?: { read: () => string | null; write: (sha: string) => void };
-    /** ADR 229: the outage run/escalation marker — SEPARATE from the build debounce, so an outage
+    /** ADR 230: the outage run/escalation marker — SEPARATE from the build debounce, so an outage
      *  can never clobber the broken-`main` attempted-tip marker (or be clobbered by it). */
     outageState?: { read: () => string | null; write: (s: string) => void };
     /** Sleep between post-bounce `/health` polls (injected so tests never actually wait). */
@@ -1203,7 +1203,7 @@ async function refreshDaemon(
   return 0;
 }
 
-/** File-backed outage marker for the ADR 229 escalation ladder — its own file beside the attempted-tip
+/** File-backed outage marker for the ADR 230 escalation ladder — its own file beside the attempted-tip
  *  stamp, so the two lifecycles (a broken build vs. a dead daemon) can never overwrite each other. */
 function fileOutageState(): { read: () => string | null; write: (s: string) => void } {
   const p = join(dirname(configPath()), 'autorefresh', '.outage');
@@ -1269,7 +1269,7 @@ function fileAutoState(): { read: () => string | null; write: (sha: string) => v
  *      With no live sessions, refresh straight through (the ADR 047 guard passes cleanly).
  */
 /**
- * A dead daemon is not a success (ADR 229).
+ * A dead daemon is not a success (ADR 230).
  *
  * The tick used to log `✓ unreachable — nothing to refresh` and exit 0 — the report of a healthy
  * no-op, used for an outage. Measured on the live machine 2026-08-04: **1,136 such ticks across 29
@@ -1337,7 +1337,7 @@ async function handleUnreachable(
 
 /**
  * Does `launchctl` agree the daemon job is not running? The independent second source behind the
- * ADR 229 confirmation. `launchctl print` exits non-zero when the service is unknown/unloaded; a
+ * ADR 230 confirmation. `launchctl print` exits non-zero when the service is unknown/unloaded; a
  * loaded-but-crashlooping job still prints, so this is deliberately the CONSERVATIVE half — it says
  * "down" only when launchd itself has nothing running, and a false "up" merely withholds an
  * escalation rather than causing one.
@@ -1364,7 +1364,7 @@ async function autoRefreshTick(
   } catch {
     return handleUnreachable(ctx, notify, outageState, ok);
   }
-  // Reachable: whatever outage we were tracking is over (ADR 229). Clearing here — rather than only
+  // Reachable: whatever outage we were tracking is over (ADR 230). Clearing here — rather than only
   // on the up-to-date path — is what makes the run counter mean "consecutive", so a blip between two
   // healthy ticks can never accumulate into a false confirmation.
   if (outageState.read()) outageState.write('');

@@ -135,7 +135,7 @@ describe('service refresh --auto (the tick)', () => {
         notify: over.notify,
         // Default to a fresh in-memory store so tests never touch (or share) the real ~/.musterd stamp.
         autoState: over.autoState ?? memState(),
-        // ADR 229: the outage run/escalation marker — a SEPARATE store from the build debounce, so
+        // ADR 230: the outage run/escalation marker — a SEPARATE store from the build debounce, so
         // an outage can never clobber the broken-`main` marker (and vice versa).
         outageState: over.outageState ?? memState(),
       }),
@@ -415,12 +415,12 @@ describe('service refresh --auto (the tick)', () => {
   });
 
   /**
-   * ADR 229 — a dead daemon is not a success. The tick used to log `✓ unreachable — nothing to
+   * ADR 230 — a dead daemon is not a success. The tick used to log `✓ unreachable — nothing to
    * refresh` and exit 0, which is the report of a healthy no-op being used for an outage: measured
    * 1,136 times across 29 blocks on the live machine. It never rebuilds (nothing to build against),
    * but it must now tell down from nothing-to-do.
    */
-  describe('a dead daemon is not a success (ADR 229)', () => {
+  describe('a dead daemon is not a success (ADR 230)', () => {
     const down = async () => {
       throw new Error('ECONNREFUSED');
     };
@@ -469,7 +469,7 @@ describe('service refresh --auto (the tick)', () => {
       expect(state.read()).toContain('notified');
     });
 
-    it('never restarts on its own — autonomy flows through the role machinery, not this cron (ADR 229 re-eval)', async () => {
+    it('never restarts on its own — autonomy flows through the role machinery, not this cron (ADR 230 re-eval)', async () => {
       // The 2026-08-04 re-evaluation with nick: the tick has no seat, no role, no identity — the
       // infra-gate cannot even see it. Granting it restart autonomy the same day ADR 227 shipped
       // "only designated platform agents touch running infrastructure" was the contradiction; the

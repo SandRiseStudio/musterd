@@ -1,4 +1,4 @@
-# 229 — A dead daemon is not a success
+# 230 — A dead daemon is not a success
 
 - Status: proposed
 - Date: 2026-08-04
