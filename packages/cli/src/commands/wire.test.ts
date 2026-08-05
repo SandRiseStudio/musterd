@@ -11,7 +11,7 @@ const h = vi.hoisted(() => ({
 }));
 vi.mock('../onboard/harnesses/claudeCode.js', () => ({ claudeCode: { configure: h.configure } }));
 
-const { wireCommand } = await import('./wire.js');
+const { wireCommand, WIRE_CONFIGURED_HARNESSES } = await import('./wire.js');
 
 let cwd: string;
 let configPath: string;
@@ -157,6 +157,23 @@ describe('musterd wire', () => {
   it('errors clearly when there is no committed spec', async () => {
     writeConfig({ bravo: 'mskey_x' });
     await expect(wireCommand(parseArgs([]))).rejects.toMatchObject({ exitCode: 6 });
+  });
+
+  // WIRE_CONFIGURED_HARNESSES is what the doctor derives its repair advice from, so it is only
+  // trustworthy if it matches what wire really does. Before this was derived, the doctor told
+  // Cursor and Codex seats to run `musterd wire` — a repair that cannot touch their entries, so
+  // the drift re-flagged on every --check forever. If someone widens wire to configure another
+  // harness without adding it here, the advice silently goes stale again; this fails instead.
+  it('configures exactly the harnesses it advertises in WIRE_CONFIGURED_HARNESSES', async () => {
+    writeSpec(SPEC);
+    writeConfig({ bravo: 'mskey_x' });
+    await run([]);
+    expect([...WIRE_CONFIGURED_HARNESSES]).toEqual(['claude-code']);
+    // The one advertised harness is the one that got configured...
+    expect(h.configure).toHaveBeenCalledTimes(1);
+    // ...and nothing else was. Any other harness module would have to be imported to be called,
+    // so an unmocked import escaping into a real config write is the failure this pins down.
+    expect(WIRE_CONFIGURED_HARNESSES).toHaveLength(1);
   });
 
   it('never writes a secret into the committed workspace.json (it is secret-free by construction)', async () => {

@@ -21,6 +21,20 @@ import { theme } from '../render/theme.js';
  * never the repo-root-shared entry). The spec's `claim` policy still tells the adapter *which*
  * seat to occupy when it does join.
  */
+/**
+ * The harnesses `wire` actually rewrites an MCP entry for — today, Claude Code and only Claude Code
+ * (see the single `claudeCode.configure` call below).
+ *
+ * This is exported because the doctor PRESCRIBES `musterd wire` as the repair for entry drift, and
+ * that advice is only true for harnesses in this list. It used to be hard-coded into every drift
+ * message, which made the doctor tell Cursor and Codex seats to run a command that cannot touch
+ * their entries: the drift then re-flagged on every `--check` forever, and a permanently-red check
+ * nobody can clear teaches everyone to skim the ✗ block. Deriving the prescription from this
+ * constant keeps the two in sync by construction — widen what `wire` configures and you widen the
+ * advice in the same edit, right next to the code you changed.
+ */
+export const WIRE_CONFIGURED_HARNESSES: readonly string[] = ['claude-code'];
+
 export async function wireCommand(parsed: Parsed): Promise<number> {
   const flags = parsed.flags;
   const spec = findWorkspaceSpec(process.cwd());

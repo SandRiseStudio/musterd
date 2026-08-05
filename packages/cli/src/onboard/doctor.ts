@@ -11,6 +11,7 @@ import {
   type Binding,
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
+import { WIRE_CONFIGURED_HARNESSES } from '../commands/wire.js';
 import { findBinding, loadConfig } from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
@@ -378,6 +379,20 @@ async function inspectSeatIdentity(
   };
 }
 
+/**
+ * Human-readable list of the harnesses `musterd wire` configures, for the repair sentence the
+ * doctor gives a harness wire cannot reach. Derived from the same constant wire exports, so it
+ * cannot go stale independently of the command it describes. Resolved per call rather than at
+ * module load: HARNESSES is injectable, and a registry that does not happen to contain the wired
+ * harness must degrade to naming its id, never to an empty "it configures  only".
+ */
+function harnessLabelsWireConfigures(): string {
+  const labels = HARNESSES.filter((h) => WIRE_CONFIGURED_HARNESSES.includes(h.id)).map(
+    (h) => h.label,
+  );
+  return (labels.length > 0 ? labels : [...WIRE_CONFIGURED_HARNESSES]).join(' + ');
+}
+
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
   // The folder's single source of truth for which seat it claims (ADR 018). A legacy MCP registration
@@ -392,8 +407,26 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
 
   const harnesses: HarnessState[] = [];
   let claudeConfigured = false;
+  // Does any drifting entry belong to a harness `wire` can actually rewrite? Drives the `repair`
+  // classification below: `--fix` must not run `wire` for drift it is structurally unable to touch.
+  let anyWireRepairable = false;
   for (const h of HARNESSES) {
     const d = await h.detect();
+    // The repair sentence, derived from what `wire` configures rather than assumed (see
+    // WIRE_CONFIGURED_HARNESSES). Every drift message below ends with `repairWith`, so a harness
+    // wire cannot reach never gets told to run it.
+    const wireRepairs = WIRE_CONFIGURED_HARNESSES.includes(h.id);
+    const repairWith = wireRepairs
+      ? 'Run `musterd wire` here to rewrite the entry without it'
+      : `\`musterd wire\` does not rewrite ${h.label}'s entry — it configures ` +
+        `${harnessLabelsWireConfigures()} only. Re-provision this folder with \`musterd init\` and ` +
+        `pick ${h.label}, or drop the line from ${h.label}'s own entry file by hand`;
+    // Record entry drift AND whether `wire` could repair this particular one, so the `repair`
+    // classification below never routes `--fix` at a command that cannot touch the drift it found.
+    const noteEntryDrift = (text: string) => {
+      entryDrift.push(text);
+      if (wireRepairs) anyWireRepairable = true;
+    };
     if (h.id === 'claude-code' && d.configured) claudeConfigured = true;
     harnesses.push({
       label: h.label,
@@ -408,11 +441,11 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       boundClaim !== undefined &&
       d.registeredClaim !== boundClaim
     ) {
-      entryDrift.push(
+      noteEntryDrift(
         `${h.label}'s musterd server has a baked MUSTERD_CLAIM=${d.registeredClaim} but ` +
           `.musterd/binding.json claims ${boundClaim} — the team_* tools will resolve a different ` +
-          `seat than the musterd CLI in this folder. Run \`musterd wire\` to re-sync (it no longer ` +
-          `bakes the claim, so binding.json becomes the single source of truth).`,
+          `seat than the musterd CLI in this folder. ${repairWith} (provisioning no longer bakes the ` +
+          `claim, so binding.json becomes the single source of truth).`,
       );
     }
     // A legacy baked MUSTERD_MODEL. Provisioning stopped emitting it, but entries written before that
@@ -425,18 +458,17 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // demonstrably capturing its sessions (PR #607 made the contradiction visible; this names the
     // entry that causes it).
     if (d.registeredSurface !== undefined) {
-      entryDrift.push(
+      noteEntryDrift(
         `${h.label}'s musterd server bakes MUSTERD_SURFACE=${d.registeredSurface} — a wire-time ` +
           `snapshot that outranks .musterd/binding.json and that no observation can correct, so the ` +
-          `roster, presence and audit report whatever it says. Run \`musterd wire\` here to rewrite ` +
-          `the entry without it.`,
+          `roster, presence and audit report whatever it says. ${repairWith}.`,
       );
     }
     if (d.registeredModel !== undefined) {
-      entryDrift.push(
+      noteEntryDrift(
         `${h.label}'s musterd server bakes MUSTERD_MODEL=${d.registeredModel} — a wire-time snapshot ` +
           `that outranks what the harness is actually running, and that no later observation can ` +
-          `correct. Run \`musterd wire\` here to rewrite the entry without it.`,
+          `correct. ${repairWith}.`,
       );
     }
     // Per-seat SECRETS in a registered entry (ADR 143/165). Flagged on PRESENCE, not on mismatch —
@@ -467,16 +499,23 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ],
     ] as const) {
       if (value === undefined) continue;
-      entryDrift.push(
+      // The repair clause used to be hard-coded here as an unconditional "Run `musterd wire` here:
+      // it rewrites the entry from .musterd/binding.json without secrets" — and the `shared`
+      // ternary gave that MOST confident wording to the per-folder branch, i.e. exactly the
+      // harnesses wire never touches. Derive it instead.
+      noteEntryDrift(
         `${h.label}'s musterd server bakes ${name} — a per-seat secret in ` +
           (shared
             ? `an entry ${h.label} keys by repo ROOT, which every git worktree of this repo shares, `
             : `the entry itself, `) +
-          `${why}. Run \`musterd wire\` here: it rewrites the entry from .musterd/binding.json ` +
-          `without secrets` +
-          (shared
-            ? `, and because the entry is shared, one run repairs every seat in the family.`
-            : `.`),
+          `${why}. ` +
+          (wireRepairs
+            ? `Run \`musterd wire\` here: it rewrites the entry from .musterd/binding.json ` +
+              `without secrets` +
+              (shared
+                ? `, and because the entry is shared, one run repairs every seat in the family.`
+                : `.`)
+            : `${repairWith}.`),
       );
     }
     // Per-worktree POLICY in the shared slot (ADR 165 inc 2) — not secrets, but the same family-bleed
@@ -484,23 +523,22 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // marks the whole family as driven by one human (corrupting ADR 155 driver co-presence).
     // Provisioning now writes both to .musterd/binding.json instead; flagged on presence.
     if (d.registeredAutojoin !== undefined) {
-      entryDrift.push(
+      noteEntryDrift(
         `${h.label}'s musterd server bakes MUSTERD_AUTOJOIN=${d.registeredAutojoin} — join-on-launch ` +
           (shared
             ? `policy in an entry every worktree of this repo shares, so it applies family-wide instead of per seat. `
             : `policy pinned in the entry, where it outranks the per-workspace setting. `) +
-          `Provisioning now records it in .musterd/binding.json; run \`musterd wire\` here to ` +
-          `rewrite the entry without it.`,
+          `Provisioning now records it in .musterd/binding.json; ${repairWith}.`,
       );
     }
     if (d.registeredDriver !== undefined) {
-      entryDrift.push(
+      noteEntryDrift(
         `${h.label}'s musterd server bakes MUSTERD_DRIVER=${d.registeredDriver} — ` +
           (shared
             ? `a driver in the repo-root-shared entry marks EVERY sibling worktree as driven by ${d.registeredDriver}, `
             : `a driver pinned in the entry outranks the per-workspace setting, `) +
           `corrupting driver co-presence (ADR 155). Provisioning now records the driver in ` +
-          `.musterd/binding.json; run \`musterd wire\` here to rewrite the entry without it.`,
+          `.musterd/binding.json; ${repairWith}.`,
       );
     }
     // An adapter inside a sibling seat's workspace: a note, not a refusal — identity comes from cwd,
@@ -613,13 +651,19 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   // Classify BEFORE merging so the distinction survives into `--fix`. Identity drift wins outright:
   // the seat is dead, no other repair reaches it, and the generic remedy would make it worse. Then
   // entry drift (repairable headlessly by `wire`), then everything else (full onboarding).
+  // `wire` is only the answer for entry drift it can actually reach. Per-folder drift (Cursor,
+  // Codex) is real drift, but wire configures Claude Code alone — classifying it 'wire' made
+  // `--fix` run a command that changed nothing and then report it as the remedy. Fall through to
+  // 'init', which does re-provision the chosen harness's entry.
   const repair: DoctorReport['repair'] =
     seatIdentity.drift.length > 0
       ? 'identity'
       : drift.length > 0
         ? 'init'
         : entryDrift.length > 0
-          ? 'wire'
+          ? anyWireRepairable
+            ? 'wire'
+            : 'init'
           : undefined;
   drift.push(...seatIdentity.drift, ...entryDrift);
   return {
