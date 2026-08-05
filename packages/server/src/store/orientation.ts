@@ -1,4 +1,4 @@
-import type { Lane, NextBrief } from '@musterd/protocol';
+import { isAwaitingAcceptance, type Lane, type NextBrief } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { listGoals, nextGoal } from './goals.js';
 import { listLanes } from './lanes.js';
@@ -51,6 +51,13 @@ function laneOf(meta: Record<string, unknown>): string | null {
   return typeof lane === 'string' ? lane : null;
 }
 
+interface OwedRow {
+  ask_id: string;
+  ts: number;
+  from_name: string;
+  lane_id: string;
+}
+
 interface HandoffRow {
   from_name: string;
   body: string;
@@ -78,6 +85,40 @@ export function deriveNext(
     .filter((l) => l.state === 'open')
     .sort((a, b) => a.created_at - b.created_at)
     .slice(0, upNextLimit);
+
+  // Owed reviews (ADR 233): lanes still in the acceptance stage whose review ask came to ME.
+  //
+  // Why the brief and not the inbox: the inbox already carries the ask, and it is not enough. Half
+  // the unverified self-closes on this team had the named reviewer ONLINE for ~40 minutes across an
+  // 18-hour window and still never answering — more awake time than the reviewers who did answer.
+  // The ask arrives once, while the seat is mid-lane, and nothing ever re-surfaces it.
+  //
+  // "Still in the acceptance stage" IS the unanswered test (ADR 192 as repaired: an accept closes
+  // the lane it accepts). So there is no accept-message bookkeeping to drift out of sync with the
+  // lane — the lane state is the single source, and a review answered any way at all disappears
+  // from here for free.
+  const owed_reviews = db
+    .prepare<[string, string], OwedRow>(
+      `SELECT m.id AS ask_id, m.ts AS ts, mf.name AS from_name,
+              json_extract(m.meta, '$.lane_review.lane') AS lane_id
+         FROM messages m
+         JOIN members mf ON mf.id = m.from_member
+         JOIN members mt ON mt.id = m.to_member
+        WHERE m.team_id = ?
+          AND m.act = 'ask'
+          AND mt.name = ?
+          AND lane_id IS NOT NULL
+        ORDER BY m.ts ASC, m.id ASC`,
+    )
+    .all(teamId, member)
+    .flatMap((r) => {
+      const lane = all.find((l) => l.id === r.lane_id);
+      // Gone, closed, or mine. Never ask a seat to review its own lane: the ask can name you (a
+      // self-submitted lane on a one-seat team), but reviewing your own work is the thing the
+      // counterpart exists to prevent, so it is not a reminder — it is a wrong instruction.
+      if (!lane || !isAwaitingAcceptance(lane.state) || lane.owner_seat === member) return [];
+      return [{ lane, from: r.from_name, ask_id: r.ask_id, ts: r.ts }];
+    });
 
   // The why: the latest handoff addressed to me or the team (not one I sent). Enrichment, never
   // required — but it is read as a live instruction, so a handoff whose lane has since closed is
@@ -130,5 +171,5 @@ export function deriveNext(
   // dogfood uses roadmap.data.ts instead, so this is null there — not every team opts into it.
   const next_goal = nextGoal(listGoals(db, teamId, teamSlug));
 
-  return { member, in_flight, shipped, up_next, why, next_goal };
+  return { member, in_flight, shipped, up_next, owed_reviews, why, next_goal };
 }
