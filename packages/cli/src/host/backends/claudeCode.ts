@@ -292,6 +292,7 @@ function runAttempt(
           node: process.execPath,
           binJs: process.argv[1] ?? '',
         }),
+        spec.order.lease_id,
       ),
       detached: true, // its own process group, so the watchdog can kill harness + MCP children
       stdio: ['ignore', 'pipe', 'pipe'],

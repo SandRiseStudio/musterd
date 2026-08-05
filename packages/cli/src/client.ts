@@ -13,6 +13,7 @@ import {
   ReportSchema,
   resolveAttestedModel,
   resolveAttestedProvenance,
+  resolveAttestedWakeLease,
   TOKEN_PREFIXES,
   type Policy,
   type PolicyOverride,
@@ -159,6 +160,15 @@ export class HttpClient {
         this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
           ? resolveAttestedProvenance(process.env)
           : undefined;
+      // ADR 241: the wake correlation token rides the same agent-key gate as provenance, and for
+      // the same reason — a woken session's FIRST authenticated call is often a hook one-shot, not
+      // the adapter's claim, so the ambient row it writes must carry the lease or the host's verify
+      // has nothing of this wake's to find. Never on a human credential: a lease token in a human
+      // shell would let that shell claim to be a machine's wake.
+      const attestedWakeLease =
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+          ? resolveAttestedWakeLease(process.env)
+          : undefined;
       res = await this.fetchWithRetry(path, {
         method,
         headers: {
@@ -171,6 +181,7 @@ export class HttpClient {
           ...(attestedProvenance !== undefined
             ? { 'x-musterd-provenance': attestedProvenance }
             : {}),
+          ...(attestedWakeLease !== undefined ? { 'x-musterd-wake-lease': attestedWakeLease } : {}),
           // ADR 135: build attestation rides every request, for EVERY credential — no ADR 121 gate.
           // The model gate exists because a model is a harness fact a human must not stamp; build
           // attests the *binary* itself, which a human's (possibly stale) CLI genuinely has.

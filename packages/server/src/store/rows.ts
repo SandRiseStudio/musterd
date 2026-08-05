@@ -91,6 +91,10 @@ export interface PresenceRow {
    *  connecting dist was built against. Null for older clients. Sticky across ambient heartbeats like
    *  `build`/`model`; the roster renders skew from it in place of the raw build ref. */
   epoch: number | null;
+  /** The wake lease that spawned this occupancy (ADR 241) — the daemon-minted `lease_id` the
+   *  actuator handed the child, attested back on claim. Null for every occupancy no wake caused,
+   *  which is nearly all of them. The only column here that identifies rather than describes. */
+  wake_lease: string | null;
   created_at: number;
 }
 

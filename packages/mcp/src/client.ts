@@ -641,6 +641,9 @@ export class MusterdClient {
           ...(this.config.model ? { model: this.config.model } : {}),
           ...(this.config.build ? { build: this.config.build } : {}),
           ...(this.config.epoch != null ? { epoch: this.config.epoch } : {}),
+          // ADR 241: the correlation token, when a wake spawned this session. Absent otherwise —
+          // never a placeholder, because the host treats a match as proof of authorship.
+          ...(this.config.wakeLease ? { wake_lease: this.config.wakeLease } : {}),
         }),
       );
     };

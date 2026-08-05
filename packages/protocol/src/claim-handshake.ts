@@ -94,6 +94,14 @@ export const ClaimFrame = z.object({
    * a lower epoch still connects, it just lacks later features — which the roster surfaces, not this frame.
    */
   epoch: z.number().int().nonnegative().optional(),
+  /**
+   * The wake lease that spawned this session (ADR 241), read from `MUSTERD_WAKE_LEASE`. Attested
+   * like `model`/`build`; omitted by every session a wake did not cause, and by older clients.
+   * The host's verification matches it against the lease it is actuating — the correlation that
+   * `provenance: 'wake'` alone cannot provide, because provenance describes a KIND of session and
+   * two wake sessions on one seat look identical under it.
+   */
+  wake_lease: z.string().max(64).optional(),
 });
 export type ClaimFrame = z.infer<typeof ClaimFrame>;
 

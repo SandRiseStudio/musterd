@@ -65,12 +65,18 @@ export interface BackendContext {
    *  only presence touched at-or-after it counts — a lingering presence row from a PREVIOUS
    *  occupancy can read non-offline for minutes after the daemon's lease-eligibility read went
    *  offline, and crediting it once reported a dead resume child as woke (first live fallback
-   *  rehearsal, 2026-07-13). Backends pass their spawn timestamp. */
+   *  rehearsal, 2026-07-13). Backends pass their spawn timestamp.
+   *
+   *  `lease_matched` (ADR 241) is the one field that answers "is this occupancy MINE": true only
+   *  when a fresh row attests this wake's own lease token. There is deliberately no parameter for
+   *  it — the loop binds the lease it is actuating, so a backend cannot verify against any other.
+   *  `occupied && !lease_matched` means the seat is held by a session this wake did not create,
+   *  which is a deferral, never a failure. */
   verifyOccupied(
     seat: string,
     windowMs?: number,
     sinceTs?: number,
-  ): Promise<{ occupied: boolean; provenance?: string | null }>;
+  ): Promise<{ occupied: boolean; provenance?: string | null; lease_matched?: boolean }>;
   /** One narrator line to the host's stdout (never per poll tick — telemetry carve-out). */
   log(line: string): void;
 }

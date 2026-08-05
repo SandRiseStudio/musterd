@@ -57,6 +57,22 @@ present for gptbot again during the probe. And izzo's daemon bounce at 09:51 —
 adapter to reconnect and ambient-touch, minutes before the first failure — remains the best
 available explanation for _why the condition began_, but it is a correlate, not a proven cause.
 
+### Limitation (added 2026-08-05, after review): this narrows the window, it does not close it
+
+The Decision below reads as though requiring `provenance: 'wake'` establishes that _this_ wake
+produced the occupancy. It does not, and the ADR should have said so. `wake` is a **description** of
+a kind of session, and a Presence carries no wake or session identity at all — so a **prior wake
+session**, still alive inside its 30-minute `work_order` timeout, keeps a fresh `wake` row and
+satisfies the next wake on its first poll. That is a false _success_: the act is reported delivered,
+to a session that never received it, and nothing retries it — worse than the false failure this ADR
+removed.
+
+What stays true here: all three failures of 2026-08-05 showed a `session` row at verify time, so
+waiting past it was the right fix for those, and the deferral half is unaffected.
+
+The correlation this ADR lacks is added by **ADR 241**, which carries the daemon-minted `lease_id`
+to the woken child and accepts only a presence row attesting that exact lease.
+
 ## Decision
 
 **Verify waits for the wake's own evidence, and treats another session's occupancy as a deferral.**

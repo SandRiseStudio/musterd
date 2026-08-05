@@ -35,10 +35,16 @@ export function parseCodexThreadLine(line: string): string | undefined {
 }
 
 /** An intentionally small child environment: enough to find Codex and its local account/config,
- * never an ambient agent key, grant, binding override, or smoke/trust control. */
-export function codexWakeEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+ * never an ambient agent key, grant, binding override, or smoke/trust control.
+ *
+ * `MUSTERD_WAKE_LEASE` (ADR 241) rides beside `MUSTERD_PROVENANCE`: the adapter inside the child
+ * attests it on claim, and that is what makes the resulting presence row identifiably THIS wake's.
+ * It is a daemon-minted opaque lease id — not a session id, transcript path, or token — so it
+ * carries nothing ADR 128 keeps off the wire, and it is already on the wire in the wake order. */
+export function codexWakeEnv(base: NodeJS.ProcessEnv, leaseId?: string): NodeJS.ProcessEnv {
   const allowed = ['HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM'];
   const env: NodeJS.ProcessEnv = { MUSTERD_PROVENANCE: 'wake' };
+  if (leaseId) env['MUSTERD_WAKE_LEASE'] = leaseId;
   for (const key of allowed) if (base[key] !== undefined) env[key] = base[key];
   return env;
 }
@@ -108,7 +114,7 @@ async function attempt(
   try {
     child = (deps.spawn ?? nodeSpawn)(bin, args, {
       cwd: spec.workspace,
-      env: codexWakeEnv(process.env),
+      env: codexWakeEnv(process.env, spec.order.lease_id),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -166,8 +172,15 @@ async function attempt(
     (deps.recordFreshThread ?? recordFreshThread)(spec.workspace, threadId, startedAt);
   const processOk =
     !spawnError && child.signalCode === null && (child.exitCode === null || child.exitCode === 0);
-  if (verified.occupied && verified.provenance === 'wake' && exact && processOk) {
-    ctx.log(`⚡ woke ${spec.order.seat}: session=${label} provenance=wake`);
+  // ADR 241: the success bar is `lease_matched` — a fresh row attesting THIS lease's token. It
+  // replaces `provenance === 'wake'`, which was a description every wake session in history
+  // satisfies: a prior wake still inside its 30m work-order timeout kept a fresh `wake` row and was
+  // credited to this lease instantly, reporting an act as delivered that no session ever received.
+  if (verified.occupied && verified.lease_matched && exact && processOk) {
+    ctx.log(
+      `⚡ woke ${spec.order.seat}: session=${label} lease=${spec.order.lease_id} ` +
+        `provenance=${verified.provenance ?? 'none'}`,
+    );
     return { occupied: true, exactCleanWithoutPresence: false, reason: '', settled };
   }
   const cleanExact = label === 'resumed' && exact && child.exitCode === 0 && !verified.occupied;
@@ -177,7 +190,11 @@ async function attempt(
   // wrong and nothing about the host is broken, so the attempt must not be charged: it defers, on
   // ADR 221/236's discipline (budget-neutral by construction; the awake-time ceiling still bounds
   // it). Distinguished from `!verified.occupied`, which IS a real failure and keeps burning.
-  const heldByOther = verified.occupied && verified.provenance !== 'wake';
+  // ADR 241: "not mine" is now decided by the lease token, so a seat held by ANOTHER WAKE's session
+  // defers too. Under the old provenance test that case read as `provenance === 'wake'` ⇒ not
+  // held-by-other ⇒ a charged failure, which is exactly backwards: the other session is alive and
+  // working, and this act should wait for it rather than pay for it.
+  const heldByOther = verified.occupied && !verified.lease_matched;
   return {
     occupied: false,
     ...(heldByOther ? { deferred: true } : {}),
@@ -191,8 +208,9 @@ async function attempt(
         : timedOut
           ? `watchdog timeout (${timeoutMs}ms)`
           : !verified.occupied
-            ? 'no wake-provenance roster Presence'
-            : `roster provenance ${verified.provenance ?? 'none'} is not wake`,
+            ? 'no roster Presence attesting this wake lease'
+            : `the seat is held by another session (provenance ${verified.provenance ?? 'none'}, ` +
+              `not lease ${spec.order.lease_id})`,
     settled,
   };
 }

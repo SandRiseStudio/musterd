@@ -76,6 +76,18 @@ export const PresenceSchema = z.object({
    *  when this is known *and* lower than the daemon's epoch — i.e. the seat genuinely lacks later features,
    *  never on benign build drift. */
   epoch: z.number().int().nonnegative().nullish(),
+  /**
+   * The wake lease this occupancy was spawned by (ADR 241) — the daemon-minted `lease_id` carried
+   * to the child through `MUSTERD_WAKE_LEASE` and attested back on claim. This is the only field on
+   * a Presence that CORRELATES a row with the act that caused it: everything else here describes
+   * the session, and two sessions on one seat are indistinguishable by description. Wake
+   * verification accepts a row only when this matches the lease it is verifying, so a prior wake
+   * session still inside its work-order timeout can no longer satisfy a later wake.
+   *
+   * Null/absent for every occupancy a wake did not cause — the overwhelmingly common case — and for
+   * older clients. Absence must never be read as a match (ADR 236: absence is not an assertion).
+   */
+  wake_lease: z.string().nullish(),
 });
 export type Presence = z.infer<typeof PresenceSchema>;
 

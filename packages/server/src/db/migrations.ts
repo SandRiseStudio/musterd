@@ -660,6 +660,21 @@ export const MIGRATIONS: Migration[] = [
       if (!laneCols.includes('stakes')) db.exec('ALTER TABLE lanes ADD COLUMN stakes TEXT');
     },
   },
+  {
+    // v34 — the wake correlation token (ADR 241). Sibling to the v17 `build` and v23 `epoch`
+    // columns in shape, but not in kind: those describe the session, and this IDENTIFIES what
+    // caused it. Every other column on a presence row is a description, and two sessions on one
+    // seat are indistinguishable under any description — which is how wake verification came to
+    // credit a prior wake's still-fresh row to a later lease and report an undelivered act as
+    // delivered. Nullable, never backfilled: an occupancy no wake caused genuinely has no lease,
+    // and the verifier treats absence as "not mine" rather than as missing data (ADR 236).
+    version: 34,
+    up: (db) => {
+      // Guarded, per v31's note: the migration tests rewind schema_version and replay the tail.
+      const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+      if (!cols.includes('wake_lease')) db.exec('ALTER TABLE presence ADD COLUMN wake_lease TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

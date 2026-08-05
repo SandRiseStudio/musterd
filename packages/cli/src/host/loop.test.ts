@@ -326,6 +326,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
             status: 'online',
             last_seen_at: Date.now() + 1_000, // fresh evidence — touched after the verify began
             provenance: 'wake',
+            wake_lease: 'L1', // ADR 241: and attesting THIS lease — the order's `lease_id`
           },
         ],
       },
@@ -346,7 +347,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         clientFor: () => client,
       }),
     );
-    expect(verified).toEqual({ occupied: true, provenance: 'wake' });
+    expect(verified).toEqual({ occupied: true, provenance: 'wake', lease_matched: true });
   });
 
   /**
@@ -358,7 +359,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
    * inside the 90s window, behind a stale-but-live `session` row that answered instantly.
    */
   const memberWith = (
-    presences: { provenance: string; last_seen_at: number }[],
+    presences: { provenance: string; last_seen_at: number; wake_lease?: string }[],
   ): MemberSummary[] => [
     {
       id: 'm1',
@@ -373,6 +374,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         status: 'online' as const,
         last_seen_at: p.last_seen_at,
         provenance: p.provenance,
+        ...(p.wake_lease !== undefined ? { wake_lease: p.wake_lease } : {}),
       })),
       created_at: 1,
     },
@@ -382,7 +384,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     const other = memberWith([{ provenance: 'session', last_seen_at: Date.now() + 1_000 }]);
     const bothRows = memberWith([
       { provenance: 'session', last_seen_at: Date.now() + 1_000 },
-      { provenance: 'wake', last_seen_at: Date.now() + 2_000 },
+      { provenance: 'wake', last_seen_at: Date.now() + 2_000, wake_lease: 'L1' },
     ]);
     // Two polls: the other session answers first, our own adapter claims on the second.
     const { client } = fakeClient([order()], [other, bothRows]);
@@ -401,7 +403,101 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         clientFor: () => client,
       }),
     );
-    expect(verified).toEqual({ occupied: true, provenance: 'wake' });
+    expect(verified).toEqual({ occupied: true, provenance: 'wake', lease_matched: true });
+  });
+
+  /**
+   * ADR 241 — the regression gptbot's rejection of ADR 238 asked for, and the point of the whole
+   * increment. Increment 1 accepted any fresh `provenance: 'wake'` row as this wake's evidence, but
+   * `wake` describes a KIND of session: a PRIOR wake, still alive inside its 30-minute work-order
+   * timeout, keeps its row fresh by working. So the later wake was credited to it on the first poll,
+   * the act was reported delivered, and no session ever received it — a false SUCCESS, strictly
+   * worse than the false failure increment 1 removed, because nothing retries it.
+   *
+   * The fixture is that exact shape: an old lease's wake row, fresh from the first poll, and this
+   * wake's own row arriving later. Verified by mutation — relax the match in `verifyOccupied` back
+   * to `p.provenance === 'wake'` and this test reports `lease_matched: true` against L-OLD's row on
+   * poll one, which is the bug reproduced.
+   */
+  it('roster verify: a PRIOR live wake session does not satisfy a later wake (ADR 241)', async () => {
+    const priorWake = memberWith([
+      { provenance: 'wake', last_seen_at: Date.now() + 1_000, wake_lease: 'L-OLD' },
+    ]);
+    const ours = memberWith([
+      { provenance: 'wake', last_seen_at: Date.now() + 1_000, wake_lease: 'L-OLD' },
+      { provenance: 'wake', last_seen_at: Date.now() + 2_000, wake_lease: 'L1' },
+    ]);
+    const { client } = fakeClient([order()], [priorWake, ours]);
+    const seen: { occupied: boolean; provenance?: string | null; lease_matched?: boolean }[] = [];
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async (_spec, ctx) => {
+        seen.push(await ctx.verifyOccupied('scout'));
+        return { outcome: { occupied: true }, settled: Promise.resolve(undefined) };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    // It waited past the prior wake's row and answered on OUR lease, not on the description it shares.
+    expect(seen).toEqual([{ occupied: true, provenance: 'wake', lease_matched: true }]);
+  });
+
+  it('roster verify: a seat held ONLY by another wake defers rather than failing (ADR 241)', async () => {
+    // The deadline case of the same condition, and the reason `lease_matched` had to replace the
+    // provenance test rather than sit beside it: under ADR 238's rule this row read `wake`, so it
+    // was NOT held-by-other, so it became a charged failure. The other session is alive and working;
+    // this act should wait for it, not pay for it.
+    const priorWake = memberWith([
+      { provenance: 'wake', last_seen_at: Date.now() + 1_000, wake_lease: 'L-OLD' },
+    ]);
+    const { client } = fakeClient([order()], [priorWake]);
+    let verified: { occupied: boolean; provenance?: string | null; lease_matched?: boolean } = {
+      occupied: false,
+    };
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async (_spec, ctx) => {
+        verified = await ctx.verifyOccupied('scout', 300);
+        return { outcome: { occupied: false, reason: 'x' }, settled: Promise.resolve(undefined) };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    expect(verified).toEqual({ occupied: true, provenance: 'wake', lease_matched: false });
+  });
+
+  it('roster verify: an UNTOKENED fresh wake row never matches — absence is not an assertion', async () => {
+    // ADR 236's subject, restated on this surface: a row from a client that does not attest the
+    // token (an older adapter dist) must read as "not mine", never as "close enough". The honest
+    // consequence is a deferral until that workspace's dist catches up — ADR 241's rollout note.
+    const untokened = memberWith([{ provenance: 'wake', last_seen_at: Date.now() + 1_000 }]);
+    const { client } = fakeClient([order()], [untokened]);
+    let verified: { occupied: boolean; lease_matched?: boolean } = { occupied: false };
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async (_spec, ctx) => {
+        verified = await ctx.verifyOccupied('scout', 300);
+        return { outcome: { occupied: false, reason: 'x' }, settled: Promise.resolve(undefined) };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    expect(verified.lease_matched).toBe(false);
   });
 
   it('roster verify: a seat held only by a non-wake session resolves occupied with that provenance', async () => {
@@ -425,7 +521,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         clientFor: () => client,
       }),
     );
-    expect(verified).toEqual({ occupied: true, provenance: 'session' });
+    expect(verified).toEqual({ occupied: true, provenance: 'session', lease_matched: false });
   });
 
   it('roster verify: window expiry without presence resolves occupied=false', async () => {
@@ -445,7 +541,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         clientFor: () => client,
       }),
     );
-    expect(verified).toEqual({ occupied: false });
+    expect(verified).toEqual({ occupied: false, lease_matched: false });
   });
 
   it('roster verify: STALE presence (pre-spawn last_seen_at) never verifies — the debris bar', async () => {
@@ -491,7 +587,7 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         clientFor: () => client,
       }),
     );
-    expect(verified).toEqual({ occupied: false });
+    expect(verified).toEqual({ occupied: false, lease_matched: false });
   });
 
   it('the local-session guard (inc 4): a live local session defers — backend never called, lease settled', async () => {

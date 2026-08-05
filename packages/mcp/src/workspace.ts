@@ -1,5 +1,10 @@
 import { basename, relative } from 'node:path';
-import { PROVENANCES, resolveAttestedModel, type Provenance } from '@musterd/protocol';
+import {
+  PROVENANCES,
+  resolveAttestedModel,
+  resolveAttestedWakeLease,
+  type Provenance,
+} from '@musterd/protocol';
 import { gitOutput, gitToplevel } from '@musterd/protocol/project';
 
 /**
@@ -26,6 +31,20 @@ export function resolveWorkspace(
   const qualifier = git?.branch || git?.subpath || '';
   const label = qualifier ? `${folder}@${qualifier}` : folder;
   return label.slice(0, 120);
+}
+
+/**
+ * The wake correlation token (ADR 241) for this session, from `MUSTERD_WAKE_LEASE` via the shared
+ * protocol resolver — so the adapter and the CLI's ambient touches attest the same value the same
+ * way, exactly as they already do for model and provenance.
+ *
+ * Note the asymmetry with {@link resolveProvenance} directly below, which is deliberate: provenance
+ * DEFAULTS (`session` is the honest description of an unlabelled session), and this one never does.
+ * A default here would turn "I don't know what spawned me" into "this lease spawned me", which is
+ * the false assertion ADR 236 exists to forbid and the exact bug this token was added to fix.
+ */
+export function resolveWakeLease(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return resolveAttestedWakeLease(env);
 }
 
 /** Read provenance from `MUSTERD_PROVENANCE`, defaulting to `session` (the common human-driven case). */

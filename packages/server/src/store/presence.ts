@@ -16,6 +16,7 @@ export interface PresenceSummary {
     model: string | null;
     build: string | null;
     epoch: number | null;
+    wake_lease: string | null;
   }[];
 }
 
@@ -30,6 +31,9 @@ export interface AttachContext {
   build?: string | null;
   /** Client-attested feature epoch (ADR 148); absent → null (older client). The roster's skew signal. */
   epoch?: number | null;
+  /** The wake lease this session was spawned by (ADR 241), attested from `MUSTERD_WAKE_LEASE`.
+   *  Absent → null, and null never matches a verifying lease: absence is not an assertion. */
+  wake_lease?: string | null;
 }
 
 /**
@@ -61,11 +65,12 @@ export function attach(
     model: ctx.model ?? null,
     build: ctx.build ?? null,
     epoch: ctx.epoch ?? null,
+    wake_lease: ctx.wake_lease ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, build, epoch, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @build, @epoch, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, build, epoch, wake_lease, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @build, @epoch, @wake_lease, @created_at)`,
   ).run(row);
   return row;
 }
@@ -182,9 +187,13 @@ export function touchAmbientPresence(
     // clearing it (attestation only moves forward — a real switch comes via a claim/heartbeat that
     // *does* carry a model). ADR 119: when the client *does* send a model (`x-musterd-model`), COALESCE
     // installs it on a fresh or blank ambient row — the fire-and-exit CLI re-attest path.
-    // provenance/workspace/driver stay per-session seed and re-write normally.
+    // provenance/workspace/driver stay per-session seed and re-write normally — and `wake_lease`
+    // (ADR 241) rides with provenance rather than with model, deliberately. The two answer one
+    // question together ("which session animates this row, and what caused it"), so a touch that
+    // re-writes provenance must re-write the token in the same breath; a sticky token under a
+    // fresh provenance would claim a lease the session no longer belongs to.
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, model = COALESCE(?, model), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, wake_lease = ?, model = COALESCE(?, model), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -192,6 +201,7 @@ export function touchAmbientPresence(
       provenance,
       ctx.workspace ?? null,
       ctx.driver ?? null,
+      ctx.wake_lease ?? null,
       ctx.model ?? null,
       ctx.build ?? null,
       ctx.epoch ?? null,
@@ -290,6 +300,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         model: p.model ?? null,
         build: p.build ?? null,
         epoch: p.epoch ?? null,
+        wake_lease: p.wake_lease ?? null,
       })),
     };
   });

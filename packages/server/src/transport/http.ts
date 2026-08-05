@@ -593,6 +593,21 @@ function provenanceHeader(req: IncomingMessage): Provenance | undefined {
 }
 
 /**
+ * The wake correlation token from `x-musterd-wake-lease` (ADR 241) — the daemon-minted lease id the
+ * actuator handed the woken child. Opaque here: the daemon does not check that the lease exists or
+ * is this member's, because the token is evidence for the HOST that spawned it, not an authorization
+ * of anything. Its only reader is a verifier comparing it to a lease it already holds, so a forged
+ * value can at most make a session claim a wake nobody is verifying.
+ */
+function wakeLeaseHeader(req: IncomingMessage): string | undefined {
+  const raw = req.headers['x-musterd-wake-lease'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 64) : undefined;
+}
+
+/**
  * Authenticate a request and write an ambient presence touch for the caller (ADR 057): a one-shot
  * authenticated command is itself proof of liveness, so it flips a bursty agent present between watch
  * sockets. A no-op when the member already holds a resident session; on an offline→online transition we
@@ -623,6 +638,9 @@ function authTouch(
   // Provenance describes the *current* animation source (newest-wins, owner call 2026-07-14) —
   // agent seats only, mirroring the model gate: a human shell must not label itself `wake`.
   const provenance = auth.member.kind === 'agent' ? provenanceHeader(req) : undefined;
+  // ADR 241: same agent-only gate as provenance, and it travels WITH it — the ambient row's
+  // provenance and its lease token describe one session, so a human shell can stamp neither.
+  const wakeLease = auth.member.kind === 'agent' ? wakeLeaseHeader(req) : undefined;
   // Snapshot the ambient row before the touch so a real model change can audit (source: ambient).
   const before = model
     ? ctx.db
@@ -641,6 +659,7 @@ function authTouch(
       ...(model !== undefined ? { model } : {}),
       ...(build !== undefined ? { build } : {}),
       ...(provenance !== undefined ? { provenance } : {}),
+      ...(wakeLease !== undefined ? { wake_lease: wakeLease } : {}),
     },
   );
   if (model) {
