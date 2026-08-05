@@ -219,11 +219,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         // Derived from the protocol schema (ADR 169 consolidation) — this enum was hand-duplicated
         // and silently missed new states.
         state: z.enum(LaneStateSchema.options).optional().describe('new state'),
-        title: z
-          .string()
-          .min(1)
-          .optional()
-          .describe('correct the title (ADR 240) — forward-only; sent notifications keep theirs'),
+        title: z.string().min(1).optional().describe('correct a mis-stated title'),
         detail: z.string().optional(),
         surface_globs: z.array(z.string()).optional(),
         stakes: z
