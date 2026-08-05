@@ -151,8 +151,10 @@ describe('format helpers', () => {
 
   it('notJoinedMessage appends the last join error when present', () => {
     expect(notJoinedMessage('send', null)).toMatch(/call team_join first, then send/);
-    const withErr = notJoinedMessage('send', 'superseded by a newer session');
-    expect(withErr).toContain('last join attempt failed: superseded by a newer session');
+    const withErr = notJoinedMessage('send', 'timed out waiting for admin approval');
+    expect(withErr).toContain('last join attempt failed: timed out waiting for admin approval');
+    // A superseded join error takes the ADR 237 eviction branch instead — see format.test.ts.
+    expect(notJoinedMessage('send', 'superseded by a newer session')).toMatch(/evicted/i);
   });
 });
 
