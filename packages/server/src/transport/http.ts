@@ -2145,6 +2145,15 @@ export async function handleHttp(
             ctx.hub.remove(old.connId);
           }
           clearMemberPresence(ctx.db, targetMember.id);
+          // ADR 237: every displacement writes a ledger row — this branch used to evict silently,
+          // leaving only the winner's claim.occupied behind.
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'claim.superseded',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { same_workspace: false, evicted: liveConns.length, via: 'http' },
+          });
         }
 
         // Step 5: grant path — validate + consume, then occupy.

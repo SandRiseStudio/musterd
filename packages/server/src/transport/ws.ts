@@ -377,6 +377,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           ) {
             const sameWorkspace = (w?: string | null): boolean =>
               w != null && frame.workspace != null && w === frame.workspace;
+            let displaced = 0;
             for (const old of ctx.hub.connsForMember(targetMember.id)) {
               if (sameWorkspace(old.workspace)) {
                 // Same seat reconnecting/probing — keep it now; a durable successor reaps it (ADR 092).
@@ -391,6 +392,18 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               old.close?.();
               ctx.hub.remove(old.connId);
               clearPresenceById(ctx.db, old.presenceId);
+              displaced++;
+            }
+            // ADR 237: an eviction the ledger cannot see is an eviction nobody can debug — this
+            // branch used to displace silently while the same-workspace reap audited.
+            if (displaced > 0) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'claim.superseded',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { same_workspace: false, evicted: displaced, via: 'ws' },
+              });
             }
             clearOrphanPresence(ctx.db, targetMember.id);
           }
