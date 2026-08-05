@@ -125,6 +125,7 @@ describe('service refresh --auto (the tick)', () => {
     health: () => Promise<{ connections?: number; build?: string }>;
     notify?: (n: { id: string; title: string; body: string }) => void;
     autoState?: { read: () => string | null; write: (sha: string) => void };
+    outageState?: { read: () => string | null; write: (s: string) => void };
   }) =>
     capture(() =>
       serviceCommand(parseArgs(over.argv ?? ['refresh', '--auto', '--mode', 'notice']), {
@@ -134,6 +135,9 @@ describe('service refresh --auto (the tick)', () => {
         notify: over.notify,
         // Default to a fresh in-memory store so tests never touch (or share) the real ~/.musterd stamp.
         autoState: over.autoState ?? memState(),
+        // ADR 230: the outage run/escalation marker — a SEPARATE store from the build debounce, so
+        // an outage can never clobber the broken-`main` marker (and vice versa).
+        outageState: over.outageState ?? memState(),
       }),
     );
 
@@ -410,16 +414,110 @@ describe('service refresh --auto (the tick)', () => {
     expect(out).toContain('answered /health');
   });
 
-  it('no-ops when the daemon is unreachable (watcher, never gatekeeper)', async () => {
-    const { code, out } = await tick({
-      ctx: ctx(autoRunner({ behind: 5 })),
-      health: async () => {
-        throw new Error('ECONNREFUSED');
-      },
+  /**
+   * ADR 230 — a dead daemon is not a success. The tick used to log `✓ unreachable — nothing to
+   * refresh` and exit 0, which is the report of a healthy no-op being used for an outage: measured
+   * 1,136 times across 29 blocks on the live machine. It never rebuilds (nothing to build against),
+   * but it must now tell down from nothing-to-do.
+   */
+  describe('a dead daemon is not a success (ADR 230)', () => {
+    const down = async () => {
+      throw new Error('ECONNREFUSED');
+    };
+    /** A runner where launchctl agrees the job is not running (the independent second source). */
+    const runnerJobDown = (): Runner => {
+      const base = autoRunner({ behind: 5 });
+      return (cmd, args) => {
+        if (cmd === 'launchctl' && args.includes('print')) {
+          calls.push({ cmd, args });
+          return { status: 113, stdout: '', stderr: 'Could not find service' };
+        }
+        return base(cmd, args);
+      };
+    };
+
+    it('one failed probe never escalates — it records the run and waits (the ADR 205 lesson)', async () => {
+      const state = memState();
+      const { code, out } = await tick({
+        ctx: ctx(runnerJobDown()),
+        health: down,
+        outageState: state,
+      });
+      expect(code).toBe(0);
+      expect(out).toContain('unreachable');
+      expect(out).not.toContain('restarting'); // a single miss is a shrug, not an incident
+      expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
+      // …but the run is remembered, so the NEXT tick can tell a run from a blip.
+      expect(state.read()).toContain('down:1');
     });
-    expect(code).toBe(0);
-    expect(out).toContain('unreachable');
-    expect(calls.some((x) => x.cmd === 'pnpm')).toBe(false);
+
+    it('two consecutive probes + launchctl agreeing → the operator is notified exactly once', async () => {
+      const notices: { title: string; body: string }[] = [];
+      const state = memState('down:1'); // a previous tick already saw it down
+      const { code, out } = await tick({
+        ctx: ctx(runnerJobDown()),
+        health: down,
+        notify: (n) => notices.push(n),
+        outageState: state,
+      });
+      expect(code).toBe(0);
+      expect(out).toContain('confirmed');
+      expect(out).toContain('notified the operator');
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.body).toMatch(/daemon/i);
+      // The stop rule: the state marks this outage as already escalated…
+      expect(state.read()).toContain('notified');
+    });
+
+    it('never restarts on its own — autonomy flows through the role machinery, not this cron (ADR 230 re-eval)', async () => {
+      // The 2026-08-04 re-evaluation with nick: the tick has no seat, no role, no identity — the
+      // infra-gate cannot even see it. Granting it restart autonomy the same day ADR 227 shipped
+      // "only designated platform agents touch running infrastructure" was the contradiction; the
+      // restart arrives through the automated-actors-under-roles design or not at all.
+      await tick({
+        ctx: ctx(runnerJobDown()),
+        health: down,
+        notify: () => {},
+        outageState: memState('down:1'),
+      });
+      expect(calls.some((x) => x.cmd === 'launchctl' && x.args.includes('kickstart'))).toBe(false);
+    });
+
+    it('…and the next tick in the same outage does NOT notify again (one notice per outage)', async () => {
+      const notices: { title: string; body: string }[] = [];
+      const { code, out } = await tick({
+        ctx: ctx(runnerJobDown()),
+        health: down,
+        notify: (n) => notices.push(n),
+        outageState: memState('down:notified'),
+      });
+      expect(code).toBe(0);
+      expect(notices).toHaveLength(0);
+      expect(out).toContain('standing down');
+    });
+
+    it('launchctl saying the job is healthy withholds escalation — one source is never enough', async () => {
+      const { code, out } = await tick({
+        // plain autoRunner: launchctl returns status 0 for everything, i.e. the job looks fine
+        ctx: ctx(autoRunner({ behind: 5 })),
+        health: down,
+        outageState: memState('down:1'),
+      });
+      expect(code).toBe(0);
+      expect(out).not.toContain('restarting');
+      expect(out).toContain('launchctl'); // says WHY it held back, rather than going quiet
+    });
+
+    it('a healthy tick clears the outage state, so the next outage starts from zero', async () => {
+      const state = memState('down:notified');
+      const { code } = await tick({
+        ctx: ctx(autoRunner({ behind: 0 })),
+        health: async () => ({ connections: 1, build: 'newtip1111' }),
+        outageState: state,
+      });
+      expect(code).toBe(0);
+      expect(state.read() ?? '').not.toContain('down:');
+    });
   });
   /**
    * The settle window (measured 2026-08-03). The tick bounced the daemon on ANY skew, so a merge
