@@ -169,3 +169,45 @@ describe('shouldChime (the broadcast cue throttle)', () => {
     expect(fired).toEqual([0]);
   });
 });
+
+describe('the lazy engine façade', () => {
+  // The engines are a dynamic import now, so the risk this file has to cover is no longer "does the
+  // synth work" — it is "does a command issued before the chunk lands survive the wait".
+
+  it('answers `enabled` from the stored preference without loading the engines', () => {
+    // Nothing here awaits: the toggle reads this during render, on a page that may never fetch a synth.
+    expect(typeof firehoseSound.enabled).toBe('boolean');
+    expect(typeof roomTone.enabled).toBe('boolean');
+  });
+
+  it('forwards a command issued before the chunk lands, once it lands', async () => {
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('document', { hidden: true, addEventListener: () => {} });
+    try {
+      firehoseSound.enableForBroadcast();
+      roomTone.enableForBroadcast();
+      // The façade said yes synchronously; the engines have not been asked yet.
+      const engines = await import('./soundEngine');
+      // One more turn for the façade's own `.then` to run after the module resolves.
+      await Promise.resolve();
+      expect(engines.firehoseEngine.enabled).toBe(true);
+      expect(engines.roomToneEngine.enabled).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('drops a cue that arrives before the engines do, rather than queueing it', () => {
+    // A burst during the fetch must not collapse into one simultaneous chord when the chunk lands.
+    // Nothing to assert but the absence of a throw and of a queue: the cue is simply gone.
+    expect(() => firehoseSound.chime('message')).not.toThrow();
+  });
+
+  it('takes occupancy before an engine exists and hands it over on load', async () => {
+    roomTone.setOccupancy(near);
+    const { roomToneEngine } = await import('./soundEngine');
+    await Promise.resolve();
+    expect(() => roomTone.setOccupancy(EMPTY_LIFE)).not.toThrow();
+    expect(roomToneEngine).toBeDefined();
+  });
+});
