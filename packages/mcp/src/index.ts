@@ -104,7 +104,15 @@ export function primerInstructions(config: McpConfig): string {
 /** The canonical registered-tool names (ADR 085) — kept in a dependency-free module so the guidance
  * drift check can import it without the MCP SDK; re-exported here for normal consumers. */
 export { TOOL_NAMES } from './toolNames.js';
-export { measureToolSurface } from './surfaceMeasure.js';
+
+/* `measureToolSurface` is deliberately NOT re-exported here. It lives in `surfaceMeasure.ts`, which
+ * imports `@modelcontextprotocol/client` — a devDependency, because measuring the surface means
+ * standing up an in-memory client against our own server. A top-level re-export puts that module in
+ * the runtime graph of `dist/index.js`, and ESM evaluates it eagerly: 0.4.0 shipped that way and
+ * could not be loaded by any consumer at all (`ERR_MODULE_NOT_FOUND: @modelcontextprotocol/client`),
+ * while staying invisible here because a workspace install has the dev deps. Its two consumers —
+ * `scopeSurface.test.ts` and `scripts/context/check-budgets.ts` — both import the module directly,
+ * which is the honest shape for a measurement harness. See `dist-imports.test.ts` for the guard. */
 
 /** Tools that must NOT trigger the deferred launch autojoin: an explicit `team_join` supersedes the
  * implicit one (firing both would claim twice), and a `team_leave` must never cause a join. */
