@@ -3,9 +3,11 @@ import {
   askTierHolds,
   AskSpeciesSchema,
   AskTierSchema,
+  isAwaitingAcceptance,
   type AskSpecies,
   type AskTier,
   type Envelope,
+  type Lane,
 } from '@musterd/protocol';
 
 /**
@@ -42,6 +44,14 @@ export interface AskView {
   env: Envelope;
   species: AskSpecies;
   tier: AskTier;
+  /**
+   * Who the ask was ROUTED to — the addressed member, or null for a team/broadcast ask. This existed
+   * on the envelope all along and the derivation dropped it, which is how the strip came to render an
+   * agent-routed acceptance ask under "waiting on a human" copy with a "Sign in as nick" button
+   * (lane 01KZ9GFHZ9): a reader concluded nick held ten asks the ledger had routed to gptbot. ADR 149
+   * predates ADR 191's agent-routed review asks; the recipient is no longer implicit.
+   */
+  to: string | null;
   /** When the tier clock elapses: `ts + ASK_TIER_DEFAULTS[tier].timeout_ms` — the same protocol
    *  constant the asking agent's clock reads, so the surface and the agent agree on the deadline. */
   deadline: number;
@@ -85,6 +95,7 @@ export function deriveAsks(envelopes: Envelope[]): AskView[] {
         env,
         species: species.data,
         tier: tier.data,
+        to: env.to.kind === 'member' ? env.to.name : null,
         deadline: env.ts + ASK_TIER_DEFAULTS[tier.data].timeout_ms,
         state: 'open',
       });
@@ -119,7 +130,79 @@ export function deriveAsks(envelopes: Envelope[]): AskView[] {
   return [...asks.values()].reverse();
 }
 
+/**
+ * Whose attention an ask is actually waiting on, seen from this browser:
+ * - `you`   — routed to the signed-in seat. The only bucket the answer buttons belong to.
+ * - `human` — routed to a human who is not you. Someone's, just not yours.
+ * - `agent` — routed to an agent seat (ADR 191 review asks are most of the timeline now). Watchable,
+ *             never "sign in to answer" — that invitation on an agent's ask is how the strip lied.
+ * - `team`  — addressed to nobody in particular; anyone answerable may take it.
+ */
+export type AskAudience = 'you' | 'human' | 'agent' | 'team';
+
+export interface AudienceContext {
+  /** The seat this browser is signed in as (or would sign in as); null/undefined when observing. */
+  you?: string | null;
+  /** Names of the roster's human members — how `human` and `agent` are told apart. */
+  humans: Set<string>;
+}
+
+export function askAudience(ask: AskView, ctx: AudienceContext): AskAudience {
+  if (ask.to == null) return 'team';
+  if (ctx.you != null && ask.to === ctx.you) return 'you';
+  return ctx.humans.has(ask.to) ? 'human' : 'agent';
+}
+
+/**
+ * One lane sitting in acceptance, and who it waits on (nick, 2026-08-05: "visibility into all lanes
+ * awaiting acceptance and who it's waiting on", at a glance beside the asks).
+ */
+export interface ReviewView {
+  lane: Lane;
+  /** The acceptor the daemon routed the review ask to — null when no open routed ask is found
+   *  (renders as "unrouted"; the honest read, never a guess). */
+  waitingOn: string | null;
+}
+
+/**
+ * Lanes in acceptance (both state spellings, ADR 192/169), longest-waiting first, each joined to its
+ * routed acceptance ask by `meta.lane_review.lane` — the id the daemon stamps on every ADR 191 review
+ * ask. Joining by id rather than title-matching is the point: titles are prose and get edited. A later
+ * re-route supersedes, and an answered ask stops naming its acceptor (the lane then reads unrouted
+ * until the daemon routes again or resolves it).
+ */
+export function deriveReviewQueue(lanes: Lane[], asks: AskView[]): ReviewView[] {
+  // Newest routed, still-open review ask per lane id (deriveAsks returns newest first).
+  const acceptorByLane = new Map<string, string | null>();
+  for (const ask of asks) {
+    const ref = (ask.env.meta?.['lane_review'] as { lane?: unknown } | undefined)?.lane;
+    if (typeof ref !== 'string' || acceptorByLane.has(ref)) continue;
+    acceptorByLane.set(ref, askIsLoud(ask.state) ? ask.to : null);
+  }
+  return lanes
+    .filter((l) => isAwaitingAcceptance(l.state))
+    .sort((a, b) => a.updated_at - b.updated_at)
+    .map((lane) => ({ lane, waitingOn: acceptorByLane.get(lane.id) ?? null }));
+}
+
 const TIER_WEIGHT = { blocking: 0, standard: 1, advisory: 2 } as const;
+
+const AUDIENCE_WEIGHT = { you: 0, team: 1, human: 2, agent: 3 } as const;
+
+/**
+ * The rail's order once the recipient exists: what is YOURS first, then the team pool you could take,
+ * then other people's, then the agents' — and within each bucket, the untouched ADR 149 urgency order.
+ * An agent's blocking ask never outranks your standard one: however hot its clock, it is not this
+ * reader's clock.
+ */
+export function byAudienceThenUrgency(ctx: AudienceContext, now: number = Date.now()) {
+  return (a: AskView, b: AskView): number => {
+    const wa = AUDIENCE_WEIGHT[askAudience(a, ctx)];
+    const wb = AUDIENCE_WEIGHT[askAudience(b, ctx)];
+    if (wa !== wb) return wa - wb;
+    return byUrgency(a, b, now);
+  };
+}
 
 /**
  * Which open ask matters most — the order the rail leads with and the sheet lists in.

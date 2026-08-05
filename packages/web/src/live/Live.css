@@ -4171,6 +4171,66 @@
   color: var(--lc-muted);
   white-space: nowrap;
 }
+/* Routed-elsewhere chip (lane 01KZ9GFHZ9): names the actual acceptor on an ask that is not this
+   reader's, in the roster's muted neutral — informational, never an alarm. The arrow does the work:
+   "izzo needs approval → gptbot" reads as routing, not as a demand on whoever is looking. */
+.lc-asks__routed {
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  color: var(--lc-muted);
+  white-space: nowrap;
+}
+/* The review queue: lanes in acceptance, below the ask cards in the same floating sheet. Rows are
+   ways IN (open the board on the lane) — acceptance is the acceptor's act, so there are no answer
+   buttons here to press on someone else's behalf. */
+.lc-asks__reviews {
+  margin-top: var(--lc-3);
+  padding-top: var(--lc-3);
+  border-top: 1px solid color-mix(in srgb, var(--lc-muted) 18%, transparent);
+}
+.lc-asks__reviews-title {
+  margin: 0 0 var(--lc-2);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lc-muted);
+}
+.lc-asks__review {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-3);
+  width: 100%;
+  padding: var(--lc-2) var(--lc-2);
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--lc-text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.lc-asks__review:hover {
+  background: color-mix(in srgb, var(--lc-accent) 8%, transparent);
+}
+.lc-asks__review-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lc-asks__review-who {
+  color: var(--lc-muted);
+  white-space: nowrap;
+  font-size: 11px;
+}
+.lc-asks__review-who b {
+  color: var(--lc-text);
+  font-weight: 600;
+}
 .lc-asks__link {
   color: var(--lc-muted);
   text-decoration: none;

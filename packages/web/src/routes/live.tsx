@@ -469,6 +469,8 @@ function LivePage() {
                   localIdentity={localIdentity}
                   onSignIn={signInHere}
                   onSignOut={signOut}
+                  board={board}
+                  onOpenLane={setBoardLane}
                 />
               }
               workCues={WORK_CUES}

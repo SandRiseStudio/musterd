@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Envelope, MemberSummary } from '@musterd/protocol';
+import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol';
-import { askIsLoud, byUrgency, deriveAsks, type AskView } from './asks';
+import {
+  askAudience,
+  askIsLoud,
+  byAudienceThenUrgency,
+  deriveAsks,
+  deriveReviewQueue,
+  type AskView,
+  type AudienceContext,
+} from './asks';
 import { sendAct, type LiveConfig } from './client';
 import { initial, memberColor, kindOf } from './format';
 import { scrollToMessage } from './Stream';
@@ -31,6 +39,8 @@ export function AsksStrip({
   localIdentity = null,
   onSignIn,
   onSignOut,
+  board = null,
+  onOpenLane,
 }: {
   envelopes: Envelope[];
   roster: MemberSummary[];
@@ -41,6 +51,10 @@ export function AsksStrip({
   localIdentity?: string | null;
   onSignIn?: () => void;
   onSignOut?: () => void;
+  /** The lane board the page already holds (useWorkingOn) — feeds the review queue; null renders none. */
+  board?: LaneBoard | null;
+  /** Open the room's board overlay on a lane — the review queue's click-through. */
+  onOpenLane?: (laneId: string) => void;
 }) {
   // Answers this browser just sent: the firehose deliberately skips the sender, so the POST ack is the
   // only copy this client sees — fold it into the derivation so the card settles immediately.
@@ -54,12 +68,40 @@ export function AsksStrip({
     () => deriveAsks([...envelopes, ...localAnswers]),
     [envelopes, localAnswers],
   );
-  const loud = asks.filter((a) => askIsLoud(a.state)).sort((a, b) => byUrgency(a, b));
+  // Answerable iff the connected seat is a real member (observers are hidden from the roster).
+  const canAnswer = roster.some((m) => m.name === cfg.as);
+  /**
+   * Who "you" are for audience purposes (lane 01KZ9GFHZ9): the signed-in seat, else the seat one
+   * click would make you. Routing is judged against that identity — an ask routed to an AGENT must
+   * never render under "sign in to answer" copy, which is exactly how this strip told a reader that
+   * ten agent-routed asks were nick's.
+   */
+  const ctx: AudienceContext = useMemo(
+    () => ({
+      you: canAnswer ? cfg.as : localIdentity,
+      humans: new Set(roster.filter((m) => m.kind === 'human').map((m) => m.name)),
+    }),
+    [canAnswer, cfg.as, localIdentity, roster],
+  );
+  const loud = asks.filter((a) => askIsLoud(a.state)).sort(byAudienceThenUrgency(ctx));
   const deferred = asks.filter((a) => a.state === 'deferred');
   const closed = asks.length - loud.length - deferred.length;
   const cards = [...loud, ...deferred];
-  // The one the rail answers inline, and the one the sheet puts first: see `byUrgency`.
+  // The one the rail answers inline, and the one the sheet puts first: yours first, then urgency.
   const lead = loud[0] ?? deferred[0];
+  const leadAudience = lead ? askAudience(lead, ctx) : null;
+  // Yours-or-anyone's: the only audiences whose asks this browser should be invited to answer.
+  const leadIsOurs = leadAudience === 'you' || leadAudience === 'team';
+  const yoursCount = loud.filter((a) => {
+    const aud = askAudience(a, ctx);
+    return aud === 'you' || aud === 'team';
+  }).length;
+
+  // The review queue (nick, 2026-08-05): every lane in acceptance and who it waits on, at a glance.
+  const reviews = useMemo(
+    () => (board ? deriveReviewQueue(board.lanes, asks) : []),
+    [board, asks],
+  );
 
   // A 1s tick while any clock is running, so the countdowns are honest. Stops when nothing is loud —
   // idle cost is paid by every viewer, forever (packages/web/AGENTS.md).
@@ -70,16 +112,18 @@ export function AsksStrip({
     return () => clearInterval(id);
   }, [loud.length]);
 
-  // Waiting-on-you count in the tab title — loud even when the tab isn't front.
+  // Waiting-on-YOU count in the tab title — loud even when the tab isn't front. Counts only asks
+  // this browser's identity could answer (yours + team-pool): titling the tab "(10 asks)" for ten
+  // agent-routed reviews is the lie this lane exists to retire.
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const base = document.title.replace(/^\(\d+ asks?\) /, '');
     document.title =
-      loud.length > 0 ? `(${loud.length} ask${loud.length > 1 ? 's' : ''}) ${base}` : base;
+      yoursCount > 0 ? `(${yoursCount} ask${yoursCount > 1 ? 's' : ''}) ${base}` : base;
     return () => {
       document.title = base;
     };
-  }, [loud.length]);
+  }, [yoursCount]);
 
   // Dismissal: Escape, and a click anywhere outside. Both are what a floating layer owes the reader —
   // it covers the canvas, so it must be as easy to put away as it was to open.
@@ -98,9 +142,6 @@ export function AsksStrip({
       document.removeEventListener('mousedown', onDown);
     };
   }, [open]);
-
-  // Answerable iff the connected seat is a real member (observers are hidden from the roster).
-  const canAnswer = roster.some((m) => m.name === cfg.as);
 
   /**
    * What the action slot holds when you cannot answer (ADR 222). Before this, it held nothing: the
@@ -148,7 +189,7 @@ export function AsksStrip({
     [cfg],
   );
 
-  if (asks.length === 0) return null;
+  if (asks.length === 0 && reviews.length === 0) return null;
 
   const idx = new Map(roster.map((m) => [m.name, m]));
   const rest = cards.length - (lead ? 1 : 0);
@@ -178,14 +219,21 @@ export function AsksStrip({
               title="Jump to this ask in the stream"
             >
               <b>{lead.env.from}</b>
-              <span className="lc-asks__verb">{SPECIES_VERB[lead.species]}</span>
+              <span className="lc-asks__verb">
+                {leadAudience === 'you' ? SPECIES_VERB_YOU[lead.species] : SPECIES_VERB[lead.species]}
+              </span>
+              {/* Routed elsewhere: name the actual acceptor, so nobody reads an agent's queue as
+                  their own (lane 01KZ9GFHZ9 — the strip's wrong-acceptor bug was exactly this). */}
+              {!leadIsOurs && lead.to && (
+                <span className="lc-asks__routed">→ {lead.to}</span>
+              )}
               {lead.env.body && <span className="lc-asks__gist">{lead.env.body}</span>}
             </button>
             <span className={`lc-ask__tier lc-asks__tier lc-ask__tier--${lead.tier}`}>
               {lead.tier}
             </span>
             <AskClock ask={lead} />
-            {askIsLoud(lead.state) && canAnswer && (
+            {askIsLoud(lead.state) && canAnswer && leadIsOurs && (
               <span className="lc-asks__quick">
                 <button
                   type="button"
@@ -210,8 +258,10 @@ export function AsksStrip({
               </span>
             )}
             {/* The way in sits exactly where the answer will sit, so one click swaps this for
-                Approve/Deny in place and the rail never moves (ADR 222). */}
-            {askIsLoud(lead.state) && !canAnswer && wayIn === 'offer' && (
+                Approve/Deny in place and the rail never moves (ADR 222). Only offered when the ask
+                is actually answerable BY that identity — "Sign in as nick" on gptbot's review queue
+                was this strip's founding lie. */}
+            {askIsLoud(lead.state) && !canAnswer && leadIsOurs && wayIn === 'offer' && (
               <button
                 type="button"
                 className="lc-ask__btn lc-asks__signin"
@@ -221,7 +271,7 @@ export function AsksStrip({
                 Sign in as {localIdentity} to answer
               </button>
             )}
-            {askIsLoud(lead.state) && !canAnswer && wayIn === 'paste' && (
+            {askIsLoud(lead.state) && !canAnswer && leadIsOurs && wayIn === 'paste' && (
               <button
                 type="button"
                 className="lc-ask__btn lc-asks__link lc-asks__signin--ghost"
@@ -241,10 +291,11 @@ export function AsksStrip({
 
         <span className="lc-asks__spacer" />
 
+        {reviews.length > 0 && <span className="lc-asks__meta">{reviews.length} in review</span>}
         {deferred.length > 0 && <span className="lc-asks__meta">{deferred.length} deciding</span>}
         {closed > 0 && <span className="lc-asks__meta">{closed} settled</span>}
 
-        {cards.length > 0 && (
+        {(cards.length > 0 || reviews.length > 0) && (
           <button
             type="button"
             className="lc-ask__btn lc-asks__more"
@@ -285,28 +336,85 @@ export function AsksStrip({
       {error && <div className="lc-asks__error">{error}</div>}
 
       {/* Closed, the sheet is inert: no tab stops into a layer the reader cannot see. */}
-      {cards.length > 0 && (
+      {(cards.length > 0 || reviews.length > 0) && (
         <div className="lc-asks__sheet" data-open={open || undefined} inert={!open}>
           <div className="lc-asks__cards">
-            {cards.map((ask, i) => (
-              <AskCard
-                key={ask.env.id}
-                ask={ask}
-                idx={idx}
-                canAnswer={canAnswer}
-                busy={busy === ask.env.id}
-                onAnswer={(kind) => void answer(ask, kind)}
-                style={{ '--i': i } as React.CSSProperties}
-              />
-            ))}
+            {cards.map((ask, i) => {
+              const aud = askAudience(ask, ctx);
+              return (
+                <AskCard
+                  key={ask.env.id}
+                  ask={ask}
+                  idx={idx}
+                  canAnswer={canAnswer && (aud === 'you' || aud === 'team')}
+                  audience={aud}
+                  busy={busy === ask.env.id}
+                  onAnswer={(kind) => void answer(ask, kind)}
+                  style={{ '--i': i } as React.CSSProperties}
+                />
+              );
+            })}
           </div>
+          {/* The review queue (nick, 2026-08-05): every lane sitting in acceptance and who it waits
+              on — visibility the board overlay had a click too deep. Read-only here: acceptance is
+              the acceptor's act, so each row is a way IN (opens the board on that lane), never a
+              button that answers on someone else's behalf. */}
+          {reviews.length > 0 && (
+            <div className="lc-asks__reviews">
+              <h3 className="lc-asks__reviews-title">
+                In review — {reviews.length} lane{reviews.length === 1 ? '' : 's'} awaiting acceptance
+              </h3>
+              {reviews.map((r) => (
+                <button
+                  key={r.lane.id}
+                  type="button"
+                  className="lc-asks__review"
+                  onClick={() => onOpenLane?.(r.lane.id)}
+                  title="Open this lane on the board"
+                >
+                  <span
+                    className="lc-chip__avatar"
+                    style={{
+                      background: memberColor(
+                        r.lane.owner_seat ?? '?',
+                        kindOf(r.lane.owner_seat ?? '?', idx),
+                      ),
+                    }}
+                    aria-hidden="true"
+                  >
+                    {initial(r.lane.owner_seat ?? '?')}
+                  </span>
+                  <span className="lc-asks__review-title">{r.lane.title}</span>
+                  <span className="lc-asks__review-who">
+                    {r.waitingOn ? (
+                      <>
+                        waiting on <b>{r.waitingOn}</b>
+                      </>
+                    ) : (
+                      'unrouted'
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </section>
   );
 }
 
+/** For an ask routed to someone ELSE (or the team pool): neutral copy, no second person. The "your"
+ *  voice below was written when every ask was to-human (ADR 149); on an agent-routed review ask it
+ *  read as an instruction to whoever was looking (lane 01KZ9GFHZ9). */
 const SPECIES_VERB = {
+  consult: 'asks for a view',
+  escalate: 'escalated',
+  approve: 'needs approval',
+} as const;
+
+/** For an ask routed to YOU — the original ADR 149 voice, now earned rather than assumed. */
+const SPECIES_VERB_YOU = {
   consult: 'asks what you think',
   escalate: 'escalated to you',
   approve: 'needs your approval',
@@ -317,13 +425,16 @@ function AskCard({
   ask,
   idx,
   canAnswer,
+  audience,
   busy,
   onAnswer,
   style,
 }: {
   ask: AskView;
   idx: Map<string, MemberSummary>;
+  /** Already audience-gated by the caller: true only when this browser may answer THIS ask. */
   canAnswer: boolean;
+  audience: 'you' | 'human' | 'agent' | 'team';
   busy: boolean;
   onAnswer: (kind: 'accept' | 'decline' | 'deciding') => void;
   style?: React.CSSProperties;
@@ -331,6 +442,7 @@ function AskCard({
   const from = ask.env.from;
   const kind = kindOf(from, idx);
   const open = askIsLoud(ask.state);
+  const ours = audience === 'you' || audience === 'team';
   return (
     <article className={`lc-ask lc-ask--${ask.state}`} style={style}>
       {/* Left column: who + what, stacked. The clock and the actions get their own columns so that
@@ -341,7 +453,8 @@ function AskCard({
             {initial(from)}
           </span>
           <span className="lc-ask__verb">
-            <b>{from}</b> {SPECIES_VERB[ask.species]}
+            <b>{from}</b> {audience === 'you' ? SPECIES_VERB_YOU[ask.species] : SPECIES_VERB[ask.species]}
+            {!ours && ask.to && <span className="lc-asks__routed"> → {ask.to}</span>}
           </span>
           <span className={`lc-ask__tier lc-ask__tier--${ask.tier}`}>{ask.tier}</span>
         </div>
