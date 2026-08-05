@@ -2474,6 +2474,113 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     ).toHaveLength(1);
   });
 
+  // ADR 231. The #653 fix taught the orientation `why` to skip a handoff whose lane had closed —
+  // but its test used a SYNTHETIC handoff carrying meta.lane_handoff.lane, and the real instance
+  // that motivated it carried none, so the test went green while the bug stayed live. These go
+  // through the real send route with a real lane, which is the thing the fixture stood in for.
+  describe('a handoff names the lane it hands off (ADR 231)', () => {
+    async function twoSeats() {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickTok = team.json.human_credential;
+      const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+      return { nickTok, bobTok: bob.json.human_credential as string };
+    }
+    const handoff = (id: string) => ({
+      id,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'member', name: 'Bob' },
+      act: 'handoff',
+      body: 'over to you',
+      ts: Date.now(),
+    });
+
+    it("attaches the sender's only live lane, and the stored message carries it", async () => {
+      const { nickTok, bobTok } = await twoSeats();
+      const lane = await post(
+        '/teams/dawn/lanes',
+        { title: 'the only live lane', branch: 'nick/work', claim: true },
+        nickTok,
+      );
+      const sent = await post('/teams/dawn/messages', { envelope: handoff('h-231a') }, nickTok);
+      expect(sent.status).toBe(201);
+      expect(sent.json.handoff_lane).toMatchObject({
+        lane: lane.json.lane.id,
+        branch: 'nick/work',
+        source: 'derived',
+      });
+      // The point of the whole exercise: the PERSISTED envelope carries the lane, so the `why` can
+      // judge it. Asserting the ack alone would repeat #653's mistake at a different altitude.
+      const inbox = await get('/teams/dawn/inbox', bobTok);
+      const got = inbox.json.messages.find((m: { id: string }) => m.id === 'h-231a');
+      expect(got.meta.lane_handoff).toMatchObject({ lane: lane.json.lane.id, branch: 'nick/work' });
+    });
+
+    it('warns without attaching when the sender holds several — and still delivers the message', async () => {
+      const { nickTok, bobTok } = await twoSeats();
+      await post('/teams/dawn/lanes', { title: 'first', claim: true }, nickTok);
+      await post('/teams/dawn/lanes', { title: 'second', claim: true }, nickTok);
+      const sent = await post('/teams/dawn/messages', { envelope: handoff('h-231b') }, nickTok);
+      expect(sent.status).toBe(201);
+      expect(sent.json.handoff_lane.warning).toContain('you hold 2');
+      // Warn-never-refuse: the words get through untouched. A message is worth more than a field.
+      const inbox = await get('/teams/dawn/inbox', bobTok);
+      const got = inbox.json.messages.find((m: { id: string }) => m.id === 'h-231b');
+      expect(got.body).toBe('over to you');
+      expect(got.meta?.lane_handoff).toBeUndefined();
+    });
+
+    it('leaves a genuinely lane-less handoff alone — no lane, no warning, no audit', async () => {
+      const { nickTok } = await twoSeats();
+      const sent = await post('/teams/dawn/messages', { envelope: handoff('h-231c') }, nickTok);
+      expect(sent.status).toBe(201);
+      expect(sent.json.handoff_lane).toBeUndefined();
+      const team = getTeamBySlug(server.db, 'dawn')!;
+      expect(
+        listAudit(server.db, team.id, {}).filter((a) => a.action.startsWith('handoff.lane_')),
+      ).toHaveLength(0);
+    });
+
+    it('an explicit meta.lane_handoff always wins over the derivation', async () => {
+      const { nickTok, bobTok } = await twoSeats();
+      await post('/teams/dawn/lanes', { title: 'my live lane', claim: true }, nickTok);
+      const env = { ...handoff('h-231d'), meta: { lane_handoff: { lane: 'chosen-by-hand' } } };
+      const sent = await post('/teams/dawn/messages', { envelope: env }, nickTok);
+      expect(sent.json.handoff_lane).toBeUndefined();
+      const inbox = await get('/teams/dawn/inbox', bobTok);
+      const got = inbox.json.messages.find((m: { id: string }) => m.id === 'h-231d');
+      expect(got.meta.lane_handoff.lane).toBe('chosen-by-hand');
+    });
+
+    it('both branches are auditable (ADR 231 Observability)', async () => {
+      const { nickTok } = await twoSeats();
+      const lane = await post('/teams/dawn/lanes', { title: 'solo', claim: true }, nickTok);
+      await post('/teams/dawn/messages', { envelope: handoff('h-231e') }, nickTok);
+      await post('/teams/dawn/lanes', { title: 'second', claim: true }, nickTok);
+      await post('/teams/dawn/messages', { envelope: handoff('h-231f') }, nickTok);
+      const team = getTeamBySlug(server.db, 'dawn')!;
+      const rows = listAudit(server.db, team.id, {}).filter((a) =>
+        a.action.startsWith('handoff.lane_'),
+      );
+      expect(rows.map((r) => r.action).sort()).toEqual([
+        'handoff.lane_ambiguous',
+        'handoff.lane_derived',
+      ]);
+      const derived = rows.find((r) => r.action === 'handoff.lane_derived')!;
+      expect(derived.target).toBe('h-231e');
+      expect(JSON.parse(derived.detail!).lane).toBe(lane.json.lane.id);
+    });
+
+    it('a done lane is not what you are handing off', async () => {
+      const { nickTok } = await twoSeats();
+      const done = await post('/teams/dawn/lanes', { title: 'shipped', claim: true }, nickTok);
+      await req('PATCH', `/teams/dawn/lanes/${done.json.lane.id}`, { state: 'done' }, nickTok);
+      const sent = await post('/teams/dawn/messages', { envelope: handoff('h-231g') }, nickTok);
+      expect(sent.json.handoff_lane).toBeUndefined();
+    });
+  });
+
   it('delivery ledger (ADR 090): logged → seen (cursor) → answered, on the endpoint and the report', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

@@ -215,6 +215,48 @@ export function listLanes(
     .filter((l) => (filter.goalId ? l.goal_id === filter.goalId : true));
 }
 
+/**
+ * What a lane-less `handoff` should carry (ADR 231).
+ *
+ * `attach` — the sender holds exactly one live lane, so there is nothing to choose between and the
+ * daemon writes `meta.lane_handoff` onto the envelope. `ambiguous` — two or more, so the daemon
+ * warns and stores the message untouched rather than mis-attributing it. `none` — the genuinely
+ * lane-less handoff, which is legal and stays silent.
+ */
+export type HandoffLaneDerivation =
+  | { kind: 'attach'; lane: Lane }
+  | { kind: 'ambiguous'; candidates: Lane[] }
+  | { kind: 'none' };
+
+/**
+ * Derive the lane a `handoff` from `seat` is about, from the lanes that seat actually holds.
+ *
+ * Only `lane_handoff` ever wrote `meta.lane_handoff.lane`, so 24 of the first 30 handoffs on the
+ * dogfood team named no lane at all — and the orientation `why`, which reads a handoff as a live
+ * instruction, has nothing to check those against. It cannot tell a fresh instruction from a
+ * four-day-old one whose PR merged, so it serves the stale one (ADR 173's abstain-by-showing: an
+ * unjudgeable why is still the human's words, and hiding it is worse).
+ *
+ * This closes the gap by construction rather than by heuristic — the rejected alternative was to
+ * age out an old handoff, which is a number standing in for a fact. Deliberately warn-not-refuse on
+ * ambiguity: unlike the un-threaded `accept` (send.ts), where a wrong guess writes a verdict onto
+ * the wrong lane and cannot be recovered, declining to attach here leaves the message exactly as it
+ * is today — unjudgeable, but never wrong. A message is worth more than a derived field.
+ */
+export function deriveHandoffLane(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  seat: string,
+): HandoffLaneDerivation {
+  const held = listLanes(db, teamId, teamSlug, { owner: seat }).filter(
+    (l) => !LANE_TERMINAL_STATES.has(l.state),
+  );
+  if (held.length === 0) return { kind: 'none' };
+  if (held.length === 1) return { kind: 'attach', lane: held[0]! };
+  return { kind: 'ambiguous', candidates: held };
+}
+
 /** Lanes joined to a Goal (ADR 084) — the input to {@link deriveGoalStatus}. */
 export function lanesForGoal(
   db: Database,

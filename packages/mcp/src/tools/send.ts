@@ -193,12 +193,27 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           ? ` Recipient is live: if you have the ccd session tools, find their session via ` +
             `list_sessions (seat-name label) and send_message this line VERBATIM: "${hint.nudge_text}"`
           : '';
+        // The handoff's lane (ADR 231): a `handoff` that named no lane either got one attached —
+        // because the sender held exactly one live lane, so there was nothing to choose between —
+        // or gets told it holds several and the orientation `why` cannot tell which. Surfaced
+        // rather than silent: work was linked to the message on the sender's behalf, and they are
+        // the one who can correct it.
+        const handoffLane = ackBody?.handoff_lane;
+        const handoffGuidance = !handoffLane
+          ? ''
+          : 'warning' in handoffLane
+            ? ` NOTE: ${handoffLane.warning}`
+            : ` Lane ${handoffLane.lane} attached (your only live lane` +
+              `${handoffLane.branch ? `, branch ${handoffLane.branch}` : ''}) — ` +
+              `re-send with meta.lane_handoff.lane if this handoff was about something else.`;
         // Structured-first (ADR 144 inc 3): the id/thread a programmatic caller needs to keep the
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
         const text =
           (askGuidance
             ? `sent ask to ${args.to} (id=${envelope.id}). ${askGuidance}`
-            : `sent ${args.act} to ${args.to} (id=${envelope.id})`) + hintGuidance;
+            : `sent ${args.act} to ${args.to} (id=${envelope.id})`) +
+          hintGuidance +
+          handoffGuidance;
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
@@ -210,6 +225,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
               ? { ask_contract: serverContract ?? askContract(meta['tier']) }
               : {}),
             ...(hint ? { delivery_hint: hint } : {}),
+            ...(handoffLane ? { handoff_lane: handoffLane } : {}),
           },
         };
       } catch (err) {

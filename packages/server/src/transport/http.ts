@@ -2418,6 +2418,9 @@ export async function handleHttp(
             },
           });
         }
+        // ADR 231's `handoff_lane` rides the ack additively, same contract as `ask_contract`
+        // (ADR 147) and `delivery_hint` (ADR 167): older clients ignore it, older daemons omit it.
+        // Reported rather than silent, so the sender can see what was attached on their behalf.
         if (askTier?.success) {
           return sendJson(res, 201, {
             ack,
@@ -2431,9 +2434,14 @@ export async function handleHttp(
               ),
             },
             ...(hint ? { delivery_hint: hint } : {}),
+            ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
           });
         }
-        return sendJson(res, 201, { ack, ...(hint ? { delivery_hint: hint } : {}) });
+        return sendJson(res, 201, {
+          ack,
+          ...(hint ? { delivery_hint: hint } : {}),
+          ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
+        });
       }
 
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All
