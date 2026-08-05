@@ -7,13 +7,44 @@ import { getMemberById, reapExcessIdleObservers, reapStaleObservers } from '../s
 import { hasLivePresence, reapStale } from '../store/presence.js';
 import { expireRequests } from '../store/requests.js';
 import type { RequestRow } from '../store/requests.js';
-import { expireWakeLeases, wakeExhaustionKey } from '../store/residency.js';
+import {
+  HOST_SUSPEND_GAP_MS,
+  WAKE_UNREACHABLE_CEILING_MS,
+  awakeMsSince,
+  expireWakeLeases,
+  firstWakeLeaseTs,
+  listResidencyTeamIds,
+  wakeExhaustionKey,
+} from '../store/residency.js';
 import { getPolicy, listActiveTeams } from '../store/teams.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
+  // ADR 236: this loop is its own reachability probe. `lastTickAt` is when it last ran and
+  // `continuousSince` is the start of its current unbroken run — initialised to boot, because before
+  // that the loop was not running either (a restart is an absence like any other). A lease that was
+  // outstanding across a break in that run tells us nothing about the host: nothing was there.
+  let lastTickAt = Date.now();
+  let continuousSince = lastTickAt;
+
   const tick = () => {
     const now = Date.now();
+
+    const tickGap = now - lastTickAt;
+    lastTickAt = now;
+    if (tickGap >= HOST_SUSPEND_GAP_MS) {
+      continuousSince = now;
+      for (const teamId of listResidencyTeamIds(ctx.db)) {
+        appendAudit(ctx.db, teamId, {
+          actor: null,
+          action: 'residency.host_suspended',
+          target: 'daemon',
+          result: 'allow',
+          detail: { gap_ms: tickGap, from: now - tickGap, to: now },
+        });
+      }
+      log.info({ msg: 'reap_host_suspended', gap_ms: tickGap });
+    }
 
     // P3.2: expire claim requests past their deadline (ADR 077 spec-gap 3). Fetch pending+expired
     // rows BEFORE updating so we have from_session connIds to push refused frames.
@@ -45,24 +76,46 @@ export function startReaper(ctx: Ctx): () => void {
     }
 
     // ADR 131: expire wake leases the host never reported (a crash mid-spawn, a hung headless
-    // harness past the watchdog). Each expiry writes `residency.wake_failed` so the attempt still
+    // harness past the watchdog). Such an expiry writes `residency.wake_failed` so the attempt still
     // consumes rate budget — a host that dies mid-spawn can never retry forever — and the wake
     // re-becomes due on the next poll, bounded by the derived cooldown/caps.
+    //
+    // ADR 236: but the same expiry also happens when the machine simply slept, and that carries no
+    // information about the act — so it burns nothing. `continuousSince` above answers which:
+    // a lease created before this loop's current unbroken run was outstanding while we were not
+    // running, so no host could have been asked. That defers (`wake_deferred`, budget-neutral by
+    // construction, ADR 221's verb) — bounded by HOST-AWAKE time since the act was first leased, so
+    // "retires nine hours early" cannot quietly become "never retires".
     const expiredLeases = expireWakeLeases(ctx.db, now);
     for (const lease of expiredLeases) {
       const seat = getMemberById(ctx.db, lease.member_id);
+      const act = wakeExhaustionKey(lease.act_id, lease.lane_id);
+      const detail = {
+        act,
+        lease_id: lease.id,
+        lane: lease.lane,
+        ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
+      };
+      const unreachable = lease.created_at < continuousSince;
+      const awakeMs = unreachable
+        ? awakeMsSince(ctx.db, lease.team_id, firstWakeLeaseTs(ctx.db, lease.team_id, act) ?? lease.created_at, now) // prettier-ignore
+        : 0;
+      if (unreachable && awakeMs < WAKE_UNREACHABLE_CEILING_MS) {
+        appendAudit(ctx.db, lease.team_id, {
+          actor: null,
+          action: 'residency.wake_deferred',
+          target: seat?.name ?? '?',
+          result: 'allow',
+          detail: { ...detail, reason: 'host_unreachable', awake_ms: awakeMs },
+        });
+        continue;
+      }
       appendAudit(ctx.db, lease.team_id, {
         actor: null,
         action: 'residency.wake_failed',
         target: seat?.name ?? '?',
         result: 'deny',
-        detail: {
-          act: wakeExhaustionKey(lease.act_id, lease.lane_id),
-          lease_id: lease.id,
-          lane: lease.lane,
-          ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
-          reason: 'lease_expired',
-        },
+        detail: { ...detail, reason: 'lease_expired' },
       });
     }
     if (expiredLeases.length > 0) {
