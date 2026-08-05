@@ -118,6 +118,14 @@ export type AuditAction =
   // SessionStart/SessionEnd hooks — detail carries `{ harness, enrolled }`, harness CLASS only:
   // a session id or transcript path never reaches the daemon.
   | 'residency.wake_deferred'
+  // ADR 236: the daemon's own cadence, made a ledger fact. The reaper writes this when the gap
+  // between its ticks exceeds `HOST_SUSPEND_GAP_MS` — a 15-second loop that did not fire for a
+  // quarter hour was suspended, not late — with detail `{ gap_ms, from, to }`. Two consumers: it
+  // classifies an expired wake lease as host-unreachable (defer, budget-neutral) rather than
+  // host-reported failure, and its intervals are subtracted from wall-clock to give the HOST-AWAKE
+  // time that bounds deferral. Written per team with a residency enrollment, since that is who the
+  // machine's absence concerns; `target` is the daemon, not a seat.
+  | 'residency.host_suspended'
   | 'residency.session_captured'
   | 'residency.session_ended'
   // ADR 167 delivery rail, made observable (ADR 173; lane `01KYQ9175S`). The rail's own decision for
