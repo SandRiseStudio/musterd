@@ -18,6 +18,10 @@ export interface ResolvedConfig {
   heartbeatIntervalMs: number;
   presenceTimeoutMs: number;
   reaperIntervalMs: number;
+  /** Footprint sampler tick interval (seat-footprint design). */
+  footprintIntervalMs: number;
+  /** Footprint samples older than this are pruned each tick. */
+  footprintRetentionMs: number;
   reclaimGraceMs: number;
   /** TTL (ms) of a seat resume grant issued on approval + refreshed on each clean occupy (ADR 087). */
   resumeTtlMs: number;
@@ -61,6 +65,10 @@ export const RESUME_TTL_MS = 86_400_000; // 24h
 /** A same-workspace successor waits this long, still attached, before reaping its predecessor (ADR
  * 092). Above the ~ms lifetime of a Claude Code health-check probe, below a human-noticeable stall. */
 export const SUPERSEDE_GRACE_MS = 5_000;
+/** Footprint sampler tick (seat-footprint design): one cheap `ps` scan per minute. */
+export const FOOTPRINT_INTERVAL_MS = 60_000;
+/** Footprint samples older than this are pruned each tick — the table stays bounded. */
+export const FOOTPRINT_RETENTION_MS = 604_800_000; // 7d
 export const DEFAULT_PORT = 4849;
 export const DEFAULT_HOST = '127.0.0.1';
 
@@ -202,6 +210,8 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     heartbeatIntervalMs: envMs('MUSTERD_HEARTBEAT_INTERVAL_MS', HEARTBEAT_INTERVAL_MS),
     presenceTimeoutMs: envMs('MUSTERD_PRESENCE_TIMEOUT_MS', PRESENCE_TIMEOUT_MS),
     reaperIntervalMs: envMs('MUSTERD_REAPER_INTERVAL_MS', REAPER_INTERVAL_MS),
+    footprintIntervalMs: envMs('MUSTERD_FOOTPRINT_INTERVAL_MS', FOOTPRINT_INTERVAL_MS),
+    footprintRetentionMs: envMs('MUSTERD_FOOTPRINT_RETENTION_MS', FOOTPRINT_RETENTION_MS),
     reclaimGraceMs: envMs('MUSTERD_RECLAIM_GRACE_MS', RECLAIM_GRACE_MS),
     resumeTtlMs: envMs('MUSTERD_RESUME_TTL_MS', RESUME_TTL_MS),
     observerTtlMs: envMs('MUSTERD_OBSERVER_TTL_MS', OBSERVER_TTL_MS),

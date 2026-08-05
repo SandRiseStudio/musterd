@@ -12,6 +12,7 @@ import type { Ctx } from './context.js';
 import { schemaVersion } from './db/migrations.js';
 import { openDb } from './db/open.js';
 import { log } from './log.js';
+import { startFootprintSampler } from './footprint/sampler.js';
 import { startReaper } from './presence/reaper.js';
 import { reconcileAll } from './projection/reconcile.js';
 import { startRosterWatcher } from './projection/watcher.js';
@@ -111,6 +112,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   // the daemon on 2026-07-27 — see the close() comment below.
   const wss = attachWsServer(ctx, http);
   let stopReaper: (() => void) | null = null;
+  let stopFootprint: (() => void) | null = null;
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
   /** One shared shutdown promise, so a second signal joins the first instead of racing it. */
@@ -163,6 +165,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           const addr = http.address();
           boundPort = typeof addr === 'object' && addr ? addr.port : config.port;
           stopReaper = startReaper(ctx);
+          stopFootprint = startFootprintSampler(ctx);
           startWatching();
           log.info({
             msg: 'listening',
@@ -204,6 +207,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
       if (closing) return closing;
       closing = new Promise((resolve) => {
         stopReaper?.();
+        stopFootprint?.();
         stopWatcher?.();
         void stopTelemetry?.();
         // Kill the upgraded sockets FIRST — http.close() below never settles while they live.
