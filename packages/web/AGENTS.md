@@ -39,6 +39,17 @@ one week in 2026-07 because raises were being used to fix a calibration problem.
   Fraunces → Inter on 2026-07-20; `budgets.json` is the authority). A new family or
   weight is a re-font decision, not a side-effect (#329). Canvas painters read type via
   `src/live/canvasFont.ts` tokens — never hard-code a family name in a painter.
+- **Colour tokens must be defined, and a `var()` fallback must not contradict them.** `pnpm
+  tokens:check` (in the `format:check` chain) fails on two silent lies: a colour token used with a
+  fallback but **defined nowhere** (the fallback quietly becomes the value, and defining it later
+  silently restyles everything that used it), and a fallback that **disagrees** with the definition
+  (dead, since the token resolves — but it misinforms the next reader, which is how a wrong value
+  gets copied forward). Runtime-parametric properties are exempt automatically, including colour
+  ones the sources actually `setProperty` — don't add fallback-free `var()` to those.
+  **Fill and text amber are different tokens**: `--lc-warn` is FILLS ONLY (presence dots, ~1.2:1 on
+  paper by design) and `--lc-warn-ink` is anything read as text (4.92:1 worst case). Same split as
+  `--lc-ov-accent` / `--lc-ov-accent-ink`. Reaching for the fill as a text colour is the mistake
+  this pair exists to prevent.
 - **The daemon already serves compressed + cached** (brotli/gzip, immutable hashed assets, ETag app
   shell, compressed JSON — #326/#327). Don't add a second compression layer or cache-bust hashed
   assets.

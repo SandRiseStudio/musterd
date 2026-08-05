@@ -26,6 +26,13 @@
   --lc-accent-bright: var(--mustard-500, #e1ad01);
   --lc-success: #2f9e6a;
   --lc-danger: #d1503f;
+  /* Split for the same reason --lc-ov-accent is (see the overlay block): one amber cannot do both
+     jobs on paper. The fill is a DOT — a non-text mark whose job is to be seen as a colour, where
+     1.0–1.4:1 against paper is the point rather than a failure. Text is not exempt, so it gets its
+     own value. Before this pair existed --lc-warn was defined NOWHERE and its inline fallback was
+     doing the work, which is how an amber this light nearly shipped as body copy (lane 01KZA27Q7C). */
+  --lc-warn: #f4cf52; /* FILLS ONLY — the idle/away presence dots */
+  --lc-warn-ink: #7a4e06; /* 4.92:1 on the darkest paper it lands on — anything read as text */
   --lc-info: #5b7fa6;
   --lc-handoff: #8a5fd6; /* violet — handoff (a distinct act tone, dark enough for cream) */
   --lc-lane: #5a52c9; /* indigo — lane transitions (ADR 102), handoff's family so the cluster reads as one */
@@ -866,7 +873,7 @@
   background: color-mix(in srgb, var(--lc-accent) 12%, var(--lc-paper));
 }
 .lc-workstack__row.is-blocked {
-  background: color-mix(in srgb, var(--lc-danger, #ef4444) 8%, var(--lc-paper));
+  background: color-mix(in srgb, var(--lc-danger) 8%, var(--lc-paper));
 }
 .lc-workstack__dot {
   flex: 0 0 auto;
@@ -903,8 +910,8 @@
   background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
 }
 .lc-workstack__row.is-blocked .lc-workstack__state {
-  color: color-mix(in srgb, var(--lc-danger, #ef4444) 85%, #3a2512);
-  background: color-mix(in srgb, var(--lc-danger, #ef4444) 14%, transparent);
+  color: color-mix(in srgb, var(--lc-danger) 85%, #3a2512);
+  background: color-mix(in srgb, var(--lc-danger) 14%, transparent);
 }
 .lc-workstack__said {
   color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
@@ -1953,12 +1960,9 @@
    Amber rather than the muted neutral — but still a line of prose, not a banner, because the room
    beside it is working fine and the remedy is one switch, not an incident. */
 .lc-roster__gap.is-ladder {
-  /* `--lc-warn` is not a defined token — every use of it in this file is silently riding its inline
-     fallback. Not inventing a token here for one line; the literal is measured against the roster's
-     own background rather than assumed. */
-  color: #8a5a1f;
-  background: color-mix(in srgb, #8a5a1f 6%, transparent);
-  border-top-color: color-mix(in srgb, #8a5a1f 26%, transparent);
+  color: var(--lc-warn-ink);
+  background: color-mix(in srgb, var(--lc-warn-ink) 6%, transparent);
+  border-top-color: color-mix(in srgb, var(--lc-warn-ink) 26%, transparent);
 }
 .lc-roster__gap.is-ladder b {
   font-weight: 640;
@@ -3130,7 +3134,7 @@
   }
   .lc-card--breathe {
     animation: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--lc-human, #ff86a8) 22%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--lc-human) 22%, transparent);
   }
   .lc-card,
   .lc-board__new,
@@ -3579,10 +3583,10 @@
 @keyframes lc-card-breathe {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-human, #ff86a8) 0%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-human) 0%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--lc-human, #ff86a8) 16%, transparent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--lc-human) 16%, transparent);
   }
 }
 
