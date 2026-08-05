@@ -19,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   PACKAGE_DIRS,
   PUBLISH_ORDER,
+  assertPublishable,
   bumpPackageJson,
   nextStepsAfterPublish,
   parseReleaseArgs,
@@ -29,10 +30,14 @@ import { smokeConsumerInstall } from './release/smoke.ts';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 function usage(): string {
-  return `Usage: pnpm release [--dry-run] [--allow-dirty] [--version X.Y.Z]
+  return `Usage: pnpm release --version X.Y.Z [--dry-run] [--allow-dirty]
 
-Publishes @musterd/* in lockstep (ADR 156). Default version: 0.3.0.
---dry-run builds, smoke-tests and npm-packs each package; does not bump or publish.
+Publishes @musterd/* in lockstep (ADR 156).
+
+--version is REQUIRED for a real release and has no default: an npm version can never be
+unpublished, so the number is a decision, not a fallback. It must also be higher than the
+one on disk — npm accepts a LOWER version and would move \`latest\` backwards.
+--dry-run builds, smoke-tests and packs at the versions already on disk; never bumps or publishes.
 
 Every run installs the packed tarballs into a clean directory outside the workspace and
 runs them, BEFORE any registry write — the check that would have caught 0.4.0.
@@ -63,6 +68,18 @@ function bumpAll(version: string): void {
     writeFileSync(path, next);
     console.log(`bumped ${name} → ${version}`);
   }
+}
+
+/** The version the working tree currently carries — the CLI is the user-facing one. */
+function currentVersion(): string {
+  const raw = readFileSync(packageJsonPath('@musterd/cli'), 'utf8');
+  return (JSON.parse(raw) as { version: string }).version;
+}
+
+/** A patch bump, offered only as an EXAMPLE in the error — never applied. */
+function suggestNext(current: string): string {
+  const [x, y, z] = current.split('-')[0]!.split('.').map(Number);
+  return `${x}.${y}.${(z ?? 0) + 1}`;
 }
 
 function buildAll(): void {
@@ -103,6 +120,27 @@ export function runRelease(argv: string[]): number {
     return 1;
   }
 
+  const current = currentVersion();
+
+  // A real publish must be told its version, and that version must be able to BE a release. Both
+  // checks are here rather than in the parser because a dry run legitimately needs neither: it
+  // never bumps and never writes, so it just reports the versions already on disk.
+  if (!args.dryRun) {
+    if (!args.version) {
+      process.stderr.write(
+        `a release version is required — there is no safe default for a number that can never be ` +
+          `unpublished.\n  current: ${current}\n  e.g. pnpm release --version ${suggestNext(current)}\n`,
+      );
+      return 1;
+    }
+    try {
+      assertPublishable(args.version, current);
+    } catch (e) {
+      process.stderr.write(`${e instanceof Error ? e.message : e}\n`);
+      return 1;
+    }
+  }
+
   try {
     assertCleanTree(args.allowDirty);
   } catch (e) {
@@ -112,12 +150,12 @@ export function runRelease(argv: string[]): number {
 
   console.log(
     args.dryRun
-      ? `dry-run release @ ${args.version} (order: ${PUBLISH_ORDER.join(' → ')})`
+      ? `dry-run release @ ${current} (on disk; order: ${PUBLISH_ORDER.join(' → ')})`
       : `release @ ${args.version} (order: ${PUBLISH_ORDER.join(' → ')})`,
   );
 
   if (!args.dryRun) {
-    bumpAll(args.version);
+    bumpAll(args.version!);
   } else {
     console.log('(dry-run) skipping version bump');
   }
