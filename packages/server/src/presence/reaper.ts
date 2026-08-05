@@ -97,9 +97,10 @@ export function startReaper(ctx: Ctx): () => void {
         ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
       };
       const unreachable = lease.created_at < continuousSince;
-      const awakeMs = unreachable
-        ? awakeMsSince(ctx.db, lease.team_id, firstWakeLeaseTs(ctx.db, lease.team_id, act) ?? lease.created_at, now) // prettier-ignore
-        : 0;
+      // The ceiling's clock starts at the act's FIRST lease, not this one — three attempts spread
+      // across three sleeps must not each restart the bound.
+      const clockFrom = firstWakeLeaseTs(ctx.db, lease.team_id, act) ?? lease.created_at;
+      const awakeMs = unreachable ? awakeMsSince(ctx.db, lease.team_id, clockFrom, now) : 0;
       if (unreachable && awakeMs < WAKE_UNREACHABLE_CEILING_MS) {
         appendAudit(ctx.db, lease.team_id, {
           actor: null,
