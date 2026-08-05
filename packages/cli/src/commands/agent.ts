@@ -2,6 +2,7 @@ import { type Binding, resolveAttestedModel } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
+import { infraTouchWarning } from '../infra-gate.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { buildEntry } from '../onboard/mcpEntry.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
@@ -23,7 +24,13 @@ import { resolve } from './helpers.js';
  * wired workspace, not a Claude-Code-only one. `--here` keeps the legacy single-folder behavior;
  * `--path <dir>` targets an explicit folder.
  */
-export async function agentCommand(parsed: Parsed): Promise<number> {
+export async function agentCommand(
+  parsed: Parsed,
+  deps: {
+    /** ADR 227 inc 2: the warn-only infra-touch gate (injected so tests never reach a daemon). */
+    infraGate?: (verb: string) => Promise<string | null>;
+  } = {},
+): Promise<number> {
   const name = parsed.positionals[0];
   if (!name || /\s/.test(name)) {
     throw new CliError(
@@ -69,6 +76,14 @@ export async function agentCommand(parsed: Parsed): Promise<number> {
 
   // Adding a member is an admin act — needs an active identity (binding/env/--as), like `team add`.
   const { team, http, config } = resolve(parsed.flags);
+
+  // The warn-only infra-touch gate (ADR 227 inc 2). This verb re-provisions through
+  // harness.configure, which rewrites the MACHINE-SHARED MCP entry every seat on this repo root
+  // launches through (ADR 143) and reinstalls hooks — infra consequences the 01KZ9CGYGH outage
+  // proved out. One added line for a non-`platform` seat (the daemon writes the audit row), then
+  // proceed; every failure mode is silence, same contract as `service`/`reset`.
+  const gateWarn = await (deps.infraGate ?? infraTouchWarning)('agent');
+  if (gateWarn) process.stdout.write(`${theme.warn(sym.warn)} ${theme.warn(gateWarn)}\n`);
 
   // ADR 058 §5: write the seat file first for a file-backed team so the file stays the single writer;
   // db-only teams skip this and the daemon originates. addMember revives a soft-removed name (ADR 065).
