@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   harnesses: [] as { label: string; detect: () => Promise<DetectResult> }[],
   primer: 'managed' as 'none' | 'unmarked' | 'managed',
   binding: null as Record<string, unknown> | null,
+  spec: null as { surface?: string } | null,
   roster: { members: [] as any[] },
   rosterThrows: false,
   agentKeys: {} as Record<string, string>,
@@ -26,6 +27,9 @@ vi.mock('./harnesses/index.js', () => ({
 vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
 vi.mock('../config.js', () => ({
   findBinding: () => h.binding,
+  // The committed launch spec decides which harness `musterd wire` reaches in this folder, and so
+  // which repair the doctor may prescribe for an entry. Null ⇒ fall back to the binding's surface.
+  findWorkspaceSpec: () => h.spec,
   // ADR 162: the doctor reads the binding registry to note stale entries.
   loadConfig: () => ({
     bindings: h.bindings,
@@ -72,14 +76,17 @@ function harnessWithEntry(
     registeredDriver?: string;
   },
   entryScope: 'repo-shared' | 'folder' = 'repo-shared',
-  // Which harness this is decides whether `musterd wire` can repair its entry at all — wire
-  // configures Claude Code and nothing else. Defaults to claude-code so the pre-existing cases
-  // (all written when every prescription said "run wire") keep asserting the repairable branch.
+  // Which harness this is decides whether `musterd wire` can repair its entry — wire configures the
+  // harness the FOLDER declares (`h.spec.surface`). Defaults to claude-code, which is also what an
+  // undeclared folder falls back to, so the pre-existing cases (all written when every prescription
+  // said "run wire") keep asserting the repairable branch.
   id = 'claude-code',
 ) {
   return {
     id,
     label,
+    // The registry is what `harnessWiredFor` searches by surface; for these three, id === surface.
+    surface: id,
     entryScope,
     detect: async () => ({ installed: true, configured: true, detail: label, ...extra }),
   };
@@ -90,6 +97,7 @@ describe('inspectProvisioning', () => {
     h.harnesses = [];
     h.primer = 'managed';
     h.binding = null;
+    h.spec = null;
     h.bindings = {};
   });
 
@@ -351,11 +359,13 @@ describe('inspectProvisioning', () => {
     expect(r.repair).toBe('wire');
   });
 
-  // The prescription must be derived from what `wire` actually configures, not hard-coded. `wire`
-  // calls claudeCode.configure and nothing else, so telling a Cursor or Codex seat to run it is a
-  // repair that cannot fire — and the drift then re-flags on every --check forever, training seats
-  // to skim the ✗ block. Measured live 2026-08-04: `musterd wire` left all four Cursor/Codex entry
-  // items byte-identical.
+  // The prescription must be derived from what `wire` actually configures, not hard-coded — a repair
+  // that cannot fire re-flags on every --check forever and trains seats to skim the ✗ block.
+  // Measured live 2026-08-04: `musterd wire` left all four Cursor/Codex entry items byte-identical.
+  //
+  // Two halves now, because wire follows the folder's declared surface: an entry belonging to the
+  // harness THIS folder is provisioned for is repairable, and a stray entry from some other harness
+  // is not. The cases below with no `h.spec` are folders that declare Claude Code.
   describe('the prescribed repair matches what wire actually configures', () => {
     const perFolder = (extra: Parameters<typeof harnessWithEntry>[1], id: string) => {
       h.primer = 'managed';
@@ -400,6 +410,41 @@ describe('inspectProvisioning', () => {
       const r = await perFolder({ registeredAgentKey: 'mskey_x' }, 'cursor');
       expect(r.drift.length).toBeGreaterThan(0);
       expect(r.repair).not.toBe('wire');
+    });
+
+    // The lane this block was reopened for: a Codex seat whose `.codex/config.toml` baked
+    // MUSTERD_SURFACE — a snapshot that outranks binding.json and that no observation can correct —
+    // could only be told to hand-edit the file, because the prescription came off a hard-coded
+    // ['claude-code']. In a folder provisioned FOR Codex, wire rewrites Codex's entry, so the
+    // detector finally has a repair with a safe form (ADR 168).
+    it('prescribes wire for the Codex entry in a folder provisioned for Codex', async () => {
+      h.primer = 'managed';
+      h.spec = { surface: 'codex' };
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [harnessWithEntry('Codex', { registeredSurface: 'codex' }, 'folder', 'codex')];
+      const r = await inspectProvisioning('/x');
+      const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'));
+      expect(line).toMatch(/Run `musterd wire`/);
+      expect(line).not.toContain('by hand');
+      // ...and the machine-readable half agrees, so --fix routes at a command that can act.
+      expect(r.repair).toBe('wire');
+    });
+
+    it('names the harness the folder is provisioned for when it cannot prescribe wire', async () => {
+      h.primer = 'managed';
+      h.spec = { surface: 'codex' };
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      // A stray Claude Code entry in a folder that declares Codex: wire will not touch it here, and
+      // the correction has to say which entry wire *does* rewrite, or the reader has no next step.
+      h.harnesses = [
+        harnessWithEntry('Codex', {}, 'folder', 'codex'),
+        harnessWithEntry('Claude Code', { registeredAgentKey: 'mskey_x' }, 'repo-shared'),
+      ];
+      const r = await inspectProvisioning('/x');
+      const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
+      expect(line).toContain('does not rewrite');
+      expect(line).toContain('provisioned for Codex');
+      expect(line).not.toMatch(/Run `musterd wire`/);
     });
 
     it("still classifies as 'wire' when at least one drifting entry is Claude Code's", async () => {
@@ -660,6 +705,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     h.harnesses = [];
     h.primer = 'none';
     h.binding = null;
+    h.spec = null;
   });
 
   function tmp(): string {
@@ -756,6 +802,7 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
     h.harnesses = [];
     h.primer = 'managed';
     h.binding = null;
+    h.spec = null;
     h.bindings = {};
   });
 
@@ -1008,6 +1055,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     h.harnesses = [];
     h.primer = 'managed';
     h.binding = null;
+    h.spec = null;
     h.bindings = {};
   });
 
@@ -1129,6 +1177,7 @@ describe('binding-registry staleness note (ADR 162)', () => {
     h.harnesses = [harness('Claude Code', true, true)];
     h.primer = 'managed';
     h.binding = null;
+    h.spec = null;
     h.bindings = {};
   });
 
@@ -1251,6 +1300,7 @@ describe('seat git attribution (ADR 109)', () => {
 
   it('stays quiet with no seat to attribute (unprovisioned folder)', async () => {
     h.binding = null;
+    h.spec = null;
     const r = await inspectProvisioning(repo());
     expect(r.notes.find((n) => n.includes('attributed to'))).toBeUndefined();
   });

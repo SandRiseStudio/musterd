@@ -69,6 +69,16 @@ env-referenced entry — a separate change to the binding model."_ This ADR is t
   config is committable; the credential is not.
 - Composes with ADR 018 (binding file), ADR 058 (committed `.musterd/`), ADR 060 (verify-don't-assume;
   this supersedes its non-goal), ADR 075/077 (agent key + claim/request lane).
+- **`wire` follows the spec's `surface` (2026-08-05).** The decision above says "registers the MCP
+  server for the folder"; the implementation registered Claude Code's, whichever harness the folder
+  had actually been provisioned for. That only became load-bearing once the doctor started
+  prescribing `wire` as the repair for a **baked env value** in a harness entry — a wire-time
+  snapshot that outranks `binding.json` and that no observation can correct — because for a Codex or
+  Cursor folder the prescription was then a command that could not touch the file it named (ADR 168:
+  a detector whose fix has no safe form is half a feature). `wire` now dispatches on `spec.surface`
+  through the ADR 038 registry, falling back to Claude Code for a surface no adapter answers to
+  (`cli`, `other`, absent) — and never creating a _first_ install for a harness the folder never
+  picked, which stays `init`'s job.
 - **Exception — musterd's own repo ignores `workspace.json` (2026-07-07).** The committed-spec is a
   _downstream-repo_ feature: one repo, one canonical team, `git add` it once. musterd's own repo is
   dogfooded by many agents across many worktrees, each `musterd agent`/`init` **re-stamping**

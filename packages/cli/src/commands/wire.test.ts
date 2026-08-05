@@ -5,18 +5,51 @@ import { BINDING_DIR, BINDING_FILE, WORKSPACE_SPEC_FILE } from '@musterd/protoco
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 
-// Capture what the harness would register, without shelling a real `claude`.
+// Capture what each harness would register, without shelling a real `claude` or writing any config.
 const h = vi.hoisted(() => ({
   configure: vi.fn(async () => ({ target: 'claude mcp', activation: '' })),
+  configureCursor: vi.fn(async () => ({ target: '.cursor/mcp.json', activation: '' })),
+  configureCodex: vi.fn(async () => ({ target: '.codex/config.toml', activation: '' })),
 }));
-vi.mock('../onboard/harnesses/claudeCode.js', () => ({ claudeCode: { configure: h.configure } }));
+vi.mock('../onboard/harnesses/claudeCode.js', () => ({
+  claudeCode: {
+    id: 'claude-code',
+    label: 'Claude Code',
+    surface: 'claude-code',
+    entryScope: 'repo-shared',
+    configure: h.configure,
+  },
+}));
+vi.mock('../onboard/harnesses/cursor.js', () => ({
+  cursor: {
+    id: 'cursor',
+    label: 'Cursor',
+    surface: 'cursor',
+    entryScope: 'folder',
+    configure: h.configureCursor,
+  },
+}));
+vi.mock('../onboard/harnesses/codex.js', () => ({
+  codex: {
+    id: 'codex',
+    label: 'Codex',
+    surface: 'codex',
+    entryScope: 'folder',
+    configure: h.configureCodex,
+  },
+}));
 
-const { wireCommand, WIRE_CONFIGURED_HARNESSES } = await import('./wire.js');
+const { wireCommand, harnessWiredFor, wireConfigures } = await import('./wire.js');
 
 let cwd: string;
 let configPath: string;
 
 beforeEach(() => {
+  // Call history is per-test: several assertions below read `mock.calls[0]`, which silently reads a
+  // PREVIOUS test's call once a hoisted vi.fn accumulates across the file.
+  h.configure.mockClear();
+  h.configureCursor.mockClear();
+  h.configureCodex.mockClear();
   cwd = mkdtempSync(join(tmpdir(), 'musterd-wire-'));
   vi.spyOn(process, 'cwd').mockReturnValue(cwd);
   configPath = join(mkdtempSync(join(tmpdir(), 'musterd-wire-cfg-')), 'config.json');
@@ -159,21 +192,52 @@ describe('musterd wire', () => {
     await expect(wireCommand(parseArgs([]))).rejects.toMatchObject({ exitCode: 6 });
   });
 
-  // WIRE_CONFIGURED_HARNESSES is what the doctor derives its repair advice from, so it is only
-  // trustworthy if it matches what wire really does. Before this was derived, the doctor told
-  // Cursor and Codex seats to run `musterd wire` — a repair that cannot touch their entries, so
-  // the drift re-flagged on every --check forever. If someone widens wire to configure another
-  // harness without adding it here, the advice silently goes stale again; this fails instead.
-  it('configures exactly the harnesses it advertises in WIRE_CONFIGURED_HARNESSES', async () => {
-    writeSpec(SPEC);
+  // What wire configures is what the doctor derives its repair advice from, so the two are only
+  // trustworthy together. The advice used to come from a hard-coded ['claude-code']: the doctor
+  // therefore told a Codex seat with a baked MUSTERD_SURFACE to edit its config by hand, and the
+  // drift re-flagged on every --check forever — a permanently-red check nobody can clear teaches
+  // everyone to skim the ✗ block. The prescription is now derived from these same functions.
+  it('configures the harness this folder declares — a Codex folder gets Codex, not Claude Code', async () => {
+    writeSpec({ ...SPEC, surface: 'codex' });
+    writeConfig({ bravo: 'mskey_x' });
+    const { code } = await run([]);
+    expect(code).toBe(0);
+    expect(h.configureCodex).toHaveBeenCalledTimes(1);
+    // ...and it does NOT create a Claude Code entry for a folder that never picked Claude Code.
+    expect(h.configure).not.toHaveBeenCalled();
+    expect(h.configureCursor).not.toHaveBeenCalled();
+  });
+
+  it('configures Cursor for a Cursor folder', async () => {
+    writeSpec({ ...SPEC, surface: 'cursor' });
     writeConfig({ bravo: 'mskey_x' });
     await run([]);
-    expect([...WIRE_CONFIGURED_HARNESSES]).toEqual(['claude-code']);
-    // The one advertised harness is the one that got configured...
+    expect(h.configureCursor).toHaveBeenCalledTimes(1);
+    expect(h.configure).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Claude Code when the declared surface names no harness (cli, other)', async () => {
+    // `surface` is a Presence surface, not a harness id: `cli` and `other` are legitimate values that
+    // no adapter answers to. Wire still has a job there — register the tools — so the default stands.
+    writeSpec({ ...SPEC, surface: 'cli' });
+    writeConfig({ bravo: 'mskey_x' });
+    await run([]);
     expect(h.configure).toHaveBeenCalledTimes(1);
-    // ...and nothing else was. Any other harness module would have to be imported to be called,
-    // so an unmocked import escaping into a real config write is the failure this pins down.
-    expect(WIRE_CONFIGURED_HARNESSES).toHaveLength(1);
+    expect(h.configureCodex).not.toHaveBeenCalled();
+  });
+
+  it('says which harness it would configure, per folder — the doctor prescribes from this', () => {
+    expect(harnessWiredFor('codex').id).toBe('codex');
+    expect(harnessWiredFor('cursor').id).toBe('cursor');
+    expect(harnessWiredFor('claude-code').id).toBe('claude-code');
+    // Unknown/absent degrade to the default rather than to "no harness at all", so the doctor never
+    // has to render an empty "`musterd wire` configures  only".
+    expect(harnessWiredFor('cli').id).toBe('claude-code');
+    expect(harnessWiredFor(undefined).id).toBe('claude-code');
+    // The predicate the doctor asks per harness is the same answer, inverted.
+    expect(wireConfigures('codex', 'codex')).toBe(true);
+    expect(wireConfigures('claude-code', 'codex')).toBe(false);
+    expect(wireConfigures('claude-code', undefined)).toBe(true);
   });
 
   it('never writes a secret into the committed workspace.json (it is secret-free by construction)', async () => {

@@ -610,9 +610,9 @@ describe('runInit — intent branches', () => {
 
 // The doctor tells a Cursor or Codex seat to "re-provision this folder with `musterd init` and pick
 // <harness>" (doctor.ts, #663). That sentence REPLACED a false prescription — "run `musterd wire`",
-// which configures Claude Code alone — so it inherits the burden the original failed: a prescription
-// nobody asserts survives for months. `wire.test.ts` pins wire's half (it configures exactly
-// WIRE_CONFIGURED_HARNESSES); this is the mirror, that the harness wire cannot reach, init can.
+// which configured Claude Code alone — so it inherits the burden the original failed: a prescription
+// nobody asserts survives for months. `wire.test.ts` pins wire's half (it configures the harness the
+// FOLDER declares); this is the mirror, that the harness wire cannot reach there, init can.
 //
 // The existing happy-path test below already asserts `configure` is called, but the mocked registry
 // is a single harness with id 'claude-code' — which is precisely NOT the case the doctor's new
