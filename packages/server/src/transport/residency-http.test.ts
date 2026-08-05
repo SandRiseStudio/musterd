@@ -319,9 +319,9 @@ describe('x-musterd-wake-lease — the ambient touch carries the correlation tok
     expect(res.status).toBe(200);
     const status = await get('/teams/dawn/members', nickCred);
     const nick = status.json.members.find((m: { name: string }) => m.name === 'nick');
-    expect(
-      nick.presences.every((p: { wake_lease: string | null }) => p.wake_lease === null),
-    ).toBe(true);
+    expect(nick.presences.every((p: { wake_lease: string | null }) => p.wake_lease === null)).toBe(
+      true,
+    );
   });
 });
 

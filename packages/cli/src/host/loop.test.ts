@@ -327,7 +327,6 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
             last_seen_at: Date.now() + 1_000, // fresh evidence — touched after the verify began
             provenance: 'wake',
             wake_lease: 'L1', // ADR 241: and attesting THIS lease — the order's `lease_id`
-
           },
         ],
       },

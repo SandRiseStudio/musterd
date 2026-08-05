@@ -59,9 +59,10 @@ describe('db', () => {
     // Nullable and never backfilled: an occupancy no wake caused genuinely has no lease, and the
     // verifier must read that absence as "not mine" rather than as missing data (ADR 236).
     const nullable = db
-      .prepare<[], { notnull: number }>(
-        "SELECT [notnull] FROM pragma_table_info('presence') WHERE name = 'wake_lease'",
-      )
+      .prepare<
+        [],
+        { notnull: number }
+      >("SELECT [notnull] FROM pragma_table_info('presence') WHERE name = 'wake_lease'")
       .get();
     expect(nullable?.notnull).toBe(0);
   });

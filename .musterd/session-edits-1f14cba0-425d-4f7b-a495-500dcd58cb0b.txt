@@ -15,3 +15,5 @@ packages/cli/src/host/backends/claudeCode.ts
 packages/server/src/db/migrations.ts
 packages/mcp/src/workspace.ts
 packages/cli/src/host/loop.test.ts
+docs/decisions/241-a-wake-verifies-against-its-own-lease.md
+docs/decisions/238-verify-waits-for-its-own-evidence.md

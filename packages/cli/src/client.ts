@@ -181,9 +181,7 @@ export class HttpClient {
           ...(attestedProvenance !== undefined
             ? { 'x-musterd-provenance': attestedProvenance }
             : {}),
-          ...(attestedWakeLease !== undefined
-            ? { 'x-musterd-wake-lease': attestedWakeLease }
-            : {}),
+          ...(attestedWakeLease !== undefined ? { 'x-musterd-wake-lease': attestedWakeLease } : {}),
           // ADR 135: build attestation rides every request, for EVERY credential — no ADR 121 gate.
           // The model gate exists because a model is a harness fact a human must not stamp; build
           // attests the *binary* itself, which a human's (possibly stale) CLI genuinely has.

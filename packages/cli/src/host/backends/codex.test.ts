@@ -177,7 +177,7 @@ describe('codexBackend', () => {
     await result.settled;
   });
 
-  it('the child is spawned with this lease\'s token in its env (ADR 241)', async () => {
+  it("the child is spawned with this lease's token in its env (ADR 241)", async () => {
     const child = new Child();
     let spawnedEnv: NodeJS.ProcessEnv | undefined;
     const backend = codexBackend({
