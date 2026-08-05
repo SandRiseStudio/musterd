@@ -1285,15 +1285,17 @@ function fileAutoState(): { read: () => string | null; write: (sha: string) => v
  *   2. `launchctl` agreeing the job is not running — a different source, not a second opinion from
  *      the same one. A daemon mid-restart fails a probe while launchctl is content; that is normal.
  *
- * On confirmation: ONE `kickstart` attempt (the tick already bounces the daemon on every ordinary
- * refresh under the same guards — restarting a daemon that is already dead drops no session because
- * there is none to drop), then either a quiet recovery or one OS notice, and then it stands down.
- * A watcher that retries a failing restart every two minutes is a restart storm wearing a helpful
- * expression. It never spends a wake: a woken seat would coordinate through the daemon that is down.
+ * On confirmation: ONE OS notice, then it stands down until the outage ends. **Deliberately no
+ * restart** — re-evaluated with nick 2026-08-04, the same day ADR 227 shipped "only designated
+ * platform agents touch running infrastructure": this tick has no seat, no role, and no identity
+ * (the infra-gate cannot even see it — an unbound context is silence by design), so granting it
+ * restart autonomy would make the role system's biggest infra toucher the one actor outside the
+ * role system. Restart autonomy arrives through the automated-actors-under-roles design (the seed
+ * doc's autonomy-tiers-as-team-policy question) or not at all. It also never spends a wake: a woken
+ * seat would coordinate through the daemon that is down.
  */
 async function handleUnreachable(
   ctx: ServiceCtx,
-  health: () => Promise<DaemonHealth>,
   notify: (n: { id: string; title: string; body: string }) => void,
   outageState: { read: () => string | null; write: (s: string) => void },
   ok: (s: string) => void,
@@ -1319,27 +1321,18 @@ async function handleUnreachable(
     return 0;
   }
 
+  outageState.write('down:notified');
+  notify({
+    id: 'musterd-daemon-down',
+    title: 'musterd daemon is down',
+    // Self-contained on purpose: a push body is read on a lock screen where the title may be
+    // truncated or absent, so it names WHAT is down rather than relying on "it".
+    body: 'The musterd daemon stopped answering /health and launchctl shows the job not running. Run: musterd service restart',
+  });
   ok(
-    `daemon down (confirmed: ${prior.replace('down:', '')} failed probes + launchctl) — restarting`,
+    `daemon down (confirmed: 2 consecutive failed probes + launchctl) — notified the operator, standing down`,
   );
-  ctx.run('launchctl', kickstartArgs(ctx.uid, ctx.label));
-  try {
-    await health();
-    outageState.write(''); // recovered — the outage is over, and the next one starts from zero
-    ok('daemon recovered on restart');
-    return 0;
-  } catch {
-    outageState.write('down:notified');
-    notify({
-      id: 'musterd-daemon-down',
-      title: 'musterd daemon is down',
-      // Self-contained on purpose: a push body is read on a lock screen where the title may be
-      // truncated or absent, so it names WHAT is down rather than relying on "it".
-      body: 'The musterd daemon did not answer /health and a restart did not recover it. The auto-refresher has stood down.',
-    });
-    ok('restart did not recover it — notified the operator, standing down');
-    return 0;
-  }
+  return 0;
 }
 
 /**
@@ -1369,7 +1362,7 @@ async function autoRefreshTick(
   try {
     health0 = await health();
   } catch {
-    return handleUnreachable(ctx, health, notify, outageState, ok);
+    return handleUnreachable(ctx, notify, outageState, ok);
   }
   // Reachable: whatever outage we were tracking is over (ADR 229). Clearing here — rather than only
   // on the up-to-date path — is what makes the run counter mean "consecutive", so a blip between two

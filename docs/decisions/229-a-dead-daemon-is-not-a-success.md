@@ -74,18 +74,24 @@ Escalation requires both:
 Either alone is a shrug: a daemon mid-restart fails a probe while launchctl is content, and that is
 normal, not an incident.
 
-### 2. Autonomy — one restart attempt, then tell the human, then stop
+### 2. Escalation — tell the human once, then stand down. No self-restart.
 
-On confirmed-down the tick attempts `service restart`. This is deliberately _not_ a new power: the
-tick **already** stops and starts the daemon on every ordinary refresh, under the same guards, and
-restarting a daemon that is already dead is strictly less disruptive than the bounce it performs
-routinely (no live session to drop — there is nothing to drop).
+On confirmed-down: `musterd notify` (ADR 035) + its ledger line, naming the fix
+(`musterd service restart`), and then **stand down** until the outage ends. One notice per outage
+block — a watcher that re-notifies every two minutes is an alarm the operator learns to silence.
 
-- **Recovered** → a stamped `refresh.log` line. No notification: a self-healed outage that
-  interrupts the operator has just moved the cost rather than removed it.
-- **Still down** → `musterd notify` (ADR 035) + its ledger line, and **stop attempting**. One
-  restart per outage block. A watcher that retries a failing restart every two minutes is a restart
-  storm wearing a helpful expression.
+**Re-evaluated 2026-08-04 (nick + izzo), and the restart came out.** The first draft of this ADR
+had the tick attempt one `kickstart` before notifying, argued as "strictly less than the bounce it
+already performs routinely." The argument was true and still lost, because it answered the wrong
+question. ADR 227 shipped, the same day, a system whose thesis is _only designated platform agents
+touch running infrastructure_ — and this tick has no seat, no role, and no identity. The infra-gate
+cannot even see it: an unbound context is silence by design. Granting new restart autonomy to the
+one infra-touching actor the role system structurally cannot cover would have made the role
+machinery a rule for everyone except the actor that acts most often. Detection and notification are
+observability and grant nothing; the restart is an **autonomy grant**, and autonomy grants flow
+through the automated-actors-under-roles design (the seed doc's autonomy-tiers-as-team-policy
+question, now due for its own session) — or not at all. The tick's _existing_ refresh-path bounce
+is untouched: it predates this ADR and is grandfathered exactly until that design says otherwise.
 
 **There is deliberately no audit row here, and the reason is structural:** the ADR 071 audit log
 lives _inside the daemon_, so an outage is exactly the event it cannot record. Reaching for it would
@@ -107,12 +113,14 @@ and lands later as promotions of _this_ seam, not as a second watcher racing thi
 
 ## Consequences
 
-- The `platform` role (ADR 227) gets its first automated increment, and it is a repair to an actor
-  that already exists rather than a new resident agent — the cheapest possible version of the
-  guardian, with the guardian's later probe layers as promotions of the same code path.
-- One behavioural change an operator will notice: a genuinely-down daemon now produces at most one
-  OS notification per outage, where previously it produced silence.
-- The tick keeps its no-token-when-healthy property. Nothing here runs a model.
+- The guardian arrives as a repair to an actor that already exists rather than a new resident
+  agent — detection and notification only, with every later power (self-restart first among them)
+  deferred to the automated-actors-under-roles design so the role machinery is never a rule for
+  everyone except the most frequent actor.
+- One behavioural change an operator will notice: a genuinely-down daemon now produces exactly one
+  OS notification per outage — naming the fix — where previously it produced silence.
+- The tick keeps its no-token-when-healthy property. Nothing here runs a model, and nothing here
+  gained the power to restart anything.
 - `refresh.log` gains a legible outage record, which is what makes the evaluation below possible at
   all — the current log cannot distinguish its own worst hour from its best.
 
@@ -121,8 +129,8 @@ and lands later as promotions of _this_ seam, not as a second watcher racing thi
 **Traces.** Two signals, both on rails that already exist and — per the Decision — both _outside_
 the daemon, because the daemon is the thing that is down: a stamped `refresh.log` line naming each
 stage of the ladder (`one failed probe, waiting for a second` / `launchctl reports the job running —
-holding off` / `daemon down (confirmed …) — restarting` / `daemon recovered on restart` / `restart
-did not recover it — notified the operator, standing down`), and the `musterd notify` push, which
+holding off` / `daemon down (confirmed …) — notified the operator, standing down` / `still
+unreachable — already notified this outage`), and the `musterd notify` push, which
 leaves its own ledger line (#631's fix) so a reported notice can be checked against the log that
 caused it. Each rung is a distinct string on purpose: the whole defect being fixed is one message
 covering several different states.
@@ -131,16 +139,17 @@ covering several different states.
 Context table (1,136 unreachable ticks / 29 blocks / longest short block 13 ticks). Re-measure after
 two weeks:
 
-- **Pass:** every contiguous unreachable block resolves to either one recovery line or exactly one
-  notify+audit — and **zero** blocks end with a bare `✓ nothing to refresh`, which is the whole
-  defect. Total unreachable ticks per block should fall for recoverable outages (one restart ends
-  them) and stay flat for outages that need a human.
+- **Pass:** every contiguous unreachable block resolves to exactly one notification line — and
+  **zero** blocks end with a bare `✓ nothing to refresh`, which is the whole defect. Block _duration_
+  should shorten too, because the operator now learns at minute ~4 instead of whenever they next
+  look; if it doesn't, that is the evidence the deferred restart autonomy waits for, and it goes to
+  the automated-actors-under-roles design with numbers attached.
 - **Fail (fix the confirmation, not the threshold):** a notification fires during an ordinary bounce
   window — meaning two consecutive probes plus launchctl was still too weak a test, and the answer is
-  a stronger confirmation, never a longer silence. Second failure mode: more than one restart attempt
+  a stronger confirmation, never a longer silence. Second failure mode: more than one notification
   inside a single block, meaning the stop rule leaked.
 
 **Experiment.** None pre-registered — the change is a repair with a measured baseline, not a
-hypothesis. The one live check worth running by hand before merge: stop the daemon deliberately,
-watch two ticks, confirm the escalation fires once and the restart brings it back. That rehearsal is
-also the honest test of the stop rule, which no unit test can prove about `launchd`.
+hypothesis. The one live check worth running by hand after merge: stop the daemon deliberately,
+watch two ticks, confirm exactly one notification arrives and the following tick stands down. That
+rehearsal is also the honest test of the stop rule, which no unit test can prove about `launchd`.

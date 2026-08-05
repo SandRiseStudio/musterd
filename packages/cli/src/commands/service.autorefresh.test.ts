@@ -451,26 +451,9 @@ describe('service refresh --auto (the tick)', () => {
       expect(state.read()).toContain('down:1');
     });
 
-    it('two consecutive probes + launchctl agreeing → one restart attempt, and it recovers', async () => {
-      let probes = 0;
-      const { code, out } = await tick({
-        ctx: ctx(runnerJobDown()),
-        health: async () => {
-          // down for the confirmation probe, back after the restart
-          if (probes++ < 1) throw new Error('ECONNREFUSED');
-          return { connections: 0, build: 'newtip1111' };
-        },
-        outageState: memState('down:1'), // a previous tick already saw it down
-      });
-      expect(code).toBe(0);
-      expect(out).toContain('confirmed');
-      expect(out).toContain('recovered');
-      expect(calls.some((x) => x.cmd === 'launchctl' && x.args.includes('kickstart'))).toBe(true);
-    });
-
-    it('a restart that does not recover it notifies the operator exactly once, then stands down', async () => {
+    it('two consecutive probes + launchctl agreeing → the operator is notified exactly once', async () => {
       const notices: { title: string; body: string }[] = [];
-      const state = memState('down:1');
+      const state = memState('down:1'); // a previous tick already saw it down
       const { code, out } = await tick({
         ctx: ctx(runnerJobDown()),
         health: down,
@@ -478,16 +461,31 @@ describe('service refresh --auto (the tick)', () => {
         outageState: state,
       });
       expect(code).toBe(0);
+      expect(out).toContain('confirmed');
+      expect(out).toContain('notified the operator');
       expect(notices).toHaveLength(1);
       expect(notices[0]!.body).toMatch(/daemon/i);
-      expect(out).toContain('standing down');
       // The stop rule: the state marks this outage as already escalated…
       expect(state.read()).toContain('notified');
     });
 
-    it('…and the next tick in the same outage does NOT restart or notify again (no restart storm)', async () => {
+    it('never restarts on its own — autonomy flows through the role machinery, not this cron (ADR 229 re-eval)', async () => {
+      // The 2026-08-04 re-evaluation with nick: the tick has no seat, no role, no identity — the
+      // infra-gate cannot even see it. Granting it restart autonomy the same day ADR 227 shipped
+      // "only designated platform agents touch running infrastructure" was the contradiction; the
+      // restart arrives through the automated-actors-under-roles design or not at all.
+      await tick({
+        ctx: ctx(runnerJobDown()),
+        health: down,
+        notify: () => {},
+        outageState: memState('down:1'),
+      });
+      expect(calls.some((x) => x.cmd === 'launchctl' && x.args.includes('kickstart'))).toBe(false);
+    });
+
+    it('…and the next tick in the same outage does NOT notify again (one notice per outage)', async () => {
       const notices: { title: string; body: string }[] = [];
-      const { code } = await tick({
+      const { code, out } = await tick({
         ctx: ctx(runnerJobDown()),
         health: down,
         notify: (n) => notices.push(n),
@@ -495,7 +493,7 @@ describe('service refresh --auto (the tick)', () => {
       });
       expect(code).toBe(0);
       expect(notices).toHaveLength(0);
-      expect(calls.some((x) => x.cmd === 'launchctl' && x.args.includes('kickstart'))).toBe(false);
+      expect(out).toContain('standing down');
     });
 
     it('launchctl saying the job is healthy withholds escalation — one source is never enough', async () => {
