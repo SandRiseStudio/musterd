@@ -58,6 +58,23 @@ export const WAKE_POLICY_DEFAULTS: ResidencyPolicy = ResidencyPolicySchema.parse
  *  `residency.woke` nor `residency.wake_failed`), so the act stays fully due afterwards. */
 export const WAKE_DEFER_SNOOZE_MS = 5 * 60_000;
 /**
+ * ADR 236: a gap between reaper ticks this long means the loop did not run — it was not merely late.
+ * Six times `REAPER_INTERVAL_MS`: far above scheduler jitter or a long GC pause, far below the
+ * 12–16 minute gaps a suspended host produces (measured across every overnight lease expiry in the
+ * live ledger, against a 0.2–0.3 minute daytime cluster). The threshold discriminates a host that
+ * reported a failure from a host that was not there — the first burns wake budget, the second must
+ * not, or an act is retired before anyone could answer it.
+ */
+export const HOST_SUSPEND_GAP_MS = 90_000;
+/**
+ * ADR 236: the bound on deferring for an unreachable host, measured in HOST-AWAKE time since the
+ * act's first lease — wall-clock elapsed minus every recorded suspension. Past this, an expiry burns
+ * attempt budget again, so termination stays provable. Six hours of a host actually being up is far
+ * more than the attempt cap needs (three attempts at the 30-minute cooldown fit in ninety minutes),
+ * yet short enough that a genuinely broken host is still retired within a working day of uptime.
+ */
+export const WAKE_UNREACHABLE_CEILING_MS = 6 * 3_600_000;
+/**
  * How far back the wake derivation scans for deferring `wait`s (ADR 211 §4). Matches the inbox
  * read's bound: past this a deferral stops suppressing, and the act becomes a wake reason again —
  * the pre-ADR-211 behaviour.
@@ -983,10 +1000,54 @@ export function settleWakeLease(
 
 /**
  * Expire live leases past `expires_at` (the reaper, mirroring `expireRequests`). Returns the expired
- * rows so the reaper can write `residency.wake_failed {reason: 'lease_expired'}` for each — a
- * crashed/hung wake still consumes attempt budget (else a host that dies mid-spawn would retry
- * forever), and the act re-becomes due, still bounded by the derived rate policy.
+ * rows so the reaper can CLASSIFY each one (ADR 236): a host that was up and did not report burns
+ * attempt budget as `residency.wake_failed {reason: 'lease_expired'}` (else a host that dies
+ * mid-spawn would retry forever); a host that was not there at all defers instead. Either way the
+ * act re-becomes due, still bounded by the derived rate policy.
  */
+/** Teams with at least one residency enrollment — who a host suspension concerns (ADR 236). */
+export function listResidencyTeamIds(db: Database): string[] {
+  return db
+    .prepare<[], { team_id: string }>('SELECT DISTINCT team_id FROM residency')
+    .all()
+    .map((r) => r.team_id);
+}
+
+/**
+ * Milliseconds the daemon was demonstrably ABSENT within `[from, to]` — the sum of every recorded
+ * `residency.host_suspended` interval clipped to that window (ADR 236). Derived from the ledger, in
+ * the ADR 131 §4 shape: the audit rows ARE the state, and they survive a daemon restart, which
+ * in-memory tick bookkeeping does not.
+ */
+export function hostAsleepMs(db: Database, teamId: string, from: number, to: number): number {
+  const row = db
+    .prepare<[number, number, string, number], { ms: number }>(
+      `SELECT COALESCE(SUM(MAX(0,
+                MIN(json_extract(detail, '$.to'), ?) - MAX(json_extract(detail, '$.from'), ?))), 0) AS ms
+         FROM audit
+        WHERE team_id = ? AND action = 'residency.host_suspended' AND ts >= ?`,
+    )
+    .get(to, from, teamId, from);
+  return row?.ms ?? 0;
+}
+
+/** Host-awake milliseconds since `since` (ADR 236): elapsed time minus every recorded suspension. */
+export function awakeMsSince(db: Database, teamId: string, since: number, now: number): number {
+  return Math.max(0, now - since - hostAsleepMs(db, teamId, since, now));
+}
+
+/** When this act was FIRST leased for actuation, from the ledger — the ceiling's clock start. */
+export function firstWakeLeaseTs(db: Database, teamId: string, actKey: string): number | null {
+  const row = db
+    .prepare<[string, string], { ts: number }>(
+      `SELECT MIN(ts) AS ts FROM audit
+        WHERE team_id = ? AND action = 'residency.wake_leased'
+          AND json_extract(detail, '$.act') = ?`,
+    )
+    .get(teamId, actKey);
+  return row?.ts ?? null;
+}
+
 export function expireWakeLeases(db: Database, now = Date.now()): WakeLeaseRow[] {
   const rows = db
     .prepare<
