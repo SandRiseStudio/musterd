@@ -1224,8 +1224,11 @@ export async function handleHttp(
           .filter((m) => m.observer !== 1 && toMember(m, team.slug).roles.includes('platform'))
           .map((m) => m.name)
           .sort();
+        // The verb agrees with the number of holders. ADR 227 §4 names a platform alternate, so two
+        // holders is a roster state this team is already heading for — and a message whose only job
+        // is to be trusted enough to redirect someone cannot afford to read as a typo.
         const text = holders.length
-          ? `${holders.join(', ')} holds platform — route an ask instead of touching this yourself (ADR 227)`
+          ? `${holders.join(', ')} ${holders.length === 1 ? 'holds' : 'hold'} platform — route an ask instead of touching this yourself (ADR 227)`
           : 'no seat holds platform yet — this team has no designated infra toucher (ADR 227)';
         appendAudit(ctx.db, team.id, {
           actor: caller.name,
