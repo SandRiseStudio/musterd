@@ -228,6 +228,27 @@
   color: var(--lc-paper-dim);
   font-style: italic;
 }
+/* The acceptor, inline in an ask row — reads as routing rather than as a second subject, so it sits
+   in the lead run right after the verb and never wraps. */
+.bc-reel__routed-inline {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  color: var(--lc-paper-dim);
+  white-space: nowrap;
+}
+/* Who a review lane is waiting on. Sits where the tier chip sits on an ask row, so the rotation
+   never shifts the right edge — on a stream a jumping column reads as a glitch. Mono and dim: it is
+   a name, not a status, and the row's subject is the lane. */
+.bc-reel__routed {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  color: var(--lc-paper-dim);
+  white-space: nowrap;
+}
 .bc-reel__tier {
   flex: none;
   margin-left: auto;
