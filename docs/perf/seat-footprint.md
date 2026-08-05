@@ -54,3 +54,32 @@ stack. Per-session grouping inside the desktop app is not derivable from
 process parents its own sidecars). Follow-up recorded for the ADR: report
 desktop-app-held sidecars as one aggregate with a proc/session estimate,
 rather than pretending to per-session resolution the data cannot support.
+
+## 2026-08-05 closed-window pass (app restart + global MCP diet)
+
+Full transcript: `docs/perf/footprint-window-20260805-155220.log`.
+
+| moment | swap | free mem | procs | sidecars |
+| --- | --- | --- | --- | --- |
+| app up (pre) | 9923/11264 MB | 67 MB | 737 | 212 in 15 stacks |
+| app down | 988/6144 MB | 1699 MB | 473 | **0** |
+| app reopened, sessions resumed (lean config) | 1544/2048 MB | 139 MB | 509 | 34 in 5 stacks |
+
+### Finding 3 — the app restart alone returned ~9 GB of swap
+
+Quitting Claude.app took all 198 held sidecars with it (confirming finding 1:
+they were app-held, not orphaned — the sweep found nothing to kill), and swap
+collapsed 9.9 GB → 1.0 GB with the swapfile pool itself shrinking 11.3 GB →
+2 GB. The single biggest recoverable cost on this machine is the desktop app's
+accumulated session stacks.
+
+### Finding 4 — the global diet cut sidecars ~6× at equal session count
+
+Global `~/.claude.json` mcpServers is now empty (musterd was already
+per-project; ElevenLabs, cloudflare-obs, embrace, figma, flyctl, langfuse,
+posthog, supabase dropped — backup kept beside the file). Same sessions
+resumed after relaunch now spawn 34 sidecar procs vs 212 before. The remaining
+per-session spawns are plugin-provided MCPs (chrome-devtools, playwright,
+pdf-server — note each resumed session still carries a pdf-server at ~30 MB
+resident now that pages are unswapped); a plugin-scoping pass is the next diet
+increment if needed.
