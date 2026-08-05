@@ -135,7 +135,12 @@ describe('codex detect reads its own entry back', () => {
   it('reports nothing when the folder has no codex entry at all', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'musterd-codex-detect-none-'));
     const prev = process.cwd();
+    const prevHome = process.env['HOME'];
     try {
+      // HOME is pinned to an empty dir: "no entry anywhere" is now a claim about the GLOBAL config
+      // too, and against the real ~/.codex/config.toml this assertion would pass or fail depending
+      // on whose machine ran it.
+      process.env['HOME'] = dir;
       process.chdir(dir);
       const d = await codex.detect();
       expect(d.configured).toBe(false);
@@ -143,7 +148,92 @@ describe('codex detect reads its own entry back', () => {
       expect(d.registeredAgentKey).toBeUndefined();
     } finally {
       process.chdir(prev);
+      if (prevHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = prevHome;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Codex merges a **global** `~/.codex/config.toml` with the project-local one, and musterd only ever
+ * writes the project file (ADR 031, deliberately non-invasive). `detect` read only the project file,
+ * so a globally-registered musterd server read as ABSENT: `musterd init --check` printed "Codex: no
+ * musterd server" and called the folder coherent while a Codex session launched there would in fact
+ * get that server.
+ *
+ * Measured on the dogfood machine 2026-08-05: `~/.codex/config.toml` carried `[mcp_servers.musterd]`
+ * with MUSTERD_AGENT_KEY, MUSTERD_GRANT, MUSTERD_AUTOJOIN=1, MUSTERD_MODEL and MUSTERD_SURFACE baked
+ * in — every value ADR 165 unbaked because it outranks binding.json, sitting in a file that reaches
+ * EVERY folder on the machine rather than one worktree. None of it was reportable.
+ *
+ * Cursor's detect already falls back to its global config; this closes the same gap for Codex, and
+ * marks where the entry was found — because `configure` writes the project file, so a repair command
+ * cannot reach a global one and must not be prescribed for it.
+ */
+describe('codex detect sees a globally-registered server', () => {
+  let dir: string;
+  let home: string;
+  let prev: string;
+  let prevHome: string | undefined;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-codex-global-'));
+    home = join(dir, 'home');
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    prev = process.cwd();
+    prevHome = process.env['HOME'];
+    process.env['HOME'] = home;
+    process.chdir(dir);
+  });
+  afterEach(() => {
+    process.chdir(prev);
+    if (prevHome === undefined) delete process.env['HOME'];
+    else process.env['HOME'] = prevHome;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const writeGlobal = (env: Record<string, string>) =>
+    writeFileSync(
+      join(home, '.codex', 'config.toml'),
+      renderServer('musterd', { command: 'node', args: ['/x/bin.js'], env }),
+    );
+
+  it('reports configured, and reads the global entry’s baked env back', async () => {
+    writeGlobal({
+      MUSTERD_AGENT_KEY: 'mskey_secret',
+      MUSTERD_GRANT: 'msgr_secret',
+      MUSTERD_AUTOJOIN: '1',
+      MUSTERD_MODEL: 'gpt-5.6-luna',
+      MUSTERD_SURFACE: 'codex',
+    });
+    const d = await codex.detect();
+    expect(d.configured).toBe(true);
+    expect(d.registeredAgentKey).toBe('mskey_secret');
+    expect(d.registeredGrant).toBe('msgr_secret');
+    expect(d.registeredAutojoin).toBe('1');
+    expect(d.registeredModel).toBe('gpt-5.6-luna');
+    expect(d.registeredSurface).toBe('codex');
+  });
+
+  it('names the global file as one no repair here can rewrite, and says so in the detail', async () => {
+    writeGlobal({ MUSTERD_SURFACE: 'codex' });
+    const d = await codex.detect();
+    expect(d.registeredElsewhere).toBe(join(home, '.codex', 'config.toml'));
+    expect(d.detail).toContain('~/.codex/config.toml');
+  });
+
+  it('prefers the project entry, which IS the file configure writes', async () => {
+    writeGlobal({ MUSTERD_SURFACE: 'codex', MUSTERD_AGENT_KEY: 'mskey_global' });
+    mkdirSync(join(dir, '.codex'), { recursive: true });
+    writeFileSync(
+      join(dir, '.codex', 'config.toml'),
+      renderServer('musterd', { command: 'node', args: ['/x/bin.js'], env: {} }),
+    );
+    const d = await codex.detect();
+    // The project file wins, so the global file's baked key is not attributed to this folder...
+    expect(d.registeredAgentKey).toBeUndefined();
+    // ...and the entry read IS the one `configure` rewrites, so a repair may be prescribed.
+    expect(d.registeredElsewhere).toBeUndefined();
   });
 });

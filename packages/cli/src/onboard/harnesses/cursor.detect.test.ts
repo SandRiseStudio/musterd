@@ -83,4 +83,44 @@ describe('cursor detect reads its own entry back', () => {
     expect(d.registeredSurface).toBeUndefined();
     expect(d.registeredArgs).toBeUndefined();
   });
+
+  // Cursor's detect already falls back to the GLOBAL `~/.cursor/mcp.json`, but `configure` only ever
+  // writes the project file — so drift read from the global one was reported with the project file's
+  // repair. That is the same false-prescription shape ADR 168 is about, one file over: `musterd wire`
+  // would report success having rewritten a file that was never the problem.
+  describe('an entry read from the global config', () => {
+    let home: string;
+    let prevHome: string | undefined;
+    beforeEach(() => {
+      home = join(dir, 'home');
+      mkdirSync(join(home, '.cursor'), { recursive: true });
+      prevHome = process.env['HOME'];
+      process.env['HOME'] = home;
+    });
+    afterEach(() => {
+      if (prevHome === undefined) delete process.env['HOME'];
+      else process.env['HOME'] = prevHome;
+    });
+
+    it('is reported with the file it lives in, which no repair here rewrites', async () => {
+      writeFileSync(
+        join(home, '.cursor', 'mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            musterd: { command: 'node', args: [], env: { MUSTERD_SURFACE: 'cursor' } },
+          },
+        }),
+      );
+      const d = await cursor.detect();
+      expect(d.configured).toBe(true);
+      expect(d.registeredSurface).toBe('cursor');
+      expect(d.registeredElsewhere).toBe(join(home, '.cursor', 'mcp.json'));
+    });
+
+    it('leaves it unset for a project entry — the file configure writes', async () => {
+      writeEntry({ MUSTERD_SURFACE: 'cursor' });
+      const d = await cursor.detect();
+      expect(d.registeredElsewhere).toBeUndefined();
+    });
+  });
 });

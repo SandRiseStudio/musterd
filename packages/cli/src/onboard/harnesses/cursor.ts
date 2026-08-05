@@ -185,14 +185,22 @@ export const cursor: Harness = {
     const installed = existsSync(join(homedir(), '.cursor'));
     // The project entry is the one musterd writes, so it is the one to inspect; fall back to the
     // global entry only when this folder has none, mirroring `configured` below.
-    const entry =
-      musterdEntry(projectConfigPath()) ??
-      (hasMusterd(globalConfigPath()) ? musterdEntry(globalConfigPath()) : null);
+    const projectEntry = musterdEntry(projectConfigPath());
+    const fromGlobal = projectEntry === null && hasMusterd(globalConfigPath());
+    const entry = projectEntry ?? (fromGlobal ? musterdEntry(globalConfigPath()) : null);
     const configured = hasMusterd(projectConfigPath()) || hasMusterd(globalConfigPath());
     return {
       installed,
       configured,
-      detail: installed ? '~/.cursor present' : '~/.cursor not found',
+      detail: fromGlobal
+        ? 'registered in ~/.cursor/mcp.json (machine-global — musterd writes the project file)'
+        : installed
+          ? '~/.cursor present'
+          : '~/.cursor not found',
+      // Everything below describes the GLOBAL file when the fallback fired, and `configure` writes
+      // the project one — so say which file it is, or the doctor prescribes a repair that rewrites
+      // something else and reports success (ADR 168).
+      ...(fromGlobal ? { registeredElsewhere: globalConfigPath() } : {}),
       // Read our own entry back so the doctor can flag a baked legacy value here too. This is where
       // the gap was measured (2026-08-03): a pre-ADR-165 `.cursor/mcp.json` carrying a per-seat
       // AGENT KEY and GRANT plus a stale MUSTERD_SURFACE, none of it reportable because nothing

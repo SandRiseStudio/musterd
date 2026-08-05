@@ -75,3 +75,16 @@ at launch is Codex's concern — musterd never writes a real secret into the rol
 - The hand-rolled TOML helper is the one piece to revisit if Codex's config grows shapes we edit;
   it's deliberately small and well-tested so that's cheap.
 - Moves the Codex renderer from open/must-build → shipped in `provisioning-recipe.md` and ROADMAP.
+- **Not writing the global file is not the same as not READING it (2026-08-05).** The decision above
+  is about musterd's write posture, and it holds. But `detect` inherited the same scope and looked
+  only at the project file, while Codex itself _merges_ the global config — so a musterd server
+  defined in `~/.codex/config.toml` read as absent, and `musterd init --check` printed "Codex: no
+  musterd server" for a folder where a Codex session would in fact get one. Measured on the dogfood
+  machine: that global entry carried `MUSTERD_AGENT_KEY`, `MUSTERD_GRANT`, `MUSTERD_AUTOJOIN=1`,
+  `MUSTERD_MODEL` and `MUSTERD_SURFACE` — every value ADR 165 unbaked because it outranks
+  `binding.json`, in a file reaching _every folder on the machine_ rather than one worktree, and none
+  of it reportable. `detect` now falls back to the global file (as Cursor's already did) and marks
+  what it found there with `registeredElsewhere`, so the doctor reports it with its true reach and
+  **without** prescribing a repair: no command run in a folder rewrites a file musterd does not own,
+  and such an entry is typically how some _other_ seat on the machine launches, so removing it is the
+  user's call. Reading it is how the check stops lying; writing it is still out of bounds.
