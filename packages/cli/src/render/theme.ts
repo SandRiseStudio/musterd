@@ -35,7 +35,8 @@ export const paint: Colors = new Proxy({} as Colors, {
 export const theme = {
   accent: (s: string) => colors.bold(colors.yellow(s)),
   memberName: (name: string, kind: MemberKind) =>
-    kind === 'agent' ? colors.cyan(name) : colors.magenta(name),
+    // Services (ADR 232) render quiet on purpose: a ledger seat is roster furniture, not a peer.
+    kind === 'agent' ? colors.cyan(name) : kind === 'service' ? colors.gray(name) : colors.magenta(name),
   meta: (s: string) => colors.gray(s),
   ok: (s: string) => colors.green(s),
   warn: (s: string) => colors.yellow(s),

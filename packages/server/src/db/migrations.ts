@@ -5,6 +5,14 @@ import { SCHEMA_V1_SQL } from './schema.js';
 export interface Migration {
   version: number;
   up: (db: Database) => void;
+  /**
+   * Run with `PRAGMA foreign_keys = OFF` (toggled OUTSIDE the transaction — SQLite refuses the
+   * pragma inside one). Needed only by table REBUILDS of an FK-referenced parent (`members`):
+   * with enforcement on, the DROP half of copy-drop-rename fails against every child row. The
+   * runner re-enables enforcement and runs `PRAGMA foreign_key_check` afterwards, so a rebuild
+   * that orphaned rows fails the boot instead of shipping silent corruption.
+   */
+  fkOff?: boolean;
 }
 
 /** Forward-only migrations, applied in order. No down-migrations in v1. */
@@ -589,6 +597,53 @@ export const MIGRATIONS: Migration[] = [
       if (!roleCols.includes('summary')) db.exec('ALTER TABLE roles ADD COLUMN summary TEXT');
     },
   },
+  {
+    // v32 — ledger seats (ADR 232 increment 1): widen the members.kind CHECK to admit 'service'.
+    // The CHECK is frozen in the v1 DDL and SQLite cannot ALTER it in place, so rebuild the table
+    // (the migration-5 pattern) — but members is the FK parent of half the schema, hence `fkOff`.
+    // Column list read from the live table, not hardcoded: nine migrations have widened members
+    // since v1, and a rebuild that enumerates them by hand breaks the version-rewind replay the
+    // migration tests use.
+    version: 32,
+    fkOff: true,
+    up: (db) => {
+      const cols = db
+        .prepare("SELECT name FROM pragma_table_info('members')")
+        .pluck()
+        .all() as string[];
+      const colList = cols.map((c) => `"${c}"`).join(', ');
+      db.exec(`
+        CREATE TABLE members_new (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          name        TEXT NOT NULL,
+          kind        TEXT NOT NULL CHECK (kind IN ('agent','human','service')),
+          role        TEXT NOT NULL DEFAULT '',
+          lifecycle   TEXT NOT NULL DEFAULT 'forever' CHECK (lifecycle IN ('forever','session','until')),
+          lifecycle_until INTEGER,
+          availability TEXT,
+          token_hash  TEXT,
+          left_at     INTEGER,
+          created_at  INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL,
+          bound_at    INTEGER,
+          observer    INTEGER NOT NULL DEFAULT 0,
+          account_status TEXT,
+          capabilities TEXT,
+          credential_hash TEXT,
+          observer_scope TEXT,
+          last_offline_reason TEXT,
+          working_hours TEXT,
+          roles TEXT
+        );
+        INSERT INTO members_new (${colList}) SELECT ${colList} FROM members;
+        DROP TABLE members;
+        ALTER TABLE members_new RENAME TO members;
+        CREATE UNIQUE INDEX idx_members_team_name ON members(team_id, name);
+        CREATE INDEX idx_members_team ON members(team_id);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
@@ -626,7 +681,22 @@ export function runMigrations(db: Database): number {
           'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       ).run(String(m.version));
     });
-    tx();
+    if (m.fkOff) {
+      // The pragma is refused inside a transaction, so it brackets the tx. See Migration.fkOff.
+      db.pragma('foreign_keys = OFF');
+      try {
+        tx();
+        const broken = db.pragma('foreign_key_check') as unknown[];
+        if (broken.length > 0)
+          throw new Error(
+            `migration ${m.version} left ${broken.length} broken foreign-key reference(s)`,
+          );
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+    } else {
+      tx();
+    }
     applied = m.version;
   }
   return applied;

@@ -2,7 +2,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir, platform as osPlatform } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
+import { makeEnvelope } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
+import { HttpClient } from '../client.js';
 import { configPath, loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { loadHostRegistry } from '../host/registry.js';
@@ -405,6 +408,9 @@ function resolveAutoRefreshCtx(run: Runner, parsed: Parsed): AutoRefreshCtx {
       '/sbin',
     ].join(':'),
     intervalSeconds: interval ? Number(interval) : DEFAULT_AUTOREFRESH_INTERVAL,
+    // ADR 232 §5: the service seat's token file rides the plist environment — the tick reads it
+    // back to announce as `autorefresh`, never inheriting the folder binding it runs inside.
+    env: { MUSTERD_SERVICE_TOKEN_FILE: join(home, 'autorefresh', 'seat-token') },
     run,
   };
 }
@@ -1203,6 +1209,108 @@ async function refreshDaemon(
   return 0;
 }
 
+/** The auto-refresher's ledger-seat name (ADR 232) — the first attributed unattended actor. */
+const AUTOREFRESH_SEAT = 'autorefresh';
+
+/** Where `service install --auto` delivers the service seat's token (0600, never logged). */
+export function serviceTokenPath(): string {
+  return join(dirname(configPath()), 'autorefresh', 'seat-token');
+}
+
+/**
+ * Provision the auto-refresher's ledger seat token (ADR 232 §5) — best-effort, at install time,
+ * with the OPERATOR's stored identity (they are running `service install`; the daemon's admin
+ * gate decides). The token lands as a 0600 file whose path rides the plist environment; the tick
+ * reads it back and never sees a binding — which is the point: the tick runs in a folder bound to
+ * the operator, and inheriting that binding is the misattribution this seat exists to end.
+ *
+ * Every failure is a meta line, never a hard stop: an unprovisioned auto-refresher is exactly the
+ * pre-232 behaviour, and `install` must keep working on teams that haven't declared the seat.
+ */
+async function provisionAutoRefreshToken(
+  ok: (s: string) => void,
+  meta: (s: string) => void,
+): Promise<void> {
+  const config = loadConfig();
+  const team = config.current;
+  const identity = team ? config.identities[team] : undefined;
+  if (!team || !identity) {
+    meta(
+      '  seat:    no current team identity — skipped the autorefresh service seat token (ADR 232); ' +
+        'join your team, then rerun `musterd service install --auto`',
+    );
+    return;
+  }
+  try {
+    const http = new HttpClient({ server: config.server, key: identity.key, surface: 'cli' });
+    const res = (await http.addMember(team, {
+      name: AUTOREFRESH_SEAT,
+      kind: 'service',
+      role: 'platform',
+    })) as { token?: string };
+    if (!res.token) throw new Error('daemon returned no token');
+    const p = serviceTokenPath();
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, res.token + '\n', { encoding: 'utf8', mode: 0o600 });
+    ok(`minted the ${AUTOREFRESH_SEAT} service seat token → ${theme.accent(p)} (0600)`);
+  } catch (err) {
+    meta(
+      `  seat:    could not provision the ${AUTOREFRESH_SEAT} service seat (${(err as Error).message}) — ` +
+        `the tick will run unattributed (pre-ADR 232 behaviour). For a file-backed roster, write ` +
+        `seats/${AUTOREFRESH_SEAT}.toml (kind = "service", roles = ["platform"]) and rerun install.`,
+    );
+  }
+}
+
+/**
+ * The in-band bounce announcement (ADR 232 §2) — the seat the ADR 152 comment promised: on a REAL
+ * bounce, and only then, the auto-refresher says what it did in the stream the team already reads.
+ * Never on a no-op tick: the named failure mode is service chatter drowning the stream, and the fix
+ * is quieter services, never filtering the stream by kind.
+ *
+ * Silent no-op when the seat isn't provisioned (no token file): an unprovisioned install stays
+ * bit-identical to pre-232. A failed send is one meta line — the bounce already happened, and the
+ * announcement must never turn a successful refresh into a failed tick.
+ */
+async function announceRefreshBounce(
+  sha: string,
+  conns: number,
+  ok: (s: string) => void,
+): Promise<void> {
+  const tokenFile = process.env['MUSTERD_SERVICE_TOKEN_FILE'] ?? serviceTokenPath();
+  let token: string;
+  try {
+    token = readFileSync(tokenFile, 'utf8').trim();
+  } catch {
+    return; // unprovisioned — pre-232 behaviour, silently
+  }
+  const config = loadConfig();
+  const team = process.env['MUSTERD_SERVICE_TEAM'] ?? config.current;
+  if (!token || !team) return;
+  const s = conns === 1 ? '' : 's';
+  try {
+    const http = new HttpClient({ server: config.server, key: token, surface: 'cli' });
+    await http.send(
+      team,
+      makeEnvelope({
+        id: ulid(),
+        team,
+        from: AUTOREFRESH_SEAT,
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: `bounced the daemon on ${sha}, ${conns} live session${s} notified`,
+      }),
+    );
+    ok(`announced the bounce in-band as ${AUTOREFRESH_SEAT}`);
+  } catch (err) {
+    ok(
+      theme.meta(
+        `bounce announcement failed (${(err as Error).message}) — the refresh itself succeeded`,
+      ),
+    );
+  }
+}
+
 /** File-backed outage marker for the ADR 230 escalation ladder — its own file beside the attempted-tip
  *  stamp, so the two lifecycles (a broken build vs. a dead daemon) can never overwrite each other. */
 function fileOutageState(): { read: () => string | null; write: (s: string) => void } {
@@ -1264,8 +1372,10 @@ function fileAutoState(): { read: () => string | null; write: (sha: string) => v
  *      interval forever (mirrors the /live publisher's `.published-sha`).
  *   3. **Quiet period** — with live sessions connected: `idle` defers (retries next tick); `notice`
  *      force-refreshes and fires an OS notice to the operator at the bounce itself, once the build
- *      has landed, so one merge is one notification (the announced, conscious bounce —
- *      the team-facing announcement belongs to the future platform-guardian seat, not this schedule).
+ *      has landed, so one merge is one notification (the announced, conscious bounce). The
+ *      team-facing announcement lives with the `autorefresh` ledger seat now (ADR 232 — the seat
+ *      the old comment here promised): a completed bounce lands in-band as an attributed
+ *      status_update, and a no-op tick says nothing.
  *      With no live sessions, refresh straight through (the ADR 047 guard passes cleanly).
  */
 /**
@@ -1468,7 +1578,12 @@ async function autoRefreshTick(
     : undefined;
   if (tip) autoState.write(tip); // mark the attempt BEFORE building, so a failed build debounces next tick
   try {
-    return await refreshDaemon(ctx, health, force, ok, fail, undefined, health0, announce);
+    const code = await refreshDaemon(ctx, health, force, ok, fail, undefined, health0, announce);
+    // The bounce landed and the daemon verified up — say so IN-BAND, as the service seat
+    // (ADR 232 §2). After the verify on purpose: announcing a bounce that didn't happen is the
+    // same lie the OS notice was moved off of (#631).
+    if (code === 0) await announceRefreshBounce(tip.slice(0, 7), conns, ok);
+    return code;
   } catch (err) {
     // A failed tick is the one state nothing else surfaces. The debounce then parks it, so the
     // daemon stays pinned on old code across every later merge while /health answers cheerfully —
@@ -1511,6 +1626,7 @@ async function autoRefreshServiceCommand(
       const res = installAutoRefresh(ctx);
       if (res.status !== 0) fail('auto-refresher (bootstrap)', res);
       ok(`installed + started the daemon auto-refresher (${theme.accent(ctx.label)})`);
+      await provisionAutoRefreshToken(ok, meta);
       meta(`  runs:    musterd service refresh --auto --mode ${mode}`);
       meta(
         `  cadence: on load + every ${ctx.intervalSeconds}s (only acts when behind origin/main)`,

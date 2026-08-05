@@ -317,7 +317,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // branch; a human credential already proved it identifies the target seat above. This
           // covers BOTH claim branches below — only the ADR 146 re-seat path checked before.
           if (authenticatedAs === null && targetMember && !agentKeyMayOccupy(targetMember)) {
-            const refusal = agentKeySeatKindRefusal(targetMember.name);
+            const refusal = agentKeySeatKindRefusal(targetMember.name, targetMember.kind);
             send(ws, {
               type: 'refused',
               code: 'forbidden',

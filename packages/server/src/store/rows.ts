@@ -6,6 +6,7 @@ import {
   CapabilitiesSchema,
   GENERALIST_CAPABILITIES,
   type Member,
+  type MemberKind,
 } from '@musterd/protocol';
 
 /** Raw DB row shapes (snake_case, SQLite types). */
@@ -29,7 +30,7 @@ export interface MemberRow {
   id: string;
   team_id: string;
   name: string;
-  kind: 'agent' | 'human';
+  kind: MemberKind;
   role: string;
   /** Every role the seat holds (ADR 227), JSON array projected by reconcile. NULL ⇒ derive from the
    * legacy single `role` (db-only teams, pre-v31 rows). */
