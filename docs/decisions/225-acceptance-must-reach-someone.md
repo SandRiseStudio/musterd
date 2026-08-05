@@ -5,7 +5,9 @@
 - Deciders: nick (directed), stanley, ryder (residency-split amendment, bimodality finding, the
   falsifier correction, and raising the shared-predicate trap — from an acceptance review of this
   ADR), dolly (the `derivation` re-measurement that forced the wake-count correction, and the call
-  that the shared-predicate trap is a pattern rather than three incidents)
+  that the shared-predicate trap is a pattern rather than three incidents). **ryder again, 2026-08-05:
+  the host-vs-seat correction to decision 1's instrument table — wakeability is a property of the
+  machine, not of the seat ([ADR 236](236-sleeping-host-defers.md)).**
 - Amends: [ADR 192](192-outcome-acceptance.md) (the acceptor's job and the two-stage close stand
   unchanged; this ADR changes how the ask is delivered and what is promised for it) and
   [ADR 188](188-graded-review-ladder.md) (the grading ladder is untouched)
@@ -191,6 +193,63 @@ and is applied inconsistently.
 > **under-specified**, and the honest three-way is _interruptible_ / _wakeable_ / _neither_, with
 > `no_reachable_acceptor` widening to cover an idle-live seat that nothing may reach in time. Sizing
 > the middle row is a measurement, not a guess, and it is now the first thing the Eval should report.
+
+> **Amendment (2026-08-05), from ryder's [ADR 236](236-sleeping-host-defers.md): every row in the
+> table above is a property of the SEAT, and the binding one is a property of the HOST.**
+>
+> The table asks what the acceptor's state is — live, idle, woken, offline — and picks an instrument
+> from the answer. All four are statements about a seat. Enrolment for wakes is likewise a statement
+> about a seat: a row in the residency table saying this one may be woken. **Whether anything can
+> actually be woken is a fact about the machine**, and no column here records it.
+>
+> On the evening of 2026-08-04 nick's laptop slept and woke in 19 cycles, **13.7 hours asleep between
+> 18:10 and 08:12**. The daemon kept coming back, seeing pending wakes, and leasing them into a
+> machine with nobody home: **11 `residency.wake_leased`, 13 `residency.wake_failed`** — every one
+> `reason: 'lease_expired'` — **and 5 `residency.wake_exhausted`, acts terminally retired at three
+> attempts each, while the host was asleep.** izzo's acceptance ask was leased at 19:01, 20:25 and
+> 21:39, and **retired at 23:00:18 — nine hours before any seat could have answered it.** The lane
+> then closed `review_unanswered`, a reason that reads as a reviewer asked and declining. Nobody was
+> ever asked.
+>
+> **So the honest three-way collapses when the lid is shut.** _wakeable_ is not a fourth state beside
+> the others; it is conditional on a fact none of them can see, and when the host is away **every seat
+> is in the `neither` bucket regardless of enrolment.** This ADR's own thesis, one level further up
+> again: presence is not reachability, then seat-liveness is not interruptibility, and now
+> **enrolment is not wakeability.** Each time the predicate we trusted described something adjacent to
+> the thing we needed.
+>
+> It is also the third instance of the defect class this document named. `lease_expired` serves two
+> consumers with opposite needs — it must burn budget for a crash-looping host (or it retries forever)
+> and must not burn budget for an absent one (or the act dies unanswered) — and, as the shared-predicate
+> trap predicts, it silently served the first and charged the second. ADR 236 splits it: a host that
+> was up and did not report burns an attempt; a host that was not there **defers**, budget-neutral,
+> under a ceiling measured in host-_awake_ time.
+>
+> **What this costs the Eval and the Experiment above, concretely:**
+>
+> - **The instrumentation clause is wrong as written.** It says record the acceptor's state at submit
+>   resolved to _interruptible / wakeable / neither_. Derived from the seat, that field would record
+>   `wakeable` for a seat on a sleeping host — **confidently wrong in exactly the population already
+>   identified as dominant and diurnal.** Record the host's state beside it. ADR 236's
+>   `residency.host_suspended {gap_ms, from, to}` is what makes this answerable at all: the machine's
+>   absence becomes a ledger fact instead of an archaeology exercise, and it can be joined
+>   retroactively over the window already measured.
+> - **A fourth precondition, and it voids a run rather than biasing it.** The wake arm of the
+>   three-arm experiment cannot span a host suspension. A wake arm run across a night does not measure
+>   wake delivery; it measures the reaper. Any arm whose window intersects a `host_suspended` gap is
+>   excluded, and the exclusion is recorded — the same discipline as the autorefresh precondition, and
+>   for the same reason: this one is adversarial to the phenomenon too, since offline acceptors are
+>   most common exactly when the host is least likely to be up.
+> - **Acceptances whose ask was retired by lease exhaustion must be excluded from the answer-rate
+>   denominator entirely** — never scored as an unanswered ask. Five acts died that way in one night.
+>   Scored naively they read as five acceptors who were reached and declined to answer, which is the
+>   precise inversion of what happened and would push this ADR's own falsifier toward firing for a
+>   reason that has nothing to do with delivery.
+>
+> **What it does not change.** Decision 1's instrument-per-state logic is untouched: the interrupt line
+> is still the right free instrument for a working seat, and a wake is still the right paid one for an
+> offline seat _on a host that is up_. The correction is to the ADR's model of who is reachable, not
+> to what to do once you know.
 
 **2. The promise matches the measurement.** — **WEAKENED, do not implement on this evidence.** See
 "What this ADR's evidence is actually worth": where a promise is actually recorded, confirms land at
@@ -473,6 +532,12 @@ autorefresh was in flight, and the acceptor's state resolved to the three-way ab
 (_interruptible_ / _wakeable_ / _neither_) rather than the two-way `hasLivePresence` answer. Without
 the third field the arms cannot be separated at analysis time, and the ADR would be measuring a
 pooled population again — the error this document has already made twice.
+
+> **This clause is corrected by the 08-05 amendment to decision 1 — do not build it as written.** The
+> three-way above is derived from the seat, so it records `wakeable` for a seat on a sleeping host.
+> The host's own state must be recorded beside it (ADR 236's `residency.host_suspended`), and any
+> acceptance whose ask was retired by lease exhaustion leaves the denominator rather than scoring as
+> unanswered. A fourth precondition follows: **no arm may span a host suspension.**
 
 ### The result, 2026-08-05 — the rule fired, and the rule was under-specified
 
