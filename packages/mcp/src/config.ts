@@ -173,6 +173,22 @@ function warnUnattestedSeat(
  *
  * Silent unless something was actually captured: a declaration alone is not a contradiction, and
  * Codex has no hook path at all, so warning on absence would fire forever on every Codex seat.
+ *
+ * **The prescription is deliberately narrower than the warning.** This warning used to prescribe
+ * `musterd wire` (env case) and `musterd agent <seat>` (binding case). Both of those re-provision:
+ * they call `harness.configure`, which does `claude mcp remove musterd -s local` + `add` — and
+ * Claude Code keys local scope by **repo root**, so that slot is shared by every `agents-*` seat
+ * worktree of this repo (ADR 143). Repairing one stale string in one seat's gitignored binding
+ * therefore rewrote the entry every seat on the machine launches through, re-pointing its
+ * `command`/`args` at whatever checkout the running CLI resolved, and reinstalled hooks besides.
+ * That is a machine-wide write to fix a per-worktree field, and it is how a warning grew a
+ * machine-wide repair without anyone reviewing it: the seven tests here all covered *detection*
+ * and none covered what the message told the reader to do.
+ *
+ * So the fix named here touches only the file that holds the stale value: one `-e` in the harness's
+ * own MCP entry, or one field in this worktree's `.musterd/binding.json`. A too-wide write is not
+ * closed with another too-wide write. `packages/mcp/src/surface-drift.test.ts` binds this — including
+ * a guard that fails if a fourth command learns to rewrite the shared entry.
  */
 function warnContestedSurface(
   claim: ClaimPolicy,
@@ -187,8 +203,9 @@ function warnContestedSurface(
   const ran = binding.session?.harness ?? binding.model_observed?.harness;
   if (!ran || ran === surface) return;
   const source = fromEnv
-    ? `MUSTERD_SURFACE=${surface} in this harness's MCP entry (a baked value outranks binding.json and no observation can correct it — \`musterd wire\` rewrites the entry without it)`
-    : `"surface": "${surface}" in .musterd/binding.json (\`musterd agent ${claim.name}\` here rewrites it)`;
+    ? `MUSTERD_SURFACE=${surface} in this harness's MCP entry (a baked value outranks binding.json and ` +
+      `no observation can correct it — delete that one \`-e MUSTERD_SURFACE=\` from the entry)`
+    : `"surface": "${surface}" in .musterd/binding.json — set it to "${ran}" (this worktree only)`;
   console.error(
     `[musterd] seat "${claim.name}" reports surface "${surface}", but the session in this workspace ` +
       `was captured by "${ran}" — a ${ran} hook only fires under ${ran}, so the declaration is the ` +
