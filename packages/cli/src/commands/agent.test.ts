@@ -57,6 +57,43 @@ describe('musterd agent <name>', () => {
     rmSync(h.workspace.dir, { recursive: true, force: true });
   });
 
+  describe('the infra-touch gate (ADR 227 inc 2) — this verb rewrites the machine-shared MCP entry', () => {
+    it('asks the gate with verb "agent" and prints the one warn line, then PROCEEDS', async () => {
+      const infraGate = vi.fn(async () => 'nick holds platform — route an ask instead (ADR 227)');
+      const chunks: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => {
+        chunks.push(String(c));
+        return true;
+      });
+      let code: number;
+      try {
+        code = await agentCommand(parseArgs(['June']), { infraGate });
+      } finally {
+        spy.mockRestore();
+      }
+      expect(code).toBe(0); // warn-never-block: the provisioning still ran
+      expect(infraGate).toHaveBeenCalledWith('agent');
+      expect(chunks.join('')).toContain('nick holds platform');
+      expect(h.configure).toHaveBeenCalled(); // proceeded through to the shared-entry write
+    });
+
+    it('stays silent when the gate answers null — holder, human shell, or unreachable daemon', async () => {
+      const chunks: string[] = [];
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => {
+        chunks.push(String(c));
+        return true;
+      });
+      let code: number;
+      try {
+        code = await agentCommand(parseArgs(['June']), { infraGate: async () => null });
+      } finally {
+        spy.mockRestore();
+      }
+      expect(code).toBe(0);
+      expect(chunks.join('')).not.toContain('ADR 227');
+    });
+  });
+
   it('adds the agent, binds the workspace, and registers MCP with autojoin', async () => {
     const code = await agentCommand(parseArgs(['June', '--role', 'engineer']));
     expect(code).toBe(0);
