@@ -74,6 +74,27 @@ describe('reapOrphans', () => {
     expect(kills).toEqual([]);
   });
 
+  it('an unreadable process table refuses everything as unverifiable — no scan, no kill', async () => {
+    const res = await reapOrphans(db, teamId, 'kimi', [20, 21], {
+      scanProcs: () => {
+        throw new Error('unsupported platform');
+      },
+      kill: (pid: number, sig: NodeJS.Signals) => {
+        kills.push([pid, sig]);
+      },
+      graceMs: 0,
+      sleep: () => Promise.resolve(),
+    });
+    expect(res).toEqual({
+      killed: [],
+      refused: [
+        { pid: 20, reason: 'unverifiable' },
+        { pid: 21, reason: 'unverifiable' },
+      ],
+    });
+    expect(kills).toEqual([]);
+  });
+
   it('an all-refused request kills nothing and audits nothing', async () => {
     await reapOrphans(db, teamId, 'kimi', [99], deps([]));
     expect(listAudit(db, teamId, {}).some((r) => r.action === 'footprint.reaped')).toBe(false);

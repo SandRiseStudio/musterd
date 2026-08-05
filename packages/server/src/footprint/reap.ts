@@ -21,7 +21,7 @@ export interface ReapDeps {
 
 export interface ReapResult {
   killed: number[];
-  refused: { pid: number; reason: 'not_found' | 'not_sidecar' | 'not_orphaned' }[];
+  refused: { pid: number; reason: 'not_found' | 'not_sidecar' | 'not_orphaned' | 'unverifiable' }[];
 }
 
 export async function reapOrphans(
@@ -36,7 +36,15 @@ export async function reapOrphans(
   const graceMs = deps.graceMs ?? 3_000;
   const sleep = deps.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
 
-  const procs = scanProcs();
+  // No scan, no kill: a platform where the process table cannot be read (or a transient ps
+  // failure) refuses every pid rather than erroring — "cannot verify" and "verified ineligible"
+  // both mean the same thing to the kill path, which only ever acts on positive verification.
+  let procs: ProcSample[];
+  try {
+    procs = scanProcs();
+  } catch {
+    return { killed: [], refused: pids.map((pid) => ({ pid, reason: 'unverifiable' as const })) };
+  }
   const byPid = new Map<number, ProcSample>(procs.map((p) => [p.pid, p]));
   const orphanPids = new Set(
     buildStacks(procs)

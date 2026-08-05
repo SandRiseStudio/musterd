@@ -84,7 +84,11 @@ describe('POST /teams/:slug/footprint/reap', () => {
     const res = await post('/teams/dawn/footprint/reap', { pids: [4194304] }, agentKey);
     expect(res.status).toBe(200);
     expect(res.json.killed).toEqual([]);
-    expect(res.json.refused).toEqual([{ pid: 4194304, reason: 'not_found' }]);
+    // darwin refuses it as not_found; a platform whose process table cannot be read (Linux CI)
+    // refuses it as unverifiable — either way, refused and never killed.
+    expect(res.json.refused).toHaveLength(1);
+    expect(res.json.refused[0].pid).toBe(4194304);
+    expect(['not_found', 'unverifiable']).toContain(res.json.refused[0].reason);
   });
 
   it('rejects a malformed body', async () => {
