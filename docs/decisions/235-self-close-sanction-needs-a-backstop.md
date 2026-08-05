@@ -9,12 +9,20 @@ When a lane enters outcome acceptance, `lane_submit` tells the owner, verbatim:
 > acceptance asked of `<seat>` (`<route>`) — wait ≤5m; accept closes the lane, reject resumes it; on
 > silence, `lane_resolve` yourself (recorded unconfirmed).
 
-The CLI says the same. Agents obey it, and the result is bucket A of the review-failure
+The CLI says the same. Agents mostly obey it, and the result is bucket A of the review-failure
 decomposition (lane `01KZ9B4BXH`): **unverified self-closes at a mean of 8.5 minutes**, with the
 named acceptor never once active during the window.
 
 That reads like impatience. It is not. It is compliance with our own instruction, and the instrument
 that produced it is a five-minute wall-clock timer on a team that exists roughly 4.7 hours a day.
+
+**"Mostly" is load-bearing, and it is a correction to this ADR's first draft** (izzo, on accepting
+the lane). The hint does not compel. izzo received the old five-minute text at 09:41 on the day this
+shipped — the daemon had not yet rebuilt onto the merge — and did _not_ self-close; the lane was
+left with its acceptor and stayed open. One counter-example against twenty is not a refutation, but
+it changes the mechanism from coercion to path-of-least-resistance: the advice makes self-closing the
+obvious next move, and over twenty lanes that is enough. "Agents obey" was the stronger claim and
+"agents mostly obey" is the truer one.
 
 ### The measurement
 
@@ -29,8 +37,38 @@ For every bucket-A close, asking one further question — did that acceptor ever
 | acceptor back within 24 hours                                      | 20 of 20 (100%)     |
 | owner was early by                                                 | 106.8 min (mean)    |
 
-Every single one. The owner shut the lane unverified an average of an hour and three quarters before
-a live acceptor returned, and **100% returned inside the sweep's 24-hour grace**.
+Every one of **these twenty**. The owner shut the lane unverified an average of an hour and three
+quarters before a live acceptor returned, and 100% of this set returned inside the sweep's 24-hour
+grace.
+
+The scope qualifier is deliberate (ryder, reviewing the first draft). "Every one of those acceptors
+came back" is a fact about twenty measured lanes on one team over roughly two weeks. It is not
+"acceptors always come back", and the difference is exactly the failure mode this team hit four times
+in a day: a true finding generalised one notch too far survives being re-checked, because the thing
+it says _is_ true — just not of what it was applied to. Anything reading this ADR should treat 20/20
+as strong evidence that the five-minute window is too short **here**, not as a law about acceptors.
+
+### Is this really about a human's sleep cycle?
+
+Raised as a falsification test after the decision shipped (miley): perhaps the acceptors "came back"
+only because the team's asks route to its one human, so the result would be a fact about nick's sleep
+cycle rather than about agents and session boundaries. Checked, and it does not hold — the split runs
+the other way:
+
+| routed acceptor | n   | came back | mean gap after the close |
+| --------------- | --- | --------- | ------------------------ |
+| **agent**       | 18  | 18        | **59.3 min**             |
+| human           | 2   | 2         | 534.3 min                |
+
+Eighteen of the twenty were agent-routed, and agents returned roughly **nine times faster** than the
+human. So bucket A is an agent-return result, and if anything the human-routed pair is the weaker
+part of the evidence — a 534-minute mean is a sleep cycle, and it is the minority case. The
+falsification test strengthened the finding rather than undermining it.
+
+One adjacent fact surfaced by the same query and worth recording because it is a real fragility, not
+a footnote: every live agent seat now attests `claude-opus-5`, so ADR 188's cross-family ladder finds
+no agent peer among them and a single wakeable seat is carrying essentially the whole acceptance
+load. That is a separate defect from this one, and it wants its own lane.
 
 ### Why the advice was right, and no longer is
 
@@ -48,8 +86,8 @@ genuinely did wait the window it promised), 1 `review_cut_short`. The labels are
 _window_ is wrong. No relabelling work is warranted here, and `laneClose.ts`'s reason derivation is
 deliberately untouched — history is derived, never rewritten (ADR 169).
 
-**It is not reviewer re-routing.** The acceptor came back in every case. Choosing a different name
-would fix a failure that does not exist.
+**It is not reviewer re-routing.** The acceptor came back in every case measured here. Choosing a
+different name would fix a failure that, in this sample, does not exist.
 
 ## Decision
 
@@ -102,7 +140,10 @@ derived from a policy row that `policy.change` already logs.
 **Eval.** Dataset: `lane.closed` rows carrying `time_in_review_ms`, joined to their `lane_review` ask
 and split by whether the acceptor was active during the window. Baselines, all on the pre-235
 population: bucket A **n=20, mean time-in-review 8.5 minutes, 0 verified**; acceptor-returned **20 of
-20**. The decision works if, on an armed team, the mean time-in-review for owner-closed lanes rises
+20 in this sample** (18 agent-routed at a 59.3-minute mean, 2 human-routed at 534.3). Re-derive the
+baseline rather than quoting it if the roster's composition changes — the agent/human mix is what
+that number is made of. The decision works if, on an armed team, the mean time-in-review for
+owner-closed lanes rises
 well above the old 8.5 minutes and the share of bucket-A closes falls. Success after 20 further
 closes: **bucket A below 25% of unverified self-closes, and mean owner-close time above 1 hour.**
 
