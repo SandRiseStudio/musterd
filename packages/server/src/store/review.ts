@@ -181,6 +181,11 @@ export function teamFamilyPosture(
   let humans_live = 0;
   for (const m of listMembers(db, teamId)) {
     if (m.observer) continue;
+    // Ledger seats (ADR 232) attest no model, correctly — they are not evidence holes, not
+    // wake-pool candidates (you cannot wake a LaunchAgent, and trying costs a lease), and never
+    // rungs on the review ladder. Counting one as `unattested` would be the exact "just reuse
+    // kind: agent" bug the kind exists to prevent.
+    if (m.kind === 'service') continue;
     const live = hasLivePresence(db, m.id, presenceTimeoutMs);
     if (m.kind === 'human') {
       if (live) humans_live += 1;
@@ -267,7 +272,14 @@ export function pickReviewCounterpart(
   presenceTimeoutMs: number,
 ): ReviewPick | null {
   const candidates = listMembers(db, teamId).filter(
-    (m) => m.name !== worker && !m.observer && hasLivePresence(db, m.id, presenceTimeoutMs),
+    // A service seat is never an acceptance candidate (ADR 232 / ADR 158): a cron cannot judge a
+    // landed outcome. Belt-and-braces — the ladder would drop it as ungradeable anyway, but the
+    // exclusion is a kind-level fact, not an accident of a missing attestation.
+    (m) =>
+      m.name !== worker &&
+      !m.observer &&
+      m.kind !== 'service' &&
+      hasLivePresence(db, m.id, presenceTimeoutMs),
   );
 
   if (lane.risk.length > 0) {

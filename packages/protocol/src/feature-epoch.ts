@@ -46,5 +46,9 @@
 // against the library), role files carry a `summary`, and `team_members` grows a role filter composed
 // with the liveness trio. An older seat still renders the single `role` display label and simply
 // cannot filter by role; the roster's `behind` hint is the cue.
-export const FEATURE_EPOCH = 7 as const;
+// Epoch 8 — ADR 232 increment 1: `kind: 'service'` ledger seats. The roster can now carry an
+// unattended actor (the auto-refresher first) as a named, attributed row; an older seat's renderer
+// doesn't know the kind and may facet it oddly, and its tools cannot reason about the peer/ledger
+// split — the roster's `behind` hint is the cue.
+export const FEATURE_EPOCH = 8 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

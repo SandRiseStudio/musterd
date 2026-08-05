@@ -105,6 +105,19 @@ describe('auto-refresher lifecycle (injected runner, temp dir)', () => {
     expect(uninstallAutoRefresh(c).removedPlist).toBe(false); // idempotent
   });
 
+  it('bakes the service-seat token file path into the plist environment (ADR 232 §5)', () => {
+    const c = {
+      ...ctx(),
+      env: { MUSTERD_SERVICE_TOKEN_FILE: '/fake/musterd/autorefresh/seat-token' },
+    };
+    installAutoRefresh(c);
+    const plist = readFileSync(c.plistPath, 'utf8');
+    expect(plist).toContain('<key>MUSTERD_SERVICE_TOKEN_FILE</key>');
+    expect(plist).toContain('<string>/fake/musterd/autorefresh/seat-token</string>');
+    // The token itself must never appear anywhere near a plist or a log — only its path travels.
+    expect(plist).not.toContain('mskd_');
+  });
+
   it('restart kickstarts (a tick runs now); stop boots out; status parses launchctl print', () => {
     const c = ctx();
     installAutoRefresh(c);

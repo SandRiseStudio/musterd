@@ -38,6 +38,8 @@ export interface AutoRefreshCtx {
   path: string;
   /** How often the agent runs the tick (seconds). */
   intervalSeconds: number;
+  /** Extra tick environment (`MUSTERD_SERVICE_TOKEN_FILE`, ADR 232 §5). */
+  env?: Record<string, string>;
   run: Runner;
   sleep?: (ms: number) => void;
 }
@@ -62,6 +64,7 @@ export function writeAutoRefreshPlist(ctx: AutoRefreshCtx): void {
       stderrPath: ctx.errLogPath,
       path: ctx.path,
       intervalSeconds: ctx.intervalSeconds,
+      ...(ctx.env ? { env: ctx.env } : {}),
     }),
     'utf8',
   );

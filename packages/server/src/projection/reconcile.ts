@@ -181,7 +181,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
     if (m.kind !== 'human' && caps.is_admin) {
       caps.is_admin = false;
       result.errors.push(
-        `seat "${name}" is an agent declaring is_admin — clamped to false (admins are human-only, ADR 172)`,
+        `seat "${name}" is ${m.kind === 'service' ? 'a service' : 'an agent'} declaring is_admin — clamped to false (admins are human-only, ADR 172)`,
       );
     }
     setMemberGovernance(db, m.id, seat.account_status ?? null, JSON.stringify(caps), held);

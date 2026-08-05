@@ -70,6 +70,18 @@ describe('teamFamilyPosture (ADR 172)', () => {
     expect(p.attesting).toBe(1);
   });
 
+  it('a service seat is invisible to the posture: not unattested, never in the wake pool (ADR 232)', () => {
+    const { db, team } = seed();
+    agent(db, team, 'ada', 'claude-opus-5');
+    agent(db, team, 'lin', 'claude-fable-5');
+    const { row } = addMember(db, team, { kind: 'service', name: 'autorefresh', role: '' });
+    attach(db, row.id, 'cli', 'conn-autorefresh'); // live, attests no model — correctly
+    const p = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(p.state).toBe('monoculture');
+    expect(p.unattested).toBe(0); // NOT an evidence hole — services attest none, by design
+    expect(p.wake_pool.map((c) => c.seat)).not.toContain('autorefresh');
+  });
+
   it('a live agent attesting nothing is unattested — present, proves nothing, not in the denominator', () => {
     const { db, team } = seed();
     agent(db, team, 'ada', 'claude-opus-5');

@@ -373,6 +373,21 @@ describe('reconcile — governance projection (ADR 070, v0.3 P1)', () => {
     expect(result.errors.some((e) => e.includes('botty') && e.includes('human-only'))).toBe(true);
   });
 
+  it('clamps is_admin on a SERVICE seat exactly as on an agent (ADR 232 / ADR 172)', () => {
+    // The service kind must not inherit a softer gate by being new: a cron declaring an admin role
+    // is the same manufactured authority, one identity further from a keyboard.
+    writeRole('ops', '[capabilities]\nis_admin = true\n');
+    writeRoster('slug = "alpha"\n', { autorefresh: 'kind = "service"\nrole = "ops"\n' });
+    const result = reconcile();
+    expect(memberView('autorefresh').kind).toBe('service');
+    expect(memberView('autorefresh').capabilities!.is_admin).toBe(false);
+    expect(
+      result.errors.some(
+        (e) => e.includes('autorefresh') && e.includes('a service') && e.includes('human-only'),
+      ),
+    ).toBe(true);
+  });
+
   it('a per-seat override narrows the role default but cannot widen it', () => {
     writeRole('reviewer', '[capabilities]\ncan_flag_urgent = true\n');
     writeRoster('slug = "alpha"\n', {

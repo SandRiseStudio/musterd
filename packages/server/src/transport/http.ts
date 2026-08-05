@@ -1214,9 +1214,11 @@ export async function handleHttp(
         const team = requireTeam(ctx.db, slug);
         const verb = new URL(req.url ?? '', 'http://local').searchParams.get('verb') ?? 'unknown';
         const caller = tryAuth(ctx, slug, req);
-        // Silent unless the caller is a known AGENT seat: unauthenticated shells and humans are not
-        // the audience — the operator touching their own infra is exactly who this must not nag.
-        if (!caller || caller.kind !== 'agent') return sendJson(res, 200, { warn: null });
+        // Silent unless the caller is a known NON-HUMAN seat: unauthenticated shells and humans are
+        // not the audience — the operator touching their own infra is exactly who this must not nag.
+        // ADR 232 widened the audience from "agent seats" to "non-human seats": a service touching
+        // infra is precisely the actor the census exists to see.
+        if (!caller || caller.kind === 'human') return sendJson(res, 200, { warn: null });
         if (toMember(caller, team.slug).roles.includes('platform')) {
           return sendJson(res, 200, { warn: null });
         }
@@ -2102,7 +2104,7 @@ export async function handleHttp(
         // `authenticatedMember === null` is exactly the agent-key branch; a human credential already
         // proved it identifies the target seat above.
         if (authenticatedMember === null && !agentKeyMayOccupy(targetMember)) {
-          const refusal = agentKeySeatKindRefusal(targetMember.name);
+          const refusal = agentKeySeatKindRefusal(targetMember.name, targetMember.kind);
           return sendJson(res, 403, {
             type: 'refused',
             code: 'forbidden',
@@ -2580,6 +2582,14 @@ export async function handleHttp(
 
       if (method === 'POST' && rest === '/lanes') {
         const { team, member } = authTouch(ctx, slug, req);
+        // Ledger seats hold no lanes (ADR 232 §1) — a service is an accountable actor, never a
+        // negotiator: it cannot decline, hold, or raise, so giving it work would recreate the
+        // anonymous-worker problem under a name.
+        if (member.kind === 'service')
+          throw new MusterdError(
+            'forbidden',
+            `"${member.name}" is a service seat — ledger seats never open or hold lanes (ADR 232)`,
+          );
         const body = parseOrBadRequest(OpenLaneSchema, await readJson(req));
         const lane = openLane(ctx.db, team.id, team.slug, member.name, body);
         // The acquisition ledger (ADR 203) must cover every edge that decides who owns work. The
@@ -2618,6 +2628,22 @@ export async function handleHttp(
         const body = parseOrBadRequest(UpdateLaneSchema, await readJson(req));
         const before = getLane(ctx.db, team.id, laneId, team.slug);
         if (!before) throw new MusterdError('not_found', `no lane "${laneId}" on ${slug}`);
+        // Ledger seats hold no lanes (ADR 232 §1): a service can neither claim a lane for itself
+        // nor be handed one — both edges land here as an `owner_seat` PATCH, so both are refused
+        // at the same door.
+        if (body.owner_seat !== undefined && member.kind === 'service')
+          throw new MusterdError(
+            'forbidden',
+            `"${member.name}" is a service seat — ledger seats never claim or hold lanes (ADR 232)`,
+          );
+        if (body.owner_seat) {
+          const newOwner = getMemberByName(ctx.db, team.id, body.owner_seat);
+          if (newOwner?.kind === 'service')
+            throw new MusterdError(
+              'forbidden',
+              `"${body.owner_seat}" is a service seat — a lane cannot be handed to a ledger seat (ADR 232)`,
+            );
+        }
         // Claiming a lane someone else already holds is the one thing the board exists to prevent
         // ("never build in a lane a teammate owns"), and until now nothing checked it: `lane_claim`
         // is a bare PATCH of `owner_seat`, so a second claimant silently took the lane, got a

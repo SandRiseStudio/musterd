@@ -270,9 +270,13 @@ export function authMember(
   if (token.startsWith(TOKEN_PREFIXES.credential)) {
     return { team, member: authByCredential(db, team, token, actingSeat) };
   }
+  if (token.startsWith(TOKEN_PREFIXES.seat)) {
+    return { team, member: authByServiceToken(db, team, token, actingSeat) };
+  }
 
-  // v0.3 hard cutover (ADR 069 decision 2): the v0.2 per-seat token (`mskd_`) auth path is removed —
-  // the only credentials are the team agent key (`mskey_`) and a human credential (`mscr_`).
+  // v0.3 hard cutover (ADR 069 decision 2): the v0.2 per-seat token (`mskd_`) auth path is removed
+  // for peer seats — the only credentials are the team agent key (`mskey_`), a human credential
+  // (`mscr_`), and a service seat's own token (`mskd_`, ADR 232 — kind-bound, see above).
   throw new MusterdError(
     'unauthorized',
     `unrecognized credential for team "${teamSlug}" — present a team agent key (mskey_) or a human credential (mscr_)`,
@@ -306,7 +310,7 @@ function authByAgentKey(
   // set `x-musterd-seat: <admin>` and impersonate the human admin → privilege escalation (admin ops).
   // A human seat is reachable only via that human's own `mscr_` credential (authByCredential, kind-bound).
   if (member.kind !== 'agent')
-    throw new MusterdError('forbidden', agentKeySeatKindRefusal(actingSeat).message);
+    throw new MusterdError('forbidden', agentKeySeatKindRefusal(actingSeat, member.kind).message);
   return member;
 }
 
@@ -344,13 +348,59 @@ export function agentKeyMayOccupy(member: Pick<MemberRow, 'kind' | 'observer'>):
  * never *acted as*. Naming the refused seat is accurate on both paths; naming the permitted set is
  * not.
  */
-export function agentKeySeatKindRefusal(seat: string): { message: string; hint: string } {
+export function agentKeySeatKindRefusal(
+  seat: string,
+  kind: MemberKind = 'human',
+): { message: string; hint: string } {
+  // ADR 232: a service seat is equally out of the shared key's reach — its own minted `mskd_`
+  // token is its identity, and the hint differs (there is no join flow for a cron).
+  if (kind === 'service') {
+    return {
+      message:
+        `the service seat "${seat}" is not reachable with the team agent key; it authenticates ` +
+        'with its own service token',
+      hint: 'musterd service install delivers the token file (ADR 232)',
+    };
+  }
   return {
     message:
       `the human seat "${seat}" is not reachable with the team agent key; it authenticates with ` +
       'its own credential',
     hint: `musterd join <team> --as ${seat} --key mscr_…`,
   };
+}
+
+/**
+ * Service-token (`mskd_`) auth (ADR 232 §5): self-identifying, **kind-bound to `service`** — the
+ * SQL predicate is the guard, exactly like `authByCredential`'s `kind = 'human'`. The `mskd_` seat
+ * token has been minted by `addMember`/`reviveMember` all along; the v0.3 cutover removed its auth
+ * path for *peer* seats (agents ride the shared team key, humans their credential) and that removal
+ * stands. A ledger seat is the one actor with no folder to bind and no human to hold a credential —
+ * its own minted token is its identity: no binding, no folder, no shared key. First touch stamps
+ * `bound_at` (declared → held), which is what lets ambient presence (ADR 057) derive freshness from
+ * its authenticated actions.
+ */
+function authByServiceToken(
+  db: Database,
+  team: TeamRow,
+  token: string,
+  actingSeat: string | undefined,
+): MemberRow {
+  const member = db
+    .prepare<
+      [string, string],
+      MemberRow
+    >("SELECT * FROM members WHERE team_id = ? AND token_hash = ? AND left_at IS NULL AND kind = 'service'")
+    .get(team.id, hashToken(token));
+  if (!member)
+    throw new MusterdError('unauthorized', `invalid service token for team "${team.slug}"`);
+  if (actingSeat && actingSeat !== member.name)
+    throw new MusterdError(
+      'forbidden',
+      `service token identifies "${member.name}", not "${actingSeat}"`,
+    );
+  markBound(db, member.id);
+  return member;
 }
 
 /** Human-credential (`mscr_`) auth: self-identifying; the credential is the authority for its seat. */

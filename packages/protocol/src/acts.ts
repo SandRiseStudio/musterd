@@ -57,8 +57,11 @@ export const LIFECYCLES = ['forever', 'session', 'until'] as const;
 export type Lifecycle = (typeof LIFECYCLES)[number];
 export const LifecycleSchema = z.enum(LIFECYCLES);
 
-/** Member kind. Humans are first-class members, not approvers. */
-export const MEMBER_KINDS = ['agent', 'human'] as const;
+/** Member kind. Humans are first-class members, not approvers. `service` is a *ledger seat*
+ *  (ADR 232): an unattended actor — a cron, a LaunchAgent — with identity, roles, attribution and
+ *  audit, but structurally excluded from the peer verbs: it never holds lanes, never accepts,
+ *  never wakes, and is never an admin. An accountable actor, never a negotiator. */
+export const MEMBER_KINDS = ['agent', 'human', 'service'] as const;
 export type MemberKind = (typeof MEMBER_KINDS)[number];
 export const MemberKindSchema = z.enum(MEMBER_KINDS);
 

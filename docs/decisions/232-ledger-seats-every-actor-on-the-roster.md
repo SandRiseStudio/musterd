@@ -1,6 +1,8 @@
 # 232 — Ledger seats: every actor on the roster
 
-- Status: proposed
+- Status: accepted — increment 1 built (`kind: service`, the mskd_ service-token auth path, the
+  kind-keyed exclusions, `service install --auto` token delivery, and the tick's in-band bounce
+  announcement); increments 2–5 open
 - Date: 2026-08-05
 - Owner: izzo (design session with nick, 2026-08-04/05 — the lane-01KZ7KRG60 session)
 - Relates to: ADR 227 (roles — the system this completes and partly re-aims), ADR 230 (the re-eval

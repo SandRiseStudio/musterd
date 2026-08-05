@@ -300,6 +300,7 @@ export function buildAutoRefreshPlist(
     path: o.path,
     runAtLoad: true,
     startInterval: o.intervalSeconds,
+    ...(o.env ? { env: o.env } : {}),
   });
 }
 
