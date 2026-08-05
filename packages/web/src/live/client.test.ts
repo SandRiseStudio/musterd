@@ -6,6 +6,7 @@ import {
   acquireObserver,
   createLane,
   fetchReport,
+  fetchRoster,
   isStaleCredential,
   updateLane,
 } from './client';
@@ -250,5 +251,69 @@ describe('createLane / updateLane (the writable board, item 5)', () => {
     expect((init.headers as Record<string, string>).authorization).toBe('Bearer mscr_nick');
     expect(out.waiting_on[0]!.member).toBe('nick');
     expect(out.flow.wip).toBe(2);
+  });
+});
+
+/**
+ * The roster read is the page's single point of failure (lane 01KZ9EJCHD): `MemberSummarySchema.array()`
+ * is strict, so ONE row carrying a `kind`/`surface`/`offline_reason` value this bundle predates threw the
+ * WHOLE array — and `useLiveStream` turned that into an error banner instead of a room. That is the exact
+ * opposite of ADR 148's premise, where a client behind the daemon degrades calmly and keeps rendering.
+ * It fired for real on ADR 232's `kind: 'service'`, and it would fire again for every future enum value.
+ *
+ * So the read path parses each member INDEPENDENTLY and reports what it could not read. The write path
+ * is untouched and must stay strict — tolerating an unknown value on ingest is how bad data gets durable.
+ */
+describe('fetchRoster (forward-tolerance: one unreadable seat must not cost the page)', () => {
+  const cfg = { team: 'revive', as: 'nick', token: 'mscr_nick' };
+  const okJson = (body: unknown) =>
+    ({ ok: true, status: 200, text: async () => JSON.stringify(body) }) as Response;
+
+  const member = (over: Record<string, unknown> = {}) => ({
+    id: 'm1',
+    team: 'revive',
+    name: 'miley',
+    kind: 'agent',
+    role: '',
+    roles: [],
+    lifecycle: 'forever',
+    created_at: 1,
+    presence: 'online',
+    presences: [],
+    ...over,
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps the seats it understands and counts the ones it does not', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        okJson({
+          members: [
+            member({ id: 'm1', name: 'miley' }),
+            // A kind this bundle predates — exactly ADR 232's `service`, from the daemon's future.
+            member({ id: 'm2', name: 'autorefresh', kind: 'wormhole' }),
+            member({ id: 'm3', name: 'izzo' }),
+          ],
+          team: {},
+        }),
+      ),
+    );
+    const out = await fetchRoster(cfg);
+    expect(out.members.map((m) => m.name)).toEqual(['miley', 'izzo']);
+    expect(out.unreadable).toBe(1);
+  });
+
+  it('reports zero unreadable when every row parses (no false alarm on a matched build)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ members: [member()], team: {} })));
+    const out = await fetchRoster(cfg);
+    expect(out.members).toHaveLength(1);
+    expect(out.unreadable).toBe(0);
+  });
+
+  it('still throws when the response is not a roster at all — tolerance is per-row, not blanket', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okJson({ members: 'nope' })));
+    await expect(fetchRoster(cfg)).rejects.toThrow();
   });
 });

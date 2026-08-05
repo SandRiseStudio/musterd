@@ -150,7 +150,8 @@ function LivePage() {
     onCredentialInvalid: recoverObserver,
     onConnected: armRecovery,
   });
-  const { envelopes, roster, error, liveIds, daemonBuild, daemonEpoch } = stream;
+  const { envelopes, roster, error, liveIds, daemonBuild, daemonEpoch, rosterUnreadable, rosterStale } =
+    stream;
 
   // The office overlay's reel: everyone in the room and what they are on. Derived here (not in the
   // scene) so both routes hand the scene the same already-projected shape.
@@ -478,6 +479,8 @@ function LivePage() {
               onCollapse={() => toggleCollapse('roster')}
               daemonBuild={daemonBuild}
               daemonEpoch={daemonEpoch}
+              unreadable={rosterUnreadable}
+              stale={rosterStale}
             />
             <Stream
               envelopes={envelopes}

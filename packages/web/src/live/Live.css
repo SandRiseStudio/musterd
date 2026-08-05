@@ -1933,6 +1933,22 @@
   color: var(--lc-faint);
 }
 
+/* The roster's honesty line (lane 01KZ9EJCHD): seats this bundle predates, or a frozen refetch. Sits
+   below the rows, hairline-separated, in the same muted neutral as the ADR 148 `behind` chip — the
+   whole point is that a client behind the daemon reads as an FYI and keeps working. A dotted underline
+   on the count marks the actionable half without spending a colour on an alarm. */
+.lc-roster__gap {
+  margin: 0;
+  padding: var(--lc-3) var(--lc-4);
+  border-top: 1px solid color-mix(in srgb, var(--lc-muted, #7a6a56) 16%, transparent);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--lc-muted, #7a6a56);
+}
+.lc-roster__gap.is-stale {
+  font-style: italic;
+}
+
 .lc-seat {
   display: flex;
   align-items: flex-start;
@@ -2029,6 +2045,11 @@
   align-items: baseline;
   gap: var(--lc-3);
 }
+/* The name shrinks LAST. Every child of `__line` is flex-shrinkable, and the role/kind labels are
+   `nowrap` with no overflow rule — so they could not shrink and the name absorbed the whole squeeze.
+   On a narrow roster that painted izzo as a nameless avatar the moment his row gained the ADR 148
+   `behind` chip: the one seat a reader most needs to identify was the one seat it stopped naming.
+   A `min-width` floor keeps a few characters and the ellipsis; the role label below yields first. */
 .lc-seat__name {
   font-size: 13px;
   font-weight: 550;
@@ -2036,6 +2057,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: 4ch;
 }
 .lc-seat__kind {
   font-family: var(--font-mono, monospace);
@@ -2055,6 +2078,10 @@
   letter-spacing: 0.01em;
   color: var(--lc-muted);
   white-space: nowrap;
+  /* Yields before the name does — see the note on `.lc-seat__name`. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lc-seat__role::before {
   content: '·';

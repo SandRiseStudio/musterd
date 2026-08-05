@@ -86,19 +86,49 @@ async function apiGet<T>(cfg: LiveConfig, path: string): Promise<T> {
 export interface TeamRoster {
   members: MemberSummary[];
   working_hours: WorkingHours | null;
+  /**
+   * How many roster rows this bundle could not read — a seat whose `kind`/`surface`/`offline_reason`
+   * carries a value that landed in the daemon after this client was built. Zero on a matched build.
+   * Surfaced as a calm hint, never an error: see the forward-tolerance note on {@link fetchRoster}.
+   */
+  unreadable: number;
 }
 
+/**
+ * Read the roster, tolerating rows from the daemon's future.
+ *
+ * This used to be `MemberSummarySchema.array().parse(...)`, and that one call made every enum in the
+ * member shape a page-level single point of failure: the schemas are strict `z.enum`s, so ONE row with
+ * a value the bundle predates threw the whole array, `useLiveStream` caught it into `setError`, and
+ * /live rendered an error banner instead of a room. ADR 232's `kind: 'service'` fired it for real.
+ *
+ * That inverts ADR 148, whose whole premise is that a client behind the daemon degrades *calmly* — it
+ * reads a quiet "behind" hint and keeps working. A page that cannot render is where the hint would have
+ * gone, so the surface built to explain the skew was the surface the skew destroyed.
+ *
+ * So: parse each member independently, keep what we understand, and count what we do not so the roster
+ * can say something small and true about the gap. **Read path only.** The write path stays strict —
+ * accepting an unknown value on ingest is how bad data becomes durable. A response that isn't a roster
+ * at all still throws: the tolerance is per-row, not blanket.
+ */
 export async function fetchRoster(cfg: LiveConfig): Promise<TeamRoster> {
   const raw = await apiGet<unknown>(cfg, `/teams/${encodeURIComponent(cfg.team)}`);
   if (!raw || typeof raw !== 'object') throw new Error('invalid team roster response');
   const response = raw as { members?: unknown; team?: unknown };
-  const members = MemberSummarySchema.array().parse(response.members);
+  if (!Array.isArray(response.members)) throw new Error('invalid team roster response: members');
+  const members: MemberSummary[] = [];
+  let unreadable = 0;
+  for (const row of response.members) {
+    const parsed = MemberSummarySchema.safeParse(row);
+    if (parsed.success) members.push(parsed.data);
+    else unreadable += 1;
+  }
   const team =
     response.team && typeof response.team === 'object'
       ? (response.team as { working_hours?: unknown })
       : undefined;
   const working_hours = WorkingHoursSchema.nullish().parse(team?.working_hours);
-  return { members, working_hours: working_hours ?? null };
+  return { members, working_hours: working_hours ?? null, unreadable };
 }
 
 /** Whole-team history for backfill (`GET /teams/:slug/messages`, the firehose's history side). */

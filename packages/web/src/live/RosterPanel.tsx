@@ -21,6 +21,8 @@ export function RosterPanel({
   onCollapse,
   daemonBuild,
   daemonEpoch,
+  unreadable = 0,
+  stale = false,
 }: {
   roster: MemberSummary[];
   collapsed?: boolean;
@@ -29,6 +31,11 @@ export function RosterPanel({
   daemonBuild?: string | undefined;
   /** The daemon's feature epoch (ADR 148) — a live seat below it gets a calm `behind` hint. */
   daemonEpoch?: number | undefined;
+  /** Seats this bundle could not read (`fetchRoster`) — the roster owns saying so, because it is the
+   *  only surface that knows the count it is showing is short. */
+  unreadable?: number;
+  /** The roster refetch is failing persistently, so these rows are frozen at their last good read. */
+  stale?: boolean;
 }) {
   const members = [...roster].sort(rosterOrder);
   const admins = members.filter((m) => m.capabilities?.is_admin).length;
@@ -58,6 +65,21 @@ export function RosterPanel({
           <SeatRow key={m.id} m={m} daemonBuild={daemonBuild} daemonEpoch={daemonEpoch} />
         ))}
       </div>
+      {/* The two ways this list can quietly lie, each said out loud in one line. Deliberately NOT an
+          error: the room and the timeline beside them are live, and ADR 148's promise is that a client
+          behind the daemon degrades calmly. Reload is the whole remedy for the first; the second clears
+          itself the moment a refetch succeeds. */}
+      {unreadable > 0 && (
+        <p className="lc-roster__gap" role="status">
+          {unreadable} seat{unreadable === 1 ? '' : 's'} newer than this page — reload to meet{' '}
+          {unreadable === 1 ? 'them' : 'them all'}.
+        </p>
+      )}
+      {stale && (
+        <p className="lc-roster__gap is-stale" role="status">
+          Roster paused — showing the last good read.
+        </p>
+      )}
     </aside>
   );
 }

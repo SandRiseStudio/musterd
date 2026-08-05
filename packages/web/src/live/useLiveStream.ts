@@ -11,6 +11,9 @@ import {
 import { firehoseSound } from './sound';
 import { capNewest } from './window';
 
+/** Consecutive roster-refetch failures before the roster admits it is frozen. */
+const ROSTER_STALE_AFTER = 3;
+
 export interface LiveStreamHooks {
   /** Fired when the observer credential is stale/invalid (a 401 backfill or a WS `refused`) — the route
    * drops it and re-provisions instead of dead-ending. */
@@ -32,6 +35,13 @@ export interface LiveState {
   /** The daemon's feature epoch (ADR 148) — the reference the roster compares member epochs against
    *  to render a "behind" hint. Undefined until /health answers (skew simply doesn't render). */
   daemonEpoch?: number | undefined;
+  /** Roster rows this bundle could not read — seats carrying a value newer than this build (see
+   *  `fetchRoster`). The roster names the gap instead of pretending the team is smaller than it is. */
+  rosterUnreadable: number;
+  /** The roster refetch has failed repeatedly, so the seats on screen are frozen at their last good
+   *  read. Silence here used to be total: the presence refetch swallowed every failure, so a persistently
+   *  broken roster looked exactly like a quiet team (the ADR 230 shape). */
+  rosterStale: boolean;
 }
 
 /**
@@ -56,6 +66,11 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
   const [status, setStatus] = useState<ConnStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [liveIds, setLiveIds] = useState<Set<string>>(new Set());
+  const [rosterUnreadable, setRosterUnreadable] = useState(0);
+  const [rosterStale, setRosterStale] = useState(false);
+  // Consecutive failed roster refetches. One is ordinary (a bounce, a dropped request); a run of them
+  // means the roster on screen is frozen, and that is worth saying out loud.
+  const rosterFailsRef = useRef(0);
   // Ids we've already sounded — at-least-once delivery + reconnect replays must not double-chime.
   const chimedRef = useRef<Set<string>>(new Set());
 
@@ -110,6 +125,7 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
         if (!alive) return;
         setRoster(r.members);
         setTeamWorkingHours(r.working_hours);
+        setRosterUnreadable(r.unreadable);
         add(h);
         hooksRef.current.onConnected?.(); // backfill worked → re-arm the route's recovery guard
       })
@@ -147,8 +163,20 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
             if (!alive) return;
             setRoster(r.members);
             setTeamWorkingHours(r.working_hours);
+            setRosterUnreadable(r.unreadable);
+            rosterFailsRef.current = 0;
+            setRosterStale(false);
           })
-          .catch(() => {});
+          .catch(() => {
+            // This used to be `.catch(() => {})`, which made a persistently broken roster
+            // indistinguishable from a calm one — the seats simply froze at their last good read and
+            // nothing on screen said so. A single failure is still ignored (bounces happen); a run of
+            // them raises a quiet stale flag rather than an error banner, because the timeline beside
+            // it is still live and the page is still worth reading.
+            if (!alive) return;
+            rosterFailsRef.current += 1;
+            if (rosterFailsRef.current >= ROSTER_STALE_AFTER) setRosterStale(true);
+          });
       },
       onStatus: (s) => alive && setStatus(s),
       onError: (msg) => alive && setError(msg),
@@ -171,5 +199,7 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
     liveIds,
     daemonBuild,
     daemonEpoch,
+    rosterUnreadable,
+    rosterStale,
   };
 }
