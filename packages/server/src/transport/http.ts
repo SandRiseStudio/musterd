@@ -80,6 +80,7 @@ import {
   openLane,
   updateLane,
 } from '../store/lanes.js';
+import { SWEEP_GRACE_MS } from '../store/laneSweep.js';
 import {
   addMember,
   authMember,
@@ -3021,7 +3022,26 @@ export async function handleHttp(
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
           recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
         }
-        return sendJson(res, 200, { lane, warnings, ...(review ? { review } : {}) });
+        // ADR 235: whether this team has an acceptance backstop is a fact only the daemon holds —
+        // it is a policy row plus a constant — and it is the fact that decides whether "self-close on
+        // silence" is sound advice or the thing destroying verdicts. Annotated here, at the ONE
+        // return site, rather than inside each `review` branch above: the branches disagree about
+        // who was picked, never about whether the team armed a sweep.
+        //
+        // Deliberately NOT added to the no-acceptor sanction: nobody was asked there, so no verdict
+        // is coming and waiting out a 24h grace would be pure delay. That branch sets no `reviewer`,
+        // which is exactly the discriminator.
+        const backstop =
+          review &&
+          typeof review['reviewer'] === 'string' &&
+          getPolicy(ctx.db, team.id).loops?.sweep
+            ? { backstop: { armed: true as const, grace_ms: SWEEP_GRACE_MS } }
+            : {};
+        return sendJson(res, 200, {
+          lane,
+          warnings,
+          ...(review ? { review: { ...review, ...backstop } } : {}),
+        });
       }
 
       // The mid-loop interrupt line (ADR 088): a silent-or-one-line probe a PostToolUse hook runs at

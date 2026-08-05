@@ -167,6 +167,46 @@ describe('empty states name the next action', () => {
     expect(out.indexOf('owed by you')).toBeLessThan(out.indexOf('carrying'));
   });
 
+  // ADR 235: the hint IS the intervention — agents self-closed at 8.5 minutes because we told them
+  // to. Assert what the three branches actually say, since a wrong word here is the whole bug.
+  describe('lane_submit advises from the backstop, not a fixed timer (ADR 235)', () => {
+    function submitClient(review: unknown) {
+      return {
+        ...emptyClient,
+        updateLane: async () => ({ lane: { ...LANE, id: 'L-1' }, warnings: [], review }),
+      } as any;
+    }
+    const run = async (review: unknown) =>
+      (await captureAll(registerLanes, submitClient(review))['lane_submit']!({ id: 'L-1' }))
+        .content[0]!.text as string;
+
+    it('backstop armed — leave it with them, and never a fixed 5-minute timer', async () => {
+      const out = await run({
+        reviewer: 'Lin',
+        route: 'cross_family',
+        backstop: { armed: true, grace_ms: 24 * 60 * 60 * 1000 },
+      });
+      expect(out).toContain('leave it with them');
+      expect(out).toContain('Do NOT self-close on silence');
+      expect(out).toContain('24h');
+      expect(out).not.toContain('wait ≤5m');
+      // Never a wedge (ADR 145): the escape must still be named, just not recommended.
+      expect(out).toContain('lane_resolve still works');
+    });
+
+    it('no backstop — the pre-235 advice is unchanged, because self-close is the only escape', async () => {
+      const out = await run({ reviewer: 'Lin', route: 'cross_family' });
+      expect(out).toContain('wait ≤5m');
+      expect(out).toContain('on silence, lane_resolve yourself');
+    });
+
+    it('no acceptor asked — sanctioned regardless, since no verdict is coming', async () => {
+      const out = await run(undefined);
+      expect(out).toContain('no eligible acceptor is live');
+      expect(out).toContain('self-close sanctioned');
+    });
+  });
+
   it('lane_board and team_next with nothing in flight', async () => {
     const handlers = captureAll(registerLanes, emptyClient);
     expect(await text(handlers['lane_board']!)).toMatch(ACTION_RE);

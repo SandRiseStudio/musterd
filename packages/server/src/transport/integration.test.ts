@@ -3273,6 +3273,62 @@ describe('two-stage close (ADR 169)', () => {
     return (audit.json.audit as { action: string }[]).filter((a) => a.action === action);
   }
 
+  // ADR 235. The daemon told the owner "wait <=5m; on silence, lane_resolve yourself", and 20 of 20
+  // owners who obeyed had their acceptor come back online later — 55% within an hour, 100% within
+  // the sweep's 24h grace, an average 106.8 minutes after the lane was already shut unverified. The
+  // advice was right when nothing collected an unanswered lane; with a backstop armed it is what
+  // destroys the verdict. So the submit response now reports whether a backstop exists, and the
+  // clients advise from that fact rather than a fixed timer.
+  describe('the self-close sanction follows the backstop (ADR 235)', () => {
+    it('reports the backstop when the team armed the sweep AND an acceptor was asked', async () => {
+      const { nickTok, ada } = await setup();
+      await post('/teams/dawn/policy', { loops: { review: true, sweep: true } }, nickTok);
+      const lane = await post('/teams/dawn/lanes', { title: 'armed', claim: true }, ada);
+      const ready = await patchLane(
+        lane.json.lane.id as string,
+        { state: 'ready_for_review' },
+        ada,
+      );
+
+      expect(ready.json.review.reviewer).toBeDefined();
+      expect(ready.json.review.backstop).toEqual({ armed: true, grace_ms: 24 * 60 * 60 * 1000 });
+    });
+
+    // Absent, not `armed:false` — absent is also what an older daemon sends, so the clients have one
+    // fallback for both and it is the pre-235 advice. Telling a seat to rely on a sweep that will
+    // never run would strand the lane forever, which is the failure the sanction exists to prevent.
+    it('omits it when the sweep is not armed — the pre-235 advice still stands', async () => {
+      const { ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'unarmed', claim: true }, ada);
+      const ready = await patchLane(
+        lane.json.lane.id as string,
+        { state: 'ready_for_review' },
+        ada,
+      );
+
+      expect(ready.json.review.reviewer).toBeDefined();
+      expect(ready.json.review.backstop).toBeUndefined();
+    });
+
+    // The discriminator is `reviewer`, not the policy: with nobody asked there is no verdict coming,
+    // so waiting out a 24h grace would be pure delay. This branch keeps its sanction regardless.
+    it('omits it when no acceptor was asked, even with the sweep armed', async () => {
+      const team = await post('/teams', { slug: 'solo', creator: { name: 'sol', kind: 'human' } });
+      const tok = team.json.human_credential as string;
+      await post('/teams/solo/policy', { loops: { sweep: true } }, tok);
+      const lane = await post('/teams/solo/lanes', { title: 'alone', claim: true }, tok);
+      const ready = await req(
+        'PATCH',
+        `/teams/solo/lanes/${lane.json.lane.id}`,
+        { state: 'ready_for_review' },
+        tok,
+      );
+
+      expect(ready.json.review?.reviewer).toBeUndefined();
+      expect(ready.json.review?.backstop).toBeUndefined();
+    });
+  });
+
   it('lane_ready persists the stage-one attestation, stays contending, and asks a cross-family reviewer', async () => {
     const { nickTok, ada, gee } = await setup();
     const lane = await post(

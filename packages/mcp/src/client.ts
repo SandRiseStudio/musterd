@@ -373,7 +373,15 @@ export class MusterdClient {
     lane: Lane;
     warnings: LaneWarning[];
     /** ADR 169: present when the patch entered ready_for_review — the review routing. */
-    review?: { reviewer?: string; route?: string; self_close_sanctioned?: boolean };
+    review?: {
+      reviewer?: string;
+      route?: string;
+      self_close_sanctioned?: boolean;
+      /** ADR 235: the team has an acceptance backstop, so silence no longer means self-close.
+       *  Absent from an older daemon and from the no-acceptor branch — absent means "no backstop
+       *  to rely on", which is the pre-235 advice, so the fallback is the safe one. */
+      backstop?: { armed: boolean; grace_ms: number };
+    };
   }> {
     return this.request(
       'PATCH',
