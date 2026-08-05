@@ -14,6 +14,7 @@ import { CliError } from '../errors.js';
 import {
   foreignModifiedPaths,
   foreignPathWarning,
+  hasSessionIndex,
   isStageShaped,
   readSessionEdits,
   recordSessionEdit,
@@ -161,6 +162,9 @@ export function workingTreeWarning(
   dir: string,
 ): string | undefined {
   if (!command || !sessionId || !isStageShaped(command)) return undefined;
+  // No index at all → this session's writes were never observable, so every path would read as
+  // foreign. Say nothing rather than everything (ADR 239 decision 2).
+  if (!hasSessionIndex(dir, sessionId)) return undefined;
   let porcelain: string;
   try {
     porcelain = execFileSync('git', ['status', '--porcelain'], {

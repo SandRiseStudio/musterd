@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   foreignModifiedPaths,
+  hasSessionIndex,
   foreignPathWarning,
   isStageShaped,
   readSessionEdits,
@@ -87,9 +88,9 @@ describe('foreignModifiedPaths', () => {
 
   /** The incident, reduced: A edits and does not commit, B runs `git add -A` knowing only its own file. */
   it('names exactly the incident’s foreign file', () => {
-    expect(foreignModifiedPaths(' M a-work.txt\n M b-work.txt\n', new Set(['b-work.txt']))).toEqual([
-      'a-work.txt',
-    ]);
+    expect(foreignModifiedPaths(' M a-work.txt\n M b-work.txt\n', new Set(['b-work.txt']))).toEqual(
+      ['a-work.txt'],
+    );
   });
 });
 
@@ -129,6 +130,24 @@ describe('the per-session edit index', () => {
     const d = dir();
     recordSessionEdit(d, '../../etc/passwd', 'a.ts');
     expect(readFileSync(join(d, 'session-edits-......etc.passwd.txt'), 'utf8')).toContain('a.ts');
+  });
+
+  /** Found by exercising the real hook: with no `.musterd/` the append was silently dropped, so the
+   *  session's own files read as foreign on the next `git add -A`. The dir is created on demand. */
+  it('creates the state dir rather than dropping the write', () => {
+    const d = join(dir(), 'nested', '.musterd');
+    recordSessionEdit(d, 'sess-1', 'a.ts');
+    expect(readSessionEdits(d, 'sess-1')).toEqual(new Set(['a.ts']));
+  });
+
+  /** "Wrote nothing" and "index unavailable" are indistinguishable in an absent file's contents, and
+   *  want opposite answers — so the absent index is no-knowledge, not an empty set of own paths. */
+  it('distinguishes an absent index from a session that wrote nothing', () => {
+    const d = dir();
+    expect(hasSessionIndex(d, 'sess-1')).toBe(false);
+    recordSessionEdit(d, 'sess-1', 'a.ts');
+    expect(hasSessionIndex(d, 'sess-1')).toBe(true);
+    expect(hasSessionIndex(d, '')).toBe(false);
   });
 
   it('never fails on an unwritable directory (a hook must not break its tool call)', () => {

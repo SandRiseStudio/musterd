@@ -42,7 +42,7 @@ answers it, and the answer splits in two:
 That ratio is the whole design. A gate priced for a daily event, defending against a monthly one,
 is exactly the gate ADR 150 warns becomes the thing everyone learns to work around. The window is
 common **and benign** — the predecessor session is usually finished. What distinguishes the incident
-is not two sessions; it is one session staging *another session's* files.
+is not two sessions; it is one session staging _another session's_ files.
 
 ### The seam is already open
 
@@ -75,6 +75,17 @@ repo-relative path to a per-session file under the workspace's musterd state, ke
 client-side convenience index, not a ledger — ADR 051's rule that raw paths stay local is preserved,
 and a lost or missing index degrades to no warning, never to a false one.
 
+That last clause is load-bearing and was **not** free. Exercising the real hook found the opposite
+behavior: with no `.musterd/` directory to append to, every write was silently dropped, and the next
+`git add -A` reported the session's _own_ files as foreign — the maximally wrong output, produced by
+the failure path that was supposed to be the safe one. "This session wrote nothing" and "this
+session's writes were never recorded" are indistinguishable from an absent file's contents and want
+opposite answers. So **the absence of an index is treated as no-knowledge, and warns about nothing**;
+only a session with a real index is ever compared. The cost is a genuine coverage hole — a session
+that stages a predecessor's leftovers before writing anything of its own is not warned — and that
+hole is accepted deliberately, because precision is the metric decision 4 hangs on and a warning
+that fires on every fresh session's first commit in a dirty tree would destroy it.
+
 **3. Silence on the ambiguous cases, by construction.** Untracked files are **not** warned about
 (a build artifact, a scratch file, a fresh checkout's noise — the false-positive floor is too high
 and `git add -A` staging an untracked file is not the incident). Neither is a path the session
@@ -86,7 +97,7 @@ commit or checkout. The candidate — "a seat commits only on the branch its cla
 is **rejected for now on the measurement above**, not postponed for lack of time: seats legitimately
 work outside a lane (docs, spikes, this very investigation started unclaimed), the benign case
 outnumbers the harmful one by ~54:1, and a gate that fires mostly on correct work teaches its own
-bypass. If the warning fires and is repeatedly *right*, that is the evidence the gate needs; the
+bypass. If the warning fires and is repeatedly _right_, that is the evidence the gate needs; the
 Eval below is written to collect exactly that.
 
 **5. Nothing touches the working tree.** The gate reads `git status` and writes only its own index
@@ -101,7 +112,7 @@ detection on the roster, which the ledger already supports and which no surface 
 
 - The common case pays nothing: a `git add -A` whose modified paths are all this session's own
   produces no output, and non-`git` Bash calls return before any `git status` runs.
-- The gate gains its first *stateful* behavior (the per-session index). It is bounded — one small
+- The gate gains its first _stateful_ behavior (the per-session index). It is bounded — one small
   file per session in the workspace's state dir, written append-only, never read across sessions.
 - A session that writes files outside the gate's view (heredoc, `sed -i`, a subagent's own writes
   under a different `agent_id` but the same `session_id` — identical by construction, ADR 163) will
@@ -116,7 +127,7 @@ detection on the roster, which the ledger already supports and which no surface 
 
 **Traces.** None added server-side, deliberately (decision 2). The signal is the warning text in the
 model's context, and the per-session index on disk. The already-existing `claim.superseded` rows
-(ADR 237 decision 1) remain the ledger-side record of *windows*; this ADR adds no counterpart for
+(ADR 237 decision 1) remain the ledger-side record of _windows_; this ADR adds no counterpart for
 collisions, because a collision is a client-local observation about paths that must not leave the
 machine.
 
@@ -135,6 +146,9 @@ frequency — is already done (54 vs 1, above) and is what selected the warn pos
   removed. **A month of warnings that are mostly false positives falsifies decision 3** — the
   gate's view of "this session's writes" is too narrow to be useful, and the honest response is to
   delete the feature rather than widen it into a guess.
+- **The no-knowledge rule has its own falsifier:** a session with no index must warn about nothing,
+  even in a dirty tree. Asserted directly; without it the first `git add -A` of every fresh session
+  is a false accusation, which is what the live exercise actually produced before the rule existed.
 - **The cost claim:** a non-`git` Bash call must not invoke `git status`. Asserted by a unit test on
   the command matcher, so the "common case pays nothing" consequence has a falsifier.
 - **The no-touch invariant (decision 5):** a test asserting the gate path issues no git command that

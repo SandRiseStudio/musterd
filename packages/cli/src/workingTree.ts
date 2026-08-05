@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { normalizeCommand } from '@musterd/protocol';
 
@@ -39,10 +39,25 @@ function indexFile(stateDir: string, sessionId: string): string {
 export function recordSessionEdit(stateDir: string, sessionId: string, path: string): void {
   if (!sessionId || !path) return;
   try {
+    mkdirSync(stateDir, { recursive: true });
     appendFileSync(indexFile(stateDir, sessionId), `${path}\n`);
   } catch {
     // best-effort by construction (ADR 150 guard metric)
   }
+}
+
+/**
+ * Has this session an index at all? The difference between "wrote nothing" and "the index could not
+ * be written" is invisible in the *contents* of an absent file, and the two want opposite answers:
+ * the first makes every modified path foreign, the second makes the whole comparison meaningless.
+ *
+ * Found by exercising the real hook (2026-08-05): with no `.musterd/` to append to, every write was
+ * silently dropped and the next `git add -A` reported the session's **own** files as foreign. So the
+ * absent index is treated as no-knowledge and warns about nothing — decision 2's "degrades to no
+ * warning, never to a false one" is only true because of this check.
+ */
+export function hasSessionIndex(stateDir: string, sessionId: string): boolean {
+  return Boolean(sessionId) && existsSync(indexFile(stateDir, sessionId));
 }
 
 /** The set of repo-relative paths this session is known to have written. Unknown session → empty. */

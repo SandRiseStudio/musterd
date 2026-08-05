@@ -338,6 +338,7 @@ describe('the working-tree check (ADR 239)', () => {
     const dir = repo();
     const state = mkdtempSync(join(tmpdir(), 'musterd-gate-state-'));
     writeFileSync(join(dir, 'a-work.txt'), 'foreign\n');
+    recordSessionEdit(state, 'sess-B', 'b-work.txt'); // an index must exist for the check to run
     const cwd = process.cwd();
     try {
       process.chdir(dir);
@@ -345,6 +346,22 @@ describe('the working-tree check (ADR 239)', () => {
       expect(workingTreeWarning('git add -A', 'sess-B', state)).toContain('a-work.txt');
       const after = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' });
       expect(after).toBe(before); // nothing staged, nothing stashed, nothing moved
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  /** The live-exercise defect, pinned: an unwritten index must not turn the session's own modified
+   *  files into a foreign-path accusation. */
+  it('says nothing when this session has no index at all', () => {
+    const dir = repo();
+    const state = mkdtempSync(join(tmpdir(), 'musterd-gate-state-'));
+    writeFileSync(join(dir, 'a-work.txt'), 'changed\n');
+    writeFileSync(join(dir, 'b-work.txt'), 'changed\n');
+    const cwd = process.cwd();
+    try {
+      process.chdir(dir);
+      expect(workingTreeWarning('git add -A', 'sess-never-wrote', state)).toBe(undefined);
     } finally {
       process.chdir(cwd);
     }
