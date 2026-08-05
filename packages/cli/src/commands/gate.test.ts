@@ -1,7 +1,17 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { HttpClient } from '../client.js';
-import { attest, parseToolCall, repoRelativePath } from './gate.js';
+import { recordSessionEdit } from '../workingTree.js';
+import {
+  attest,
+  parseEnvelopeSessionId,
+  parseToolCall,
+  repoRelativePath,
+  workingTreeWarning,
+} from './gate.js';
 
 /**
  * Unit coverage for the gate hook's payload parse (ADR 150). The end-to-end adjudication is covered by
@@ -249,5 +259,106 @@ describe('parseToolCall + attest — session-message observation (ADR 167)', () 
     const { calls, http } = spy();
     attest(http, 't', { tool: 'mcp__ccd_session_mgmt__list_sessions' });
     expect(calls).toEqual([]);
+  });
+});
+
+describe('the working-tree check (ADR 239)', () => {
+  const repo = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-gate-wt-'));
+    const git = (...args: string[]): void => {
+      execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+    };
+    git('init', '-q');
+    git('config', 'user.email', 'a@b.c');
+    git('config', 'user.name', 't');
+    writeFileSync(join(dir, 'a-work.txt'), 'base\n');
+    writeFileSync(join(dir, 'b-work.txt'), 'base\n');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+    return dir;
+  };
+
+  /** The envelope carries `session_id` (measured, ADR 163) — the index is keyed on it. */
+  it('reads the session id off the envelope, not tool_input', () => {
+    expect(
+      parseEnvelopeSessionId(JSON.stringify({ session_id: 'sess-9', tool_name: 'Bash' })),
+    ).toBe('sess-9');
+    expect(parseEnvelopeSessionId(JSON.stringify({ tool_input: { session_id: 'nope' } }))).toBe(
+      undefined,
+    );
+    expect(parseEnvelopeSessionId('not json')).toBe(undefined);
+  });
+
+  /** The incident, end to end: A's file is modified and absent from B's index, so B is told. */
+  it('names the file this session never wrote', () => {
+    const dir = repo();
+    const state = mkdtempSync(join(tmpdir(), 'musterd-gate-state-'));
+    writeFileSync(join(dir, 'a-work.txt'), "A's in-progress lane work\n"); // session A
+    writeFileSync(join(dir, 'b-work.txt'), "B's capture\n"); // session B
+    recordSessionEdit(state, 'sess-B', 'b-work.txt');
+    const cwd = process.cwd();
+    try {
+      process.chdir(dir);
+      const warn = workingTreeWarning('git add -A', 'sess-B', state);
+      expect(warn).toContain('a-work.txt');
+      expect(warn).not.toContain('b-work.txt');
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('is silent when every modified path is the session’s own', () => {
+    const dir = repo();
+    const state = mkdtempSync(join(tmpdir(), 'musterd-gate-state-'));
+    writeFileSync(join(dir, 'b-work.txt'), 'mine\n');
+    recordSessionEdit(state, 'sess-B', 'b-work.txt');
+    const cwd = process.cwd();
+    try {
+      process.chdir(dir);
+      expect(workingTreeWarning('git add -A', 'sess-B', state)).toBe(undefined);
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  /** The ADR's cost claim, with a falsifier: a non-stage-shaped command must not reach git at all.
+   *  Asserted from outside a repo — `git status` there would throw, and the check returns undefined
+   *  either way, so the observable difference is that these are cheap, not that they are quiet. */
+  it('does not shell out for a command that stages nothing', () => {
+    const state = mkdtempSync(join(tmpdir(), 'musterd-gate-state-'));
+    for (const cmd of ['pnpm build', 'git status', 'git commit -m wip', 'git add src/one.ts']) {
+      expect(workingTreeWarning(cmd, 'sess', state)).toBe(undefined);
+    }
+    expect(workingTreeWarning(undefined, 'sess', state)).toBe(undefined);
+    expect(workingTreeWarning('git add -A', undefined, state)).toBe(undefined);
+  });
+
+  /** Decision 5 — nothing on this path may write to the working tree. */
+  it('leaves the working tree exactly as it found it', () => {
+    const dir = repo();
+    const state = mkdtempSync(join(tmpdir(), 'musterd-gate-state-'));
+    writeFileSync(join(dir, 'a-work.txt'), 'foreign\n');
+    const cwd = process.cwd();
+    try {
+      process.chdir(dir);
+      const before = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' });
+      expect(workingTreeWarning('git add -A', 'sess-B', state)).toContain('a-work.txt');
+      const after = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' });
+      expect(after).toBe(before); // nothing staged, nothing stashed, nothing moved
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it('never warns outside a git repo', () => {
+    const state = mkdtempSync(join(tmpdir(), 'musterd-gate-state-'));
+    const notRepo = mkdtempSync(join(tmpdir(), 'musterd-gate-norepo-'));
+    const cwd = process.cwd();
+    try {
+      process.chdir(notRepo);
+      expect(workingTreeWarning('git add -A', 'sess', state)).toBe(undefined);
+    } finally {
+      process.chdir(cwd);
+    }
   });
 });
