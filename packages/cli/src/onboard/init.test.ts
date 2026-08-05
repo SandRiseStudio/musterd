@@ -76,12 +76,31 @@ const h = vi.hoisted(() => {
   };
   const claimKeys: (string | undefined)[] = [];
   const selectOptions: { value: string; hint?: string }[][] = [];
+  // A second harness, used only by the tests that need SELECTION to be a real choice. Kept out of
+  // the default registry so every existing test keeps its single-harness world.
+  const otherHarness = {
+    ...harness,
+    id: 'cursor',
+    label: 'Cursor',
+    surface: 'cursor',
+    detect: vi.fn(async () => ({ installed: true, configured: false, detail: 'Cursor 1.0' })),
+    configure: vi.fn(async () => ({ target: '.cursor/mcp.json', activation: 'open Cursor here' })),
+    provision: vi.fn(async () => ({
+      servers: [],
+      permissions: { allow: [], ask: [], deny: [] },
+      target: '.cursor/mcp.json',
+    })),
+  };
+  // The registry the mocked module reads through a getter, so a test can widen it for its own case.
+  const registry: unknown[] = [harness];
   return {
     confirmQueue,
     selectQueue,
     textQueue,
     http,
     harness,
+    otherHarness,
+    registry,
     config,
     claimQueue,
     claimKeys,
@@ -131,7 +150,14 @@ vi.mock('../client.js', () => ({
   },
 }));
 
-vi.mock('./harnesses/index.js', () => ({ HARNESSES: [h.harness] }));
+// Read through a getter so a test can widen the registry for its own case (see "configures the
+// harness that was chosen"): with a single-harness registry, "configured the chosen one" and
+// "configured the only one" are indistinguishable, so that test would pass on a hard-coded pick.
+vi.mock('./harnesses/index.js', () => ({
+  get HARNESSES() {
+    return h.registry;
+  },
+}));
 
 vi.mock('../config.js', () => ({
   loadConfig: () => h.config,
@@ -579,6 +605,59 @@ describe('runInit — intent branches', () => {
     h.selectQueue.push('new');
     expect(await runInit()).toBe(0);
     expect(h.http.addMember).not.toHaveBeenCalled();
+  });
+});
+
+// The doctor tells a Cursor or Codex seat to "re-provision this folder with `musterd init` and pick
+// <harness>" (doctor.ts, #663). That sentence REPLACED a false prescription — "run `musterd wire`",
+// which configures Claude Code alone — so it inherits the burden the original failed: a prescription
+// nobody asserts survives for months. `wire.test.ts` pins wire's half (it configures exactly
+// WIRE_CONFIGURED_HARNESSES); this is the mirror, that the harness wire cannot reach, init can.
+//
+// The existing happy-path test below already asserts `configure` is called, but the mocked registry
+// is a single harness with id 'claude-code' — which is precisely NOT the case the doctor's new
+// sentence is about. Requested by izzo when accepting lane 01KZ7NQX71, who nearly bounced it because
+// grepping `chosen.configure` in commands/init.ts finds nothing: that file is 72 lines and delegates,
+// and the call is in onboard/init.ts. A claim that takes two lookups to confirm is one nobody will
+// re-confirm later.
+describe('runInit — configures the harness that was chosen, not only Claude Code', () => {
+  // Both harnesses present, so picking one is a real choice. With the default single-harness
+  // registry this test would pass against an implementation that ignored the selection entirely —
+  // a fixture more convenient than production, which makes a green test evidence of nothing.
+  beforeEach(() => {
+    h.registry.length = 0;
+    h.registry.push(h.harness, h.otherHarness);
+  });
+  afterEach(() => {
+    h.registry.length = 0;
+    h.registry.push(h.harness);
+  });
+
+  it('configures the selected non-claude-code harness, and leaves the other alone', async () => {
+    h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
+    h.selectQueue.push('new', 'cursor', 'generalist');
+    h.confirmQueue.push(true, true, true);
+
+    expect(await runInit()).toBe(0);
+
+    // The prescription's whole content: picking this harness re-provisions THIS harness's entry...
+    expect(h.otherHarness.configure).toHaveBeenCalled();
+    // ...and not the one that happens to be first in the registry, which is the failure a
+    // single-harness fixture cannot see.
+    expect(h.harness.configure).not.toHaveBeenCalled();
+
+    const [entry, binding] = h.otherHarness.configure.mock.calls[0]! as unknown as [
+      { env: Record<string, string> },
+      { surface?: string },
+    ];
+    expect(binding.surface).toBe('cursor');
+    // And it re-provisions FROM binding.json rather than re-baking the drift the doctor flagged —
+    // otherwise "re-provision" would hand back the same MUSTERD_* snapshot it was meant to clear,
+    // and the doctor would be prescribing a repair that reinstates the thing it complained about.
+    expect(entry.env['MUSTERD_AGENT_KEY']).toBeUndefined();
+    expect(entry.env['MUSTERD_SURFACE']).toBeUndefined();
+    expect(entry.env['MUSTERD_AUTOJOIN']).toBeUndefined();
+    expect(entry.env['MUSTERD_DRIVER']).toBeUndefined();
   });
 });
 
