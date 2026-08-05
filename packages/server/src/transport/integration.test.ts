@@ -3386,6 +3386,63 @@ describe('two-stage close (ADR 169)', () => {
     expect(ask.body).not.toContain('you previously owned this lane');
   });
 
+  // ADR 234 increment 1 — the LABEL phase. The entire deliverable is that a declared tier reaches
+  // the ledger at ready_for_review, so the Eval can later ask whether declared stakes predict the
+  // answer rate. Nothing routes on it yet, and this test pins that too: the label must NOT move the
+  // reviewer, the tier, or whether an ask is sent. If it did, the pre/post comparison the phase
+  // exists to enable would be confounded by the phase itself.
+  describe('ADR 234 — declared stakes reach the ledger and change nothing else', () => {
+    it.each([
+      ['low', 'low'],
+      ['high', 'high'],
+      [undefined, 'normal'], // undeclared reads as the default — absence IS the declaration
+    ] as const)('records stakes=%s as %s at ready_for_review', async (declared, expected) => {
+      const { nickTok, ada } = await setup();
+      const lane = await post(
+        '/teams/dawn/lanes',
+        {
+          title: 'fix the store',
+          branch: 'ada/fix',
+          claim: true,
+          ...(declared ? { stakes: declared } : {}),
+        },
+        ada,
+      );
+      const laneId = lane.json.lane.id as string;
+      // Round-trips on the lane itself, so a client can show what was declared.
+      expect(lane.json.lane.stakes).toBe(expected);
+
+      const ready = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      expect(ready.status).toBe(200);
+
+      const rows = await auditRows(nickTok, 'lane.ready_for_review');
+      expect(rows).toHaveLength(1);
+      // Recorded UNCONDITIONALLY, including the default. A field that vanishes on its most common
+      // value makes the largest bucket the one the Eval cannot count.
+      expect(rows[0].detail.stakes).toBe(expected);
+
+      // ...and routing is untouched: a `low` lane is still routed exactly like any other.
+      expect(ready.json.lane.state).toBe('awaiting_acceptance');
+      expect(ready.json.review?.reviewer).toBeDefined();
+    });
+
+    it('is editable after open — what a change is worth is often clear only once it exists', async () => {
+      const { ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 't', claim: true }, ada);
+      const id = lane.json.lane.id as string;
+      expect(lane.json.lane.stakes).toBe('normal');
+
+      const up = await patchLane(id, { stakes: 'high' }, ada);
+      expect(up.json.lane.stakes).toBe('high');
+      // And back down again — a declaration you cannot revise is one people set defensively.
+      const down = await patchLane(id, { stakes: 'low' }, ada);
+      expect(down.json.lane.stakes).toBe('low');
+      // An unrelated patch must not silently reset it.
+      const other = await patchLane(id, { detail: 'unrelated' }, ada);
+      expect(other.json.lane.stakes).toBe('low');
+    });
+  });
+
   // The hole nick observed on 2026-07-31 (lane 01KYN3CKJE): the picker excludes only the CURRENT
   // owner, so a lane that changed hands can route acceptance to a previous owner — an author of the
   // artifact. Deliberately NOT fixed by exclusion: the pool already finds nobody on most attempts,

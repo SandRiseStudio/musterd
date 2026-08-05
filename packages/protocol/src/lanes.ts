@@ -25,6 +25,20 @@ import { GoalSchema } from './goals.js';
  */
 export const DEFAULT_PROJECT = 'default';
 
+/**
+ * Declared stakes for acceptance (ADR 234) — an ordered ladder, cheapest first.
+ *
+ * - `low` — the worker judges this not worth pulling someone off their lane for.
+ * - `normal` — the default, and what every lane written before ADR 234 is read as.
+ * - `high` — worth an interruption; risky surfaces (enforcement, protocol, data integrity).
+ *
+ * Increment 1 records the declaration and nothing reads it. What it buys is the ability to ask
+ * whether declared stakes predict the answer rate **before** anything is built on the assumption
+ * that they do. If they do not, the routing flip is aimed at nothing and should not ship.
+ */
+export const LaneStakesSchema = z.enum(['low', 'normal', 'high']);
+export type LaneStakes = z.infer<typeof LaneStakesSchema>;
+
 export const LaneStateSchema = z.enum([
   'open',
   'claimed',
@@ -97,6 +111,27 @@ export const LaneSchema = z.object({
    */
   risk: z.array(z.string()).default([]),
   /**
+   * Declared **stakes** for acceptance (ADR 234) — how much this change is worth someone's eyes.
+   *
+   * Deliberately NOT `risk`. `risk` already has a consumer that routes the ask human-first on any
+   * tag, and a second consumer with opposite needs on one value is the shared-predicate trap named
+   * in ADR 225: "low stakes" cannot be said in `risk` without either colliding with its empty
+   * default or accidentally demanding a human. Each consumer states its own need.
+   *
+   * Declared, never inferred from the surface — the counterpoint ryder insisted on carrying with
+   * nick's proposal is that surface complexity predicts review COST, not review VALUE (the two most
+   * valuable acceptance reviews of 2026-08-04 were both on docs, and each changed the artifact). So
+   * a filetype rule is the wrong knife; the worker declares.
+   *
+   * Defaults to `normal` on purpose. An opt-IN-to-acceptance design fails silent — forgetting to
+   * declare would drop a lane below the line by inaction. Forgetting must cost an ask, never a
+   * review.
+   *
+   * **Increment 1 records this and changes nothing else.** No routing consumes it yet; the flip is
+   * gated on what the label measures.
+   */
+  stakes: LaneStakesSchema.default('normal'),
+  /**
    * The worker's merge attestation, captured at `awaiting_acceptance` (ADR 192 / formerly
    * `ready_for_review`) so the acceptor's close carries the *worker's* claim verbatim into
    * `git.pr_merged`. Null until `lane_submit`; defaulted for older-daemon skew.
@@ -158,6 +193,8 @@ export const OpenLaneSchema = z.object({
   goal_id: z.string().optional(),
   /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
   risk: z.array(z.string()).optional(),
+  /** Declared acceptance stakes (ADR 234). Omitted ⇒ `normal`; nothing routes on it yet. */
+  stakes: LaneStakesSchema.optional(),
   claim: z.boolean().optional(),
 });
 export type OpenLane = z.infer<typeof OpenLaneSchema>;
@@ -181,6 +218,12 @@ export const UpdateLaneSchema = z.object({
   owner_seat: z.string().optional(),
   /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
   risk: z.array(z.string()).optional(),
+  /**
+   * Re-declare acceptance stakes (ADR 234). Editable after open on purpose: what a change is worth
+   * someone's eyes is often only clear once the work exists, and a declaration you cannot revise is
+   * one people learn to set defensively.
+   */
+  stakes: LaneStakesSchema.optional(),
   /**
    * Merge attestation (ADR 109), meaningful on a terminal move of a branch-carrying lane — or, under
    * two-stage close (ADR 192), captured at `awaiting_acceptance` (the worker's claim) and persisted

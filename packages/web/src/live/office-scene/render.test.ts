@@ -40,6 +40,7 @@ function laneFix(id: string, state: LaneState): Lane {
     branch: null,
     goal_id: null,
     risk: [],
+    stakes: 'normal' as const,
     merged: null,
     state,
     created_by: 'nick',

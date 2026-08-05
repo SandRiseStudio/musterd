@@ -244,6 +244,32 @@ describe('lane commands', () => {
     expect(lanes.some((l) => l.title === 'a')).toBe(false);
   });
 
+  // ADR 234 increment 1. A typo in --stakes must FAIL rather than fall back to the default: the
+  // phase exists to measure declarations, and a misspelling that quietly recorded `normal` would
+  // put a lane the worker meant to mark `low` into the very bucket it was being distinguished from
+  // — corrupting the measurement in the direction that HIDES the effect being tested.
+  it('refuses an unrecognised --stakes instead of silently defaulting it', async () => {
+    await expect(
+      laneCommand(parseArgs(['open', 'typo lane', '--stakes', 'trivial'])),
+    ).rejects.toThrow(/--stakes must be one of low \| normal \| high/);
+    // Nothing was opened — the refusal is before the write, not after it.
+    const board = await capture(() => lanesCommand(parseArgs(['--json'])));
+    const { lanes } = JSON.parse(board.out) as { lanes: { title: string }[] };
+    expect(lanes.some((l) => l.title === 'typo lane')).toBe(false);
+  });
+
+  it('carries a declared --stakes through open and update', async () => {
+    const id = await openLane(['staked', '--stakes', 'low', '--claim']);
+    const board = await capture(() => lanesCommand(parseArgs(['--json'])));
+    const { lanes } = JSON.parse(board.out) as { lanes: { id: string; stakes: string }[] };
+    expect(lanes.find((l) => l.id === id)?.stakes).toBe('low');
+
+    await capture(() => laneCommand(parseArgs(['update', id, '--stakes', 'high'])));
+    const after = await capture(() => lanesCommand(parseArgs(['--json'])));
+    const { lanes: l2 } = JSON.parse(after.out) as { lanes: { id: string; stakes: string }[] };
+    expect(l2.find((l) => l.id === id)?.stakes).toBe('high');
+  });
+
   it('rejects malformed subcommands and missing args with usage', async () => {
     await expect(laneCommand(parseArgs([]))).rejects.toThrow(/usage/);
     await expect(laneCommand(parseArgs(['open']))).rejects.toThrow(/usage/);

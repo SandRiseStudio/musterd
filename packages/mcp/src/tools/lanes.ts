@@ -92,6 +92,13 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .optional()
           .describe('link this lane to a Goal (team_next groups by it)'),
         role: z.string().optional().describe('assignment hint (advisory)'),
+        stakes: z
+          .enum(['low', 'normal', 'high'])
+          .optional()
+          .describe(
+            'how much this is worth someone’s eyes: low | normal (default) | high. Declared, not ' +
+              'inferred from the files — recorded for measurement; nothing routes on it yet',
+          ),
         claim: z.boolean().optional().describe('own it yourself now (recommended at task start)'),
       },
     },
@@ -214,6 +221,10 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         state: z.enum(LaneStateSchema.options).optional().describe('new state'),
         detail: z.string().optional(),
         surface_globs: z.array(z.string()).optional(),
+        stakes: z
+          .enum(['low', 'normal', 'high'])
+          .optional()
+          .describe('re-declare acceptance stakes (ADR 234): low | normal | high'),
         depends_on: z.array(z.string()).optional(),
         branch: z.string().optional(),
         project: z.string().optional().describe('re-scope the surface-space'),

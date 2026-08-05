@@ -15,6 +15,7 @@ const lane = (over: Partial<Lane> = {}): Lane => ({
   branch: null,
   goal_id: null,
   risk: [],
+  stakes: 'normal' as const,
   merged: null,
   state: 'open',
   created_by: 'nick',

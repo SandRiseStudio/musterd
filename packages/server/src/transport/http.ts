@@ -2882,6 +2882,12 @@ export async function handleHttp(
             detail: {
               lane: lane.id,
               owner: lane.owner_seat,
+              // ADR 234 increment 1 — the LABEL. Recorded unconditionally (never omitted when
+              // 'normal') because the Eval has to split the answer rate by declared tier, and a
+              // field that disappears on the default value makes the largest bucket the one you
+              // cannot count. This is the whole deliverable of the label phase: nothing routes on
+              // it, and the routing flip is gated on what it measures.
+              stakes: lane.stakes,
               ...(lane.merged ? { merged: lane.merged } : {}),
               // ADR 188: the achieved rung of the diversity ladder rides beside the historical
               // two-value route, so a cross_model routing is never mistaken for a cross_family one.
