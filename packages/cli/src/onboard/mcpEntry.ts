@@ -1,5 +1,8 @@
+import { existsSync, statSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ClaimPolicy, type Surface } from '@musterd/protocol';
+import { primaryCheckoutFor } from './entryGuard.js';
 
 /** A stdio MCP server entry: how a harness should launch the musterd adapter. */
 export interface McpServerEntry {
@@ -72,15 +75,60 @@ export function buildMcpEnv(_b: AgentBinding): Record<string, string> {
  * and the monorepo); falls back to a sibling-package path in dev.
  */
 export function resolveMcpLaunch(): { command: string; args: string[] } {
+  let adapter: string;
   try {
     // import.meta.resolve is sync + stable on Node 20+; returns a file:// URL.
-    const url = import.meta.resolve('@musterd/mcp');
-    return { command: process.execPath, args: [fileURLToPath(url)] };
+    adapter = fileURLToPath(import.meta.resolve('@musterd/mcp'));
   } catch {
     // Dev fallback: packages/cli/dist/onboard/ -> packages/mcp/dist/index.js
     const here = fileURLToPath(new URL('.', import.meta.url));
-    const dev = new URL('../../../mcp/dist/index.js', `file://${here}`);
-    return { command: process.execPath, args: [fileURLToPath(dev)] };
+    adapter = fileURLToPath(new URL('../../../mcp/dist/index.js', `file://${here}`));
+  }
+  return { command: process.execPath, args: [canonicalizeAdapterPath(adapter)] };
+}
+
+/**
+ * Prefer the repo's PRIMARY checkout's copy of the adapter over the running CLI's own (the
+ * 01KZ9JT1CG root-cause fix, named in `musterd doctor`'s narrowed prescription as why the
+ * ADR 143 shared-slot rewrite was destructive rather than idempotent).
+ *
+ * `resolveMcpLaunch` anchors on the RUNNING CLI's location, and Claude Code keys the local MCP
+ * entry by repo root — one slot for every seat worktree (ADR 143). Together: any provisioning or
+ * repair run from a worktree re-pointed every sibling's launch path at that worktree, so the slot
+ * changed hands on every write and broke when that folder moved. Re-anchoring the COMPUTED value
+ * on the primary checkout makes every writer write the same bytes — the rewrite becomes
+ * idempotent, and the entryGuard's "adapter in a peer worktree" drift can no longer be planted by
+ * provisioning at all. Deliberately fixed here, where the value is computed, not by adding
+ * another writer or another warning (the 01KZ9CGYGH caution: never close a too-wide-write bug
+ * with another too-wide write).
+ *
+ * Falls back to the resolved path unchanged when: the adapter isn't inside a git checkout (a
+ * global `pnpm add -g` install), the checkout IS the primary, the primary cannot be determined
+ * (abstention, ADR 173), or the primary's copy does not exist on disk (not built — a path that
+ * exists beats a canonical path that doesn't).
+ */
+export function canonicalizeAdapterPath(adapter: string): string {
+  const root = checkoutRootOf(adapter);
+  if (!root) return adapter;
+  const primary = primaryCheckoutFor(root);
+  if (!primary || resolve(primary) === resolve(root)) return adapter;
+  const candidate = join(primary, relative(root, adapter));
+  return existsSync(candidate) ? candidate : adapter;
+}
+
+/** The nearest ancestor of `p` carrying a `.git` entry (dir or worktree pointer file), or undefined. */
+function checkoutRootOf(p: string): string | undefined {
+  let dir = dirname(resolve(p));
+  for (;;) {
+    try {
+      statSync(join(dir, '.git'));
+      return dir;
+    } catch {
+      // keep walking
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
   }
 }
 
