@@ -127,6 +127,7 @@ _Priority order across all unshipped work — the coarse status grouping above, 
 
 - **Web steering console — answer consultative asks from /live** · Human ↔ agent loop
 - **musterd as its own harness & mixed-harness teams** · Harness environment
+- **Ledger seats — every actor on the roster (services as members)** · Platform
 
 ### Later — No near-term pull; opportunistic.
 
