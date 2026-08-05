@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Envelope, MemberSummary } from '@musterd/protocol';
+import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol';
-import { askIsLoud, byUrgency, deriveAsks, type AskView } from './asks';
+import {
+  askIsLoud,
+  byUrgency,
+  deriveAsks,
+  deriveReviewQueue,
+  reelItems,
+  SPECIES_VERB,
+  type AskView,
+  type ReviewView,
+} from './asks';
 import { initial, kindOf, memberColor } from './format';
 import { reelIndex } from './reel';
-
-const SPECIES_VERB = {
-  consult: 'asks what you think',
-  escalate: 'escalated to you',
-  approve: 'needs your approval',
-} as const;
 
 /**
  * The asks rail as stream chrome (ADR 228) — what `AsksStrip` is to `/live`, minus every part that
@@ -28,15 +31,27 @@ const SPECIES_VERB = {
 export function AsksReel({
   envelopes,
   roster,
+  board = null,
 }: {
   envelopes: Envelope[];
   roster: MemberSummary[];
+  /** The lane board the page already holds — feeds the review queue into the rotation. */
+  board?: LaneBoard | null;
 }) {
   const asks = useMemo(() => deriveAsks(envelopes), [envelopes]);
   const loud = asks.filter((a) => askIsLoud(a.state)).sort((a, b) => byUrgency(a, b));
   const deferred = asks.filter((a) => a.state === 'deferred');
   const settled = asks.length - loud.length - deferred.length;
-  const cards = [...loud, ...deferred];
+  const reviews = useMemo(
+    () => (board ? deriveReviewQueue(board.lanes, asks) : []),
+    [board, asks],
+  );
+  const cards = useMemo(
+    () => reelItems([...loud, ...deferred], reviews),
+    // The sorted arrays are rebuilt every render; their CONTENT is what matters to the rotation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [asks, reviews],
+  );
 
   // One clock drives both the rotation and the countdowns. It ticks only while something is loud —
   // idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs for hours.
@@ -52,9 +67,10 @@ export function AsksReel({
   // settled, /live shows a quiet "nothing waiting" row rather than vanishing, and the stream keeps
   // that: the counts are office chrome, and a bar that blinks out whenever the last ask closes
   // reads as breakage on a video.
-  if (asks.length === 0) return null;
+  if (asks.length === 0 && reviews.length === 0) return null;
 
   const shown = cards.length > 0 ? cards[reelIndex(cards.length, now - mountedAt)]! : null;
+  const shownId = shown ? (shown.ask?.env.id ?? shown.review!.lane.id) : null;
   const idx = new Map(roster.map((m) => [m.name, m]));
 
   return (
@@ -70,20 +86,24 @@ export function AsksReel({
         <span className="bc-reel__label">Asks &amp; approvals</span>
         <span className="bc-reel__spacer" />
         {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
+        {reviews.length > 0 && <span className="bc-reel__meta">{reviews.length} in review</span>}
         {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
         {settled > 0 && <span className="bc-reel__meta bc-reel__meta--dim">{settled} settled</span>}
         {shown !== null && cards.length > 1 && (
           <span className="bc-reel__dots" aria-hidden="true">
-            {cards.map((c) => (
-              <i key={c.env.id} className={c.env.id === shown.env.id ? 'is-on' : undefined} />
-            ))}
+            {cards.map((c) => {
+              const id = c.ask?.env.id ?? c.review!.lane.id;
+              return <i key={id} className={id === shownId ? 'is-on' : undefined} />;
+            })}
           </span>
         )}
       </header>
       {shown === null ? (
-        <div className="bc-reel__row bc-reel__row--quiet">nothing waiting on a human</div>
+        <div className="bc-reel__row bc-reel__row--quiet">nothing waiting</div>
+      ) : shown.kind === 'ask' ? (
+        <ShownAsk shown={shown.ask!} idx={idx} now={now} />
       ) : (
-        <ShownAsk shown={shown} idx={idx} now={now} />
+        <ShownReview shown={shown.review!} idx={idx} />
       )}
     </section>
   );
@@ -113,10 +133,39 @@ function ShownAsk({
       <span className="bc-reel__lead">
         <b>{shown.env.from}</b>
         <span className="bc-reel__verb">{SPECIES_VERB[shown.species]}</span>
+        {/* Who has to answer it. On a stream this is the whole question a viewer is asking — "is
+            this team stuck, and on whom?" — and without it the row reads as a demand on nobody
+            (nick, 2026-08-05). Directly above the review rows, which answer the same question for
+            lanes, so the two halves of "what is waiting" read in one voice. */}
+        {shown.to && <span className="bc-reel__routed-inline">→ {shown.to}</span>}
         {shown.env.body && <span className="bc-reel__gist">{shown.env.body}</span>}
       </span>
       <span className={`bc-reel__tier bc-reel__tier--${shown.tier}`}>{shown.tier}</span>
       <ReelClock ask={shown} now={now} />
+    </div>
+  );
+}
+
+/** A lane sitting in acceptance: whose work it is, what it is, and who has to say yes. */
+function ShownReview({ shown, idx }: { shown: ReviewView; idx: Map<string, MemberSummary> }) {
+  const owner = shown.lane.owner_seat ?? '?';
+  return (
+    <div className="bc-reel__row" key={shown.lane.id}>
+      <span
+        className="bc-reel__who"
+        style={{ background: memberColor(owner, kindOf(owner, idx)) }}
+        aria-hidden="true"
+      >
+        {initial(owner)}
+      </span>
+      <span className="bc-reel__lead">
+        <b>{owner}</b>
+        <span className="bc-reel__verb">in review</span>
+        <span className="bc-reel__gist">{shown.lane.title}</span>
+      </span>
+      <span className="bc-reel__routed">
+        {shown.waitingOn ? `waiting on ${shown.waitingOn}` : 'unrouted'}
+      </span>
     </div>
   );
 }

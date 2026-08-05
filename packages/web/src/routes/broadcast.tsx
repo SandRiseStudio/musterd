@@ -193,7 +193,7 @@ function BroadcastPage() {
             broadcast
             captureFps={captureFps}
             workCues="stack"
-            topSlot={<AsksReel envelopes={envelopes} roster={roster} />}
+            topSlot={<AsksReel envelopes={envelopes} roster={roster} board={board} />}
             onReady={onSceneReady}
           />
         )}

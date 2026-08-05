@@ -7,6 +7,7 @@ import {
   byUrgency,
   deriveAsks,
   deriveReviewQueue,
+  reelItems,
 } from './asks';
 
 /** A minimal timeline envelope — the derivation reads act/meta/thread/ts/id/from only. */
@@ -316,5 +317,54 @@ describe('deriveReviewQueue — lanes in acceptance and who they wait on', () =>
     ]);
     const queue = deriveReviewQueue([lane('L1')] as never[], asks);
     expect(queue[0]!.waitingOn).toBeNull();
+  });
+});
+
+/**
+ * The stream's rotation (nick, 2026-08-05: "can a viewer see the acceptances waiting on other
+ * members?"). On /live the review queue sits in a sheet behind a click; a broadcast viewer can never
+ * click, so the reel must ROTATE lanes-in-review alongside asks or they are invisible on the stream.
+ */
+describe('reelItems — what the stream rotates through', () => {
+  const to = (name: string) => ({ kind: 'member', name }) as Envelope['to'];
+  const lane = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    state: 'awaiting_acceptance',
+    title: `lane ${id}`,
+    owner_seat: 'miley',
+    updated_at: 1000,
+    ...over,
+  });
+
+  it('rotates loud asks first, then lanes in review — and never a lane twice', () => {
+    const asks = deriveAsks([
+      env('a1', 'ask', {
+        ts: 1000,
+        meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L1' } },
+        to: to('gptbot'),
+      }),
+    ]);
+    const items = reelItems(asks, deriveReviewQueue([lane('L1'), lane('L2')] as never[], asks));
+    expect(items.map((i) => i.kind)).toEqual(['ask', 'review']);
+    // L1's ask is already rotating as an ask; showing its lane too would double-count it.
+    expect(items.filter((i) => i.kind === 'review').map((i) => i.review!.lane.id)).toEqual(['L2']);
+  });
+
+  it('shows a lane whose acceptance ask was answered but whose lane is still open', () => {
+    const asks = deriveAsks([
+      env('a1', 'ask', {
+        ts: 1000,
+        meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L1' } },
+        to: to('gptbot'),
+      }),
+      env('acc', 'accept', { from: 'gptbot', ts: 2000, meta: { in_reply_to: 'a1' } }),
+    ]);
+    const items = reelItems(asks, deriveReviewQueue([lane('L1')] as never[], asks));
+    expect(items.map((i) => i.kind)).toEqual(['review']);
+    expect(items[0]!.review!.waitingOn).toBeNull();
+  });
+
+  it('is empty when nothing is waiting anywhere', () => {
+    expect(reelItems([], [])).toEqual([]);
   });
 });

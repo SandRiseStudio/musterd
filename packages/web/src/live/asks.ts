@@ -185,6 +185,66 @@ export function deriveReviewQueue(lanes: Lane[], asks: AskView[]): ReviewView[] 
     .map((lane) => ({ lane, waitingOn: acceptorByLane.get(lane.id) ?? null }));
 }
 
+/**
+ * The ask vocabulary, owned here rather than by either surface.
+ *
+ * `AsksStrip` (/live) and `AsksReel` (/broadcast) are deliberately separate components — one is
+ * ~460 lines of answerability, the other is stream chrome with no input, and they cannot share a
+ * stylesheet because the 1080p stage encodes to 720p. That split is still right. What was NOT right
+ * is that each kept its own copy of these strings: when the recipient bug was fixed on /live
+ * (2026-08-05), the identical wrong copy went on being broadcast to Twitch for two hours, because
+ * fixing one file could not fix the other. Derivation was shared; vocabulary was not, and vocabulary
+ * is where the lie lived. Both now read from here.
+ *
+ * `SPECIES_VERB` is third person and is the DEFAULT — the addressed-to-you voice must be earned by
+ * knowing the ask is yours. A stream has no "you" at all, so it never uses the second-person map.
+ */
+export const SPECIES_VERB = {
+  consult: 'asks for a view',
+  escalate: 'escalated',
+  approve: 'needs approval',
+} as const;
+
+/** The second-person voice — only for an ask routed to the reader (`askAudience` === 'you'). */
+export const SPECIES_VERB_YOU = {
+  consult: 'asks what you think',
+  escalate: 'escalated to you',
+  approve: 'needs your approval',
+} as const;
+
+/** One slot in the stream's rotation: an ask, or a lane sitting in acceptance. */
+export interface ReelItem {
+  kind: 'ask' | 'review';
+  ask?: AskView;
+  review?: ReviewView;
+}
+
+/**
+ * What `/broadcast` rotates through (nick, 2026-08-05: "can a viewer see the acceptances waiting on
+ * other members?").
+ *
+ * On `/live` the review queue can live in a sheet, because a reader can open it. A stream viewer has
+ * no cursor, so anything not in the rotation is invisible — which is why the queue is folded in here
+ * rather than rendered as a second panel nobody would ever see all of.
+ *
+ * A lane whose acceptance ask is still open is DROPPED from the review half: it is already rotating
+ * as that ask, and showing both would double-count one piece of waiting. What remains is the case a
+ * viewer otherwise never sees — a lane still in acceptance whose ask was answered, timed out, or was
+ * never routed.
+ */
+export function reelItems(asks: AskView[], reviews: ReviewView[]): ReelItem[] {
+  const loudLanes = new Set(
+    asks
+      .filter((a) => askIsLoud(a.state))
+      .map((a) => (a.env.meta?.['lane_review'] as { lane?: unknown } | undefined)?.lane)
+      .filter((l): l is string => typeof l === 'string'),
+  );
+  return [
+    ...asks.filter((a) => askIsLoud(a.state) || a.state === 'deferred').map((ask) => ({ kind: 'ask' as const, ask })),
+    ...reviews.filter((r) => !loudLanes.has(r.lane.id)).map((review) => ({ kind: 'review' as const, review })),
+  ];
+}
+
 const TIER_WEIGHT = { blocking: 0, standard: 1, advisory: 2 } as const;
 
 const AUDIENCE_WEIGHT = { you: 0, team: 1, human: 2, agent: 3 } as const;

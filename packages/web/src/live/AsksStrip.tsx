@@ -7,6 +7,8 @@ import {
   byAudienceThenUrgency,
   deriveAsks,
   deriveReviewQueue,
+  SPECIES_VERB,
+  SPECIES_VERB_YOU,
   type AskView,
   type AudienceContext,
 } from './asks';
@@ -404,21 +406,6 @@ export function AsksStrip({
   );
 }
 
-/** For an ask routed to someone ELSE (or the team pool): neutral copy, no second person. The "your"
- *  voice below was written when every ask was to-human (ADR 149); on an agent-routed review ask it
- *  read as an instruction to whoever was looking (lane 01KZ9GFHZ9). */
-const SPECIES_VERB = {
-  consult: 'asks for a view',
-  escalate: 'escalated',
-  approve: 'needs approval',
-} as const;
-
-/** For an ask routed to YOU — the original ADR 149 voice, now earned rather than assumed. */
-const SPECIES_VERB_YOU = {
-  consult: 'asks what you think',
-  escalate: 'escalated to you',
-  approve: 'needs your approval',
-} as const;
 
 
 function AskCard({
