@@ -106,7 +106,10 @@ describe('auto-refresher lifecycle (injected runner, temp dir)', () => {
   });
 
   it('bakes the service-seat token file path into the plist environment (ADR 232 §5)', () => {
-    const c = { ...ctx(), env: { MUSTERD_SERVICE_TOKEN_FILE: '/fake/musterd/autorefresh/seat-token' } };
+    const c = {
+      ...ctx(),
+      env: { MUSTERD_SERVICE_TOKEN_FILE: '/fake/musterd/autorefresh/seat-token' },
+    };
     installAutoRefresh(c);
     const plist = readFileSync(c.plistPath, 'utf8');
     expect(plist).toContain('<key>MUSTERD_SERVICE_TOKEN_FILE</key>');

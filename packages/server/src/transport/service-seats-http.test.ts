@@ -98,7 +98,12 @@ describe('service-token auth (ADR 232 §5)', () => {
   it('the minted mskd_ token sends an attributed in-band status_update and derives ambient presence', async () => {
     const sent = await post(
       '/teams/dawn/messages',
-      { envelope: envelope('autorefresh', 'bounced the daemon on 322cd28, 5 live sessions notified') },
+      {
+        envelope: envelope(
+          'autorefresh',
+          'bounced the daemon on 322cd28, 5 live sessions notified',
+        ),
+      },
       serviceToken,
     );
     expect(sent.status).toBe(201);
