@@ -366,8 +366,38 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
   );
 }
 
+/** Coarse elapsed time — the reader needs "hours, not minutes", never a precise duration. */
+function waitedFor(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m`;
+  return `${s}s`;
+}
+
 function fmtNext(b: NextBrief): string {
   const lines: string[] = [`next — as ${b.member}`];
+  // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
+  // someone else is blocked on, and it is the one that loses when a seat is busy: half the
+  // unverified closes had the named reviewer online for ~40 minutes and still never answering.
+  // Putting it under `carrying` would reproduce the failure it exists to fix.
+  // `?? []` is not defensive noise: `client.next()` casts the response instead of parsing it
+  // through NextBriefSchema, so a daemon predating ADR 233 omits the key and this would throw on
+  // `.length`. Additive means the OLD daemon can omit it, which makes tolerating that the new
+  // client's job.
+  const owed = b.owed_reviews ?? [];
+  if (owed.length) {
+    const now = Date.now();
+    lines.push(`\n⧗ owed by you — ${owed.length} lane(s) waiting on your verdict:`);
+    for (const r of owed) {
+      lines.push(
+        `  ${r.lane.id} "${r.lane.title}" — ${r.from} has waited ${waitedFor(now - r.ts)}`,
+      );
+      lines.push(
+        `    answer: team_send {act:'accept', to:'${r.from}', reply_to:'${r.ask_id}', body:'…'}`,
+      );
+    }
+  }
   if (b.in_flight.length) {
     lines.push(`\ncarrying (${b.in_flight.length}):`);
     for (const l of b.in_flight) lines.push('  ' + fmtLane(l));
@@ -392,7 +422,14 @@ function fmtNext(b: NextBrief): string {
     );
     lines.push('  ' + b.why.body);
   }
-  if (!b.in_flight.length && !b.up_next.length && !b.shipped.length && !b.next_goal && !b.why) {
+  if (
+    !owed.length &&
+    !b.in_flight.length &&
+    !b.up_next.length &&
+    !b.shipped.length &&
+    !b.next_goal &&
+    !b.why
+  ) {
     lines.push('nothing in flight — lane_open {title, claim:true} to declare your work');
   }
   return lines.join('\n');

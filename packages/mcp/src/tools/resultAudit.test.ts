@@ -47,6 +47,29 @@ function captureAll(
 
 const config = { team: 'dawn', member: 'Ada', surface: 'claude-code' };
 
+/** Minimal well-formed lane for brief fixtures. */
+const LANE = {
+  id: 'L-0',
+  team: 'dawn',
+  project: 'default',
+  title: 't',
+  detail: null,
+  owner_seat: 'Lin',
+  role: null,
+  surface_globs: [],
+  depends_on: [],
+  branch: null,
+  goal_id: null,
+  risk: [],
+  merged: null,
+  state: 'awaiting_acceptance',
+  created_by: 'Lin',
+  created_at: 0,
+  claimed_at: 0,
+  resolved_at: null,
+  updated_at: 0,
+} as const;
+
 /** An empty result names the next action: a tool name, a musterd CLI command, or an explicit re-check. */
 const ACTION_RE = /team_[a-z_]+|lane_[a-z_]+|musterd [a-z]+|check again/;
 
@@ -101,6 +124,47 @@ describe('empty states name the next action', () => {
   it('team_goals with none declared', async () => {
     const h = captureAll(registerGoals, emptyClient)['team_goals']!;
     expect(await text(h)).toMatch(ACTION_RE);
+  });
+
+  // The emptyClient's `next` fixture deliberately omits `owed_reviews` (ADR 233). That is exactly
+  // what a daemon predating the field sends, and `client.next()` CASTS the response rather than
+  // parsing it through NextBriefSchema — so the schema's `.default([])` never runs on this path and
+  // a renderer touching `.length` would throw. Additive means the old daemon may omit it; tolerating
+  // that is the new client's job. Leaving the fixture stale keeps that contract under test.
+  it('team_next against a daemon that predates owed_reviews (field absent, not empty)', async () => {
+    const handlers = captureAll(registerLanes, emptyClient);
+    await expect(text(handlers['team_next']!)).resolves.toMatch(ACTION_RE);
+  });
+
+  // The rendered line is the whole intervention — a derivation nobody reads changes nothing. Assert
+  // it names the lane, who is waiting, how long, and the exact call that answers it (ADR 233).
+  it('team_next renders an owed review first, with the reply_to that binds the verdict', async () => {
+    const owedClient: any = {
+      ...emptyClient,
+      next: async () => ({
+        member: 'Ada',
+        in_flight: [{ ...LANE, id: 'L-mine', title: 'my own work', state: 'active' }],
+        up_next: [],
+        shipped: [],
+        owed_reviews: [
+          {
+            lane: { ...LANE, id: 'L-theirs', title: 'their merged lane' },
+            from: 'Lin',
+            ask_id: 'ask-9',
+            ts: Date.now() - 16 * 3600 * 1000,
+          },
+        ],
+        why: null,
+        next_goal: null,
+      }),
+    };
+    const out = await text(captureAll(registerLanes, owedClient)['team_next']!);
+    expect(out).toContain('owed by you');
+    expect(out).toContain('their merged lane');
+    expect(out).toContain('Lin has waited 16h');
+    expect(out).toContain("reply_to:'ask-9'");
+    // Above the seat's own work — the placement IS the fix (see ADR 233).
+    expect(out.indexOf('owed by you')).toBeLessThan(out.indexOf('carrying'));
   });
 
   it('lane_board and team_next with nothing in flight', async () => {

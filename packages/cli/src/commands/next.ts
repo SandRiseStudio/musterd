@@ -15,10 +15,37 @@ function laneLine(l: Lane): string {
   return `  ${theme.meta(l.id)} ${l.state} "${l.title}"${goal}${branch}`;
 }
 
+/** Coarse elapsed time — the reader needs "hours, not minutes", never a precise duration. */
+function waitedFor(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
+  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m`;
+  return `${s}s`;
+}
+
 function render(brief: NextBrief): void {
   const w = process.stdout.write.bind(process.stdout);
   w(`${theme.accent('next')} — as ${theme.memberName(brief.member, 'agent')}\n`);
 
+  // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
+  // someone else is blocked on, and the one that loses when a seat is busy: half the unverified
+  // closes had the named reviewer online for ~40 minutes and still never answering. Printing it
+  // under `carrying` would reproduce the failure it exists to fix.
+  // `?? []` is not defensive noise: the brief arrives cast, not parsed through NextBriefSchema, so
+  // a daemon predating ADR 233 omits the key and this would throw on `.length`. Additive means the
+  // OLD daemon can omit it, which makes tolerating that the new client's job.
+  const owed = brief.owed_reviews ?? [];
+  if (owed.length > 0) {
+    const now = Date.now();
+    w(`\n${theme.accent('owed by you')} — ${owed.length} lane(s) waiting on your verdict:\n`);
+    for (const r of owed) {
+      w(
+        `  ${theme.meta(r.lane.id)} "${r.lane.title}" — ${theme.memberName(r.from, 'agent')} has waited ${waitedFor(now - r.ts)}\n`,
+      );
+      w(theme.meta(`    answer: \`musterd send --act accept --reply-to ${r.ask_id} "…"\``) + '\n');
+    }
+  }
   if (brief.in_flight.length > 0) {
     w(`\n${theme.accent('carrying')} (${brief.in_flight.length}):\n`);
     for (const l of brief.in_flight) w(laneLine(l) + '\n');
@@ -48,6 +75,7 @@ function render(brief: NextBrief): void {
   }
 
   if (
+    owed.length === 0 &&
     brief.in_flight.length === 0 &&
     brief.up_next.length === 0 &&
     brief.shipped.length === 0 &&

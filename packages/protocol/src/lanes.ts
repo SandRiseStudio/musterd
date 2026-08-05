@@ -236,6 +236,34 @@ export const NextBriefSchema = z.object({
   shipped: z.array(LaneSchema),
   /** Unowned lanes you could pick up, oldest first — what to start next. */
   up_next: z.array(LaneSchema),
+  /**
+   * Verdicts someone is waiting on from YOU (ADR 233): lanes still in the acceptance stage whose
+   * review ask was routed to this seat. Oldest ask first — the longest wait is the one closest to
+   * being closed unverified.
+   *
+   * Here because the ask alone does not survive being busy. Measured over the dogfood ledger: half
+   * the unverified self-closes had the named reviewer ONLINE for ~40 minutes across an 18-hour
+   * window and still never answering — *more* awake time than the reviewers who did answer
+   * (0.67h vs 0.22h). Having time was not the problem; being reminded was. The ask lands once in an
+   * inbox that scrolls, and nothing re-surfaces it, so a seat that goes heads-down loses it.
+   *
+   * Not `in_flight`: those are lanes you OWN. A review is owed on someone else's work, and folding
+   * the two would make "what am I carrying" mean two different things.
+   */
+  owed_reviews: z
+    .array(
+      z.object({
+        /** The lane awaiting your verdict. */
+        lane: LaneSchema,
+        /** Who is waiting — the lane's owner, as the ask's sender. */
+        from: z.string(),
+        /** The ask to answer: pass as `reply_to` so the verdict binds to this lane and no other. */
+        ask_id: z.string(),
+        /** When it was asked, so the reader can see how long someone has been waiting. */
+        ts: z.number().int(),
+      }),
+    )
+    .default([]),
   /** The latest `handoff` act to you or @team — the human-authored *why*, enrichment when present. */
   why: z
     .object({
