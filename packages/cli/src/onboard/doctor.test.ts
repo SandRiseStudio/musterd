@@ -47,7 +47,8 @@ vi.mock('../client.js', () => ({
   },
 }));
 
-const { buildSkewNotes, inspectProvisioning, runSessionProbe } = await import('./doctor.js');
+const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
+  await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
 const { writeProvisionManifest } = await import('./manifest.js');
 
@@ -1072,6 +1073,39 @@ describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('footprint note (ADR 241) — orphaned sidecars, warn-only', () => {
+  it('names the orphan count and RSS when the daemon reports them', async () => {
+    const notes = await footprintNotes('/nowhere', {
+      fetchTick: async () => ({
+        stacks: [
+          { classification: 'orphaned', procs: 41, rss_kb: 614_400 },
+          { classification: 'live', procs: 3, rss_kb: 90_000 },
+        ],
+      }),
+    });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('41 orphaned MCP sidecar procs');
+    expect(notes[0]).toContain('~600 MB');
+    expect(notes[0]).toContain('musterd reap');
+  });
+
+  it('stays silent with zero orphans, no data, or an unreachable daemon', async () => {
+    expect(
+      await footprintNotes('/nowhere', {
+        fetchTick: async () => ({ stacks: [{ classification: 'live', procs: 3, rss_kb: 1 }] }),
+      }),
+    ).toEqual([]);
+    expect(await footprintNotes('/nowhere', { fetchTick: async () => undefined })).toEqual([]);
+    expect(
+      await footprintNotes('/nowhere', {
+        fetchTick: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+      }),
+    ).toEqual([]);
   });
 });
 

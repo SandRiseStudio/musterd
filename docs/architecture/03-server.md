@@ -52,6 +52,7 @@ src/
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
     review.ts         // outcome-acceptance picker (ADR 169 mechanics / ADR 192 vocab): pickReviewCounterpart routes an acceptor — risk-tagged → live human/admin first, else graded ladder (ADR 188); ask body carries intent/principles/usable/feel checklist. Also pickWakeReviewer / reviewLoopBounceCount (ADR 191: offline wakeable pick + circuit breaker) + memberFamily/workerFamily + teamFamilyPosture (ADR 172/187/189: idle wake_pool carries family + wakeability mark from residency — mark-not-filter)
     residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation: immediate/batched inbox + ADR 191/199 work_order when loops.review|dispatch ∧ flow:auto — typed handoff/review/work-order wakes select portable fresh; ordinary inbox wakes join only under the default-off policy cohort, ADR 209; a recent directed threaded reply may also be marked resume_eligible under the default-off ADR 210 switch — permission for a local exact-match resume, never an instruction, carrying the thread_id the host's registry is keyed by (the reverse direction — session id, transcript path, workspace — never travels); defer-snoozed) / buildWakeContext (recipient-authorized, body-free portable index for reply/handoff/review/work_order, ADR 209) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4); rate policy derived from residency.* audit rows (ADR 131)
+    footprint.ts      // seat-footprint samples (ADR 241): insertFootprintTick / latestFootprint / pruneFootprint over footprint_stacks + footprint_machine (schema v34)
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
     rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember (resolves account_status + capabilities, ADR 070)
   protocol/
@@ -67,6 +68,11 @@ src/
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
   presence/
     reaper.ts         // setInterval: presence timeout, request/wake expiry, departed-seat claim release + observer TTL/cap (ADR 064/196); emit offline events
+  footprint/
+    classify.ts       // pure sidecar classifier (ADR 241): allowlist match, stack grouping by nearest non-sidecar ancestor, live/orphaned/unattributed — pattern-identical with scripts/perf/seat-footprint.mjs
+    scan.ts           // darwin scanners: ps → ProcSample[], sysctl vm.swapusage + vm_stat → MachineSample; throw-on-failure (callers own skip policy), non-darwin throws
+    sampler.ts        // setInterval tick (60s default): scan → classify → insertFootprintTick + retention prune; any throw = one skipped tick, never a crashed daemon
+    reap.ts           // reapOrphans: the daemon's only kill path — per-pid re-verification at kill time (allowlist + still orphaned), SIGTERM→grace→SIGKILL, footprint.reaped audit row
   projection/
     load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
     reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files
