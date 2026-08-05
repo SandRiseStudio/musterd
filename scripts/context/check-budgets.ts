@@ -46,7 +46,9 @@ let GENERALIST_CAPABILITIES: Record<string, unknown>;
 let HOOK_NUDGE_TEXTS: Record<string, string>;
 let LABEL_NUDGE_TEXT: string;
 try {
-  ({ measureToolSurface } = await import(distUrl('packages/mcp/dist/index.js')));
+  // Straight at the measurement module, not the package root: it pulls a devDependency, so keeping
+  // it out of `dist/index.js`'s runtime graph is what makes the published package loadable.
+  ({ measureToolSurface } = await import(distUrl('packages/mcp/dist/surfaceMeasure.js')));
   ({ renderPrimer, GENERALIST_CAPABILITIES } = await import(
     distUrl('packages/protocol/dist/index.js')
   ));
