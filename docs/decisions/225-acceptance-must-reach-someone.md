@@ -165,8 +165,20 @@ and is applied inconsistently.
 > | ------------------------------- | --------- | ------------------------------------------------------ | --------------------------- |
 > | live **and in a tool loop**     | live      | yes, at the next tool boundary                         | not needed                  |
 > | live **but idle between turns** | live      | **only when the seat next acts, which nothing bounds** | **no — it is classed live** |
+> | **woken for another ask**       | offline   | n/a — the session exists but serves one act            | **already spent**           |
 > | offline                         | offline   | no                                                     | yes                         |
 >
+> **The third row is dolly's, found 2026-08-04, and it is the wake rail's version of the second.**
+> Her acceptance ask for `01KZ7D582V` was routed to gptbot at 16:51:25. gptbot then woke at
+> 16:58:00 — but for _this ADR's own_ lane `01KZ7JAT55`, a different ask that arrived **later**. It
+> reviewed that one, accepted at 16:59:53, and went offline. Her ask sat in the same inbox for the
+> entire ~2 minutes the session existed, six minutes older than the wake that raised it, and was
+> never touched. **One wake serves one ask:** the woken session treats its wake payload as the whole
+> job, so inbox depth at wake time is invisible to it. The seat was present, capable, and
+> structurally unaware of the rest of its queue — which is neither a delivery failure nor an
+> attention failure, and no amount of delivery fixes it. The cheap remedy is a payload change, not a
+> delivery one: let the wake composition say _"and N older asks are waiting."_ It costs no extra wake.
+
 > The middle row is routed to the free rail, cannot be promptly reached by it, and is disqualified
 > from the paid one _because it looks live_. It is not permanently unreachable — the hook fires
 > whenever the seat resumes — but the latency is bounded by **the acceptor's own next action**, which
@@ -277,6 +289,31 @@ One predicate, two call sites, opposite defaults, each legible where it is used.
 4, the equivalent fix is for the exporter to emit what the reader treats as authoritative — not for
 the reader to start guessing from the singular field.
 
+### The sibling: a fixture more convenient than production
+
+dolly's, 2026-08-05, correcting her own shipped work, and it belongs beside the trap because it is
+how the trap survives a test suite. [#653]'s fix went green and did not fix the instance it cited.
+The real message carried no `meta.lane_handoff.lane`, so the code abstained and served the stale
+handoff exactly as before — but the test reproduced the staleness with a **synthetic handoff that
+did carry the lane meta**, so the assertion passed while the real case stayed broken. She caught it
+only by re-running the live query instead of trusting the suite.
+
+**A fixture more convenient than production makes a green test evidence of nothing.** This is the
+shared-predicate trap's test-time twin: the trap is a second consumer whose case the first never
+considered, and the fixture sibling is that second consumer's case never being _instantiated_. Both
+have the same remedy and it is one sentence — **the second consumer's case must be instantiated, in
+the fixture and in the assertion, or the guard is decoration.**
+
+It generalizes past that one PR. Instance 4's single-role fixture is the same defect; so, arguably,
+is why `interrupts.test` additions passed while `claimWakeLeases` broke, since the negative case
+lived in a different suite. And it is directly relevant to this ADR's own conduct: every retracted
+claim here came from reading an aggregate without asking what wrote the row. A convenient fixture is
+that error moved one level up — reading a number you constructed to be readable.
+
+dolly's own framing is the one to keep, because she applied it against herself: _"the number and the
+behaviour looked like X and nobody asked what produced it."_
+
+[#653]: https://github.com/SandRiseStudio/musterd/pull/653
 [#651]: https://github.com/SandRiseStudio/musterd/pull/651
 
 ## Observability & Evaluation
@@ -362,6 +399,23 @@ first.** It is currently unmeasured, it is the population for which #651 shipped
 it cannot keep, and every other number here is a pooled average until it is known. If it turns out to
 be near-empty the amendment is a footnote; if it is large, it is the next increment.
 
+> **Superseded in emphasis by the 08-05 result, below.** The middle bucket is no longer the first
+> thing to measure, because the result showed the dominant population is not idle-within-session but
+> **session-ended** — the two overnight confirms landed within four minutes of a morning
+> `claim.occupied`, after ~15 hours. So the Eval's first report is **time-to-answer decomposed against session
+> boundaries**: how much of the interval is delivery, how much is the acceptor, and how much is
+> simply _no session existing_. The three-way split remains correct about instruments; it is
+> mis-weighted about populations, and the third term dominates and is diurnal.
+>
+> Three further requirements the result forced, each earned by an error it caught:
+>
+> - **Take the review grade from the `lane.closed` row, never the ask.** The two disagree in flight
+>   and the ask's value goes stale (`01KZ2EN6S1`'s guard exists precisely to re-derive it).
+> - **Do not compute "times told" from `interrupt.raised`.** It is audited once per (recipient, act)
+>   while the line returns on every call — a first-occurrence count wearing an event count's name.
+> - **State the measurement horizon before measuring.** The same six asks read 33% at a 15-hour
+>   snapshot and 80% at close. A rate quoted without its horizon is not a result.
+
 (Note also that the baseline drifts: the first draft's 16 confirms became 19 within the hour as a
 human answered four pending asks. These are snapshots of a live ledger, not fixtures.)
 
@@ -419,3 +473,113 @@ autorefresh was in flight, and the acceptor's state resolved to the three-way ab
 (_interruptible_ / _wakeable_ / _neither_) rather than the two-way `hasLivePresence` answer. Without
 the third field the arms cannot be separated at analysis time, and the ADR would be measuring a
 pooled population again — the error this document has already made twice.
+
+### The result, 2026-08-05 — the rule fired, and the rule was under-specified
+
+ryder ran the tally against their own change ([#651]) and led with the falsifier rather than burying
+it: six acceptance asks reached the live rail on 08-04, two had closed, four were still
+`awaiting_acceptance` 15–16 hours later. **2 of 6 = 33%**, against this ADR's 36% baseline. On that
+reading delivery did not move the answer rate and this ADR is wrong.
+
+I re-measured before writing it up, and the picture is different in ways that cut both directions.
+Taking the favourable ones first, and flagging plainly what that means: **I am this ADR's author and
+what follows is a reading that rescues it, which is exactly the post-hoc fitting this document has
+twice caught itself doing.** So the corrections are stated as facts with their queries, the
+un-rescued number is kept, and no vindication is claimed.
+
+**Correction 1 — the set is 5 live-rail asks, not 6.** Lane `01KZ7JVWX2`'s
+`lane.ready_for_review` row carries `wake_queued: 1`. It is a wake datum and belongs in the offline
+arm; pooling it into the live arm is the exact error precondition 2 exists to prevent.
+
+**Correction 2 — the snapshot was taken three seconds before it changed.** ryder's tally is
+timestamped 08:58:01. izzo's acceptance of `01KZ7NQX71` landed at **08:58:04**, and two more followed
+by 09:00:31. The measurement caught the ledger at the bottom of a diurnal trough. This document
+already warns _"these are snapshots of a live ledger, not fixtures"_ — and the warning did not
+prevent the third instance of the same error.
+
+**The outcomes at close**, all `lane.closed` rows, live-rail asks only:
+
+| Lane         | Acceptor | Outcome               | Time in review |
+| ------------ | -------- | --------------------- | -------------- |
+| `01KZ7GK9J5` | stanley  | `counterpart_confirm` | 13.8 min       |
+| `01KZ7GR0V5` | miley    | `counterpart_confirm` | 22.4 min       |
+| `01KZ7NQX71` | izzo     | `counterpart_confirm` | **904.8 min**  |
+| `01KZ7NKKE5` | izzo     | `counterpart_confirm` | **891.6 min**  |
+| `01KZ7HTSHG` | izzo     | still open            | 16.5 h and up  |
+
+**4 of 5 confirmed = 80%**, against 17 of 33 = 52% over the whole post-217 window. The one wake-rail
+ask in the set closed `review_unanswered` at 930.9 min.
+
+**So which number is the result?** Both, and the disagreement is my fault. The pre-registered rule
+says _"the answer rate does not move"_ and **never specifies a measurement horizon.** At a 15-hour
+snapshot it is 33% and the ADR is falsified; at close it is 80% and the ADR is supported. A rule
+whose verdict flips on a horizon it never named is not a decision rule. That is a defect in how I
+wrote the falsifier, not in ryder's measurement, and it is the third instance in this document of the
+same family: **a number that reads as a fact about the world and is actually a fact about when you
+looked.**
+
+**The finding that survives either horizon, and it is worse for the ADR than the rate is good.**
+Two of the four confirms took roughly fifteen hours (904.8 and 891.6 min), and both landed within
+**four minutes** of their acceptor occupying a session: izzo's `claim.occupied` is 08:54:36, the two
+accepts 08:58:04 and 08:58:22. The overnight wake-rail ask closed `review_unanswered` in the same
+burst at 09:00:31. Set beside the two-point decomposition below — told fast, answered in 94 s and in
+2 min 11 s — the shape is unambiguous:
+
+> **Delivery moved the answer rate. It did not move the answer latency, because the binding
+> constraint is not delivery — it is session lifetime.** An acceptor answers when their session next
+> exists. The interrupt line delivers into a live session reliably; when that session ends, delivery
+> silently becomes "whenever they come back", and no delivery mechanism reaches across that gap.
+
+This widens the "neither" bucket well beyond the idle-between-turns case the amendment described.
+The dominant term is not idleness within a session, it is **the session ending** — and that is
+diurnal, so it is large, predictable, and invisible to every instrument in the table above. Decision
+1's three-way split is right about instruments and wrong about which population dominates.
+
+**What this does not rescue.** The 80% is an answer rate over a horizon long enough that the
+two-stage close's five-minute promise is meaningless within it. A confirm at 904 minutes against a
+5-minute promise is not the mechanism working; it is the worker having self-closed or moved on long
+before. So the practical conclusion is closer to ryder's than the rate suggests, and **nick's
+tiering proposal is the right next shape**: if most acceptance latency is set by when the acceptor
+next wakes up, then routing an ask for every change buys ritual, and the ones worth waiting for
+should be the ones that declare they are.
+
+**Why the four sat open rather than closing unanswered** — dolly, 08-05, and it is not a defect in
+ADR 229. revive's policy row is `{"standing_reseat_known_agents":true,"loops":{"review":true,"dispatch":false}}`:
+there is no `sweep` key, and `reaper.ts:83` skips every team where `loops.sweep !== true`, so
+`sweepAbandonedAcceptance` has never run here. ADR 229 states that every team is bit-identical to
+pre-229 until armed, and the code honours that. **The gap is that a safety backstop shipped opt-in
+and nobody opted in** — the mechanism built to stop lanes waiting forever spent the night watching
+four lanes wait. This changes the _labelling_ of the overnight state (open, not unanswered); it does
+**not** change the answer rate, and must not be read as if it does.
+
+### The delivery/acceptor decomposition — report these as two numbers, never their sum
+
+Both clean wake-rail confirms, joined lease-to-close by `lane_id`:
+
+| Acceptance                | Routed → leased | Woke → answered | Delivery share |
+| ------------------------- | --------------- | --------------- | -------------- |
+| gptbot, lane `01KZ7JAT55` | **11 min 55 s** | 1 min 34 s      | 86%            |
+| ryder, lane `01KZ7MSAG4`  | **4 min 42 s**  | 2 min 11 s      | 68%            |
+
+n=2, and no rate claim is made on two points. What they support is a claim about _mechanism_: the
+acceptor is fast once told, and the telling is the slow part. This ADR is built on the sentence _"the
+acceptor is never told"_; in both episodes the telling was slow and the acceptor was fast. **We have
+been reporting delivery latency and acceptor latency as one number, and they are different
+quantities with different fixes.** Report `time_to_lease` and `time_to_answer` separately. The
+second episode is also within-seat: ryder produced both the live-rail n=5 and this wake-rail confirm,
+which the design could not have arranged deliberately.
+
+**A grading defect the decomposition surfaced.** ryder's acceptance was reported as `cross_model`;
+the `lane.closed` row records `same_model`, while the `ready_for_review` row five minutes earlier
+recorded `cross_model`. Both seats attest `claude-opus-5`, so `same_model` is correct — this is lane
+`01KZ2EN6S1`'s re-derivation guard catching a stale grade in flight, and the first live instance of
+it firing. Without it, wake-rail confirms would silently read as better-graded than they are. The
+Eval must take the grade from the close row, not the ask.
+
+**A delivery-count defect, ryder's, and it is the same skeleton again.** `interrupt.raised` is
+audited **once per (recipient, act)** — `http.ts` gates the `appendAudit` on `hasInterruptRaised` —
+while the interrupt line itself is returned on **every** call, outside that branch. So the four
+unanswered acceptors were not told once; they were told at every tool boundary for as long as their
+sessions lived, and the ledger shows one row each. **Repeated telling did not work either**, which is
+a stronger result than the tally alone, and anyone computing "how many times was the acceptor told"
+from that table undercounts by the acceptor's tool-call rate.
