@@ -34,10 +34,7 @@ env-referenced entry — a separate change to the binding model."_ This ADR is t
 - **`musterd wire` — the headless counterpart to `init`.** Reads `.musterd/workspace.json`, resolves
   the key from **local** sources only (`--key` → `MUSTERD_AGENT_KEY` → the machine's global
   `config.agentKeys[team]`), and registers the MCP server for the folder (idempotent — `configure`
-  does `mcp remove` then `mcp add`). No prompts. The harness it configures follows the spec's
-  `surface` (falling back to Claude Code for a surface no adapter answers to), so the folder's own
-  entry is the one rewritten — later amendment, once the doctor began prescribing `wire` as the
-  repair for a baked-env entry that only Codex or Cursor owns. It **registers tools only** — it does _not_ set
+  does `mcp remove` then `mcp add`). No prompts. It **registers tools only** — it does _not_ set
   `MUSTERD_AUTOJOIN`, so a shared repo cloned by many never has every clone auto-claim the same seat;
   the session stays dormant until it joins explicitly (`--autojoin` opts a personal worktree into
   claim-on-launch). Wiring (make the tools available) is deliberately distinct from claiming a seat.
@@ -72,6 +69,16 @@ env-referenced entry — a separate change to the binding model."_ This ADR is t
   config is committable; the credential is not.
 - Composes with ADR 018 (binding file), ADR 058 (committed `.musterd/`), ADR 060 (verify-don't-assume;
   this supersedes its non-goal), ADR 075/077 (agent key + claim/request lane).
+- **`wire` follows the spec's `surface` (2026-08-05).** The decision above says "registers the MCP
+  server for the folder"; the implementation registered Claude Code's, whichever harness the folder
+  had actually been provisioned for. That only became load-bearing once the doctor started
+  prescribing `wire` as the repair for a **baked env value** in a harness entry — a wire-time
+  snapshot that outranks `binding.json` and that no observation can correct — because for a Codex or
+  Cursor folder the prescription was then a command that could not touch the file it named (ADR 168:
+  a detector whose fix has no safe form is half a feature). `wire` now dispatches on `spec.surface`
+  through the ADR 038 registry, falling back to Claude Code for a surface no adapter answers to
+  (`cli`, `other`, absent) — and never creating a _first_ install for a harness the folder never
+  picked, which stays `init`'s job.
 - **Exception — musterd's own repo ignores `workspace.json` (2026-07-07).** The committed-spec is a
   _downstream-repo_ feature: one repo, one canonical team, `git add` it once. musterd's own repo is
   dogfooded by many agents across many worktrees, each `musterd agent`/`init` **re-stamping**
