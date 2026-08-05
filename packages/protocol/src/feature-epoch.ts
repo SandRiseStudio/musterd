@@ -50,5 +50,10 @@
 // unattended actor (the auto-refresher first) as a named, attributed row; an older seat's renderer
 // doesn't know the kind and may facet it oddly, and its tools cannot reason about the peer/ledger
 // split — the roster's `behind` hint is the cue.
-export const FEATURE_EPOCH = 8 as const;
+// Epoch 9 — ADR 240: a lane's title is correctable. `lane_update` (and `musterd lane update`) take
+// `title`, so a lane opened with a title that misstates the work can be put right instead of
+// carrying a correction buried in its detail. An older seat is unaffected in what it reads — titles
+// render as they always did — it simply cannot issue the correction, and the roster's `behind` hint
+// is the cue for why its lane_update refuses the field.
+export const FEATURE_EPOCH = 9 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

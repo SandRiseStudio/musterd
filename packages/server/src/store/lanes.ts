@@ -163,6 +163,8 @@ export function updateLane(
     id,
     team_id: teamId,
     project: patch.project ?? existing.project,
+    // ADR 240: the title is correctable — opt-in, like `detail`, so every other patch leaves it be.
+    title: patch.title !== undefined ? patch.title : existing.title,
     detail: patch.detail !== undefined ? patch.detail : existing.detail,
     owner_seat: ownerSeat,
     surface_globs: JSON.stringify(patch.surface_globs ?? existing.surface_globs),
@@ -194,7 +196,7 @@ export function updateLane(
     updated_at: now,
   };
   db.prepare(
-    `UPDATE lanes SET project=@project, detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
+    `UPDATE lanes SET project=@project, title=@title, detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
        depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, stakes=@stakes, merged_json=@merged_json,
        state=@state, claimed_at=@claimed_at, resolved_at=@resolved_at, updated_at=@updated_at
      WHERE team_id=@team_id AND id=@id`,

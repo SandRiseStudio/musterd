@@ -38,6 +38,27 @@ describe('globsOverlap (cheap prefix intersection, ADR 083)', () => {
   });
 });
 
+/**
+ * ADR 240. A lane's title is what the board renders, what a handoff announces, and what a seat
+ * reads when deciding whether a lane is theirs — and it was the one field with no escape hatch.
+ * Live instance 2026-08-05: lane 01KZ9HR001 was opened with a title built on a misreading, and the
+ * only available correction was a note at the top of the detail saying the title is wrong.
+ */
+describe('a lane title is correctable (ADR 240)', () => {
+  it('patches the title, and leaves it alone when the patch omits one', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'wrong from the start' });
+
+    const retitled = updateLane(db, team.id, lane.id, 'bravo', { title: 'what it actually is' });
+    expect(retitled?.title).toBe('what it actually is');
+
+    // An unrelated patch must not disturb it — the field is opt-in, like `detail` and `project`.
+    const later = updateLane(db, team.id, lane.id, 'bravo', { state: 'active' });
+    expect(later?.title).toBe('what it actually is');
+    expect(getLane(db, team.id, lane.id, 'bravo')?.title).toBe('what it actually is');
+  });
+});
+
 describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () => {
   it('scenario 1 — the dependency-revert: unmet_dependency warns while the dep is active', () => {
     const { db, team } = seed();

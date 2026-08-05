@@ -212,13 +212,14 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_update',
     {
       description:
-        'Update a lane: state (active/blocked/done/…), surface_globs, depends_on, branch, detail, ' +
-        'project. Going active re-runs contention checks.',
+        'Update a lane: state (active/blocked/done/…), title, surface_globs, depends_on, branch, ' +
+        'detail, project. Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // Derived from the protocol schema (ADR 169 consolidation) — this enum was hand-duplicated
         // and silently missed new states.
         state: z.enum(LaneStateSchema.options).optional().describe('new state'),
+        title: z.string().min(1).optional().describe('correct a mis-stated title'),
         detail: z.string().optional(),
         surface_globs: z.array(z.string()).optional(),
         stakes: z
