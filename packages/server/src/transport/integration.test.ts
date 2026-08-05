@@ -3090,7 +3090,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(entry!.recipients.map((r) => r.seat)).toContain('bo');
   });
 
-  // ADR 241. The transfer's own act already names the right lane; what it could not carry was the
+  // ADR 242. The transfer's own act already names the right lane; what it could not carry was the
   // sender's reason, which is why explaining a handoff took a second act that then mis-derived.
   it('a handoff note rides the transfer act, with the correct lane, and is never stored on the lane', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
@@ -3127,7 +3127,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(msg.meta.lane_handoff.lane).toBe(lane.json.lane.id);
   });
 
-  it('a lane-less handoff act after a transfer names the handed lane, not an unrelated held one (ADR 241)', async () => {
+  it('a lane-less handoff act after a transfer names the handed lane, not an unrelated held one (ADR 242)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);

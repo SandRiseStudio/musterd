@@ -1,4 +1,4 @@
-# 241 — A handoff carries its own why
+# 242 — A handoff carries its own why
 
 - Status: accepted
 - Date: 2026-08-05
@@ -106,7 +106,7 @@ sends it.
 **Traces.** No new action; one new field on the two ADR 231 rows. `handoff.lane_derived` and
 `handoff.lane_ambiguous` now carry `detail.basis` — `handed_to_recipient` or `held` — so the two
 rules can be told apart after the fact. It is written on **every** derivation, so absence means
-"recorded before ADR 241" and never "the held set"; that unambiguous write edge is what makes the
+"recorded before ADR 242" and never "the held set"; that unambiguous write edge is what makes the
 read three-valued rather than quietly wrong (ADR 173 correction #1, same discipline). The note in
 (1) adds no trace of its own: it is message body, and the `handoff` act already carries it.
 

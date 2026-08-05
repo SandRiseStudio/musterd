@@ -482,7 +482,7 @@ describe('deriveHandoffLane (ADR 231) — a handoff act names the lane it hands 
     expect(deriveHandoffLane(db, team.id, 'bravo', 'June').kind).toBe('none');
   });
 
-  // ADR 241. The candidate set was "lanes the sender still HOLDS", but `lane_handoff` transfers
+  // ADR 242. The candidate set was "lanes the sender still HOLDS", but `lane_handoff` transfers
   // ownership BEFORE the explanatory act is sent — so the intended lane is never a candidate, and a
   // sender who holds exactly one OTHER lane lands in the confident single-candidate branch.
   describe('a lane just handed to this recipient outranks a lane the sender still holds', () => {

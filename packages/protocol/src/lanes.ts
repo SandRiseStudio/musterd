@@ -225,7 +225,7 @@ export const UpdateLaneSchema = z.object({
   /** Transfer ownership to this seat (lane_handoff / lane_claim sets it to the caller). */
   owner_seat: z.string().optional(),
   /**
-   * Why this handoff (ADR 241) — carried into the body of the `handoff` act the transfer already
+   * Why this handoff (ADR 242) — carried into the body of the `handoff` act the transfer already
    * emits, never stored on the lane. `lane_handoff` had no way to say anything, so explaining a
    * handoff took a SECOND act, and that act named no lane and had to derive one from the lanes the
    * sender still held — which is precisely the set the transfer just removed the right answer from.
