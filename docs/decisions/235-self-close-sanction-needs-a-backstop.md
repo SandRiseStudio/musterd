@@ -130,6 +130,28 @@ branches disagree about who was picked, never about whether the team armed a swe
   is the intent — the wait is where the verdict comes from — but it means `awaiting_acceptance` depth
   is no longer a health signal on an armed team, and anything reading it as one needs revisiting.
 
+> **Amendment (2026-08-05): a path around this ADR, found live the day it was measured against.** A
+> **repeat** submit — recording the merge SHA after the PR lands, which is the _normal_ flow, since
+> the SHA exists only after the merge — re-routes nothing, so the server composed no `review`, and
+> both clients read that silence as "no eligible acceptor is live — self-close sanctioned." Against
+> two lanes whose acceptor held a pending ask. Following that hint is precisely the premature
+> unverified close this ADR measured 20-for-20 and shipped to stop, reached by a branch the backstop
+> advice never touched: the no-acceptor branch keeps its sanction unconditionally (correctly — where
+> nobody was asked, no verdict is coming), and the repeat submit was landing in it by absence rather
+> than by fact.
+>
+> Two additive fields on `LaneResultSchema.review` close it, and the contract change is this
+> amendment's subject: **`standing: true`** marks a report of the existing acceptance state (who was
+> asked at the original submit, read from the recorded ready row — never re-derived from live lane
+> fields, so a later stakes edit cannot rewrite what the submit did) as distinct from a fresh routing
+> decision; **`acceptance_exempt: true`** carries the ADR 234 exemption so clients word it as the
+> designed path rather than the "nobody was eligible" degradation. Client rule, both surfaces: a
+> standing report with a reviewer names them and says leave it with them; a missing `review`
+> **abstains** — absence of a routing decision is not absence of an acceptor (the ADR 173 discipline,
+> applied to the one read that never had it) — and the sanction is reserved for a recorded null-pick.
+> Older clients ignore both fields; older daemons omit them and the client abstention is the safe
+> floor.
+
 ## Observability & Evaluation
 
 **Traces.** No new audit rows, and deliberately none: the decision changes advice, and advice is not

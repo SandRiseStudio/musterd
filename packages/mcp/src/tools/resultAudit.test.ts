@@ -201,9 +201,45 @@ describe('empty states name the next action', () => {
     });
 
     it('no acceptor asked — sanctioned regardless, since no verdict is coming', async () => {
-      const out = await run(undefined);
+      const out = await run({ self_close_sanctioned: true });
       expect(out).toContain('no eligible acceptor is live');
       expect(out).toContain('self-close sanctioned');
+    });
+
+    it('no review at all — abstains, and never sanctions self-close on silence', async () => {
+      // The 2026-08-05 defect: a repeat submit returns no fresh routing decision, and this client
+      // read the silence as "no eligible acceptor is live" against two lanes whose acceptor had a
+      // pending ask — inviting the premature unverified close ADR 235 measured 20-for-20. Absence
+      // of a decision is not absence of an acceptor (ADR 173): with nothing to report, say nothing.
+      const out = await run(undefined);
+      expect(out).not.toContain('no eligible acceptor');
+      expect(out).not.toContain('self-close sanctioned');
+    });
+
+    it('a standing report names the acceptor who already holds the ask', async () => {
+      // The server's half of the same fix: a repeat submit reports the STANDING state, and the
+      // hint must say "already awaiting" — a report, never a fresh promise, and never a sanction.
+      const out = await run({ standing: true, reviewer: 'Lin', route: 'cross_family' });
+      expect(out).toContain('already awaiting acceptance from Lin');
+      expect(out).toContain('nothing re-routed');
+      expect(out).not.toContain('self-close sanctioned');
+    });
+
+    it('a standing report with no acceptor keeps the sanction — nobody was ever asked', async () => {
+      const out = await run({ standing: true, self_close_sanctioned: true });
+      expect(out).toContain('no acceptor was ever routed');
+      expect(out).toContain('self-close sanctioned');
+    });
+
+    it('an exempt submit is worded as the designed path, never as the degradation', async () => {
+      // ADR 234 increment 2: fresh and repeat submits of a declared-low lane both say "exempt" —
+      // "no eligible acceptor is live" would report a design choice as an empty fleet.
+      const fresh = await run({ acceptance_exempt: true });
+      expect(fresh).toContain('acceptance-exempt');
+      expect(fresh).not.toContain('no eligible acceptor');
+      const repeat = await run({ standing: true, acceptance_exempt: true });
+      expect(repeat).toContain('acceptance-exempt');
+      expect(repeat).not.toContain('no eligible acceptor');
     });
   });
 

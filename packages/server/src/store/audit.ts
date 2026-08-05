@@ -470,6 +470,51 @@ export function reviewRouting(
 }
 
 /**
+ * The standing acceptance state of a lane, read from its newest `lane.ready_for_review` row — who
+ * was asked, or that nobody was, or that the submit was exempt (ADR 234).
+ *
+ * Exists for the REPEAT submit (recording a merge SHA after the PR lands is the normal flow, not an
+ * edge case). That call is a legal no-op that re-routes nothing, so the transition block composes no
+ * `review` — and on 2026-08-05 both clients read that absence as "no eligible acceptor is live" and
+ * sanctioned self-close against two lanes whose acceptor had a pending ask. Absence of a routing
+ * decision on one call is not absence of an acceptor; this read is what lets the response say what
+ * IS true instead. Distinct from `reviewRouting` above, which answers the close edge's narrower
+ * question and deliberately omits the reviewer's name.
+ */
+export function standingAcceptance(
+  db: Database,
+  teamId: string,
+  laneId: string,
+): { reviewer?: string; route?: string; grade?: string; acceptance_exempt?: boolean } | null {
+  const row = db
+    .prepare<[string, string], { detail: string | null }>(
+      `SELECT detail FROM audit
+         WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+       ORDER BY ts DESC, id DESC LIMIT 1`,
+    )
+    .get(teamId, laneId);
+  if (!row?.detail) return null;
+  try {
+    const d = JSON.parse(row.detail) as {
+      reviewer?: string;
+      route?: string;
+      review_grade?: string;
+      acceptance_exempt?: boolean;
+    };
+    if (d.acceptance_exempt === true) return { acceptance_exempt: true };
+    if (typeof d.reviewer === 'string' && d.reviewer.length > 0)
+      return {
+        reviewer: d.reviewer,
+        ...(typeof d.route === 'string' ? { route: d.route } : {}),
+        ...(typeof d.review_grade === 'string' ? { grade: d.review_grade } : {}),
+      };
+    return null; // no_candidate, or a pre-#450 row that recorded neither — nothing standing to report
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The newest `lane.review_peer_confirmed` grade for a lane, or 'none' (ADR 188). The close edge
  * writes this on risky lanes so the two-review pair (peer + human) is legible in one row.
  */

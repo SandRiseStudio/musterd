@@ -254,6 +254,18 @@ export const LaneResultSchema = z.object({
       route: z.enum(['human_admin', 'cross_family']).optional(),
       self_close_sanctioned: z.boolean().optional(),
       /**
+       * The lane was ALREADY awaiting acceptance: this is a report of the standing state (who was
+       * asked at the original submit), not a fresh routing decision. Set on repeat submits — e.g.
+       * recording the merge SHA after the PR lands, which is the normal flow. Consumers must never
+       * read a standing report's missing reviewer as "no eligible acceptor is live": that misread
+       * sanctioned self-close against lanes whose acceptor had a pending ask (2026-08-05), the
+       * premature unverified close ADR 235 measured 20-for-20.
+       */
+      standing: z.boolean().optional(),
+      /** ADR 234 increment 2: the submit was acceptance-exempt (declared low stakes) — no ask
+       *  exists and none is owed; self-close is the designed path, not a degradation. */
+      acceptance_exempt: z.boolean().optional(),
+      /**
        * ADR 235: this team has an acceptance backstop, so an unanswered lane gets collected rather
        * than hanging — which is what makes "leave it with them" safe advice instead of a way to
        * strand work. Present only when an acceptor was actually asked AND the team armed
