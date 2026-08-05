@@ -67,6 +67,7 @@ export function recordLaneClose(
         routed: undefined as boolean | undefined,
         human_required: undefined as boolean | undefined,
         promised_ms: undefined as number | undefined,
+        exempt: undefined as boolean | undefined,
       };
   // ADR 217: how long the owner actually left the lane in review. Same approximation ADR 169 uses
   // for `time_in_review_ms` — entering review was the lane's last update before the close — and it
@@ -125,20 +126,34 @@ export function recordLaneClose(
                   // `human_review_missed` — a requirement with no one to meet it, not a shrug.
                   // `undefined` routing (a lane that entered review before the outcome was recorded)
                   // keeps the old label rather than inventing a verdict about the past.
-                  routing.routed === false
-                  ? // Same discipline one level down: only a RECORDED requirement earns the
-                    // `human_review_missed` label. A row that abstains keeps the older, weaker
-                    // `no_candidate` — the label it would have carried before the requirement was
-                    // ever recorded — rather than a verdict about a past that never wrote one down.
-                    routing.human_required === true
-                    ? 'human_review_missed'
-                    : 'no_candidate'
-                  : // ADR 217: an ask WAS sent and the owner closed it themselves — but "timeout" was
-                    // asserting an elapsed wait nobody had measured. 11 of the first 18 such closes
-                    // happened inside five minutes, the fastest after 8 seconds, while the median
-                    // successful confirm took 22 minutes. The reason now says which of the two
-                    // opposite failures this was, and abstains when the promise is unknowable.
-                    waitVerdict
+                  routing.exempt === true
+                  ? // ADR 234 increment 2: nobody was asked BY DESIGN, on the lane's own declared
+                    // stakes. Ahead of `no_candidate` because both present as `routed: false` and
+                    // only this one is a choice — `no_candidate` is the sanctioned degradation
+                    // where the system wanted a counterpart and could not find one. Folding them
+                    // would inflate the degradation count with lanes that degraded nothing, and
+                    // that count is a live input to dolly's bucket split and to this ADR's own 84%.
+                    //
+                    // Keyed on the RECORDED `acceptance_exempt` from the ready row, never on
+                    // `lane.stakes` here: stakes are editable after open (ADR 234), so re-deriving
+                    // at close would let an edit made after the submit rewrite what the submit did.
+                    // The whole point of the ladder's discipline is that only a recorded fact earns
+                    // a label, and this is the case where the tempting shortcut is a live field.
+                    'acceptance_exempt'
+                  : routing.routed === false
+                    ? // Same discipline one level down: only a RECORDED requirement earns the
+                      // `human_review_missed` label. A row that abstains keeps the older, weaker
+                      // `no_candidate` — the label it would have carried before the requirement was
+                      // ever recorded — rather than a verdict about a past that never wrote one down.
+                      routing.human_required === true
+                      ? 'human_review_missed'
+                      : 'no_candidate'
+                    : // ADR 217: an ask WAS sent and the owner closed it themselves — but "timeout" was
+                      // asserting an elapsed wait nobody had measured. 11 of the first 18 such closes
+                      // happened inside five minutes, the fastest after 8 seconds, while the median
+                      // successful confirm took 22 minutes. The reason now says which of the two
+                      // opposite failures this was, and abstains when the promise is unknowable.
+                      waitVerdict
                 : 'self_close',
       // ADR 172: flagged even on a verified close — an agent counterpart's confirm on a risky lane
       // is a real review, but not the human one the risk tag demanded.

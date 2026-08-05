@@ -145,6 +145,8 @@ import {
   wakeExhaustionKey,
 } from '../store/residency.js';
 import {
+  ACCEPTANCE_EXEMPT_SAMPLE_RATE,
+  acceptanceExemption,
   pickHumanReviewer,
   pickReviewCounterpart,
   pickWakeReviewer,
@@ -2783,13 +2785,14 @@ export async function handleHttp(
           // when no peer exists the human ask is not gated behind a stage that cannot happen —
           // fall back to the stage-two human directly, at the blocking tier, as before ADR 188.
           const worker = lane.owner_seat ?? member.name;
-          const peerPick = pickReviewCounterpart(
-            ctx.db,
-            team.id,
-            lane,
-            worker,
-            ctx.config.presenceTimeoutMs,
-          );
+          // ADR 234 increment 2: decided BEFORE the picker runs. Exempting here rather than teaching
+          // pickReviewCounterpart to decline keeps the "why was this seat chosen" trace intact — the
+          // picker's ladder still means exactly what it meant — and it means an exempt submit never
+          // leases a wake or trips the review-loop breaker on the way to being skipped.
+          const exemption = acceptanceExemption(lane);
+          const peerPick = exemption.exempt
+            ? null
+            : pickReviewCounterpart(ctx.db, team.id, lane, worker, ctx.config.presenceTimeoutMs);
           const humanFallback =
             lane.risk.length > 0 && !peerPick
               ? pickHumanReviewer(ctx.db, team.id, worker, ctx.config.presenceTimeoutMs)
@@ -2800,10 +2803,15 @@ export async function handleHttp(
           // ADR 191: when nobody live is eligible, try a marked-wakeable offline seat — only if the
           // review loop is enabled AND that seat is flow:auto AND the circuit breaker has not tripped.
           const teamPolicy = getPolicy(ctx.db, team.id);
-          const posture = pick
-            ? undefined
-            : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
-          if (!pick && lane.risk.length === 0 && posture) {
+          // ADR 234 increment 2: an exempt lane has no posture to explain. `family_posture` answers
+          // "why was nobody eligible" — a question an exempt submit never asked. Recording one here
+          // would put an empty-pool diagnosis on a row where the pool was never consulted, and the
+          // ADR 172 remedy list (wake a seat / enrol one) would be advice about a non-problem.
+          const posture =
+            pick || exemption.exempt
+              ? undefined
+              : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
+          if (!pick && !exemption.exempt && lane.risk.length === 0 && posture) {
             if (reviewLoopBounceCount(ctx.db, team.id, lane.id) >= REVIEW_LOOP_BREAKER_N) {
               breakerTripped = true;
               const human = pickHumanReviewer(
@@ -2901,18 +2909,32 @@ export async function handleHttp(
               // re-attested to the worker's own model inside one 5-minute window on 2026-08-02.
               // Read the CLOSE row for diversity claims (ADR 056 counts from there); read this one
               // for routing behaviour. Mistaking the two reads a false defect into a healthy system.
-              ...(pick
-                ? {
-                    reviewer: pick.reviewer,
-                    route: pick.route,
-                    review_grade: pick.grade,
-                    ...(wakeQueued ? { wake_queued: true } : {}),
-                    ...(breakerTripped ? { breaker_tripped: true } : {}),
-                  }
-                : {
-                    no_candidate: true,
-                    ...(breakerTripped ? { breaker_tripped: true } : {}),
-                  }),
+              // ADR 234 increment 2 — THE THIRD BRANCH, and it is a gate, not a nicety. An exempt
+              // submit must never borrow `no_candidate`: that word means "we wanted a counterpart
+              // and could not get one", it is the sanctioned-degradation bucket, and every exempt
+              // lane reusing it would inflate dolly's n=16 and rot the 84% headline this very ADR
+              // exists to protect. Increment 2 corrupting increment 1's measurement is the one
+              // outcome that would make the whole arc worthless, so exemption gets its own name.
+              ...(exemption.exempt
+                ? { acceptance_exempt: true }
+                : pick
+                  ? {
+                      reviewer: pick.reviewer,
+                      route: pick.route,
+                      review_grade: pick.grade,
+                      ...(wakeQueued ? { wake_queued: true } : {}),
+                      ...(breakerTripped ? { breaker_tripped: true } : {}),
+                    }
+                  : {
+                      no_candidate: true,
+                      ...(breakerTripped ? { breaker_tripped: true } : {}),
+                    }),
+              // The 1-in-5 draw, recorded on the rows that were drawn IN. Without it the Eval cannot
+              // tell a sampled-in low lane from a lane declared `normal` — they route identically —
+              // and the sampling hole would buy data nobody could identify. Written beside the pick
+              // rather than inside it, so a sampled-in lane that then finds no candidate still says
+              // it was sampled: those two facts are independent and both matter to the analysis.
+              ...(exemption.sampled ? { exempt_sampled: true } : {}),
               // ADR 188: how the human requirement will be met — 'gated' (fires on the peer's
               // accept) vs 'immediate' (no peer existed). Absent on non-risky lanes.
               ...(humanRequired && pick
@@ -3000,6 +3022,20 @@ export async function handleHttp(
               grade: pick.grade,
               tier: 'blocking',
               breaker_tripped: true,
+            };
+          } else if (exemption.exempt) {
+            // ADR 234 increment 2. Deliberately NOT `self_close_sanctioned`: that field is the ADR
+            // 172 degradation — "we tried and nobody was eligible, closing yourself is forgiven".
+            // Here nobody was asked BY DESIGN, on the worker's own declaration, and telling them
+            // they are being forgiven for a degradation would teach the wrong lesson about a path
+            // they chose. It also says what closing will record, so the ledger label is never a
+            // surprise found afterwards, and it names the 1-in-5 so the exemption never reads as a
+            // promise: the next low submit may well route.
+            review = {
+              acceptance_exempt: true,
+              stakes: lane.stakes,
+              close_records: 'acceptance_exempt',
+              sample_rate: ACCEPTANCE_EXEMPT_SAMPLE_RATE,
             };
           } else if (humanRequired) {
             // ADR 172: a risky lane with no live human/admin. NOT the sanctioned self-close — the

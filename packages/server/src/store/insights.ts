@@ -404,6 +404,8 @@ export function deriveReviewMetrics(
     ready: 0,
     routed: 0,
     no_candidate: 0,
+    acceptance_exempt: 0,
+    exempt_sampled: 0,
     sent_back: 0,
     closed: {
       total: 0,
@@ -412,6 +414,7 @@ export function deriveReviewMetrics(
       review_unanswered: 0,
       review_cut_short: 0,
       no_candidate: 0,
+      acceptance_exempt: 0,
       human_review_missed: 0,
       human_required_unknown: 0,
       self_close: 0,
@@ -424,6 +427,8 @@ export function deriveReviewMetrics(
     let d: {
       reviewer?: string;
       no_candidate?: boolean;
+      acceptance_exempt?: boolean;
+      exempt_sampled?: boolean;
       reason?: string;
       human_required_unknown?: boolean;
     } = {};
@@ -438,8 +443,16 @@ export function deriveReviewMetrics(
       m.ready++;
       // Pre-#450 rows recorded neither field; they count as `ready` and abstain from the split
       // rather than being guessed into one side of it.
-      if (typeof d.reviewer === 'string' && d.reviewer.length > 0) m.routed++;
+      // ADR 234 increment 2: matched FIRST and on its own counter. An exempt row carries neither
+      // `reviewer` nor `no_candidate`, so without this clause it would land in the abstain bucket
+      // and the report would call a designed exemption "predates routing-outcome recording" — an
+      // unknown asserted about the one row that knows exactly what it did.
+      if (d.acceptance_exempt === true) m.acceptance_exempt++;
+      else if (typeof d.reviewer === 'string' && d.reviewer.length > 0) m.routed++;
       else if (d.no_candidate === true) m.no_candidate++;
+      // Orthogonal to the split above: a sampled-in lane ROUTED, and is counted in `routed` too.
+      // This is the sample size the low tier is producing, and the Eval divides by it.
+      if (d.exempt_sampled === true) m.exempt_sampled++;
     } else {
       m.closed.total++;
       const reason = d.reason;
@@ -451,6 +464,10 @@ export function deriveReviewMetrics(
       else if (reason === 'review_unanswered') m.closed.review_unanswered++;
       else if (reason === 'review_cut_short') m.closed.review_cut_short++;
       else if (reason === 'no_candidate') m.closed.no_candidate++;
+      // ADR 234 increment 2: matched explicitly like every other recorded reason. Left to the
+      // `else` it would count as `unknown_reason` — "written by a newer build, upgrade the reader" —
+      // which is exactly the wrong remedy for a reason this build writes itself.
+      else if (reason === 'acceptance_exempt') m.closed.acceptance_exempt++;
       // ADR 172's counter-metric needs its own bucket: without one it fell to the `else` and was
       // counted as a self-close — "never entered review" said of a lane that entered review and
       // whose required human never came, which is the opposite of what the row records.

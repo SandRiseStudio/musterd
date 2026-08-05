@@ -3397,6 +3397,11 @@ describe('two-stage close (ADR 169)', () => {
       ['high', 'high'],
       [undefined, 'normal'], // undeclared reads as the default — absence IS the declaration
     ] as const)('records stakes=%s as %s at ready_for_review', async (declared, expected) => {
+      // ADR 234 increment 2 landed after this test and made `low` route conditionally. The draw is
+      // pinned INTO the sample here so all three tiers still route identically — which is what this
+      // test is about. The label's own claim (recorded unconditionally, on every tier) is
+      // orthogonal to the routing flip and must keep holding on a routed low lane.
+      vi.spyOn(Math, 'random').mockReturnValue(0);
       const { nickTok, ada } = await setup();
       const lane = await post(
         '/teams/dawn/lanes',
@@ -3440,6 +3445,205 @@ describe('two-stage close (ADR 169)', () => {
       // An unrelated patch must not silently reset it.
       const other = await patchLane(id, { detail: 'unrelated' }, ada);
       expect(other.json.lane.stakes).toBe('low');
+    });
+  });
+
+  // ADR 234 increment 2 — the ROUTING FLIP. A declared-`low` lane routes no acceptance ask, except
+  // the 1-in-5 the sampling hole draws in. The load-bearing claims are not "no ask was sent" (that
+  // is the easy half) but what the LEDGER says afterwards: an exempt submit must be distinguishable
+  // from the sanctioned no-candidate degradation and from a plain self-close, or increment 2
+  // corrupts the very measurement increment 1 shipped to protect.
+  describe('ADR 234 increment 2 — declared-low routes no ask, and says so in its own words', () => {
+    /** The draw, pinned. 0.99 misses the 1-in-5 hole; 0 falls into it. */
+    const draw = (n: number) => vi.spyOn(Math, 'random').mockReturnValue(n);
+
+    it('sends no ask, records acceptance_exempt at ready, and closes acceptance_exempt', async () => {
+      draw(0.99);
+      const { nickTok, ada, gee } = await setup();
+      const laneRes = await post(
+        '/teams/dawn/lanes',
+        { title: 'typo in a comment', claim: true, stakes: 'low' },
+        ada,
+      );
+      const laneId = laneRes.json.lane.id as string;
+
+      const ready = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      expect(ready.status).toBe(200);
+      expect(ready.json.lane.state).toBe('awaiting_acceptance');
+      // No acceptor was chosen — and the response says so in the exemption's own vocabulary, NOT as
+      // `self_close_sanctioned`. That field is the ADR 172 degradation ("we tried, nobody was
+      // eligible, you are forgiven"); being forgiven for a path you deliberately chose teaches the
+      // wrong lesson about it.
+      expect(ready.json.review.reviewer).toBeUndefined();
+      expect(ready.json.review.acceptance_exempt).toBe(true);
+      expect(ready.json.review.self_close_sanctioned).toBeUndefined();
+      expect(ready.json.review.close_records).toBe('acceptance_exempt');
+      // The rate rides along so the exemption never reads as a promise: the next low submit may
+      // well route, and a worker who learns "low never routes" has learned something false.
+      expect(ready.json.review.sample_rate).toBeGreaterThan(0);
+
+      // Nothing was delivered to the counterpart who WOULD have been picked.
+      const inbox = await get(`/teams/dawn/inbox?limit=50`, gee);
+      expect(
+        (inbox.json.messages as any[]).filter((m) => m.meta?.lane_review?.lane === laneId),
+      ).toHaveLength(0);
+
+      const readyRows = await auditRows(nickTok, 'lane.ready_for_review');
+      const r0 = readyRows.find((r: any) => r.detail.lane === laneId)!;
+      expect(r0.detail.acceptance_exempt).toBe(true);
+      // THE GATE (miley's catch): never the null-pick path. `no_candidate` is the bucket meaning
+      // "we wanted a counterpart and could not get one"; every exempt lane borrowing it would
+      // inflate dolly's n=16 and rot this ADR's own 84% headline.
+      expect(r0.detail.no_candidate).toBeUndefined();
+      expect(r0.detail.reviewer).toBeUndefined();
+      // ADR 217: an exempt lane promised nobody anything, so it stamps no window.
+      expect(r0.detail.ask_tier).toBeUndefined();
+      expect(r0.detail.ask_timeout_ms).toBeUndefined();
+      // ADR 172: `family_posture` answers "why was nobody eligible" — a question this submit never
+      // asked. Recording one would put an empty-pool diagnosis on a row where the pool was never
+      // consulted, and send a reader after a remedy for a non-problem.
+      expect(r0.detail.family_posture).toBeUndefined();
+      // The label itself is still recorded, unconditionally, exactly as increment 1 promised.
+      expect(r0.detail.stakes).toBe('low');
+      expect(r0.detail.exempt_sampled).toBeUndefined();
+
+      await patchLane(laneId, { state: 'done' }, ada);
+      const closed = (await auditRows(nickTok, 'lane.closed')).find(
+        (r: any) => r.detail.lane === laneId,
+      )!;
+      expect(closed.detail.reason).toBe('acceptance_exempt');
+      // Distinguishable from BOTH neighbours in the unverified bucket, which is the requirement.
+      expect(closed.detail.reason).not.toBe('no_candidate');
+      expect(closed.detail.reason).not.toBe('self_close');
+      // Still an unverified close — nobody confirmed it. Unverified BY DESIGN is a different fact
+      // about the fleet than "nobody was available", but it is not a verified one.
+      expect(closed.detail.verified).toBe(false);
+    });
+
+    it('the 1-in-5 routes exactly like normal, and the draw is recorded so it can be told apart', async () => {
+      draw(0);
+      const { nickTok, ada } = await setup();
+      const laneRes = await post(
+        '/teams/dawn/lanes',
+        { title: 'also small', claim: true, stakes: 'low' },
+        ada,
+      );
+      const laneId = laneRes.json.lane.id as string;
+      const ready = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      expect(ready.json.review.reviewer).toBeTruthy();
+      expect(ready.json.review.acceptance_exempt).toBeUndefined();
+
+      const r0 = (await auditRows(nickTok, 'lane.ready_for_review')).find(
+        (r: any) => r.detail.lane === laneId,
+      )!;
+      expect(r0.detail.reviewer).toBeTruthy();
+      expect(r0.detail.acceptance_exempt).toBeUndefined();
+      // Without this flag a sampled-in low lane is indistinguishable in the ledger from a lane
+      // declared `normal` — they route identically — and the hole would produce data nobody could
+      // attribute to the low tier. The whole point of paying for the sample is being able to read it.
+      expect(r0.detail.exempt_sampled).toBe(true);
+      expect(r0.detail.stakes).toBe('low');
+      expect(r0.detail.ask_tier).toBe('standard');
+    });
+
+    it('a risk tag outranks the declaration — low + risky still routes to a human', async () => {
+      // ADR 172 makes human review a REQUIREMENT on a risky lane. If `stakes: low` could dissolve
+      // it, the field would be a second and quieter way to clear `risk`.
+      draw(0.99); // would exempt, were the lane not risky
+      const { nickTok, ada } = await setup();
+      const laneRes = await post(
+        '/teams/dawn/lanes',
+        { title: 'small but user-facing', claim: true, stakes: 'low', risk: ['user_facing'] },
+        ada,
+      );
+      const laneId = laneRes.json.lane.id as string;
+      const ready = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      expect(ready.json.review.acceptance_exempt).toBeUndefined();
+
+      const r0 = (await auditRows(nickTok, 'lane.ready_for_review')).find(
+        (r: any) => r.detail.lane === laneId,
+      )!;
+      expect(r0.detail.acceptance_exempt).toBeUndefined();
+      expect(r0.detail.human_required).toBe(true);
+    });
+
+    it('normal and high are untouched by the flip, at the draw that would exempt', async () => {
+      draw(0.99);
+      const { nickTok, ada } = await setup();
+      for (const stakes of ['normal', 'high'] as const) {
+        const laneRes = await post(
+          '/teams/dawn/lanes',
+          { title: `a ${stakes} lane`, claim: true, stakes },
+          ada,
+        );
+        const laneId = laneRes.json.lane.id as string;
+        const ready = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+        expect(ready.json.review.reviewer).toBeTruthy();
+        const r0 = (await auditRows(nickTok, 'lane.ready_for_review')).find(
+          (r: any) => r.detail.lane === laneId,
+        )!;
+        expect(r0.detail.acceptance_exempt).toBeUndefined();
+        expect(r0.detail.exempt_sampled).toBeUndefined();
+      }
+    });
+
+    it('the close reads the RECORDED exemption, so editing stakes afterwards cannot rewrite it', async () => {
+      // The trap the reason ladder's own discipline warns about: `stakes` is editable after open
+      // (ADR 234), so a close that re-derived the label from the live field would let an edit made
+      // minutes later rewrite what the submit actually did — in both directions.
+      draw(0.99);
+      const { nickTok, ada } = await setup();
+
+      // (a) exempt at submit, then raised to `high` before the close. The close must still say
+      // acceptance_exempt: no ask was sent, and no later edit changes that fact.
+      const a = await post('/teams/dawn/lanes', { title: 'a', claim: true, stakes: 'low' }, ada);
+      const aId = a.json.lane.id as string;
+      await patchLane(aId, { state: 'ready_for_review' }, ada);
+      await patchLane(aId, { stakes: 'high' }, ada);
+      await patchLane(aId, { state: 'done' }, ada);
+      const aClosed = (await auditRows(nickTok, 'lane.closed')).find(
+        (r: any) => r.detail.lane === aId,
+      )!;
+      expect(aClosed.detail.reason).toBe('acceptance_exempt');
+
+      // (b) the mirror: routed at submit, then dropped to `low` before the close. A lane whose ask
+      // WAS sent must keep an ask-shaped reason — relabelling it exempt would erase a real unanswered
+      // acceptance from the numerator the rollback condition is judged on.
+      const b = await post('/teams/dawn/lanes', { title: 'b', claim: true, stakes: 'normal' }, ada);
+      const bId = b.json.lane.id as string;
+      const bReady = await patchLane(bId, { state: 'ready_for_review' }, ada);
+      expect(bReady.json.review.reviewer).toBeTruthy();
+      await patchLane(bId, { stakes: 'low' }, ada);
+      await patchLane(bId, { state: 'done' }, ada);
+      const bClosed = (await auditRows(nickTok, 'lane.closed')).find(
+        (r: any) => r.detail.lane === bId,
+      )!;
+      expect(bClosed.detail.reason).not.toBe('acceptance_exempt');
+      expect(['review_cut_short', 'review_unanswered', 'review_timeout']).toContain(
+        bClosed.detail.reason,
+      );
+    });
+
+    it('a counterpart who confirms an exempt lane anyway still records a verified close', async () => {
+      // The exemption removes the ASK, never the possibility. A seat that reviews a low lane
+      // unprompted has performed a real cross-seat review, and `verified` must keep meaning what it
+      // has always meant — otherwise the exemption would quietly suppress good news too.
+      draw(0.99);
+      const { nickTok, ada, gee } = await setup();
+      const laneRes = await post(
+        '/teams/dawn/lanes',
+        { title: 'small', claim: true, stakes: 'low' },
+        ada,
+      );
+      const laneId = laneRes.json.lane.id as string;
+      await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      await patchLane(laneId, { state: 'done' }, gee); // a different seat closes it
+
+      const closed = (await auditRows(nickTok, 'lane.closed')).find(
+        (r: any) => r.detail.lane === laneId,
+      )!;
+      expect(closed.detail.verified).toBe(true);
+      expect(closed.detail.reason).toBe('counterpart_confirm');
     });
   });
 
