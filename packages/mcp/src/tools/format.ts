@@ -136,8 +136,8 @@ const REPAIR_CLASSES: { match: RegExp; hint: string }[] = [
   },
   {
     // ADR 068/092: another session took this seat; this one is stale, not broken.
-    match: /superseded|replaced by/i,
-    hint: 'another session took this seat — team_join to re-claim it, or team_status to see who holds it',
+    match: /superseded|taken over|replaced by/i,
+    hint: 'another session took this seat — team_status shows who holds it now; team_join re-claims but would displace them, so choose deliberately (ADR 237)',
   },
   {
     match: /no memory saved/i,
@@ -175,6 +175,15 @@ export function errorResult(err: unknown) {
  * "call team_join first" and the real cause (member offline everywhere) stays hidden.
  */
 export function notJoinedMessage(action: string, lastJoinError: string | null): string {
+  // ADR 237: an evicted session DID join — "call team_join first" is the opposite of what happened,
+  // and following it reflexively is the ADR 131 ping-pong. Name the eviction instead.
+  if (lastJoinError && /superseded|taken over|replaced by/i.test(lastJoinError)) {
+    return (
+      `this session was evicted from its seat — a newer session took it over, so you can't ${action} as it. ` +
+      `team_status shows who holds the seat now; team_join would displace them, so rejoin only deliberately.\n` +
+      `Eviction detail: ${lastJoinError}`
+    );
+  }
   const base = `you haven't joined the team yet — call team_join first, then ${action}`;
   return lastJoinError ? `${base}.\nNote: the last join attempt failed: ${lastJoinError}` : base;
 }

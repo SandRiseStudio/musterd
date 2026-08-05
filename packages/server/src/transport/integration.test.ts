@@ -1375,8 +1375,47 @@ describe('WebSocket', () => {
     // genuinely different one (another machine / branch) and stays dormant rather than self-exiting.
     expect((superseded as any).same_workspace).toBeFalsy();
 
+    // ADR 237: the displacement itself is a ledger fact — this branch used to evict silently,
+    // leaving only the winner's claim.occupied (the 2026-08-05 ryder incident's diagnostic gap).
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const row = listAudit(server.db, teamId).find((r) => r.action === 'claim.superseded');
+    expect(row).toBeDefined();
+    const detail = JSON.parse(row!.detail ?? '{}');
+    expect(detail).toMatchObject({ same_workspace: false, evicted: 1, via: 'ws' });
+
     first.close();
     second.close();
+  });
+
+  it('an HTTP claim that displaces a live WS session audits the eviction (ADR 237)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+    const first = new TestWs();
+    await first.open();
+    await first.claim('dawn', team.json.agent_key, 'Ada', 'claude-code', grant);
+
+    // A stateless HTTP claim (CLI-style) displaces the live WS incumbent — the other transport's
+    // copy of the same silent branch.
+    const r = await post('/teams/dawn/claim', {
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(team.json.human_credential, 'Ada'),
+      surface: 'cli',
+    });
+    expect(r.json).toMatchObject({ type: 'occupied' });
+
+    const superseded = await first.waitFor('error');
+    expect((superseded as any).code).toBe('superseded');
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const row = listAudit(server.db, teamId).find((a) => a.action === 'claim.superseded');
+    expect(row).toBeDefined();
+    const detail = JSON.parse(row!.detail ?? '{}');
+    expect(detail).toMatchObject({ same_workspace: false, evicted: 1, via: 'http' });
+
+    first.close();
   });
 
   describe('durability-gated same-workspace eviction (ADR 092)', () => {

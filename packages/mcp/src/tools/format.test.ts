@@ -108,3 +108,31 @@ describe('notReadyMessage — seat-drop B (ADR 193)', () => {
     expect(msg).not.toMatch(/last join attempt failed/i);
   });
 });
+
+describe('notReadyMessage — evicted session (ADR 237)', () => {
+  // An evicted session DID join; "call team_join first" was the opposite of what happened, and
+  // following it reflexively re-fights the ADR 131 ping-pong war (the 2026-08-05 ryder incident).
+  it('names the eviction instead of claiming the session never joined', () => {
+    const msg = notReadyMessage(
+      {
+        claimed: true,
+        lastJoinError: 'superseded: your session as "ryder" was taken over by a newer one',
+        claimCode: 'GXJ0',
+      },
+      'send',
+    );
+    expect(msg).toMatch(/evicted/i);
+    expect(msg).toMatch(/would displace/i);
+    expect(msg).toContain('taken over by a newer one');
+    expect(msg).not.toMatch(/haven't joined the team yet/i);
+  });
+
+  it('keeps the never-joined copy for a non-eviction join failure', () => {
+    const msg = notReadyMessage(
+      { claimed: true, lastJoinError: 'timed out waiting for admin approval', claimCode: 'GXJ0' },
+      'send',
+    );
+    expect(msg).toMatch(/haven't joined the team yet/i);
+    expect(msg).not.toMatch(/evicted/i);
+  });
+});
