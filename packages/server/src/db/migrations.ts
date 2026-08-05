@@ -644,6 +644,22 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // v33 — declared acceptance stakes (ADR 234). Deliberately a NEW column rather than a reuse of
+    // `risk`: risk already routes the ask human-first on any tag, and hanging a second consumer with
+    // opposite needs off one value is the shared-predicate trap ADR 225 names. Nullable, and read as
+    // `normal` when absent, so every pre-234 lane keeps exactly its current meaning and no backfill
+    // is needed — the absence of a declaration is itself the default, not missing data.
+    //
+    // Nothing routes on this in increment 1. The column exists so the ledger can answer "do declared
+    // stakes predict the answer rate" BEFORE the routing flip is built on the assumption they do.
+    version: 33,
+    up: (db) => {
+      // Guarded, per v31's note: the migration tests rewind schema_version and replay the tail.
+      const laneCols = db.prepare("SELECT name FROM pragma_table_info('lanes')").pluck().all();
+      if (!laneCols.includes('stakes')) db.exec('ALTER TABLE lanes ADD COLUMN stakes TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

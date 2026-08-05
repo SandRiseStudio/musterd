@@ -33,6 +33,8 @@ interface LaneRow {
   goal_id: string | null;
   /** JSON array of declared risk tags (ADR 169); null on pre-v24 rows ⇒ []. */
   risk: string | null;
+  /** Declared acceptance stakes (ADR 234); null on pre-v32 rows ⇒ 'normal' — absence IS the default. */
+  stakes: string | null;
   /** The worker's merge attestation captured at awaiting_acceptance (ADR 192); null until lane_submit. */
   merged_json: string | null;
   state: string;
@@ -57,6 +59,9 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     branch: row.branch,
     goal_id: row.goal_id,
     risk: row.risk ? (JSON.parse(row.risk) as string[]) : [],
+    // Absence reads as the default rather than as missing data, so every pre-234 lane keeps its
+    // current meaning without a backfill (ADR 148 skew posture).
+    stakes: (row.stakes as Lane['stakes']) ?? 'normal',
     merged: row.merged_json ? (JSON.parse(row.merged_json) as Lane['merged']) : null,
     state: row.state as LaneState,
     created_by: row.created_by,
@@ -92,6 +97,10 @@ export function openLane(
     branch: input.branch ?? null,
     goal_id: input.goal_id ?? null,
     risk: input.risk && input.risk.length > 0 ? JSON.stringify(input.risk) : null,
+    // Store only an explicit non-default declaration; null means "did not say", which reads back as
+    // 'normal'. Keeps "never declared" and "declared normal" indistinguishable ON PURPOSE — nothing
+    // in increment 1 should be able to tell them apart, because nothing should act on the difference.
+    stakes: input.stakes && input.stakes !== 'normal' ? input.stakes : null,
     merged_json: null,
     state: claim ? 'claimed' : 'open',
     created_by: createdBy,
@@ -102,9 +111,9 @@ export function openLane(
   };
   db.prepare(
     `INSERT INTO lanes (id, team_id, project, title, detail, owner_seat, role, surface_globs,
-                        depends_on, branch, goal_id, risk, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
+                        depends_on, branch, goal_id, risk, stakes, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
      VALUES (@id, @team_id, @project, @title, @detail, @owner_seat, @role, @surface_globs,
-             @depends_on, @branch, @goal_id, @risk, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
+             @depends_on, @branch, @goal_id, @risk, @stakes, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
   ).run(row);
   return rowToLane(row, teamSlug);
 }
@@ -149,6 +158,7 @@ export function updateLane(
   // it here too is harmless and keeps the lane's last attestation readable.)
   const merged = patch.merged !== undefined ? patch.merged : existing.merged;
   const risk = patch.risk ?? existing.risk;
+  const stakes = patch.stakes ?? existing.stakes;
   const next = {
     id,
     team_id: teamId,
@@ -160,6 +170,7 @@ export function updateLane(
     branch: patch.branch !== undefined ? patch.branch : existing.branch,
     goal_id: patch.goal_id !== undefined ? patch.goal_id : existing.goal_id,
     risk: risk.length > 0 ? JSON.stringify(risk) : null,
+    stakes: stakes !== 'normal' ? stakes : null,
     merged_json: merged ? JSON.stringify(merged) : null,
     state,
     // claimed_at describes the CURRENT tenure: sticky while held, cleared by the release above so a
@@ -184,7 +195,7 @@ export function updateLane(
   };
   db.prepare(
     `UPDATE lanes SET project=@project, detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
-       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, merged_json=@merged_json,
+       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, stakes=@stakes, merged_json=@merged_json,
        state=@state, claimed_at=@claimed_at, resolved_at=@resolved_at, updated_at=@updated_at
      WHERE team_id=@team_id AND id=@id`,
   ).run(next);

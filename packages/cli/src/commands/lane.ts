@@ -1,4 +1,10 @@
-import { LaneStateSchema, type Lane, type LaneWarning } from '@musterd/protocol';
+import {
+  LaneStakesSchema,
+  LaneStateSchema,
+  type Lane,
+  type LaneStakes,
+  type LaneWarning,
+} from '@musterd/protocol';
 import { resolveProject } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
@@ -13,15 +19,32 @@ import { resolve } from './helpers.js';
 
 const USAGE =
   'usage:\n' +
-  '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--goal <id>] [--project p] [--role r] [--branch b] [--detail d] [--claim]\n' +
+  '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--goal <id>] [--project p] [--role r] [--branch b] [--detail d] [--stakes low|normal|high] [--claim]\n' +
   '  musterd lane claim <id>\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d] [--project p]\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high]\n' +
   '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
+
+/**
+ * Parse `--stakes` (ADR 234). A typo must FAIL rather than silently fall back to the default: the
+ * point of the label phase is to measure declarations, and a misspelling that quietly records
+ * `normal` would put a lane the worker meant to mark `low` into the bucket it was being
+ * distinguished from — corrupting the measurement in the direction that hides the effect.
+ */
+function parseStakes(raw: string): LaneStakes {
+  const parsed = LaneStakesSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new CliError(
+      `--stakes must be one of ${LaneStakesSchema.options.join(' | ')} (got "${raw}")`,
+      2,
+    );
+  }
+  return parsed.data;
+}
 
 /** Split a comma-separated repeatable flag; undefined when the flag is absent. */
 function list(flags: Record<string, string | boolean>, name: string): string[] | undefined {
@@ -103,6 +126,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         : {}),
       ...(list(parsed.flags, 'depends') !== undefined
         ? { depends_on: list(parsed.flags, 'depends')! }
+        : {}),
+      ...(flagStr(parsed.flags, 'stakes') !== undefined
+        ? { stakes: parseStakes(flagStr(parsed.flags, 'stakes')!) }
         : {}),
       ...(parsed.flags['claim'] === true ? { claim: true } : {}),
     });
@@ -225,6 +251,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         : {}),
       ...(list(parsed.flags, 'depends') !== undefined
         ? { depends_on: list(parsed.flags, 'depends')! }
+        : {}),
+      ...(flagStr(parsed.flags, 'stakes') !== undefined
+        ? { stakes: parseStakes(flagStr(parsed.flags, 'stakes')!) }
         : {}),
     });
     process.stdout.write(`${theme.ok('✓')} lane updated\n${renderLane(res.lane)}\n`);
