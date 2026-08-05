@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMcpConfig } from './config.js';
 
@@ -139,5 +140,81 @@ describe('a declared surface contradicted by the harness that actually ran', () 
     const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
     loadMcpConfig({});
     expect(stdout).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The prescription — what the warning tells the reader to DO.
+ *
+ * Everything above tests detection. Nothing tested the fix, which is how this message came to
+ * prescribe `musterd wire` / `musterd agent <seat>`: both re-provision through `harness.configure`,
+ * which rewrites the `claude mcp -s local` entry — a slot Claude Code keys by repo ROOT, and so
+ * shares across every `agents-*` seat worktree (ADR 143). Repairing one stale string in one seat's
+ * gitignored binding rewrote the entry every seat on the machine launches through.
+ *
+ * These tests bind the narrowed prescription: it may name only the file that actually holds the
+ * stale value.
+ */
+describe('the repair it prescribes', () => {
+  /** The commands that re-provision, i.e. that rewrite the repo-root-shared MCP entry. Kept honest
+   *  by the source guard at the bottom of this file rather than by memory. */
+  const SHARED_ENTRY_WRITERS = ['musterd agent', 'musterd init', 'musterd wire'];
+
+  const expectNoWideWrite = (): void => {
+    for (const cmd of SHARED_ENTRY_WRITERS) expect(warning()).not.toContain(cmd);
+  };
+
+  it('repairs the baked env by deleting that one value, not by re-wiring the entry', () => {
+    writeBinding({
+      surface: 'codex',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    });
+    loadMcpConfig({ MUSTERD_SURFACE: 'cursor' });
+
+    expect(warning()).toContain('MUSTERD_SURFACE');
+    expect(warning()).toMatch(/delete/i);
+    // `musterd wire` would remove it — and re-point command/args and reinstall hooks for every seat
+    // worktree sharing the slot, to unset one string in one of them.
+    expectNoWideWrite();
+  });
+
+  it('repairs the binding in place, and says which worktree it means', () => {
+    writeBinding({
+      surface: 'cursor',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    });
+    loadMcpConfig({});
+
+    expect(warning()).toContain('.musterd/binding.json');
+    expect(warning()).toContain('this worktree only'); // per-seat, gitignored — not shared state
+    expectNoWideWrite();
+  });
+
+  it('names the value to write, so the reader does not have to infer it', () => {
+    writeBinding({
+      surface: 'cursor',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    });
+    loadMcpConfig({});
+    // The evidence side of the contradiction is the value that should be there.
+    expect(warning()).toMatch(/set it to "claude-code"/);
+  });
+
+  /**
+   * The guard that would have caught this. `SHARED_ENTRY_WRITERS` above is only as good as its
+   * accuracy, so derive the real set from the CLI: every command whose source calls `.configure(`
+   * on a harness adapter rewrites the shared entry. If a fourth one appears, this fails — and
+   * whoever added it has to look at what this warning (and any other prescription) tells people to
+   * run before it can go green.
+   */
+  it('knows every command that rewrites the shared entry — a new one fails this test', () => {
+    const commandsDir = fileURLToPath(new URL('../../cli/src/commands/', import.meta.url));
+    const found = readdirSync(commandsDir)
+      .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+      .filter((f) => /\.configure\(/.test(readFileSync(join(commandsDir, f), 'utf8')))
+      .map((f) => `musterd ${f.replace(/\.ts$/, '')}`);
+    // `init` provisions from packages/cli/src/onboard/init.ts, not a commands/ file, so it is not
+    // discovered here — it is a known writer and stays in the list unconditionally.
+    expect(new Set([...found, 'musterd init'])).toEqual(new Set(SHARED_ENTRY_WRITERS));
   });
 });
