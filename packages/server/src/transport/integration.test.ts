@@ -5814,6 +5814,21 @@ describe('infra-touch gate (ADR 227 inc 2): GET /teams/:slug/infra-gate', () => 
     expect(JSON.parse(rows[0]!.detail)).toMatchObject({ verb: 'restart', holders: ['izzo'] });
   });
 
+  it('agrees with itself about number — two holders HOLD platform, one HOLDS it', async () => {
+    // ADR 227 §4 already names a platform alternate, so the plural is a real roster state and not a
+    // hypothetical: the moment a second seat is assigned, a singular verb here reads as a typo in
+    // the one message whose whole job is to be trusted enough to redirect someone.
+    const { key, tok } = await seedTeam();
+    await post('/teams/dawn/members', { name: 'stanley', kind: 'agent' }, tok);
+    holdPlatform('izzo');
+    holdPlatform('stanley');
+    const r = await get('/teams/dawn/infra-gate?verb=restart', { key, seat: 'dolly' });
+    expect(r.status).toBe(200);
+    expect(r.json.warn.holders).toEqual(['izzo', 'stanley']);
+    expect(r.json.warn.text).toContain('izzo, stanley hold platform');
+    expect(r.json.warn.text).not.toContain('holds platform');
+  });
+
   it('stays silent for a platform holder — no warn, no audit row', async () => {
     const { key } = await seedTeam();
     holdPlatform('izzo');
