@@ -89,6 +89,8 @@ interface Attempt {
   exactCleanWithoutPresence: boolean;
   reason: string;
   settled: Promise<undefined>;
+  /** ADR 238: the seat is held by a session this wake did not create — defer, never charge. */
+  deferred?: boolean;
 }
 
 async function attempt(
@@ -170,8 +172,15 @@ async function attempt(
   }
   const cleanExact = label === 'resumed' && exact && child.exitCode === 0 && !verified.occupied;
   killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
+  // ADR 238: the seat is OCCUPIED, just not by us — another session holds it and verify waited the
+  // whole window for our own `wake`-provenance row without seeing one. Nothing about this act went
+  // wrong and nothing about the host is broken, so the attempt must not be charged: it defers, on
+  // ADR 221/236's discipline (budget-neutral by construction; the awake-time ceiling still bounds
+  // it). Distinguished from `!verified.occupied`, which IS a real failure and keeps burning.
+  const heldByOther = verified.occupied && verified.provenance !== 'wake';
   return {
     occupied: false,
+    ...(heldByOther ? { deferred: true } : {}),
     exactCleanWithoutPresence: cleanExact,
     reason: !exact
       ? expectedId
@@ -267,6 +276,20 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
             },
             settled: resumed.settled,
           };
+        // ADR 238: a seat someone else holds will not be freed by spawning again — take the
+        // deferral now rather than spending a second doomed child on the same lease.
+        if (resumed.deferred)
+          return {
+            outcome: {
+              occupied: false,
+              deferred: true,
+              session: 'resumed',
+              reason: resumed.reason,
+              ...(deliveryTracked ? { delivery_outcome: 'resumed' as const } : {}),
+              ...deliveryMetadata(),
+            },
+            settled: resumed.settled,
+          };
         ctx.log(
           `resume failed for ${spec.order.seat} (${resumed.reason}) — fresh fallback in the same lease`,
         );
@@ -286,6 +309,7 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
       return {
         outcome: {
           occupied: fresh.occupied,
+          ...(fresh.deferred ? { deferred: true } : {}),
           session: 'fresh',
           ...(deliveryTracked
             ? {
