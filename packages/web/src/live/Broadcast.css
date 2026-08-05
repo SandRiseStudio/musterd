@@ -286,3 +286,19 @@
     transform: translateY(4px);
   }
 }
+
+/* The ladder line under the reel (2026-08-05). Persistent, not rotated: it is the CONDITION the
+   rotation is happening under, and a viewer who catches only one frame should still see it. Amber
+   on the paper rim at stream weight — 13px, because 11px here lands under 8px after the 720p
+   encode and would be decoration rather than information. */
+.bc-reel__ladder {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--lc-accent) 30%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  /* Deep amber, not the accent mustard: measured 5.6:1 on this card's paper, where the accent sits
+     near 2.4:1. A stream re-encodes at 720p and low-contrast type is the first thing it eats. */
+  color: #7a4e06;
+}

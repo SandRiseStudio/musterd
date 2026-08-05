@@ -1,5 +1,6 @@
 import type { MemberSummary } from '@musterd/protocol';
 import {
+  acceptanceCapacity,
   accountStatusException,
   capabilityBadges,
   initial,
@@ -39,6 +40,9 @@ export function RosterPanel({
 }) {
   const members = [...roster].sort(rosterOrder);
   const admins = members.filter((m) => m.capabilities?.is_admin).length;
+  // Whether the review ladder underneath this roster is standing up (ADR 188) — a roster fact, so
+  // the roster is where it belongs, beside the other things this list can quietly be wrong about.
+  const capacity = acceptanceCapacity(roster);
 
   return (
     <aside
@@ -73,6 +77,16 @@ export function RosterPanel({
         <p className="lc-roster__gap" role="status">
           {unreadable} seat{unreadable === 1 ? '' : 's'} newer than this page — reload to meet{' '}
           {unreadable === 1 ? 'them' : 'them all'}.
+        </p>
+      )}
+      {capacity.degraded && (
+        <p className="lc-roster__gap is-ladder" role="status">
+          <b>No live acceptor.</b>{' '}
+          {capacity.models.length === 1
+            ? `Every live agent is on ${capacity.models[0]}, and a seat cannot accept its own model's work — so every review is waiting on a wake.`
+            : 'No live seat can accept another seat\'s work, so every review is waiting on a wake.'}
+          {capacity.unattested.length > 0 &&
+            ` ${capacity.unattested.join(', ')} attest${capacity.unattested.length === 1 ? 's' : ''} no model.`}
         </p>
       )}
       {stale && (

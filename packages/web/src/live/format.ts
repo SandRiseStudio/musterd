@@ -6,7 +6,7 @@ import type {
   OfflineReason,
   Posture,
 } from '@musterd/protocol';
-import { resolvePosture } from '@musterd/protocol';
+import { normalizeModelId, resolvePosture, reviewGrade } from '@musterd/protocol';
 
 export type ActTone =
   | 'accent'
@@ -578,4 +578,64 @@ export function rosterOrder(a: MemberSummary, b: MemberSummary): number {
   const kB = b.kind === 'human' ? 0 : 1;
   if (kA !== kB) return kA - kB;
   return a.name.localeCompare(b.name);
+}
+
+/** What the live roster can currently accept — see {@link acceptanceCapacity}. */
+export interface AcceptanceCapacity {
+  /** Live seats that could serve as SOMEONE's counterpart on the ADR 188 ladder. */
+  liveCandidates: number;
+  /** Distinct attested models across live agents — one entry is the monoculture. */
+  models: string[];
+  /** Live agents attesting nothing: routed to, but ungradeable (ADR 158). */
+  unattested: string[];
+  /** True when no live seat can accept any other live seat's work. */
+  degraded: boolean;
+}
+
+/**
+ * Can any LIVE seat accept another seat's work?
+ *
+ * The server's `pickLadder` (ADR 188) never routes a `same_model` or ungradeable counterpart, so
+ * when every live agent attests one model the live picker returns null for EVERY lane and acceptance
+ * survives only by waking an offline seat (ADR 191). That is not hypothetical: on 2026-08-05 five
+ * live agents converged on `claude-opus-5` and one wakeable seat became the team's entire acceptance
+ * capacity — while the strip cheerfully rendered "→ gptbot" on row after row without ever saying
+ * that the ladder underneath had gone flat.
+ *
+ * Nobody chose the monoculture and nothing noticed it, which is the part worth fixing on a surface:
+ * seats converge on whatever model their sessions default to, and the failure is silent until
+ * someone reads the ledger. This mirrors the server's rule client-side over the roster the page
+ * already holds — deliberately a MIRROR, not an authority: routing is the daemon's to decide, and
+ * this only ever explains what a reader is looking at.
+ *
+ * A live human counts (cross-family by construction). Offline seats do not — a seat that is not
+ * running cannot accept anything. Neither do `service` seats, which never hold lanes or accept
+ * (ADR 232), nor live seats attesting nothing, which cannot prove decorrelation (ADR 158).
+ * One seat alone is never "degraded": a team of one has nothing to review.
+ */
+export function acceptanceCapacity(roster: MemberSummary[]): AcceptanceCapacity {
+  const live = roster.filter((m) => m.presence !== 'offline' && m.kind !== 'service');
+  const agents = live.filter((m) => m.kind !== 'human');
+  const humans = live.filter((m) => m.kind === 'human');
+  const modelOf = (m: MemberSummary) => m.presences?.[0]?.model ?? null;
+  const attested = agents.filter((m) => normalizeModelId(modelOf(m)) !== 'unknown');
+  const unattested = agents.filter((m) => normalizeModelId(modelOf(m)) === 'unknown').map((m) => m.name);
+  const models = [...new Set(attested.map((m) => normalizeModelId(modelOf(m))))].sort();
+
+  // A seat is a candidate if it could review at least one OTHER live seat: a human always can, and
+  // an agent can when some other attested agent grades cross_model or better against it.
+  const candidates = [
+    ...humans,
+    ...attested.filter((a) =>
+      attested.some((b) => b !== a && reviewGrade(modelOf(a), modelOf(b)) !== 'same_model' && reviewGrade(modelOf(a), modelOf(b)) !== null),
+    ),
+  ];
+  // Nothing to review is not a failure — only a team that COULD pair and cannot is degraded.
+  const pairable = agents.length + humans.length > 1;
+  return {
+    liveCandidates: candidates.length,
+    models,
+    unattested,
+    degraded: pairable && candidates.length === 0,
+  };
 }

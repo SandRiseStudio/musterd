@@ -1948,6 +1948,21 @@
 .lc-roster__gap.is-stale {
   font-style: italic;
 }
+/* The ladder line earns warmth the other two do not: a flat review ladder is not a display quirk,
+   it is the team's acceptance capacity at zero, and it stays true until someone changes a model.
+   Amber rather than the muted neutral — but still a line of prose, not a banner, because the room
+   beside it is working fine and the remedy is one switch, not an incident. */
+.lc-roster__gap.is-ladder {
+  /* `--lc-warn` is not a defined token — every use of it in this file is silently riding its inline
+     fallback. Not inventing a token here for one line; the literal is measured against the roster's
+     own background rather than assumed. */
+  color: #8a5a1f;
+  background: color-mix(in srgb, #8a5a1f 6%, transparent);
+  border-top-color: color-mix(in srgb, #8a5a1f 26%, transparent);
+}
+.lc-roster__gap.is-ladder b {
+  font-weight: 640;
+}
 
 .lc-seat {
   display: flex;
