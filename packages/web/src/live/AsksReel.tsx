@@ -11,7 +11,7 @@ import {
   type AskView,
   type ReviewView,
 } from './asks';
-import { initial, kindOf, memberColor } from './format';
+import { acceptanceCapacity, initial, kindOf, memberColor } from './format';
 import { reelIndex } from './reel';
 
 /**
@@ -72,6 +72,10 @@ export function AsksReel({
   const shown = cards.length > 0 ? cards[reelIndex(cards.length, now - mountedAt)]! : null;
   const shownId = shown ? (shown.ask?.env.id ?? shown.review!.lane.id) : null;
   const idx = new Map(roster.map((m) => [m.name, m]));
+  // Why nearly every row above reads "→ gptbot" (nick, watching the stream, 2026-08-05). Without
+  // this the reel repeats one name until it looks like a preference; it is a capacity failure, and
+  // a viewer should be able to see that from the picture alone.
+  const capacity = acceptanceCapacity(roster);
 
   return (
     <section
@@ -104,6 +108,13 @@ export function AsksReel({
         <ShownAsk shown={shown.ask!} idx={idx} now={now} />
       ) : (
         <ShownReview shown={shown.review!} idx={idx} />
+      )}
+      {capacity.degraded && (
+        <div className="bc-reel__ladder">
+          No live acceptor
+          {capacity.models.length === 1 ? ` — every agent on ${capacity.models[0]}` : ''}. Reviews
+          are waiting on a wake.
+        </div>
       )}
     </section>
   );

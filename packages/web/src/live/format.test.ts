@@ -18,6 +18,7 @@ import {
   rosterOrder,
   rosterPrimaryChip,
   type RichToken,
+  acceptanceCapacity,
 } from './format';
 
 describe('actTone — steering acts (ADR 103)', () => {
@@ -335,5 +336,92 @@ describe('formatClock — the office clock', () => {
     const [, min, sec] = time.split(':');
     expect(min).toHaveLength(2);
     expect(sec).toHaveLength(2);
+  });
+});
+
+/**
+ * Acceptance capacity (nick, 2026-08-05: the broadcast reads "→ gptbot" on nearly every row).
+ *
+ * The server's `pickLadder` (ADR 188) never routes a `same_model` or ungradeable counterpart, so
+ * when every live agent attests one model the LIVE picker returns null for every lane and acceptance
+ * survives only by waking an offline seat (ADR 191). That happened here: five live agents converged
+ * on claude-opus-5 and one wakeable seat became the team's entire acceptance capacity.
+ *
+ * Nobody chose it and nothing noticed. This mirrors the server's rule client-side so a surface can
+ * say so — the same reasoning `pickLadder` does, over the roster the page already holds.
+ */
+describe('acceptanceCapacity — can any LIVE seat accept another seat\'s work?', () => {
+  const seat = (name: string, model: string | null, over: Partial<MemberSummary> = {}) =>
+    ({
+      name,
+      kind: 'agent',
+      presence: 'online',
+      presences: model ? [{ model }] : [],
+      ...over,
+    }) as MemberSummary;
+
+  it('reports zero live candidates when every live agent attests the same model', () => {
+    const cap = acceptanceCapacity([
+      seat('miley', 'claude-opus-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('dolly', 'claude-opus-5'),
+    ]);
+    expect(cap.degraded).toBe(true);
+    expect(cap.liveCandidates).toBe(0);
+    expect(cap.models).toEqual(['claude-opus-5']);
+  });
+
+  it('is healthy the moment ONE seat differs — the whole remedy is one model switch', () => {
+    const cap = acceptanceCapacity([
+      seat('miley', 'claude-fable-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('dolly', 'claude-opus-5'),
+    ]);
+    expect(cap.degraded).toBe(false);
+    expect(cap.liveCandidates).toBe(3);
+  });
+
+  it('counts a live HUMAN as capacity — a human is cross-family by construction (ADR 188)', () => {
+    const cap = acceptanceCapacity([
+      seat('miley', 'claude-opus-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('nick', null, { kind: 'human' }),
+    ]);
+    expect(cap.degraded).toBe(false);
+  });
+
+  it('ignores offline seats — a seat that is not running cannot accept anything', () => {
+    const cap = acceptanceCapacity([
+      seat('miley', 'claude-opus-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('gptbot', 'gpt-5.2-codex', { presence: 'offline' }),
+    ]);
+    expect(cap.degraded).toBe(true);
+  });
+
+  it('does not count an unattested live seat — it cannot prove anything (ADR 158)', () => {
+    // gptbot's real shape today: live, routed to, and attesting an empty model in all 32 rows.
+    const cap = acceptanceCapacity([
+      seat('miley', 'claude-opus-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('gptbot', null),
+    ]);
+    expect(cap.degraded).toBe(true);
+    expect(cap.unattested).toEqual(['gptbot']);
+  });
+
+  it('is not degraded when there is nothing to review — one seat cannot be a monoculture', () => {
+    expect(acceptanceCapacity([seat('miley', 'claude-opus-5')]).degraded).toBe(false);
+    expect(acceptanceCapacity([]).degraded).toBe(false);
+  });
+
+  it('excludes service seats — a ledger seat never accepts (ADR 232)', () => {
+    const cap = acceptanceCapacity([
+      seat('miley', 'claude-opus-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('autorefresh', null, { kind: 'service' as MemberSummary['kind'] }),
+    ]);
+    expect(cap.degraded).toBe(true);
+    expect(cap.unattested).toEqual([]);
   });
 });
