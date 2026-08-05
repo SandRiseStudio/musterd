@@ -726,6 +726,46 @@ describe('team_status handler', () => {
     expect(out).toContain('nick (human)');
   });
 
+  /** ADR 237 decision 3 — reads carry the eviction. The incident's session read "you are ryder"
+   *  unqualified for twenty minutes while the client knew the eviction the whole time. */
+  it('leads with the eviction banner when this session was superseded', async () => {
+    const handler = capture(registerStatus, {
+      member: 'ryder',
+      lastJoinError: 'superseded: your session as ryder was taken over by a newer one',
+      roster: (async () => ({
+        members: [member({ name: 'ryder', presence: 'online' })],
+      })) as any,
+    });
+    const out = text(await handler({}));
+    expect(out).toContain('evicted from its seat');
+    expect(out).toContain('reflects whoever holds it now');
+    expect(out).toContain('taken over by a newer one'); // the raw refusal rides along as detail
+    // The banner LEADS — before the roster, not appended where a skimming reader stops early.
+    expect(out.indexOf('evicted')).toBeLessThan(out.indexOf('1 member'));
+  });
+
+  it('renders the roster unqualified when the last join error is not an eviction', async () => {
+    const handler = capture(registerStatus, {
+      member: 'ryder',
+      lastJoinError: 'pending approval — request 42 (an admin must approve)',
+      roster: (async () => ({
+        members: [member({ name: 'ryder', presence: 'online' })],
+      })) as any,
+    });
+    expect(text(await handler({}))).not.toContain('evicted');
+  });
+
+  it('renders the roster unqualified when no join ever failed', async () => {
+    const handler = capture(registerStatus, {
+      member: 'ryder',
+      lastJoinError: null,
+      roster: (async () => ({
+        members: [member({ name: 'ryder', presence: 'online' })],
+      })) as any,
+    });
+    expect(text(await handler({}))).not.toContain('evicted');
+  });
+
   it('tells an agent what its teammates are working on — the point of a coordination roster', async () => {
     const handler = capture(registerStatus, {
       member: 'Lin',

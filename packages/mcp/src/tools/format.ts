@@ -121,6 +121,9 @@ export function textResult(text: string) {
  * leaving the agent to rediscover it. Deterministic string matching only — no model in the request
  * path. Unknown errors get no hint: a wrong repair is worse than none.
  */
+/** The one pattern that recognizes an eviction refusal, wherever its text surfaces (ADR 237). */
+const EVICTED_RE = /superseded|taken over|replaced by/i;
+
 const REPAIR_CLASSES: { match: RegExp; hint: string }[] = [
   {
     // Transport-level connect failures (Node's fetch/undici + socket vocabulary): the daemon is down
@@ -136,7 +139,7 @@ const REPAIR_CLASSES: { match: RegExp; hint: string }[] = [
   },
   {
     // ADR 068/092: another session took this seat; this one is stale, not broken.
-    match: /superseded|taken over|replaced by/i,
+    match: EVICTED_RE,
     hint: 'another session took this seat — team_status shows who holds it now; team_join re-claims but would displace them, so choose deliberately (ADR 237)',
   },
   {
@@ -177,7 +180,7 @@ export function errorResult(err: unknown) {
 export function notJoinedMessage(action: string, lastJoinError: string | null): string {
   // ADR 237: an evicted session DID join — "call team_join first" is the opposite of what happened,
   // and following it reflexively is the ADR 131 ping-pong. Name the eviction instead.
-  if (lastJoinError && /superseded|taken over|replaced by/i.test(lastJoinError)) {
+  if (lastJoinError && EVICTED_RE.test(lastJoinError)) {
     return (
       `this session was evicted from its seat — a newer session took it over, so you can't ${action} as it. ` +
       `team_status shows who holds the seat now; team_join would displace them, so rejoin only deliberately.\n` +
@@ -186,6 +189,23 @@ export function notJoinedMessage(action: string, lastJoinError: string | null): 
   }
   const base = `you haven't joined the team yet — call team_join first, then ${action}`;
   return lastJoinError ? `${base}.\nNote: the last join attempt failed: ${lastJoinError}` : base;
+}
+
+/**
+ * ADR 237 decision 3 — reads carry the eviction too. An evicted session's `team_status` answered
+ * "you are ryder" unqualified for twenty minutes in the incident; the client held the fact the whole
+ * time (`lastJoinError`). This renders it ahead of the roster, so the cheapest read a confused
+ * session reaches for is the one that corrects it. Empty string when nothing is known — the common
+ * case pays one regex. Server-side read gating is deliberately NOT added (the HTTP layer cannot
+ * distinguish sessions — ADR 101); this is the client rendering its own knowledge.
+ */
+export function evictionNotice(lastJoinError: string | null): string {
+  if (!lastJoinError || !EVICTED_RE.test(lastJoinError)) return '';
+  return (
+    `⚠ this session was evicted from its seat — the roster below reflects whoever holds it now, ` +
+    `not this session. team_join would displace them, so rejoin only deliberately (ADR 237).\n` +
+    `Eviction detail: ${lastJoinError}\n\n`
+  );
 }
 
 /**
