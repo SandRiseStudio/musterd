@@ -377,6 +377,14 @@ export class MusterdClient {
       reviewer?: string;
       route?: string;
       self_close_sanctioned?: boolean;
+      /** The lane was ALREADY awaiting acceptance — this is a report of the standing state (who was
+       *  asked at the original submit), not a fresh routing decision. Set on repeat submits, e.g.
+       *  recording a merge SHA after the PR lands. A standing report must never be read as "nobody
+       *  was asked": that misread sanctioned self-close against lanes with a pending acceptor. */
+      standing?: boolean;
+      /** ADR 234 increment 2: the submit was acceptance-exempt (declared low stakes) — no ask
+       *  exists and none is coming; self-close is the designed path, not a degradation. */
+      acceptance_exempt?: boolean;
       /** ADR 235: the team has an acceptance backstop, so silence no longer means self-close.
        *  Absent from an older daemon and from the no-acceptor branch — absent means "no backstop
        *  to rely on", which is the pre-235 advice, so the fallback is the safe one. */

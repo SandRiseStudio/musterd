@@ -3624,6 +3624,63 @@ describe('two-stage close (ADR 169)', () => {
       );
     });
 
+    it('a repeat submit reports the STANDING acceptance, not a fresh decision — and re-sends nothing', async () => {
+      // The 2026-08-05 defect this pins: recording a merge SHA after the PR lands is a repeat
+      // submit, a legal no-op that re-routes nothing. The transition block composes no `review`,
+      // and both clients read that silence as "no eligible acceptor is live" and sanctioned
+      // self-close — against lanes whose acceptor held a pending ask. The daemon owns the fact the
+      // clients were guessing at, so the repeat now reports it.
+      draw(0.99);
+      const { nickTok, ada, gee } = await setup();
+      const laneRes = await post('/teams/dawn/lanes', { title: 'routed once', claim: true }, ada);
+      const laneId = laneRes.json.lane.id as string;
+      const first = await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      const acceptor = first.json.review.reviewer as string;
+      expect(acceptor).toBeTruthy();
+
+      // The repeat: same state, now carrying the merge attestation.
+      const again = await patchLane(
+        laneId,
+        { state: 'ready_for_review', merged: { pr: 7, sha: 'abc123' } },
+        ada,
+      );
+      expect(again.status).toBe(200);
+      // Marked `standing` so no consumer mistakes the report for a fresh routing decision — and it
+      // names the acceptor who already holds the ask, which is the fact that forbids the sanction.
+      expect(again.json.review.standing).toBe(true);
+      expect(again.json.review.reviewer).toBe(acceptor);
+      expect(again.json.review.self_close_sanctioned).toBeUndefined();
+
+      // Report, not re-ask: still exactly one ready row and one delivered ask.
+      const readyRows = await auditRows(nickTok, 'lane.ready_for_review');
+      expect(readyRows.filter((r: any) => r.detail.lane === laneId)).toHaveLength(1);
+      // The ladder is human-first, so the acceptor may be nick or gee — read the right inbox.
+      const inbox = await get(`/teams/dawn/inbox?limit=50`, acceptor === 'gee' ? gee : nickTok);
+      expect(
+        (inbox.json.messages as any[]).filter((m) => m.meta?.lane_review?.lane === laneId),
+      ).toHaveLength(1);
+    });
+
+    it('a repeat submit of an exempt lane reports the exemption, never the null-pick sanction', async () => {
+      draw(0.99);
+      const { ada } = await setup();
+      const laneRes = await post(
+        '/teams/dawn/lanes',
+        { title: 'small twice', claim: true, stakes: 'low' },
+        ada,
+      );
+      const laneId = laneRes.json.lane.id as string;
+      await patchLane(laneId, { state: 'ready_for_review' }, ada);
+      const again = await patchLane(laneId, { state: 'ready_for_review', merged: { pr: 8 } }, ada);
+      expect(again.json.review.standing).toBe(true);
+      // Keyed on the RECORDED acceptance_exempt from the ready row — same discipline as the close
+      // reason, and for the same reason: a repeat submit after a stakes edit must report what the
+      // submit did, not what the lane says now.
+      expect(again.json.review.acceptance_exempt).toBe(true);
+      expect(again.json.review.reviewer).toBeUndefined();
+      expect(again.json.review.self_close_sanctioned).toBeUndefined();
+    });
+
     it('a counterpart who confirms an exempt lane anyway still records a verified close', async () => {
       // The exemption removes the ASK, never the possibility. A seat that reviews a low lane
       // unprompted has performed a real cross-seat review, and `verified` must keep meaning what it

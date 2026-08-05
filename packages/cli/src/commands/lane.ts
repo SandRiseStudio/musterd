@@ -169,7 +169,38 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     renderWarnings(res.warnings);
     if (submit) {
       // ADR 192: report the acceptor routing — who was asked, or that self-close is sanctioned.
-      if (res.review?.reviewer) {
+      if (res.review?.standing) {
+        // A repeat submit (e.g. recording the merge SHA after the PR landed) re-routes nothing;
+        // the daemon reports the STANDING state. Before it did, the else-branch below read the
+        // silence as "no eligible acceptor is live" and sanctioned self-close against lanes whose
+        // acceptor had a pending ask — the premature unverified close ADR 235 exists to stop.
+        process.stdout.write(
+          theme.meta(
+            res.review.reviewer
+              ? `already awaiting acceptance from ${res.review.reviewer}` +
+                  `${res.review.route ? ` (${res.review.route})` : ''} — attestation recorded, ` +
+                  `nothing re-routed. Leave it with them.`
+              : res.review.acceptance_exempt
+                ? 'already awaiting close — this submit was acceptance-exempt (declared low ' +
+                  'stakes, ADR 234): `musterd lane resolve` when ready'
+                : 'no acceptor was ever routed — self-close sanctioned: ' +
+                  '`musterd lane resolve` when ready (recorded unconfirmed)',
+          ) + '\n',
+        );
+      } else if (!res.review) {
+        // No routing decision and no standing report (an older daemon, or a patch that never
+        // touched acceptance). Absence of a decision is not absence of an acceptor (ADR 173) —
+        // abstain rather than assert, and never sanction self-close on silence.
+      } else if (res.review.acceptance_exempt) {
+        // ADR 234 increment 2: no ask by design, on the lane's own declared stakes — never worded
+        // as the "nobody was eligible" degradation.
+        process.stdout.write(
+          theme.meta(
+            'acceptance-exempt (declared low stakes, ADR 234) — no ask was routed and none is ' +
+              'owed: `musterd lane resolve` when ready',
+          ) + '\n',
+        );
+      } else if (res.review.reviewer) {
         // ADR 235: the advice follows the backstop. "Self-close on silence" was right while an
         // unaccepted lane hung forever; with a sweep armed it is what turns a recoverable wait into
         // a permanent unverified close — measured, the acceptor came back 20 of 20 times, an

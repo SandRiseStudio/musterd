@@ -58,7 +58,13 @@ import { deliveryHintFor } from '../protocol/nudge.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
-import { appendAudit, hasInterruptRaised, laneOwnerHistory, listAudit } from '../store/audit.js';
+import {
+  appendAudit,
+  hasInterruptRaised,
+  laneOwnerHistory,
+  listAudit,
+  standingAcceptance,
+} from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { listGoals } from '../store/goals.js';
@@ -3061,6 +3067,25 @@ export async function handleHttp(
                 : {}),
             };
           }
+        } else if (
+          isAwaitingAcceptance(lane.state) &&
+          isAwaitingAcceptance(before.state) &&
+          body.state !== undefined &&
+          isAwaitingAcceptance(body.state)
+        ) {
+          // A REPEAT submit — the lane was already awaiting acceptance, so nothing re-routed and no
+          // ask was sent. This is the normal flow (recording a merge SHA after the PR lands), and
+          // until 2026-08-05 it returned no `review` at all, which both clients read as "no eligible
+          // acceptor is live" and answered by sanctioning self-close — against lanes whose acceptor
+          // had a pending ask. The daemon holds the fact the clients were guessing at, so it says
+          // it: what the ready edge actually recorded, marked `standing` so no consumer mistakes a
+          // report of the existing state for a fresh routing decision.
+          const standing = standingAcceptance(ctx.db, team.id, lane.id);
+          review = standing
+            ? { standing: true, ...standing }
+            : // Nothing standing to report — the original submit found no candidate (or predates
+              // recording). The sanction was and remains honest here: nobody was ever asked.
+              { standing: true, self_close_sanctioned: true };
         }
         // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the
         // rejection — the counterpart said "not what we wanted". Audited; the lane_state broadcast above
