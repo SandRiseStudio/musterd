@@ -10,6 +10,13 @@
 >
 > _Original status (2026-07-13): capture, not design — recorded so the session could start from the
 > full picture instead of re-discovering it._
+>
+> **2026-08-05 follow-on:** the guardian sketch's deepest question — who is responsible when an
+> _unattended_ actor acts — got its own session and ADR:
+> [ADR 232 — ledger seats](../decisions/232-ledger-seats-every-actor-on-the-roster.md) (every actor
+> on the roster; peer vs ledger seats; `kind: service`; platform vs project services). The
+> autonomy-tiers-as-policy question (Q7 below) remains open there, deliberately deferred until a
+> governed actor produces evidence worth constraining.
 
 ## The prompting problem: who may touch running infrastructure?
 

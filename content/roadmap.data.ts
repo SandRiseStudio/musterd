@@ -1444,6 +1444,25 @@ const RAW: RawItem[] = [
     dependsOn: ['v03-p1-seats'],
   },
   {
+    id: 'ledger-seats',
+    frozenBy: 232,
+    wave: 8,
+    title: 'Ledger seats — every actor on the roster (services as members)',
+    plan: 'increments 1–5: kind service + the auto-refresher’s seat, the census check, remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance',
+    category: 'platform',
+    blurb:
+      'The roster becomes the complete census of actors on a machine — humans, agents, and now services: peer seats can decline and hold lanes; ledger seats (kind: service) carry identity, roles, attribution, and audit for the unattended actors that act most.',
+    detail:
+      'Design frozen 2026-08-05 by ADR 232 (session: nick + izzo, lane 01KZ7KRG60), forced by the ADR 230 re-evaluation: ADR 227 shipped "only designated platform agents touch running infrastructure" the same day a draft granted restart autonomy to the auto-refresh tick — an actor with no seat, no role, no identity, structurally invisible to the infra-gate. The measured inventory (2026-08-04): six unattended actors — the wake actuator (spawns paid agent sessions every 10s poll), the auto-refresher (bounces the daemon), the /live publisher (writes the daemon’s web-root), the steward Action, the ADR 166 sweep, the otel-sink — under three accidental governance regimes, none decided. The real axis is unattended action with consequences, not "infrastructure"; spawning agents outranks restarting the daemon, and the role system gated the one case where a human was already present. The model: TWO TIERS, doctrinal — peer seats (human, agent: can decline, hold lanes, accept, be woken) vs ledger seats (kind: service — identity, capabilities, attribution, audit; structurally excluded from lanes, acceptance, wake, handoff), which SHARPENS the founding "a named seat can decline" argument into a kind-level fact. Ledger seats speak: status_update announcements in-band ("bounced the daemon on 322cd28") and advisory-tier asks routed to the platform holder whenever the daemon is alive to carry them, with OS-notify shrinking to the daemon’s own death (ADR 230 unchanged). Presence is ambient only (ADR 057) — a wedged cron goes visibly quiet, monitoring nobody built. The census gets a warn-only enforcer: doctor/init --check diffs musterd-labeled LaunchAgents against service seats and names any unattributed actor. Identity without a folder: per-seat tokens minted at reconcile, delivered by service install as a 0600 file in the plist env (the tick currently runs in the operator’s bound folder — its actions would attribute to nick, the whole problem in one sentence). THE PRODUCT SPLIT (nick’s fork): platform services (musterd’s own machinery — seats auto-provisioned by service install, charters written for users who will never read them; infra transparency as a shipped default for a team that doesn’t know what launchd is) vs project services (the Slack-bot-shaped generalization — deploybot posting "deployed v1.2 to TestFlight ✓" — the team’s own automation as a visible teammate, our steward being an instance). The restart stays out pending ADR 230’s measured eval; attribution before enforcement; autonomy-tiers-as-team-policy stays deferred until a governed actor produces evidence worth constraining. Gifts: lifecycle until = research probes that visibly expire (the sweep should carry one); the steward Action can hold the steward seat now, runtime migrating later (ADR 112’s first step free); woken sessions later carry provenance woken-by-<service>.',
+    refs: [
+      adr(232, 'ADR 232'),
+      adr(227, 'ADR 227'),
+      adr(230, 'ADR 230'),
+      doc('docs/design/roles-and-stewardship.md', 'roles-and-stewardship.md'),
+    ],
+    dependsOn: ['roles-and-stewardship', 'v03-p1-seats'],
+  },
+  {
     id: 'sandboxed-runtime',
     unfrozen: 'a stated non-goal with an optional future, not a design',
     wave: 'later',
