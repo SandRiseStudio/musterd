@@ -11,8 +11,8 @@ import {
 import type { Ctx } from './context.js';
 import { schemaVersion } from './db/migrations.js';
 import { openDb } from './db/open.js';
-import { log } from './log.js';
 import { startFootprintSampler } from './footprint/sampler.js';
+import { log } from './log.js';
 import { startReaper } from './presence/reaper.js';
 import { reconcileAll } from './projection/reconcile.js';
 import { startRosterWatcher } from './projection/watcher.js';
