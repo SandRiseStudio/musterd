@@ -68,10 +68,17 @@ function harnessWithEntry(
     registeredGrant?: string;
     registeredAgentKey?: string;
     registeredSurface?: string;
+    registeredAutojoin?: string;
+    registeredDriver?: string;
   },
   entryScope: 'repo-shared' | 'folder' = 'repo-shared',
+  // Which harness this is decides whether `musterd wire` can repair its entry at all — wire
+  // configures Claude Code and nothing else. Defaults to claude-code so the pre-existing cases
+  // (all written when every prescription said "run wire") keep asserting the repairable branch.
+  id = 'claude-code',
 ) {
   return {
+    id,
     label,
     entryScope,
     detect: async () => ({ installed: true, configured: true, detail: label, ...extra }),
@@ -342,6 +349,69 @@ describe('inspectProvisioning', () => {
     h.harnesses = [harnessWithEntry('Claude Code', { registeredGrant: 'msgr_mine' })];
     const r = await inspectProvisioning('/x');
     expect(r.repair).toBe('wire');
+  });
+
+  // The prescription must be derived from what `wire` actually configures, not hard-coded. `wire`
+  // calls claudeCode.configure and nothing else, so telling a Cursor or Codex seat to run it is a
+  // repair that cannot fire — and the drift then re-flags on every --check forever, training seats
+  // to skim the ✗ block. Measured live 2026-08-04: `musterd wire` left all four Cursor/Codex entry
+  // items byte-identical.
+  describe('the prescribed repair matches what wire actually configures', () => {
+    const perFolder = (extra: Parameters<typeof harnessWithEntry>[1], id: string) => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [harnessWithEntry(id === 'cursor' ? 'Cursor' : 'Codex', extra, 'folder', id)];
+      return inspectProvisioning('/x');
+    };
+
+    it.each([
+      ['MUSTERD_SURFACE', { registeredSurface: 'cursor' }],
+      ['MUSTERD_AGENT_KEY', { registeredAgentKey: 'mskey_x' }],
+      ['MUSTERD_AUTOJOIN', { registeredAutojoin: '1' }],
+      ['MUSTERD_DRIVER', { registeredDriver: 'nick' }],
+      ['MUSTERD_MODEL', { registeredModel: 'grok-4.5' }],
+    ])('never prescribes wire for a Cursor entry (%s)', async (name, extra) => {
+      const r = await perFolder(extra, 'cursor');
+      const line = r.drift.find((d) => d.includes(name));
+      expect(line).toBeDefined();
+      // It may NAME wire — saying "wire does not rewrite this" is the useful correction, since
+      // that is the advice these seats have been given for months. What it must never do is
+      // PRESCRIBE it as the remedy.
+      expect(line).not.toMatch(/[Rr]un `musterd wire`/);
+      expect(line).toContain('does not rewrite');
+      // ...and must still name a repair that exists, rather than going silent.
+      expect(line).toContain('musterd init');
+    });
+
+    it('still prescribes wire for Claude Code, which wire does configure', async () => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [
+        harnessWithEntry('Claude Code', { registeredAgentKey: 'mskey_x' }, 'repo-shared'),
+      ];
+      const r = await inspectProvisioning('/x');
+      expect(r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'))).toContain('musterd wire');
+    });
+
+    // The machine-readable half of the same lie: `repair: 'wire'` drives --fix, so classifying
+    // Cursor-only drift as wire-repairable makes --fix run a command that changes nothing and
+    // report it as the remedy.
+    it("does not classify per-folder-only drift as 'wire' repairable", async () => {
+      const r = await perFolder({ registeredAgentKey: 'mskey_x' }, 'cursor');
+      expect(r.drift.length).toBeGreaterThan(0);
+      expect(r.repair).not.toBe('wire');
+    });
+
+    it("still classifies as 'wire' when at least one drifting entry is Claude Code's", async () => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [
+        harnessWithEntry('Cursor', { registeredAgentKey: 'mskey_x' }, 'folder', 'cursor'),
+        harnessWithEntry('Claude Code', { registeredGrant: 'msgr_x' }, 'repo-shared'),
+      ];
+      const r = await inspectProvisioning('/x');
+      expect(r.repair).toBe('wire');
+    });
   });
 
   it('does not claim headless repair when the drift needs full onboarding', async () => {
