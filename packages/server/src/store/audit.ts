@@ -248,7 +248,13 @@ export type AuditAction =
   // refuses to create. Its off-machine refusal reuses `signin.handoff_missed` with
   // `reason: 'off_machine'` instead of minting a second action, so the cross-device signal stays ONE
   // series across both sign-in mechanisms rather than two half-series nobody thinks to add up.
-  | 'team.archive';
+  | 'team.archive'
+  // Seat-footprint design (2026-08-05): an explicit `musterd reap` killed orphaned MCP sidecars.
+  // actor = the requesting seat, target null (machine-scoped), detail
+  // `{ killed: pid[], refused: {pid, reason}[], rss_kb }`. Every kill was re-verified against the
+  // live process table at kill time (allowlist match + still orphaned) — the row records what the
+  // verification let through, so a disputed reap can be audited against what was actually running.
+  | 'footprint.reaped';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

@@ -52,6 +52,7 @@ import { isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
+import { reapOrphans } from '../footprint/reap.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import { deliveryHintFor } from '../protocol/nudge.js';
@@ -67,6 +68,7 @@ import {
 } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
+import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
 import {
   consumeGrant,
@@ -485,6 +487,12 @@ function composeInterruptLine(latest: Envelope, count: number): string {
     ? `⚡ musterd: ${count} acts waiting (latest: ${noun} from ${head}) — run 'musterd inbox' to read them.`
     : `⚡ musterd: ${noun} from ${head} — run 'musterd inbox' to read it.`;
 }
+
+// Seat-footprint design: an explicit reap names its pids; the daemon re-verifies every one
+// against the live process table before any signal is sent (see footprint/reap.ts).
+const FootprintReapBody = z.object({
+  pids: z.array(z.number().int().positive()).max(500),
+});
 
 const CreateTeamBody = z.object({
   slug: z.string(),
@@ -2383,6 +2391,22 @@ export async function handleHttp(
           request_id: claimReq.id,
           message: `claim request opened — waiting for admin approval (poll GET /teams/${slug}/requests/${claimReq.id})`,
         });
+      }
+
+      // Seat-footprint design: the sampler's latest tick. 404 while no tick exists (fresh daemon,
+      // pre-v34 data, or non-darwin sampler self-disable) — clients treat any non-200 as "no data".
+      if (method === 'GET' && rest === '/footprint') {
+        authTouch(ctx, slug, req);
+        const tick = latestFootprint(ctx.db);
+        if (!tick) return sendJson(res, 404, { error: 'no footprint data yet' });
+        return sendJson(res, 200, tick);
+      }
+
+      if (method === 'POST' && rest === '/footprint/reap') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(FootprintReapBody, await readJson(req));
+        const result = await reapOrphans(ctx.db, team.id, member.name, body.pids);
+        return sendJson(res, 200, result);
       }
 
       if (method === 'POST' && rest === '/messages') {

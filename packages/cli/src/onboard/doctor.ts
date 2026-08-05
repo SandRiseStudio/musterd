@@ -710,6 +710,50 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   };
 }
 
+/**
+ * Footprint note (ADR 242, seat-footprint design): orphaned MCP sidecars the daemon's sampler can
+ * see. Warn-only and best-effort like the skew notes — an unreachable daemon, a pre-241 daemon
+ * (404), or an unbound folder all stay silent; the doctor reports drift, it never invents it.
+ */
+export async function footprintNotes(
+  cwd: string = process.cwd(),
+  deps?: {
+    fetchTick?: () => Promise<
+      { stacks: { classification: string; procs: number; rss_kb: number }[] } | undefined
+    >;
+  },
+): Promise<string[]> {
+  const fetchTick =
+    deps?.fetchTick ??
+    (async () => {
+      const binding = findBinding(cwd);
+      if (!binding?.team || !binding.agent_key) return undefined;
+      const res = await fetch(
+        `${binding.server}/teams/${encodeURIComponent(binding.team)}/footprint`,
+        {
+          headers: {
+            authorization: `Bearer ${binding.agent_key}`,
+            ...(binding.claim?.mode === 'seat' ? { 'x-musterd-seat': binding.claim.name } : {}),
+          },
+          signal: AbortSignal.timeout(2000),
+        },
+      );
+      if (!res.ok) return undefined;
+      return (await res.json()) as {
+        stacks: { classification: string; procs: number; rss_kb: number }[];
+      };
+    });
+  const tick = await fetchTick().catch(() => undefined);
+  if (!tick) return [];
+  const orphaned = tick.stacks.filter((s) => s.classification === 'orphaned');
+  const procs = orphaned.reduce((sum, s) => sum + s.procs, 0);
+  if (procs === 0) return [];
+  const mb = Math.round(orphaned.reduce((sum, s) => sum + s.rss_kb, 0) / 1024);
+  return [
+    `${procs} orphaned MCP sidecar proc${procs === 1 ? '' : 's'} (~${mb} MB RSS) from ended sessions — \`musterd reap\` reclaims them.`,
+  ];
+}
+
 /** Render + exit-code for `musterd init --check`. Exit 1 on drift, 0 when healthy or unprovisioned. */
 /**
  * Build-skew notes (ADR 135): is the `musterd` you just typed the code you think it is? Two
@@ -868,6 +912,8 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
   const report = await inspectProvisioning(cwd);
   // ADR 135: freshness notes ride the report (warn-only, never drift/exit-1).
   report.notes.push(...(await buildSkewNotes()));
+  // ADR 242: orphaned-sidecar note — a machine fact like the skew notes, warn-only, never drift.
+  report.notes.push(...(await footprintNotes(cwd)));
   // The binary a WAKE would resolve is a different question from the one this shell resolves, and
   // nothing asked it until a poisoned shim went a day unnoticed. Warn-only for the same reason as
   // the skew notes: it is a fact about the machine, not this folder's provisioning.

@@ -675,6 +675,35 @@ export const MIGRATIONS: Migration[] = [
       if (!cols.includes('wake_lease')) db.exec('ALTER TABLE presence ADD COLUMN wake_lease TEXT');
     },
   },
+  {
+    // v35 — seat footprint samples (seat-footprint design, 2026-08-05). Two tables, one tick:
+    // machine row (swap/free) keyed by ts, and zero-or-more sidecar-stack rows sharing that ts.
+    // Machine-level rows deliberately carry no team_id: the sampler measures the HOST, and one
+    // team = one daemon (ADR 040) makes the daemon's db the machine's ledger. Retention is the
+    // sampler's job (pruneFootprint), so this table can never become its own resource problem.
+    // IF NOT EXISTS throughout, per v33's note: the migration tests rewind schema_version and
+    // replay the tail.
+    version: 35,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS footprint_stacks (
+          ts INTEGER NOT NULL,
+          classification TEXT NOT NULL,
+          seat TEXT,
+          procs INTEGER NOT NULL,
+          rss_kb INTEGER NOT NULL,
+          pids TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_footprint_stacks_ts ON footprint_stacks(ts);
+        CREATE TABLE IF NOT EXISTS footprint_machine (
+          ts INTEGER PRIMARY KEY,
+          swap_used_mb INTEGER,
+          swap_total_mb INTEGER,
+          free_mem_mb INTEGER
+        );
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
