@@ -58,6 +58,21 @@ export interface DetectResult {
   registeredSurface?: string;
   /** The registered launch args, so the doctor can spot an adapter inside another seat's workspace. */
   registeredArgs?: string[];
+  /**
+   * Where the inspected entry lives, when that file is **not** the one this harness's `configure`
+   * writes for this folder — a machine-global config no repair run here can rewrite.
+   *
+   * Set this and every `registered*` value above becomes a report about a file the reader must edit
+   * themselves. Leaving it unset asserts the opposite: that the drift sits in the file `configure`
+   * owns, which is what licenses the doctor to prescribe `musterd wire`. That distinction is the
+   * whole of ADR 168 — a prescription that cannot reach the drift it names is worse than none, since
+   * the check then stays red through a repair that reported success.
+   *
+   * Measured 2026-08-05: `~/.codex/config.toml` held a musterd server with an agent key, a grant,
+   * autojoin and a model baked in, while `init --check` reported "Codex: no musterd server" — the
+   * global file was outside everything the detector looked at.
+   */
+  registeredElsewhere?: string;
 }
 
 /** The `MUSTERD_*` names provisioning no longer emits, so a baked one is legacy drift by presence. */

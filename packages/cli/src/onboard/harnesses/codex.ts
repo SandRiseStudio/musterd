@@ -33,6 +33,16 @@ function projectConfigPath(): string {
   return join(process.cwd(), '.codex', 'config.toml');
 }
 
+/**
+ * Codex's machine-global config. musterd never WRITES it (see above), but Codex merges it with the
+ * project file, so a musterd server defined here is live in every folder on the machine — and
+ * reading it back is the only way `init --check` can stop reporting "no musterd server" while one is
+ * plainly there. Read-only by construction: nothing in this adapter passes this path to `writeToml`.
+ */
+function globalConfigPath(): string {
+  return join(homedir(), '.codex', 'config.toml');
+}
+
 function readToml(path: string): string {
   try {
     return readFileSync(path, 'utf8');
@@ -66,17 +76,36 @@ export const codex: Harness = {
     payload.transcript_path ? readModelFromTranscript(payload.transcript_path) : undefined,
 
   async detect() {
-    const toml = readToml(projectConfigPath());
     const installed = existsSync(join(homedir(), '.codex'));
-    const configured = hasServer(toml, 'musterd');
+    const projectToml = readToml(projectConfigPath());
+    // The project file is what musterd writes, so it is what an entry here MEANS — the global file
+    // is the fallback, and only when the folder has none of its own. Getting this order wrong would
+    // attribute another seat's baked credential to this folder.
+    const inProject = hasServer(projectToml, 'musterd');
+    const globalToml = inProject ? '' : readToml(globalConfigPath());
+    const inGlobal = !inProject && hasServer(globalToml, 'musterd');
+    const configured = inProject || inGlobal;
     return {
       installed,
       configured,
-      detail: installed ? '~/.codex present' : '~/.codex not found',
-      // Read our own entry's env back so the doctor can flag a baked legacy value here too. Before
-      // this, only Claude Code's entry was ever inspected, so a per-seat secret or a stale
-      // MUSTERD_SURFACE in `.codex/config.toml` was invisible by construction.
-      ...(configured ? registeredFromEnv(readServerEnv(toml, 'musterd')) : {}),
+      detail: inGlobal
+        ? 'registered in ~/.codex/config.toml (machine-global — musterd writes the project file)'
+        : installed
+          ? '~/.codex present'
+          : '~/.codex not found',
+      // Read the entry's env back so the doctor can flag a baked legacy value here too. Before this,
+      // only Claude Code's entry was ever inspected, so a per-seat secret or a stale MUSTERD_SURFACE
+      // in `.codex/config.toml` was invisible by construction.
+      ...(inProject ? registeredFromEnv(readServerEnv(projectToml, 'musterd')) : {}),
+      // A global entry's values are just as live — they outrank binding.json in the adapter's ladder
+      // exactly the same way — but no repair run in this folder rewrites that file, so it is reported
+      // WITH its location rather than with a prescription (ADR 168).
+      ...(inGlobal
+        ? {
+            ...registeredFromEnv(readServerEnv(globalToml, 'musterd')),
+            registeredElsewhere: globalConfigPath(),
+          }
+        : {}),
     };
   },
 

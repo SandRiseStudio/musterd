@@ -416,13 +416,24 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // message below ends with `repairWith`, so a harness wire cannot reach never gets told to run it
     // — and since wire now follows the folder's declared surface, the harness a provisioned folder
     // actually uses is reachable, whichever one it is.
-    const wireRepairs = wireConfigures(h.id, declaredSurface);
+    // Two ways a repair can fail to reach the drift, and both must silence the prescription. The
+    // harness may not be the one this folder declares — or it may be, while the entry that drifted
+    // lives in a machine-global config `configure` never writes (`registeredElsewhere`). The second
+    // is the quieter failure: everything looks repairable, `wire` runs, rewrites the project file,
+    // and reports success with the drift untouched.
+    const wireRepairs =
+      wireConfigures(h.id, declaredSurface) && d.registeredElsewhere === undefined;
     const repairWith = wireRepairs
       ? 'Run `musterd wire` here to rewrite the entry without it'
-      : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
-        `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
-        `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
-        `${h.label}'s own entry file by hand`;
+      : d.registeredElsewhere !== undefined
+        ? `this entry lives in ${d.registeredElsewhere}, which musterd does not write — it writes ` +
+          `the project file, so no command run in this folder rewrites it. Edit that file directly, ` +
+          `and check what else depends on it first: a machine-global entry is how other seats on ` +
+          `this machine may be launching`
+        : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
+          `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
+          `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
+          `${h.label}'s own entry file by hand`;
     // Record entry drift AND whether `wire` could repair this particular one, so the `repair`
     // classification below never routes `--fix` at a command that cannot touch the drift it found.
     const noteEntryDrift = (text: string) => {
@@ -483,21 +494,31 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // sits ABOVE binding.json in the adapter's ladder, so once it goes stale, re-minting the seat
     // (`musterd agent <seat>`) writes a fresh key the adapter never reads, and the seat keeps failing
     // to claim with a repair that looks like it should have worked.
-    const shared = h.entryScope === 'repo-shared';
+    // A third reach, wider than either: the entry read was the harness's MACHINE-GLOBAL config, so
+    // the credential is not one worktree's or one repo's — it is every folder's on this machine, and
+    // it is what a harness launched anywhere here will authenticate as. Understating that as "in the
+    // entry itself" (the per-folder wording) is the difference between a stale-key nuisance and one
+    // seat's credential silently backing every Codex session on the box. Measured 2026-08-05.
+    const machineGlobal = d.registeredElsewhere !== undefined;
+    const shared = h.entryScope === 'repo-shared' && !machineGlobal;
     for (const [name, value, why] of [
       [
         'MUSTERD_GRANT',
         d.registeredGrant,
-        shared
-          ? 'so a sibling seat presents this grant at claim time and gets denied or sent to approval'
-          : 'and it outranks binding.json, so re-minting the seat cannot repair a stale one',
+        machineGlobal
+          ? 'so any seat launched anywhere on this machine presents this grant at claim time'
+          : shared
+            ? 'so a sibling seat presents this grant at claim time and gets denied or sent to approval'
+            : 'and it outranks binding.json, so re-minting the seat cannot repair a stale one',
       ],
       [
         'MUSTERD_AGENT_KEY',
         d.registeredAgentKey,
-        shared
-          ? 'so a sibling seat may authenticate with this team key rather than its own'
-          : 'and it outranks binding.json, so re-minting the seat cannot repair a stale one',
+        machineGlobal
+          ? 'so any seat launched anywhere on this machine may authenticate with this team key rather than its own'
+          : shared
+            ? 'so a sibling seat may authenticate with this team key rather than its own'
+            : 'and it outranks binding.json, so re-minting the seat cannot repair a stale one',
       ],
     ] as const) {
       if (value === undefined) continue;
@@ -507,9 +528,11 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       // harnesses wire never touches. Derive it instead.
       noteEntryDrift(
         `${h.label}'s musterd server bakes ${name} — a per-seat secret in ` +
-          (shared
-            ? `an entry ${h.label} keys by repo ROOT, which every git worktree of this repo shares, `
-            : `the entry itself, `) +
+          (machineGlobal
+            ? `${h.label}'s MACHINE-GLOBAL config, which every folder on this machine reads, `
+            : shared
+              ? `an entry ${h.label} keys by repo ROOT, which every git worktree of this repo shares, `
+              : `the entry itself, `) +
           `${why}. ` +
           (wireRepairs
             ? `Run \`musterd wire\` here: it rewrites the entry from .musterd/binding.json ` +
