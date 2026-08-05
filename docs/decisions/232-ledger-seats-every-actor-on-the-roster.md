@@ -1,6 +1,6 @@
 # 232 — Ledger seats: every actor on the roster
 
-- Status: accepted — increment 1 built (`kind: service`, the mskd_ service-token auth path, the
+- Status: accepted — increment 1 built (`kind: service`, the mskd\_ service-token auth path, the
   kind-keyed exclusions, `service install --auto` token delivery, and the tick's in-band bounce
   announcement); increments 2–5 open
 - Date: 2026-08-05
@@ -60,6 +60,22 @@ they split cleanly:
 
 Multi-team daemons (the cookoff cells) are a dogfood artifact; a real install is one daemon, one
 team. The design must not bake the overlap in.
+
+### Amendment (2026-08-05): §3 was false as built — silence needs an audible baseline
+
+§3 claimed a sending service exercises ambient presence "for free": interval ticks would read
+present-with-freshness. Measured on the live machine the day increment 1 shipped: **a healthy
+auto-refresher read offline within six minutes of working correctly.** The two decisions collide —
+§2 correctly forbids idle-tick chatter, so the bounce announcement turned out to be the seat's
+_only_ authenticated call, and ~99% of ticks are no-ops. A quiet roster row therefore carried no
+signal at all: it was the steady state of health, not the mark of a wedged cron.
+
+The repair keeps both decisions intact rather than weakening either: every tick that finds the
+daemon reachable now makes **one authenticated presence touch** as the service seat — a presence
+row, never an envelope, so the message stream stays exactly as quiet as §2 demands. Silence is
+signal only once health is audible; the heartbeat is the audible half. An unreachable daemon gets
+no touch (there is nothing to touch), so an outage still reads as staleness on the roster. The
+touch is best-effort like the announcement: its failure is a log line, never a failed tick.
 
 ## Decision
 
@@ -202,8 +218,14 @@ did carry identity would attribute to the operator's folder binding, not the act
 
 - **Increment 1 pass:** every daemon bounce the auto-refresher performs appears as an attributed
   in-band `status_update` within one tick of the bounce; its audit rows carry the service seat's
-  name and never the operator's; the roster shows the seat with ambient freshness that goes quiet
-  within two ticks of `launchctl unload` (verified by hand once — the silence-is-signal check).
+  name and never the operator's.
+- **Silence-is-signal pass (rewritten by the 2026-08-05 amendment):** the original criterion —
+  "freshness goes quiet within two ticks of `launchctl unload`" — was vacuous, because a _healthy_
+  service also read quiet within two ticks (its only authenticated call was the rare bounce
+  announcement). The criterion must discriminate, so it is now two-sided: **while the job runs and
+  the daemon is reachable, the seat's presence freshness stays within 2× the tick interval; after
+  `launchctl unload`, freshness exceeds 2× the tick interval and stays there.** Quiet now implies
+  stopped — verified by hand once in each direction.
 - **Increment 2 pass:** with all six actors enumerated, `musterd doctor` reports zero unattributed
   musterd-labeled jobs; deliberately adding a fake plist produces exactly one named warn line.
 - **Fail worth watching:** service chatter drowning the stream (more than ~1 announcement per

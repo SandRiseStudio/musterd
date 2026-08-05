@@ -804,6 +804,9 @@ export async function serviceCommand(
     trimLogs?: () => TrimmedLog[];
     /** ADR 227 inc 2: the warn-only infra-touch gate (injected so tests never reach a daemon). */
     infraGate?: (verb: string) => Promise<string | null>;
+    /** ADR 232 §3 amendment: the per-tick service-seat presence heartbeat (injected so tests
+     *  never read the real token file or reach a daemon). */
+    touch?: (ok: (s: string) => void) => Promise<void>;
   } = {},
 ): Promise<number> {
   const sub = parsed.positionals[0];
@@ -911,6 +914,7 @@ export async function serviceCommand(
         outageState,
         okStamped,
         fail,
+        deps.touch,
       );
     }
     const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
@@ -1272,24 +1276,56 @@ async function provisionAutoRefreshToken(
  * bit-identical to pre-232. A failed send is one meta line — the bounce already happened, and the
  * announcement must never turn a successful refresh into a failed tick.
  */
-async function announceRefreshBounce(
-  sha: string,
-  conns: number,
-  ok: (s: string) => void,
-): Promise<void> {
+/**
+ * The service seat's authenticated client, or null when unprovisioned. Null is the pre-232
+ * posture — every caller must degrade to silence, never to a failed tick.
+ */
+function serviceSeatAuth(): { http: HttpClient; team: string } | null {
   const tokenFile = process.env['MUSTERD_SERVICE_TOKEN_FILE'] ?? serviceTokenPath();
   let token: string;
   try {
     token = readFileSync(tokenFile, 'utf8').trim();
   } catch {
-    return; // unprovisioned — pre-232 behaviour, silently
+    return null; // unprovisioned — pre-232 behaviour, silently
   }
   const config = loadConfig();
   const team = process.env['MUSTERD_SERVICE_TEAM'] ?? config.current;
-  if (!token || !team) return;
+  if (!token || !team) return null;
+  return { http: new HttpClient({ server: config.server, key: token, surface: 'cli' }), team };
+}
+
+/**
+ * The per-tick heartbeat (ADR 232 §3 amendment): one authenticated presence touch as the service
+ * seat, on EVERY tick that finds the daemon reachable — including the ~99% that refresh nothing.
+ *
+ * §3 as written assumed the announcement alone would keep ambient presence fresh, but §2
+ * correctly forbids idle-tick chatter, so a HEALTHY service's only authenticated call was the
+ * rare bounce announcement and it read offline within minutes of working correctly. Silence can
+ * only be signal if health is audible; this is the audible half, kept deliberately out of the
+ * message stream (a presence row, never an envelope) so §2's no-chatter rule stays intact.
+ *
+ * Best-effort like the announcement: a failed touch is one meta line, never a failed tick.
+ */
+export async function touchServicePresence(ok: (s: string) => void): Promise<void> {
+  const auth = serviceSeatAuth();
+  if (!auth) return; // unprovisioned — pre-232 behaviour, silently
+  try {
+    await auth.http.presence(auth.team, 'cli');
+  } catch (err) {
+    ok(theme.meta(`presence touch failed (${(err as Error).message}) — the tick is unaffected`));
+  }
+}
+
+async function announceRefreshBounce(
+  sha: string,
+  conns: number,
+  ok: (s: string) => void,
+): Promise<void> {
+  const auth = serviceSeatAuth();
+  if (!auth) return; // unprovisioned — pre-232 behaviour, silently
+  const { http, team } = auth;
   const s = conns === 1 ? '' : 's';
   try {
-    const http = new HttpClient({ server: config.server, key: token, surface: 'cli' });
     await http.send(
       team,
       makeEnvelope({
@@ -1466,6 +1502,7 @@ async function autoRefreshTick(
   outageState: { read: () => string | null; write: (s: string) => void },
   ok: (s: string) => void,
   fail: (step: string, r: RunResult) => never,
+  touch: (ok: (s: string) => void) => Promise<void> = touchServicePresence,
 ): Promise<number> {
   const dir = daemonCheckout(ctx) ?? ctx.workingDir;
   let health0: DaemonHealth;
@@ -1478,6 +1515,11 @@ async function autoRefreshTick(
   // on the up-to-date path — is what makes the run counter mean "consecutive", so a blip between two
   // healthy ticks can never accumulate into a false confirmation.
   if (outageState.read()) outageState.write('');
+  // The §3-amendment heartbeat: one authenticated presence touch per reachable tick, so a healthy
+  // interval service reads present-with-freshness instead of offline-in-minutes. Before the skew
+  // gates on purpose — every no-op exit below is still a live, correctly-working service. The
+  // catch enforces the amendment's contract at the seam: a heartbeat can never fail the tick.
+  await touch(ok).catch(() => {});
   if (!health0.build) {
     ok('daemon reports no build ref (not running from a checkout) — skipping');
     return 0;
