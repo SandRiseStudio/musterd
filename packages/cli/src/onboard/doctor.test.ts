@@ -447,6 +447,43 @@ describe('inspectProvisioning', () => {
       expect(line).not.toMatch(/Run `musterd wire`/);
     });
 
+    // Even the harness the folder IS provisioned for can be reporting drift from a file `configure`
+    // does not write: Codex and Cursor both merge a machine-global config, and musterd only ever
+    // writes the project one. Prescribing `wire` there rewrites a different file and reports success,
+    // leaving the drift exactly where it was — a repair that cannot reach its target is the ADR 168
+    // failure whichever direction it comes from. Measured 2026-08-05 on ~/.codex/config.toml, which
+    // held an agent key, a grant, autojoin and a model.
+    it('never prescribes wire for an entry that lives outside the file configure writes', async () => {
+      h.primer = 'managed';
+      h.spec = { surface: 'codex' };
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [
+        {
+          ...harnessWithEntry('Codex', { registeredAgentKey: 'mskey_x' }, 'folder', 'codex'),
+          detect: async () => ({
+            installed: true,
+            configured: true,
+            detail: 'Codex',
+            registeredAgentKey: 'mskey_x',
+            registeredElsewhere: '/Users/x/.codex/config.toml',
+          }),
+        },
+      ];
+      const r = await inspectProvisioning('/x');
+      const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
+      expect(line).toBeDefined();
+      expect(line).not.toMatch(/Run `musterd wire`/);
+      // It must NAME the file, or the reader has nowhere to go — the whole point is that this one
+      // cannot be fixed from inside the folder.
+      expect(line).toContain('/Users/x/.codex/config.toml');
+      // ...and --fix must not route at wire on the strength of it.
+      expect(r.repair).not.toBe('wire');
+      // The REACH has to scale with the file: a credential in a machine-global config is not "in the
+      // entry itself" (one folder) — it is what every folder on the machine authenticates as.
+      expect(line).toContain('MACHINE-GLOBAL');
+      expect(line).toContain('anywhere on this machine');
+    });
+
     it("still classifies as 'wire' when at least one drifting entry is Claude Code's", async () => {
       h.primer = 'managed';
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
