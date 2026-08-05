@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol';
 import {
+  answerableCount,
   askAudience,
   askIsLoud,
   byAudienceThenUrgency,
@@ -94,10 +95,7 @@ export function AsksStrip({
   const leadAudience = lead ? askAudience(lead, ctx) : null;
   // Yours-or-anyone's: the only audiences whose asks this browser should be invited to answer.
   const leadIsOurs = leadAudience === 'you' || leadAudience === 'team';
-  const yoursCount = loud.filter((a) => {
-    const aud = askAudience(a, ctx);
-    return aud === 'you' || aud === 'team';
-  }).length;
+  const yoursCount = answerableCount(loud, ctx);
 
   // The review queue (nick, 2026-08-05): every lane in acceptance and who it waits on, at a glance.
   const reviews = useMemo(
@@ -371,7 +369,13 @@ export function AsksStrip({
                   key={r.lane.id}
                   type="button"
                   className="lc-asks__review"
-                  onClick={() => onOpenLane?.(r.lane.id)}
+                  onClick={() => {
+                    // Close the sheet BEFORE opening the board. The dismissal handler only fires on
+                    // a click OUTSIDE the strip, and this button is inside it — so without this the
+                    // sheet stays up covering the lane it just opened (ryder's review note on #687).
+                    setOpen(false);
+                    onOpenLane?.(r.lane.id);
+                  }}
                   title="Open this lane on the board"
                 >
                   <span

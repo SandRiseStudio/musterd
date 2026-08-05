@@ -1,6 +1,7 @@
 import { ASK_TIER_DEFAULTS, PROTOCOL_VERSION, type Envelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import {
+  answerableCount,
   askAudience,
   askIsLoud,
   byAudienceThenUrgency,
@@ -366,5 +367,46 @@ describe('reelItems — what the stream rotates through', () => {
 
   it('is empty when nothing is waiting anywhere', () => {
     expect(reelItems([], [])).toEqual([]);
+  });
+});
+
+/**
+ * ryder's review note on #687: the tab title counted `team`-audience asks even when this browser has
+ * no identity at all, so a watch-link viewer who has never signed in and cannot answer anything still
+ * read "(3 asks)" in their tab. Smaller than the ten-asks lie that opened lane 01KZ9GFHZ9, but the
+ * same species — a count addressed to somebody it is not addressed to.
+ *
+ * The line is `ctx.you`: a browser one click from being nick still counts (the title is the nudge,
+ * and the team pool is genuinely takeable), but a browser that is nobody counts nothing.
+ */
+describe('answerableCount — the tab title only counts asks THIS browser could answer', () => {
+  const to = (name: string) => ({ kind: 'member', name }) as Envelope['to'];
+  const humans = new Set(['nick']);
+  const mk = (id: string, recipient?: string) =>
+    deriveAsks([
+      env(id, 'ask', {
+        ts: 1000,
+        meta: { species: 'approve', tier: 'standard' },
+        ...(recipient ? { to: to(recipient) } : {}),
+      }),
+    ])[0]!;
+
+  it('counts nothing for a viewer with no identity — even when team-pool asks are open', () => {
+    const pool = [mk('a1'), mk('a2'), mk('a3')]; // to: team → audience 'team'
+    expect(answerableCount(pool, { you: null, humans })).toBe(0);
+  });
+
+  it('counts team-pool asks for a browser that is one click from an identity', () => {
+    expect(answerableCount([mk('a1'), mk('a2')], { you: 'nick', humans })).toBe(2);
+  });
+
+  it('counts yours, and never an agent-routed review', () => {
+    const mine = mk('a1', 'nick');
+    const theirs = mk('a2', 'gptbot');
+    expect(answerableCount([mine, theirs], { you: 'nick', humans })).toBe(1);
+  });
+
+  it('counts nothing when every open ask is routed to an agent', () => {
+    expect(answerableCount([mk('a1', 'gptbot'), mk('a2', 'izzo')], { you: 'nick', humans })).toBe(0);
   });
 });

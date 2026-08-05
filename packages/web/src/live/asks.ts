@@ -147,6 +147,25 @@ export interface AudienceContext {
   humans: Set<string>;
 }
 
+/**
+ * How many open asks THIS browser could actually answer — the tab title's number.
+ *
+ * `you` + `team` count: an ask routed to you is yours, and the team pool is genuinely takeable by
+ * whoever signs in. An agent-routed review never counts, which is the lie lane 01KZ9GFHZ9 retired.
+ *
+ * The `ctx.you` guard is ryder's review note on #687: with no identity at all — a watch-link viewer
+ * who has never signed in — every team-pool ask still scored, so the tab read "(3 asks)" at someone
+ * who cannot answer a single one of them. A browser one click from an identity still counts (the
+ * title is the nudge); a browser that is nobody counts nothing.
+ */
+export function answerableCount(asks: AskView[], ctx: AudienceContext): number {
+  if (!ctx.you) return 0;
+  return asks.filter((a) => {
+    const audience = askAudience(a, ctx);
+    return audience === 'you' || audience === 'team';
+  }).length;
+}
+
 export function askAudience(ask: AskView, ctx: AudienceContext): AskAudience {
   if (ask.to == null) return 'team';
   if (ctx.you != null && ask.to === ctx.you) return 'you';
