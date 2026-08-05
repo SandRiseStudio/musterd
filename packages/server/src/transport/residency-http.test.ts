@@ -285,6 +285,46 @@ describe('x-musterd-provenance — the ambient touch attests the animation sourc
   });
 });
 
+describe('x-musterd-wake-lease — the ambient touch carries the correlation token (ADR 241)', () => {
+  it('an agent-key touch stamps the lease; a human credential can never stamp one', async () => {
+    const adaLease = async () => {
+      const status = await get('/teams/dawn/members', nickCred);
+      return status.json.members.find((m: { name: string }) => m.name === 'Ada').presences[0]
+        .wake_lease;
+    };
+    const read = async (lease?: string) => {
+      const res = await fetch(base + '/teams/dawn/inbox?seat=Ada', {
+        headers: {
+          authorization: `Bearer ${agentKey}`,
+          'x-musterd-seat': 'Ada',
+          'x-musterd-provenance': 'wake',
+          ...(lease ? { 'x-musterd-wake-lease': lease } : {}),
+        },
+      });
+      expect(res.status).toBe(200);
+    };
+    await read('L-77');
+    expect(await adaLease()).toBe('L-77');
+
+    // The woken session's later touches keep carrying it; a touch that carries none clears it,
+    // travelling with provenance rather than sticking like model/build (ADR 241).
+    await read();
+    expect(await adaLease()).toBeNull();
+
+    // A human credential stamps nothing — same gate as model and provenance (ADR 121). A lease
+    // token in a human's shell must never let that shell pose as a machine's wake.
+    const res = await fetch(base + '/teams/dawn/inbox', {
+      headers: { ...authHeaders(nickCred), 'x-musterd-wake-lease': 'L-99' },
+    });
+    expect(res.status).toBe(200);
+    const status = await get('/teams/dawn/members', nickCred);
+    const nick = status.json.members.find((m: { name: string }) => m.name === 'nick');
+    expect(
+      nick.presences.every((p: { wake_lease: string | null }) => p.wake_lease === null),
+    ).toBe(true);
+  });
+});
+
 describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
   async function reportedLease(): Promise<string> {
     await enrollAda();

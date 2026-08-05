@@ -85,6 +85,14 @@ const VERIFY_FRESHNESS_SLACK_MS = 2_000;
  * offline, and crediting it reported a dead resume child as `woke {session:resumed}` while the act
  * went unanswered. Returns the attested provenance so the backend can flag an adapter that isn't
  * stamping `wake` yet.
+ *
+ * ADR 241: the evidence bar is IDENTITY, not description. `leaseId` is this wake's own lease, which
+ * the actuator handed to the child through `MUSTERD_WAKE_LEASE`; only a row attesting that exact
+ * value is this wake's evidence. Descriptions cannot do this job — a prior wake session still inside
+ * its 30-minute work-order timeout keeps a fresh `provenance: 'wake'` row, so accepting provenance
+ * alone credits the old session instantly and reports a wake that never happened as delivered.
+ * `lease_matched` carries the answer out: the backend distinguishes "someone else holds the seat"
+ * (defer, budget-neutral) from "nobody occupied" (a real failure that burns).
  */
 async function verifyOccupied(
   client: WakeClient,
@@ -93,10 +101,11 @@ async function verifyOccupied(
   windowMs: number,
   pollMs: number,
   sinceTs: number,
-): Promise<{ occupied: boolean; provenance?: string | null }> {
+  leaseId: string,
+): Promise<{ occupied: boolean; provenance?: string | null; lease_matched?: boolean }> {
   const deadline = Date.now() + windowMs;
   const freshBar = sinceTs - VERIFY_FRESHNESS_SLACK_MS;
-  // ADR 238: the newest non-wake occupancy seen so far. Held, not returned — see below.
+  // ADR 238: the newest occupancy that is not ours, seen so far. Held, not returned — see below.
   let otherOccupancy: { occupied: boolean; provenance?: string | null } | null = null;
   for (;;) {
     const roster = await client.roster(team).catch(() => null);
@@ -104,8 +113,12 @@ async function verifyOccupied(
     if (me) {
       const fresh = me.presences.filter((p) => p.last_seen_at >= freshBar);
       if (fresh.length > 0 && (me.presence !== 'offline' || me.reclaimable)) {
-        const attested = fresh.find((p) => p.provenance === 'wake');
-        if (attested) return { occupied: true, provenance: 'wake' };
+        // ADR 241: `p.wake_lease === leaseId` and nothing weaker. An absent token never matches —
+        // absence is not an assertion (ADR 236), and reading it as one is the error this whole
+        // lane is a chain of.
+        const attested = fresh.find((p) => p.wake_lease === leaseId);
+        if (attested)
+          return { occupied: true, provenance: attested.provenance ?? null, lease_matched: true };
         // ADR 238: a row belonging to ANOTHER live session is fresh by definition — its owner keeps
         // touching it — so the freshness bar above, which filters by time, cannot exclude it.
         // Returning here credited that row to this wake and judged the wake before our own adapter
@@ -116,7 +129,10 @@ async function verifyOccupied(
         otherOccupancy = { occupied: true, provenance: fresh[0]?.provenance ?? null };
       }
     }
-    if (Date.now() >= deadline) return otherOccupancy ?? { occupied: false };
+    if (Date.now() >= deadline)
+      return otherOccupancy
+        ? { ...otherOccupancy, lease_matched: false }
+        : { occupied: false, lease_matched: false };
     await new Promise((r) => setTimeout(r, pollMs));
   }
 }
@@ -310,6 +326,9 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
               windowMs ?? deps.verifyWindowMs ?? VERIFY_WINDOW_MS,
               deps.verifyPollMs ?? VERIFY_POLL_MS,
               sinceTs ?? Date.now(),
+              // ADR 241: bound HERE, from the order the loop is actuating — never passed in by the
+              // backend. A backend cannot name a lease other than the one it was handed.
+              order.lease_id,
             ),
           log: deps.log,
         },

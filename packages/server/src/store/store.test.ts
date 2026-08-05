@@ -472,6 +472,43 @@ describe('presence', () => {
     expect(epochOf('Bo')).toBeNull();
   });
 
+  /**
+   * ADR 241. The token is the one presence field that IDENTIFIES rather than describes, so its
+   * stickiness rule is deliberately the opposite of model/build/epoch's: it travels with
+   * `provenance`, not with attestation. A touch that re-writes provenance re-writes the token in the
+   * same breath, because a sticky token under a fresh provenance would keep asserting a lease the
+   * session no longer belongs to — and a verifier reads that assertion as proof it spawned the
+   * session.
+   */
+  it('round-trips the wake correlation token, and clears it with provenance (ADR 241)', () => {
+    const { db, team } = freshTeam();
+    const leaseOf = (name: string) =>
+      listPresence(db, team.id, 45_000).find((s) => s.member.name === name)?.presences[0]
+        ?.wake_lease;
+
+    // Claim path: the woken adapter attests the lease that spawned it.
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    attach(db, ada.row.id, 'codex', 'c1', { provenance: 'wake', wake_lease: 'L-1' });
+    expect(leaseOf('Ada')).toBe('L-1');
+
+    // Ambient path: the woken session's hook one-shots carry it too — often BEFORE the adapter
+    // claims, which is why the header exists at all.
+    const cy = addMember(db, team, { name: 'Cy', kind: 'agent' });
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, { provenance: 'wake', wake_lease: 'L-2' });
+    expect(leaseOf('Cy')).toBe('L-2');
+
+    // …and a later touch from a human-driven session takes the row over completely: provenance
+    // `session` AND no lease. Keeping the token here would leave the row claiming a wake it is no
+    // longer part of — a row that lies is worse than a row that says nothing.
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, {});
+    expect(leaseOf('Cy')).toBeNull();
+
+    // An occupancy no wake caused simply has none. This is the overwhelmingly common case.
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    attach(db, bo.row.id, 'claude-code', 'c2');
+    expect(leaseOf('Bo')).toBeNull();
+  });
+
   it('countLivePresences counts distinct live members across all teams, ignoring offline/held (ADR 047)', () => {
     const { db, team } = freshTeam();
     const other = createTeam(db, { slug: 'dusk' });

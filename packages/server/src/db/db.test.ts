@@ -11,7 +11,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('33');
+    expect(ver?.value).toBe('34');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -50,6 +50,20 @@ describe('db', () => {
     ).map((c) => c.name);
     expect(presenceCols).toContain('model');
     db.close();
+  });
+
+  it('v34 adds the wake correlation token on presence (ADR 241)', () => {
+    const db = openDb(':memory:');
+    const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+    expect(cols).toContain('wake_lease');
+    // Nullable and never backfilled: an occupancy no wake caused genuinely has no lease, and the
+    // verifier must read that absence as "not mine" rather than as missing data (ADR 236).
+    const nullable = db
+      .prepare<[], { notnull: number }>(
+        "SELECT [notnull] FROM pragma_table_info('presence') WHERE name = 'wake_lease'",
+      )
+      .get();
+    expect(nullable?.notnull).toBe(0);
   });
 
   it('v19 adds the resumable-attestation columns on residency (ADR 131 inc 4)', () => {
@@ -226,7 +240,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(33); // runs v18…v33 (… + ledger seats + declared stakes)
+    expect(runMigrations(db)).toBe(34); // runs v18…v34 (… + declared stakes + the wake token)
 
     const scope = (id: string) =>
       db
@@ -290,7 +304,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(33);
+    expect(runMigrations(db)).toBe(34);
 
     const policy = (id: string) =>
       db

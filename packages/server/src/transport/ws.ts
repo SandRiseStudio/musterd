@@ -575,6 +575,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             model: frame.model ?? null,
             build: frame.build ?? null,
             epoch: frame.epoch ?? null,
+            wake_lease: frame.wake_lease ?? null,
           });
           // First occupancy stamps the durable *held* marker (ADR 058) — the claim path is the v0.3
           // successor to the v0.2 first-token-touch that used to do this; keeps the ADR 070 derivation.

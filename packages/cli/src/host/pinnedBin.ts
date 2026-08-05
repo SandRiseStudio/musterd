@@ -176,9 +176,20 @@ export function ensurePinnedMusterd(opts: PinnedMusterdOpts): string | undefined
  * The spawn environment for a woken harness: the inherited env, `wake` provenance, and PATH with the
  * pinned shim FIRST. Prepending is the whole point — `/opt/homebrew/bin` is already on the host's
  * PATH, so anything appended loses to the frozen tarball.
+ *
+ * `leaseId` (ADR 241) stamps `MUSTERD_WAKE_LEASE`, so the woken session's presence row carries the
+ * lease that caused it. This backend does not yet VERIFY against it (see ADR 241's limitations —
+ * its success bar is looser than codex's and tightening it is its own increment); the token is
+ * plumbed now so the correlation exists in the ledger and the increment that reads it needs no
+ * second rollout.
  */
-export function wakeEnv(base: NodeJS.ProcessEnv, pinnedDir: string | undefined): NodeJS.ProcessEnv {
+export function wakeEnv(
+  base: NodeJS.ProcessEnv,
+  pinnedDir: string | undefined,
+  leaseId?: string,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...base, MUSTERD_PROVENANCE: 'wake' };
+  if (leaseId) env['MUSTERD_WAKE_LEASE'] = leaseId;
   if (!pinnedDir) return env;
   env['PATH'] = base['PATH'] ? `${pinnedDir}:${base['PATH']}` : pinnedDir;
   return env;

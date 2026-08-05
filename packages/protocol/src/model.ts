@@ -43,6 +43,23 @@ export function resolveAttestedProvenance(
 }
 
 /**
+ * Resolve the wake lease this session was spawned by (ADR 241), from `MUSTERD_WAKE_LEASE` — the
+ * actuator sets it on the child alongside `MUSTERD_PROVENANCE`, so hooks and one-shot CLI sends
+ * inherit it exactly as they inherit provenance.
+ *
+ * **Undefined when unset, always.** Unlike provenance, this resolver has no default and must never
+ * grow one: a defaulted correlation token would make an unstamped session assert membership of a
+ * lease it knows nothing about, and the whole point of the token is that presence rows carry
+ * identity rather than a plausible description (ADR 236 — absence is not an assertion).
+ */
+export function resolveAttestedWakeLease(
+  env: Record<string, string | undefined>,
+): string | undefined {
+  const raw = env['MUSTERD_WAKE_LEASE']?.trim();
+  return raw ? raw.slice(0, 64) : undefined;
+}
+
+/**
  * Derive the model family from an attested model id — the prefix up to the first version-ish
  * segment: `claude-opus-4-8` → `claude`, `gpt-5.2-codex` → `gpt`, `gemini-3-pro` → `gemini`.
  * The family is the leading alphabetic token of the id (lowercased, NFC); anything that yields no

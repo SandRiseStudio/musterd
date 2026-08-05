@@ -17,7 +17,13 @@ import {
   resolveBindingDir,
   warnForeignAdapterWorkspace,
 } from './binding.js';
-import { resolveDriver, resolveModel, resolveProvenance, resolveWorkspace } from './workspace.js';
+import {
+  resolveDriver,
+  resolveModel,
+  resolveProvenance,
+  resolveWakeLease,
+  resolveWorkspace,
+} from './workspace.js';
 
 /**
  * Where this adapter obtained its model. `observed` (a harness probe, hook-written) outranks both
@@ -45,6 +51,10 @@ export interface McpConfig {
   surface: Surface;
   /** Why this session attaches (provenance/where seed, ADR 014). Defaults to `session`. */
   provenance: Provenance;
+  /** The wake lease that spawned this session (ADR 241), from `MUSTERD_WAKE_LEASE`. Undefined for
+   *  every session no wake caused — and it must stay undefined rather than defaulting, because the
+   *  host reads a match as proof it spawned this session. */
+  wakeLease?: string | undefined;
   /** The gracefully-degrading "where" label, resolved once at load. */
   workspace: string;
   /** The human driving this session, if one is (driver co-presence, ADR 021). Env > binding.json
@@ -280,6 +290,7 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     ...(grant !== undefined ? { grant } : {}),
     surface,
     provenance: resolveProvenance(env),
+    wakeLease: resolveWakeLease(env),
     workspace,
     // Per-worktree fields moved out of the shared harness entry (ADR 165 inc 2): env stays the
     // manual override (headless/CI), the binding is what provisioning writes.
