@@ -66,7 +66,10 @@ export function nextStepsAfterPublish(version: string): string[] {
   return [
     `git tag v${version} && git push origin v${version}`,
     `pnpm bump-brew-formula --version ${version}   # then push SandRiseStudio/homebrew-musterd`,
-    `smoke: npm i -g @musterd/cli@${version} && musterd --version`,
-    `smoke: brew tap SandRiseStudio/musterd && brew install musterd`,
+    // The npm-install smoke that used to live here now runs BEFORE publishing (release/smoke.ts):
+    // as a suggestion it could only ever confirm damage, and 0.4.0 is what that cost. What is left
+    // here is the one path the pre-publish gate genuinely cannot exercise — brew resolves a formula
+    // and a tap, neither of which exists until the steps above are done.
+    `smoke: brew tap SandRiseStudio/musterd && brew install musterd   # after the formula push`,
   ];
 }
