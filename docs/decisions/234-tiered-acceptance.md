@@ -17,6 +17,27 @@ that if delivery is fixed and the answer rate does not move, the honest response
 two-stage close advisory in name as well as in fact. Two days of measurement have pushed toward that
 response without quite arriving at it:
 
+> **Amendment (2026-08-05, hours after increment 1 merged): the 84% is partly an artefact, and this
+> ADR's motivating statistic is weaker than it was when the proposal was made.** dolly's
+> [ADR 235](235-self-close-sanction-needs-a-backstop.md) measured the unverified self-closes
+> where the named acceptor was never active during the window (n=20). The owner closed at a mean of
+> **8.5 minutes** — because `lane_submit` told them to, verbatim: _"wait ≤5m … on silence,
+> `lane_resolve` yourself (recorded unconfirmed)."_ And the acceptor came back afterwards in **20 of
+> 20 cases** — 55% within an hour, 100% within the sweep's 24h grace, a mean **106.8 minutes after
+> the lane had already been shut**. Not one was a real silence.
+>
+> Those closes were not judgements that a change was not worth review. They were compliance with a
+> hint. So an unknown fraction of the 84% below is the daemon's own instruction rather than evidence
+> that acceptance buys ritual — and that fraction was never a stakes signal at all.
+>
+> **This is the falsifier this ADR pre-registered, arriving early and from someone else's lane.**
+> The Eval below says that if unverified closes are not concentrated in the low tier then stakes are
+> not the discriminator and increment 2 must not ship. dolly supplied a competing explanation _with
+> numbers_ before the label had run a single day. The honest consequence is not that increment 1 was
+> wasted — the label is exactly the instrument for telling the remaining stakes signal from this —
+> but that **increment 2's bar has gone up**, because part of what motivated it has already been
+> fixed by ADR 235. Read every number in this Context as pre-235.
+
 - **135 of 161 closes are unverified (84%).** The requirement is already advisory _in fact_ — seats
   self-close with a stated verification when nobody answers, and successive ADRs have blessed that
   as legitimate.
@@ -127,18 +148,41 @@ about the rate `high` lanes are — then **stakes are not the discriminator and 
 ship.** The unverified closes would then be explained by dolly's two buckets, and the work belongs
 there instead.
 
-Half of that alternative has already shipped: [ADR 233](233-owed-reviews-in-the-brief.md) gives the
-orientation brief an `owed_reviews` field, so bucket B — a reviewer who was online and simply never
-re-surfaced — now has a mechanism aimed at it. **This is a confound for increment 1 and must be
-stated in the Eval output, not discovered afterwards:** 233 landed hours before this label, so the
-post-234 window is also the post-233 window, and any improvement in the answer rate over the label
-period is at least as plausibly 233's as it is anything tiering would later do. The label phase can
-still answer its own question — whether stakes _differentiate_ — because that comparison is
-within-window and across tiers, and 233 applies to all tiers alike. It cannot be used to claim a
-level shift.
+**Both halves of that alternative have now shipped, and both landed _before_ this label.** Bucket B
+went to [ADR 233](233-owed-reviews-in-the-brief.md) (`owed_reviews` in the orientation brief);
+bucket A went to [ADR 235](235-self-close-sanction-needs-a-backstop.md) (the self-close
+sanction made conditional on an armed backstop). So the alternative explanation is not a hypothesis
+the label might rule out later — it is deployed code, and the amendment in the Context says what
+that costs this ADR's premise.
 
-What remains unaddressed is bucket A: an owner giving up at the 5-minute promise, which points at
-shortening or honestly restating `promised_wait_ms` rather than at tiering.
+**Two covariates, stated here so they cannot be discovered afterwards.** The post-234 window is also
+post-233 and post-235. Record both merge SHAs beside the label data. The consequence is blunt:
+
+- **The label may not be quoted for a level shift** in the answer rate. Any improvement over the
+  label period is at least as plausibly 233's or 235's. That reading was already unavailable when
+  233 landed; 235 buries it.
+- **The label can still answer its own question** — whether stakes _differentiate_ — because that
+  comparison is within-window and across tiers, and both changes apply to all tiers alike.
+
+That is the question increment 2 turns on, so the phase survives. It just answers one question
+instead of two, and the one it lost was never the one that mattered.
+
+> **A third finding, and it invalidates an assumption this Eval rests on.** ryder (lane
+> `01KZ9DZD9N`) established that the host slept in 19 cycles overnight, and that `reaper.ts:45-48`
+> charges every expired lease against the attempt budget — so izzo's acceptance act was
+> **terminally retired at 23:00:18** after three expired leases, nine hours before any seat could
+> have answered. The lane then closed `review_unanswered`, which reads as a reviewer declining.
+>
+> This Eval's item 2 measures time-to-answer from the acceptor's first presence after the ask. That
+> presumes the ask survives until they are present. Overnight it may not: the act can be retired
+> while the host is asleep, and no tier a worker declares changes that. **Any acceptance whose ask
+> was retired by lease exhaustion must be excluded from the tier comparison, not scored as an
+> unanswered high-tier or low-tier ask** — otherwise the label measures the reaper.
+>
+> The deeper correction belongs to [ADR 225](225-acceptance-must-reach-someone.md), not here: its
+> instrument table treats _wakeable_ as a property of the **seat**, and ryder has shown it is a
+> property of the **host**. When the lid is shut every seat is in the "neither" bucket regardless of
+> enrolment. That amendment is owed to 225 separately.
 
 State the measurement horizon before measuring. ADR 225's falsifier flipped its own verdict between
 a 15-hour snapshot and close because the rule never named one; this Eval reports **at close**, with
