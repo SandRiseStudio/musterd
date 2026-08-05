@@ -1,4 +1,5 @@
-import { isAbsolute, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { isAbsolute, join, relative } from 'node:path';
 import {
   CCD_SEND_MESSAGE_TOOL,
   extractUlid,
@@ -10,6 +11,14 @@ import {
 import type { Parsed } from '../args.js';
 import type { HttpClient } from '../client.js';
 import { CliError } from '../errors.js';
+import {
+  foreignModifiedPaths,
+  foreignPathWarning,
+  hasSessionIndex,
+  isStageShaped,
+  readSessionEdits,
+  recordSessionEdit,
+} from '../workingTree.js';
 import { resolveRead } from './helpers.js';
 
 /**
@@ -115,6 +124,61 @@ export function parseToolCall(raw: string): GateToolCall | null {
   }
 }
 
+/**
+ * The harness session id off the payload **envelope** (not `tool_input` — that slot belongs to the
+ * ADR 167 send target). Measured present on every PreToolUse payload in ADR 163's table, alongside
+ * `transcript_path` and `cwd`. Used only to key the ADR 239 per-session edit index, which never
+ * leaves the machine — the id is deliberately not returned on `GateToolCall`, so nothing that goes
+ * over the wire can pick it up.
+ */
+export function parseEnvelopeSessionId(raw: string): string | undefined {
+  try {
+    const json: unknown = JSON.parse(raw);
+    if (typeof json !== 'object' || json === null) return undefined;
+    const id = (json as Record<string, unknown>)['session_id'];
+    return typeof id === 'string' && id ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The workspace's musterd state dir. The PreToolUse hook `cd`s to the project root before running
+ *  (see {@link repoRelativePath}), and `musterd init` gitignores `.musterd/`. */
+function stateDir(): string {
+  return join(process.cwd(), '.musterd');
+}
+
+/**
+ * ADR 239 — the working-tree check. Returns the advisory text when a stage-shaped command would
+ * sweep in tracked files this session never wrote, and `undefined` otherwise (the overwhelmingly
+ * common case, which costs one regex and no subprocess).
+ *
+ * `git status --porcelain` is the only git command on this path and it is read-only: decision 5
+ * forbids touching another session's uncommitted work, for which there is no reflog.
+ */
+export function workingTreeWarning(
+  command: string | undefined,
+  sessionId: string | undefined,
+  dir: string,
+): string | undefined {
+  if (!command || !sessionId || !isStageShaped(command)) return undefined;
+  // No index at all → this session's writes were never observable, so every path would read as
+  // foreign. Say nothing rather than everything (ADR 239 decision 2).
+  if (!hasSessionIndex(dir, sessionId)) return undefined;
+  let porcelain: string;
+  try {
+    porcelain = execFileSync('git', ['status', '--porcelain'], {
+      encoding: 'utf8',
+      timeout: 3_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return undefined; // not a repo, git missing, or slow — never warn on a guess
+  }
+  const foreign = foreignModifiedPaths(porcelain, readSessionEdits(dir, sessionId));
+  return foreign.length > 0 ? foreignPathWarning(foreign, command) : undefined;
+}
+
 /** Emit the PreToolUse deny control JSON Claude Code reads — the tool is blocked and `reason` is the
  *  repair string surfaced to the model (in its action loop, not its background context). */
 function emitDeny(reason: string): void {
@@ -207,13 +271,26 @@ async function gateCheck(parsed: Parsed): Promise<number> {
       2,
     );
   }
-  try {
-    const raw = parseToolCall(await readStdin());
-    if (!raw) return 0; // nothing to match on → allow
+  let wtWarn: string | undefined;
+  // The hook protocol reads ONE control object off stdout, so the two advisories share a slot: an
+  // enforcement decision always wins it (a deny must never be swallowed), and the ADR 239 warning is
+  // flushed afterwards only if nothing was emitted. Tracked locally — this process handles one call.
+  let emitted = false;
+  const decide = async (): Promise<void> => {
+    const stdin = await readStdin();
+    const raw = parseToolCall(stdin);
+    if (!raw) return; // nothing to match on → allow
     // Normalize the target path to repo-relative BEFORE matching, so class + lane globs compare cleanly.
     const call: GateToolCall = raw.path ? { ...raw, path: repoRelativePath(raw.path) } : raw;
+    // ADR 239 — both halves of the working-tree check, before anything that can throw or round-trip.
+    // Purely local: the index is a file in this workspace's `.musterd/`, and nothing here is sent.
+    const sessionId = parseEnvelopeSessionId(stdin);
+    if (sessionId) {
+      if (call.path && isWriteShaped(call)) recordSessionEdit(stateDir(), sessionId, call.path);
+      wtWarn = workingTreeWarning(call.command, sessionId, stateDir());
+    }
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
-    if (!explicit || !identity) return 0; // ambient/unbound folder — no seat to gate → allow
+    if (!explicit || !identity) return; // ambient/unbound folder — no seat to gate → allow
     // ADR 163 — actor attestation, BEFORE the class table and independent of it. Deliberately not
     // awaited: nothing downstream reads the result, and an observer on the critical path would be the
     // latency tax the ADR's guard metric forbids. Fires on undeclared calls by design (ADR 150 §Gate B
@@ -221,7 +298,7 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     attest(http, team, call);
     const { enforcement } = await http.getEnforcement(team);
     const match = matchEnforcement(enforcement, call);
-    if (!match) return 0; // undeclared call → allow, no daemon round-trip (the common case)
+    if (!match) return; // undeclared call → allow, no daemon round-trip (the common case)
     const decision = await http.gateCheck(team, {
       kind: match.cls.kind,
       class: match.cls.class,
@@ -230,10 +307,21 @@ async function gateCheck(parsed: Parsed): Promise<number> {
       tool: call.tool,
       target: match.target,
     });
-    if (decision.decision === 'deny') emitDeny(decision.reason);
-    else if (decision.outcome === 'warned' && decision.reason) emitWarn(decision.reason);
+    if (decision.decision === 'deny') {
+      emitDeny(decision.reason);
+      emitted = true;
+    } else if (decision.outcome === 'warned' && decision.reason) {
+      emitWarn(decision.reason);
+      emitted = true;
+    }
+  };
+  try {
+    await decide();
   } catch {
     // Fail-open: a gate must never break the tool call it rides on (ADR 150 guard metric).
   }
+  // The ADR 239 advisory survives a failure above on purpose: an unreachable daemon is exactly when a
+  // second session in the folder is least likely to be noticed any other way.
+  if (wtWarn && !emitted) emitWarn(wtWarn);
   return 0;
 }
