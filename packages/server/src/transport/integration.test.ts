@@ -3090,6 +3090,96 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(entry!.recipients.map((r) => r.seat)).toContain('bo');
   });
 
+  // ADR 241. The transfer's own act already names the right lane; what it could not carry was the
+  // sender's reason, which is why explaining a handoff took a second act that then mis-derived.
+  it('a handoff note rides the transfer act, with the correct lane, and is never stored on the lane', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    const boTok = bo.json.human_credential;
+
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'the attestation gap', branch: 'nick/attestation', claim: true },
+      nickTok,
+    );
+    const handed = await fetch(base + `/teams/dawn/lanes/${lane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({
+        owner_seat: 'bo',
+        handoff_note: 'the platform half of what I shipped on the surface today',
+      }),
+    });
+    expect(handed.status).toBe(200);
+    const handedJson = (await handed.json()) as { lane: { detail: string | null } };
+    // The note is a message, not lane state: nothing about the lane's own record changed.
+    expect(handedJson.lane.detail).toBeNull();
+
+    const inbox = await get('/teams/dawn/inbox?unread=1', boTok);
+    const msg = inbox.json.messages.find(
+      (m: { meta?: { lane_handoff?: unknown } }) => m.meta?.lane_handoff,
+    );
+    expect(msg.act).toBe('handoff');
+    expect(msg.body).toContain('the platform half of what I shipped on the surface today');
+    // Load-bearing pairing: the why and the lane it is about are in ONE act, which is the whole
+    // point — the second act that used to carry the why is the one that derived the wrong lane.
+    expect(msg.meta.lane_handoff.lane).toBe(lane.json.lane.id);
+  });
+
+  it('a lane-less handoff act after a transfer names the handed lane, not an unrelated held one (ADR 241)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+    const boTok = bo.json.human_credential;
+
+    // The live 2026-08-05 shape: hand one lane over, keep exactly one other. The kept lane is what
+    // the old rule attached — confidently, with no warning, because it was the only candidate left.
+    const handedLane = await post(
+      '/teams/dawn/lanes',
+      { title: 'the lane actually handed over', branch: 'nick/handed', claim: true },
+      nickTok,
+    );
+    const keptLane = await post(
+      '/teams/dawn/lanes',
+      { title: 'my unrelated lane in acceptance', claim: true },
+      nickTok,
+    );
+    await fetch(base + `/teams/dawn/lanes/${handedLane.json.lane.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+      body: JSON.stringify({ owner_seat: 'bo' }),
+    });
+
+    const sent = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          id: 'h-241a',
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'bo' },
+          act: 'handoff',
+          body: 'context for the lane I just gave you',
+          ts: Date.now(),
+        },
+      },
+      nickTok,
+    );
+    expect(sent.status).toBe(201);
+    expect(sent.json.handoff_lane).toMatchObject({
+      lane: handedLane.json.lane.id,
+      branch: 'nick/handed',
+      source: 'derived',
+    });
+    expect(sent.json.handoff_lane.lane).not.toBe(keptLane.json.lane.id);
+    // Persisted, not just acked — the durable env.meta is what the orientation `why` reads.
+    const inbox = await get('/teams/dawn/inbox', boTok);
+    const got = inbox.json.messages.find((m: { id: string }) => m.id === 'h-241a');
+    expect(got.meta.lane_handoff.lane).toBe(handedLane.json.lane.id);
+  });
+
   it('a surface-overlap warning stays a plain message — advisories must never spend a wake', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

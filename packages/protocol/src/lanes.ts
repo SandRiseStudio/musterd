@@ -224,6 +224,17 @@ export const UpdateLaneSchema = z.object({
   goal_id: z.string().nullable().optional(),
   /** Transfer ownership to this seat (lane_handoff / lane_claim sets it to the caller). */
   owner_seat: z.string().optional(),
+  /**
+   * Why this handoff (ADR 241) — carried into the body of the `handoff` act the transfer already
+   * emits, never stored on the lane. `lane_handoff` had no way to say anything, so explaining a
+   * handoff took a SECOND act, and that act named no lane and had to derive one from the lanes the
+   * sender still held — which is precisely the set the transfer just removed the right answer from.
+   * The note exists so the explanation and the correct lane travel in one act instead of two.
+   *
+   * Meaningful only alongside an `owner_seat` that moves the lane to someone else; ignored
+   * otherwise rather than rejected, so a client that always sends it is not punished for it.
+   */
+  handoff_note: z.string().max(4000).optional(),
   /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
   risk: z.array(z.string()).optional(),
   /**

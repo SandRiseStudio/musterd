@@ -22,7 +22,7 @@ const USAGE =
   '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--goal <id>] [--project p] [--role r] [--branch b] [--detail d] [--stakes low|normal|high] [--claim]\n' +
   '  musterd lane claim <id>\n' +
   '  musterd lane release <id>\n' +
-  '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
+  '  musterd lane handoff <id> --to <seat> [--branch <ref>] [--note <why>]\n' +
   '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high]\n' +
   '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
@@ -265,6 +265,11 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       owner_seat: to,
       ...(flagStr(parsed.flags, 'branch') !== undefined
         ? { branch: flagStr(parsed.flags, 'branch')! }
+        : {}),
+      // ADR 241: the why rides the transfer's own act, so explaining a handoff never needs a
+      // second, lane-less one.
+      ...(flagStr(parsed.flags, 'note') !== undefined
+        ? { handoff_note: flagStr(parsed.flags, 'note')! }
         : {}),
     });
     process.stdout.write(`${theme.ok('✓')} lane handed to ${to}\n${renderLane(res.lane)}\n`);
