@@ -23,7 +23,7 @@ const USAGE =
   '  musterd lane claim <id>\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high]\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high]\n' +
   '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
@@ -279,6 +279,10 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     const state = stateRaw !== undefined ? LaneStateSchema.parse(stateRaw) : undefined;
     const res = await http.updateLane(team, id, {
       ...(state !== undefined ? { state } : {}),
+      // ADR 240: correct a title that misstates the work — forward-only.
+      ...(flagStr(parsed.flags, 'title') !== undefined
+        ? { title: flagStr(parsed.flags, 'title')! }
+        : {}),
       ...(flagStr(parsed.flags, 'detail') !== undefined
         ? { detail: flagStr(parsed.flags, 'detail')! }
         : {}),

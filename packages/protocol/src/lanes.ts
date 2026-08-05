@@ -202,6 +202,14 @@ export type OpenLane = z.infer<typeof OpenLaneSchema>;
 /** Body for `PATCH /teams/:slug/lanes/:id` (lane_update / claim / handoff / resolve — one seam). */
 export const UpdateLaneSchema = z.object({
   state: LaneStateSchema.optional(),
+  /**
+   * Correct the title (ADR 240). Same reasoning as `project` below, applied to the field a reader
+   * sees FIRST: a lane opened with a title that misstates the work had no way back, and the only
+   * available correction was a note inside the detail — which reaches nobody who decides, from the
+   * board, not to open the lane. Forward-only: notification bodies already sent keep the title they
+   * were sent with, because they are history. `min(1)` — an empty title is worse than a wrong one.
+   */
+  title: z.string().min(1).optional(),
   detail: z.string().optional(),
   /**
    * Re-scope this lane's surface-space. `project` is stamped at open from the opener's workspace, so
