@@ -266,7 +266,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       ...(flagStr(parsed.flags, 'branch') !== undefined
         ? { branch: flagStr(parsed.flags, 'branch')! }
         : {}),
-      // ADR 242: the why rides the transfer's own act, so explaining a handoff never needs a
+      // ADR 243: the why rides the transfer's own act, so explaining a handoff never needs a
       // second, lane-less one.
       ...(flagStr(parsed.flags, 'note') !== undefined
         ? { handoff_note: flagStr(parsed.flags, 'note')! }

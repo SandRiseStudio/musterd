@@ -2759,7 +2759,7 @@ export async function handleHttp(
           body.owner_seat !== before.owner_seat &&
           body.owner_seat !== member.name
         ) {
-          // ADR 242: the sender's own words ride the SAME act as the transfer. Without a note here,
+          // ADR 243: the sender's own words ride the SAME act as the transfer. Without a note here,
           // explaining a handoff took a second `team_send {act:'handoff'}` — which names no lane and
           // derives one from the lanes the sender still holds, the one set this transfer has just
           // removed the right answer from. One act carries the why and the what it is about.

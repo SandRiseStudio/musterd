@@ -80,10 +80,10 @@ function routeEnvelopeInner(
   // dogfood team named no lane). Derived HERE, on the one validate→persist→deliver path, so WS and
   // HTTP and every client above them get it from one implementation. Explicit meta always wins.
   let handoffLane: RouteResult['handoff_lane'];
-  /** ADR 242: which evidence answered — audited, never on the wire. */
+  /** ADR 243: which evidence answered — audited, never on the wire. */
   let handoffBasis: HandoffLaneBasis | undefined;
   if (env.act === 'handoff' && !(env.meta as { lane_handoff?: unknown } | null)?.lane_handoff) {
-    // ADR 242: the recipient is evidence. A handoff act directed at a seat, moments after a lane
+    // ADR 243: the recipient is evidence. A handoff act directed at a seat, moments after a lane
     // was transferred to that seat, has a referent that "a lane the sender holds" cannot see — and
     // the held set is exactly where the intended lane is NOT, because lane_handoff already moved it.
     const derived = deriveHandoffLane(
@@ -107,7 +107,7 @@ function routeEnvelopeInner(
       // because guessing there writes a verdict onto the wrong lane and cannot be recovered. Here,
       // declining to attach leaves the message exactly as it is today — unjudgeable, but never
       // wrong. A message is worth more than a derived field.
-      // ADR 242: say which set was ambiguous. "you hold N" is false when the candidates are lanes
+      // ADR 243: say which set was ambiguous. "you hold N" is false when the candidates are lanes
       // the sender GAVE AWAY — a warning that misdescribes its own evidence sends the reader
       // looking at the wrong lanes.
       const situation =
@@ -388,8 +388,8 @@ function routeEnvelopeInner(
       detail: {
         message: message.id,
         ...handoffLane,
-        // ADR 242: which of the two candidate sets answered. Always written when a derivation
-        // happened, so absence means "recorded before ADR 242" and never "the held set" — the
+        // ADR 243: which of the two candidate sets answered. Always written when a derivation
+        // happened, so absence means "recorded before ADR 243" and never "the held set" — the
         // ADR 173 rule that a three-valued read needs an unambiguous write edge to mean anything.
         ...(handoffBasis ? { basis: handoffBasis } : {}),
       },

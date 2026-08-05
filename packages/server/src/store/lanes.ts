@@ -243,7 +243,7 @@ export type HandoffLaneDerivation =
   | { kind: 'none' };
 
 /**
- * Which evidence answered (ADR 242) — audited, never on the wire. `handed_to_recipient` is the
+ * Which evidence answered (ADR 243) — audited, never on the wire. `handed_to_recipient` is the
  * strong fact (this sender gave that seat this lane, and they still hold it); `held` is ADR 231's
  * original fallback. Recorded so the two rules can be told apart in a month: a derived population
  * still dominated by `held` means the fallback is doing the real work.
@@ -265,7 +265,7 @@ export type HandoffLaneBasis = 'handed_to_recipient' | 'held';
  * the wrong lane and cannot be recovered, declining to attach here leaves the message exactly as it
  * is today — unjudgeable, but never wrong. A message is worth more than a derived field.
  *
- * ADR 242 CORRECTION. Held lanes are the WEAKER evidence and are now the fallback, because
+ * ADR 243 CORRECTION. Held lanes are the WEAKER evidence and are now the fallback, because
  * `lane_handoff` transfers ownership *before* the explanatory act is sent: the lane the sender means
  * has already left the held set and could never be derived, while an unrelated lane they still hold
  * could — silently, in the confident single-candidate branch. The stronger fact is the pairing the
@@ -302,7 +302,7 @@ export function deriveHandoffLane(
 const HANDOFF_LEDGER_SCAN = 200;
 
 /**
- * Lanes `sender` handed to `recipient` that `recipient` still holds and has not closed (ADR 242).
+ * Lanes `sender` handed to `recipient` that `recipient` still holds and has not closed (ADR 243).
  *
  * Read from the acquisition ledger (ADR 203), which is the only record that distinguishes a handoff
  * from a self-claim — the lane row afterwards shows only who owns it, not who gave it to them. The
