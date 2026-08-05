@@ -70,6 +70,7 @@ jobs:
         run: pnpm coverage
 
       # prettier + roadmap:check + arch-trees:check + obs-evals:check + guidance:check + vocab:check
+      # + tokens:check (CSS colour tokens that lie: phantom, or a fallback disagreeing with the token)
       - name: Gates (format + docs)
         run: pnpm format:check
 

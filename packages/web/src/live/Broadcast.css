@@ -298,7 +298,8 @@
   font-family: var(--font-mono, monospace);
   font-size: 13px;
   letter-spacing: 0.01em;
-  /* Deep amber, not the accent mustard: measured 5.6:1 on this card's paper, where the accent sits
-     near 2.4:1. A stream re-encodes at 720p and low-contrast type is the first thing it eats. */
-  color: #7a4e06;
+  /* Deep amber, not the accent mustard, which sits near 2.4:1 on this card. A stream re-encodes at
+     720p and low-contrast type is the first thing it eats. Now the shared text amber rather than a
+     literal — same value, one owner. */
+  color: var(--lc-warn-ink);
 }
