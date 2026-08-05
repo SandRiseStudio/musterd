@@ -31,7 +31,7 @@ unlike Claude Code (a CLI, no file) and Cursor (a project-local JSON file):
 
 The adapter writes `<cwd>/.codex/config.toml` — the same non-invasive, project-scoped posture as
 Cursor's `.cursor/mcp.json` (ADR 027): one folder, in-tree, gitignorable, cleanly removable, and it
-never pollutes the user's _other_ Codex projects. A global `~/.codex/config.toml` write would put the
+never pollutes the user's *other* Codex projects. A global `~/.codex/config.toml` write would put the
 musterd server into **every** Codex session the user runs — exactly the capture ADR 027 forbids.
 
 This is a **deliberate deviation** from the recipe's "prefer the harness's own CLI" guidance (§4):
