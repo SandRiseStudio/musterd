@@ -88,6 +88,15 @@ export type AuditAction =
   // assumed this row existed — it did not, and its absence is why a 2026-08-01 double-claim left
   // nothing in the audit log but the release that undid it.
   | 'lane.claimed'
+  // ADR 231: a `handoff` act named no lane, so the daemon looked at the lanes the sender actually
+  // holds. `handoff.lane_derived` = exactly one, attached (detail: { message, lane, branch }).
+  // `handoff.lane_ambiguous` = two or more, so nothing was attached and the sender was warned
+  // (detail: { message, warning }). The no-lane case is deliberately unlogged — it is the legal
+  // path, and it is common enough that logging it would drown the two rows that carry signal.
+  // Together they are the ADR's evaluation: if ambiguous rows pile up without the senders going on
+  // to name a lane, the warning is being ignored and the shape needs revisiting.
+  | 'handoff.lane_derived'
+  | 'handoff.lane_ambiguous'
   // ADR 131: harness residency — the six wake-ledger verbs. `enrolled`/`revoked` are the
   // authorization events (actor = the deciding caller, detail carries `authorized_by`, ADR 127).
   // `wake_leased` is the daemon ordering an actuation (actor null — machine decision); `woke` /

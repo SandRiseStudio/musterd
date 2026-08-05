@@ -24,6 +24,15 @@ import { clearGrantFromBinding } from './binding.js';
 import { refreshAttestation, type McpConfig } from './config.js';
 import { SessionAttestation } from './sessionLiveness.js';
 
+/**
+ * What the daemon says about a `handoff`'s lane (ADR 231). Either `lane` — attached because the
+ * sender held exactly one live lane — or `warning`, when they held several and the daemon refused to
+ * guess. Absent when the sender holds none (the legal lane-less handoff) or the daemon predates 231.
+ */
+export type HandoffLaneAck =
+  | { lane: string; branch: string | null; source: 'derived' }
+  | { warning: string };
+
 /** A refuse whose cause is a bad *grant*, not a bad seat — drop the grant and retry bare (ADR 193). */
 function isStaleGrantRefusal(frame: { code: string; message: string }): boolean {
   if (frame.code === 'expired_grant') return true;
@@ -314,13 +323,19 @@ export class MusterdClient {
    *  with the reachability projection (`unblocker_reachable`, ADR 153) — a fact only the daemon can
    *  compute; callers fall back to the pure local contract when an older daemon omits it. A directed
    *  act to a live recipient may also carry a `delivery_hint` (ADR 167): a daemon-composed nudge the
-   *  sender can relay over the harness's session messaging. Both additive — older daemons omit them. */
-  sendEnvelope(
-    envelope: Envelope,
-  ): Promise<{ ask_contract?: AskContract; delivery_hint?: DeliveryHint }> {
+   *  sender can relay over the harness's session messaging. A `handoff` may carry `handoff_lane`
+   *  (ADR 231): either the lane the daemon attached because the sender held exactly one, or a
+   *  warning that they hold several and the `why` cannot tell which. All additive — older daemons
+   *  omit them. */
+  sendEnvelope(envelope: Envelope): Promise<{
+    ask_contract?: AskContract;
+    delivery_hint?: DeliveryHint;
+    handoff_lane?: HandoffLaneAck;
+  }> {
     return this.request('POST', `/teams/${this.config.team}/messages`, { envelope }) as Promise<{
       ask_contract?: AskContract;
       delivery_hint?: DeliveryHint;
+      handoff_lane?: HandoffLaneAck;
     }>;
   }
 

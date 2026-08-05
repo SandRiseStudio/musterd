@@ -14,7 +14,7 @@ import { log } from '../log.js';
 import { formatAskSlackText, postSlackWebhook } from '../notify/slack.js';
 import { appendAudit } from '../store/audit.js';
 import { recordLaneClose } from '../store/laneClose.js';
-import { getLane, updateLane } from '../store/lanes.js';
+import { deriveHandoffLane, getLane, updateLane } from '../store/lanes.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import { currentAttestedModel } from '../store/presence.js';
@@ -35,6 +35,10 @@ export interface RouteResult {
   message: MessageRow;
   recipients: string[]; // member ids the message is addressed to
   delivered: number; // live deliveries pushed
+  /** ADR 231 — what happened to a lane-less `handoff`'s lane: the one the daemon attached, or the
+   *  warning that the sender holds several and the daemon would not guess. Absent for every other
+   *  act, and for a handoff whose sender holds no live lane (the legal lane-less case). */
+  handoff_lane?: { lane: string; branch: string | null; source: 'derived' } | { warning: string };
 }
 
 /**
@@ -69,6 +73,39 @@ function routeEnvelopeInner(
   senderPresenceId?: string,
   daemonComposed = false,
 ): RouteResult {
+  // ADR 231: a `handoff` that names no lane. Only `lane_handoff` ever wrote
+  // `meta.lane_handoff.lane`, so a plain `team_send {act:'handoff'}` hands over work without saying
+  // WHICH work — and the orientation `why`, which reads a handoff as a live instruction, then has
+  // nothing to check it against and serves stale ones forever (24 of the first 30 handoffs on the
+  // dogfood team named no lane). Derived HERE, on the one validate→persist→deliver path, so WS and
+  // HTTP and every client above them get it from one implementation. Explicit meta always wins.
+  let handoffLane: RouteResult['handoff_lane'];
+  if (env.act === 'handoff' && !(env.meta as { lane_handoff?: unknown } | null)?.lane_handoff) {
+    const derived = deriveHandoffLane(ctx.db, team.id, team.slug, sender.name);
+    if (derived.kind === 'attach') {
+      handoffLane = { lane: derived.lane.id, branch: derived.lane.branch, source: 'derived' };
+      env = {
+        ...env,
+        meta: {
+          ...(env.meta ?? {}),
+          lane_handoff: { lane: derived.lane.id, branch: derived.lane.branch },
+        },
+      };
+    } else if (derived.kind === 'ambiguous') {
+      // Warn, never refuse. The un-threaded `accept` (mcp/tools/send.ts) DOES refuse to guess,
+      // because guessing there writes a verdict onto the wrong lane and cannot be recovered. Here,
+      // declining to attach leaves the message exactly as it is today — unjudgeable, but never
+      // wrong. A message is worth more than a derived field.
+      handoffLane = {
+        warning:
+          `handoff names no lane and you hold ${derived.candidates.length} — the orientation ` +
+          '`why` cannot tell the recipient which work this is. Use lane_handoff, or pass ' +
+          'meta.lane_handoff.lane: ' +
+          derived.candidates.map((l) => `${l.id} "${l.title}"`).join(', '),
+      };
+    }
+  }
+
   if (env.from !== sender.name || env.team !== team.slug) {
     throw new MusterdError('forbidden', 'envelope from/team must match the authenticated member');
   }
@@ -319,7 +356,20 @@ function routeEnvelopeInner(
     firehose_delivered: firehoseDelivered,
   });
 
-  return { message, recipients, delivered };
+  // Durable record of both branches (ADR 231 Observability): the derivation is otherwise invisible
+  // to the sender's transcript, and the ambiguous count is the counter-signal that says the warning
+  // is being ignored. The no-lane case is deliberately unlogged — it is the legal path, and logging
+  // it would drown the two that matter.
+  if (handoffLane) {
+    appendAudit(ctx.db, team.id, {
+      actor: sender.name,
+      action: 'lane' in handoffLane ? 'handoff.lane_derived' : 'handoff.lane_ambiguous',
+      target: message.id,
+      result: 'allow',
+      detail: { message: message.id, ...handoffLane },
+    });
+  }
+  return { message, recipients, delivered, ...(handoffLane ? { handoff_lane: handoffLane } : {}) };
 }
 
 /**

@@ -4,6 +4,7 @@ import { openDb } from '../db/open.js';
 import {
   boardWarnings,
   deriveGoalStatus,
+  deriveHandoffLane,
   getLane,
   globsOverlap,
   laneWarnings,
@@ -372,5 +373,66 @@ describe('departed-seat claim release (ADR 196)', () => {
       state: 'open',
       owner_seat: null,
     });
+  });
+});
+
+describe('deriveHandoffLane (ADR 231) — a handoff act names the lane it hands off', () => {
+  it('attaches when the sender holds exactly one live lane', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', {
+      title: 'the one live lane',
+      project: 'musterd',
+      branch: 'june/the-work',
+      claim: true,
+    });
+    const derived = deriveHandoffLane(db, team.id, 'bravo', 'June');
+    expect(derived.kind).toBe('attach');
+    if (derived.kind !== 'attach') throw new Error('unreachable');
+    expect(derived.lane.id).toBe(lane.id);
+    expect(derived.lane.branch).toBe('june/the-work');
+  });
+
+  it('abstains as ambiguous when the sender holds two or more — never guesses', () => {
+    const { db, team } = seed();
+    openLane(db, team.id, 'bravo', 'June', { title: 'first', project: 'musterd', claim: true });
+    openLane(db, team.id, 'bravo', 'June', { title: 'second', project: 'musterd', claim: true });
+    const derived = deriveHandoffLane(db, team.id, 'bravo', 'June');
+    expect(derived.kind).toBe('ambiguous');
+    if (derived.kind !== 'ambiguous') throw new Error('unreachable');
+    expect(derived.candidates).toHaveLength(2);
+  });
+
+  it('says none when the sender holds no live lane — the legal lane-less handoff', () => {
+    const { db, team } = seed();
+    expect(deriveHandoffLane(db, team.id, 'bravo', 'June').kind).toBe('none');
+  });
+
+  it('ignores terminal lanes — a done lane is not what you are handing off', () => {
+    const { db, team } = seed();
+    const done = openLane(db, team.id, 'bravo', 'June', {
+      title: 'shipped',
+      project: 'musterd',
+      claim: true,
+    });
+    updateLane(db, team.id, done.id, 'bravo', { state: 'done' });
+    const live = openLane(db, team.id, 'bravo', 'June', {
+      title: 'still going',
+      project: 'musterd',
+      claim: true,
+    });
+    const derived = deriveHandoffLane(db, team.id, 'bravo', 'June');
+    expect(derived.kind).toBe('attach');
+    if (derived.kind !== 'attach') throw new Error('unreachable');
+    expect(derived.lane.id).toBe(live.id);
+  });
+
+  it('ignores lanes owned by someone else — you cannot hand off what you do not hold', () => {
+    const { db, team } = seed();
+    openLane(db, team.id, 'bravo', 'Cleo', {
+      title: 'cleo owns it',
+      project: 'musterd',
+      claim: true,
+    });
+    expect(deriveHandoffLane(db, team.id, 'bravo', 'June').kind).toBe('none');
   });
 });
