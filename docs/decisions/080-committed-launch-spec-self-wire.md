@@ -34,7 +34,10 @@ env-referenced entry — a separate change to the binding model."_ This ADR is t
 - **`musterd wire` — the headless counterpart to `init`.** Reads `.musterd/workspace.json`, resolves
   the key from **local** sources only (`--key` → `MUSTERD_AGENT_KEY` → the machine's global
   `config.agentKeys[team]`), and registers the MCP server for the folder (idempotent — `configure`
-  does `mcp remove` then `mcp add`). No prompts. It **registers tools only** — it does _not_ set
+  does `mcp remove` then `mcp add`). No prompts. The harness it configures follows the spec's
+  `surface` (falling back to Claude Code for a surface no adapter answers to), so the folder's own
+  entry is the one rewritten — later amendment, once the doctor began prescribing `wire` as the
+  repair for a baked-env entry that only Codex or Cursor owns. It **registers tools only** — it does _not_ set
   `MUSTERD_AUTOJOIN`, so a shared repo cloned by many never has every clone auto-claim the same seat;
   the session stays dormant until it joins explicitly (`--autojoin` opts a personal worktree into
   claim-on-launch). Wiring (make the tools available) is deliberately distinct from claiming a seat.

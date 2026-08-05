@@ -39,7 +39,8 @@ export async function initCommand(parsed: Parsed): Promise<number> {
     if (code !== 0 && parsed.flags['fix'] && !parsed.flags['json']) {
       // Which repair depends on what drifted. Entry drift — the harness MCP entry disagreeing with
       // binding.json — is fixed by `musterd wire`: headless, no member minted, no bound-folder guard,
-      // and because Claude Code keys that entry by repo ROOT it repairs every seat worktree at once.
+      // and it rewrites the entry of the harness this folder declares (for Claude Code, keyed by repo
+      // ROOT, that one run repairs every seat worktree at once).
       // Sending entry drift to `runInit` was actively harmful: it repaired the running seat by taking
       // the shared slot from whoever held it, who then hit `expired_grant` on wake.
       const { repair } = await inspectProvisioning(process.cwd());

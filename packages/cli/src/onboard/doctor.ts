@@ -11,8 +11,8 @@ import {
   type Binding,
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
-import { WIRE_CONFIGURED_HARNESSES } from '../commands/wire.js';
-import { findBinding, loadConfig } from '../config.js';
+import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
+import { findBinding, findWorkspaceSpec, loadConfig } from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -380,17 +380,13 @@ async function inspectSeatIdentity(
 }
 
 /**
- * Human-readable list of the harnesses `musterd wire` configures, for the repair sentence the
- * doctor gives a harness wire cannot reach. Derived from the same constant wire exports, so it
- * cannot go stale independently of the command it describes. Resolved per call rather than at
- * module load: HARNESSES is injectable, and a registry that does not happen to contain the wired
- * harness must degrade to naming its id, never to an empty "it configures  only".
+ * The harness `musterd wire` would configure in THIS folder, for the repair sentence the doctor gives
+ * a harness wire cannot reach. Derived from the same function wire itself dispatches on, so it cannot
+ * go stale independently of the command it describes — and resolved per folder rather than per
+ * machine, because which harness wire reaches is now a property of what the folder declares.
  */
-function harnessLabelsWireConfigures(): string {
-  const labels = HARNESSES.filter((h) => WIRE_CONFIGURED_HARNESSES.includes(h.id)).map(
-    (h) => h.label,
-  );
-  return (labels.length > 0 ? labels : [...WIRE_CONFIGURED_HARNESSES]).join(' + ');
+function harnessLabelWireConfigures(surface: string | undefined): string {
+  return harnessWiredFor(surface).label;
 }
 
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
@@ -399,6 +395,10 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   // may still carry a baked `MUSTERD_CLAIM` that outranks it — the value-coherence check below.
   const binding = findBinding(cwd);
   const boundClaim = binding?.claim ? formatClaimPolicy(binding.claim) : undefined;
+  // Which harness `wire` would reach here follows the folder's DECLARED surface — the committed spec
+  // first (what wire itself reads), then the gitignored binding for a folder wired before the spec
+  // existed. Undefined degrades to the default, exactly as wire does.
+  const declaredSurface = findWorkspaceSpec(cwd)?.surface ?? binding?.surface;
   const drift: string[] = [];
   // Entry drift: the shared harness entry disagrees with this folder's binding.json. Tracked
   // separately from `drift` so `--fix` can route it to `musterd wire` (headless, whole-family)
@@ -412,15 +412,17 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   let anyWireRepairable = false;
   for (const h of HARNESSES) {
     const d = await h.detect();
-    // The repair sentence, derived from what `wire` configures rather than assumed (see
-    // WIRE_CONFIGURED_HARNESSES). Every drift message below ends with `repairWith`, so a harness
-    // wire cannot reach never gets told to run it.
-    const wireRepairs = WIRE_CONFIGURED_HARNESSES.includes(h.id);
+    // The repair sentence, derived from what `wire` configures rather than assumed. Every drift
+    // message below ends with `repairWith`, so a harness wire cannot reach never gets told to run it
+    // — and since wire now follows the folder's declared surface, the harness a provisioned folder
+    // actually uses is reachable, whichever one it is.
+    const wireRepairs = wireConfigures(h.id, declaredSurface);
     const repairWith = wireRepairs
       ? 'Run `musterd wire` here to rewrite the entry without it'
-      : `\`musterd wire\` does not rewrite ${h.label}'s entry — it configures ` +
-        `${harnessLabelsWireConfigures()} only. Re-provision this folder with \`musterd init\` and ` +
-        `pick ${h.label}, or drop the line from ${h.label}'s own entry file by hand`;
+      : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
+        `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
+        `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
+        `${h.label}'s own entry file by hand`;
     // Record entry drift AND whether `wire` could repair this particular one, so the `repair`
     // classification below never routes `--fix` at a command that cannot touch the drift it found.
     const noteEntryDrift = (text: string) => {

@@ -2,7 +2,9 @@ import { type Binding, bindingSeat, type ClaimPolicy } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { findBinding, findWorkspaceSpec, loadConfig, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
+import type { Harness } from '../onboard/harness.js';
 import { claudeCode } from '../onboard/harnesses/claudeCode.js';
+import { HARNESSES } from '../onboard/harnesses/index.js';
 import { buildEntry } from '../onboard/mcpEntry.js';
 import { theme } from '../render/theme.js';
 
@@ -22,18 +24,37 @@ import { theme } from '../render/theme.js';
  * seat to occupy when it does join.
  */
 /**
- * The harnesses `wire` actually rewrites an MCP entry for — today, Claude Code and only Claude Code
- * (see the single `claudeCode.configure` call below).
+ * The harness `wire` rewrites the musterd MCP entry for, in a folder that declares `surface`.
  *
- * This is exported because the doctor PRESCRIBES `musterd wire` as the repair for entry drift, and
- * that advice is only true for harnesses in this list. It used to be hard-coded into every drift
- * message, which made the doctor tell Cursor and Codex seats to run a command that cannot touch
- * their entries: the drift then re-flagged on every `--check` forever, and a permanently-red check
- * nobody can clear teaches everyone to skim the ✗ block. Deriving the prescription from this
- * constant keeps the two in sync by construction — widen what `wire` configures and you widen the
- * advice in the same edit, right next to the code you changed.
+ * Exported because the doctor PRESCRIBES `musterd wire` as the repair for entry drift, and that
+ * advice is only true for the harness wire will actually reach *in that folder*. This used to be the
+ * literal `['claude-code']`, which made wire a Claude-Code-only command by construction: a Codex seat
+ * whose `.codex/config.toml` baked a stale `MUSTERD_SURFACE` — a wire-time snapshot that outranks
+ * binding.json and that no observation can correct — was told to hand-edit the file or re-run the
+ * interactive `init`. Neither is a repair a check can offer (ADR 168: a detector whose prescribed fix
+ * has no safe form is half a feature), so the drift re-flagged on every `--check` forever, and a
+ * permanently-red check nobody can clear teaches everyone to skim the ✗ block.
+ *
+ * Every harness already implements the idempotent, promptless `configure` this needs; nothing but the
+ * hard-coded list stood between them and a working repair.
+ *
+ * The folder's *declared* surface decides, not what happens to be installed on the machine: wire
+ * repairs the entry this folder was provisioned with, and never conjures a first install for a
+ * harness the folder never picked (that is `init`'s job — the same line `refreshHooks.applies`
+ * draws). `surface` is a Presence surface rather than a harness id, so legitimate values (`cli`,
+ * `other`, or none at all in a spec written before the field existed) name no adapter; those degrade
+ * to Claude Code, which is what wire did for every folder before this.
  */
-export const WIRE_CONFIGURED_HARNESSES: readonly string[] = ['claude-code'];
+export function harnessWiredFor(surface: string | undefined): Harness {
+  // An undeclared surface must never *match* — `find` on an undefined needle would otherwise pair it
+  // with the first harness that happens to have no surface, which is a coincidence, not a decision.
+  return (surface ? HARNESSES.find((h) => h.surface === surface) : undefined) ?? claudeCode;
+}
+
+/** Will `wire`, run in a folder declaring `surface`, rewrite this harness's entry? */
+export function wireConfigures(harnessId: string, surface: string | undefined): boolean {
+  return harnessWiredFor(surface).id === harnessId;
+}
 
 export async function wireCommand(parsed: Parsed): Promise<number> {
   const flags = parsed.flags;
@@ -70,10 +91,12 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
   // state and goes into binding.json below, never into the repo-root-shared slot.
   const entry = buildEntry(agentBinding);
 
+  const harness = harnessWiredFor(spec.surface);
   let mcpError: string | null = null;
   try {
-    // `claude mcp add -s local` keys off cwd, which is already this folder — no chdir needed.
-    await claudeCode.configure(entry, agentBinding);
+    // Every adapter writes for the CURRENT folder — `claude mcp add -s local` keys off cwd, and the
+    // per-folder harnesses write `.cursor/mcp.json` / `.codex/config.toml` under it — so no chdir.
+    await harness.configure(entry, agentBinding);
   } catch (err) {
     mcpError = (err as Error).message;
   }
@@ -127,16 +150,23 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
         : `${theme.dim(`the team_* tools are available — join when ready (team_join / musterd claim ${seat ?? '<name>'}). Reload the session to pick up the tools.`)}\n`,
     );
   } else {
+    // The manual fallback is Claude Code's CLI, so it can only be offered when Claude Code is the
+    // harness that failed. Printing it for a Codex folder would hand the reader a command that
+    // registers the server in the wrong harness entirely — the same "repair that cannot work" this
+    // function's doc-comment is about.
     process.stdout.write(
-      `${theme.warn('⚠')} couldn't register the MCP server (${mcpError}). Register it here with:\n` +
-        theme.meta(
-          `  claude mcp add musterd -s local ` +
-            Object.entries(entry.env)
-              .map(([k, v]) => `-e ${k}=${v}`)
-              .join(' ') +
-            ` -- ${entry.command} ${entry.args.join(' ')}`,
-        ) +
-        '\n',
+      `${theme.warn('⚠')} couldn't register the musterd MCP server for ${harness.label} (${mcpError}).` +
+        (harness.id === 'claude-code'
+          ? ' Register it here with:\n' +
+            theme.meta(
+              `  claude mcp add musterd -s local ` +
+                Object.entries(entry.env)
+                  .map(([k, v]) => `-e ${k}=${v}`)
+                  .join(' ') +
+                ` -- ${entry.command} ${entry.args.join(' ')}`,
+            ) +
+            '\n'
+          : ` Re-provision this folder with \`musterd init\` and pick ${harness.label}.\n`),
     );
   }
   if (agentKey === undefined) {
