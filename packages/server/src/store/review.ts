@@ -264,6 +264,52 @@ export function verifiedCloses(db: Database, teamId: string): Map<string, boolea
   return out;
 }
 
+/**
+ * ADR 234 increment 2: the fraction of declared-`low` submits that route an acceptance ask ANYWAY.
+ *
+ * A named constant because it is a sample size, not a magic number. Exempting the low tier outright
+ * would destroy the ability to learn whether low lanes WOULD have been answered — the
+ * sample-starvation confound ADR 234 named, arriving by choice rather than by accident. Widen it if
+ * the low tier starves; the Eval reads the draw off the ready row either way.
+ */
+export const ACCEPTANCE_EXEMPT_SAMPLE_RATE = 0.2;
+
+/** What the submit edge decided about a lane's acceptance exemption (ADR 234 increment 2). */
+export interface AcceptanceExemption {
+  /** Route no ask at all: declared `low`, not risky, and not drawn into the sample. */
+  exempt: boolean;
+  /** Declared `low` and eligible, but drawn into the 1-in-5 hole — routes exactly like `normal`. */
+  sampled: boolean;
+}
+
+/**
+ * Does this submit skip acceptance (ADR 234 increment 2)?
+ *
+ * Two rules, and the second is a judgement this ADR had to make:
+ *
+ * 1. Only a `low` DECLARATION exempts. Never the surface, never the diff size — ADR 234 rejects
+ *    inference-from-surface by name, because surface complexity predicts review COST, not review
+ *    VALUE.
+ * 2. **A risk tag outranks the declaration.** ADR 172 makes human review a REQUIREMENT on a risky
+ *    lane, not a preference, and a worker's own "this is small" must not be able to dissolve a
+ *    requirement they also declared. Without this clause `stakes: low` would be a second, quieter
+ *    way to clear `risk` — precisely the shared-predicate collision ADR 225 and ADR 234 §3 built two
+ *    separate fields to avoid, rebuilt at the consumer instead of at the schema.
+ *
+ * The draw is per-SUBMIT and deliberately not derived from the lane id: hashing the id would make
+ * the same lane always-exempt or never-exempt, which is a fixed subpopulation rather than a sample,
+ * and a lane bounced back and resubmitted would keep drawing the same answer. `rand` is injectable
+ * so a test can pin the draw without pinning the whole clock.
+ */
+export function acceptanceExemption(
+  lane: Lane,
+  rand: () => number = Math.random,
+): AcceptanceExemption {
+  if (lane.stakes !== 'low' || lane.risk.length > 0) return { exempt: false, sampled: false };
+  const sampled = rand() < ACCEPTANCE_EXEMPT_SAMPLE_RATE;
+  return { exempt: !sampled, sampled };
+}
+
 export function pickReviewCounterpart(
   db: Database,
   teamId: string,

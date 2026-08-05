@@ -465,11 +465,22 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   w(
     `  ${theme.accent(String(r.ready))} entered acceptance · ${r.routed} routed · ${r.no_candidate} no counterpart${catchRate}\n`,
   );
+  // ADR 234 increment 2: the exemption and the hole on one line, because either number alone
+  // misleads. The exempt count without the sampled count reads as acceptance quietly eroding; the
+  // sampled count is the evidence that the low tier is still being measured, which is the whole
+  // condition on which the exemption was allowed to ship early.
+  if (r.acceptance_exempt > 0 || r.exempt_sampled > 0) {
+    w(
+      `  ${theme.meta(`${r.acceptance_exempt} exempt (declared low, no ask) · ${r.exempt_sampled} sampled in and routed anyway`)}\n`,
+    );
+  }
   // Rows written before the routing outcome was recorded (pre-#450) count as `ready` and abstain
   // from the split. Say so: without this line a panel reading "4 entered acceptance · 0 routed" invites
   // exactly the misreading this whole projection exists to prevent — and their closes carry the old
   // `review_timeout` label, which asserts an ask that may never have been sent.
-  const unknown = r.ready - r.routed - r.no_candidate;
+  // ADR 234 increment 2: exempt submits are a KNOWN third outcome and must come out of this
+  // subtraction. Left in, every declared-low lane would be reported as predating a 2026-07 fix.
+  const unknown = r.ready - r.routed - r.no_candidate - r.acceptance_exempt;
   if (unknown > 0) {
     w(
       `  ${theme.meta(`${unknown} predate routing-outcome recording (ADR 169 follow-up) — their split is unknown, and their closes read as timeouts whether or not an ask was sent`)}\n`,
@@ -488,6 +499,11 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   w(`    ${theme.ok('accepted')} ${c.counterpart_confirm}${verifiedPct}\n`);
   w(`    ${theme.meta('self-closed')} ${c.self_close} · never entered acceptance\n`);
   w(`    ${theme.meta('no counterpart')} ${c.no_candidate} · sanctioned, nobody was asked\n`);
+  if (c.acceptance_exempt > 0) {
+    w(
+      `    ${theme.meta('exempt')} ${c.acceptance_exempt} · declared low stakes, no ask was owed (ADR 234)\n`,
+    );
+  }
   // ADR 217: the old single line said "asked, unanswered" of every owner-close out of acceptance,
   // including the ones that closed after 8 seconds. Three lines now, because they call for three
   // different remedies — and the cut-short count is warn-coloured: it is the only one of the three

@@ -256,6 +256,17 @@ export const ReviewMetricsSchema = z.object({
   /** …and how many found no eligible counterpart, so no ask was ever sent (the ADR 172 posture
    *  explains WHY; this is just how often). */
   no_candidate: z.number().int().nonnegative(),
+  /**
+   * ADR 234 increment 2: …and how many routed no ask BY DESIGN, because the lane declared
+   * `stakes: low` and the 1-in-5 sampling draw missed it. Its own count for the same reason it has
+   * its own close reason: folded into `no_candidate` it would read as a degrading fleet, and the
+   * catch rate's denominator would silently acquire lanes nobody was ever meant to look at.
+   */
+  acceptance_exempt: z.number().int().nonnegative(),
+  /** …of the declared-`low` submits, how many the 1-in-5 hole drew IN and routed anyway. The
+   *  numerator that keeps the low tier producing answer-rate data at all; without it a sampled-in
+   *  low lane is indistinguishable from a lane declared `normal`. */
+  exempt_sampled: z.number().int().nonnegative(),
   /** Reviews where a counterpart sent the lane back — the review catch, the thing being measured. */
   sent_back: z.number().int().nonnegative(),
   /** Every terminal close in the window, by derived reason (ADR 169 §3). */
@@ -278,6 +289,11 @@ export const ReviewMetricsSchema = z.object({
     review_cut_short: z.number().int().nonnegative(),
     /** Owner closed where no counterpart existed — sanctioned, and not a timeout. */
     no_candidate: z.number().int().nonnegative(),
+    /** ADR 234 increment 2: closed with no acceptance because the lane declared `low` and was not
+     *  sampled in. Never folded into `no_candidate` — that is the degradation bucket, and an exempt
+     *  close degraded nothing. Unverified, but unverified BY DESIGN, which is a different fact about
+     *  the fleet than "nobody was available". */
+    acceptance_exempt: z.number().int().nonnegative(),
     /** ADR 172's counter-metric: a risky lane whose REQUIRED human review never happened — a
      *  requirement with no one to meet it, not a shrug. Bucketed since ADR 173 correction #1; before
      *  that it fell through to `self_close`, labelling a lane that entered review as one that never

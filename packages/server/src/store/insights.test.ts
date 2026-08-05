@@ -965,6 +965,52 @@ describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin cr
     expect(m.sent_back).toBe(0);
   });
 
+  it('counts an exemption as its own outcome — not routed, not no-candidate, not unknown', () => {
+    // ADR 234 increment 2. An exempt ready row carries neither `reviewer` nor `no_candidate`, so
+    // without its own clause it would land in the abstain bucket and the report would call a
+    // designed exemption "predates routing-outcome recording" — an unknown asserted about the one
+    // row that knows exactly what it did. And its close, left to the `else`, would count as
+    // `unknown_reason`: "written by a newer build, upgrade the reader", for a reason this build
+    // writes itself.
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'a',
+      acceptance_exempt: true,
+      stakes: 'low',
+    });
+    row(db, team.id, 'lane.closed', { lane: 'a', reason: 'acceptance_exempt', verified: false });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.ready).toBe(1);
+    expect(m.acceptance_exempt).toBe(1);
+    expect(m.routed).toBe(0);
+    expect(m.no_candidate).toBe(0); // the degradation count must not absorb a design choice
+    expect(m.ready - m.routed - m.no_candidate - m.acceptance_exempt).toBe(0); // nothing left "unknown"
+    expect(m.closed.acceptance_exempt).toBe(1);
+    expect(m.closed.no_candidate).toBe(0);
+    expect(m.closed.self_close).toBe(0);
+    expect(m.closed.unknown_reason).toBe(0);
+    expect(m.closed.legacy_unlabelled).toBe(0);
+  });
+
+  it('counts a sampled-in low lane as ROUTED, and separately as the sample', () => {
+    // The 1-in-5 hole routes exactly like `normal`, so it belongs in the catch rate's denominator.
+    // `exempt_sampled` rides beside it as the sample size the low tier is producing — the number
+    // that says whether the tier is still being measured at all.
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'a',
+      reviewer: 'gee',
+      route: 'cross_family',
+      stakes: 'low',
+      exempt_sampled: true,
+    });
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.routed).toBe(1);
+    expect(m.exempt_sampled).toBe(1);
+    expect(m.acceptance_exempt).toBe(0); // it was NOT exempt — it was drawn in and asked
+  });
+
   it('counts a review catch, and keeps timeout distinct from no-counterpart', () => {
     const { db, team } = seed();
     row(db, team.id, 'lane.ready_for_review', {

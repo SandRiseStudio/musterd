@@ -1,6 +1,6 @@
 # 234 — Tiered acceptance: declare the stakes before changing who gets asked
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-08-05
 - Deciders: nick (proposed the tiering), stanley, ryder (carried the proposal, and insisted on the
   counterpoint that surface complexity predicts review cost rather than review value), dolly (the
@@ -90,6 +90,69 @@ prescription is to let each consumer state its own need, so this is a distinct f
 routes exactly as it did yesterday. The routing flip — trivial tier routes no ask unless requested,
 risky surfaces keep acceptance required — is **increment 2, gated on what increment 1 measures.**
 
+**5. Increment 2 (2026-08-05): a declared-`low` lane routes no acceptance ask — except 1 in 5, drawn
+at random per submit, which routes normally.** An exempt submit closes through its own terminal
+reason, `acceptance_exempt`, never the null-pick path. A `risk` tag outranks the declaration: ADR 172
+makes human review a requirement on a risky lane, and a worker's own "this is small" must not
+dissolve a requirement they also declared — otherwise `stakes: low` becomes a second, quieter way to
+clear `risk`, rebuilding §3's shared-predicate collision at the consumer instead of at the schema.
+
+### Increment 2 shipped before its own gate, knowingly
+
+The Eval below pre-registers that increment 2 must not ship until the label shows stakes predict the
+answer rate. **It has shipped anyway, by nick's decision, with the trade in view.** That is an
+override, not an argument that the rule did not apply, and the rule is left standing above rather
+than quietly deleted — because it worked. It forced this conversation instead of letting a weaker
+version of the same change land silently.
+
+What it stopped is worth recording. The request that started this was a **surface-path** exemption:
+"simple frontend changes don't need acceptance", with the path axis chosen explicitly over
+no-observable-change and author-declared. miley declined to build it and escalated. The objection
+that changed the decision was not this ADR — it was nick's own policy contradicting itself:
+
+- his standing rule is that **all** web UI must be magical, warm and on-brand;
+- ADR 172 routes user-facing work to a **human**;
+- so a `packages/web` path rule would exempt precisely the category his risk policy most wants eyes
+  on. It would have exempted the office overhaul and the enamel nameplates, and would **not** have
+  exempted #676 — a pure perf refactor with zero user-visible delta, the one change in that week
+  that genuinely needed nobody.
+
+miley's framing is why the declared axis won: the frontend request was a no-observable-change request
+wearing a path costume. Which is the same knife this ADR's Problem section already rejected — surface
+complexity predicts review _cost_, not review _value_.
+
+### The sampling hole, and why it is not optional
+
+Exempting the low tier outright would destroy the ability to learn whether low lanes _would_ have
+been answered. That is the sample-starvation confound this ADR named in "Why label-before-route" —
+arriving by choice rather than by accident, which is worse, because a confound you chose is one you
+cannot later claim to have discovered.
+
+- The draw is **per submit and not derived from the lane id.** Hashing the id would make each lane
+  permanently exempt or permanently sampled — a fixed subpopulation, not a sample — and a lane sent
+  back and resubmitted would keep drawing the same answer.
+- The draw is **recorded** (`exempt_sampled: true` on the ready row). A sampled-in low lane routes
+  identically to one declared `normal`, so without the flag the sample produces data nobody can
+  attribute to the tier that paid for it.
+- The rate is a **named constant** (`ACCEPTANCE_EXEMPT_SAMPLE_RATE`), so it can be widened if the low
+  tier starves.
+
+### The terminal reason is a gate, not a nicety
+
+An exempt lane must **not** close through `no_candidate`. That reason means "we wanted a counterpart
+and could not get one" — the sanctioned degradation — and it is a live input to dolly's bucket split
+and to this ADR's own 84% headline. Every exempt lane borrowing it would inflate the degradation
+count with lanes that degraded nothing: **increment 2 corrupting the measurement increment 1 exists
+to protect**, which is the one outcome that would make the whole arc worthless. `acceptance_exempt`
+is therefore distinguishable in the ledger from both `no_candidate` and `self_close`, and carries its
+own counters in the review projection.
+
+It is derived from the **recorded** `acceptance_exempt` on the ready row, never re-derived at close
+from `lane.stakes`. Stakes are editable after open (Consequences, below), so reading the live field
+at close would let an edit made minutes later rewrite what the submit actually did — in both
+directions. Only a recorded fact earns a label; this is the case where the tempting shortcut is a
+field still sitting in front of you.
+
 ### Why label-before-route, and not both at once
 
 This is the sequencing question ryder put to me, framed as "run the three-arm delivery experiment
@@ -120,6 +183,13 @@ first, or stratify from day one." Both options are worse than splitting the ship
   the work exists, and a declaration nobody can revise is one people learn to set defensively.
 - Increment 1 buys no improvement to acceptance whatsoever. That is intended, and it is the cost of
   not building increment 2 on an assumption.
+- Increment 2 makes `stakes` load-bearing, and a self-declared field that removes a check is one
+  people can learn to set for the quiet rather than for the truth. Two things bound that: the
+  declaration is recorded on every submit, so the ledger can show a seat whose lanes are all `low`;
+  and the 1-in-5 hole means declaring `low` never guarantees the quiet, only makes it likely.
+- The exemption removes the **ask**, never the possibility. A seat that reviews a low lane unprompted
+  still records a verified `counterpart_confirm` — otherwise the exemption would suppress good news
+  along with the noise.
 
 ## Observability & Evaluation
 
@@ -187,6 +257,44 @@ instead of two, and the one it lost was never the one that mattered.
 State the measurement horizon before measuring. ADR 225's falsifier flipped its own verdict between
 a 15-hour snapshot and close because the rule never named one; this Eval reports **at close**, with
 the still-open count stated beside it.
+
+**The measurement window, named — owed since the proposal and fixed here.** Report at **n=20 routed
+acceptances per tier, or 14 days from the increment 2 merge, whichever comes first.** Unbounded
+"later" is exactly what made the path rule tempting: a gate with no deadline is a gate nobody has to
+walk through. With the exemption live, the `low` denominator is fed only by the 1-in-5 hole, so that
+tier will reach n=20 roughly five times slower than the others — which is a cost of increment 2 and
+is stated here rather than discovered as a surprise at the report.
+
+**Traces added by increment 2.** `acceptance_exempt: true` on the ready row of an exempt submit (in
+place of the routing branch, never alongside `no_candidate`); `exempt_sampled: true` on the 1-in-5
+that routed anyway; `reason: 'acceptance_exempt'` on the close. All three surface in
+`deriveReviewMetrics` as their own counters, because a bucket that exists only in the raw audit log
+is one the team cannot read without an admin credential — the defect that projection was built for.
+
+**The rollback condition, pre-registered.** If the label shows declared stakes do **not** predict the
+answer rate, **the exemption is withdrawn — not grandfathered.** Shipping increment 2 ahead of its
+gate is a bet placed on the founder's authority, and a bet has to be settleable. "It is already
+built" is not evidence and must not be allowed to become the reason it stays.
+
+> **A threat to that rollback test, raised by miley on 2026-08-05, before the exemption shipped.**
+> All ten pending acceptance asks on the team were routed to nick — 3 dolly, 3 izzo, 2 miley,
+> 2 stanley — because every agent seat on the roster attests `claude-opus-5`, so ADR 188's ladder can
+> never find a cross-family peer, and `gptbot` attests no model at all and is ineligible under ADR
+> 158/187. There is currently **no eligible agent acceptor on this team**, and the sole human acceptor
+> was offline.
+>
+> If the entire acceptance denominator is asks routed to one offline person, then "the answer rate by
+> declared tier" is substantially measuring **his availability**, not the stakes. The rollback test
+> would then be unable to fire for a reason that has nothing to do with tiering — and a rollback
+> condition that cannot fire is decoration. This is a third covariate beside 233 and 235, and unlike
+> those two it is not fixed by anything shipped: the remedy is enrolling one genuinely cross-family
+> seat, which is a wake-pool problem (grokbot's lane `01KYZAT6CP` named it first) and belongs to
+> whoever owns residency.
+>
+> **Consequence for the report:** state the acceptor composition beside every tier number. If the
+> monoculture still holds at the window, the tier comparison is reported as **inconclusive** rather
+> than as a pass — and an inconclusive result withdraws the exemption, because the burden sits with
+> the increment that shipped early.
 
 **Experiment.** Increment 1 is not an experiment — it is the instrumentation that makes one
 interpretable. The three-arm delivery experiment in ADR 225 should stratify by tier from the moment

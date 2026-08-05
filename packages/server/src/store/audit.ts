@@ -411,8 +411,21 @@ export function reviewRouting(
   /** ADR 217: the wait the acceptor was promised (the ask tier's timeout), or `undefined` when the
    *  ready row predates the field — an abstention the close edge must not resolve by guessing. */
   promised_ms: number | undefined;
+  /**
+   * ADR 234 increment 2: this submit routed no ask because the lane DECLARED `low` and the 1-in-5
+   * draw missed it. `true` only from a recorded `acceptance_exempt` on the ready row — never
+   * re-derived from `lane.stakes`, which is editable after open, and reading it at close would let a
+   * post-hoc edit rewrite what happened at submit. Absent on every pre-increment-2 row, where it
+   * abstains like every other field here.
+   */
+  exempt: boolean | undefined;
 } {
-  const unknown = { routed: undefined, human_required: undefined, promised_ms: undefined };
+  const unknown = {
+    routed: undefined,
+    human_required: undefined,
+    promised_ms: undefined,
+    exempt: undefined,
+  };
   const row = db
     .prepare<[string, string], { detail: string | null }>(
       `SELECT detail FROM audit
@@ -427,6 +440,7 @@ export function reviewRouting(
       no_candidate?: boolean;
       human_required?: boolean;
       ask_timeout_ms?: number;
+      acceptance_exempt?: boolean;
     };
     // An explicit `false` is knowledge and survives as `false`; only a missing field abstains.
     const human_required = typeof d.human_required === 'boolean' ? d.human_required : undefined;
@@ -439,11 +453,17 @@ export function reviewRouting(
       d.ask_timeout_ms > 0
         ? d.ask_timeout_ms
         : undefined;
-    if (d.no_candidate === true) return { routed: false, human_required, promised_ms };
+    // ADR 234 increment 2, read FIRST because it is the strongest claim on the row: an exempt
+    // submit is not a routing outcome at all. `routed` stays `false` — no ask was sent, which is
+    // literally true and keeps every existing consumer of that boolean correct — but `exempt`
+    // carries WHY, and the close edge must not collapse the two.
+    const exempt = d.acceptance_exempt === true ? true : undefined;
+    if (exempt) return { routed: false, human_required, promised_ms, exempt };
+    if (d.no_candidate === true) return { routed: false, human_required, promised_ms, exempt };
     if (typeof d.reviewer === 'string' && d.reviewer.length > 0)
-      return { routed: true, human_required, promised_ms };
+      return { routed: true, human_required, promised_ms, exempt };
     // pre-fix row: recorded neither — we do not know
-    return { routed: undefined, human_required, promised_ms };
+    return { routed: undefined, human_required, promised_ms, exempt };
   } catch {
     return unknown; // reachable now that the query no longer parses the JSON for us
   }
