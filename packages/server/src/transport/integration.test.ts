@@ -3560,6 +3560,51 @@ describe('two-stage close (ADR 169)', () => {
       expect(ready.json.review?.reviewer).toBeDefined();
     });
 
+    it('records stakes_provenance so a policy default is never mistaken for a judgement (ADR 244)', async () => {
+      // The measurement trap miley named. ADR 234's rollback test asks whether DECLARED stakes
+      // predict the answer rate; once an admin policy can write `low`, one bucket pools worker
+      // judgement with policy assumption and the test silently stops being answerable. The ready row
+      // has to carry the split, or the Eval cannot recover it.
+      vi.spyOn(Math, 'random').mockReturnValue(0); // sample in, so a low lane still routes here
+      const { nickTok, ada } = await setup();
+      await post(
+        '/teams/dawn/policy',
+        { stakes_defaults: [{ surface: 'packages/web/**', stakes: 'low' }] },
+        nickTok,
+      );
+
+      // (a) policy fired — defaulted.
+      const auto = await post(
+        '/teams/dawn/lanes',
+        { title: 'a web tweak', claim: true, surface_globs: ['packages/web/src/x.ts'] },
+        ada,
+      );
+      expect(auto.json.lane.stakes).toBe('low');
+      expect(auto.json.lane.stakes_provenance).toBe('defaulted');
+      await patchLane(auto.json.lane.id as string, { state: 'ready_for_review' }, ada);
+
+      // (b) same surface, worker overrode upward — declared, and the override is frictionless.
+      const manual = await post(
+        '/teams/dawn/lanes',
+        {
+          title: 'a web change that asserts a fact',
+          claim: true,
+          surface_globs: ['packages/web/src/y.ts'],
+          stakes: 'normal',
+        },
+        ada,
+      );
+      expect(manual.json.lane.stakes_provenance).toBe('declared');
+      await patchLane(manual.json.lane.id as string, { state: 'ready_for_review' }, ada);
+
+      const rows = await auditRows(nickTok, 'lane.ready_for_review');
+      const byLane = Object.fromEntries(rows.map((r: any) => [r.detail.lane, r.detail]));
+      expect(byLane[auto.json.lane.id].stakes).toBe('low');
+      expect(byLane[auto.json.lane.id].stakes_provenance).toBe('defaulted');
+      expect(byLane[manual.json.lane.id].stakes).toBe('normal');
+      expect(byLane[manual.json.lane.id].stakes_provenance).toBe('declared');
+    });
+
     it('is editable after open — what a change is worth is often clear only once it exists', async () => {
       const { ada } = await setup();
       const lane = await post('/teams/dawn/lanes', { title: 't', claim: true }, ada);

@@ -41,6 +41,7 @@ function laneFix(id: string, state: LaneState): Lane {
     goal_id: null,
     risk: [],
     stakes: 'normal' as const,
+    stakes_provenance: 'declared' as const,
     merged: null,
     state,
     created_by: 'nick',

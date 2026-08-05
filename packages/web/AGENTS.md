@@ -28,6 +28,14 @@ one week in 2026-07 because raises were being used to fix a calibration problem.
 
 ## Standing rules (each one is a shipped, measured win — don't undo it)
 
+- **Web lanes default to `stakes: low`, and raising it is your call to make** (ADR 244). A team admin
+  set that default; you don't declare it per lane. But the default is a *starting point*, not a
+  verdict on your change — override upward the moment your change alters what a surface **asserts as
+  fact** (counts, recipients, routing claims, who an ask is for) rather than only how it looks. That
+  distinction is deliberately not in the config: encoding it would be inferring value from surface,
+  which is what ADR 234 rejected and what this default is only admissible for *not* doing. The
+  evidence it matters is on the record — on 2026-08-05 four web lanes routed `normal` and acceptance
+  caught two real defects on one of them, both on a change a blanket path rule would have exempted.
 - **New dependencies are guilty until proven light.** Check the gzip cost before importing; prefer
   what's already in the tree. Heavy, route-specific code gets a lazy chunk, never the entry.
 - **Animation/render loops must stop when unseen.** The office scene suspends its rAF loop when the

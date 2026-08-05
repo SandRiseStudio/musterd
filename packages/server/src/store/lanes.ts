@@ -3,6 +3,7 @@ import {
   globToRegExp,
   LANE_CONTENDING_STATES,
   LANE_TERMINAL_STATES,
+  resolveStakesDefault,
   type Lane,
   type LaneState,
   type LaneWarning,
@@ -12,6 +13,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import type { AuditRow } from './audit.js';
+import { getPolicy } from './teams.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — store CRUD + the two warn-only contention checks.
@@ -36,6 +38,9 @@ interface LaneRow {
   risk: string | null;
   /** Declared acceptance stakes (ADR 234); null on pre-v32 rows ⇒ 'normal' — absence IS the default. */
   stakes: string | null;
+  /** Who set `stakes` (ADR 244); null ⇒ 'declared' — every pre-policy lane got its value from a seat
+   *  or from silence, and ADR 234 §2 rules that silence IS the worker's declaration. */
+  stakes_provenance: string | null;
   /** The worker's merge attestation captured at awaiting_acceptance (ADR 192); null until lane_submit. */
   merged_json: string | null;
   state: string;
@@ -63,6 +68,8 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     // Absence reads as the default rather than as missing data, so every pre-234 lane keeps its
     // current meaning without a backfill (ADR 148 skew posture).
     stakes: (row.stakes as Lane['stakes']) ?? 'normal',
+    // Same skew posture one field over: absence is 'declared', never missing data (ADR 244).
+    stakes_provenance: (row.stakes_provenance as Lane['stakes_provenance']) ?? 'declared',
     merged: row.merged_json ? (JSON.parse(row.merged_json) as Lane['merged']) : null,
     state: row.state as LaneState,
     created_by: row.created_by,
@@ -85,6 +92,18 @@ export function openLane(
   now: number = Date.now(),
 ): Lane {
   const claim = input.claim === true;
+  // ADR 244: an admin's default-stakes rule fires HERE, at open, and never again. Resolving it late
+  // — at submit, or at close — would make a policy able to rewrite what a lane already was, which is
+  // the exact trap ADR 234 increment 2 named for the close edge: only a RECORDED fact earns a label.
+  // An explicit declaration always wins, in EITHER direction: a seat that thinks its web change
+  // deserves eyes must be able to say so without an admin, and a seat that says `low` on a lane
+  // policy would have left `normal` has still declared it themselves.
+  const surfaces = input.surface_globs ?? [];
+  const rule =
+    input.stakes === undefined
+      ? resolveStakesDefault(getPolicy(db, teamId).stakes_defaults, surfaces)
+      : undefined;
+  const stakes = input.stakes ?? rule?.stakes ?? 'normal';
   const row: LaneRow = {
     id: ulid(),
     team_id: teamId,
@@ -101,7 +120,11 @@ export function openLane(
     // Store only an explicit non-default declaration; null means "did not say", which reads back as
     // 'normal'. Keeps "never declared" and "declared normal" indistinguishable ON PURPOSE — nothing
     // in increment 1 should be able to tell them apart, because nothing should act on the difference.
-    stakes: input.stakes && input.stakes !== 'normal' ? input.stakes : null,
+    stakes: stakes !== 'normal' ? stakes : null,
+    // Written only where a policy actually fired. `declared` is the default on read, so a policy
+    // that defaulted a lane to `normal` still records `defaulted` — the Eval must be able to see a
+    // rule that fired even when it changed nothing, or "policy is inert here" becomes unfalsifiable.
+    stakes_provenance: rule ? 'defaulted' : null,
     merged_json: null,
     state: claim ? 'claimed' : 'open',
     created_by: createdBy,
@@ -112,9 +135,9 @@ export function openLane(
   };
   db.prepare(
     `INSERT INTO lanes (id, team_id, project, title, detail, owner_seat, role, surface_globs,
-                        depends_on, branch, goal_id, risk, stakes, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
+                        depends_on, branch, goal_id, risk, stakes, stakes_provenance, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
      VALUES (@id, @team_id, @project, @title, @detail, @owner_seat, @role, @surface_globs,
-             @depends_on, @branch, @goal_id, @risk, @stakes, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
+             @depends_on, @branch, @goal_id, @risk, @stakes, @stakes_provenance, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
   ).run(row);
   return rowToLane(row, teamSlug);
 }
@@ -160,6 +183,11 @@ export function updateLane(
   const merged = patch.merged !== undefined ? patch.merged : existing.merged;
   const risk = patch.risk ?? existing.risk;
   const stakes = patch.stakes ?? existing.stakes;
+  // ADR 244: editing stakes takes OWNERSHIP of the value. A worker overriding a policy-defaulted
+  // lane has made their own judgement, and leaving it `defaulted` would keep counting that lane
+  // toward the very policy it was overriding — inflating the policy bucket with its own refutations.
+  // Untouched otherwise, so a patch to some other field never launders provenance.
+  const stakesProvenance = patch.stakes !== undefined ? 'declared' : existing.stakes_provenance;
   const next = {
     id,
     team_id: teamId,
@@ -174,6 +202,7 @@ export function updateLane(
     goal_id: patch.goal_id !== undefined ? patch.goal_id : existing.goal_id,
     risk: risk.length > 0 ? JSON.stringify(risk) : null,
     stakes: stakes !== 'normal' ? stakes : null,
+    stakes_provenance: stakesProvenance,
     merged_json: merged ? JSON.stringify(merged) : null,
     state,
     // claimed_at describes the CURRENT tenure: sticky while held, cleared by the release above so a
@@ -198,7 +227,7 @@ export function updateLane(
   };
   db.prepare(
     `UPDATE lanes SET project=@project, title=@title, detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
-       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, stakes=@stakes, merged_json=@merged_json,
+       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, stakes=@stakes, stakes_provenance=@stakes_provenance, merged_json=@merged_json,
        state=@state, claimed_at=@claimed_at, resolved_at=@resolved_at, updated_at=@updated_at
      WHERE team_id=@team_id AND id=@id`,
   ).run(next);

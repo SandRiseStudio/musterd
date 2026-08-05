@@ -2959,6 +2959,13 @@ export async function handleHttp(
               // cannot count. This is the whole deliverable of the label phase: nothing routes on
               // it, and the routing flip is gated on what it measures.
               stakes: lane.stakes,
+              // ADR 244 — recorded beside the label, for the same reason the label is recorded
+              // unconditionally. Once an admin policy can write `stakes`, one `low` bucket pools
+              // "the worker judged this small" with "policy assumed this class is small", and ADR
+              // 234's rollback test asks about the FIRST of those. Splitting them here is what keeps
+              // that test answerable — without it the feature silently destroys the measurement it
+              // was built on top of.
+              stakes_provenance: lane.stakes_provenance,
               ...(lane.merged ? { merged: lane.merged } : {}),
               // ADR 188: the achieved rung of the diversity ladder rides beside the historical
               // two-value route, so a cross_model routing is never mistaken for a cross_family one.
@@ -3097,6 +3104,12 @@ export async function handleHttp(
             review = {
               acceptance_exempt: true,
               stakes: lane.stakes,
+              // ADR 244: say WHERE the `low` came from. A worker whose lane was defaulted low by an
+              // admin policy and then routed no ask would otherwise watch acceptance silently skip
+              // their work with no way to see why — the invisible-consequence failure ADR 237 named
+              // for supersession, one surface over. Knowing it was policy is also what tells them
+              // the upward override is theirs to use.
+              stakes_provenance: lane.stakes_provenance,
               close_records: 'acceptance_exempt',
               sample_rate: ACCEPTANCE_EXEMPT_SAMPLE_RATE,
             };

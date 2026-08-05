@@ -39,6 +39,58 @@ export const DEFAULT_PROJECT = 'default';
 export const LaneStakesSchema = z.enum(['low', 'normal', 'high']);
 export type LaneStakes = z.infer<typeof LaneStakesSchema>;
 
+/** Who set a lane's stakes (ADR 244) — see {@link LaneSchema.shape.stakes_provenance}. */
+export const LaneStakesProvenanceSchema = z.enum(['declared', 'defaulted']);
+export type LaneStakesProvenance = z.infer<typeof LaneStakesProvenanceSchema>;
+
+/**
+ * One admin-set default-stakes rule (ADR 244): lanes whose declared surface lies entirely under
+ * `surface` open at `stakes` unless the worker says otherwise.
+ *
+ * This is the surface-path rule ADR 234 rejected, and it is admissible now for one reason worth
+ * stating rather than sliding past: ADR 234 rejected the system **inferring** value from a diff,
+ * because surface complexity predicts review COST, not review VALUE. An admin declaring "on my team,
+ * web lanes start low" is not an inference — it is an accountable human making a revocable,
+ * attributable, visible choice, which is the kind of judgement ADR 234 wants stakes to carry. The
+ * rule did not change; the actor did.
+ */
+export const StakesDefaultSchema = z.object({
+  /**
+   * A surface prefix, written as a glob for readability (`packages/web/**`). Matched as a PREFIX,
+   * not by a glob engine — a predictable rule an admin can reason about beats an expressive one they
+   * cannot, and this value silently changes who reviews their team's work.
+   */
+  surface: z.string().min(1),
+  stakes: LaneStakesSchema,
+});
+export type StakesDefault = z.infer<typeof StakesDefaultSchema>;
+
+/**
+ * Does this policy give the lane a default, and which? First match wins, so an admin can order
+ * specific rules ahead of broad ones.
+ *
+ * **Every** declared glob must fall under the rule, not merely one — and that asymmetry is the
+ * safety property. A lane touching `packages/web/**` AND `packages/server/**` is not a web lane; if
+ * `any` matched, a worker could exempt a server change by mentioning a web file beside it, and the
+ * exemption would be one glob away from anything. A lane declaring NO surface matches nothing and
+ * keeps `normal`: a lane that did not say where it works has not earned a surface-based default.
+ */
+export function resolveStakesDefault(
+  rules: readonly StakesDefault[],
+  surfaceGlobs: readonly string[],
+): StakesDefault | undefined {
+  if (surfaceGlobs.length === 0) return undefined;
+  return rules.find((rule) => {
+    // `packages/web/**`, `packages/web/` and `packages/web` all mean "under packages/web". Normalize
+    // to a prefix ending at a path boundary: without that last step `packages/web` also matches
+    // `packages/webhooks`, and an admin who wrote the shortest legible form would silently widen
+    // their own rule across a sibling package. A rule that changes who reviews the team's work has
+    // to mean exactly what it looks like it means.
+    const prefix = rule.surface.replace(/\*+$/, '').replace(/\/$/, '') + '/';
+    return surfaceGlobs.every((g) => g.startsWith(prefix));
+  });
+}
+
 export const LaneStateSchema = z.enum([
   'open',
   'claimed',
@@ -131,6 +183,22 @@ export const LaneSchema = z.object({
    * gated on what the label measures.
    */
   stakes: LaneStakesSchema.default('normal'),
+  /**
+   * WHO put that value there (ADR 244) — `declared` when a person or seat said it, `defaulted` when
+   * a team policy wrote it at `lane_open`.
+   *
+   * This exists to protect ADR 234's rollback test, which asks whether **declared** stakes predict
+   * the answer rate. Once an admin policy can write `stakes: 'low'`, a single `low` bucket pools two
+   * completely different claims — "the worker judged this small" and "policy assumed this class is
+   * small" — and the Eval could no longer tell them apart. It would fail silently and permanently,
+   * which is the same confound class as the acceptor monoculture except arriving through a feature
+   * instead of an accident. So the two are separated at the source, and the Eval splits on it.
+   *
+   * `declared` is the honest default for everything else, including a lane that declared nothing:
+   * ADR 234 §2 already ruled that absence IS the declaration, so an unstated `normal` is the
+   * worker's answer, not a policy's. `defaulted` is written ONLY where a policy actually fired.
+   */
+  stakes_provenance: LaneStakesProvenanceSchema.default('declared'),
   /**
    * The worker's merge attestation, captured at `awaiting_acceptance` (ADR 192 / formerly
    * `ready_for_review`) so the acceptor's close carries the *worker's* claim verbatim into

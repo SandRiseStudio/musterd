@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EnforcementPolicySchema } from './enforcement.js';
+import { StakesDefaultSchema } from './lanes.js';
 import { LoopsPolicySchema } from './loops.js';
 import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from './residency.js';
 
@@ -84,6 +85,16 @@ export const PolicySchema = z.object({
    * target seat's residency `flow` is `auto`.
    */
   loops: LoopsPolicySchema.default({}),
+  /**
+   * Admin-set default stakes by surface (ADR 244) — the configurable half of "front-end changes
+   * default to low". First match wins; a lane whose declared surfaces all fall under a rule opens at
+   * that rule's stakes unless the worker declared their own, and records
+   * `stakes_provenance: 'defaulted'` so the ADR 234 Eval can still tell policy from judgement.
+   *
+   * `parse({})` yields an EMPTY list: no rule means every lane opens exactly as it did before, so
+   * this is inert until a team asks for it — the same opt-in posture as `enforcement` and `loops`.
+   */
+  stakes_defaults: z.array(StakesDefaultSchema).default([]),
 });
 export type Policy = z.infer<typeof PolicySchema>;
 

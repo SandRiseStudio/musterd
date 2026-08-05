@@ -124,6 +124,7 @@ describe('createLane / updateLane (the writable board, item 5)', () => {
     goal_id: null,
     risk: [],
     stakes: 'normal' as const,
+    stakes_provenance: 'declared' as const,
     merged: null,
     state: 'claimed',
     created_by: 'nick',

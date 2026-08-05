@@ -704,6 +704,24 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 244: WHO set the stakes. Null reads back as 'declared' — every lane written before a
+    // policy could set stakes had them from a seat (or from silence, which ADR 234 §2 rules is
+    // itself the worker's declaration), so the backfill is correct rather than merely convenient.
+    //
+    // v36 after a rebase, not by original choice: this was written as v35 while v34 and v35 were
+    // both unmerged on other branches (ryder's wake_lease, kimi's footprint tables). Coordinating
+    // in-band beat discovering it in a merge conflict — which is all that caught the v32 collision
+    // izzo and I both wrote last week, and that one could have produced a database whose applied
+    // schema depended on merge order. The sequence stays dense; a `migrations:check` gate on
+    // duplicate versions is still owed.
+    version: 36,
+    up: (db) => {
+      const laneCols = db.prepare("SELECT name FROM pragma_table_info('lanes')").pluck().all();
+      if (!laneCols.includes('stakes_provenance'))
+        db.exec('ALTER TABLE lanes ADD COLUMN stakes_provenance TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
