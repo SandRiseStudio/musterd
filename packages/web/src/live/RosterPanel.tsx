@@ -85,8 +85,18 @@ export function RosterPanel({
           {capacity.models.length === 1
             ? `Every live agent is on ${capacity.models[0]}, and a seat cannot accept its own model's work — so every review is waiting on a wake.`
             : 'No live seat can accept another seat\'s work, so every review is waiting on a wake.'}
-          {capacity.unattested.length > 0 &&
-            ` ${capacity.unattested.join(', ')} attest${capacity.unattested.length === 1 ? 's' : ''} no model.`}
+        </p>
+      )}
+      {/* Reported whether or not the ladder is flat, because an unattested seat is ineligible in
+          BOTH directions (ADR 158) and is otherwise silent everywhere: `reattestModel` audits
+          nothing when the value is unchanged, so a seat that re-claims into an occupancy attesting
+          null leaves no audit row at all. ryder did exactly that on 2026-08-05. Calm, not amber —
+          it is a fact about those seats, not a failure of the team. */}
+      {capacity.unattested.length > 0 && (
+        <p className="lc-roster__gap" role="status">
+          {capacity.unattested.join(', ')} attest{capacity.unattested.length === 1 ? 's' : ''} no
+          model, so {capacity.unattested.length === 1 ? 'it can' : 'they can'} neither review nor be
+          reviewed.
         </p>
       )}
       {stale && (

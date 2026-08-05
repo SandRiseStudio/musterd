@@ -630,12 +630,24 @@ export function acceptanceCapacity(roster: MemberSummary[]): AcceptanceCapacity 
       attested.some((b) => b !== a && reviewGrade(modelOf(a), modelOf(b)) !== 'same_model' && reviewGrade(modelOf(a), modelOf(b)) !== null),
     ),
   ];
-  // Nothing to review is not a failure — only a team that COULD pair and cannot is degraded.
-  const pairable = agents.length + humans.length > 1;
+  /*
+   * Degraded requires EVIDENCE, not merely an absence of candidates. Two guards, each earned:
+   *
+   * 1. Nothing to review is not a failure — a team of one has nobody to pair with.
+   * 2. Concluding "nothing pairs" needs at least two seats whose models we can SEE. Every daemon
+   *    bounce makes all seats re-claim, and a fresh occupancy attests nothing until its first call,
+   *    so without this the line would fire on every autorefresh — the cried-wolf failure ADR 148
+   *    retired the build-SHA chip for. Fewer than two attested seats is `unknown`, not `degraded`
+   *    (the absent-vs-unknown discipline ADR 169/189 draws elsewhere).
+   *
+   * Unattested seats still cannot RESCUE a flat ladder — they are ineligible either way — so they
+   * never suppress a warning that the attested seats have already earned.
+   */
+  const decidable = attested.length > 1;
   return {
     liveCandidates: candidates.length,
     models,
     unattested,
-    degraded: pairable && candidates.length === 0,
+    degraded: decidable && candidates.length === 0,
   };
 }

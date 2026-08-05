@@ -425,3 +425,76 @@ describe('acceptanceCapacity — can any LIVE seat accept another seat\'s work?'
     expect(cap.unattested).toEqual([]);
   });
 });
+
+/**
+ * A live seat attesting nothing is ineligible in BOTH directions — it cannot accept and cannot be
+ * accepted for (ADR 158). That is worth saying even when the ladder is otherwise standing, because
+ * it is silent everywhere else: `reattestModel` audits nothing when the value is unchanged, so a
+ * seat that re-claims into a fresh occupancy attesting null leaves no audit row at all. Observed
+ * 2026-08-05: ryder attested claude-opus-5 at 13:33:55, re-claimed, and read unattested at 13:47
+ * with nothing in between.
+ */
+describe('acceptanceCapacity — unattested live seats are reported even when the ladder is up', () => {
+  const seat = (name: string, model: string | null, over: Partial<MemberSummary> = {}) =>
+    ({
+      name,
+      kind: 'agent',
+      presence: 'online',
+      presences: model ? [{ model }] : [],
+      ...over,
+    }) as MemberSummary;
+
+  it('names them while reporting the ladder healthy — the exact roster after the fable-5 switch', () => {
+    const cap = acceptanceCapacity([
+      seat('dolly', 'claude-fable-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('miley', 'claude-opus-5'),
+      seat('ryder', null),
+      seat('kimi', null),
+    ]);
+    expect(cap.degraded).toBe(false);
+    expect(cap.unattested).toEqual(['ryder', 'kimi']);
+    expect(cap.liveCandidates).toBe(3);
+  });
+});
+
+/**
+ * The bounce guard. Every autorefresh restart makes all seats re-claim, and a fresh occupancy
+ * attests nothing until its first call — ryder was observed unattested for ~14 minutes across one
+ * such window on 2026-08-05. Without a guard the amber line would fire on every daemon bounce,
+ * which is precisely the cried-wolf failure ADR 148 retired the build-SHA "stale" chip for.
+ *
+ * The rule that survives both cases: unattested seats cannot RESCUE a flat ladder (they are
+ * ineligible either way), so they must not suppress the warning — but concluding "nothing pairs"
+ * needs at least two seats whose models we can actually see. Fewer than that is `unknown`, not
+ * `degraded`, which is the same absent-vs-unknown discipline ADR 169/189 draws elsewhere.
+ */
+describe('acceptanceCapacity — unknown is not degraded', () => {
+  const seat = (name: string, model: string | null, over: Partial<MemberSummary> = {}) =>
+    ({ name, kind: 'agent', presence: 'online', presences: model ? [{ model }] : [], ...over }) as MemberSummary;
+
+  it('stays quiet mid-bounce, when every seat has re-claimed and not yet attested', () => {
+    const cap = acceptanceCapacity([seat('miley', null), seat('izzo', null), seat('dolly', null)]);
+    expect(cap.degraded).toBe(false);
+    expect(cap.unattested).toEqual(['miley', 'izzo', 'dolly']);
+  });
+
+  it('stays quiet when only ONE seat has attested — one model is not evidence of a monoculture', () => {
+    expect(acceptanceCapacity([seat('miley', 'claude-opus-5'), seat('izzo', null)]).degraded).toBe(
+      false,
+    );
+  });
+
+  it('still fires when unattested seats sit BESIDE a real monoculture — they cannot rescue it', () => {
+    // The true 13:09 roster: five agents on one model, plus an unattested seat that helps nobody.
+    const cap = acceptanceCapacity([
+      seat('miley', 'claude-opus-5'),
+      seat('izzo', 'claude-opus-5'),
+      seat('dolly', 'claude-opus-5'),
+      seat('ryder', 'claude-opus-5'),
+      seat('stanley', 'claude-opus-5'),
+      seat('kimi', null),
+    ]);
+    expect(cap.degraded).toBe(true);
+  });
+});
