@@ -1076,7 +1076,7 @@ describe('build skew (ADR 135) — warn-only freshness, never drift', () => {
   });
 });
 
-describe('footprint note (ADR 241) — orphaned sidecars, warn-only', () => {
+describe('footprint note (ADR 242) — orphaned sidecars, warn-only', () => {
   it('names the orphan count and RSS when the daemon reports them', async () => {
     const notes = await footprintNotes('/nowhere', {
       fetchTick: async () => ({

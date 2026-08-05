@@ -711,7 +711,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
 }
 
 /**
- * Footprint note (ADR 241, seat-footprint design): orphaned MCP sidecars the daemon's sampler can
+ * Footprint note (ADR 242, seat-footprint design): orphaned MCP sidecars the daemon's sampler can
  * see. Warn-only and best-effort like the skew notes — an unreachable daemon, a pre-241 daemon
  * (404), or an unbound folder all stay silent; the doctor reports drift, it never invents it.
  */
@@ -912,7 +912,7 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
   const report = await inspectProvisioning(cwd);
   // ADR 135: freshness notes ride the report (warn-only, never drift/exit-1).
   report.notes.push(...(await buildSkewNotes()));
-  // ADR 241: orphaned-sidecar note — a machine fact like the skew notes, warn-only, never drift.
+  // ADR 242: orphaned-sidecar note — a machine fact like the skew notes, warn-only, never drift.
   report.notes.push(...(await footprintNotes(cwd)));
   // The binary a WAKE would resolve is a different question from the one this shell resolves, and
   // nothing asked it until a poisoned shim went a day unnoticed. Warn-only for the same reason as

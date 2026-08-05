@@ -1,4 +1,4 @@
-# 241 — The daemon knows what a seat costs: footprint sampling, honest attribution, allowlist-only reaping
+# 242 — The daemon knows what a seat costs: footprint sampling, honest attribution, allowlist-only reaping
 
 - Status: accepted
 - Date: 2026-08-05
@@ -35,7 +35,7 @@ mode ADR 148 retired for build skew.
    matched against an **allowlist of MCP-server command patterns**, grouped into stacks by nearest
    non-sidecar ancestor, classified `live` / `orphaned` (reparented to launchd) / `unattributed`.
    One machine row per tick: swap used/total, free memory. Persisted to `footprint_stacks` +
-   `footprint_machine` (migration v34), pruned past `MUSTERD_FOOTPRINT_RETENTION_MS` (default 7 d)
+   `footprint_machine` (migration v35), pruned past `MUSTERD_FOOTPRINT_RETENTION_MS` (default 7 d)
    each tick so the table bounds itself. Darwin first; the scanners throw on any other platform and
    the sampler degrades to a skipped tick with one log line — never a crashed daemon.
 
