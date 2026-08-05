@@ -11,7 +11,7 @@ describe('db', () => {
     const ver = db
       .prepare<[], { value: string }>("SELECT value FROM schema_meta WHERE key='schema_version'")
       .get();
-    expect(ver?.value).toBe('34');
+    expect(ver?.value).toBe('35');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -241,7 +241,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(34); // runs v18…v34 (… + declared stakes + the wake token)
+    expect(runMigrations(db)).toBe(35); // runs v18…v35 (… + the wake token + footprint tables)
 
     const scope = (id: string) =>
       db
@@ -305,7 +305,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(34);
+    expect(runMigrations(db)).toBe(35);
 
     const policy = (id: string) =>
       db
