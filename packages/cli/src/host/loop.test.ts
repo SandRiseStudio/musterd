@@ -349,6 +349,85 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(verified).toEqual({ occupied: true, provenance: 'wake' });
   });
 
+  /**
+   * ADR 238. A presence row belonging to ANOTHER live session is fresh by definition — whoever owns
+   * it keeps touching it — so the debris bar below, which filters by time, cannot exclude it. Verify
+   * used to return on the first fresh row of any provenance, so it judged the wake before the woken
+   * adapter had claimed, and reported the other session's `session` row as this wake's outcome.
+   * Measured live on 2026-08-05: the woken codex adapter's `wake` row appeared ~8s after spawn, well
+   * inside the 90s window, behind a stale-but-live `session` row that answered instantly.
+   */
+  const memberWith = (
+    presences: { provenance: string; last_seen_at: number }[],
+  ): MemberSummary[] => [
+    {
+      id: 'm1',
+      team: 'dawn',
+      name: 'scout',
+      kind: 'agent',
+      role: '',
+      lifecycle: 'forever',
+      presence: 'online',
+      presences: presences.map((p) => ({
+        surface: 'claude-code',
+        status: 'online' as const,
+        last_seen_at: p.last_seen_at,
+        provenance: p.provenance,
+      })),
+      created_at: 1,
+    },
+  ];
+
+  it('roster verify: waits past another live session for THIS wake, rather than crediting its row', async () => {
+    const other = memberWith([{ provenance: 'session', last_seen_at: Date.now() + 1_000 }]);
+    const bothRows = memberWith([
+      { provenance: 'session', last_seen_at: Date.now() + 1_000 },
+      { provenance: 'wake', last_seen_at: Date.now() + 2_000 },
+    ]);
+    // Two polls: the other session answers first, our own adapter claims on the second.
+    const { client } = fakeClient([order()], [other, bothRows]);
+    let verified: { occupied: boolean; provenance?: string | null } | undefined;
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async (_spec, ctx) => {
+        verified = await ctx.verifyOccupied('scout');
+        return { outcome: { occupied: verified.occupied }, settled: Promise.resolve(undefined) };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    expect(verified).toEqual({ occupied: true, provenance: 'wake' });
+  });
+
+  it('roster verify: a seat held only by a non-wake session resolves occupied with that provenance', async () => {
+    // The deadline case of the same condition: nobody but the other session ever shows up. Verify
+    // still reports honestly — occupied, provenance `session` — and the BACKEND decides that this is
+    // a deferral (someone else holds the seat) rather than a failure of this wake.
+    const other = memberWith([{ provenance: 'session', last_seen_at: Date.now() + 1_000 }]);
+    const { client } = fakeClient([order()], [other]);
+    let verified: { occupied: boolean; provenance?: string | null } | undefined;
+    const backend: ActuatorBackend = {
+      harness: 'claude-code',
+      wake: async (_spec, ctx) => {
+        verified = await ctx.verifyOccupied('scout', 300);
+        return { outcome: { occupied: false, reason: 'x' }, settled: Promise.resolve(undefined) };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    expect(verified).toEqual({ occupied: true, provenance: 'session' });
+  });
+
   it('roster verify: window expiry without presence resolves occupied=false', async () => {
     const { client } = fakeClient([order()], [[]]);
     let verified: { occupied: boolean } | undefined;

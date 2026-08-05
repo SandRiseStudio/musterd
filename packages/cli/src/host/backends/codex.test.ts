@@ -111,6 +111,57 @@ describe('codexBackend', () => {
     child.exit();
     await result.settled;
   });
+  /**
+   * ADR 238. A seat already held by a non-wake session is not a failure of this wake — nothing about
+   * the act went wrong, and retrying later is right. It burned attempt budget instead: three of
+   * gptbot's acceptance wakes died this way on 2026-08-05 against a seat that was healthy throughout,
+   * and the ten asks queued behind them stalled.
+   */
+  it('a seat held by a non-wake session DEFERS — it does not burn the act (ADR 238)', async () => {
+    const child = new Child();
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      recordFreshThread: () => undefined,
+      spawn: (() => child) as never,
+    });
+    const heldByOther: BackendContext = {
+      verifyOccupied: async () => ({ occupied: true, provenance: 'session' }),
+      log: () => {},
+    };
+    const wake = backend.wake(spec, heldByOther);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(false);
+    expect(result.outcome.deferred).toBe(true);
+    expect(result.outcome.reason).toMatch(/session/);
+    child.exit();
+    await result.settled;
+  });
+
+  it('a wake that genuinely produced nothing still FAILS — deferral is not the catch-all', async () => {
+    // The guard on the guard: an empty roster is a real failure and must keep consuming budget,
+    // or a host that spawns nothing retries forever (ADR 236's ceiling reasoning, one layer out).
+    const child = new Child();
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      recordFreshThread: () => undefined,
+      spawn: (() => child) as never,
+    });
+    const nobody: BackendContext = {
+      verifyOccupied: async () => ({ occupied: false }),
+      log: () => {},
+    };
+    const wake = backend.wake(spec, nobody);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(false);
+    expect(result.outcome.deferred).toBeUndefined();
+    child.exit();
+    await result.settled;
+  });
+
   it('resumes the captured thread only when its JSONL identity agrees', async () => {
     const child = new Child();
     const calls: string[][] = [];

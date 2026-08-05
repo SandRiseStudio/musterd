@@ -96,17 +96,27 @@ async function verifyOccupied(
 ): Promise<{ occupied: boolean; provenance?: string | null }> {
   const deadline = Date.now() + windowMs;
   const freshBar = sinceTs - VERIFY_FRESHNESS_SLACK_MS;
+  // ADR 238: the newest non-wake occupancy seen so far. Held, not returned — see below.
+  let otherOccupancy: { occupied: boolean; provenance?: string | null } | null = null;
   for (;;) {
     const roster = await client.roster(team).catch(() => null);
     const me = roster?.members.find((m) => m.name === seat);
     if (me) {
       const fresh = me.presences.filter((p) => p.last_seen_at >= freshBar);
       if (fresh.length > 0 && (me.presence !== 'offline' || me.reclaimable)) {
-        const attesting = fresh.find((p) => p.provenance === 'wake') ?? fresh[0];
-        return { occupied: true, provenance: attesting?.provenance ?? null };
+        const attested = fresh.find((p) => p.provenance === 'wake');
+        if (attested) return { occupied: true, provenance: 'wake' };
+        // ADR 238: a row belonging to ANOTHER live session is fresh by definition — its owner keeps
+        // touching it — so the freshness bar above, which filters by time, cannot exclude it.
+        // Returning here credited that row to this wake and judged the wake before our own adapter
+        // had claimed: measured 2026-08-05, the codex adapter's `wake` row landed ~8s after spawn,
+        // behind a `session` row that answered instantly. Keep waiting for OUR evidence; only when
+        // the window is spent does the other session's occupancy become the answer — which the
+        // backend reads as "someone else holds the seat" and defers on, never as this wake failing.
+        otherOccupancy = { occupied: true, provenance: fresh[0]?.provenance ?? null };
       }
     }
-    if (Date.now() >= deadline) return { occupied: false };
+    if (Date.now() >= deadline) return otherOccupancy ?? { occupied: false };
     await new Promise((r) => setTimeout(r, pollMs));
   }
 }
