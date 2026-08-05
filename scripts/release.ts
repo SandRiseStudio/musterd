@@ -1,11 +1,16 @@
 /**
  * Lockstep publish of @musterd/* (ADR 156).
  *
- *   pnpm release --dry-run              # build + pack, no registry write
- *   pnpm release                        # bump → build → npm publish (human credentials)
+ *   pnpm release --dry-run              # build → consumer smoke → pack, no registry write
+ *   pnpm release                        # bump → build → consumer smoke → publish (human creds)
  *   pnpm release --version 0.3.1        # override target version
  *
  * Publish order: protocol → telemetry → server → mcp → cli.
+ *
+ * Every run — dry or real — installs the packed tarballs into a clean directory outside the
+ * workspace and runs them before anything is published (release/smoke.ts). That gate exists because
+ * 0.4.0 reached npm unloadable: a workspace install has the dev deps, so the whole suite passes on
+ * a package no consumer can import, and npm versions cannot be replaced.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -19,6 +24,7 @@ import {
   parseReleaseArgs,
   type PublishPackageName,
 } from './release/helpers.ts';
+import { smokeConsumerInstall } from './release/smoke.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,7 +32,10 @@ function usage(): string {
   return `Usage: pnpm release [--dry-run] [--allow-dirty] [--version X.Y.Z]
 
 Publishes @musterd/* in lockstep (ADR 156). Default version: 0.3.0.
---dry-run builds and npm-packs each package; does not bump or publish.
+--dry-run builds, smoke-tests and npm-packs each package; does not bump or publish.
+
+Every run installs the packed tarballs into a clean directory outside the workspace and
+runs them, BEFORE any registry write — the check that would have caught 0.4.0.
 `;
 }
 
@@ -115,6 +124,18 @@ export function runRelease(argv: string[]): number {
 
   buildAll();
 
+  // The gate, deliberately BEFORE the first registry write and on dry runs too.
+  //
+  // 0.4.0 shipped unloadable and burned two version numbers, because the only consumer check we had
+  // was printed under "Next:" *after* publishing — where it can confirm damage and nothing else.
+  // npm versions cannot be replaced, so the check has to be able to stop the release.
+  try {
+    smokeConsumerInstall(ROOT);
+  } catch (e) {
+    process.stderr.write(`${e instanceof Error ? e.message : e}\n`);
+    return 1;
+  }
+
   for (const name of PUBLISH_ORDER) {
     if (args.dryRun) packOne(name);
     else publishOne(name);
@@ -132,8 +153,7 @@ export function runRelease(argv: string[]): number {
   return 0;
 }
 
-const isMain =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]!).href;
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]!).href;
 
 if (isMain) {
   process.exit(runRelease(process.argv.slice(2)));
