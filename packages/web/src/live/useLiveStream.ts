@@ -146,7 +146,8 @@ export function useLiveStream(cfg: LiveConfig | null, hooks: LiveStreamHooks = {
         // Mark live-arrived before adding (same render tick) so the row mounts knowing to type out.
         setLiveIds((prev) => (prev.has(e.id) ? prev : new Set(prev).add(e.id)));
         // Sound the arrival — but only for genuinely-now messages (a reconnect can replay recent
-        // history over the socket), and once per id. The engine itself no-ops when muted.
+        // history over the socket), and once per id. The engine itself no-ops when muted, and the
+        // façade drops cues while the tab is hidden (broadcast excepted) — see firehoseSound.chime.
         if (!chimedRef.current.has(e.id) && Date.now() - e.ts < 30_000) {
           chimedRef.current.add(e.id);
           firehoseSound.chime(e.act);

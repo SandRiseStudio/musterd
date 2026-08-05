@@ -200,6 +200,8 @@ function loadEngines(): Promise<Engine> {
 class FirehoseSoundFacade {
   /** The stored preference, answered synchronously — the toggle renders off this on first paint. */
   enabled = readPref(PREF_KEY);
+  /** Broadcast never counts as hidden — a capture box has no tab to front (ADR 228). */
+  private broadcast = false;
   private engine: Engine['firehoseEngine'] | null = null;
 
   private withEngine(run: (e: Engine['firehoseEngine']) => void): void {
@@ -231,6 +233,7 @@ class FirehoseSoundFacade {
    */
   enableForBroadcast(): void {
     this.enabled = true;
+    this.broadcast = true;
     this.withEngine((e) => e.enableForBroadcast());
   }
 
@@ -245,6 +248,14 @@ class FirehoseSoundFacade {
    */
   chime(act: string): void {
     if (!this.enabled) return;
+    // A hidden tab does not chime (broadcast excepted — a capture box is hidden by construction,
+    // ADR 228). The room-tone engine has always had this gate; the act cues did not, and the gap was
+    // audible (nick, 2026-08-05): agent seats verify /live in the harness browser pane, which
+    // reports `document.hidden === true` for its whole lifetime — one such pane with sound toggled
+    // on chimed the whole team's acts from a laptop with no browser window open anywhere. A cue for
+    // a room nobody is looking at is noise by definition; the title-count badge still carries the
+    // arrival.
+    if (!this.broadcast && typeof document !== 'undefined' && document.hidden) return;
     if (this.engine) this.engine.chime(act);
     else this.withEngine(() => {});
   }
