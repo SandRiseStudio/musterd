@@ -13,8 +13,8 @@
 class Musterd < Formula
   desc "Muster your agents and humans into persistent teams"
   homepage "https://github.com/SandRiseStudio/musterd"
-  url "https://registry.npmjs.org/@musterd/cli/-/cli-0.3.1.tgz"
-  sha256 "7e96ff7184ca0eb1d8e2b038fc695b18988755e1c809c560e4b4dc073c846745"
+  url "https://registry.npmjs.org/@musterd/cli/-/cli-0.4.1.tgz"
+  sha256 "1dad4fdc0fab113581610e478f0a57df48656ebbefc867f5c72acb4b0a73dae3"
   license "MIT"
 
   # better-sqlite3 (via @musterd/server) needs a supported Node ABI — pin Node 22 (engines >=22).
