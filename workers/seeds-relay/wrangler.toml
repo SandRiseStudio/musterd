@@ -15,9 +15,12 @@ id = "58c05cfa4ea94dc5a1cf22476f98e665"
 [vars]
 ENABLE_TWILIO = "true"
 ENABLE_SLACK = "true"
-# Optional: restrict Slack capture to the dedicated seeds channel id (e.g. "C0123456789").
-# Unset = accept messages from any channel the Slack app is subscribed to.
-# SLACK_SEEDS_CHANNEL = ""
+# Diagnostic notes (`debug:` prefix, 1h TTL, invisible to the daemon's `seed:` scan) recording that
+# Slack delivered and what became of it. On while a channel is being wired up; the point is that an
+# empty buffer stops being ambiguous between "never delivered" and "delivered and skipped".
+SLACK_DEBUG = "true"
+# The dedicated seeds channel (#musterd). Only its messages become seeds.
+SLACK_SEEDS_CHANNEL = "C0BNGM9CBU4"
 
 # Secrets (set via: wrangler secret put <NAME>):
 # - TWILIO_AUTH_TOKEN     Twilio auth token (HMAC key for x-twilio-signature)
