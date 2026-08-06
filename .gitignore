@@ -60,3 +60,4 @@ coverage/
 .env
 scripts/broadcast/.image-digest
 .superpowers/
+workers/*/.wrangler/
