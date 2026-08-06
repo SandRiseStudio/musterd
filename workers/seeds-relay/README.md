@@ -9,6 +9,15 @@ Lives outside the pnpm workspace on purpose: it deploys with wrangler, shares no
 daemon, and must not add dependencies to the monorepo install (the daemon's autorefresh does
 not `pnpm install`).
 
+## Deployed
+
+`https://musterd-seeds-relay.nick-sanders-a.workers.dev` (Cloudflare account
+`0f159d2f0622a4fef8e07d64d4a9bdb0`, KV namespace `58c05cfa4ea94dc5a1cf22476f98e665`).
+
+Every route fails closed until its secret exists: a missing `PULL_TOKEN`/`TWILIO_AUTH_TOKEN`/
+`SLACK_SIGNING_SECRET` is a 500, not an open door. Deploying before the secrets are set is
+therefore safe — the Worker is inert until configured.
+
 ## Deploy
 
 ```bash
