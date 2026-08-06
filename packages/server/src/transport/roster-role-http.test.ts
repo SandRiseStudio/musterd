@@ -36,9 +36,10 @@ const bearer = (auth: string) => ({ authorization: `Bearer ${auth}` });
 const auditRows = () => {
   const team = getTeamBySlug(server.db, 'dawn')!;
   return server.db
-    .prepare<[string], { actor: string | null; detail: string | null }>(
-      `SELECT actor, detail FROM audit WHERE team_id = ? AND action = 'roster.role_query' ORDER BY ts`,
-    )
+    .prepare<
+      [string],
+      { actor: string | null; detail: string | null }
+    >(`SELECT actor, detail FROM audit WHERE team_id = ? AND action = 'roster.role_query' ORDER BY ts`)
     .all(team.id);
 };
 
@@ -50,7 +51,11 @@ beforeEach(async () => {
   nickCred = team.json.human_credential;
   // One holder, one roleless generalist — the legacy single-`role` field is enough (parseRoles
   // derives `roles: ['platform']` from it, the ADR 227 back-compat read).
-  await post('/teams/dawn/members', { name: 'izzo', kind: 'agent', role: 'platform' }, bearer(nickCred));
+  await post(
+    '/teams/dawn/members',
+    { name: 'izzo', kind: 'agent', role: 'platform' },
+    bearer(nickCred),
+  );
   await post('/teams/dawn/members', { name: 'kimi', kind: 'agent' }, bearer(nickCred));
   // The role library entry (normally projected from roles/<name>.toml by reconcile).
   const teamRow = getTeamBySlug(server.db, 'dawn')!;
