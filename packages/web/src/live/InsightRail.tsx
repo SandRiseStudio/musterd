@@ -1,6 +1,6 @@
 import type { MemberSummary, Report } from '@musterd/protocol';
 import { useState } from 'react';
-import { kindOf, memberColor } from './format';
+import { kindOf, memberInk } from './format';
 import { CollapseButton, PanelRail } from './PanelChrome';
 
 /**
@@ -92,7 +92,7 @@ export function InsightRail({
                   <li key={w.member} className="lc-insight__wait">
                     <span
                       className="lc-insight__who"
-                      style={{ color: memberColor(w.member, kindOf(w.member, rosterIdx)) }}
+                      style={{ color: memberInk(w.member, kindOf(w.member, rosterIdx)) }}
                     >
                       {w.member}
                     </span>{' '}

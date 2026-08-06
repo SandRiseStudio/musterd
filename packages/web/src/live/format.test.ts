@@ -9,6 +9,10 @@ import {
   formatClock,
   goalEvent,
   isFeatureBehind,
+  memberAvatar,
+  memberColor,
+  memberHue,
+  memberInk,
   laneEvent,
   laneEventDetail,
   postureMeta,
@@ -496,5 +500,104 @@ describe('acceptanceCapacity — unknown is not degraded', () => {
       seat('kimi', null),
     ]);
     expect(cap.degraded).toBe(true);
+  });
+});
+
+/* ─── identity colour: the fill / ink split ──────────────────────────────────────────────────────
+ * These are contrast REGRESSION tests, not unit trivia. The values they pin were arrived at by
+ * measurement, and the failure mode they guard against is someone "tidying" the derived lightnesses
+ * back to a single constant — which is exactly the state that made avatar initials unreadable. */
+
+/** sRGB relative luminance of an `hsl(h, s%, l%)` string, per WCAG 2.1. */
+function luminanceOfHsl(css: string): number {
+  const [hue, sat, light] = css.match(/[\d.]+/g)!.map(Number);
+  const s = sat / 100;
+  const l = light / 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + hue / 30) % 12;
+    return l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+  };
+  const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(f(0)) + 0.7152 * lin(f(8)) + 0.0722 * lin(f(4));
+}
+const contrast = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+const WHITE = 1;
+/** --lc-surface-3 #e8d7b4, the darkest paper any of this text can land on. */
+const DARKEST_PAPER = 0.6598;
+
+/** Enough names to sweep both hue bands densely. */
+const NAMES = Array.from({ length: 400 }, (_, i) => `seat-${i}`);
+const KINDS = ['agent', 'human'] as const;
+
+describe('memberColor — the identity FILL, deliberately unchanged', () => {
+  it('still returns the floor-body colour at a constant lightness', () => {
+    // The room paints characters with this. Pinned so an accessibility change to the AVATAR can
+    // never silently restyle the office.
+    expect(memberColor('miley', 'agent')).toMatch(/^hsl\(\d+, 68%, 62%\)$/);
+    expect(memberColor('nick', 'human')).toMatch(/^hsl\(\d+, 68%, 62%\)$/);
+  });
+
+  it('is stable across calls and distinct per member', () => {
+    expect(memberColor('miley', 'agent')).toBe(memberColor('miley', 'agent'));
+    expect(memberColor('miley', 'agent')).not.toBe(memberColor('izzo', 'agent'));
+  });
+
+  it('cannot carry a hard-coded initial colour — which is why memberAvatar exists', () => {
+    // The premise of the split, asserted rather than left in a comment. For any ONE background at
+    // least one pole clears AA (the two failure conditions are mutually exclusive), so the bug is
+    // not "nothing works" — it is that the correct pole FLIPS across the band, and every avatar
+    // component pins one. Both failure sets must be non-empty for that to be true.
+    const fills = NAMES.flatMap((n) => KINDS.map((k) => luminanceOfHsl(memberColor(n, k))));
+    expect(fills.filter((bg) => contrast(WHITE, bg) < 4.5).length).toBeGreaterThan(0);
+    expect(fills.filter((bg) => contrast(0, bg) < 4.5).length).toBeGreaterThan(0);
+    expect(fills.filter((bg) => contrast(WHITE, bg) < 4.5 && contrast(0, bg) < 4.5)).toEqual([]);
+  });
+});
+
+describe('memberAvatar — the fill that has to carry a letter', () => {
+  it('takes white initials at AA for every member, in both bands', () => {
+    for (const name of NAMES) {
+      for (const kind of KINDS) {
+        const ratio = contrast(WHITE, luminanceOfHsl(memberAvatar(name, kind)));
+        expect(ratio, `white on ${kind} avatar ${name} (${memberAvatar(name, kind)})`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it('keeps the member’s hue, so the avatar and the body are one identity', () => {
+    for (const name of NAMES.slice(0, 40)) {
+      for (const kind of KINDS) {
+        expect(memberAvatar(name, kind)).toContain(`hsl(${memberHue(name, kind)},`);
+      }
+    }
+  });
+
+  it('holds luminance constant, which is what makes one pole correct for everyone', () => {
+    // The old palette spanned 4.6x in luminance at a constant LIGHTNESS. Evening that out is the
+    // mechanism, not a nicety: it is why the initials can be uniformly white.
+    const lums = NAMES.flatMap((n) => KINDS.map((k) => luminanceOfHsl(memberAvatar(n, k))));
+    expect(Math.max(...lums) / Math.min(...lums)).toBeLessThan(1.1);
+  });
+});
+
+describe('memberInk — the identity colour as TEXT on paper', () => {
+  it('clears AA against the darkest paper for every member', () => {
+    for (const name of NAMES) {
+      for (const kind of KINDS) {
+        const ratio = contrast(DARKEST_PAPER, luminanceOfHsl(memberInk(name, kind)));
+        expect(ratio, `${kind} ink ${name} (${memberInk(name, kind)})`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it('is darker than the avatar fill, which is darker than the floor fill', () => {
+    for (const name of NAMES.slice(0, 40)) {
+      for (const kind of KINDS) {
+        expect(luminanceOfHsl(memberInk(name, kind))).toBeLessThan(
+          luminanceOfHsl(memberAvatar(name, kind)),
+        );
+      }
+    }
   });
 });

@@ -4,7 +4,7 @@ import {
   auditTime,
   formatAuditDetail,
   initial,
-  memberColor,
+  memberAvatar,
 } from './format';
 
 /**
@@ -86,7 +86,7 @@ function Seat({ name }: { name: string | null }) {
   if (!name) return <span className="lc-audit__system">system</span>;
   return (
     <span className="lc-audit__seat">
-      <span className="lc-audit__avatar" style={{ background: memberColor(name, 'agent') }}>
+      <span className="lc-audit__avatar" style={{ background: memberAvatar(name, 'agent') }}>
         {initial(name)}
       </span>
       {name}

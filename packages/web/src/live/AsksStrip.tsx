@@ -14,7 +14,7 @@ import {
   type AudienceContext,
 } from './asks';
 import { sendAct, type LiveConfig } from './client';
-import { initial, memberColor, kindOf } from './format';
+import { initial, memberAvatar, kindOf } from './format';
 import { scrollToMessage } from './Stream';
 
 /**
@@ -207,7 +207,7 @@ export function AsksStrip({
           <>
             <span
               className="lc-chip__avatar lc-asks__who"
-              style={{ background: memberColor(lead.env.from, kindOf(lead.env.from, idx)) }}
+              style={{ background: memberAvatar(lead.env.from, kindOf(lead.env.from, idx)) }}
               aria-hidden="true"
             >
               {initial(lead.env.from)}
@@ -381,7 +381,7 @@ export function AsksStrip({
                   <span
                     className="lc-chip__avatar"
                     style={{
-                      background: memberColor(
+                      background: memberAvatar(
                         r.lane.owner_seat ?? '?',
                         kindOf(r.lane.owner_seat ?? '?', idx),
                       ),
@@ -440,7 +440,7 @@ function AskCard({
           down a list of twenty, every clock and every button lands on the same vertical line. */}
       <div className="lc-ask__main">
         <div className="lc-ask__head">
-          <span className="lc-chip__avatar" style={{ background: memberColor(from, kind) }}>
+          <span className="lc-chip__avatar" style={{ background: memberAvatar(from, kind) }}>
             {initial(from)}
           </span>
           <span className="lc-ask__verb">

@@ -2113,7 +2113,7 @@
   justify-content: center;
   font-size: 11px;
   font-weight: 600;
-  color: #1a1119;
+  color: #fff;
 }
 .lc-seat__body {
   flex: 1;
@@ -2481,7 +2481,10 @@
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  /* background set inline per member (unique colour); white outlined initial reads on any hue */
+  /* Background is set inline per member — `memberAvatar()`, the identity hue deepened until white
+     initials clear AA on EVERY hue in both bands. It is not `memberColor()`: that fill is lighter, and
+     across its range white bottoms out at 1.40:1 and even pure black at 4.07:1, so nothing readable
+     sits on it. All four avatar circles use white here; two of them used to disagree. */
   background: var(--lc-agent);
   color: #fff;
   font-size: 10.5px;
@@ -3094,7 +3097,7 @@
   justify-content: center;
   font-size: 9.5px;
   font-weight: 600;
-  color: #1a1119;
+  color: #fff;
 }
 .lc-audit__system {
   color: var(--lc-faint);

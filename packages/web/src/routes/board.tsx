@@ -20,7 +20,7 @@ import {
 } from '../live/memberIdentity';
 import { filterLanes, UNOWNED } from '../live/boardWrite';
 import { useBoardData } from '../live/useBoardData';
-import { initial, kindOf, memberColor } from '../live/format';
+import { initial, kindOf, memberColor, memberAvatar } from '../live/format';
 import { InsightRail } from '../live/InsightRail';
 import { useLiveStream } from '../live/useLiveStream';
 import { useReport } from '../live/useReport';
@@ -265,7 +265,7 @@ function BoardPage() {
               <span
                 className="lc-card__avatar"
                 style={{
-                  background: memberColor(me, kindOf(me, new Map(roster.map((m) => [m.name, m])))),
+                  background: memberAvatar(me, kindOf(me, new Map(roster.map((m) => [m.name, m])))),
                 }}
                 aria-hidden="true"
               >
