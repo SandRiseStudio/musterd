@@ -26,6 +26,7 @@
  */
 
 import { slackSecretHint, twilioTokenHint } from './hints.js';
+import { type SlackEnvelope, slackSeedVerdict } from './slackVerdict.js';
 
 export interface Env {
   SEEDS_KV: KVNamespace;
@@ -39,7 +40,12 @@ export interface Env {
   ENABLE_SLACK?: string;
   /** Restrict Slack capture to one channel id; unset = accept any channel the app is in. */
   SLACK_SEEDS_CHANNEL?: string;
+  /** "true" ⇒ record a short-lived `debug:` note per Slack delivery (see recordSlackDelivery). */
+  SLACK_DEBUG?: string;
 }
+
+/** Diagnostic notes self-delete; they are for wiring up a channel, not a second ledger. */
+const DEBUG_TTL_SECONDS = 3600;
 
 type SeedSource = 'sms' | 'slack';
 
@@ -167,21 +173,6 @@ async function verifyTwilioSignature(
 // ---------------------------------------------------------------------------
 // Slack (Events API on the dedicated seeds channel)
 
-interface SlackEventEnvelope {
-  type?: string;
-  challenge?: string;
-  event?: {
-    type?: string;
-    subtype?: string;
-    bot_id?: string;
-    thread_ts?: string;
-    text?: string;
-    user?: string;
-    channel?: string;
-    ts?: string;
-  };
-}
-
 async function handleSlack(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const signingSecret = env.SLACK_SIGNING_SECRET;
   if (!signingSecret) throw new HttpError('Slack signing secret missing', 500);
@@ -196,7 +187,13 @@ async function handleSlack(request: Request, env: Env, ctx: ExecutionContext): P
   const rawBody = await request.text();
   await verifySlackSignature(rawBody, timestamp, signature, signingSecret);
 
-  const envelope = JSON.parse(rawBody) as SlackEventEnvelope;
+  const envelope = JSON.parse(rawBody) as SlackEnvelope;
+  const verdict = slackSeedVerdict(envelope, env.SLACK_SEEDS_CHANNEL);
+
+  // Record the delivery BEFORE acting on it. A rejected event used to return 200 and leave no
+  // trace, which made "the buffer is empty" ambiguous between "Slack never delivered" and "Slack
+  // delivered and we dropped it" — two failures with identical symptoms and opposite fixes.
+  await recordSlackDelivery(env, envelope, verdict.reason);
 
   // Events API subscription handshake.
   if (envelope.type === 'url_verification' && envelope.challenge) {
@@ -207,20 +204,7 @@ async function handleSlack(request: Request, env: Env, ctx: ExecutionContext): P
   }
 
   const event = envelope.event;
-  // Only fresh, human, top-level channel messages are seeds. Skipping bot messages is what
-  // prevents the "🌱 saved" webhook confirmation from re-entering as a new event; skipping
-  // subtypes drops edits/deletes/joins.
-  const isSeedMessage =
-    envelope.type === 'event_callback' &&
-    event?.type === 'message' &&
-    !event.subtype &&
-    !event.bot_id &&
-    !event.thread_ts &&
-    typeof event.text === 'string' &&
-    event.text.trim().length > 0 &&
-    (!env.SLACK_SEEDS_CHANNEL || event.channel === env.SLACK_SEEDS_CHANNEL);
-
-  if (isSeedMessage) {
+  if (verdict.seed && event) {
     await bufferSeed(env, {
       body: event.text!.trim(),
       ts: Date.now(),
@@ -246,6 +230,37 @@ async function handleSlack(request: Request, env: Env, ctx: ExecutionContext): P
 
   // Slack wants a fast 200 for every delivery, seed or not, or it retries.
   return new Response('ok', { status: 200 });
+}
+
+/**
+ * A short-lived, self-deleting note that Slack delivered SOMETHING and what became of it. Written
+ * under a `debug:` prefix, which the pull endpoint's `seed:` prefix scan cannot see — so it is
+ * invisible to the daemon and can never be mistaken for a seed.
+ *
+ * Bodies are deliberately NOT recorded: this answers "did it arrive and why was it skipped",
+ * which needs the shape of the event, never its content.
+ */
+async function recordSlackDelivery(
+  env: Env,
+  envelope: SlackEnvelope,
+  reason: string,
+): Promise<void> {
+  console.log('[SeedsRelay] slack delivery', { envelope_type: envelope.type, reason });
+  if (env.SLACK_DEBUG !== 'true') return;
+  await env.SEEDS_KV.put(
+    `debug:${Date.now()}-${crypto.randomUUID()}`,
+    JSON.stringify({
+      at: new Date().toISOString(),
+      reason,
+      envelope_type: envelope.type,
+      event_type: envelope.event?.type ?? null,
+      subtype: envelope.event?.subtype ?? null,
+      bot_id: envelope.event?.bot_id ?? null,
+      channel: envelope.event?.channel ?? null,
+      pinned_channel: env.SLACK_SEEDS_CHANNEL ?? null,
+    }),
+    { expirationTtl: DEBUG_TTL_SECONDS },
+  );
 }
 
 async function verifySlackSignature(

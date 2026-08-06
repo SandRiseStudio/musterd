@@ -51,3 +51,19 @@ Then:
 | `GET /seeds?after=id` | `Authorization: Bearer PULL_TOKEN` | seeds with id > `after`, oldest first, ≤100    |
 
 Seeds are never deleted or mutated by pull; the daemon keeps its own cursor.
+
+## Inspecting the buffer — `--remote` is not optional
+
+```bash
+npx wrangler kv key list --namespace-id 58c05cfa4ea94dc5a1cf22476f98e665 --remote
+```
+
+**Without `--remote`, wrangler reads a LOCAL simulator that always starts empty — and it does not
+error, it answers.** During first-deploy debugging this produced a solid hour of `[]` readings
+against a buffer that in fact held every captured seed, and the "failure" being debugged did not
+exist. If a listing shows `[]`, prove the instrument before trusting it: `kv key put` a control key
+with `--remote` and confirm the remote listing shows it.
+
+`debug:` keys are delivery diagnostics (`SLACK_DEBUG` var, 1h TTL, invisible to the daemon's
+`seed:` prefix scan) — one note per Slack delivery saying what became of it, so an empty seed
+buffer is not ambiguous between "Slack never delivered" and "delivered and rejected".
