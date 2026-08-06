@@ -51,6 +51,64 @@ export function adrNumbersInPaths(paths: Iterable<string>): number[] {
   return out;
 }
 
+/**
+ * ADR numbers a PR claims in PROSE — its title and branch name (ADR 223 amendment, 2026-08-05).
+ *
+ * The file-path read below cannot see a compliant reservation. ADR 223's ritual is "push the draft
+ * PR **before** writing it", and its Decision puts the number in the TITLE (`ADR 223: <slug>`) with
+ * a body that "may be empty" — so a seat that follows the instruction exactly pushes a branch with
+ * no `docs/decisions/` file, and the claim is invisible to the very scan the ritual exists to feed.
+ * Verified on ryder's PR #703: commit c9ca4e1b, zero files under docs/decisions, number visible only
+ * in the title and branch name. Three seats allocated 241 inside an hour that evening, each having
+ * run this command and each correct at the moment they looked.
+ *
+ * So this reads the field the ritual already designates. It is deliberately a WIDENING rung: a title
+ * that merely cites an ADR ("fix: the ADR 131 wake path") reserves that number too. That is the
+ * cheap direction — under {@link nextAdrNumber} a number below the maximum costs nothing at all, and
+ * a spurious high one costs a single skipped integer, which ADR 220 already rules is preferable to
+ * reuse. An under-reservation costs a collision and a rewrite of every cross-reference.
+ */
+export function adrNumbersInPrText(title?: string, branch?: string): number[] {
+  const found = new Set<number>();
+  // `ADR 241`, `ADR-241`, `adr241` — the title shape ADR 223 specifies, case-insensitively, with the
+  // separator optional. `\d{3}` with boundaries on both sides so `ADR 1234` and a bare `241` miss.
+  for (const m of (title ?? '').matchAll(/\badr[\s-]?(\d{3})\b/gi)) found.add(Number(m[1]));
+  // Branch names: `ryder/adr-241-wake-lease`, `feat/adr241-…`. Same shape, but `/` and `-` are the
+  // separators rather than spaces, so the leading boundary is anything that is not a word character.
+  for (const m of (branch ?? '').matchAll(/(?:^|[^a-z0-9])adr-?(\d{3})(?:[^0-9]|$)/gi))
+    found.add(Number(m[1]));
+  return [...found];
+}
+
+/** One open PR as the number-scan sees it — the shape `gh pr list --json` returns. */
+export interface PrForScan {
+  number: number;
+  files?: { path: string }[];
+  title?: string;
+  headRefName?: string;
+}
+
+/**
+ * Every ADR number one open PR claims, and how (ADR 223 amendment).
+ *
+ * `reserved: true` means the claim came from prose ALONE — a draft PR that named its number before
+ * writing the ADR, exactly as the ritual instructs. That distinction is reported rather than
+ * flattened: a reader who sees a number skipped needs to tell a written ADR from a reservation
+ * without opening the PR, or the widened rung just turns into someone wondering where 243 went.
+ *
+ * Extracted as a pure function so the WIRING is testable, not merely the two matchers. The first
+ * version of this change had unit tests for {@link adrNumbersInPrText} that all passed while the
+ * scan ignored it — proven by mutation: emptying the prose read killed nothing.
+ */
+export function prClaims(pr: PrForScan): { number: number; reserved: boolean }[] {
+  const fromFiles = new Set(adrNumbersInPaths((pr.files ?? []).map((f) => f.path)));
+  const fromText = adrNumbersInPrText(pr.title, pr.headRefName);
+  return [...new Set([...fromFiles, ...fromText])].map((n) => ({
+    number: n,
+    reserved: !fromFiles.has(n),
+  }));
+}
+
 function git(args: string[]): string {
   return execFileSync('git', args, {
     cwd: repoRoot,
@@ -98,18 +156,25 @@ function mainNumbers(): number[] {
 function openPrNumbers(): { numbers: number[]; consulted: boolean; byPr: string[] } {
   const byPr: string[] = [];
   try {
-    const raw = execFileSync('gh', ['pr', 'list', '--state', 'open', '--json', 'number,files'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const prs = JSON.parse(raw) as { number: number; files?: { path: string }[] }[];
+    const raw = execFileSync(
+      'gh',
+      ['pr', 'list', '--state', 'open', '--json', 'number,files,title,headRefName'],
+      { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    const prs = JSON.parse(raw) as {
+      number: number;
+      files?: { path: string }[];
+      title?: string;
+      headRefName?: string;
+    }[];
     const numbers: number[] = [];
     for (const pr of prs) {
-      const claimed = adrNumbersInPaths((pr.files ?? []).map((f) => f.path));
-      for (const n of claimed) {
-        numbers.push(n);
-        byPr.push(`PR #${pr.number} claims ADR ${String(n).padStart(3, '0')}`);
+      for (const claim of prClaims(pr)) {
+        numbers.push(claim.number);
+        byPr.push(
+          `PR #${pr.number} claims ADR ${String(claim.number).padStart(3, '0')}` +
+            (claim.reserved ? ' (reserved — title/branch only, no ADR file yet)' : ''),
+        );
       }
     }
     return { numbers, consulted: true, byPr };
@@ -152,8 +217,17 @@ function run(): void {
     // ADR 223: this answer is only correct until someone else runs the same command. Publishing the
     // claim is what makes it visible to their `open PRs` line — an unpushed branch is invisible to
     // every other seat for the whole authoring session, which is how ADR 221 collided.
+    //
+    // The stub is the 2026-08-05 amendment. This line used to stop at "push the draft PR now,
+    // before writing it" — and a seat obeying it pushed nothing the scan could see, because the
+    // scan matched file paths. Naming the file in the reservation push makes the claim exact for
+    // the detector AND legible to a human scanning the PR list, which is the other half of what
+    // ADR 223 was for.
     process.stdout.write(
-      `Push the branch as a draft PR now, before writing it, so ${padded} is visible to the next seat (ADR 223).\n`,
+      `Push the branch as a draft PR now, before writing it, so ${padded} is visible to the next\n` +
+        `seat (ADR 223) — and include a one-line stub at that path in the reservation push:\n` +
+        `  git commit --allow-empty-message -m "reserve ADR ${padded}" docs/decisions/${padded}-<slug>.md\n` +
+        `The title should name it too (\`ADR ${padded}: <slug>\`); both are read.\n`,
     );
   }
 
