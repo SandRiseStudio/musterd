@@ -60,7 +60,9 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
  * loop; ADR 199: `--dispatch-loop on` arms the dispatch work-order loop; ADR 229: `--sweep-loop on`
  * arms the acceptance backstop, which closes a lane nobody accepted after the grace. ADR 149:
  * `--ask-slack-webhook <url>` points the ask stream's loud reach at a Slack incoming webhook (`off`
- * clears it); the URL is a secret, so the display masks it to its host. Reads → merges the named
+ * clears it); the URL is a secret, so the display masks it to its host. ADR 248:
+ * `--seeds-relay <url> --seeds-token <token>` points the seeds ingest loop at the capture relay
+ * (`--seeds-relay off` clears both); the token is a secret and never displayed. Reads → merges the named
  * knob(s) → POSTs the policy (the residency-policy read-merge-write pattern), so setting one knob
  * never clobbers the wake-policy defaults.
  */
@@ -120,6 +122,28 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
     }
     changed = true;
   }
+  // ADR 248: seeds ingest — the relay the daemon pulls raw captured ideas from. Two keys set
+  // together (`--seeds-relay <url> --seeds-token <token>`), `--seeds-relay off` clears both (delete,
+  // not empty string, restoring the daemon's "unset = no outbound call ever" default). The token is
+  // a secret with the webhook's handling: masked on display, never exported.
+  const seedsRelay = flagStr(parsed.flags, 'seeds-relay');
+  const seedsToken = flagStr(parsed.flags, 'seeds-token');
+  if (seedsRelay !== undefined) {
+    if (seedsRelay === 'off') {
+      delete merged.seeds_relay_url;
+      delete merged.seeds_relay_token;
+    } else {
+      if (!/^https:\/\//.test(seedsRelay) || seedsToken === undefined) {
+        throw new CliError(
+          'usage: musterd team policy --seeds-relay <https url | off> --seeds-token <token>',
+          2,
+        );
+      }
+      merged.seeds_relay_url = seedsRelay;
+      merged.seeds_relay_token = seedsToken;
+    }
+    changed = true;
+  }
   // ADR 150: the enforcement class table — the opt-in PreToolUse gate declaration. `--enforce-surface`
   // (contended surfaces, Gate A) and `--enforce-action` (costly actions, Gate B) upsert classes by name
   // (re-declaring a name replaces it); `--enforce-clear` empties the table. Posture defaults to `block`
@@ -157,6 +181,14 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
           updated.ask_slack_webhook
             ? `asks now also post to Slack (${maskWebhook(updated.ask_slack_webhook)})`
             : 'Slack delivery for asks is off',
+        ) + '\n',
+      );
+    if (seedsRelay !== undefined)
+      process.stdout.write(
+        hint(
+          updated.seeds_relay_url
+            ? `seeds ingest on — the daemon polls ${maskWebhook(updated.seeds_relay_url)} and opens a lane per captured seed`
+            : 'seeds ingest is off',
         ) + '\n',
       );
     if (enforceChanged) {
@@ -199,6 +231,10 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   // ADR 149: the webhook URL is a secret — show only that it's set, and where it points (host).
   process.stdout.write(
     `  ask slack webhook: ${current.ask_slack_webhook ? theme.accent(maskWebhook(current.ask_slack_webhook)) : 'off'}${inherited(stored, 'ask_slack_webhook')}\n`,
+  );
+  // ADR 248: the relay URL shows its host; the token shows only that it is set.
+  process.stdout.write(
+    `  seeds relay: ${current.seeds_relay_url ? theme.accent(maskWebhook(current.seeds_relay_url)) : 'off'}${inherited(stored, 'seeds_relay_url')}\n`,
   );
   // ADR 150: the enforcement class table — the opt-in PreToolUse gate declaration.
   const classes = current.enforcement.classes;

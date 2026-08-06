@@ -1,0 +1,26 @@
+name = "musterd-seeds-relay"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+
+[observability]
+enabled = true
+
+# KV buffer — the source of record for captured seeds. Create with:
+#   wrangler kv namespace create SEEDS_KV
+# then paste the id below.
+[[kv_namespaces]]
+binding = "SEEDS_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+ENABLE_TWILIO = "true"
+ENABLE_SLACK = "true"
+# Optional: restrict Slack capture to the dedicated seeds channel id (e.g. "C0123456789").
+# Unset = accept messages from any channel the Slack app is subscribed to.
+# SLACK_SEEDS_CHANNEL = ""
+
+# Secrets (set via: wrangler secret put <NAME>):
+# - TWILIO_AUTH_TOKEN     Twilio auth token (HMAC key for x-twilio-signature)
+# - SLACK_SIGNING_SECRET  Slack app signing secret (v0 request signing)
+# - SLACK_WEBHOOK_URL     incoming webhook for the "🌱 saved" confirmation (ADR 149 webhook)
+# - PULL_TOKEN            bearer token the musterd daemon presents on GET /seeds

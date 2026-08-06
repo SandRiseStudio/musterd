@@ -1,0 +1,16 @@
+{
+  "name": "musterd-seeds-relay",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Always-on relay for musterd seeds (ADR 248): Twilio SMS + Slack capture into a raw KV buffer, pulled by the daemon.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "typescript": "^5.5.0",
+    "wrangler": "^4.0.0"
+  }
+}
