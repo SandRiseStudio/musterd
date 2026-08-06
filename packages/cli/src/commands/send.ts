@@ -27,7 +27,7 @@ import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
 async function openRequests(http: HttpClient, team: string, me: string): Promise<Envelope[]> {
   try {
     const res = await http.inbox(team, { unread: false });
-    const open = openActionNeeded(res.messages, me).filter(
+    const open = openActionNeeded(res.messages, me, res.answered ?? []).filter(
       (m) =>
         m.act === 'request_help' || m.act === 'handoff' || m.act === 'challenge' || m.act === 'ask',
     );

@@ -427,16 +427,31 @@ function threadKey(env: Envelope): string {
 
 /**
  * The still-open action-needed messages in a set: those {@link isActionNeeded} whose thread has no
- * `resolve` (ADR 025). This is the open-vs-done axis ADR 024's read-cursor deliberately doesn't
- * track — a resolved request stops counting as waiting even if it is still unread, because the work
- * it asked for is done. Pure; the comeback summary reads it off the inbox.
+ * `resolve` (ADR 025) **and which I have not already replied to**. This is the open-vs-done axis
+ * ADR 024's read-cursor deliberately doesn't track — a resolved request stops counting as waiting
+ * even if it is still unread, because the work it asked for is done. Pure; the comeback summary
+ * reads it off the inbox.
+ *
+ * `answered` is the server's `GET /inbox` list of ask ids this seat has replied to. It has to come
+ * from outside: the inbox excludes my own sends, so the reply that discharges an ask is not in
+ * `messages` and no amount of folding here can find it. Closure used to be read from `resolve`
+ * alone — and the live ledger holds 199 accepts against 9 resolves, so an answered ask counted as
+ * waiting forever, in the `⚑ N requests waiting for you` banner, in the notification Loud set, and
+ * in the lane-acceptance candidate list. Omitted ⇒ the previous behaviour exactly.
  */
-export function openActionNeeded(messages: Envelope[], me: string): Envelope[] {
+export function openActionNeeded(
+  messages: Envelope[],
+  me: string,
+  answered: Iterable<string> = [],
+): Envelope[] {
   const resolved = new Set<string>();
   for (const m of messages) {
     if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
   }
-  return messages.filter((m) => isActionNeeded(m, me) && !resolved.has(threadKey(m)));
+  const alreadyAnswered = new Set(answered);
+  return messages.filter(
+    (m) => isActionNeeded(m, me) && !resolved.has(threadKey(m)) && !alreadyAnswered.has(m.id),
+  );
 }
 
 /**

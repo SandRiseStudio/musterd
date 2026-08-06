@@ -296,6 +296,10 @@ export class HttpClient {
     total?: number;
     /** ADR 211: what this seat has postponed, and whether each one's condition has fired. */
     deferred?: { target: string; until: DeferUntil; raised: boolean }[];
+    /** Ids of asks this seat has already replied to (by `meta.in_reply_to`). Server-computed: the
+     *  inbox excludes our own sends, so the reply that answers an ask cannot be seen from here.
+     *  Absent from an older daemon ⇒ callers treat everything as open, the prior behaviour. */
+    answered?: string[];
   }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');

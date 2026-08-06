@@ -85,6 +85,17 @@ describe('pendingToNotify', () => {
     expect(pendingToNotify([help, done], 'nick', new Set())).toEqual([]);
   });
 
+  // …and an act I ANSWERED no longer waits either, which `resolve` alone could never express. My
+  // reply is my own send, so it is absent from my inbox by construction — the server has to tell me,
+  // and until it did, an answered ask kept pushing an OS notification at the human who answered it.
+  // The live ledger's ratio is the scale of it: 199 accepts, 9 resolves.
+  it('drops an act I already replied to, which no resolve ever marked (server `answered`)', () => {
+    const help = env({ act: 'request_help', from: 'lin', to: { kind: 'team' } });
+    // No resolve, no shared thread — only the server's word that this seat answered it.
+    expect(pendingToNotify([help], 'nick', new Set())).toHaveLength(1);
+    expect(pendingToNotify([help], 'nick', new Set(), null, [help.id])).toEqual([]);
+  });
+
   // ---- tiering by availability (SPEC A.6a; ADR 044) ----
 
   it('away holds the Loud (directed) set but an urgent ping breaks through', () => {
@@ -158,7 +169,7 @@ describe('pollOnce', () => {
     const seen = new Set<string>();
     const deps: NotifyDeps = {
       me: 'nick',
-      inbox: async () => [help],
+      inbox: async () => ({ messages: [help] }),
       isReachable: async () => false, // away
       availability: async () => null,
       notify: (n) => fired.push(n),
@@ -174,7 +185,7 @@ describe('pollOnce', () => {
     const seen = new Set<string>();
     const deps: NotifyDeps = {
       me: 'nick',
-      inbox: async () => [help],
+      inbox: async () => ({ messages: [help] }),
       isReachable: async () => true, // a live watch pane
       availability: async () => null,
       notify: (n) => fired.push(n),
@@ -266,7 +277,7 @@ describe('notify against a live daemon', () => {
     const seen = new Set<string>();
     const deps: NotifyDeps = {
       me: 'nick',
-      inbox: async () => (await poll.inbox('dawn', { unread: true })).messages,
+      inbox: () => poll.inbox('dawn', { unread: true }),
       isReachable: async () => {
         const roster = await poll.roster('dawn');
         const me = roster.members.find((m) => m.name === 'nick');
@@ -328,7 +339,7 @@ describe('notify against a live daemon', () => {
     const fired: NotifyItem[] = [];
     const deps: NotifyDeps = {
       me: 'nick',
-      inbox: async () => (await nick.inbox('dawn', { unread: true })).messages,
+      inbox: () => nick.inbox('dawn', { unread: true }),
       isReachable: async () => false, // away, nothing open
       availability: async () => {
         const roster = await nick.roster('dawn');

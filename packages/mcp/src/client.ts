@@ -352,9 +352,15 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/members${q}`);
   }
 
-  async fetchInbox(
-    unreadOnly = true,
-  ): Promise<{ messages: Envelope[]; cursor: { last_read_ts: number } }> {
+  async fetchInbox(unreadOnly = true): Promise<{
+    messages: Envelope[];
+    cursor: { last_read_ts: number };
+    /** Ids of asks this seat has already replied to (by `meta.in_reply_to`). Server-computed
+     *  because the inbox excludes our own sends, so the reply that answers an ask is invisible
+     *  here — see the note on `GET /inbox`. Absent from an older daemon; callers degrade to
+     *  treating everything as open, which is the pre-existing behaviour. */
+    answered?: string[];
+  }> {
     const q = unreadOnly ? '?unread=1' : '';
     return this.request('GET', `/teams/${this.config.team}/inbox${q}`);
   }
