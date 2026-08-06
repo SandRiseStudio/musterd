@@ -1,6 +1,5 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { normalizeCommand } from '@musterd/protocol';
 
 /**
  * ADR 239 — foreign paths in the working tree.
@@ -75,23 +74,106 @@ export function readSessionEdits(stateDir: string, sessionId: string): Set<strin
   }
 }
 
+/** Short options that consume the next token as their value, so it is never a pathspec. */
+const VALUE_SHORT = 'mFCcS';
+/** Long options that consume the next token as their value (the `--opt=value` form self-consumes). */
+const VALUE_LONG = new Set([
+  '--message',
+  '--file',
+  '--author',
+  '--date',
+  '--reuse-message',
+  '--reedit-message',
+  '--gpg-sign',
+  '--cleanup',
+  '--pathspec-from-file',
+]);
+
 /**
- * Does this command stage an *implicit* path set? Only those are worth a `git status` — `git add
- * src/one.ts` names what it stages, so there is nothing to be surprised by.
+ * Split a command into tokens with quoted runs collapsed to a single opaque token, so a commit
+ * message can never be mistaken for a pathspec. Deliberately not a shell parser: anything it cannot
+ * read confidently ends up as a bare token, which makes the caller decline to match — the safe
+ * direction, since a missed warning costs nothing and a wrong one is the defect being fixed.
+ */
+function tokenize(command: string): string[] {
+  const out: string[] = [];
+  const re = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\S+/g;
+  for (const m of command.match(re) ?? []) out.push(m);
+  return out;
+}
+
+/**
+ * Does this command stage an *implicit* path set **in this worktree**? Only those are worth a
+ * `git status`, because only for those does the status we can afford to run describe the same set
+ * of files the command will actually stage.
  *
- * Matched against `normalizeCommand` so an env prefix and git's pre-subcommand globals are lifted
- * off first (`git -C ../main add -A` → `git add -A`, the ADR 153 exercise finding).
+ * Corrected 2026-08-05 after gptbot's outcome review found two false-positive classes, both of them
+ * the same mistake: the first pass matched `normalizeCommand(command)`, and that normalizer exists
+ * to answer a *different question*. It lifts off git's pre-subcommand globals (ADR 153) so the
+ * enforcement matcher can classify `git -C ../main merge` as a merge — right for "what class of
+ * action is this", fatal for "which tree does this touch", because it erases the very token that
+ * answers it. ADR 225's shared-predicate trap, and the reason this matches the RAW command:
+ *
+ *  - **A pathspec narrows the command below the status.** `git add -A own/` stages only `own/`,
+ *    while `git status` reports the whole tree — so a foreign file outside `own/` got named as one
+ *    this command would stage, which is exactly what the warning promises it never does.
+ *  - **A tree-redirecting global points somewhere else entirely.** `git -C ../main add -A` stages a
+ *    sibling worktree while status runs here; the warning would describe a tree the command never
+ *    touches.
+ *  - **`git add .` is scoped to the shell's cwd**, which the hook cannot observe (the Bash tool's
+ *    cwd persists across calls; the hook always runs at the repo root). Unknown scope, so no match.
+ *
+ * An env prefix is still lifted, and only that: it changes the identity of the committer, never the
+ * tree that is committed to.
  */
 export function isStageShaped(command: string): boolean {
-  const c = normalizeCommand(command);
-  if (!/^git\s/.test(c)) return false;
-  // `git add` with -A/--all/-u/--update/. and no other pathspec.
-  if (/^git add\s+(-A|--all|-u|--update|\.)(\s|$)/.test(c)) return true;
-  // `git commit` with -a/--all (including the bundled `-am` form).
-  if (/^git commit\s/.test(c) && /(^|\s)(--all|-a|-a[a-zA-Z]*|-[a-zA-Z]*a)(\s|$)/.test(c)) {
-    return true;
+  // First line only + env-assignment prefix stripped — the two passes that cannot change the tree.
+  const flat = (command.split('\n', 1)[0] ?? '').trim();
+  const tokens = tokenize(flat);
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i]!)) i += 1;
+  if (tokens[i] !== 'git') return false; // `cd sub && git add -A` included: not ours to guess
+  i += 1;
+
+  // Any pre-subcommand global that redirects the tree disqualifies the command outright.
+  while (i < tokens.length && tokens[i]!.startsWith('-')) {
+    const t = tokens[i]!;
+    if (t === '-C' || t === '--git-dir' || t === '--work-tree') return false;
+    if (t.startsWith('--git-dir=') || t.startsWith('--work-tree=')) return false;
+    i += 1;
   }
-  return false;
+
+  const sub = tokens[i];
+  i += 1;
+  if (sub !== 'add' && sub !== 'commit') return false;
+
+  const pathless =
+    sub === 'add'
+      ? new Set(['-A', '--all', '-u', '--update'])
+      : new Set(['-a', '--all']);
+  let sawPathless = false;
+
+  for (; i < tokens.length; i += 1) {
+    const t = tokens[i]!;
+    if (t === '--') return false; // everything after `--` is a pathspec by definition
+    if (!t.startsWith('-')) return false; // a bare token is a pathspec — unknown scope, decline
+    if (pathless.has(t)) {
+      sawPathless = true;
+      continue;
+    }
+    if (t.startsWith('--')) {
+      const name = t.split('=', 1)[0]!;
+      if (VALUE_LONG.has(name) && !t.includes('=')) i += 1; // consumes its value
+      continue;
+    }
+    // A short cluster: `-am` is -a + -m, and a trailing value-taking short flag eats the next token.
+    const cluster = t.slice(1);
+    if (sub === 'commit' && cluster.includes('a')) sawPathless = true;
+    if (sub === 'add' && (cluster.includes('A') || cluster.includes('u'))) sawPathless = true;
+    const last = cluster.at(-1);
+    if (last && VALUE_SHORT.includes(last)) i += 1;
+  }
+  return sawPathless;
 }
 
 /**

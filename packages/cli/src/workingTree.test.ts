@@ -11,33 +11,78 @@ import {
   recordSessionEdit,
 } from './workingTree.js';
 
-/** ADR 239 decision 1 — only the commands that stage an *implicit* path set are worth a git status. */
+/**
+ * ADR 239 decision 1, as corrected — a command earns a `git status` only when the tree that status
+ * inspects IS the tree the command stages. Two classes were wrong on the first pass (gptbot's
+ * outcome review, 2026-08-05) and both are asserted here as the contract, not as a regression note.
+ */
 describe('isStageShaped', () => {
   it.each([
     'git add -A',
-    'git add .',
-    'git add -u',
     'git add --all',
+    'git add -u',
     'git add --update',
     'git commit -a -m wip',
     'git commit -am wip',
     'git commit --all -m wip',
-    'git -C ../main add -A', // ADR 153: the sibling-worktree form normalizes to the obvious one
-    'GIT_AUTHOR_NAME=x git add -A', // env-prefixed
+    'git commit -a -m "a longer message with spaces"',
+    'GIT_AUTHOR_NAME=x git add -A', // an env prefix changes identity, never the tree
   ])('matches %j', (cmd) => {
     expect(isStageShaped(cmd)).toBe(true);
   });
 
   it.each([
-    'git add src/one.ts', // an explicit path set is the author's own choice — nothing implicit to warn about
+    'git add src/one.ts', // an explicit path set is the author's own choice
     'git commit -m wip', // stages nothing
     'git status',
     'git checkout -b foo',
     'pnpm build',
     'echo git add -A is a string here',
+    'cd sub && git add -A', // not a git command at the head — the tree is not ours to guess
     '',
   ])('does not match %j', (cmd) => {
     expect(isStageShaped(cmd)).toBe(false);
+  });
+
+  /**
+   * DECLINE 1 (gptbot): `git add -A own/` stages only `own/`, but `git status` reports the whole
+   * tree — so a foreign file OUTSIDE `own/` was named as one this command would stage, which the
+   * ADR promises it never does. A pathspec narrows the command's scope below the status we can
+   * afford to run, so it is not stage-shaped.
+   */
+  it.each([
+    'git add -A own/',
+    'git add --all packages/cli',
+    'git add -u src',
+    'git commit -a -m wip -- packages/web',
+    'git commit -am wip somefile.ts',
+  ])('does not match %j — a pathspec narrows what is staged', (cmd) => {
+    expect(isStageShaped(cmd)).toBe(false);
+  });
+
+  /**
+   * DECLINE 2 (gptbot): `git -C ../main add -A` stages ANOTHER worktree, while `git status` runs in
+   * this one — the warning would describe a tree the command never touches. `normalizeCommand`
+   * deliberately lifts these globals off (ADR 153) because the enforcement matcher asks "what class
+   * of action is this"; this check asks "which tree does it touch", and the two questions cannot
+   * share a predicate (ADR 225's shared-predicate trap). So the RAW command is matched here.
+   */
+  it.each([
+    'git -C ../main add -A',
+    'git -C /Users/nick/agents-ryder commit -am wip',
+    'git --git-dir=../other/.git add -A',
+    'git --work-tree=/tmp/elsewhere add -A',
+  ])('does not match %j — it stages a different worktree', (cmd) => {
+    expect(isStageShaped(cmd)).toBe(false);
+  });
+
+  /**
+   * `git add .` is scoped to the shell's cwd, which the hook cannot observe — the Bash tool's cwd
+   * persists across calls while the hook always runs at the repo root, so the two can disagree.
+   * Dropped for the same reason as a pathspec: unknown scope, and a false positive is the cost.
+   */
+  it('does not match `git add .` — its scope depends on a cwd the gate cannot see', () => {
+    expect(isStageShaped('git add .')).toBe(false);
   });
 
   /** The "common case pays nothing" consequence needs a falsifier: a non-git call must never reach
