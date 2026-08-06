@@ -343,6 +343,18 @@ export const CATALOG: readonly CommandEntry[] = [
       'Print the directed acts waiting for this seat. Read-only — the approval-prompt hook target.',
   },
   {
+    name: 'reap',
+    signature: '[--yes]',
+    summary: 'reclaim orphaned MCP sidecar processes (list first; --yes applies)',
+    group: 'setup',
+    detail:
+      "Read the daemon's latest footprint tick (ADR 242) and list MCP sidecar processes whose " +
+      'sessions ended. With --yes, ask the daemon to reap them — every pid is re-verified against ' +
+      'the live process table at kill time (allowlist match + still orphaned), refused otherwise, ' +
+      'and the kill is audited as footprint.reaped.',
+    examples: ['musterd reap', 'musterd reap --yes'],
+  },
+  {
     name: 'notify',
     signature: '[--interval <seconds>] [--once]',
     summary: 'background OS notification when a directed act lands while away',

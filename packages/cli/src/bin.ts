@@ -25,6 +25,7 @@ import { memoryCommand } from './commands/memory.js';
 import { nextCommand } from './commands/next.js';
 import { notifyCommand } from './commands/notify.js';
 import { nudgeCommand } from './commands/nudge.js';
+import { reapCommand } from './commands/reap.js';
 import { reclaimCommand } from './commands/reclaim.js';
 import { reloadCommand } from './commands/reload.js';
 import { reportCommand } from './commands/report.js';
@@ -222,6 +223,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return inboxCommand(rest);
     case 'nudge':
       return nudgeCommand(rest);
+    case 'reap':
+      return reapCommand(rest);
     case 'whoami':
       return whoamiCommand(rest);
     case 'status':

@@ -326,6 +326,37 @@ export class HttpClient {
   clearMemory(slug: string): Promise<void> {
     return this.request('DELETE', `/teams/${slug}/memory`);
   }
+  /** ADR 242: the sampler's latest footprint tick, or null when the daemon has none (any non-200). */
+  async footprint(slug: string): Promise<{
+    ts: number;
+    stacks: {
+      classification: string;
+      seat: string | null;
+      procs: number;
+      rss_kb: number;
+      pids: string;
+    }[];
+    machine: {
+      swap_used_mb: number | null;
+      swap_total_mb: number | null;
+      free_mem_mb: number | null;
+    };
+  } | null> {
+    try {
+      return await this.request('GET', `/teams/${slug}/footprint`);
+    } catch {
+      // A fresh daemon (no tick yet), a pre-241 daemon (unknown route), and a non-darwin host all
+      // answer non-200 here — every one of them means the same thing to a caller: no data.
+      return null;
+    }
+  }
+  /** ADR 242: ask the daemon to reap orphaned sidecar pids (re-verified server-side at kill time). */
+  reapFootprint(
+    slug: string,
+    pids: number[],
+  ): Promise<{ killed: number[]; refused: { pid: number; reason: string }[] }> {
+    return this.request('POST', `/teams/${slug}/footprint/reap`, { pids });
+  }
   /** ADR 209's recipient-scoped, body-free wake orientation index. */
   async wakeContext(slug: string, request: WakeContextRequest): Promise<WakeContextPacket> {
     const target = WakeContextRequestSchema.safeParse(request);
