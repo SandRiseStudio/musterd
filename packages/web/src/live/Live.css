@@ -18,8 +18,16 @@
   --lc-surface-3: #e8d7b4;
   --lc-text: #2a2118; /* dark ink */
   --lc-dim: #4a3f30;
-  --lc-muted: #7a6a56;
-  --lc-faint: #9a8a72;
+  /* The quiet tiers are INK — 45 of muted's 52 uses and 22 of faint's 25 are `color`. They were
+     picked for feel (3.68:1 and 2.37:1) and quiet text is still text, so both were re-spaced to
+     clear 4.5. The ramp keeps four separable steps rather than collapsing the bottom two together:
+     11.1 / 7.2 / 5.7 / 4.6. */
+  --lc-muted: #5a4e3f; /* 5.71:1 on the darkest paper */
+  --lc-faint: #675c4b; /* 4.60:1 — the quietest tier that is still readable */
+  /* A cold seat's dot, which is what --lc-faint used to paint. It stays light on purpose: darkening
+     it along with the ink would have made the OFFLINE dot the strongest mark on the roster, which is
+     backwards. A dot is a fill; its job is to be a colour. */
+  --lc-dot-off: #9a8a72;
   --lc-border: rgba(60, 40, 20, 0.14);
   --lc-border-2: rgba(60, 40, 20, 0.26);
   --lc-accent: var(--mustard-700, #b8860b);
@@ -44,6 +52,36 @@
   --lc-challenge: #2f8fb3; /* cyan — challenge (ADR 103): the epistemic "justify this or reconsider" */
   --lc-agent: #1a9e88;
   --lc-human: #d9557d;
+
+  /* — the ink half of the semantic palette —
+   *
+   * THE LAW, third statement of it: a colour that is both SEEN and READ needs two values. Every
+   * token above is a FILL — a badge tint at 11–16%, a 44% border, a presence dot, a glow — and each
+   * was chosen to be recognisable as a hue at that weight on cream. None of them survives being set
+   * as `color` on the same paper: measured on /live, the badge labels ran 1.2:1 (`ask`) to 4.3:1,
+   * i.e. from invisible to merely failing. The fills are correct and are NOT touched here; the text
+   * moves to these siblings, so a badge keeps its exact colour identity and gains a readable label.
+   *
+   * Same split, same reason, as --lc-warn / --lc-warn-ink and --lc-ov-accent / --lc-ov-accent-ink.
+   * Reaching for a fill as a text colour is the mistake all three pairs exist to prevent.
+   *
+   * Derived by scaling each fill in LINEAR LIGHT — the same pigment under less light — so hue and
+   * saturation are preserved exactly and a green badge still reads green. Each clears 4.5:1 against
+   * its OWN badge tint over the darkest paper it can land on (--lc-surface-3), which is the worst
+   * case; on the stream's ground and on the reel's paper they run 4.9–5.9:1.
+   *
+   * One accent ink serves both --lc-accent and --lc-accent-bright: darkened to the same target the
+   * two mustards converge, and it clears 4.87:1 on the brighter of the two tints. */
+  --lc-accent-ink: #715104; /* 4.60:1 worst case */
+  --lc-success-ink: #1a6240; /* 4.60:1 */
+  --lc-agent-ink: #0c6354; /* 4.61:1 */
+  --lc-danger-ink: #93362a; /* 4.61:1 */
+  --lc-info-ink: #3e5874; /* 4.60:1 */
+  --lc-handoff-ink: #62429a; /* 4.61:1 */
+  --lc-lane-ink: #4b44a9; /* 4.60:1 */
+  --lc-steer-ink: #8e2b64; /* 4.60:1 */
+  --lc-challenge-ink: #1b5c75; /* 4.61:1 */
+  --lc-human-ink: #903651; /* 4.61:1 */
 
   /* — spacing (4-based) — */
   --lc-1: 2px;
@@ -152,7 +190,7 @@
 }
 .lc__sound--on,
 .lc__pbtn--on {
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
   border-color: color-mix(in srgb, var(--lc-accent) 40%, transparent);
   background: color-mix(in srgb, var(--lc-accent) 12%, transparent);
 }
@@ -269,7 +307,7 @@
   display: inline-block;
   width: 0.34em;
   text-align: center;
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
   animation: lc-clock-breathe 2s var(--lc-ease) infinite;
 }
 /* A breath, not a blink: the colons stay legible at the trough — a colon that vanishes reads as a
@@ -320,7 +358,7 @@
   opacity: 0.7;
 }
 .lc__status--live {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
 }
 .lc__status--live::before {
   background: var(--lc-success);
@@ -328,11 +366,21 @@
   animation: lc-ping 2.4s var(--lc-ease) infinite;
 }
 .lc__status--error {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
+}
+/* The dot is a fill and the label is ink, so the dot must be pinned rather than left on
+   `currentColor` — the base rule paints it from the text colour, which is now dark on purpose.
+   `--live` was already pinned for its own reasons; these two join it. */
+.lc__status--error::before {
+  background: var(--lc-danger);
 }
 .lc__status--connecting,
 .lc__status--reconnecting {
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
+}
+.lc__status--connecting::before,
+.lc__status--reconnecting::before {
+  background: var(--lc-accent-bright);
 }
 @keyframes lc-ping {
   0% {
@@ -922,7 +970,7 @@
   background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
 }
 .lc-workstack__row.is-blocked .lc-workstack__state {
-  color: color-mix(in srgb, var(--lc-danger) 85%, #3a2512);
+  color: color-mix(in srgb, var(--lc-danger-ink) 85%, #3a2512);
   background: color-mix(in srgb, var(--lc-danger) 14%, transparent);
 }
 .lc-workstack__said {
@@ -1347,10 +1395,10 @@
 /* Away sits between idle and offline: the same amber family (they're a person, not a cold seat) but
    drained, so a glance separates "here but between tasks" from "stepped out". */
 .lc-gl-label__dot--away {
-  background: color-mix(in srgb, var(--lc-warn, #f4cf52) 55%, var(--lc-faint));
+  background: color-mix(in srgb, var(--lc-warn, #f4cf52) 55%, var(--lc-dot-off));
 }
 .lc-gl-label__dot--off {
-  background: var(--lc-faint);
+  background: var(--lc-dot-off);
 }
 /* ─── ephemeral speech bubble (act body typed over the sender's head, then fades) ─────────────── */
 .lc-speech {
@@ -1959,10 +2007,10 @@
 .lc-roster__gap {
   margin: 0;
   padding: var(--lc-3) var(--lc-4);
-  border-top: 1px solid color-mix(in srgb, var(--lc-muted, #7a6a56) 16%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--lc-muted) 16%, transparent);
   font-size: 11.5px;
   line-height: 1.45;
-  color: var(--lc-muted, #7a6a56);
+  color: var(--lc-muted);
 }
 .lc-roster__gap.is-stale {
   font-style: italic;
@@ -2006,7 +2054,7 @@
   box-shadow: 0 0 7px color-mix(in srgb, var(--lc-success) 70%, transparent);
 }
 .lc-seat__dot--off {
-  background: var(--lc-faint);
+  background: var(--lc-dot-off);
 }
 /* Reclaimable (ADR 105): the seat reads offline, but it's held within its reclaim grace — reconnecting,
    not gone. A slow amber breathe distinguishes it from a cold seat without shouting. */
@@ -2045,14 +2093,14 @@
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
   letter-spacing: -0.01em;
-  color: var(--lc-muted, #7a6a56);
+  color: var(--lc-muted);
   padding: 0 6px;
   height: 17px;
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--lc-muted, #7a6a56) 28%, transparent);
-  background: color-mix(in srgb, var(--lc-muted, #7a6a56) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lc-muted) 28%, transparent);
+  background: color-mix(in srgb, var(--lc-muted) 8%, transparent);
 }
 .lc-seat__avatar {
   flex: 0 0 auto;
@@ -2098,10 +2146,10 @@
   white-space: nowrap;
 }
 .lc-seat__kind--agent {
-  color: var(--lc-agent);
+  color: var(--lc-agent-ink);
 }
 .lc-seat__kind--human {
-  color: var(--lc-human);
+  color: var(--lc-human-ink);
 }
 .lc-seat__role {
   font-family: var(--font-mono, monospace);
@@ -2141,15 +2189,15 @@
   border-color: var(--lc-border);
 }
 .lc-stat--ok {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
   background: color-mix(in srgb, var(--lc-success) 14%, transparent);
 }
 .lc-stat--pending {
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
   background: color-mix(in srgb, var(--lc-accent) 16%, transparent);
 }
 .lc-stat--danger {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   background: color-mix(in srgb, var(--lc-danger) 16%, transparent);
 }
 .lc-stat--muted {
@@ -2165,16 +2213,16 @@
   border-radius: 5px;
 }
 .lc-cap--admin {
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
   background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
   border: 1px solid color-mix(in srgb, var(--lc-accent) 40%, transparent);
 }
 .lc-cap--restrict {
-  color: var(--lc-info);
+  color: var(--lc-info-ink);
   background: color-mix(in srgb, var(--lc-info) 16%, transparent);
 }
 .lc-cap--muted {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   background: color-mix(in srgb, var(--lc-danger) 14%, transparent);
 }
 
@@ -2227,7 +2275,7 @@
 .lc-stream__live {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
   letter-spacing: 0.04em;
 }
 .lc-stream__rows {
@@ -2324,7 +2372,7 @@
   font-variant-numeric: tabular-nums;
 }
 .lc-row--now .lc-row__ts {
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
 }
 .lc-row__body {
   margin: var(--lc-2) 0 0;
@@ -2380,7 +2428,7 @@
   font-family: var(--font-mono, monospace);
   font-size: 0.9em;
   font-weight: 600;
-  color: var(--lc-lane);
+  color: var(--lc-lane-ink);
 }
 
 /* ─── work item: the subject of a lane/goal event ────────────────────────────
@@ -2465,49 +2513,49 @@
   white-space: nowrap;
 }
 .lc-badge--accent {
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
   border-color: color-mix(in srgb, var(--lc-accent) 44%, transparent);
   background: color-mix(in srgb, var(--lc-accent) 15%, transparent);
 }
 .lc-badge--success {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
   border-color: color-mix(in srgb, var(--lc-success) 44%, transparent);
   background: color-mix(in srgb, var(--lc-success) 13%, transparent);
 }
 .lc-badge--danger {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   border-color: color-mix(in srgb, var(--lc-danger) 44%, transparent);
   background: color-mix(in srgb, var(--lc-danger) 13%, transparent);
 }
 .lc-badge--info {
-  color: var(--lc-info);
+  color: var(--lc-info-ink);
   border-color: color-mix(in srgb, var(--lc-info) 40%, transparent);
   background: color-mix(in srgb, var(--lc-info) 13%, transparent);
 }
 .lc-badge--handoff {
-  color: var(--lc-handoff);
+  color: var(--lc-handoff-ink);
   border-color: color-mix(in srgb, var(--lc-handoff) 44%, transparent);
   background: color-mix(in srgb, var(--lc-handoff) 14%, transparent);
 }
 .lc-badge--lane {
-  color: var(--lc-lane);
+  color: var(--lc-lane-ink);
   border-color: color-mix(in srgb, var(--lc-lane) 44%, transparent);
   background: color-mix(in srgb, var(--lc-lane) 14%, transparent);
 }
 .lc-badge--status {
-  color: var(--lc-agent);
+  color: var(--lc-agent-ink);
   border-color: color-mix(in srgb, var(--lc-agent) 34%, transparent);
   background: color-mix(in srgb, var(--lc-agent) 11%, transparent);
 }
 /* Steering acts (ADR 103): steer reads loudest (interrupt-class), challenge a calmer question tone;
    defer reuses --lc-badge--lane (its work-moving family). */
 .lc-badge--steer {
-  color: var(--lc-steer);
+  color: var(--lc-steer-ink);
   border-color: color-mix(in srgb, var(--lc-steer) 48%, transparent);
   background: color-mix(in srgb, var(--lc-steer) 16%, transparent);
 }
 .lc-badge--challenge {
-  color: var(--lc-challenge);
+  color: var(--lc-challenge-ink);
   border-color: color-mix(in srgb, var(--lc-challenge) 42%, transparent);
   background: color-mix(in srgb, var(--lc-challenge) 13%, transparent);
 }
@@ -2559,7 +2607,7 @@
   font-weight: 550;
 }
 .lc-to--all {
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
   border-color: color-mix(in srgb, var(--lc-accent) 32%, transparent);
 }
 
@@ -2674,7 +2722,7 @@
   font-family: var(--font-mono, monospace);
   font-size: 10.5px;
   letter-spacing: 0.14em;
-  color: var(--lc-accent-bright);
+  color: var(--lc-accent-ink);
 }
 .lc-now__line {
   flex: 1;
@@ -2835,7 +2883,7 @@
 }
 .lc-form__error {
   margin: 0;
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   font-size: 12.5px;
 }
 .lc-form__connect {
@@ -3059,11 +3107,11 @@
   border-radius: 5px;
 }
 .lc-result--allow {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
   background: color-mix(in srgb, var(--lc-success) 14%, transparent);
 }
 .lc-result--deny {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   background: color-mix(in srgb, var(--lc-danger) 16%, transparent);
 }
 .lc-audit__more {
@@ -3482,7 +3530,7 @@
   white-space: nowrap;
 }
 .lc-card__chip--goal {
-  color: var(--lc-lane);
+  color: var(--lc-lane-ink);
   border-color: color-mix(in srgb, var(--lc-lane) 34%, transparent);
   background: color-mix(in srgb, var(--lc-lane) 10%, transparent);
 }
@@ -3494,7 +3542,7 @@
 }
 .lc-card__warn {
   font-size: 10.5px;
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
 }
 .lc-card__age {
   margin-left: auto;
@@ -3503,14 +3551,14 @@
   color: var(--lc-faint);
 }
 .lc-card__chip--branch {
-  color: var(--lc-info);
+  color: var(--lc-info-ink);
   border-color: color-mix(in srgb, var(--lc-info) 34%, transparent);
   background: color-mix(in srgb, var(--lc-info) 10%, transparent);
 }
 /* ADR 169: the derived close verdict on a Done card — a quiet pair, never a shout. Confirmed gets
  * the success tint (a counterpart agreed); unverified stays in muted ink (honest, not a scolding). */
 .lc-card__chip--verified {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
   border-color: color-mix(in srgb, var(--lc-success) 34%, transparent);
   background: color-mix(in srgb, var(--lc-success) 10%, transparent);
 }
@@ -3634,20 +3682,20 @@
 }
 .lc-card__act--claim:hover:not(:disabled),
 .lc-card__act--start:hover:not(:disabled) {
-  color: var(--lc-lane);
+  color: var(--lc-lane-ink);
   border-color: color-mix(in srgb, var(--lc-lane) 55%, transparent);
 }
 .lc-card__act--done:hover:not(:disabled) {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
   border-color: color-mix(in srgb, var(--lc-success) 55%, transparent);
 }
 .lc-card__act--block:hover:not(:disabled),
 .lc-card__act--unblock:hover:not(:disabled) {
-  color: var(--lc-info);
+  color: var(--lc-info-ink);
   border-color: color-mix(in srgb, var(--lc-info) 55%, transparent);
 }
 .lc-card__act--handoff:hover:not(:disabled) {
-  color: var(--lc-handoff);
+  color: var(--lc-handoff-ink);
   border-color: color-mix(in srgb, var(--lc-handoff) 55%, transparent);
 }
 /* the quiet path — bare text, red only when you mean it (the ac__deny idiom) */
@@ -3662,7 +3710,7 @@
   transition: color var(--lc-fast) var(--lc-ease);
 }
 .lc-card__abandon:hover:not(:disabled) {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
 }
 
 /* the hand-off seat picker — the actions row steps aside, teammates step in */
@@ -3774,7 +3822,7 @@
   color: var(--lc-dim);
 }
 .lc-board__note--err {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
 }
 
 /* ── Inc B: the insight rail + Goal swimlanes + the view toggle ── */
@@ -3846,7 +3894,7 @@
   gap: var(--lc-3);
 }
 .lc-insight__section--flag .lc-insight__label {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
 }
 .lc-insight__stats {
   display: grid;
@@ -3950,11 +3998,11 @@
   background: color-mix(in srgb, var(--lc-muted) 12%, transparent);
 }
 .lc-band__status--in-flight {
-  color: var(--lc-lane);
+  color: var(--lc-lane-ink);
   background: color-mix(in srgb, var(--lc-lane) 12%, transparent);
 }
 .lc-band__status--shipped {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
   background: color-mix(in srgb, var(--lc-success) 12%, transparent);
 }
 .lc-band__grid {
@@ -4040,7 +4088,7 @@
   transition: color var(--lc-fast) var(--lc-ease);
 }
 .lc__identity-out:hover {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
 }
 .lc-board__new {
   border: 0;
@@ -4176,7 +4224,7 @@
   transition: color var(--lc-fast) var(--lc-ease);
 }
 .lc-asks__lead:hover {
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
 }
 .lc-asks__lead--quiet {
   cursor: default;
@@ -4284,13 +4332,13 @@
   flex: none;
 }
 .lc-asks__more:hover {
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
   border-color: color-mix(in srgb, var(--lc-accent) 55%, transparent);
 }
 .lc-asks__restcount {
   font-family: var(--font-mono, monospace);
   font-size: 10px;
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
   font-weight: 650;
 }
 .lc-asks__chev {
@@ -4307,12 +4355,12 @@
   transform: rotate(180deg);
 }
 .lc-asks__link:hover {
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
 }
 .lc-asks__error {
   padding: 0 var(--lc-5) var(--lc-3);
   font-size: 11px;
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
 }
 /* The sheet floats: absolute, so expanding costs the canvas nothing it had. Kept mounted and
    transitioned (not keyframed) so a fast open→close retargets from where it is instead of
@@ -4473,12 +4521,12 @@
   color: var(--lc-dim);
 }
 .lc-ask__tier--blocking {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   border-color: color-mix(in srgb, var(--lc-danger) 45%, transparent);
   background: color-mix(in srgb, var(--lc-danger) 9%, transparent);
 }
 .lc-ask__tier--standard {
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
   border-color: color-mix(in srgb, var(--lc-accent) 45%, transparent);
 }
 .lc-ask__clock {
@@ -4489,7 +4537,7 @@
   white-space: nowrap;
 }
 .lc-ask__clock--over {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   font-weight: 650;
 }
 .lc-ask__body {
@@ -4508,7 +4556,7 @@
   overflow: hidden;
 }
 .lc-ask__body:hover {
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
 }
 .lc-ask__actions {
   display: flex;
@@ -4554,12 +4602,12 @@
    the page, and a colour you only discover by pointing at it is a colour that arrives too late.
    `--lc-success`/`--lc-danger` are the same inks the stream already uses for accept/decline acts. */
 .lc-ask__btn--accept {
-  color: var(--lc-success);
+  color: var(--lc-success-ink);
   border-color: color-mix(in srgb, var(--lc-success) 42%, transparent);
   background: color-mix(in srgb, var(--lc-success) 10%, var(--lc-surface-2));
 }
 .lc-ask__btn--decline {
-  color: var(--lc-danger);
+  color: var(--lc-danger-ink);
   border-color: color-mix(in srgb, var(--lc-danger) 42%, transparent);
   background: color-mix(in srgb, var(--lc-danger) 10%, var(--lc-surface-2));
 }
@@ -4574,7 +4622,7 @@
    the rail never reflows. Accent rather than success/danger on purpose: it is the way to an answer,
    not an answer, and the two irreversible colours stay reserved for the two irreversible acts. */
 .lc-asks__signin {
-  color: var(--lc-accent);
+  color: var(--lc-accent-ink);
   border-color: color-mix(in srgb, var(--lc-accent) 50%, transparent);
   background: color-mix(in srgb, var(--lc-accent) 12%, var(--lc-surface-2));
   font-weight: 600;
@@ -4639,7 +4687,7 @@
 .lc-ask__note {
   grid-column: 1 / -1;
   font-size: 11px;
-  color: var(--lc-info);
+  color: var(--lc-info-ink);
 }
 
 /* ─── the office overlay (shared by /live and /broadcast) ─────────────────
