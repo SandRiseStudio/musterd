@@ -7,7 +7,15 @@ export default defineConfig({
     // `content/` earns its own glob: roadmap.data.ts moved out of packages/web when the roadmap map
     // was dropped from the UI, and its ADR 177 invariant tests moved with it. Without this line they
     // would still pass locally and silently stop running in CI, which is the worst way to lose a gate.
-    include: ['packages/**/*.test.ts', 'tests/**/*.test.ts', 'content/**/*.test.ts'],
+    // `workers/` earns its line for the same reason as `content/` (ADR 248): the seeds relay deploys
+    // with wrangler and lives outside the pnpm workspace so it adds no monorepo dependencies, but its
+    // pure helpers are still shipped logic and their gate must run in CI, not just on the author's box.
+    include: [
+      'packages/**/*.test.ts',
+      'tests/**/*.test.ts',
+      'content/**/*.test.ts',
+      'workers/**/*.test.ts',
+    ],
     environment: 'node',
     pool: 'forks',
     // Vitest's 5s default assumes unit tests. Much of this suite is not: it boots real daemons over

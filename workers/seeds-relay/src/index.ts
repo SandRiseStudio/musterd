@@ -25,6 +25,8 @@
  * guard); all podcast enrichment dropped.
  */
 
+import { slackSecretHint, twilioTokenHint } from './hints.js';
+
 export interface Env {
   SEEDS_KV: KVNamespace;
   /** Secrets (wrangler secret put): */
@@ -78,11 +80,13 @@ export default {
     const url = new URL(request.url);
     try {
       if (request.method === 'POST' && url.pathname === '/ingest/twilio') {
-        if (env.ENABLE_TWILIO !== 'true') return new Response('Twilio channel disabled', { status: 403 });
+        if (env.ENABLE_TWILIO !== 'true')
+          return new Response('Twilio channel disabled', { status: 403 });
         return await handleTwilio(request, env);
       }
       if (request.method === 'POST' && url.pathname === '/ingest/slack') {
-        if (env.ENABLE_SLACK !== 'true') return new Response('Slack channel disabled', { status: 403 });
+        if (env.ENABLE_SLACK !== 'true')
+          return new Response('Slack channel disabled', { status: 403 });
         return await handleSlack(request, env, ctx);
       }
       if (request.method === 'GET' && url.pathname === '/seeds') {
@@ -125,7 +129,11 @@ async function handleTwilio(request: Request, env: Env): Promise<Response> {
   });
 }
 
-async function verifyTwilioSignature(request: Request, rawBody: string, token: string): Promise<void> {
+async function verifyTwilioSignature(
+  request: Request,
+  rawBody: string,
+  token: string,
+): Promise<void> {
   const signature = request.headers.get('x-twilio-signature');
   if (!signature) throw new HttpError('Missing Twilio signature.', 401);
 
@@ -141,12 +149,18 @@ async function verifyTwilioSignature(request: Request, rawBody: string, token: s
   const data = `${url.origin}${url.pathname}${paramsString}`;
 
   const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', encoder.encode(token), { name: 'HMAC', hash: 'SHA-1' }, false, [
-    'sign',
-  ]);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(token),
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign'],
+  );
   const digest = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
   if (!timingSafeEqual(arrayBufferToBase64(digest), signature)) {
-    throw new HttpError('Invalid Twilio signature.', 401);
+    // The hint is appended to an ALREADY-DECIDED rejection and never consulted before it — see the
+    // module comment in hints.ts. Verification above is untouched by anything below.
+    throw new HttpError(`Invalid Twilio signature.${twilioTokenHint(token)}`, 401);
   }
 }
 
@@ -211,7 +225,11 @@ async function handleSlack(request: Request, env: Env, ctx: ExecutionContext): P
       body: event.text!.trim(),
       ts: Date.now(),
       source: 'slack',
-      meta: compact({ user: event.user ?? null, channel: event.channel ?? null, event_ts: event.ts ?? null }),
+      meta: compact({
+        user: event.user ?? null,
+        channel: event.channel ?? null,
+        event_ts: event.ts ?? null,
+      }),
     });
     // Confirm in-channel, detached: a slow/dead webhook must not fail (or slow) the capture.
     if (env.SLACK_WEBHOOK_URL) {
@@ -238,12 +256,16 @@ async function verifySlackSignature(
 ): Promise<void> {
   const base = `v0:${timestamp}:${body}`;
   const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign',
-  ]);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
   const digest = await crypto.subtle.sign('HMAC', key, encoder.encode(base));
   if (!timingSafeEqual(`v0=${bufferToHex(digest)}`, signature)) {
-    throw new HttpError('Invalid Slack signature.', 401);
+    throw new HttpError(`Invalid Slack signature.${slackSecretHint(secret)}`, 401);
   }
 }
 
