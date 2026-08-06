@@ -77,11 +77,8 @@ Phase 1 cannot produce).
 
 ### 3. Increment 2 — the infra-touch guardrail, warn-only
 
-Infra verbs — `service install|restart|refresh`, `reset`, and `agent` (added post-ship, #689: it
-rewrites the machine-shared MCP entry) — get an ADR 150-style pre-execution check. Migrations are
-**not** gated, because no `migrate` CLI verb exists to gate; collision safety for migrations is
-ADR 245's strictly-upward ladder gate, and gating a migrate verb is deferred until one exists.
-The check: if the acting seat does not hold `platform`, print a warning that **names the
+Infra verbs — `service restart|refresh|install|reset`, migrations — get an ADR 150-style
+pre-execution check: if the acting seat does not hold `platform`, print a warning that **names the
 current holders from discovery** ("izzo holds platform — route an ask instead of touching this
 yourself"), emit an audit event (`infra.touch.warned`, with seat + verb), and **proceed**. Never
 blocks. This is the lanes doctrine applied to infrastructure: watcher, never gatekeeper, while the
@@ -93,12 +90,12 @@ shouldn't?) and flipped by an admin via team policy, never by a code change land
 
 ### 4. The v1 library — four live roles, the rest stay templates
 
-| role       | holder   | charter anchor                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `platform` | izzo     | Designated toucher of running infrastructure: daemon lifecycle, service verbs, shared checkouts, migrations; supervises the ADR 152 auto-refresher. (stanley is the named alternate; assignment is nick's call at review.)                                                                                                                                                                                                                                    |
-| `designer` | miley    | Owns the design surfaces (/live, office, CLI output contract, Figma frames); the standing owner rule — frontend is miley's, magical/warm/on-brand — as a charter instead of tribal memory.                                                                                                                                                                                                                                                                    |
-| `steward`  | (Action) | Re-anchor the ADR 112 charter (`scripts/steward/CHARTER.md`) as `roles/steward.toml`; the seat-residency migration stays with ADR 131.                                                                                                                                                                                                                                                                                                                        |
-| `observer` | (unheld) | Fold the `observer` role already live in MCP scope-by-role (ADR 144 inc 5) into the library, so the library describes reality rather than adding a parallel one. _(Amendment 2026-08-06: wanderer moved to the generalist default; the role stays in the library — a role without a holder is just a file — and ADR 144 inc 5's scope-by-role now has no live exerciser, so re-holding observer is where evidence for that scope narrowing would come from.)_ |
+| role       | holder   | charter anchor                                                                                                                                                                                                             |
+| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform` | izzo     | Designated toucher of running infrastructure: daemon lifecycle, service verbs, shared checkouts, migrations; supervises the ADR 152 auto-refresher. (stanley is the named alternate; assignment is nick's call at review.) |
+| `designer` | miley    | Owns the design surfaces (/live, office, CLI output contract, Figma frames); the standing owner rule — frontend is miley's, magical/warm/on-brand — as a charter instead of tribal memory.                                 |
+| `steward`  | (Action) | Re-anchor the ADR 112 charter (`scripts/steward/CHARTER.md`) as `roles/steward.toml`; the seat-residency migration stays with ADR 131.                                                                                     |
+| `observer` | wanderer | Fold the `observer` role already live in MCP scope-by-role (ADR 144 inc 5) into the library, so the library describes reality rather than adding a parallel one.                                                           |
 
 The rest of the seed-doc wishlist (product manager, facilitator/brainstorm, experimenter,
 researcher, support, database guru) stays as documented templates, unheld — the library is
@@ -132,6 +129,27 @@ their architecture.
 - The schema bump (`role` → `roles[]`) touches protocol, daemon, CLI, MCP render, and the seat
   files; it ships with increment 1 behind a back-compat read, so existing seat files stay valid.
 - `FEATURE_EPOCH` bumps with increment 1 (client-visible roster capability, per the ADR 148 ritual).
+
+_Amendment 2026-08-06 (close-out, #725/#726) — §3's verb list, as built._ The Decision names
+`service restart|refresh|install|reset` and migrations. What the gate actually covers is
+`service install|restart|refresh`, `reset`, and `agent` — the last added post-ship in #689, because
+`musterd agent` rewrites the machine-shared MCP entry. **Migrations are not gated**, because no
+`migrate` CLI verb exists to gate; collision safety for migrations is ADR 245's strictly-upward
+ladder gate, and gating a migrate verb is deferred until one exists. The decision stands as
+written — this records where the built surface diverged from the sketch.
+
+_Amendment 2026-08-06 — §4's `observer` holder is now `(unheld)`._ wanderer moved to the generalist
+default; the role stays in the library, since a role without a holder is just a file. The
+consequence worth recording: ADR 144 increment 5's MCP scope-by-role now has **no live exerciser**,
+so re-holding `observer` is where evidence for that scope narrowing would have to come from.
+
+_Amendment 2026-08-06 (process) — these two notes were originally written INTO `## Decision`, which
+is frozen._ #726 changed 19 lines inside it and passed CI because the immutability gate's status
+regex was blind to `- **Status:** accepted` (ADR 227 was one of three bold-key ADRs it skipped;
+94 of 223 accepted ADRs were unprotected). izzo's #739 closed that hole; this note is the
+remediation — the same paragraph move 07-conventions prescribes, and the same one PR #733 needs
+for ADR 131. `prettier --write` was also run on this file, which 07-conventions forbids for
+`docs/`; the reflow it introduced inside `## Decision` is reverted here along with the text.
 
 ## Observability & Evaluation
 
