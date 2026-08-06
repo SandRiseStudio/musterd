@@ -46,6 +46,8 @@ coverage/
 .cursor/rules/musterd.mdc
 .cursor/rules/musterd-label-session.mdc
 .cursor/commands/musterd-*.md
+# `musterd wire` writes this per-workspace; it is machine-local, not project config.
+.cursor/hooks.json
 
 # Qoder editor workspace state — local tooling, never committed
 .qoder/

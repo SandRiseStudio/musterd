@@ -135,7 +135,12 @@ export function isStageShaped(command: string): boolean {
   if (tokens[i] !== 'git') return false; // `cd sub && git add -A` included: not ours to guess
   i += 1;
 
-  // Any pre-subcommand global that redirects the tree disqualifies the command outright.
+  // Any pre-subcommand global that redirects the tree disqualifies the command outright. The
+  // *attached* forms (`--git-dir=x`) are the load-bearing half: git requires a separate token for
+  // `-C <path>` and `--git-dir <path>`, and that token then fails the subcommand check below. The
+  // separated forms are named here anyway, because a reader should not have to derive that
+  // second-order argument to know the redirect is handled — mutation testing shows those two
+  // literals are redundant, and they are kept deliberately as the statement of intent.
   while (i < tokens.length && tokens[i]!.startsWith('-')) {
     const t = tokens[i]!;
     if (t === '-C' || t === '--git-dir' || t === '--work-tree') return false;
@@ -148,15 +153,16 @@ export function isStageShaped(command: string): boolean {
   if (sub !== 'add' && sub !== 'commit') return false;
 
   const pathless =
-    sub === 'add'
-      ? new Set(['-A', '--all', '-u', '--update'])
-      : new Set(['-a', '--all']);
+    sub === 'add' ? new Set(['-A', '--all', '-u', '--update']) : new Set(['-a', '--all']);
   let sawPathless = false;
 
   for (; i < tokens.length; i += 1) {
     const t = tokens[i]!;
     if (t === '--') return false; // everything after `--` is a pathspec by definition
-    if (!t.startsWith('-')) return false; // a bare token is a pathspec — unknown scope, decline
+    // The one rule the whole check rests on: any token that is not a flag (and not a flag's
+    // consumed value) is a pathspec, and a pathspec means the command stages less than `git status`
+    // reports. `.` needs no special case — it lands here, which is why it is excluded.
+    if (!t.startsWith('-')) return false;
     if (pathless.has(t)) {
       sawPathless = true;
       continue;

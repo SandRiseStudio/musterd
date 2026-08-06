@@ -212,9 +212,20 @@ frequency — is already done (54 vs 1, above) and is what selected the warn pos
 - **Scope agreement is the invariant behind every warning** (the correction above): for any command
   the matcher accepts, the set `git status` reports must equal the set the command would stage. The
   falsifier is a matched command whose staged set is narrower — a pathspec, a `-C`/`--git-dir`/
-  `--work-tree` redirect, or a cwd-relative `.`. Each has its own test asserting **non**-match, and
-  each is verified by mutation, because a match here is silent: it produces a plausible warning about
-  the wrong files rather than an error anyone would notice.
+  `--work-tree` redirect, or a cwd-relative `.` — and each has a test asserting **non**-match. This
+  matters more than a normal regression because a failure here is _silent_: it produces a plausible
+  warning about the wrong files, not an error anyone would notice.
+
+  Mutation testing then said something the green suite could not, and it is recorded rather than
+  tidied away. Of the matcher's rules, four are load-bearing — a bare token means a pathspec, the
+  attached `--git-dir=`/`--work-tree=` forms, the env-prefix lift, and a value-taking flag consuming
+  its value — and each has a killed mutant. **Three are redundant**: the separated `-C`/`--git-dir`
+  forms, the `--` separator, and any special case for `.` all reduce to the bare-token rule or to
+  the subcommand check, and their mutants survive. So the honest statement of the invariant is that
+  it rests on _one_ rule, with the rest kept as intent. A future edit that weakens the bare-token
+  rule will not be caught by the checks that appear to guard the same property — which is exactly
+  the shape of the defect this correction exists to repair, and worth knowing before it recurs.
+
 - **The cost claim:** a non-`git` Bash call must not invoke `git status`. Asserted by a unit test on
   the command matcher, so the "common case pays nothing" consequence has a falsifier.
 - **The no-touch invariant (decision 5):** a test asserting the gate path issues no git command that
