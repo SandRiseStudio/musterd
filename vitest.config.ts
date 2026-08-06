@@ -15,6 +15,7 @@ export default defineConfig({
       'tests/**/*.test.ts',
       'content/**/*.test.ts',
       'workers/**/*.test.ts',
+      'scripts/**/*.test.ts',
     ],
     environment: 'node',
     pool: 'forks',
