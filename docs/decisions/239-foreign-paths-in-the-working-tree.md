@@ -84,15 +84,50 @@ the real repository index, so a future `git add -A` cannot quietly restore them.
 **The reason this is worth an amendment rather than a silent `.gitignore` line:** a gate whose own
 evidence is committable was under-specified, and the next stateful gate will have the same question.
 Local state needs an ignore rule in the same change that creates it.
+### Correction, 2026-08-05: the normalizer answered a different question
+
+The first implementation matched `normalizeCommand(command)`, and gptbot's outcome review declined
+it for two false-positive classes that turn out to be one mistake wearing two hats.
+
+`normalizeCommand` exists to serve the ADR 150 enforcement matcher, whose question is **"what class
+of action is this?"** — so it lifts off git's pre-subcommand globals on purpose (ADR 153's exercise
+finding: a class author writes `git merge*` and it should still catch `git -C ../main merge`). This
+check's question is **"which tree does this touch?"**, and the normalizer erases the exact token
+that answers it. `git -C ../main add -A` and `git add -A` normalize to the same string, so the gate
+ran `git status` here and described a tree the command never touched. Separately, the matcher's own
+comment claimed "no other pathspec" while its regex only anchored the flag, so `git add -A own/`
+matched and the whole tree was reported for a command scoped to one directory.
+
+This is ADR 225's shared-predicate trap, third sighting: one value with two consumers whose needs
+are opposite, where the consumer that arrives second inherits a predicate tuned for the first. The
+repair is not a better regex — it is matching the **raw** command, lifting only the env-assignment
+prefix (which changes the committer's identity, never the tree).
+
+Two things are worth recording about how it was caught. The bad behavior was **asserted as correct
+by its own test** (`'git -C ../main add -A'` sat in the match list citing ADR 153), so the suite was
+green on the defect; a test can only protect the property its author understood. And the gate's
+first live warning fired on its author's own `git add -A`, against files written through a python
+heredoc it cannot see — the documented coverage hole, arriving within the hour.
 
 ## Decision
 
 **1. Warn on foreign modified paths, at the moment they would be staged.** On a PreToolUse `Bash`
-call whose command is stage-shaped over an implicit path set (`git add -A`, `git add .`,
+call whose command is stage-shaped over an implicit path set **in this worktree** (`git add -A`,
 `git add -u`, `git commit -a`), the gate compares `git status --porcelain` against this session's
 recorded edit set and, when modified tracked paths exist that this session never wrote, emits a
 **warn** (`additionalContext`) naming them. Never a deny. The message names the paths and says what
 they are: files changed on disk that this session did not touch, which this command will stage.
+
+The qualifier is the whole of it: a command earns a `git status` **only when the tree that status
+inspects is the tree the command stages**. Three forms are therefore excluded, and the exclusions
+are not conservatism for its own sake — each one was a way the warning could name a file the command
+would leave alone, which is precisely what it promises never to do:
+
+- **A pathspec.** `git add -A own/` stages only `own/`; status reports the whole tree.
+- **A tree-redirecting global.** `git -C ../main add -A` stages a sibling worktree.
+- **`git add .`** — scoped to the shell's cwd, which the hook cannot observe (the Bash tool's
+  working directory persists across calls; the hook always runs at the repo root, so the two can
+  disagree). Unknown scope is treated as out of scope.
 
 **2. The session's edit set is local, per-session, and disposable.** Write-shaped calls append their
 repo-relative path to a per-session file under the workspace's musterd state, keyed by the envelope
@@ -174,6 +209,23 @@ frequency — is already done (54 vs 1, above) and is what selected the warn pos
 - **The no-knowledge rule has its own falsifier:** a session with no index must warn about nothing,
   even in a dirty tree. Asserted directly; without it the first `git add -A` of every fresh session
   is a false accusation, which is what the live exercise actually produced before the rule existed.
+- **Scope agreement is the invariant behind every warning** (the correction above): for any command
+  the matcher accepts, the set `git status` reports must equal the set the command would stage. The
+  falsifier is a matched command whose staged set is narrower — a pathspec, a `-C`/`--git-dir`/
+  `--work-tree` redirect, or a cwd-relative `.` — and each has a test asserting **non**-match. This
+  matters more than a normal regression because a failure here is _silent_: it produces a plausible
+  warning about the wrong files, not an error anyone would notice.
+
+  Mutation testing then said something the green suite could not, and it is recorded rather than
+  tidied away. Of the matcher's rules, four are load-bearing — a bare token means a pathspec, the
+  attached `--git-dir=`/`--work-tree=` forms, the env-prefix lift, and a value-taking flag consuming
+  its value — and each has a killed mutant. **Three are redundant**: the separated `-C`/`--git-dir`
+  forms, the `--` separator, and any special case for `.` all reduce to the bare-token rule or to
+  the subcommand check, and their mutants survive. So the honest statement of the invariant is that
+  it rests on _one_ rule, with the rest kept as intent. A future edit that weakens the bare-token
+  rule will not be caught by the checks that appear to guard the same property — which is exactly
+  the shape of the defect this correction exists to repair, and worth knowing before it recurs.
+
 - **The cost claim:** a non-`git` Bash call must not invoke `git status`. Asserted by a unit test on
   the command matcher, so the "common case pays nothing" consequence has a falsifier.
 - **The no-touch invariant (decision 5):** a test asserting the gate path issues no git command that
