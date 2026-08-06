@@ -2055,7 +2055,7 @@ export async function handleHttp(
           action: body.event === 'start' ? 'residency.session_captured' : 'residency.session_ended',
           target: target.name,
           result: 'allow',
-          // `session_digest` is the correlation handle, not the id (ADR 131 §5 amendment): it makes
+          // `session_digest` is the correlation handle, not the id (ADR 131 Consequences, follow-up note 2026-08-05): it makes
           // a lifecycle event able to name its own subject, so `captured` then `ended` seconds later
           // can be read as one session flapping or two short ones — a distinction that decides the
           // fix. Absent from an older CLI, in which case the row degrades to seat + class as before.

@@ -164,7 +164,7 @@ export const SessionAttestationBodySchema = z.object({
   seat: z.string(),
   harness: z.string().min(1).max(40),
   event: z.enum(['start', 'end']),
-  /** Keyed, truncated HMAC of the session id (ADR 131 §5 amendment 2026-08-05) — equal across one
+  /** Keyed, truncated HMAC of the session id (ADR 131 Consequences, follow-up note 2026-08-05) — equal across one
    *  session's start and end, different across two sessions, and irreversible without the
    *  workspace's agent key, which the daemon holds only as a hash. It exists so a lifecycle event
    *  can name its own subject: without it, `captured` then `ended` nine seconds later cannot be told
