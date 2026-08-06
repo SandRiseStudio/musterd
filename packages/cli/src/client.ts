@@ -266,7 +266,17 @@ export class HttpClient {
       {},
     );
   }
-  roster(slug: string): Promise<{ members: MemberSummary[] }> {
+  roster(slug: string): Promise<{
+    members: MemberSummary[];
+    /** The team's role library (ADR 227): absent from an older daemon — consumers degrade to
+     *  members-only. Charter + capabilities ride along since the close-out (additive). */
+    roles?: Array<{
+      name: string;
+      summary: string | null;
+      charter?: string | null;
+      capabilities?: unknown;
+    }>;
+  }> {
     return this.request('GET', `/teams/${slug}/members`);
   }
   /** On an `ask`, the daemon's ack additionally carries the derived tier contract with the reachability
