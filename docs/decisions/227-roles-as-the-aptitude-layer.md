@@ -4,7 +4,10 @@
   role-file `summary`, `mergeRoleDefaults`, the `team_members` role filter, `musterd role assign`,
   migration v31, epoch 7) shipped 2026-08-04; increment 2 (the warn-only guardrail:
   `GET /teams/:slug/infra-gate` + the `infra.touch.warned` audit row, wired into
-  `service install|restart|refresh` and `reset`) shipped 2026-08-04
+  `service install|restart|refresh` and `reset`) shipped 2026-08-04; amended 2026-08-06
+  (close-out, #725: measurable eval signal `roster.role_query`, roster-first `musterd role`,
+  verb-list correction, first warn→deliberate-proceed measurement recorded below —
+  docs/superpowers/specs/2026-08-06-adr-227-closeout-design.md)
 - **Date:** 2026-08-04
 - **Owner:** izzo (design session with nick, 2026-08-04)
 - **Supersedes / relates to:** ADR 069/070 (the capability substrate this extends), ADR 112 (steward — the first worked role), ADR 145 (admins are human-only), ADR 150 (structural inducement — the gate pattern increment 2 reuses), ADR 191/219/131 (the liveness trio discovery composes with), ADR 026–030 (provisioning templates — the per-harness rendering half), landscape.md §9 (the AgentField survey that widened the scope)
@@ -74,8 +77,11 @@ Phase 1 cannot produce).
 
 ### 3. Increment 2 — the infra-touch guardrail, warn-only
 
-Infra verbs — `service restart|refresh|install|reset`, migrations — get an ADR 150-style
-pre-execution check: if the acting seat does not hold `platform`, print a warning that **names the
+Infra verbs — `service install|restart|refresh`, `reset`, and `agent` (added post-ship, #689: it
+rewrites the machine-shared MCP entry) — get an ADR 150-style pre-execution check. Migrations are
+**not** gated, because no `migrate` CLI verb exists to gate; collision safety for migrations is
+ADR 245's strictly-upward ladder gate, and gating a migrate verb is deferred until one exists.
+The check: if the acting seat does not hold `platform`, print a warning that **names the
 current holders from discovery** ("izzo holds platform — route an ask instead of touching this
 yourself"), emit an audit event (`infra.touch.warned`, with seat + verb), and **proceed**. Never
 blocks. This is the lanes doctrine applied to infrastructure: watcher, never gatekeeper, while the
@@ -87,12 +93,12 @@ shouldn't?) and flipped by an admin via team policy, never by a code change land
 
 ### 4. The v1 library — four live roles, the rest stay templates
 
-| role       | holder   | charter anchor                                                                                                                                                                                                             |
-| ---------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `platform` | izzo     | Designated toucher of running infrastructure: daemon lifecycle, service verbs, shared checkouts, migrations; supervises the ADR 152 auto-refresher. (stanley is the named alternate; assignment is nick's call at review.) |
-| `designer` | miley    | Owns the design surfaces (/live, office, CLI output contract, Figma frames); the standing owner rule — frontend is miley's, magical/warm/on-brand — as a charter instead of tribal memory.                                 |
-| `steward`  | (Action) | Re-anchor the ADR 112 charter (`scripts/steward/CHARTER.md`) as `roles/steward.toml`; the seat-residency migration stays with ADR 131.                                                                                     |
-| `observer` | wanderer | Fold the `observer` role already live in MCP scope-by-role (ADR 144 inc 5) into the library, so the library describes reality rather than adding a parallel one.                                                           |
+| role       | holder   | charter anchor                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform` | izzo     | Designated toucher of running infrastructure: daemon lifecycle, service verbs, shared checkouts, migrations; supervises the ADR 152 auto-refresher. (stanley is the named alternate; assignment is nick's call at review.)                                                                                                                                                                                                                                    |
+| `designer` | miley    | Owns the design surfaces (/live, office, CLI output contract, Figma frames); the standing owner rule — frontend is miley's, magical/warm/on-brand — as a charter instead of tribal memory.                                                                                                                                                                                                                                                                    |
+| `steward`  | (Action) | Re-anchor the ADR 112 charter (`scripts/steward/CHARTER.md`) as `roles/steward.toml`; the seat-residency migration stays with ADR 131.                                                                                                                                                                                                                                                                                                                        |
+| `observer` | (unheld) | Fold the `observer` role already live in MCP scope-by-role (ADR 144 inc 5) into the library, so the library describes reality rather than adding a parallel one. _(Amendment 2026-08-06: wanderer moved to the generalist default; the role stays in the library — a role without a holder is just a file — and ADR 144 inc 5's scope-by-role now has no live exerciser, so re-holding observer is where evidence for that scope narrowing would come from.)_ |
 
 The rest of the seed-doc wishlist (product manager, facilitator/brainstorm, experimenter,
 researcher, support, database guru) stays as documented templates, unheld — the library is
@@ -129,27 +135,60 @@ their architecture.
 
 ## Observability & Evaluation
 
-**Traces.** Two new signals, both on existing rails. (1) Discovery: the ADR 144 tool telemetry
-already counts `team_members` calls; the role filter becomes a countable parameter on that
-existing row. (2) The guardrail: each tripped check emits an `infra.touch.warned` audit event
-(seat, verb, holders named at the time) into the ADR 071 audit log. Roster truth is self-checking:
-`roles[]` values are validated against `roles/*.toml` at load, and an unknown role name is a
-warn-level roster event, so the library and the seat files cannot drift silently.
+**Traces.** Two signals, both on the ADR 071 audit rail. (1) Discovery: each authenticated
+role-filtered roster read writes a `roster.role_query` audit row (actor seat,
+`detail: {role, holders}`). _Amendment 2026-08-06: this replaces the original "countable parameter
+on the tool-stats row" wording — that described a `tool_call_stats` column that never existed, and
+a filter the daemon never saw (it ran client-side in the MCP tool). The close-out (#725) moved the
+filter server-side (`GET /members?role=`) precisely so this row could exist. Anonymous reads
+filter but are not audited — the eval joins actor→send, and an anonymous read has no seat to
+join._ (2) The guardrail: each tripped check emits an `infra.touch.warned` audit event (seat,
+verb, holders named at the time). Roster truth is self-checking: `roles[]` values are validated
+against `roles/*.toml` at load, and an unknown role name is a warn-level roster event, so the
+library and the seat files cannot drift silently.
 
-**Eval** — dataset: the tool-telemetry log plus the audit log over the first two weeks after each
-increment lands. Baseline: today both signals are structurally zero — `team_members` has no role
-filter to call and no infra verb emits anything.
+**Eval** — dataset: the audit log over the first two weeks after each increment lands.
 
-- **Increment 1 pass:** role-filtered `team_members` queries appear in real (non-test) sessions
-  within two weeks. Zero means the surface or the primer failed — the design is wrong, not the
-  team.
+- **Increment 1 pass:** `roster.role_query` rows from real (non-test) seats appear within two
+  weeks of the close-out landing. Zero means the surface or the primer failed — the design is
+  wrong, not the team.
 - **Increment 2 pass:** every `infra.touch.warned` event joins (by seat + time) to a following ask
   directed at a `platform` holder, or to a deliberate proceed by a seat doing platform work. A high
   warn count with zero redirects means the warning text or the routing affordance failed — fix
   that, don't block harder. The warn→redirect rate is the evidence the hardening ramp waits for.
-- **Reopening trigger, measured:** the deferred role-addressed send reopens on the observed
-  two-call pattern — role-filtered `team_members` immediately followed by a directed send — showing
-  up repeatedly in telemetry; that is exactly the pair the deferred feature would collapse to one.
+- **Reopening trigger, measured:** the deferred role-addressed send reopens when this join fires
+  repeatedly — role-filtered discovery followed within 120s by a directed send from the same seat,
+  exactly the pair the deferred feature would collapse to one:
+
+  ```sql
+  -- role-filtered discovery followed within 120s by a directed send from the same seat
+  SELECT a.ts, a.actor, json_extract(a.detail,'$.role') AS role, m.act, tm.name AS sent_to
+    FROM audit a
+    JOIN members fm ON fm.name = a.actor
+    JOIN messages m ON m.from_member = fm.id
+     AND m.ts BETWEEN a.ts AND a.ts + 120*1000
+     AND m.to_member IS NOT NULL
+    LEFT JOIN members tm ON tm.id = m.to_member
+   WHERE a.action = 'roster.role_query'
+   ORDER BY a.ts;
+  ```
+
+**First increment-2 measurement (run 2026-08-06 against the live team DB — every
+`infra.touch.warned` row then existing, n=3).** Join window: directed sends from the warned seat
+within 30 minutes; classification from the send bodies and the seat's own status updates.
+
+| warned at (UTC)  | seat    | verb      | classification                                                                                            |
+| ---------------- | ------- | --------- | --------------------------------------------------------------------------------------------------------- |
+| 2026-08-05 19:31 | stanley | `agent`   | deliberate proceed — verifying #689, the change that added `agent` to this very gate                      |
+| 2026-08-05 22:48 | ryder   | `refresh` | deliberate proceed — "nick asked me to force it rather than wait for autorefresh" (ryder's status_update) |
+| 2026-08-05 22:49 | ryder   | `refresh` | deliberate proceed — second bounce of the same human-directed refresh                                     |
+
+Warn→redirect rate: **0/3 redirects, 3/3 deliberate proceeds** — the inc-2 pass criterion holds
+(every warn joins to a sanctioned proceed), and no warn has yet fired on work that _needed_
+redirecting. That is zero evidence for hardening: the ramp stays at warn until a warn is observed
+redirecting real unsanctioned work (or failing to). n=3, and one of the three is self-referential
+(a warn emitted while testing the gate) — the next measurement should re-run this join before
+reading anything into rates.
 
 **Experiment.** None pre-registered for increment 1 (a roster query needs no A/B). The hardening
 ramp is the standing experiment for increment 2: each step (warn → `--force` → refuse) is a
