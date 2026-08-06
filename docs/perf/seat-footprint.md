@@ -83,3 +83,34 @@ per-session spawns are plugin-provided MCPs (chrome-devtools, playwright,
 pdf-server — note each resumed session still carries a pdf-server at ~30 MB
 resident now that pages are unswapped); a plugin-scoping pass is the next diet
 increment if needed.
+
+## 2026-08-06 five-seat stagger test (post-diet, post-ADR 242)
+
+Protocol: t0 with 4 working seats, 5th launched staggered, probe every 5 min
+for 30 min. Daemon sampler (60 s ticks) running throughout.
+
+| t | swap | free mem | sidecars |
+| --- | --- | --- | --- |
+| 00:43 (t0, 4 seats) | 7069/8192 MB | 49 MB | 61 in 8 stacks |
+| 00:48 | 6082/7168 MB | 57 MB | 70 in 9 |
+| 00:53 | 6246/7168 MB | 61 MB | 70 in 9 |
+| 00:58 | 7707/8192 MB | 61 MB | 79 in 10 |
+| 01:03 (peak) | 8162/9216 MB | 51 MB | 79 in 10 |
+| 01:08 | 6890/8192 MB | 50 MB | 70 in 9 |
+| 01:13 | 7305/8192 MB | 70 MB | 70 in 9 |
+
+### Verdict — 5 concurrent seats: survivable, not comfortable
+
+Swap **oscillates** in the 6–8 GB band and the swapfile pool grew to 9.2 GB at
+peak then contracted back — the pager keeping up, in sharp contrast to the
+pre-diet baseline's monotonic climb to 10.3/11.3 GB (near-standstill). Sidecars
+held at 70–79 procs across 5 seats vs 212 pre-diet. Free memory pinned at
+50–70 MB throughout (macOS under sustained pressure — expected).
+
+Honest reading: the diet moved the machine from "5 seats ≈ standstill" to
+"5 seats works with elevated swap churn". 8 GB of RAM remains the binding
+constraint; the marginal desktop-app seat costs ~9 sidecar procs plus its
+renderer, and the swap band says a 6th concurrent seat would likely tip it.
+This curve is the baseline for any future admission-control threshold
+(ADR 242 future work): the honest ceiling of this machine is **5 working
+seats, with 4 as the comfortable operating point**.
