@@ -66,6 +66,16 @@ export const PolicySchema = z.object({
    * `team export` never serializes policy, and the CLI display masks it to its host.
    */
   ask_slack_webhook: z.string().url().optional(),
+  /**
+   * Seeds ingest (ADR 248) — where the daemon pulls buffered raw ideas from, and the bearer token it
+   * presents. Both set = the ingest loop polls `GET <url>/seeds?after=<cursor>` and opens one lane
+   * per seed (open state, unowned, stakes normal — light cleanup only, never interpretation). Either
+   * unset (the default) = no outbound call ever, the same posture as `ask_slack_webhook`. The token
+   * is a secret with the same handling: policy reads are admin-only, `team export` never serializes
+   * policy, and the CLI masks it on display.
+   */
+  seeds_relay_url: z.string().url().optional(),
+  seeds_relay_token: z.string().optional(),
   /** Team-wide wake-policy defaults (ADR 131 increment 5) — per-seat enrollment overrides layer on
    *  top (`ResidencyPolicyOverrideSchema` in `residency.policy`). `parse({})` yields launch defaults. */
   residency: ResidencyPolicySchema.default({}),

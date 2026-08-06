@@ -722,6 +722,23 @@ export const MIGRATIONS: Migration[] = [
         db.exec('ALTER TABLE lanes ADD COLUMN stakes_provenance TEXT');
     },
   },
+  {
+    // ADR 248: the seeds ingest cursor — the daemon's own record of the last relay seed it turned
+    // into a lane. A dedicated table on purpose: the `seed.ingested` audit row exists for
+    // observability, and reading it back as ingest state would put one row under two consumers with
+    // different needs (ADR 247). Advanced per seed, inside the same transaction as the lane insert,
+    // so a crash mid-batch resumes without duplicating lanes.
+    version: 37,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS seeds_ingest_cursor (
+          team_id TEXT PRIMARY KEY,
+          last_seed_id TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

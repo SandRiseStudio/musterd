@@ -73,6 +73,8 @@ src/
     scan.ts           // darwin scanners: ps → ProcSample[], sysctl vm.swapusage + vm_stat → MachineSample; throw-on-failure (callers own skip policy), non-darwin throws
     sampler.ts        // setInterval tick (60s default): scan → classify → insertFootprintTick + retention prune; any throw = one skipped tick, never a crashed daemon
     reap.ts           // reapOrphans: the daemon's only kill path — per-pid re-verification at kill time (allowlist + still orphaned), SIGTERM→grace→SIGKILL, footprint.reaped audit row
+  seeds/
+    ingest.ts         // setInterval poll (60s): pull raw seeds from the policy-named relay, deterministic title/detail cleanup, one unowned open lane per seed + seed.ingested audit; cursor advanced transactionally with the lane insert (ADR 248)
   projection/
     load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
     reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files

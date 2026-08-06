@@ -35,10 +35,10 @@ Then:
 
 ## Endpoints
 
-| Route            | Auth                          | Behaviour                                            |
-| ---------------- | ----------------------------- | ---------------------------------------------------- |
-| `POST /ingest/twilio` | Twilio HMAC-SHA1 signature | buffer `Body` as a seed, empty TwiML ack             |
-| `POST /ingest/slack`  | Slack v0 signing + 5m window | handshake, buffer fresh human channel messages       |
+| Route                 | Auth                               | Behaviour                                      |
+| --------------------- | ---------------------------------- | ---------------------------------------------- |
+| `POST /ingest/twilio` | Twilio HMAC-SHA1 signature         | buffer `Body` as a seed, empty TwiML ack       |
+| `POST /ingest/slack`  | Slack v0 signing + 5m window       | handshake, buffer fresh human channel messages |
 | `GET /seeds?after=id` | `Authorization: Bearer PULL_TOKEN` | seeds with id > `after`, oldest first, ≤100    |
 
 Seeds are never deleted or mutated by pull; the daemon keeps its own cursor.

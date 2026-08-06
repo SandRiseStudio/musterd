@@ -72,6 +72,7 @@ async function bufferSeed(env: Env, seed: Omit<Seed, 'id'>): Promise<Seed> {
   return full;
 }
 
+// eslint-disable-next-line import/no-default-export -- the Workers runtime requires a default export
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);

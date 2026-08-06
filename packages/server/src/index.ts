@@ -16,6 +16,7 @@ import { log } from './log.js';
 import { startReaper } from './presence/reaper.js';
 import { reconcileAll } from './projection/reconcile.js';
 import { startRosterWatcher } from './projection/watcher.js';
+import { startSeedsIngest } from './seeds/ingest.js';
 import { countDiversityFlagsByTeam } from './store/mast.js';
 import { countOpenLoopsByTeam } from './store/messages.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
@@ -112,6 +113,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   // the daemon on 2026-07-27 — see the close() comment below.
   const wss = attachWsServer(ctx, http);
   let stopReaper: (() => void) | null = null;
+  let stopSeeds: (() => void) | null = null;
   let stopFootprint: (() => void) | null = null;
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
@@ -165,6 +167,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           const addr = http.address();
           boundPort = typeof addr === 'object' && addr ? addr.port : config.port;
           stopReaper = startReaper(ctx);
+          stopSeeds = startSeedsIngest(ctx);
           stopFootprint = startFootprintSampler(ctx);
           startWatching();
           log.info({
@@ -207,6 +210,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
       if (closing) return closing;
       closing = new Promise((resolve) => {
         stopReaper?.();
+        stopSeeds?.();
         stopFootprint?.();
         stopWatcher?.();
         void stopTelemetry?.();
