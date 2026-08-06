@@ -53,18 +53,20 @@ export function deleteRoles(db: Database, teamId: string, names: string[]): void
   for (const name of names) stmt.run(teamId, name);
 }
 
-/** The team's role library for the roster read (ADR 227 discovery): name + one-line summary,
- *  name-ordered so the response is stable. */
+/** The team's role library for the roster read (ADR 227 discovery): name-ordered so the response
+ *  is stable. Charter + capability defaults ride along (close-out, additive) so `role show` can
+ *  render a team role without a second route — they were always in the row. */
 export function listRoles(
   db: Database,
   teamId: string,
-): Array<{ name: string; summary: string | null }> {
+): Array<{ name: string; summary: string | null; charter: string | null; capabilities: unknown }> {
   return db
     .prepare<
       [string],
-      { name: string; summary: string | null }
-    >('SELECT name, summary FROM roles WHERE team_id = ? ORDER BY name')
-    .all(teamId);
+      { name: string; summary: string | null; charter: string | null; capabilities: string | null }
+    >('SELECT name, summary, charter, capabilities FROM roles WHERE team_id = ? ORDER BY name')
+    .all(teamId)
+    .map((r) => ({ ...r, capabilities: r.capabilities ? JSON.parse(r.capabilities) : {} }));
 }
 
 /** A team's role summaries as a name→summary map (ADR 227 discovery — the roster's one-line face
