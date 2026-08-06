@@ -636,6 +636,49 @@ describe('MCP adapter', () => {
       expect(notReadyMessage(client, 'send')).toContain('the last join attempt failed');
       client.close();
     });
+
+    // The two re-arm tests above stub `releasedByLiveness` and inject `join` as `onFirstToolCall`, so
+    // they prove the WRAPPER honours the flag and prove nothing about what the real `onFirstToolCall`
+    // — `autojoin()` — does when it fires. This one goes end to end through a real server, a real
+    // client and a real ladder demotion, because that is where the promise broke in the field: on
+    // 2026-08-05 two consecutive `team_send` calls after a demotion stayed dormant, byte-identical
+    // refusals, and only an explicit `team_join` recovered (izzo, then dolly on a different seat).
+    //
+    // The mechanism: `config.member` is set ONLY by the `occupied` frame, so `isClaimedConfig` is
+    // false at every boot and true only after a successful occupy. That makes the `isClaimedConfig`
+    // branch of `autojoin()` unreachable at boot and reachable ONLY on the re-arm — and there it
+    // consults `config.autojoin`, a BOOT policy that defaults to false. So the very success of the
+    // first join is what disarms the recovery, for every seat whose binding has no `autojoin` key.
+    // Silently: the branch returns without throwing, so nothing is caught, nothing is recorded, and
+    // the dormant guard keeps repeating the ladder's "the next one re-joins" forever.
+    it('RE-OCCUPIES the seat after a real ladder demotion — through autojoin(), not a stub', async () => {
+      const cfg = adaConfig(); // no `autojoin` key: the default, and izzo's + dolly's exact shape
+      const client = new MusterdClient(cfg);
+      const mcp = buildMcpServer(client, cfg, { onFirstToolCall: () => autojoin(client, cfg) });
+
+      // 1. First tool call → boot autojoin → claim + occupy. This is the step that sets config.member.
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      await delay(150);
+      expect(client.joined).toBe(true);
+      expect(cfg.member).toBe('Ada');
+
+      // 2. The ADR 164 ladder demotes on inference. Only the verdict SOURCE is faked — the release
+      //    itself runs for real: leave(), the flag, the agent-facing message.
+      (client as unknown as { session: { check: () => unknown } }).session = {
+        check: () => ({ verdict: 'dormant', rung: 'ended' }),
+      };
+      (client as unknown as { lastActivityAt: number }).lastActivityAt = Date.now() - 60_000;
+      expect((client as unknown as { attestSession: () => boolean }).attestSession()).toBe(true);
+      expect(client.joined).toBe(false);
+      expect(client.releasedByLiveness).toBe(true);
+
+      // 3. A tool call is first-hand evidence the session is alive, and ADR 164's own message
+      //    promises it is enough: "a tool call is evidence otherwise, so the next one re-joins".
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      await delay(150);
+      expect(client.joined).toBe(true);
+      client.close();
+    });
   });
 
   it('serves the primer as MCP instructions — file-free onboarding (ADR 012 follow-up)', () => {

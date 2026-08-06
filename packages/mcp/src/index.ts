@@ -274,7 +274,19 @@ export function buildMcpServer(
 export async function autojoin(client: MusterdClient, config: McpConfig): Promise<void> {
   try {
     if (isClaimedConfig(config)) {
-      if (config.autojoin) await client.join();
+      // `config.member` is set ONLY by the `occupied` frame (client.ts), never by `loadMcpConfig` —
+      // so this branch is unreachable at boot and reachable only on the arming layer's RE-ARM, after
+      // the ADR 164 ladder released a seat this process had already occupied. Gating that recovery on
+      // `config.autojoin` was the defect: autojoin is a BOOT policy (default false), and asking it
+      // whether to come back from an inference-driven demotion made the FIRST SUCCESSFUL JOIN the
+      // thing that disarmed the recovery — for every seat whose binding has no `autojoin` key, which
+      // is every seat by default. Silently, too: returning without throwing gave the caller nothing
+      // to catch, so the dormant guard went on repeating the ladder's "the next one re-joins" while
+      // no tool call ever did. Measured live 2026-08-05 on two seats, izzo and dolly.
+      //
+      // A deliberate `team_leave` is excluded by construction — `leave()` clears the flag and only
+      // `attestSession` re-sets it, so leaving still means left.
+      if (config.autojoin || client.releasedByLiveness) await client.join();
       return;
     }
     const target: ClaimTarget | null =
