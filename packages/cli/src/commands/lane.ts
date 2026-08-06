@@ -24,7 +24,7 @@ const USAGE =
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>] [--note <why>]\n' +
   '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high]\n' +
-  '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
+  '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>] [--branch b]\n' +
   '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
@@ -162,6 +162,12 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         : {
             state: submit ? 'awaiting_acceptance' : 'done',
             ...(Object.keys(merged).length ? { merged } : {}),
+            // The acceptor needs to know where the work IS (ADR 083). Submit was the one lane edge
+            // that could not say so, while `branch` is valid on open/handoff/update — so seats
+            // reached for it here and were bounced.
+            ...(flagStr(parsed.flags, 'branch') !== undefined
+              ? { branch: flagStr(parsed.flags, 'branch')! }
+              : {}),
           },
     );
     const label = sub === 'claim' ? 'claimed' : submit ? 'submitted for acceptance' : 'done';
