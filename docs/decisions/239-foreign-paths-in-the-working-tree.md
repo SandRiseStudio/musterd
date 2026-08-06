@@ -60,6 +60,31 @@ the hook seam?** It is, and nothing new has to be wired to know it.
 So the session's edit set is a per-session accumulation of paths the gate is already parsing. The
 answer to the lane's question is yes — and because it is yes, the cheaper half survives.
 
+### Amendment, 2026-08-05 (same day) — the index has to be ignored, or the gate feeds itself
+
+The Decision below is unchanged. One thing it did not say, and had to: **the per-session index must
+be git-ignored.** It was not, and within hours of the gate shipping, three indexes were tracked on
+`main` — `session-edits-1f14cba0`, `-4e182ce6`, `-548fda80` — each swept in by a `git add -A` in a
+different seat. Not a one-off: it is the default outcome of the ritual everyone follows, and the
+ritual this gate exists to watch.
+
+**What that actually breaks**, stated narrowly because the temptation is to overstate it. The gate's
+_correctness_ is intact: it reads only the file matching its own `session_id`, so a foreign index is
+never consulted. What breaks is decision 2's claim, in this ADR's own words, that the index "never
+leaves the machine" — committing one publishes a session id and one seat's edited-path history to
+every clone, forever. And it is self-feeding: those files land in every other seat's state dir on
+pull, where they are foreign paths in the working tree, which is the exact condition the gate warns
+about. The instrument manufactures its own signal.
+
+Fixed by ignoring `**/.musterd/session-edits-*.txt` alongside `binding.json`, `continuity.json` and
+`pending/` — the same class of local, per-session, never-committed state — plus `git rm --cached` on
+the three already tracked, because ignoring does not untrack. A test asserts both properties against
+the real repository index, so a future `git add -A` cannot quietly restore them.
+
+**The reason this is worth an amendment rather than a silent `.gitignore` line:** a gate whose own
+evidence is committable was under-specified, and the next stateful gate will have the same question.
+Local state needs an ignore rule in the same change that creates it.
+
 ## Decision
 
 **1. Warn on foreign modified paths, at the moment they would be staged.** On a PreToolUse `Bash`

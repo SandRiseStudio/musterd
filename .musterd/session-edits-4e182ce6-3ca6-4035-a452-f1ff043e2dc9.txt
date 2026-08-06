@@ -1,2 +1,0 @@
-packages/web/src/live/Live.css
-scripts/check-css-tokens.ts

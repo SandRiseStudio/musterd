@@ -18,6 +18,13 @@ coverage/
 **/.musterd/continuity.json
 # ADR 033: client-side pending-presence markers are transient local state, never committed.
 **/.musterd/pending/
+# ADR 239: the per-session edit index — one file per harness session, the evidence the working-tree
+# gate uses to tell THIS session's edits from a foreign session's. Local and disposable by design.
+# Three of these reached main via `git add -A` in three different seats before this line existed,
+# which is the gate's own private state becoming shared: pull one, and every seat now holds a
+# foreign session's index in its state dir — exactly the cross-session contamination ADR 239 was
+# built to detect. Ignoring is necessary but not sufficient; the tracked ones were removed too.
+**/.musterd/session-edits-*.txt
 # musterd provisioning state — regenerated per-workspace by `musterd init` (ADR 060/085), never committed.
 **/.musterd/provisioned.json
 **/.musterd/skill/
