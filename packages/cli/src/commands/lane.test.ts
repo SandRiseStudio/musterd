@@ -153,6 +153,29 @@ describe('lane commands', () => {
     expect(resolved.out).toContain('unconfirmed close recorded');
   });
 
+  // ADR 083: the acceptor should receive the work as an artifact, not a description. Submit hands
+  // the lane over and was the one edge that could not name the branch — so a lane opened before the
+  // branch existed (the common order: open, then cut the branch) reached its acceptor pointing at
+  // nothing. Measured 2026-08-05: 184 of 362 terminal-or-awaiting lanes carried branch=null.
+  it('submit records the branch the work landed on, for a lane opened without one', async () => {
+    const id = await openLane(['no branch at open', '--claim']);
+    const submitted = await capture(() =>
+      laneCommand(parseArgs(['submit', id, '--pr', '7', '--branch', 'izzo/the-work'])),
+    );
+    expect(submitted.code).toBe(0);
+    expect(submitted.out).toContain('⎇ izzo/the-work');
+    // And it PERSISTED, rather than only being echoed back: a later command reads it off the lane.
+    const resolved = await capture(() => laneCommand(parseArgs(['resolve', id])));
+    expect(resolved.out).toContain('git branch -D izzo/the-work');
+  });
+
+  it('submit without --branch leaves the branch the lane already carried', async () => {
+    // Never clears: a repeat submit recording a merge SHA must not blank the pointer.
+    const id = await openLane(['already pointed', '--claim', '--branch', 'feat/kept']);
+    const submitted = await capture(() => laneCommand(parseArgs(['submit', id, '--pr', '8'])));
+    expect(submitted.out).toContain('⎇ feat/kept');
+  });
+
   it('resolve prints the local-branch cleanup hint when the lane carries a branch', async () => {
     const id = await openLane(['landed', '--claim', '--branch', 'feat/landed']);
     const resolved = await capture(() => laneCommand(parseArgs(['resolve', id])));

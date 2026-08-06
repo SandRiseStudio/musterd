@@ -249,6 +249,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     pr?: number | undefined;
     sha?: string | undefined;
     authorized_by?: string | undefined;
+    branch?: string | undefined;
   }) => {
     try {
       const merged = {
@@ -259,6 +260,15 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       const { lane, warnings, review } = await client.updateLane(args.id, {
         state: 'awaiting_acceptance',
         ...(Object.keys(merged).length ? { merged } : {}),
+        // ADR 083's argument for `branch` is that work should reach the next person as an ARTIFACT
+        // rather than a description — and submit, which hands the lane to an acceptor, is the moment
+        // that matters most. It was the one lane edge that could not set it: `branch` is valid on
+        // lane_open, lane_handoff and lane_update, so seats reached for it here too and were bounced
+        // (measured 2026-08-05: 99 ok / 22 invalid_input, the worst ratio of any lane tool, against
+        // lane_open's 275/7). They were right about what the call should do. 184 of 362
+        // terminal-or-awaiting lanes carry branch=null, so acceptors routinely get an empty pointer
+        // and dig the branch out of a PR link or a status_update.
+        ...(args.branch !== undefined ? { branch: args.branch } : {}),
       });
       // ADR 235. The old advice — "wait ≤5m; on silence, lane_resolve yourself" — was correct while
       // an unaccepted lane hung forever: self-close was the only escape. With a backstop armed it
@@ -321,12 +331,11 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_submit',
     {
       description:
-        'Your work is technically complete and merged — move the lane to awaiting_acceptance (ADR 192) ' +
-        'and attest the landed merge (pr/sha/authorized_by). This is OUTCOME ACCEPTANCE, not a code ' +
-        'review: musterd asks an acceptor to judge intent/principles/usable/feel of the landed ' +
-        'artifact. Accept closes the lane, reject returns it to active. The response tells you ' +
-        'whether to wait or to self-close — follow it rather than a fixed timer (ADR 235). ' +
-        'Auto-merge first; then submit.',
+        'Your work is merged — move the lane to awaiting_acceptance (ADR 192) and attest it ' +
+        '(pr/sha/branch/authorized_by). OUTCOME ACCEPTANCE, not a code review: an acceptor judges ' +
+        'intent/principles/usable/feel of the landed artifact. Accept closes the lane, reject ' +
+        'returns it to active. The response says whether to wait or self-close — follow it, not a ' +
+        'fixed timer (ADR 235). Auto-merge first, then submit.',
       inputSchema: {
         id: z.string().describe('lane id'),
         pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
@@ -335,6 +344,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .string()
           .optional()
           .describe('the human whose authority the merge ran under'),
+        branch: z.string().optional().describe('branch carrying the work'),
       },
     },
     laneSubmitHandler,
@@ -344,9 +354,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
   server.registerTool(
     'lane_ready',
     {
-      description:
-        'Deprecated alias for lane_submit (ADR 192). Prefer lane_submit — same outcome-acceptance ' +
-        'stage after merge; not a code review.',
+      description: 'Deprecated alias for lane_submit (ADR 192) — prefer lane_submit.',
       inputSchema: {
         id: z.string().describe('lane id'),
         pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
@@ -355,6 +363,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .string()
           .optional()
           .describe('the human whose authority the merge ran under'),
+        branch: z.string().optional().describe('branch carrying the work'),
       },
     },
     laneSubmitHandler,

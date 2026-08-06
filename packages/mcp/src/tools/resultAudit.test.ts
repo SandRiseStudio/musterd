@@ -243,6 +243,57 @@ describe('empty states name the next action', () => {
     });
   });
 
+  /**
+   * ADR 083: work should reach the next person as an ARTIFACT, not a description — and submit, which
+   * hands the lane to an acceptor, is the moment that matters most. It was the one lane edge that
+   * could not set `branch`, while open/handoff/update all can, so seats reached for it here and were
+   * bounced: 99 ok / 22 invalid_input measured 2026-08-05, the worst ratio of any lane tool.
+   */
+  describe('lane_submit carries the branch to the acceptor', () => {
+    function patchSpy() {
+      const patches: unknown[] = [];
+      const client = {
+        ...emptyClient,
+        updateLane: async (_id: string, patch: unknown) => {
+          patches.push(patch);
+          return { lane: { ...LANE, id: 'L-1' }, warnings: [], review: undefined };
+        },
+      } as any;
+      return { client, patches };
+    }
+
+    it('forwards the branch onto the lane alongside the state move', async () => {
+      const { client, patches } = patchSpy();
+      await captureAll(registerLanes, client)['lane_submit']!({
+        id: 'L-1',
+        branch: 'izzo/the-work',
+      });
+      expect(patches[0]).toMatchObject({
+        state: 'awaiting_acceptance',
+        branch: 'izzo/the-work',
+      });
+    });
+
+    it('never invents one: a submit without a branch leaves the lane’s alone', async () => {
+      // A docs-only lane legitimately has no branch, so the field must stay absent from the patch
+      // rather than arrive as null and clear whatever the lane already carried.
+      const { client, patches } = patchSpy();
+      await captureAll(registerLanes, client)['lane_submit']!({ id: 'L-1', pr: 706 });
+      expect(patches[0]).not.toHaveProperty('branch');
+    });
+
+    it('takes it on the deprecated lane_ready alias too', async () => {
+      // Same handler, but the schemas are declared separately — a param added to one and not the
+      // other bounces every seat still using the old name.
+      const { client, patches } = patchSpy();
+      await captureAll(registerLanes, client)['lane_ready']!({
+        id: 'L-1',
+        branch: 'izzo/the-work',
+      });
+      expect(patches[0]).toMatchObject({ branch: 'izzo/the-work' });
+    });
+  });
+
   it('lane_board and team_next with nothing in flight', async () => {
     const handlers = captureAll(registerLanes, emptyClient);
     expect(await text(handlers['lane_board']!)).toMatch(ACTION_RE);
