@@ -89,6 +89,41 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     });
   });
 
+  // ADR 131 §5 amendment: the row must be able to name its own subject. Two events carrying the
+  // same digest are one session; the same two without it are indistinguishable from two sessions,
+  // which is the ambiguity that made 48 same-seat captured→ended pairs unreadable on 2026-08-05.
+  it('carries the correlation digest through to the audit row, and never anything id-shaped', async () => {
+    await enrollAda();
+    for (const event of ['start', 'end'] as const) {
+      const r = await post(
+        '/teams/dawn/residency/session',
+        { seat: 'Ada', harness: 'claude-code', event, session_digest: 'a1b2c3d4e5f6' },
+        agentKey,
+      );
+      expect(r.status).toBe(200);
+    }
+    for (const action of ['residency.session_captured', 'residency.session_ended'] as const) {
+      const rows = audits(action);
+      expect(rows).toHaveLength(1);
+      expect(JSON.parse(rows[0]!.detail as string)).toEqual({
+        harness: 'claude-code',
+        enrolled: true,
+        session_digest: 'a1b2c3d4e5f6',
+      });
+    }
+  });
+
+  it('rejects a session_digest that is not a digest — the field cannot become an id smuggler', async () => {
+    await enrollAda();
+    const r = await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'start', session_digest: 'sid-1234-abcd' },
+      agentKey,
+    );
+    expect(r.status).toBe(400);
+    expect(audits('residency.session_captured')).toHaveLength(0);
+  });
+
   it('is presence-neutral and never claims: the seat stays offline on the roster', async () => {
     await enrollAda();
     await post(

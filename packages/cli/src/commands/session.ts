@@ -16,6 +16,7 @@ import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { clock, theme } from '../render/theme.js';
 import { bindThread, pruneOnDisk, readRegistry } from '../session/continuity.js';
+import { sessionDigest } from '../session/digest.js';
 import { enumerateClaudeSessions } from '../session/enumerate.js';
 import {
   LOCAL_SESSION_LIVE_MS,
@@ -32,7 +33,8 @@ import { findWorkspaceDir } from './helpers.js';
  *
  * - **Local-only secrets.** The session id and transcript path land ONLY in the gitignored 0600
  *   `binding.json`. The daemon push (best-effort, after the local write) carries harness CLASS +
- *   event and nothing else — the wire schema has no field for an id or a path.
+ *   event + a keyed one-way digest of the id — the wire schema still has no field for an id or a
+ *   path. The digest is correlation, not disclosure: see `../session/digest.ts`.
  * - **Presence-neutral, never claiming.** The push rides `presenceNeutral()` (ADR 057) and hits a
  *   route that touches no presence row and no claim (ADR 108) — a hook must never flip the roster
  *   or displace the live occupant.
@@ -272,8 +274,13 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
     }
   }
 
-  // The resumable attestation (harness class only), best-effort AFTER the durable local write:
-  // a dead daemon must never fail the hook, and capture is complete without it.
+  // The resumable attestation (harness class + correlation digest), best-effort AFTER the durable
+  // local write: a dead daemon must never fail the hook, and capture is complete without it.
+  //
+  // The digest travels; the id does not. It is what lets the ledger distinguish one session
+  // flapping from two short-lived sessions of the same seat — the question that made 48 same-seat
+  // captured→ended pairs unreadable on 2026-08-05. Note the `end` branch above: a mismatched id
+  // returns early, so an `ended` push always carries the digest of the capture it belongs to.
   const seat = bindingSeat(binding);
   if (binding.agent_key && seat) {
     try {
@@ -281,7 +288,12 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
         server: binding.server,
         key: binding.agent_key,
       }).presenceNeutral();
-      await http.attestSession(binding.team, { seat, harness: CAPTURE_HARNESS, event });
+      await http.attestSession(binding.team, {
+        seat,
+        harness: CAPTURE_HARNESS,
+        event,
+        session_digest: sessionDigest(binding.agent_key, session.id),
+      });
     } catch {
       // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
     }
@@ -343,7 +355,12 @@ export async function observeCursorSession(payload: HookPayload): Promise<string
           server: binding.server,
           key: binding.agent_key,
         }).presenceNeutral();
-        await http.attestSession(binding.team, { seat, harness: 'cursor', event: 'start' });
+        await http.attestSession(binding.team, {
+          seat,
+          harness: 'cursor',
+          event: 'start',
+          session_digest: sessionDigest(binding.agent_key, session.id),
+        });
       } catch {
         /* daemon unreachable — local capture stands */
       }

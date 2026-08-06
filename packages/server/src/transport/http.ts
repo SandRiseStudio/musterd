@@ -2035,8 +2035,9 @@ export async function handleHttp(
       }
 
       // The resumable attestation (ADR 131 §5, increment 4): `musterd session start|end --stdin`
-      // pushes harness CLASS + event only — never a session id, never a transcript path (the body
-      // schema has no field for them). Agent-key auth like the other host-side residency routes;
+      // pushes harness CLASS + event + a one-way correlation digest — never a session id, never a
+      // transcript path (the body schema still has no field for either). Agent-key auth like the
+      // other host-side residency routes;
       // presence-neutral by nature (this handler touches no presence row) and it never claims —
       // a hook must never displace the live occupant (ADR 108).
       if (method === 'POST' && rest === '/residency/session') {
@@ -2054,7 +2055,15 @@ export async function handleHttp(
           action: body.event === 'start' ? 'residency.session_captured' : 'residency.session_ended',
           target: target.name,
           result: 'allow',
-          detail: { harness: body.harness, enrolled },
+          // `session_digest` is the correlation handle, not the id (ADR 131 §5 amendment): it makes
+          // a lifecycle event able to name its own subject, so `captured` then `ended` seconds later
+          // can be read as one session flapping or two short ones — a distinction that decides the
+          // fix. Absent from an older CLI, in which case the row degrades to seat + class as before.
+          detail: {
+            harness: body.harness,
+            enrolled,
+            ...(body.session_digest ? { session_digest: body.session_digest } : {}),
+          },
         });
         return sendJson(res, 200, { ok: true, enrolled });
       }
