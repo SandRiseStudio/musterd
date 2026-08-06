@@ -349,6 +349,38 @@ describe('team_send handler', () => {
     expect(out).toContain('reply_to:askB');
   });
 
+  // The candidate list is only useful if it shrinks. An ask I already answered must leave it —
+  // and NOTHING in my own inbox says I answered, because `listInbox` excludes my own sends, so the
+  // accept that discharged it is not in `messages`. Closure came from `act === 'resolve'` alone and
+  // the live ledger holds 199 accepts against 9 resolves, so every answered acceptance ask stayed a
+  // candidate forever. Found when the guard offered me six asks whose lanes were all long done.
+  it('drops an ask this seat already answered, so the candidate list shrinks (server `answered`)', async () => {
+    const inbox = {
+      messages: [laneAsk('askA', 1, '01LANEA'), laneAsk('askB', 5, '01LANEB')],
+      cursor: null,
+      answered: ['askB'], // the verdict on B is already sent — only A is still a question
+    };
+    const { client, sent } = sendClient({ fetchInbox: (async () => inbox) as any });
+    const handler = capture(registerSend, client, config);
+    await handler({ to: 'nick', act: 'accept', body: 'looks right' });
+    // One candidate left, so the guard does not fire and the verdict binds to A — not to the
+    // newest ask, which is exactly the mis-attribution the guard exists to prevent.
+    expect(sent[0]!.meta?.['in_reply_to']).toBe('askA');
+  });
+
+  it('still refuses to guess when TWO asks are genuinely unanswered', async () => {
+    const inbox = {
+      messages: [laneAsk('askA', 1, '01LANEA'), laneAsk('askB', 5, '01LANEB')],
+      cursor: null,
+      answered: [] as string[],
+    };
+    const { client, sent } = sendClient({ fetchInbox: (async () => inbox) as any });
+    const handler = capture(registerSend, client, config);
+    const r = await handler({ to: 'nick', act: 'accept', body: 'Lane 01LANEA accepted' });
+    expect(sent).toHaveLength(0);
+    expect(text(r)).toContain('reply_to:askA');
+  });
+
   it('still auto-targets a lone lane-review ask — one candidate is not a guess', async () => {
     const { client, sent } = sendClient({
       fetchInbox: (async () => ({

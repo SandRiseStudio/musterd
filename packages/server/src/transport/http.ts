@@ -3302,12 +3302,34 @@ export async function handleHttp(
           raised: raised.has(d.target),
         }));
 
+        // Which of my asks I have already answered — same reason the deferral fold reads the team
+        // timeline rather than the inbox, and off the SAME scan, so it costs no extra query.
+        // `listInbox` excludes my own sends, and the reply that answers an ask IS my own send, so a
+        // client cannot derive this for itself at any price. Without it both agent-facing readers
+        // (`openAnswerable` in the MCP adapter and `openActionNeeded` in the CLI) fall back to
+        // `act === 'resolve'` alone — and the live ledger holds 199 accepts against 9 resolves, so an
+        // answered ask stayed "open" forever: it kept counting in the `⚑ N requests waiting for you`
+        // banner, kept firing OS notifications, and silted up the lane-acceptance candidate list.
+        //
+        // Keyed on `in_reply_to`, never on the thread: an explicit `reply_to` sets the former and
+        // does not inherit the latter, which is 173 of the 205 replies on record. /live already
+        // closes an ask this way (web/src/live/asks.ts); this is that rule where the inbox can see it.
+        const answered = [
+          ...new Set(
+            scan
+              .filter((m) => m.from === member.name)
+              .map((m) => (m.meta as { in_reply_to?: unknown } | null)?.in_reply_to)
+              .filter((id): id is string => typeof id === 'string'),
+          ),
+        ];
+
         // `total` is the full inbox size (visibility-scoped) so a bounded client can show "N of total".
         return sendJson(res, 200, {
           messages,
           cursor,
           total: countInbox(ctx.db, member),
           deferred,
+          answered,
         });
       }
 

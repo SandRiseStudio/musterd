@@ -247,7 +247,7 @@ export async function pendingActionSummary(
   me: string,
 ): Promise<{ count: number; since: number } | undefined> {
   const res = await http.inbox(team, { unread: true });
-  const waiting = openActionNeeded(res.messages, me);
+  const waiting = openActionNeeded(res.messages, me, res.answered ?? []);
   if (waiting.length === 0) return undefined;
   const since = waiting.reduce((min, m) => Math.min(min, m.ts), Infinity);
   return { count: waiting.length, since };

@@ -64,14 +64,21 @@ function isLaneReviewAsk(m: Envelope): boolean {
  */
 async function openAnswerable(client: MusterdClient, me: string): Promise<Envelope[]> {
   try {
-    const { messages } = await client.fetchInbox(false);
+    const { messages, answered } = await client.fetchInbox(false);
     const resolved = new Set<string>();
     for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
+    // An act I already replied to is not open, and only the server can tell me so: the inbox
+    // excludes my own sends, so the reply that answers it never appears in `messages`. Reading
+    // closure from `resolve` alone left every answered ask open forever — 199 accepts against 9
+    // resolves on the live ledger — which silted up the lane-acceptance candidate list with dead
+    // asks and could push the live one out of the six it shows. Absent on an older daemon ⇒ empty ⇒
+    // exactly the previous behaviour.
+    const alreadyAnswered = new Set(answered ?? []);
     const open = messages.filter((m) => {
       if (!ANSWERABLE.has(m.act)) return false;
       const directed =
         m.act === 'request_help' || m.act === 'ask' || (m.to.kind === 'member' && m.to.name === me);
-      return directed && !resolved.has(m.thread ?? m.id);
+      return directed && !resolved.has(m.thread ?? m.id) && !alreadyAnswered.has(m.id);
     });
     return open.sort((a, b) => b.ts - a.ts);
   } catch {

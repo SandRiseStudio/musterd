@@ -46,7 +46,7 @@ export async function notifyCommand(
 
   const notifyDeps: NotifyDeps = {
     me: identity.name,
-    inbox: async () => (await poll.inbox(team, { unread: true })).messages,
+    inbox: () => poll.inbox(team, { unread: true }),
     // Reachable in-stream = a live watch/app presence (roster `presence !== 'offline'`). When the
     // human is watching, the bell/banner already reached them (ADR 024); `notify` owns only the
     // not-watching case (ADR 035 §3). No availability state is invented.
