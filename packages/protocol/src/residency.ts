@@ -112,8 +112,9 @@ export const ResidencySchema = z.object({
   /** Who authorized the enrollment (ADR 127 actor≠authorizer). */
   authorized_by: z.string().nullable(),
   /** When the seat last attested a capturable session (ADR 131 §5, increment 4) — the resumable
-   *  attestation is harness-class-only, so this timestamp is ALL the daemon learns about sessions:
-   *  never an id, never a transcript path. Null until the first `musterd session start` push. */
+   *  attestation carries harness class and a one-way digest only, so this timestamp plus that
+   *  digest are ALL the daemon learns about sessions: never an id, never a transcript path. Null
+   *  until the first `musterd session start` push. */
   resumable_at: z.number().int().nullable(),
   /** The seat's sparse policy override (increment 5) — null when the team defaults govern whole. */
   policy: ResidencyPolicyOverrideSchema.nullish(),
@@ -153,15 +154,26 @@ export type RevokeResidencyBody = z.infer<typeof RevokeResidencyBodySchema>;
 /**
  * Body of `POST /teams/:slug/residency/session` — the resumable attestation (ADR 131 §5,
  * increment 4), pushed by `musterd session start|end --stdin` from the SessionStart/SessionEnd
- * hooks. Harness CLASS only, by construction: this schema has no field for a session id or a
- * transcript path, so they cannot cross the wire. Agent-key authenticated (the hook holds only the
- * workspace binding), presence-neutral (ADR 057 — capture must never flip the roster) and never
- * claiming (ADR 108 — a hook must never displace the live occupant).
+ * hooks. Harness CLASS plus a one-way correlation digest, by construction: this schema still has no
+ * field for a session id or a transcript path, so neither can cross the wire. Agent-key
+ * authenticated (the hook holds only the workspace binding), presence-neutral (ADR 057 — capture
+ * must never flip the roster) and never claiming (ADR 108 — a hook must never displace the live
+ * occupant).
  */
 export const SessionAttestationBodySchema = z.object({
   seat: z.string(),
   harness: z.string().min(1).max(40),
   event: z.enum(['start', 'end']),
+  /** Keyed, truncated HMAC of the session id (ADR 131 §5 amendment 2026-08-05) — equal across one
+   *  session's start and end, different across two sessions, and irreversible without the
+   *  workspace's agent key, which the daemon holds only as a hash. It exists so a lifecycle event
+   *  can name its own subject: without it, `captured` then `ended` nine seconds later cannot be told
+   *  apart from two short sessions of one seat. Optional on the wire — an older CLI simply omits it,
+   *  and the audit row degrades to what it recorded before. */
+  session_digest: z
+    .string()
+    .regex(/^[0-9a-f]{8,32}$/)
+    .optional(),
 });
 export type SessionAttestationBody = z.infer<typeof SessionAttestationBodySchema>;
 
@@ -426,7 +438,7 @@ export type WakeLeasesResponse = z.infer<typeof WakeLeasesResponseSchema>;
 /**
  * Body of `POST /teams/:slug/residency/wake-report` — the host's `WakeOutcome`, minus anything the
  * daemon must never learn: no session ids, no transcript paths (ADR 131 §5 — the resumable
- * attestation is harness-class only; ids stay in the workspace `binding.session`).
+ * attestation carries a class and a one-way digest; ids stay in the workspace `binding.session`).
  */
 export const WakeReportBodySchema = z.object({
   lease_id: z.string(),

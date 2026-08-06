@@ -16,6 +16,7 @@ import { teamCommand } from './commands/team.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { loadConfig, saveBinding } from './config.js';
 import { cachedTeamLive } from './onboard/init.js';
+import { sessionDigest } from './session/digest.js';
 
 let server: RunningServer;
 let dir: string;
@@ -791,8 +792,8 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
       };
       expect(binding.session?.id).toBe('sid-e2e');
 
-      // Daemon: harness class + event only — the audit detail carries NO id and NO path, and the
-      // push was presence-neutral (no presence row for scout).
+      // Daemon: harness class + a one-way digest — the audit detail carries NO id and NO path, and
+      // the push was presence-neutral (no presence row for scout).
       const audit = server.db
         .prepare<
           [],
@@ -803,11 +804,66 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
       expect(audit[0]!.target).toBe('scout');
       expect(audit[0]!.detail).not.toContain('sid-e2e');
       expect(audit[0]!.detail).not.toContain('t.jsonl');
-      expect(JSON.parse(audit[0]!.detail)).toEqual({ harness: 'claude-code', enrolled: false });
+      expect(JSON.parse(audit[0]!.detail)).toEqual({
+        harness: 'claude-code',
+        enrolled: false,
+        session_digest: sessionDigest(agentKey, 'sid-e2e'),
+      });
       const presences = server.db
         .prepare<[], { n: number }>('SELECT COUNT(*) AS n FROM presence')
         .get();
       expect(presences?.n ?? 0).toBe(0);
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  /**
+   * The capability the lane exists for (01KZAEGF2K): today's ledger shows 48 same-seat
+   * captured→ended pairs inside ten seconds, and nothing in a row says whether that is one session
+   * bouncing or two short ones. This asserts the join is now possible — end matches its own start,
+   * a second session does not — through the real hook entry point and a real daemon, not a stub.
+   */
+  it('a captured/ended pair is joinable by digest, and a second session is separable', async () => {
+    await run(teamCommand, ['create', 'dusk', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'rook', '--kind', 'agent']);
+    const agentKey = loadConfig().agentKeys['dusk']!;
+
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-e2e-ws-'));
+    try {
+      saveBinding(ws, {
+        server: process.env['MUSTERD_SERVER']!,
+        team: 'dusk',
+        surface: 'claude-code',
+        claim: { mode: 'seat', name: 'rook' },
+        agent_key: agentKey,
+      });
+
+      await captureSession('start', { session_id: 'sid-one', cwd: ws });
+      await captureSession('end', { session_id: 'sid-one', cwd: ws });
+      await captureSession('start', { session_id: 'sid-two', cwd: ws });
+
+      const rows = server.db
+        .prepare<[], { action: string; detail: string }>(
+          "SELECT action, detail FROM audit WHERE target = 'rook' AND action LIKE 'residency.session_%' ORDER BY id",
+        )
+        .all()
+        .map((r) => ({
+          action: r.action,
+          digest: (JSON.parse(r.detail) as { session_digest?: string }).session_digest,
+        }));
+
+      expect(rows.map((r) => r.action)).toEqual([
+        'residency.session_captured',
+        'residency.session_ended',
+        'residency.session_captured',
+      ]);
+      // The join: rows 0 and 1 are one session's two ends.
+      expect(rows[0]!.digest).toBe(rows[1]!.digest);
+      // The separation: row 2 is a different session, which is exactly what the seat-only ledger
+      // could not say.
+      expect(rows[2]!.digest).not.toBe(rows[0]!.digest);
+      expect(rows.every((r) => typeof r.digest === 'string' && r.digest.length > 0)).toBe(true);
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
