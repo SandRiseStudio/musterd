@@ -33,6 +33,10 @@
      doing the work, which is how an amber this light nearly shipped as body copy (lane 01KZA27Q7C). */
   --lc-warn: #f4cf52; /* FILLS ONLY — the idle/away presence dots */
   --lc-warn-ink: #7a4e06; /* 4.92:1 on the darkest paper it lands on — anything read as text */
+  /* The keyboard focus ring. --lc-accent is 2.66:1 on the ground — a ring drawn in it is decor,
+     not an indicator (WCAG 1.4.11 wants ≥3:1 for functional marks). This mustard holds 3.3:1 on
+     surface-3, the darkest chrome a ring lands on, and ~4:1 on the paper family. */
+  --lc-focus: #966d06;
   --lc-info: #5b7fa6;
   --lc-handoff: #8a5fd6; /* violet — handoff (a distinct act tone, dark enough for cream) */
   --lc-lane: #5a52c9; /* indigo — lane transitions (ADR 102), handoff's family so the cluster reads as one */
@@ -113,6 +117,14 @@
 .lc__spacer {
   flex: 1;
 }
+/* Every keyboard-focusable thing inside the live chrome gets this ring unless a later rule paints
+   its own (the board hotspot's glow, the overlay's ink ring). global.css draws the site-wide ring
+   in --accent, which this page's paper washes out — same colour, 2.66:1 here. */
+.lc :focus-visible {
+  outline: 2px solid var(--lc-focus);
+  outline-offset: 2px;
+}
+
 /* Topbar round buttons — the sound toggle and the office panel controls (collapse / companion)
    share one chrome; the sound icon's speaker body is the lone filled path. */
 .lc__sound,
@@ -360,7 +372,7 @@
   background: rgba(255, 255, 255, 0.07);
 }
 .lc__error button:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus);
   outline-offset: 2px;
 }
 
@@ -466,7 +478,7 @@
   transform: scale(0.92);
 }
 .lc-collapse:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus);
   outline-offset: 2px;
 }
 .lc-collapse svg {
@@ -603,7 +615,7 @@
   background: linear-gradient(180deg, var(--lc-surface), var(--lc-ground-2));
 }
 .lc-rail:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus);
   outline-offset: -3px;
 }
 /* a soft accent seam runs the height of the rail — brightens on hover, the "expand me" invitation */
@@ -2853,7 +2865,7 @@
   transform: translateY(1px);
 }
 .lc-form__connect:focus-visible {
-  outline: 2px solid var(--lc-accent-bright);
+  outline: 2px solid var(--lc-focus);
   outline-offset: 2px;
 }
 .lc-form__connect:disabled {
@@ -2888,7 +2900,7 @@
   color: var(--lc-dim);
 }
 .lc-form__advanced:focus-visible {
-  outline: 2px solid var(--lc-accent);
+  outline: 2px solid var(--lc-focus);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -3697,6 +3709,12 @@
   line-height: 1.35;
   color: var(--lc-text);
   outline: none;
+}
+/* The card's own accent glow says "composing"; this says which field the keyboard is in — the
+   base rule's outline:none would otherwise leave the caret as the only cue. */
+.lc-card__compose-title:focus-visible {
+  outline: 2px solid var(--lc-focus);
+  outline-offset: 2px;
 }
 .lc-card__compose-title::placeholder {
   color: var(--lc-faint);
@@ -4810,7 +4828,7 @@
 }
 
 .lc-ov.is-interactive .lc-ov__card:focus-visible {
-  outline: 2px solid var(--lc-ov-accent);
+  outline: 2px solid var(--lc-ov-accent-ink);
   outline-offset: 2px;
 }
 
@@ -4853,7 +4871,7 @@
 }
 
 .lc-ov__step:focus-visible {
-  outline: 2px solid var(--lc-ov-accent);
+  outline: 2px solid var(--lc-ov-accent-ink);
   outline-offset: 1px;
 }
 
