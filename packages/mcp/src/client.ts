@@ -339,13 +339,17 @@ export class MusterdClient {
     }>;
   }
 
-  roster(): Promise<{
+  roster(role?: string): Promise<{
     members: MemberSummary[];
     /** The team's role library (ADR 227 discovery): name + one-line summary. Absent from an older
      *  daemon — every consumer degrades to members-only. */
     roles?: Array<{ name: string; summary: string | null }>;
   }> {
-    return this.request('GET', `/teams/${this.config.team}/members`);
+    // ADR 227 close-out: the role filter rides the wire so the daemon can see (and audit) the
+    // discovery query. An older daemon ignores the param and returns the unfiltered roster —
+    // callers keep a defensive local pass.
+    const q = role ? `?role=${encodeURIComponent(role)}` : '';
+    return this.request('GET', `/teams/${this.config.team}/members${q}`);
   }
 
   async fetchInbox(
