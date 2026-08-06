@@ -510,7 +510,9 @@ describe('acceptanceCapacity — unknown is not degraded', () => {
 
 /** sRGB relative luminance of an `hsl(h, s%, l%)` string, per WCAG 2.1. */
 function luminanceOfHsl(css: string): number {
-  const [hue, sat, light] = css.match(/[\d.]+/g)!.map(Number);
+  const parts = css.match(/[\d.]+/g)?.map(Number);
+  if (!parts || parts.length < 3) throw new Error(`not an hsl() string: ${css}`);
+  const [hue, sat, light] = parts as [number, number, number];
   const s = sat / 100;
   const l = light / 100;
   const a = s * Math.min(l, 1 - l);
