@@ -292,6 +292,11 @@ converge?) is unanswerable in principle, which is why it was not attempted.
   A warning must name only paths whose mtime predates the session marker. If a warning ever names a
   path modified after that instant, the predicate has been widened back into an inference and the
   verdict has been reversed by accident. Asserted directly, and by mutation.
+- **Ignored files are kept out twice, and neither guard is individually tested.** Plain
+  `git status --porcelain` already omits them, and the `!!` status is skipped as well; each mutant
+  survives alone because the other covers it. Recorded for the same reason as the matcher
+  redundancies below — a reader should know the property has two guards and no test that
+  distinguishes them, rather than discover it by removing the wrong one.
 - **The accepted loss must stay lost.** A test asserts that a concurrent writer produces **no**
   warning. If someone "fixes" that test to make it warn, they have reintroduced the false-positive
   class this verdict removed — the test says so in its own comment, because the failure mode is a

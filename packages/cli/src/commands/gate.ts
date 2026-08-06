@@ -277,7 +277,11 @@ async function gateCheck(parsed: Parsed): Promise<number> {
       // One marker per session, stamped on the first tool call the gate sees. `justMarked` is what
       // keeps a session whose very first call IS the `git add -A` from indicting the whole tree.
       const justMarked = markSessionStart(stateDir(), sessionId);
-      wtWarn = workingTreeWarning(call.command, sessionStartedAt(stateDir(), sessionId), justMarked);
+      wtWarn = workingTreeWarning(
+        call.command,
+        sessionStartedAt(stateDir(), sessionId),
+        justMarked,
+      );
     }
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return; // ambient/unbound folder — no seat to gate → allow

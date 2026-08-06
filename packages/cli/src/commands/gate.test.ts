@@ -293,7 +293,11 @@ describe('the working-tree check (ADR 239, post-verdict)', () => {
     const dir = repo();
     const st = state();
     writeFileSync(join(dir, 'a-work.txt'), "an earlier session's work\n");
-    utimesSync(join(dir, 'a-work.txt'), new Date(Date.now() - 600_000), new Date(Date.now() - 600_000));
+    utimesSync(
+      join(dir, 'a-work.txt'),
+      new Date(Date.now() - 600_000),
+      new Date(Date.now() - 600_000),
+    );
     markSessionStart(st, 'sess-B');
     const startedAt = sessionStartedAt(st, 'sess-B');
     const cwd = process.cwd();
@@ -329,7 +333,11 @@ describe('the working-tree check (ADR 239, post-verdict)', () => {
     const dir = repo();
     const st = state();
     writeFileSync(join(dir, 'a-work.txt'), 'foreign\n');
-    utimesSync(join(dir, 'a-work.txt'), new Date(Date.now() - 600_000), new Date(Date.now() - 600_000));
+    utimesSync(
+      join(dir, 'a-work.txt'),
+      new Date(Date.now() - 600_000),
+      new Date(Date.now() - 600_000),
+    );
     markSessionStart(st, 'sess-new');
     const startedAt = sessionStartedAt(st, 'sess-new');
     const cwd = process.cwd();
@@ -360,7 +368,11 @@ describe('the working-tree check (ADR 239, post-verdict)', () => {
     const dir = repo();
     const st = state();
     writeFileSync(join(dir, 'a-work.txt'), 'foreign\n');
-    utimesSync(join(dir, 'a-work.txt'), new Date(Date.now() - 600_000), new Date(Date.now() - 600_000));
+    utimesSync(
+      join(dir, 'a-work.txt'),
+      new Date(Date.now() - 600_000),
+      new Date(Date.now() - 600_000),
+    );
     markSessionStart(st, 'sess-B');
     const startedAt = sessionStartedAt(st, 'sess-B');
     const cwd = process.cwd();

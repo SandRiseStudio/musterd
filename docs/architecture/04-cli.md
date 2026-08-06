@@ -28,7 +28,7 @@ src/
   codexBin.ts         // PATH-robust, shell-free `codex` binary resolution plus read-only `--version`/help capability probe; an unresolved or incompatible install stays non-wakeable (ADR 216)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
   infra-gate.ts       // warn-only infra-touch check: asks the daemon whether the acting seat holds `platform`; every failure mode is silence, never a block (ADR 227 inc 2)
-  workingTree.ts      // per-session edit index + the foreign-modified-path advisory a stage-shaped `git add -A` earns; local-only, warn-never-deny (ADR 239)
+  workingTree.ts      // session-start marker + the advisory a stage-shaped `git add -A` earns for paths that PREDATE this session; local-only, warn-never-deny (ADR 239 verdict)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
   errors.ts           // CliError(code) -> message + exit code
