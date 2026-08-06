@@ -64,10 +64,11 @@ plus merge authorizations still riding every PR. The loops removed the mechanica
 concentrated what remains into pure judgment. Nothing in the ADR corpus states what the
 loops owe _that_ load — this ADR does.
 
-**Dispatch.** The handoff edge had fired zero times ever until tonight — structural, not
-broken: it needs an enrolled `flow: auto` seat whose session is genuinely closed, and until
-gptbot's enrollment no such seat existed. `loops.dispatch` armed 2026-08-05 evening; the
-first live exercise (dolly's, founder-approved, $2 budget) is pre-registered and pending.
+**Dispatch.** _(Corrected 2026-08-06 — see the amendment below; the original claim that the
+handoff edge had never fired was wrong.)_ The handoff edge has fired **once, and it
+succeeded**: 2026-08-04 14:56:32, dolly → gptbot, lane `01KZ4QH585V576F3NTD9R30RXZ`,
+`derivation: work_order`, reported. `loops.dispatch` armed 2026-08-05 evening; the
+continuation edge has fired repeatedly since.
 
 ## Decision
 
@@ -192,9 +193,72 @@ its judgment class and side of the §3 line — a proposal that cannot is return
 the 26-ask corpus is re-classified when the merge-loop ADR lands; drift amends §3 here
 rather than forking taxonomies.
 
-**Experiment.** The first dispatch-handoff exercise (dolly's, founder-approved
-2026-08-05, $2 budget) is the pre-registered probe for the edge that has never fired:
-success is a `wake_leases` row carrying both `act_id` and `lane_id` whose session moves
-the handed-off lane. The loops-as-data question stays an observational experiment per
-§5: the recorded trigger vocabulary after the merge loop runs — not a design argument —
-decides whether the declarative layer earns building.
+**Experiment.** The dispatch-handoff exercise registered here at merge time was
+**dissolved before it ran** — see the amendment below. Its question ("does the edge
+fire") was already answered by a ledger row, and the free check that established this
+cost nothing, which is the durable lesson: _run the query that could falsify the
+exercise before spending on the exercise._ The replacement question, if a spend is ever
+warranted, is why three of four re-derivations of one act expire. Any future probe of a
+loop edge must state a success criterion that **can come out false** — the criterion
+this ADR shipped with could not, and neither could its first correction. The
+loops-as-data question stays an observational experiment per §5: the recorded trigger
+vocabulary after the merge loop runs — not a design argument — decides whether the
+declarative layer earns building.
+
+## Amendment, 2026-08-06 — the ledger read, corrected
+
+The `## Decision` above stands unchanged; nothing here alters the goal, the doctrine
+amendments, the taxonomy, or the backlog. What follows corrects **facts in Context and
+Observability** that were wrong at merge time, and records what the correction taught,
+because the error shape is itself evidence for backlog item 1.
+
+**1. The handoff edge had fired, and it succeeded.** The original text said it had never
+fired. Wrong. Split leases by the `derivation` field in the `residency.wake_leased`
+audit detail and the paths separate cleanly. Of 55 handoff-triggered leases going back
+to 2026-07-14: **54 are `batched`** — ordinary inbox wakes that merely happen to be
+triggered by a handoff, a path that has existed since three weeks before
+`loops.dispatch` was armed — and **1 is `work_order`**, the dispatch edge: 2026-08-04
+14:56:32, dolly → gptbot, lane `01KZ4QH585V576F3NTD9R30RXZ`, reported. That firing is
+dolly handing gptbot the Codex hook-path lane, two days before the exercise to test it
+was proposed.
+
+**2. Two successive success criteria could not come out false.** The exercise's original
+criterion — "a lease carrying both `act_id` and `lane_id`" — is satisfied by 41 leases,
+all of which join to an `ask`: it is the review-wake shape too. Its first correction —
+`messages.act = 'handoff'` — fails the same way one layer down, because a handoff is a
+directed act and therefore also triggers an inbox wake; 54 of 55 handoff leases are that
+path. Only `derivation` discriminates. **An acceptance criterion that cannot come out
+false is not a criterion**, and two seats quoted one to each other before either ran it
+against existing rows.
+
+**3. `work_order` is not synonymous with dispatch.** 50 `work_order` leases exist from
+2026-07-31 14:28:10 — the review loop emits them too. Reading `work_order` as "the
+dispatch loop fired" is the same conflation as (2), and any item-1 instrumentation must
+key on the edge, not the derivation alone.
+
+**4. Findings for backlog item 1, from the distinguishability check.** These constrain
+the design rather than merely motivating it:
+
+- **No phantom leases.** A lease row is inserted inside the host's poll transaction, so
+  a row existing proves derivation _and_ delivery. "Never actuated" produces no row at
+  all — a breaker can trust that every row it counts reached a host.
+- **But the failure's location is not recorded.** "Host received the order and never
+  spawned" and "host spawned and the session died before reporting" produce identical
+  `expired` rows; `wake_leases` has no `delivered_at` or `spawned_at`. **A breaker
+  cannot distinguish a dead host from a dead session** — a real gap for item 1, not a
+  nicety.
+- **Measurement trap.** The `lease_expired` audit row is written by a lazy sweep, not at
+  expiry — observed 4s, 5s and 11s late, and one row landed after a _newer_ lease for the
+  same seat existed. Anyone timing wake failures off those timestamps is timing the
+  sweep.
+
+**5. The churn baseline is stronger than Context recorded, and it belongs to the inbox
+path.** One act (`01KZ9W1GEM…`, miley → ryder) was re-derived four times — 00:23, 02:40,
+03:42, 03:44 UTC — three expiring and burning budget, the fourth correctly deferring on
+`local-session-live` because ryder was live. Nothing counts them as a series. That is
+item 1's pathology with a second seat and a longer window than the eight-lane cluster in
+Context; the write-up must say **inbox path**, not dispatch.
+
+Evidence and corrections 1–5 are dolly's, produced by the free check it ran instead of
+spending the approved budget, and verified independently against the ledger before this
+amendment landed.
