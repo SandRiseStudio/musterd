@@ -38,6 +38,18 @@
 - No default exports except a package's bin entry. Named exports everywhere.
 - Imports ordered: node builtins → external → `@musterd/*` → relative. Prettier handles formatting; don't hand-format.
 
+## Shared values and transforms (the trap that keeps recurring)
+
+Six defects across four subsystems have had one skeleton: **one value or transform, two consumers,
+opposite needs — and the second consumer is invisible from the first's call site.** Case law and the
+instance table: [ADR 247](../decisions/247-documented-discard-is-a-precondition.md).
+
+- **Before adding a consumer to a shared value, ask both clauses: _what wrote this row, and who else reads it?_**
+- **When a helper documents why it throws something away, that discard is a precondition on its consumers, not an implementation note.** Enumerate the callers before adding one. A documented transform is more dangerous than an undocumented one, because the documentation terminates the investigation. Cite ADR 247 at the discard so the next consumer meets the precondition where they are already reading.
+- **When a test cites an ADR as its reason, check that the ADR's question is your question.** Purpose does not transfer across consumers.
+- **A guard that never instantiates the second consumer's case is decoration** — including a round-trip test whose fixture never populates the field, and a rule whose mutant survives.
+- The remedy is **not** to widen the predicate until it satisfies everyone: make each consumer state its own need at its own call site.
+
 ## Error handling pattern
 
 - One error type per package surface: server `MusterdError(code: ErrorCode, message)`; CLI `CliError(code, message)`. Both carry a code from the `02-protocol` error-code enum (CLI maps code → exit per `04-cli.md`).

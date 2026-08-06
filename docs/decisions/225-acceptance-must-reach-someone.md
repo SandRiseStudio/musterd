@@ -289,64 +289,35 @@ today both collapse into an unverified close.
 
 ## The shared-predicate trap
 
-Raised by ryder; identified as a pattern rather than three incidents by dolly, whose call it is —
-the same skeleton appeared four times on 2026-08-04, three of them inside this ADR's own review.
+Raised by ryder here, in an acceptance review of this ADR; identified as a pattern rather than three
+incidents by dolly, whose call it was.
 
 > **One value, two consumers, opposite needs — and the second consumer is invisible from the first's
 > call site.**
 
-It earns a section here rather than an ADR of its own because the third instance _is this ADR's
-thesis_. Decision 1 says live and offline acceptors want different instruments. ryder found the same
-claim already latent in the code as a defect: one predicate was being asked to serve a free rail and
-a paid one. The conflation this ADR argues against was not hypothetical; it was shipped, and the
-implementation of the fix is where it surfaced.
+**The class now lives in [ADR 247](247-documented-discard-is-a-precondition.md)** — its statement,
+its six instances, the mechanical signature that makes it greppable, and its corollaries. It began as
+a section here on the reasoning that the third instance _is this ADR's thesis_, and that reasoning
+was sound at four instances. It stopped being sound at six: dolly hit the fifth while writing a git
+hook, and nothing in that task would ever have routed her to an ADR about acceptance. Three seats
+rediscovering the same class cold in one day is a findability failure, and a defect class that spans
+four subsystems needs its own number so a code comment can cite it. What stays here is the instance
+that is genuinely this document's argument.
 
-| Value               | First consumer (writes / assumes)                         | Second consumer (reads, needs otherwise)                                                            | What broke                                                                                | Found by                |
-| ------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------- |
-| `derivation`        | wake-lease creation, an incidental label                  | the ADR 199 Eval, measuring by _originating act_                                                    | acceptance wakes hid in the `work_order` bucket → "no review-derived wake ever" was false | dolly (ADR 199)         |
-| `promised_wait_ms`  | ADR 217 `laneClose`, recorded only when knowable          | this ADR's aggregate, which read it as universal                                                    | present on 13 of 152 rows → the 73-min-vs-5-min headline collapsed                        | stanley ([#646])        |
-| `pendingInterrupts` | the ADR 088 interrupt line — **free**, live seat, opts in | `claimWakeLeases` — **paid** (ADR 131 `wake_cost`), gated on `loops.review` + `flow:auto` (ADR 191) | admitting obligations routed a paid wake around its own policy gate                       | ryder ([#651])          |
-| seat roles          | `serialize.ts:55`, db → files, writes singular `role`     | `reconcile.ts:163` + `seatfile.ts:110`, which treat plural `roles` as authoritative                 | db → files → db silently demotes a multi-role seat to its first role                      | stanley (ADR 227 inc 1) |
+**Instance 3, `pendingInterrupts`.** Decision 1 says live and offline acceptors want different
+instruments. ryder found that same claim already latent in the code as a defect: the ADR 088
+interrupt line is **free**, opt-in, and needs a live seat; `claimWakeLeases` is **paid**
+(ADR 131 `wake_cost`) and gated on `loops.review` + `flow:auto` (ADR 191). One predicate served both,
+so admitting obligations routed a paid wake around its own policy gate. The conflation this ADR
+argues against was not hypothetical; it was shipped, and the implementation of the fix is where it
+surfaced.
 
-**The tell, and why review keeps missing it.** In every case the first consumer's code is correct in
-isolation and reads as complete at its call site. `memberRowToSeat` writing `{ kind, role }` is not
-obviously wrong until you know that a different module treats a field it never mentions as
-authoritative. The second consumer is not merely elsewhere in the file — it is elsewhere in the
-system, reached by a path the first author had no reason to open. Positive tests exercise the first
-consumer's case and stay green, because the first consumer's case is the one everybody had in mind.
-
-**The check** — the first clause was already in this document, from the two errors above; the second
-is the half that was missing:
-
-> _What wrote this row, and **who else reads it**?_
-
-**A guard that never instantiates the second consumer's case is decoration.** This is the sharpest
-part, and it comes from the fourth instance, where the first three's saving grace is absent. In
-instances 1–3 the negative tests caught it: ryder's first cut turned four tests red precisely because
-the paid rail had its own assertions. In instance 4 there is no negative test at all — and, worse,
-there is a guard that looks like one. `reconcile.test.ts:232` is named
-_"projects per-seat capabilities so db → files → db is a fixed point"_: exactly the invariant that
-multi-role seats violate. It passes because its fixture is two single-role seats (`boss` with
-`role = "lead"`, `quiet` with `role = ""`). Every multi-role test in the file runs files → db, the
-direction that does not lose data. So the guard is well-named, well-intentioned, and **will be green
-for the entire life of the bug.** A round-trip guard proves nothing about a field its fixture never
-populates.
-
-**Corollary from ryder's fix: widening a predicate makes its key a capability.** Once
-`pendingInterrupts` admits an obligation class, whatever field selects that class decides who can
-raise another seat's interrupt line — so `meta.lane_review` had to become server-controlled
-(`route.ts:171` strips it from any envelope the daemon did not compose). Keyed on act+tier alone, any
-seat could have minted an interrupt and routed around `can_flag_urgent`, which is the very gate that
-keeps the line scarce. **The new admission key inherits the trust requirements of the rail it opens.**
-
-**What this implies for decision 1, and it is a caution against the obvious reading.** The remedy is
-_not_ to widen the shared predicate until it satisfies everyone. It is to make the second consumer
-explicit and let each rail state its own need — which is what shipped: `obligations` is opt-in and
-**off by default**, the free rail passes `{ obligations: true }` (`http.ts:3000`), and
-`claimWakeLeases` calls the same function bare (`residency.ts:717`) so the paid rail keeps its gate.
-One predicate, two call sites, opposite defaults, each legible where it is used. Applied to instance
-4, the equivalent fix is for the exporter to emit what the reader treats as authoritative — not for
-the reader to start guessing from the singular field.
+The fix is also the shape of the remedy, and it is a caution against the obvious reading: **do not
+widen the shared predicate until it satisfies everyone.** Make the second consumer explicit and let
+each rail state its own need. `obligations` is opt-in and **off by default**, the free rail passes
+`{ obligations: true }` (`http.ts:3000`), and `claimWakeLeases` calls the same function bare
+(`residency.ts:717`) so the paid rail keeps its gate. One predicate, two call sites, opposite
+defaults, each legible where it is used.
 
 ### The sibling: a fixture more convenient than production
 
@@ -363,7 +334,8 @@ considered, and the fixture sibling is that second consumer's case never being _
 have the same remedy and it is one sentence — **the second consumer's case must be instantiated, in
 the fixture and in the assertion, or the guard is decoration.**
 
-It generalizes past that one PR. Instance 4's single-role fixture is the same defect; so, arguably,
+It generalizes past that one PR. The single-role fixture of [ADR 247](247-documented-discard-is-a-precondition.md)'s
+instance 4 is the same defect; so, arguably,
 is why `interrupts.test` additions passed while `claimWakeLeases` broke, since the negative case
 lived in a different suite. And it is directly relevant to this ADR's own conduct: every retracted
 claim here came from reading an aggregate without asking what wrote the row. A convenient fixture is
@@ -444,8 +416,9 @@ verifying a claim about what the number means.** The check that was missing both
 one: _what wrote this row, and over what period does this label mean one thing?_
 
 That check turned out to be the narrow case of a wider one. Both errors above are instances of the
-defect class named in "The shared-predicate trap" — a value whose second consumer needs something its
-first consumer never considered — and the generalized form of the question is stated there.
+defect class named in [ADR 247](247-documented-discard-is-a-precondition.md) — a value whose second
+consumer needs something its first consumer never considered — and the generalized form of the
+question is stated there.
 
 **Eval.** Report the answer rate **split by acceptor state at submit time** — never blended, and
 **only over the post-217 window** where the labels are commensurable. That split is now motivated by
