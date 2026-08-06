@@ -9,6 +9,7 @@ import {
   isActionNeeded,
   openActionNeeded,
   renderBanner,
+  renderMachineLine,
   renderInbox,
   renderMessageRow,
   renderPendingSummary,
@@ -730,5 +731,45 @@ describe('renderBanner', () => {
     const lines = renderBanner().split('\n');
     const widths = new Set(lines.map((l) => [...l].length));
     expect(widths.size).toBe(1);
+  });
+});
+
+describe('renderMachineLine (ADR 242) — the machine cost line', () => {
+  const machine = { swap_used_mb: 1544, swap_total_mb: 2048, free_mem_mb: 139 };
+
+  it('renders swap, free memory, and the sidecar count', () => {
+    const line = renderMachineLine({
+      stacks: [{ classification: 'live', procs: 34, rss_kb: 1_130_000 }],
+      machine,
+    });
+    expect(line).toContain('swap 1.5/2.0 GB');
+    expect(line).toContain('free 139 MB');
+    expect(line).toContain('34 sidecar procs');
+    expect(line).not.toContain('orphaned');
+  });
+
+  it('adds the orphan fragment + reap pointer only when orphans exist', () => {
+    const line = renderMachineLine({
+      stacks: [
+        { classification: 'live', procs: 3, rss_kb: 90_000 },
+        { classification: 'orphaned', procs: 41, rss_kb: 614_400 },
+      ],
+      machine,
+    });
+    expect(line).toContain('41 orphaned (~600 MB)');
+    expect(line).toContain('musterd reap');
+  });
+
+  it('no tick renders as absence, never zeros', () => {
+    expect(renderMachineLine(null)).toBe('');
+  });
+
+  it('a machine row with unknown swap omits the swap fragment rather than inventing it', () => {
+    const line = renderMachineLine({
+      stacks: [],
+      machine: { swap_used_mb: null, swap_total_mb: null, free_mem_mb: null },
+    });
+    expect(line).not.toContain('swap');
+    expect(line).toContain('0 sidecar procs');
   });
 });

@@ -454,6 +454,42 @@ export function renderPendingSummary(count: number, sinceTs: number): string {
 }
 
 /**
+ * The machine cost line (ADR 242): one calm line under the status header — swap, free memory, and
+ * the sidecar picture the daemon's footprint sampler sees. Returns '' when there is no tick (older
+ * daemon, non-darwin host, sampler just started), so callers prepend it unconditionally; absence of
+ * data renders as absence, never as zeros. Orphans get the loud fragment only when present.
+ * Per-seat cost chips deliberately wait for attribution (ADR 242 decision 2 — stacks carry
+ * seat: null until a session boundary exists in the process tree).
+ */
+export function renderMachineLine(
+  tick: {
+    stacks: { classification: string; procs: number; rss_kb: number }[];
+    machine: {
+      swap_used_mb: number | null;
+      swap_total_mb: number | null;
+      free_mem_mb: number | null;
+    };
+  } | null,
+): string {
+  if (!tick) return '';
+  const { machine, stacks } = tick;
+  const gb = (mb: number) => (mb / 1024).toFixed(1);
+  const parts: string[] = [];
+  if (machine.swap_used_mb !== null && machine.swap_total_mb !== null) {
+    parts.push(`swap ${gb(machine.swap_used_mb)}/${gb(machine.swap_total_mb)} GB`);
+  }
+  if (machine.free_mem_mb !== null) parts.push(`free ${machine.free_mem_mb} MB`);
+  const sidecarProcs = stacks.reduce((sum, s) => sum + s.procs, 0);
+  parts.push(`${sidecarProcs} sidecar proc${sidecarProcs === 1 ? '' : 's'}`);
+  const orphaned = stacks.filter((s) => s.classification === 'orphaned');
+  const orphanProcs = orphaned.reduce((sum, s) => sum + s.procs, 0);
+  const line = theme.meta(`machine: ${parts.join(' · ')}`);
+  if (orphanProcs === 0) return line;
+  const mb = Math.round(orphaned.reduce((sum, s) => sum + s.rss_kb, 0) / 1024);
+  return line + theme.warn(` · ${orphanProcs} orphaned (~${mb} MB) — musterd reap`);
+}
+
+/**
  * The agent-side reachability nudge (ADR 046): the same open-action count as the comeback summary,
  * but addressed to a named member and appended to *any* acting command's stderr — so a heads-down
  * agent that never thinks to run `inbox` still sees a directed act waiting. Names the member (it is

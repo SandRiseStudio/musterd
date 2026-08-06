@@ -1,5 +1,10 @@
 import type { Parsed } from '../args.js';
-import { renderPendingSummary, renderRoster, renderStatusHeader } from '../render/rows.js';
+import {
+  renderMachineLine,
+  renderPendingSummary,
+  renderRoster,
+  renderStatusHeader,
+} from '../render/rows.js';
 import { cliBuild } from '../version.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 import { renderMemoryLine } from './memory.js';
@@ -47,5 +52,9 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   process.stdout.write(
     '\n' + renderRoster(res.members, undefined, undefined, health?.build) + '\n',
   );
+  // The machine cost line (ADR 242): the footprint sampler's latest tick, best-effort — an older
+  // daemon, an unbound folder, or a non-darwin host all read as null and render as absence.
+  const machineLine = renderMachineLine(await http.footprint(team).catch(() => null));
+  if (machineLine) process.stdout.write('\n' + machineLine + '\n');
   return 0;
 }
