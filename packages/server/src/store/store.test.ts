@@ -18,7 +18,6 @@ import {
   reapExcessIdleObservers,
   reapStaleObservers,
 } from './members.js';
-import { listAudit } from './audit.js';
 import { insertMessage, latestStatusUpdate, listInbox, listTeamMessages } from './messages.js';
 import {
   attach,

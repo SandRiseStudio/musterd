@@ -106,7 +106,14 @@ function gather(flags: Record<string, string | boolean>) {
   }
 
   const team = flagStr(flags, 'team') ?? envId?.team ?? binding?.team ?? config.current;
-  return { config, server, sources, team, asName: flagStr(flags, 'as'), model: attestedModel(binding, env) };
+  return {
+    config,
+    server,
+    sources,
+    team,
+    asName: flagStr(flags, 'as'),
+    model: attestedModel(binding, env),
+  };
 }
 
 /**

@@ -190,7 +190,12 @@ describe('POST /claim — occupancy', () => {
     // `unknown` from the start is not a loss. Emitting here would bury the real drops under rows
     // about harnesses that simply cannot attest yet (ADR 158: Codex, today).
     const grant = await grantFor('Ada');
-    await post('/teams/dawn/claim', { key: agentKey, target: { seat: 'Ada' }, grant, surface: 'cli' });
+    await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'cli',
+    });
     const team = getTeamBySlug(server.db, 'dawn')!;
     expect(
       listAudit(server.db, team.id).filter((a) => a.action === 'occupancy.model_attested'),

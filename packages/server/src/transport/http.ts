@@ -656,10 +656,10 @@ function authTouch(
   // which made the one case that mattered invisible — a touch carrying NO model that attaches a
   // brand-new row is exactly the born-unattested occupancy, and there was nothing to compare it to.
   const before = ctx.db
-        .prepare<
-          [string],
-          { id: string; model: string | null }
-      >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
+    .prepare<
+      [string],
+      { id: string; model: string | null }
+    >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
     .get(auth.member.id);
   const flipped = touchAmbientPresence(
     ctx.db,
