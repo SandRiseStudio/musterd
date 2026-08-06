@@ -36,6 +36,13 @@ one week in 2026-07 because raises were being used to fix a calibration problem.
   which is what ADR 234 rejected and what this default is only admissible for *not* doing. The
   evidence it matters is on the record — on 2026-08-05 four web lanes routed `normal` and acceptance
   caught two real defects on one of them, both on a change a blanket path rule would have exempted.
+- **Contrast is measured in the browser, never computed from the hex.** `pnpm a11y:contrast <url>`
+  ([docs/a11y/contrast.md](../../docs/a11y/contrast.md)) resolves each colour by painting it to a
+  canvas, so alpha tints, `color-mix()` and translucent stacks are accounted for. Two things it
+  exists to stop you doing by hand: parsing `getComputedStyle`, which returns `color(srgb 0.91 …)`
+  in **0–1 floats** that a naive parser reads as 0–255 and scores as near-black; and walking
+  ancestors past a gradient, which finds the letterbox black behind the office canvas. Both produced
+  confident wrong numbers before the script existed.
 - **New dependencies are guilty until proven light.** Check the gzip cost before importing; prefer
   what's already in the tree. Heavy, route-specific code gets a lazy chunk, never the entry.
 - **Animation/render loops must stop when unseen.** The office scene suspends its rAF loop when the
