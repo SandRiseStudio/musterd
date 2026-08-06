@@ -39,6 +39,44 @@ So the exposure is not the gap between push and PR. It is the gap between **taki
 **publishing** it — and under current habit that gap is the entire authoring session. The open-PR
 rung was not weak here; it was starved, because neither author had put anything in front of it.
 
+### Amendment, 2026-08-05 — the ritual was invisible to its own detector
+
+The Decision below stands and is unchanged. What follows corrects how it is _carried out_, because
+following it literally is what caused the next collision.
+
+On 2026-08-05, **three seats allocated ADR 241 within one hour** — ryder (#703, merged), kimi (#704)
+and izzo (#706). All three ran `pnpm adr:next`. All three got 241. All three were correct at the
+moment they looked.
+
+The mechanism, verified rather than inferred: `scripts/adr-next.ts` read open PRs through
+`adrNumbersInPaths(pr.files)` — **file paths only**. This ADR's ritual is "push the draft PR
+_before_ writing it", and the Decision puts the number in the **title** with a body that "may be
+empty". So a compliant reservation push contains no `docs/decisions/NNN-*.md` for the scan to find.
+Confirmed on ryder's reservation commit `c9ca4e1b`: zero files under `docs/decisions`. For eleven
+minutes PR #703 claimed 241 in a place nothing read.
+
+**The ritual and the detector disagreed about where a claim lives, and the ritual was the one being
+obeyed.** A seat running the right command got a wrong answer — the worst shape of tooling defect,
+because it punishes compliance. This is not the residue the Decision below pre-registered ("two
+authors who run `adr:next` within the same minute"); the collisions here were eleven minutes and
+more apart, with a published draft PR sitting in between.
+
+Two changes, both landed 2026-08-05:
+
+1. **The detector reads the field the ritual designates.** `adr-next` now also matches `ADR NNN` in
+   an open PR's **title** and `adr-NNN` in its **branch name**, unioned with the file-path read.
+   Deliberately a widening rung: a title that merely cites an ADR reserves that number too. Under
+   the allocation rule that costs at most one skipped integer, while an under-reservation costs a
+   collision and a rewrite of every cross-reference. The output says which evidence claimed each
+   number, so a reservation stays distinguishable from a written ADR without opening the PR.
+2. **The reservation push includes a stub at the ADR's path**, and `adr:next` now prints that
+   instruction. The detector stays exact, and the stub is what makes the number legible to a _human_
+   scanning the PR list — the other half of what this ADR was for.
+
+Either alone would have prevented 2026-08-05. Both are kept because they fail in opposite
+directions: the stub depends on habit, and the prose read depends on nobody writing a misleading
+title.
+
 ## Decision
 
 **Push the branch as a draft PR as soon as it carries an ADR number** — before the ADR is written,
@@ -92,6 +130,20 @@ cannot fix, and it settles the question in favour of real reservation.** A recur
 author had not pushed a draft is an adoption problem for this rule, not evidence against it, and
 argues for moving the draft push into tooling — the `adr:next` command itself is the obvious place,
 since it already knows the number was taken.
+
+**The rule fired on 2026-08-05, and the honest reading is that it does _not_ yet settle the question
+(amendment above).** Three seats collided on 241; ryder had published a draft PR and the other two
+had run the tool, which is the shape the rule names. But the published draft was **invisible to the
+scan** — it claimed the number only in its title, which nothing read. So the rung was starved a
+second time, by a different mechanism than ADR 221's, and this was not a fair test of publishing.
+Reservation stays pre-registered and unspent. The clock restarts from 2026-08-05 with both halves of
+the amendment in force: the next collision in which every author ran the tool AND every claim was
+visible to it is the one that buys reservation.
+
+Watch specifically for the counter-metric the widened rung introduces: numbers skipped because a PR
+title merely _cited_ an ADR. Each costs an integer, which is cheap — but a run of them means titles
+are being read too eagerly and the match should tighten to the ritual's exact `ADR NNN: <slug>`
+prefix rather than any mention.
 
 **Experiment.** None. Withholding the rule from an arm would mean deliberately leaving a known
 collision window open on live work to measure it, at a cost paid by whichever author loses the race.

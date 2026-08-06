@@ -1,7 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { adrNumbersInPaths, nextAdrNumber } from '../scripts/adr-next.ts';
+import {
+  adrNumbersInPaths,
+  adrNumbersInPrText,
+  nextAdrNumber,
+  prClaims,
+} from '../scripts/adr-next.ts';
 
 describe('nextAdrNumber (ADR 220)', () => {
   it('is one past the highest claimed number', () => {
@@ -76,5 +81,103 @@ describe('adrNumbersInPaths', () => {
     expect(adrNumbersInPaths(['docs/superpowers/plans/2026-08-03-standing-context.md'])).toEqual(
       [],
     );
+  });
+});
+
+/**
+ * ADR 223 amendment (2026-08-05). The ritual says "push the draft PR BEFORE writing the ADR" and
+ * "the title should name the number" — so a compliant reservation has the number in its TITLE and
+ * no `docs/decisions/` file at all. The detector read file paths only, so following the instruction
+ * literally made the claim invisible. Three seats allocated 241 within an hour.
+ */
+describe('adrNumbersInPrText (ADR 223 amendment) — a reservation is visible before the file exists', () => {
+  it('reads the number from the title shape the ritual itself specifies', () => {
+    // ADR 223's Decision: "The draft PR's title should name the number (`ADR 223: <slug>`)".
+    expect(adrNumbersInPrText('ADR 241: a wake verifies against its own lease', '')).toEqual([241]);
+    expect(adrNumbersInPrText('ADR 241 — a wake verifies against its own lease', '')).toEqual([
+      241,
+    ]);
+    expect(adrNumbersInPrText('adr 241 seat footprint', '')).toEqual([241]);
+  });
+
+  it('reads a number a branch name claims, for a reservation whose title forgot', () => {
+    expect(adrNumbersInPrText('', 'ryder/adr-241-wake-lease')).toEqual([241]);
+    expect(adrNumbersInPrText('', 'feat/adr241-seat-footprint')).toEqual([241]);
+  });
+
+  it('takes both sources at once and de-duplicates', () => {
+    expect(adrNumbersInPrText('ADR 241: wake lease', 'ryder/adr-241-wake-lease')).toEqual([241]);
+  });
+
+  // The cost of reading prose: a title MENTIONING an ADR reserves it too. That is the safe
+  // direction — the reserved set may only widen (ADR 220's gaps-stay-unfilled rule means an
+  // over-reservation costs an integer, while an under-reservation costs a collision).
+  it('over-reserves rather than under-reserves when a title merely cites an ADR', () => {
+    expect(adrNumbersInPrText('fix(cli): the ADR 131 wake path defers', '')).toEqual([131]);
+  });
+
+  it('ignores numbers that are not ADR-shaped', () => {
+    expect(adrNumbersInPrText('fix: bump timeout to 241 seconds', 'izzo/timeout-241')).toEqual([]);
+    expect(adrNumbersInPrText('ADR 1234: not a three-digit number', '')).toEqual([]);
+    expect(adrNumbersInPrText('', 'izzo/handoff-lane-note')).toEqual([]);
+  });
+
+  it('survives a missing title or branch — the fields are optional on the wire', () => {
+    expect(adrNumbersInPrText(undefined, undefined)).toEqual([]);
+  });
+});
+
+/**
+ * The WIRING, not the matchers. The first cut of this change had every matcher test above passing
+ * while the PR scan still ignored prose entirely — mutation proved it: emptying the prose read
+ * killed nothing. A helper nobody calls is not a fix.
+ */
+describe('prClaims — what one open PR reserves, and on what evidence', () => {
+  it('reads a reservation that has no ADR file at all — the case that collided', () => {
+    // ryder's #703, verbatim: implementation files only, number in title and branch.
+    expect(
+      prClaims({
+        number: 703,
+        files: [{ path: 'packages/cli/src/host/wake.ts' }],
+        title: 'ADR 241: a wake verifies against its own lease',
+        headRefName: 'ryder/adr-241-wake-lease',
+      }),
+    ).toEqual([{ number: 241, reserved: true }]);
+  });
+
+  it('marks a written ADR as claimed, not reserved, even when the title names it too', () => {
+    expect(
+      prClaims({
+        number: 706,
+        files: [{ path: 'docs/decisions/243-a-handoff-carries-its-own-why.md' }],
+        title: 'ADR 243 — a handoff carries its own why',
+        headRefName: 'izzo/handoff-lane-note',
+      }),
+    ).toEqual([{ number: 243, reserved: false }]);
+  });
+
+  it('reports both when a PR carries one written ADR and reserves another', () => {
+    expect(
+      prClaims({
+        number: 707,
+        files: [{ path: 'docs/decisions/244-seat-footprint-reap.md' }],
+        title: 'ADR 244 + ADR 242 follow-up',
+        headRefName: 'kimi/footprint',
+      }),
+    ).toEqual([
+      { number: 244, reserved: false },
+      { number: 242, reserved: true },
+    ]);
+  });
+
+  it('claims nothing from a PR that names no ADR anywhere', () => {
+    expect(
+      prClaims({
+        number: 701,
+        files: [{ path: 'packages/web/src/live/Live.css' }],
+        title: 'fix(web): the review sheet gets out of the way',
+        headRefName: 'miley/review-sheet',
+      }),
+    ).toEqual([]);
   });
 });
