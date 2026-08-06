@@ -1,76 +1,75 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { closeSync, mkdirSync, openSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * ADR 239 — foreign paths in the working tree.
+ * ADR 239 — foreign paths in the working tree, as decided by its 2026-08-06 verdict.
  *
  * A worktree is one directory with one HEAD shared by every session running in it, and git has no
  * notion of sessions. When a second session runs `git add -A`, it stages the *first* session's
  * uncommitted work into its own unrelated commit — the 2026-08-05 incident, where an ADR plus a
  * server implementation left one lane and merged under another, and the original PR had to be closed.
  *
- * The posture is **warn, never deny** (ADR 239 decision 1/4), and the reason is measured, not
- * squeamish: the audit ledger shows 54 same-workspace displacements in a month against one observed
- * collision. A gate priced for a daily event defending a monthly one is the gate ADR 150 warns
- * becomes the thing everyone learns to work around.
+ * **Why this lives in the working tree and nowhere cheaper.** The obvious alternative is to ask the
+ * daemon whether another session is live in this folder. It cannot answer. ADR 068 single-active
+ * means the second session EVICTS the first, and `touchAmbientPresence` no-ops while the winner
+ * holds a socket — so the evicted-but-still-working session (ADR 237's whole subject, and precisely
+ * the dangerous actor) is invisible to the coordination layer by construction. The tree is the only
+ * place it can be observed.
  *
- * Everything here is local and disposable (decision 2): the per-session edit index never leaves the
- * machine, writes no audit row, and degrades to *no warning* rather than a false one when it is
- * missing. Nothing in this module writes to the working tree (decision 5) — the caller's only git
- * command is `status`.
+ * **Why the predicate is mtime and not an edit set.** The first implementation asked "is this path
+ * in the set this session wrote", built from Edit/Write tool calls. Its negative space was unbounded:
+ * every write through Bash — a heredoc, `sed -i`, an interpreter's own I/O — was invisible, and
+ * therefore became an accusation. Day one measured four false positives from exactly that, and its
+ * one true positive was overridden by an engineer whom the false ones had taught to dismiss it.
+ *
+ * This asks a question with no unbounded negative space: **was this path last modified before this
+ * session began?** If so it cannot be this session's work — not "was not observed to be", but cannot
+ * be. Certainty replaces inference, the whole false-positive class disappears by construction rather
+ * than by teaching the gate about every write channel, and the tool-call index is gone entirely.
+ *
+ * The accepted cost is recall: a genuinely concurrent writer is no longer caught, which means the
+ * motivating incident itself would not be. That trade is deliberate and is argued in the ADR — a
+ * warning nobody believes prevents nothing, and credibility was the resource in shortest supply.
+ *
+ * Posture is unchanged: **warn, never deny**, and nothing here writes to the working tree.
  */
 
-/** Where the index lives inside a workspace's musterd state dir. One file per session. */
-function indexFile(stateDir: string, sessionId: string): string {
+/** The per-session marker whose mtime IS the session's start. One file, written once, never read
+ *  across sessions. Replaces the append-per-edit index the verdict removed. */
+function markerFile(stateDir: string, sessionId: string): string {
   // The session id comes from the harness envelope; keep it inside the state dir regardless of shape.
   const safe = sessionId.replace(/[^A-Za-z0-9_-]/g, '.');
-  return join(stateDir, `session-edits-${safe}.txt`);
+  return join(stateDir, `session-start-${safe}`);
 }
 
 /**
- * Append a path this session wrote. Called from the gate's write-shaped branch, where the path has
- * already been made repo-relative — so it compares directly against `git status --porcelain`.
+ * Stamp this session's start, if it has not been stamped. Returns true when this call CREATED it —
+ * the caller needs that, because a marker created by the very command being judged carries no
+ * information (everything on disk would predate it) and must stay silent.
  *
- * Append-only and best-effort: a hook must never break the tool call it rides on, so an unwritable
- * or absent state dir is swallowed. The cost of losing a write is a possible false positive, which
- * the warning's wording is built to absorb; the cost of throwing is a wedged Edit.
+ * Best-effort: a hook must never break the tool call it rides on, so an unwritable state dir is
+ * swallowed and simply leaves the session unmarked, which means no warning ever.
  */
-export function recordSessionEdit(stateDir: string, sessionId: string, path: string): void {
-  if (!sessionId || !path) return;
+export function markSessionStart(stateDir: string, sessionId: string): boolean {
+  if (!sessionId) return false;
   try {
     mkdirSync(stateDir, { recursive: true });
-    appendFileSync(indexFile(stateDir, sessionId), `${path}\n`);
+    // `wx` fails if it exists — the atomic "create only" that keeps a resumed session's original start.
+    closeSync(openSync(markerFile(stateDir, sessionId), 'wx'));
+    return true;
   } catch {
-    // best-effort by construction (ADR 150 guard metric)
+    return false;
   }
 }
 
-/**
- * Has this session an index at all? The difference between "wrote nothing" and "the index could not
- * be written" is invisible in the *contents* of an absent file, and the two want opposite answers:
- * the first makes every modified path foreign, the second makes the whole comparison meaningless.
- *
- * Found by exercising the real hook (2026-08-05): with no `.musterd/` to append to, every write was
- * silently dropped and the next `git add -A` reported the session's **own** files as foreign. So the
- * absent index is treated as no-knowledge and warns about nothing — decision 2's "degrades to no
- * warning, never to a false one" is only true because of this check.
- */
-export function hasSessionIndex(stateDir: string, sessionId: string): boolean {
-  return Boolean(sessionId) && existsSync(indexFile(stateDir, sessionId));
-}
-
-/** The set of repo-relative paths this session is known to have written. Unknown session → empty. */
-export function readSessionEdits(stateDir: string, sessionId: string): Set<string> {
+/** When this session began, or undefined if it was never marked (→ no knowledge → no warning). */
+export function sessionStartedAt(stateDir: string, sessionId: string): number | undefined {
+  if (!sessionId) return undefined;
   try {
-    const raw = readFileSync(indexFile(stateDir, sessionId), 'utf8');
-    const out = new Set<string>();
-    for (const line of raw.split('\n')) {
-      const p = line.trim();
-      if (p) out.add(p);
-    }
-    return out;
+    return statSync(markerFile(stateDir, sessionId)).mtimeMs;
   } catch {
-    return new Set();
+    return undefined;
   }
 }
 
@@ -183,41 +182,62 @@ export function isStageShaped(command: string): boolean {
 }
 
 /**
- * The paths a stage-shaped command would sweep in that this session never wrote.
+ * Every path in `git status --porcelain` whose file was last modified BEFORE this session began —
+ * i.e. every path this session provably did not write.
  *
- * Untracked files (`??`) are excluded on purpose (decision 3): a build artifact or scratch file is
- * the overwhelming majority of unknown paths, and staging one is not the incident. What is left is
- * *tracked* paths modified on disk by someone other than this session — precisely the incident's
- * signature.
+ * Untracked paths are included now, and the mtime test is what makes that safe. The first pass
+ * excluded them because build output and scratch files would have swamped the signal; but ignored
+ * files never appear in porcelain at all, and real build output is rewritten constantly so its mtime
+ * is recent. What survives the filter is a leftover from before this session existed — which is
+ * exactly the case that did the most damage on day one (a foreign session's index, untracked,
+ * swept onto main by a `git add -A` that could not be warned about).
+ *
+ * Reads only. Nothing here touches the working tree.
  */
-export function foreignModifiedPaths(porcelain: string, own: Set<string>): string[] {
+export function pathsPredatingSession(startedAt: number): string[] {
+  let porcelain: string;
+  try {
+    porcelain = execFileSync('git', ['status', '--porcelain'], {
+      encoding: 'utf8',
+      timeout: 3_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return []; // not a repo, git missing, or slow — never warn on a guess
+  }
   const out: string[] = [];
   for (const line of porcelain.split('\n')) {
     if (line.length < 4) continue;
-    const status = line.slice(0, 2);
-    if (status === '??' || status === '!!') continue; // untracked / ignored — never foreign
+    if (line.slice(0, 2) === '!!') continue; // ignored (porcelain omits these unless asked, belt-and-braces)
     // A rename prints `old -> new`; the destination is the path that ends up in the commit.
     const raw = line.slice(3);
     const arrow = raw.indexOf(' -> ');
     const path = (arrow >= 0 ? raw.slice(arrow + 4) : raw).trim().replace(/^"|"$/g, '');
-    if (!path || own.has(path) || out.includes(path)) continue;
-    out.push(path);
+    if (!path || out.includes(path)) continue;
+    let mtime: number;
+    try {
+      mtime = statSync(path).mtimeMs;
+    } catch {
+      continue; // deleted, or unreadable — no evidence either way, so say nothing
+    }
+    if (mtime < startedAt) out.push(path);
   }
   return out;
 }
 
 /**
- * The advisory text. Deliberately an observation to check rather than a verdict: the gate cannot see
- * a heredoc or a `sed -i`, so a path this session really did write can still look foreign. Naming
- * the paths is the whole value — the reader can tell in one glance whether they are theirs.
+ * The advisory. It states a certainty rather than a suspicion, and — deliberately — offers no
+ * escape hatch. The first version ended "if you wrote them through a command this gate cannot see,
+ * carry on", and that sentence is how a correct warning got waved through: it was true three times
+ * running, so it was reached for a fourth time when it did not apply. The predicate now guarantees
+ * these paths are not this session's, so there is nothing to excuse them with.
  */
-export function foreignPathWarning(paths: string[], command: string): string {
+export function stalePathWarning(paths: string[], command: string): string {
   const list = paths.map((p) => `  ${p}`).join('\n');
   return (
-    `musterd (ADR 239): \`${command}\` will stage ${paths.length} tracked ` +
-    `file${paths.length === 1 ? '' : 's'} this session did not write:\n${list}\n` +
-    'If another session is working in this folder, staging these takes over its uncommitted work — ' +
-    'stage your own paths explicitly instead. If you wrote them through a command this gate cannot ' +
-    'see (a heredoc, `sed -i`), carry on.'
+    `musterd (ADR 239): \`${command}\` will stage ${paths.length} ` +
+    `file${paths.length === 1 ? '' : 's'} last modified before this session began:\n${list}\n` +
+    "This session did not write them — they are another session's uncommitted work, or a leftover " +
+    'from an earlier one. Staging them takes them over. Stage your own paths explicitly instead.'
   );
 }

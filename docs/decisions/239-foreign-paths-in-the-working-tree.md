@@ -84,6 +84,7 @@ the real repository index, so a future `git add -A` cannot quietly restore them.
 **The reason this is worth an amendment rather than a silent `.gitignore` line:** a gate whose own
 evidence is committable was under-specified, and the next stateful gate will have the same question.
 Local state needs an ignore rule in the same change that creates it.
+
 ### Correction, 2026-08-05: the normalizer answered a different question
 
 The first implementation matched `normalizeCommand(command)`, and gptbot's outcome review declined
@@ -109,19 +110,84 @@ green on the defect; a test can only protect the property its author understood.
 first live warning fired on its author's own `git add -A`, against files written through a python
 heredoc it cannot see — the documented coverage hole, arriving within the hour.
 
+### Verdict, 2026-08-06 — the purpose survives, the instrument does not
+
+This ADR pre-registered its own falsifier: _"a month of warnings that are mostly false positives
+falsifies decision 3 … the honest response is to delete the feature rather than widen it into a
+guess."_ One evening's use, reconciled across three seats, produced:
+
+| outcome                    | n   | what happened                                                             |
+| -------------------------- | --- | ------------------------------------------------------------------------- |
+| false positive             | 4   | writes through a `python3 - <<EOF … open(p,'w')` heredoc, invisible to it |
+| true positive, **ignored** | 1   | correct, and overridden — the caveat had been true three times running    |
+| miss                       | 1   | an untracked foreign index, excluded by decision 3 **by construction**    |
+| collisions prevented       | 0   | —                                                                         |
+
+**Two ways of reading that are both wrong, and it matters which.** Triggering the rate test on day
+one would be moving the goalpost pessimistically — the pre-registration said a _month_, and five
+warnings is not a rate. Waiting a month would be moving it optimistically, because the sample already
+exposed the mechanism the rate test was only ever a proxy for. The proxy is unnecessary once the
+mechanism is visible, and the mechanism is this: **decision 1's predicate has unbounded negative
+space.** "Not in the set this session wrote" is built from Edit/Write tool calls, so every write
+through Bash — a heredoc, `sed -i`, an interpreter's own I/O — is not merely unobserved but converted
+into an accusation. Agents write through Bash constantly. The false positives were not bad luck; they
+were the design working as specified. All four came from that one cause, across three seats, on day
+one.
+
+And the false positives are what destroyed the true one. izzo overrode a correct warning by reaching
+for the "you may have written these through a channel I cannot see" caveat, which did not apply that
+time. A warning that is usually wrong teaches its reader to dismiss it, and it spends that
+credibility on the occasion it is right.
+
+**But the purpose survives, for a reason discovered while looking for a cheaper replacement.** The
+obvious alternative — ask the daemon whether another session is live in this folder — **cannot be
+built.** ADR 068 single-active means the second session _evicts_ the first, and
+`touchAmbientPresence` no-ops while the winner holds a socket, so the evicted-but-still-working
+session — ADR 237's entire subject, and precisely the dangerous actor — is invisible to the
+coordination layer by construction. The working tree is the only place it can be observed. This gate
+is not redundant with a cheaper signal; there is no cheaper signal.
+
+**One error of mine is worth recording, because it is the same error the whole team hit that day.**
+The original lane recommended detecting the _condition_ (two sessions in one workspace) before
+attempting per-file attribution. I overrode that with a measurement: 54 same-workspace displacements
+a month, too common to gate on. But a **displacement** is sequential and benign — one session
+replacing a finished one — while **concurrency** is simultaneous and dangerous, and I had measured
+the first while reasoning about the second. A number that reads as a fact about the system was a fact
+about the instrument. The irony is exact: this ADR is about an instrument that cannot see what it
+reports on, and it was chosen using one.
+
+So decision 1 is replaced rather than deleted, and decision 2 is deleted outright.
+
 ## Decision
 
-**1. Warn on foreign modified paths, at the moment they would be staged.** On a PreToolUse `Bash`
-call whose command is stage-shaped over an implicit path set **in this worktree** (`git add -A`,
-`git add -u`, `git commit -a`), the gate compares `git status --porcelain` against this session's
-recorded edit set and, when modified tracked paths exist that this session never wrote, emits a
-**warn** (`additionalContext`) naming them. Never a deny. The message names the paths and says what
-they are: files changed on disk that this session did not touch, which this command will stage.
+**1. Warn about paths that provably predate this session, at the moment they would be staged.** On a
+PreToolUse `Bash` call whose command is stage-shaped over an implicit path set **in this worktree**
+(`git add -A`, `git add -u`, `git commit -a`), the gate lists `git status --porcelain` and names
+every path whose file was **last modified before this session began**. Warn (`additionalContext`),
+never deny.
 
-The qualifier is the whole of it: a command earns a `git status` **only when the tree that status
-inspects is the tree the command stages**. Three forms are therefore excluded, and the exclusions
-are not conservatism for its own sake — each one was a way the warning could name a file the command
-would leave alone, which is precisely what it promises never to do:
+The change is from a predicate of _inference_ to one of _certainty_. "Was not observed to be written
+by this session" admits everything the gate cannot see; "was last modified before this session
+existed" admits nothing — it is not a claim about what was observed but about what is possible. The
+entire measured false-positive class disappears by construction, without teaching the gate about
+heredocs, `sed -i`, or any future write channel. It also stops being a race the gate can lose as
+agents adopt new tools.
+
+Untracked paths are now **included**, reversing the old decision 3, and the mtime test is what makes
+that safe: ignored files never appear in porcelain, and real build output is rewritten constantly so
+its mtime is recent. What survives the filter is a leftover from before this session existed — which
+is exactly the case that did the most damage and could not previously be seen at all.
+
+**The accepted loss, stated plainly because it is the motivating case.** A genuinely _concurrent_
+writer modifies files during this session, so it is no longer caught — the 2026-08-05 incident that
+prompted this ADR would not fire under the new predicate. Recall is traded for certainty on purpose.
+A warning nobody believes prevents nothing, and the day-one ledger is the evidence: the old predicate
+had the recall and still prevented zero collisions, because it spent its credibility before it was
+right. A test asserts this loss so a future reader cannot mistake it for an oversight.
+
+Scope agreement is unchanged and still governs which commands qualify: a command earns a `git status`
+**only when the tree that status inspects is the tree the command stages**. Three forms are excluded,
+each a way the warning could name a file the command would leave alone:
 
 - **A pathspec.** `git add -A own/` stages only `own/`; status reports the whole tree.
 - **A tree-redirecting global.** `git -C ../main add -A` stages a sibling worktree.
@@ -129,28 +195,40 @@ would leave alone, which is precisely what it promises never to do:
   working directory persists across calls; the hook always runs at the repo root, so the two can
   disagree). Unknown scope is treated as out of scope.
 
+**1a. The warning states a certainty and offers no escape hatch.** The old wording ended "if you
+wrote them through a command this gate cannot see, carry on" — the sentence izzo reached for when
+overriding a correct warning. The predicate now guarantees these paths are not this session's, so
+there is nothing to excuse them with, and the copy says so. A test asserts the caveat's absence.
+
+**~~2. The session's edit set is local, per-session, and disposable.~~ WITHDRAWN by the verdict.**
+The tool-call index is deleted entirely — with it goes the append-per-edit write, the "no index means
+no knowledge" special case, and the class of bug that let the gate's own state be committed
+(amendment above). What replaces it is one empty marker file per session whose **mtime is the session
+start**, created once with `wx` so a resumed session keeps its original start, and never read across
+sessions. A session with no marker has no start time and therefore can never accuse anything; a
+marker created by the very command being judged is treated the same way, since everything on disk
+would predate it.
+
+<details>
+<summary>The withdrawn decision 1 and 2, as shipped 2026-08-05 (kept for the record)</summary>
+
+**1. Warn on foreign modified paths, at the moment they would be staged.** … the gate compares
+`git status --porcelain` against this session's recorded edit set and, when modified **tracked** paths
+exist that this session never wrote, emits a warn naming them.
+
 **2. The session's edit set is local, per-session, and disposable.** Write-shaped calls append their
-repo-relative path to a per-session file under the workspace's musterd state, keyed by the envelope
-`session_id`. It never leaves the machine: no new audit row, no POST, no server schema. This is a
-client-side convenience index, not a ledger — ADR 051's rule that raw paths stay local is preserved,
-and a lost or missing index degrades to no warning, never to a false one.
+repo-relative path to a per-session file keyed by the envelope `session_id`; a lost or missing index
+degrades to no warning, never to a false one.
 
-That last clause is load-bearing and was **not** free. Exercising the real hook found the opposite
-behavior: with no `.musterd/` directory to append to, every write was silently dropped, and the next
-`git add -A` reported the session's _own_ files as foreign — the maximally wrong output, produced by
-the failure path that was supposed to be the safe one. "This session wrote nothing" and "this
-session's writes were never recorded" are indistinguishable from an absent file's contents and want
-opposite answers. So **the absence of an index is treated as no-knowledge, and warns about nothing**;
-only a session with a real index is ever compared. The cost is a genuine coverage hole — a session
-that stages a predecessor's leftovers before writing anything of its own is not warned — and that
-hole is accepted deliberately, because precision is the metric decision 4 hangs on and a warning
-that fires on every fresh session's first commit in a dirty tree would destroy it.
+</details>
 
-**3. Silence on the ambiguous cases, by construction.** Untracked files are **not** warned about
-(a build artifact, a scratch file, a fresh checkout's noise — the false-positive floor is too high
-and `git add -A` staging an untracked file is not the incident). Neither is a path the session
-wrote through a tool the gate cannot see (a heredoc, `sed -i`) — those simply appear foreign, so the
-warning is worded as an observation to check, never as an accusation of error.
+**~~3. Silence on the ambiguous cases, by construction.~~ WITHDRAWN by the verdict**, and it is the
+withdrawal that mattered most. Decision 3 excluded untracked paths because their false-positive floor
+was too high, and the single most damaging event of day one — a foreign session's index, untracked,
+swept onto `main` — was invisible to the gate _because of that exclusion_. The mtime predicate
+removes the reason for the exclusion, so untracked paths are in scope under decision 1. Its second
+half (a path written through a channel the gate cannot see "simply appears foreign") is not softened
+but eliminated: that path is now never named at all.
 
 **4. No enforcement, and the reason is recorded, not deferred.** No branch invariant, no deny on
 commit or checkout. The candidate — "a seat commits only on the branch its claimed lane declares" —
@@ -160,9 +238,10 @@ outnumbers the harmful one by ~54:1, and a gate that fires mostly on correct wor
 bypass. If the warning fires and is repeatedly _right_, that is the evidence the gate needs; the
 Eval below is written to collect exactly that.
 
-**5. Nothing touches the working tree.** The gate reads `git status` and writes only its own index
-file. It never stashes, moves, resets or reformats another session's work — the failure mode this
-repo has already been bitten by once, and for which there is no reflog.
+**5. Nothing touches the working tree.** The gate reads `git status` and `stat`s the paths it reports;
+the only thing it writes is its own empty session marker. It never stashes, moves, resets or
+reformats another session's work — the failure mode this repo has already been bitten by once, and
+for which there is no reflog.
 
 **Out of scope:** the seat layer (ADR 237); the push-to-the-wrong-branch confusion, which is a
 consequence of the same collision and is addressed by not having the collision; multi-session
@@ -170,66 +249,78 @@ detection on the roster, which the ledger already supports and which no surface 
 
 ## Consequences
 
-- The common case pays nothing: a `git add -A` whose modified paths are all this session's own
+- The common case pays nothing: a `git add -A` in a tree whose changes are all this session's own
   produces no output, and non-`git` Bash calls return before any `git status` runs.
-- The gate gains its first _stateful_ behavior (the per-session index). It is bounded — one small
-  file per session in the workspace's state dir, written append-only, never read across sessions.
-- A session that writes files outside the gate's view (heredoc, `sed -i`, a subagent's own writes
-  under a different `agent_id` but the same `session_id` — identical by construction, ADR 163) will
-  see those paths reported as foreign. Accepted: the wording makes a false positive cheap, and
-  decision 3 keeps the loudest source (untracked files) out entirely.
+- **The false-positive class is gone by construction, not by coverage.** No future write channel —
+  a new tool, a new interpreter, a subagent writing under the same `session_id` (identical by
+  construction, ADR 163) — can reintroduce it, because the gate no longer asks what wrote a file.
+  This is the whole point of the verdict: the old design had to keep up with how agents write, and
+  this one does not.
+- **The gate no longer knows what this session edited, and nothing should ask it to.** The tool-call
+  index is gone; what remains is one empty marker file per session. That also removes the class of
+  bug in the amendment above — a marker carries a session id in its filename and nothing else, so
+  committing one leaks no edit history.
+- **Recall is materially lower and the motivating incident is now out of scope.** A concurrent writer
+  is not caught. This is the cost of the trade and is asserted by a test rather than left to memory.
+  If concurrent-writer detection is ever wanted, it needs an instrument that can see a session the
+  daemon cannot (see the verdict), and it should be argued on its own evidence — not smuggled back in
+  by widening this predicate, which is how the first version failed.
 - Warn is best-effort by construction (ADR 150): a Claude Code build that ignores `additionalContext`
-  proceeds silently. Unlike the ADR 150 gate, there is **no** server-side audit row backing it, so a
-  build that drops the surface drops the whole signal. That is the price of decision 2, and it is
-  why the Eval below measures from the local index rather than the ledger.
+  proceeds silently, and there is no server-side audit row backing it. **That absence is now itself a
+  finding**: the day-one ledger had to be reconstructed from three seats' status messages because the
+  feature recorded nothing about its own firings. A gate that cannot be evaluated cannot be defended,
+  and the next stateful gate should decide its evidence trail in the same change that creates it.
 
 ## Observability & Evaluation
 
-**Traces.** None added server-side, deliberately (decision 2). The signal is the warning text in the
-model's context, and the per-session index on disk. The already-existing `claim.superseded` rows
-(ADR 237 decision 1) remain the ledger-side record of _windows_; this ADR adds no counterpart for
-collisions, because a collision is a client-local observation about paths that must not leave the
-machine.
+**Traces.** None added server-side, deliberately (raw paths stay local, ADR 051). The signal is the
+warning text in the model's context. The existing `claim.superseded` rows (ADR 237) remain the
+ledger-side record of _windows_. See the last consequence above: the lack of any firing record is a
+known, named weakness of this design, not an oversight.
 
-**Eval.** Dataset: the incident above, reduced to a fixture — a repo where session A's path is
-modified and absent from session B's index. Baseline: today the gate emits nothing on `git add -A`
-in that fixture. Post-ADR it names `a-work.txt` and only `a-work.txt`. Verified by **mutation**, not
-by green: invert the set difference and the test must fail.
+**Eval.** The dataset is now the day-one ledger itself — six real outcomes, each a fixture in
+`workingTree.predates.test.ts`, and the predicate is judged on all six rather than on the ones that
+flatter it. Baseline (old predicate): 4 false positives, 1 true positive overridden, 1 miss. Under
+the new predicate the four false positives are silent, the true positive still fires, and the miss
+now fires — with the concurrent-writer case newly silent, asserted as the accepted loss.
 
-**Experiment.** None planned. The measurement that mattered — window frequency vs. collision
-frequency — is already done (54 vs 1, above) and is what selected the warn posture over the gate.
+**Experiment.** None planned. The measurement that selected this design is in the verdict; the one
+that would have been needed to keep the old one (does teaching the gate about every write channel
+converge?) is unanswerable in principle, which is why it was not attempted.
 
-- **Precision is the metric that decides decision 4.** Every warning is either right (foreign paths
-  really belonged to another session) or wrong (the session wrote them unseen). The claim to test
-  over the next month: warnings fire rarely, and when they fire they are right. **A month with zero
-  warnings falsifies the lane's premise** — the incident was a one-off and even this should be
-  removed. **A month of warnings that are mostly false positives falsifies decision 3** — the
-  gate's view of "this session's writes" is too narrow to be useful, and the honest response is to
-  delete the feature rather than widen it into a guess.
-- **The no-knowledge rule has its own falsifier:** a session with no index must warn about nothing,
-  even in a dirty tree. Asserted directly; without it the first `git add -A` of every fresh session
-  is a false accusation, which is what the live exercise actually produced before the rule existed.
-- **Scope agreement is the invariant behind every warning** (the correction above): for any command
-  the matcher accepts, the set `git status` reports must equal the set the command would stage. The
-  falsifier is a matched command whose staged set is narrower — a pathspec, a `-C`/`--git-dir`/
-  `--work-tree` redirect, or a cwd-relative `.` — and each has a test asserting **non**-match. This
-  matters more than a normal regression because a failure here is _silent_: it produces a plausible
-  warning about the wrong files, not an error anyone would notice.
+- **Certainty is the invariant, and its falsifier is any named path a session could have written.**
+  A warning must name only paths whose mtime predates the session marker. If a warning ever names a
+  path modified after that instant, the predicate has been widened back into an inference and the
+  verdict has been reversed by accident. Asserted directly, and by mutation.
+- **The accepted loss must stay lost.** A test asserts that a concurrent writer produces **no**
+  warning. If someone "fixes" that test to make it warn, they have reintroduced the false-positive
+  class this verdict removed — the test says so in its own comment, because the failure mode is a
+  well-meaning future reader, not a bug.
+- **No-knowledge beats a guess, twice over:** a session with no marker, and a session whose marker
+  was created by the very command being judged, must both warn about nothing. The second case is the
+  subtle one — a marker stamped microseconds ago makes the entire tree "predate" the session — and
+  the live exercise of the previous design produced exactly that failure in its own form.
+- **Scope agreement** (the 2026-08-05 correction) is unchanged and still governs which commands
+  qualify: for any command the matcher accepts, the set `git status` reports must equal the set the
+  command would stage. The falsifier is a matched command whose staged set is narrower — a pathspec,
+  a `-C`/`--git-dir`/`--work-tree` redirect, or a cwd-relative `.`. A failure here is _silent_: a
+  plausible warning about the wrong files, not an error anyone would notice.
 
-  Mutation testing then said something the green suite could not, and it is recorded rather than
-  tidied away. Of the matcher's rules, four are load-bearing — a bare token means a pathspec, the
-  attached `--git-dir=`/`--work-tree=` forms, the env-prefix lift, and a value-taking flag consuming
-  its value — and each has a killed mutant. **Three are redundant**: the separated `-C`/`--git-dir`
-  forms, the `--` separator, and any special case for `.` all reduce to the bare-token rule or to
-  the subcommand check, and their mutants survive. So the honest statement of the invariant is that
-  it rests on _one_ rule, with the rest kept as intent. A future edit that weakens the bare-token
-  rule will not be caught by the checks that appear to guard the same property — which is exactly
-  the shape of the defect this correction exists to repair, and worth knowing before it recurs.
+  Mutation testing said something the green suite could not, and it is recorded rather than tidied
+  away. Of the matcher's rules, four are load-bearing — a bare token means a pathspec, the attached
+  `--git-dir=`/`--work-tree=` forms, the env-prefix lift, and a value-taking flag consuming its value
+  — and each has a killed mutant. **Three are redundant**: the separated `-C`/`--git-dir` forms, the
+  `--` separator, and any special case for `.` all reduce to the bare-token rule or the subcommand
+  check, and their mutants survive. The honest statement is that the invariant rests on _one_ rule,
+  with the rest kept as intent. A future edit that weakens the bare-token rule will not be caught by
+  the checks that appear to guard the same property.
 
-- **The cost claim:** a non-`git` Bash call must not invoke `git status`. Asserted by a unit test on
-  the command matcher, so the "common case pays nothing" consequence has a falsifier.
-- **The no-touch invariant (decision 5):** a test asserting the gate path issues no git command that
-  can write — `status` only. Mutation: swap in a writing command and the test must fail.
-- **What would falsify decision 1's posture:** a warning that blocks or delays a correct commit. The
-  emitter is `additionalContext`, which cannot deny; if a future Claude Code makes that surface
-  blocking, this ADR's posture claim is void and the decision needs re-taking.
+- **What would falsify the posture:** a warning that blocks or delays a correct commit. The emitter is
+  `additionalContext`, which cannot deny; if a future Claude Code makes that surface blocking, this
+  ADR's posture claim is void and the decision needs re-taking.
+- **What would falsify the whole feature, restated post-verdict.** The old rate test is spent — it was
+  a proxy for an unbounded negative space, and that space is now bounded. The replacement: **a month
+  in which the warning never fires, or fires only on paths a reader shrugs at, means the harm it
+  guards is not occurring and it should be deleted outright.** There is no third revision. A gate
+  that has been redesigned once already and still cannot show a prevented collision is a gate whose
+  premise, not whose implementation, is wrong.
