@@ -154,6 +154,31 @@ to watch is a de-attestation rate that stays flat while attestations rise — th
 resolved a model but the row was still born null, which points at the ambient path's row identity
 rather than at the ladder.
 
+**First live reading (2026-08-05 18:31, added after the daemon picked up this ADR).** The PR said
+"not verified live", because the daemon was pinned on a pre-246 build and no ambient touch could
+exercise the change. It has since bounced, and the measurement is now taken rather than promised:
+
+| when                       | seat     | kind    | model           | epoch  |
+| -------------------------- | -------- | ------- | --------------- | ------ |
+| 17:47 — **before** the fix | miley    | ambient | `(null)`        | `null` |
+| 17:47 — **before** the fix | wanderer | ambient | `(null)`        | `null` |
+| 18:31 — **after** the fix  | dolly    | ambient | `claude-opus-5` | `null` |
+
+The `epoch: null` in all three rows is what makes this a like-for-like comparison rather than a
+hopeful one: it is the fingerprint of the HTTP ambient path (no `x-musterd-epoch` header exists), so
+the third row is the _same_ code path as the first two, now attesting. Half 1 is confirmed in
+production.
+
+Half 2 is **not** confirmed by this reading and the distinction matters: zero de-attestation rows
+exist, which is what half 1 working looks like, and is indistinguishable at this sample size from
+half 2 never firing. It is proven by unit test and by mutation, not yet by production. What would
+confirm it is a seat whose harness genuinely cannot attest (ADR 158: Codex) taking an occupancy
+after an attested one — and the first such row should be checked by hand rather than assumed.
+
+One methodological note for whoever re-runs this: **the before-rows cannot be re-read.** Presence
+rows are deleted on detach, so the 17:47 control exists only because it was captured live during the
+investigation. A comparison of this kind has to be taken before the fix ships or not at all.
+
 **Experiment.** None. An arm without the fix is an arm where the review pool silently shrinks and no
 artefact records it, which corrupts the ADR 056 diversity conclusions at the source — the same reason
 ADR 241 declined an arm. The discriminating evidence was gathered before the change instead: the live
