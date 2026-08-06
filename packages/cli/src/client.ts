@@ -104,6 +104,17 @@ export interface HttpClientOpts {
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
+   * What this client should attest as its model (ADR 246), already resolved through the full
+   * ADR 158 ladder — observed > env > binding — by the layer that holds the binding.
+   *
+   * The client deliberately does NOT resolve this itself. It is a transport, constructed in a dozen
+   * places (tests, the host loop, `init` before a binding exists), and having it read
+   * `findBinding(process.cwd())` would make every one of those attest from an ambient cwd — the
+   * ADR 143 hazard. Absent ⇒ fall back to the env declaration alone, which is the pre-244 behaviour
+   * and correct for callers that have no binding to consult.
+   */
+  model?: string;
+  /**
    * Suppress the ambient presence touch (ADR 057) for this client's requests via `x-musterd-no-touch`.
    * For background pollers that read on a member's behalf — the notifier — which must not make an
    * away/idle human look present and so silence the very notification they were owed.
@@ -148,9 +159,17 @@ export class HttpClient {
       // fire-and-exit CLI sends keep stamping after the claim presence expires (issue #172).
       // ADR 121: only agent keys (mskey_) forward the header — a human credential (mscr_) is not a
       // harness, so MUSTERD_MODEL in the human's shell must not stamp their occupancy.
+      // ADR 246: the caller's resolved attestation first, the env declaration second. The env is the
+      // WEAKEST tier of the ADR 158 ladder and used to be the only one the CLI could see, so a hook
+      // one-shot in a workspace whose harness had been observed seconds earlier attested nothing —
+      // and an unattested ambient row, being the newest non-held presence, silently drops the seat
+      // out of the ADR 188 review pool.
+      //
+      // The ADR 121 credential gate is unchanged and outranks all of it: resolving a model more
+      // thoroughly must not become a new way for a human shell to stamp an occupancy.
       const attestedModel =
         this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
-          ? resolveAttestedModel(process.env)
+          ? (this.opts.model ?? resolveAttestedModel(process.env))
           : undefined;
       // ADR 131 §6 (increment 5): provenance rides the same gate as model — a wake-spawned
       // session's hook/one-shot CLI commands inherit MUSTERD_PROVENANCE from the actuator, so
