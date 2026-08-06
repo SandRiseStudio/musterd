@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SESSION_DIGEST_LEN, sessionDigest } from './digest.js';
 
-describe('sessionDigest (ADR 131 §5 amendment — correlation without disclosure)', () => {
+describe('sessionDigest (ADR 131 Consequences, follow-up note 2026-08-05 — correlation without disclosure)', () => {
   const key = 'agent-key-abc';
 
   it('is stable for one session id, so a captured/ended pair can be joined', () => {

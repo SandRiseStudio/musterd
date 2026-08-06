@@ -147,36 +147,10 @@ hook's stdin — musterd currently discards it. Increment 4 provisions a Session
 new SessionEnd hook (markered one-liners, the ADR 088 pattern, covered by `init --check` and
 uninstall) piping stdin to **`musterd session start|end --stdin`**, which writes
 `binding.session {harness, id, started_at}` and pushes the _resumable attestation_ (harness class
-plus, since the 2026-08-05 amendment below, a one-way correlation digest — never the id, never the
-path) straight to the daemon, presence-neutral (ADR 057) and never
+only — never the id, never the path) straight to the daemon, presence-neutral (ADR 057) and never
 claiming (ADR 108). The MCP adapter never reads `binding.session`, so there is no hook-vs-adapter
 boot race to lose. SessionEnd is advisory (it never fires on a crash); resumability never depends
 on it.
-
-_Amendment (2026-08-05, lane 01KZAEGF2K): **the attestation now carries a correlation digest.**
-"Harness class only" was too strict by one field, and the cost was measured, not theorised. On
-2026-08-05 the ledger held 48 same-seat `residency.session_captured` → `residency.session_ended`
-pairs inside ten seconds, spread across all seven live seats, one of which demoted a seat that was
-mid-command. The rows name a seat but not a session, so **one session flapping and two short-lived
-sessions of the same seat produce byte-identical evidence** — and which one it is decides the fix
-entirely (a false `ended` from the harness, versus real churn the ladder should tolerate). An event
-that cannot name its own subject cannot be investigated; this is ADR 237 and ADR 246's shape a third
-time._
-
-_The fix keeps the rule and drops only the ambiguity. `SessionAttestationBodySchema` gains
-`session_digest`: a **keyed, truncated HMAC** of the session id under the workspace's own agent key
-(`packages/cli/src/session/digest.ts`). Equal across one session's start and end, different across
-two sessions, irreversible — and keyed rather than a bare hash **on purpose**, so the guarantee rests
-on the construction rather than on every future harness choosing a high-entropy id space; the daemon
-holds only the key's hash and so cannot even confirm a guessed id. The id and the transcript path
-still have no field on the wire and still live only in the gitignored 0600 `binding.json`. The field
-is optional: an older CLI omits it and its rows degrade to exactly what they recorded before.
-Correlation is team-scoped and resets on key rotation, which is acceptable for a signal read over
-seconds and minutes._
-
-_Deliberately NOT done in the same change: the ladder is untouched. If the harness is emitting a
-false `ended`, teaching ADR 164 to tolerate it hides the defect and leaves the ledger wrong. The
-digest is the instrument; the diagnosis comes after it has run._
 
 **Fresh-first degrade doctrine.** The durable identity is the **seat** — its memory (ADR 093),
 its lanes, its worktree, its primer. The session id is continuity sugar. A wake therefore never
@@ -281,6 +255,33 @@ Roster label: `offline · wakeable`.
   universal pre-mint at enrollment, wake-chain depth derivation, fork-on-wake knob, office
   choreography for `wake` provenance, multi-host failover policy, notify/host convergence into
   one resident client process.
+
+**Follow-up note (2026-08-05, lane 01KZAEGF2K, PR #733): the attestation now carries a correlation
+digest.** _§5's "harness class only" is unchanged as a decision — the id and the transcript path
+still have no field on the wire. What follows records what shipped on top of it, and why.
+"Harness class only" was too strict by one field, and the cost was measured, not theorised. On
+2026-08-05 the ledger held 48 same-seat `residency.session_captured` → `residency.session_ended`
+pairs inside ten seconds, spread across all seven live seats, one of which demoted a seat that was
+mid-command. The rows name a seat but not a session, so **one session flapping and two short-lived
+sessions of the same seat produce byte-identical evidence** — and which one it is decides the fix
+entirely (a false `ended` from the harness, versus real churn the ladder should tolerate). An event
+that cannot name its own subject cannot be investigated; this is ADR 237 and ADR 246's shape a third
+time._
+
+_The fix keeps the rule and drops only the ambiguity. `SessionAttestationBodySchema` gains
+`session_digest`: a **keyed, truncated HMAC** of the session id under the workspace's own agent key
+(`packages/cli/src/session/digest.ts`). Equal across one session's start and end, different across
+two sessions, irreversible — and keyed rather than a bare hash **on purpose**, so the guarantee rests
+on the construction rather than on every future harness choosing a high-entropy id space; the daemon
+holds only the key's hash and so cannot even confirm a guessed id. The id and the transcript path
+still have no field on the wire and still live only in the gitignored 0600 `binding.json`. The field
+is optional: an older CLI omits it and its rows degrade to exactly what they recorded before.
+Correlation is team-scoped and resets on key rotation, which is acceptable for a signal read over
+seconds and minutes._
+
+_Deliberately NOT done in the same change: the ladder is untouched. If the harness is emitting a
+false `ended`, teaching ADR 164 to tolerate it hides the defect and leaves the ledger wrong. The
+digest is the instrument; the diagnosis comes after it has run._
 
 ## Observability & Evaluation
 

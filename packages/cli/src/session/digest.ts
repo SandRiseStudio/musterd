@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 
 /**
- * The session correlation digest (ADR 131 §5, amended 2026-08-05).
+ * The session correlation digest (ADR 131, Consequences follow-up note 2026-08-05).
  *
  * §5's rule is that the daemon learns harness CLASS and nothing else about a session — never the
  * id, never the transcript path. That rule cost us a real investigation: `residency.session_captured`

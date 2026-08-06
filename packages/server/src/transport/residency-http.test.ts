@@ -89,7 +89,7 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     });
   });
 
-  // ADR 131 §5 amendment: the row must be able to name its own subject. Two events carrying the
+  // ADR 131 Consequences, follow-up note 2026-08-05: the row must be able to name its own subject. Two events carrying the
   // same digest are one session; the same two without it are indistinguishable from two sessions,
   // which is the ambiguity that made 48 same-seat captured→ended pairs unreadable on 2026-08-05.
   it('carries the correlation digest through to the audit row, and never anything id-shaped', async () => {
