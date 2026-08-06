@@ -153,6 +153,50 @@ describe('POST /claim — occupancy', () => {
     expect(actions).toContain('occupancy.model_attested');
   });
 
+  /**
+   * ADR 246, at the wire. A seat that HAS been attesting and then claims attesting nothing has left
+   * the ADR 188 review pool, and until now that produced no ledger row of any kind — the claim path
+   * audited only the attested case, so the loss was invisible even in hindsight. `new: null` is the
+   * shape `review.ts` has always read and nothing had ever written.
+   */
+  it('a claim attesting nothing after an attested one records the de-attestation (ADR 246)', async () => {
+    const grant = await grantFor('Ada');
+    await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'cli',
+      model: 'claude-opus-4-8',
+    });
+    const second = await grantFor('Ada');
+    const r = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant: second,
+      surface: 'cli', // no model — the harness attests nothing this time
+    });
+    expect(r.status).toBe(200);
+
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const drops = listAudit(server.db, team.id)
+      .filter((a) => a.action === 'occupancy.model_attested')
+      .map((a) => JSON.parse(a.detail ?? '{}') as { old: unknown; new: unknown });
+    expect(drops).toContainEqual(
+      expect.objectContaining({ old: 'claude-opus-4-8', new: null, source: 'claim' }),
+    );
+  });
+
+  it('a seat that never attested claims silently — no de-attestation row (ADR 246)', async () => {
+    // `unknown` from the start is not a loss. Emitting here would bury the real drops under rows
+    // about harnesses that simply cannot attest yet (ADR 158: Codex, today).
+    const grant = await grantFor('Ada');
+    await post('/teams/dawn/claim', { key: agentKey, target: { seat: 'Ada' }, grant, surface: 'cli' });
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    expect(
+      listAudit(server.db, team.id).filter((a) => a.action === 'occupancy.model_attested'),
+    ).toHaveLength(0);
+  });
+
   it('lets a human self-authorize onto their own seat via credential', async () => {
     const r = await post('/teams/dawn/claim', {
       key: nickCred,

@@ -1,6 +1,7 @@
 import type { Provenance, PresenceStatus, Surface } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
+import { appendAudit } from './audit.js';
 import type { MemberRow, PresenceRow } from './rows.js';
 
 export interface PresenceSummary {
@@ -117,6 +118,86 @@ export function clearPresenceById(db: Database, presenceId: string): void {
  */
 export function clearOrphanPresence(db: Database, memberId: string): void {
   db.prepare('DELETE FROM presence WHERE member_id = ? AND conn_id IS NULL').run(memberId);
+}
+
+/**
+ * Record that an occupancy was born attesting NOTHING while this member's previous occupancy
+ * attested a model (ADR 246) — the de-attestation row. Returns whether one was written.
+ *
+ * WHY THIS EXISTS. Attestation is sticky WITHIN an occupancy (`model = COALESCE(?, model)` above,
+ * and the claim path refuses to clear it) and resets ACROSS one. Both halves are right on their own
+ * and the asymmetry is the hole: a new occupancy that attests nothing has no old→new transition to
+ * audit, because it was born null — so the seat drops out of the ADR 188 review pool and the ledger
+ * cannot say when, or that it happened at all. Measured 2026-08-05: 1214 `occupancy.model_attested`
+ * rows, none carrying `new: null`, while `review.ts` has always READ that shape.
+ *
+ * `new: null` is load-bearing rather than incidental. The durable-attestation reader skips these
+ * rows ("a de-attestation proves nothing"), so recording the loss can never become a route for a
+ * dead session's model to certify a live review — the thing ADR 187 exists to forbid. This row is a
+ * record OF a loss, never a claim about what is running.
+ *
+ * A seat that has NEVER attested drops nothing: `unknown` from the start is a different fact from
+ * "was X, now nothing", and only the second is an event. Without that guard the ledger fills with
+ * rows about harnesses that simply cannot attest yet (ADR 158: Codex, today).
+ *
+ * CONTRACT: callers emit only on a genuinely NEW occupancy — this does not dedupe, because an
+ * ambient touch that reuses its row never reaches here and a claim is a new occupancy by definition.
+ */
+/**
+ * Write an occupancy's opening attestation entry — the model it attests, or the fact that it
+ * attests nothing (ADR 246). Every claim path calls this and none of them decide the rule
+ * themselves.
+ *
+ * It exists as one function because the `if (model)` branch was duplicated across five claim sites
+ * (the WS occupy, three HTTP claim outcomes, and the grant-approval attach), each of which recorded
+ * the attested case and silently dropped the unattested one. Five copies of a predicate is how the
+ * unattested half stayed invisible for as long as it did — fixing four of five would have left a
+ * ledger that is right except where it isn't, which is worse than one that is uniformly incomplete.
+ */
+export function recordClaimAttestation(
+  db: Database,
+  teamId: string,
+  member: { id: string; name: string },
+  occupancyId: string,
+  model: string | null | undefined,
+): void {
+  if (model) {
+    // ADR 101: the initial attestation is the first entry in the occupancy's model history — the
+    // audit log IS the switch history (old → new, source), never a table.
+    appendAudit(db, teamId, {
+      actor: member.name,
+      action: 'occupancy.model_attested',
+      target: member.name,
+      result: 'allow',
+      detail: { occupancy: occupancyId, old: null, new: model, source: 'claim' },
+    });
+    return;
+  }
+  recordUnattestedOccupancy(db, teamId, member, occupancyId, 'claim');
+}
+
+export function recordUnattestedOccupancy(
+  db: Database,
+  teamId: string,
+  member: { id: string; name: string },
+  occupancyId: string,
+  source: 'claim' | 'ambient',
+): boolean {
+  const prior = db
+    .prepare<
+      [string, string],
+      { model: string | null }
+    >('SELECT model FROM presence WHERE member_id = ? AND id != ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+    .get(member.id, occupancyId);
+  if (!prior?.model) return false;
+  appendAudit(db, teamId, {
+    actor: member.name,
+    action: 'occupancy.model_attested',
+    target: member.name,
+    result: 'allow',
+    detail: { occupancy: occupancyId, old: prior.model, new: null, source },
+  });
+  return true;
 }
 
 /** Does this member currently hold a *live* (connected, non-held) presence? Drives agent single-active. */

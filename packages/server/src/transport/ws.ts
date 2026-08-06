@@ -27,6 +27,7 @@ import {
 import { memoryEnvelope } from '../store/memory.js';
 import {
   attach,
+  recordClaimAttestation,
   clearOrphanPresence,
   clearPresenceById,
   hasLivePresence,
@@ -639,15 +640,11 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           }
           // ADR 101: the initial attestation is the first entry in the occupancy's model history —
           // the audit log IS the switch history (old → new, source), never a table.
-          if (frame.model) {
-            appendAudit(ctx.db, team.id, {
-              actor: targetMember.name,
-              action: 'occupancy.model_attested',
-              target: targetMember.name,
-              result: 'allow',
-              detail: { occupancy: presence.id, old: null, new: frame.model, source: 'claim' },
-            });
-          }
+          // ADR 101 + ADR 246: the occupancy's opening entry, whichever it is. A claim that attests
+          // NOTHING is not a non-event — if this seat's previous occupancy attested a model, the
+          // seat has just left the ADR 188 pool, and before ADR 246 the ledger could not say so
+          // even in hindsight, because an occupancy born null has no old→new transition to audit.
+          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, frame.model);
           log.info({
             msg: 'ws_claim_occupied',
             team: team.slug,

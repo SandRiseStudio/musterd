@@ -4,6 +4,8 @@ import {
   BINDING_DIR,
   BINDING_FILE,
   bindingSeat,
+  resolveAttestation,
+  resolveAttestedModel,
   type MemberKind,
   type MemberSummary,
 } from '@musterd/protocol';
@@ -104,7 +106,34 @@ function gather(flags: Record<string, string | boolean>) {
   }
 
   const team = flagStr(flags, 'team') ?? envId?.team ?? binding?.team ?? config.current;
-  return { config, server, sources, team, asName: flagStr(flags, 'as') };
+  return { config, server, sources, team, asName: flagStr(flags, 'as'), model: attestedModel(binding, env) };
+}
+
+/**
+ * What a CLI one-shot should attest as its model (ADR 246) — the SAME ADR 158 ladder the MCP
+ * adapter uses (`observed > env > binding`), resolved here because this is where the binding is
+ * already in hand.
+ *
+ * Before this, the CLI attested from `MUSTERD_MODEL`/`ANTHROPIC_MODEL` alone. That is the ladder's
+ * weakest tier and the one a hook process is least likely to have, so an ambient touch from a
+ * SessionStart hook routinely attested nothing while the harness's own observation sat in
+ * `binding.model_observed`, seconds old. An unattested ambient row is the newest non-held presence,
+ * so `latestAttestedModel` reads its null and the seat silently leaves the ADR 188 pool.
+ *
+ * No freshness bound on the observation, deliberately and consistently with the adapter, which
+ * reads `model_observed` unconditionally: ADR 158's never-erase rule already governs how an
+ * observation ages, and inventing a second, CLI-only staleness rule here would let the two surfaces
+ * disagree about the same seat — which is the whole thing the shared resolver exists to prevent.
+ */
+export function attestedModel(
+  binding: ReturnType<typeof findBinding>,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
+  return resolveAttestation({
+    observed: binding?.model_observed,
+    env: resolveAttestedModel(env),
+    binding: binding?.model,
+  }).model;
 }
 
 /**
@@ -114,7 +143,7 @@ function gather(flags: Record<string, string | boolean>) {
  * from silently acting as a real teammate.
  */
 export function resolve(flags: Record<string, string | boolean>): Resolved {
-  const { config, server, sources, team, asName } = gather(flags);
+  const { config, server, sources, team, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -148,6 +177,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
       key: match.identity.key,
       seat: match.identity.name,
       surface: match.identity.surface,
+      ...(model !== undefined ? { model } : {}),
     }),
   };
 }
@@ -159,7 +189,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
  * refuses on a missing/ambient identity — `status` must still print the (auth-free) roster anywhere.
  */
 export function resolveRead(flags: Record<string, string | boolean>): ResolvedRead {
-  const { config, server, sources, team, asName } = gather(flags);
+  const { config, server, sources, team, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -181,7 +211,13 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
     server,
     http: new HttpClient(
       identity
-        ? { server, key: identity.key, seat: identity.name, surface: identity.surface }
+        ? {
+            server,
+            key: identity.key,
+            seat: identity.name,
+            surface: identity.surface,
+            ...(model !== undefined ? { model } : {}),
+          }
         : { server },
     ),
     explicit,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
+import { listAudit } from './audit.js';
 import { getCursor, setCursor } from './cursors.js';
 import { getLane, openLane } from './lanes.js';
 import {
@@ -17,6 +18,7 @@ import {
   reapExcessIdleObservers,
   reapStaleObservers,
 } from './members.js';
+import { listAudit } from './audit.js';
 import { insertMessage, latestStatusUpdate, listInbox, listTeamMessages } from './messages.js';
 import {
   attach,
@@ -31,6 +33,7 @@ import {
   listReclaimableMemberIds,
   presenceById,
   reapStale,
+  recordUnattestedOccupancy,
   release,
   touchAmbientPresence,
 } from './presence.js';
@@ -507,6 +510,67 @@ describe('presence', () => {
     const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
     attach(db, bo.row.id, 'claude-code', 'c2');
     expect(leaseOf('Bo')).toBeNull();
+  });
+
+  /**
+   * ADR 246. The gap this closes, measured live on 2026-08-05: seat miley's session released
+   * cleanly (ADR 010 leaves the row HELD, attestation intact), a hook one-shot touched fifteen
+   * seconds later, `touchAmbientPresence`'s reuse query skipped the held row because it requires
+   * `held_until IS NULL`, and so a BRAND NEW row was attached attesting nothing. `latestAttestedModel`
+   * reads the newest non-held row and returns its null, so she left the ADR 188 review pool — and
+   * the audit table had no row anywhere saying it happened. 1214 `occupancy.model_attested` rows
+   * existed at the time and not one carried `new: null`, though `review.ts` has always read that
+   * shape ("a de-attestation proves nothing").
+   */
+  it('records a de-attestation when an occupancy is born unattested after an attested one (ADR 246)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const attested = attach(db, ada.row.id, 'claude-code', 'c1', { model: 'claude-fable-5' });
+    release(db, attested.id, 45_000); // clean disconnect: held, attestation intact
+
+    const born = attach(db, ada.row.id, 'cli', null); // the hook's ambient touch — attests nothing
+    expect(recordUnattestedOccupancy(db, team.id, ada.row, born.id, 'ambient')).toBe(true);
+
+    const rows = listAudit(db, team.id, { limit: 10 }).filter(
+      (r) => r.action === 'occupancy.model_attested',
+    );
+    expect(rows).toHaveLength(1);
+    const detail = JSON.parse(rows[0]!.detail ?? '{}') as Record<string, unknown>;
+    expect(detail).toMatchObject({
+      occupancy: born.id,
+      old: 'claude-fable-5',
+      new: null,
+      source: 'ambient',
+    });
+  });
+
+  it('a seat that never attested drops nothing — silence is not a de-attestation (ADR 246)', () => {
+    // The guard on the guard. `unknown` from the start is a different fact from `was X, now
+    // nothing`, and only the second is an event. Emitting for the first would fill the ledger with
+    // rows about seats that have simply never been able to attest (ADR 158: Codex, today).
+    const { db, team } = freshTeam();
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    const born = attach(db, bo.row.id, 'cli', null);
+    expect(recordUnattestedOccupancy(db, team.id, bo.row, born.id, 'claim')).toBe(false);
+    expect(listAudit(db, team.id, { limit: 10 })).toHaveLength(0);
+  });
+
+  it('the de-attestation never resurrects the old model as evidence (ADR 187)', () => {
+    // `new: null` is load-bearing: review.ts skips these rows when building the durable attestation
+    // map, so recording the drop can never become a way for a dead session's model to certify a
+    // live review. The row is a RECORD of a loss, never a claim about what is running.
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const attested = attach(db, ada.row.id, 'claude-code', 'c1', { model: 'claude-fable-5' });
+    release(db, attested.id, 45_000);
+    const born = attach(db, ada.row.id, 'cli', null);
+    recordUnattestedOccupancy(db, team.id, ada.row, born.id, 'ambient');
+
+    const detail = JSON.parse(
+      listAudit(db, team.id, { limit: 10 }).find((r) => r.action === 'occupancy.model_attested')
+        ?.detail ?? '{}',
+    ) as { new: unknown };
+    expect(detail.new).toBeNull();
   });
 
   it('countLivePresences counts distinct live members across all teams, ignoring offline/held (ADR 047)', () => {

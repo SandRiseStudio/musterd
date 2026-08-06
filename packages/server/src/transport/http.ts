@@ -129,6 +129,8 @@ import {
   listLiveDrivers,
   listPresence,
   listReclaimableMemberIds,
+  recordClaimAttestation,
+  recordUnattestedOccupancy,
   touchAmbientPresence,
 } from '../store/presence.js';
 import {
@@ -650,14 +652,15 @@ function authTouch(
   // provenance and its lease token describe one session, so a human shell can stamp neither.
   const wakeLease = auth.member.kind === 'agent' ? wakeLeaseHeader(req) : undefined;
   // Snapshot the ambient row before the touch so a real model change can audit (source: ambient).
-  const before = model
-    ? ctx.db
+  // ADR 246: taken UNCONDITIONALLY now. It used to be read only when a model header was present,
+  // which made the one case that mattered invisible — a touch carrying NO model that attaches a
+  // brand-new row is exactly the born-unattested occupancy, and there was nothing to compare it to.
+  const before = ctx.db
         .prepare<
           [string],
           { id: string; model: string | null }
-        >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
-        .get(auth.member.id)
-    : undefined;
+      >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
+    .get(auth.member.id);
   const flipped = touchAmbientPresence(
     ctx.db,
     auth.member.id,
@@ -670,13 +673,20 @@ function authTouch(
       ...(wakeLease !== undefined ? { wake_lease: wakeLease } : {}),
     },
   );
+  const after = ctx.db
+    .prepare<
+      [string],
+      { id: string; model: string | null }
+    >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
+    .get(auth.member.id);
+  // ADR 246: a touch that attached a NEW row attesting nothing is a de-attestation, and it is the
+  // one transition the old model-gated branch below could never see. Gated on the row being new
+  // (`after.id !== before.id`) so a steady stream of unattested touches records the event ONCE
+  // rather than on every heartbeat.
+  if (after && after.model === null && after.id !== before?.id) {
+    recordUnattestedOccupancy(ctx.db, auth.team.id, auth.member, after.id, 'ambient');
+  }
   if (model) {
-    const after = ctx.db
-      .prepare<
-        [string],
-        { id: string; model: string | null }
-      >('SELECT id, model FROM presence WHERE member_id = ? AND conn_id IS NULL AND held_until IS NULL ORDER BY last_seen_at DESC LIMIT 1')
-      .get(auth.member.id);
     if (after && (before?.model ?? null) !== after.model) {
       appendAudit(ctx.db, auth.team.id, {
         actor: auth.member.name,
@@ -1522,20 +1532,7 @@ export async function handleHttp(
             existing.from_session,
             { provenance: null, workspace: null, driver: null, model: existing.model ?? null },
           );
-          if (existing.model) {
-            appendAudit(ctx.db, team.id, {
-              actor: targetMember.name,
-              action: 'occupancy.model_attested',
-              target: targetMember.name,
-              result: 'allow',
-              detail: {
-                occupancy: presence.id,
-                old: null,
-                new: existing.model,
-                source: 'claim',
-              },
-            });
-          }
+          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, existing.model);
 
           // Settle the request.
           decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
@@ -2239,15 +2236,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface },
           });
-          if (body.model) {
-            appendAudit(ctx.db, team.id, {
-              actor: targetMember.name,
-              action: 'occupancy.model_attested',
-              target: targetMember.name,
-              result: 'allow',
-              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
-            });
-          }
+          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -2283,15 +2272,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, auth: 'credential' },
           });
-          if (body.model) {
-            appendAudit(ctx.db, team.id, {
-              actor: targetMember.name,
-              action: 'occupancy.model_attested',
-              target: targetMember.name,
-              result: 'allow',
-              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
-            });
-          }
+          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -2334,15 +2315,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, policy: 'standing_reseat_known_agents' },
           });
-          if (body.model) {
-            appendAudit(ctx.db, team.id, {
-              actor: targetMember.name,
-              action: 'occupancy.model_attested',
-              target: targetMember.name,
-              result: 'allow',
-              detail: { occupancy: presence.id, old: null, new: body.model, source: 'claim' },
-            });
-          }
+          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
