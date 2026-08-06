@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { isAbsolute, join, relative } from 'node:path';
 import {
   CCD_SEND_MESSAGE_TOOL,
@@ -12,12 +11,11 @@ import type { Parsed } from '../args.js';
 import type { HttpClient } from '../client.js';
 import { CliError } from '../errors.js';
 import {
-  foreignModifiedPaths,
-  foreignPathWarning,
-  hasSessionIndex,
   isStageShaped,
-  readSessionEdits,
-  recordSessionEdit,
+  markSessionStart,
+  pathsPredatingSession,
+  sessionStartedAt,
+  stalePathWarning,
 } from '../workingTree.js';
 import { resolveRead } from './helpers.js';
 
@@ -149,34 +147,24 @@ function stateDir(): string {
 }
 
 /**
- * ADR 239 — the working-tree check. Returns the advisory text when a stage-shaped command would
- * sweep in tracked files this session never wrote, and `undefined` otherwise (the overwhelmingly
- * common case, which costs one regex and no subprocess).
+ * ADR 239 — the working-tree check, as decided by the 2026-08-06 verdict. Returns the advisory when
+ * a stage-shaped command would sweep in paths last modified before this session began, and
+ * `undefined` otherwise (the overwhelmingly common case, costing one regex and no subprocess).
  *
- * `git status --porcelain` is the only git command on this path and it is read-only: decision 5
- * forbids touching another session's uncommitted work, for which there is no reflog.
+ * `git status --porcelain` is the only git command on this path and it is read-only: the ADR forbids
+ * touching another session's uncommitted work, for which there is no reflog.
  */
 export function workingTreeWarning(
   command: string | undefined,
-  sessionId: string | undefined,
-  dir: string,
+  startedAt: number | undefined,
+  justMarked: boolean,
 ): string | undefined {
-  if (!command || !sessionId || !isStageShaped(command)) return undefined;
-  // No index at all → this session's writes were never observable, so every path would read as
-  // foreign. Say nothing rather than everything (ADR 239 decision 2).
-  if (!hasSessionIndex(dir, sessionId)) return undefined;
-  let porcelain: string;
-  try {
-    porcelain = execFileSync('git', ['status', '--porcelain'], {
-      encoding: 'utf8',
-      timeout: 3_000,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch {
-    return undefined; // not a repo, git missing, or slow — never warn on a guess
-  }
-  const foreign = foreignModifiedPaths(porcelain, readSessionEdits(dir, sessionId));
-  return foreign.length > 0 ? foreignPathWarning(foreign, command) : undefined;
+  if (!command || startedAt === undefined || !isStageShaped(command)) return undefined;
+  // A marker created by THIS very command knows nothing — everything on disk would predate it, so
+  // the warning would name the whole tree. Silence beats an accusation built from no evidence.
+  if (justMarked) return undefined;
+  const stale = pathsPredatingSession(startedAt);
+  return stale.length > 0 ? stalePathWarning(stale, command) : undefined;
 }
 
 /** Emit the PreToolUse deny control JSON Claude Code reads — the tool is blocked and `reason` is the
@@ -286,8 +274,14 @@ async function gateCheck(parsed: Parsed): Promise<number> {
     // Purely local: the index is a file in this workspace's `.musterd/`, and nothing here is sent.
     const sessionId = parseEnvelopeSessionId(stdin);
     if (sessionId) {
-      if (call.path && isWriteShaped(call)) recordSessionEdit(stateDir(), sessionId, call.path);
-      wtWarn = workingTreeWarning(call.command, sessionId, stateDir());
+      // One marker per session, stamped on the first tool call the gate sees. `justMarked` is what
+      // keeps a session whose very first call IS the `git add -A` from indicting the whole tree.
+      const justMarked = markSessionStart(stateDir(), sessionId);
+      wtWarn = workingTreeWarning(
+        call.command,
+        sessionStartedAt(stateDir(), sessionId),
+        justMarked,
+      );
     }
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return; // ambient/unbound folder — no seat to gate → allow

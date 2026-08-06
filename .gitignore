@@ -24,7 +24,12 @@ coverage/
 # which is the gate's own private state becoming shared: pull one, and every seat now holds a
 # foreign session's index in its state dir — exactly the cross-session contamination ADR 239 was
 # built to detect. Ignoring is necessary but not sufficient; the tracked ones were removed too.
+# The `-edits-` form is the withdrawn tool-call index; kept ignored so a seat running an older CLI
+# cannot re-commit one. The `-start-` form is its replacement — an empty per-session marker whose
+# mtime IS the session start — and it is listed here in the SAME change that creates it, which is the
+# rule the amendment above exists to teach.
 **/.musterd/session-edits-*.txt
+**/.musterd/session-start-*
 # musterd provisioning state — regenerated per-workspace by `musterd init` (ADR 060/085), never committed.
 **/.musterd/provisioned.json
 **/.musterd/skill/
