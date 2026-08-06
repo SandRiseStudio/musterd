@@ -14,20 +14,55 @@ import {
 } from '../onboard/role.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
+import { resolveRead } from './helpers.js';
 
 /**
- * Manage role *provisioning templates* (ADR 026 / docs/design/provisioning-recipe.md §3) from the
- * CLI: see what built-ins ship, inspect a resolved template, and scaffold an editable user template
- * in `.musterd/roles/*.json`. Pure local file + the in-source built-in library — it never touches the
- * daemon or the server roster (Universe-2 only; identity is unchanged).
+ * Two worlds under one name (ADR 227 close-out). `list`/`show` are **roster-first**: they render
+ * the team's durable role library (`roles/<name>.toml`, read off the daemon roster) above the
+ * ADR 026 *provisioning templates*, and degrade to template-only output when no team is reachable
+ * (unbound folder, daemon down, older daemon) — the read path never hard-fails. `create` scaffolds
+ * a template; `assign` edits the roster (see its doc below).
  */
-export async function roleCommand(parsed: Parsed): Promise<number> {
+
+/** The roster read `list`/`show` render from — injectable so tests need no daemon. */
+export interface RosterRead {
+  team: string;
+  members: Array<{ name: string; roles?: string[] }>;
+  roles: Array<{
+    name: string;
+    summary: string | null;
+    charter?: string | null;
+    capabilities?: unknown;
+  }>;
+}
+export interface RoleDeps {
+  fetchRoster?: (flags: Parsed['flags']) => Promise<RosterRead | null>;
+}
+
+async function defaultFetchRoster(flags: Parsed['flags']): Promise<RosterRead | null> {
+  try {
+    const { team, http } = resolveRead(flags); // the status-command read path — auth-free
+    const res = await http.roster(team);
+    if (!res.roles) return null; // older daemon: no library on the wire — template-only output
+    return { team, members: res.members, roles: res.roles };
+  } catch {
+    return null; // unbound folder / daemon unreachable — degrade, never fail the read
+  }
+}
+
+export async function roleCommand(parsed: Parsed, deps: RoleDeps = {}): Promise<number> {
+  const fetchRoster = deps.fetchRoster ?? defaultFetchRoster;
   const sub = parsed.positionals[0];
-  if (sub === 'list') return roleList(parsed);
-  if (sub === 'show') return roleShow(parsed);
+  if (sub === 'list') return roleList(parsed, await fetchRoster(parsed.flags));
+  if (sub === 'show') return roleShow(parsed, await fetchRoster(parsed.flags));
   if (sub === 'create') return roleCreate(parsed);
   if (sub === 'assign') return roleAssign(parsed);
   throw new CliError('usage: musterd role <list|show|create|assign> ...', 2);
+}
+
+/** Seats holding `name` on this roster — the "who is platform?" half of discovery. */
+function holdersOf(roster: RosterRead, name: string): string[] {
+  return roster.members.filter((m) => (m.roles ?? []).includes(name)).map((m) => m.name);
 }
 
 /**
@@ -104,7 +139,7 @@ function listRosterRoles(musterdDir: string): string[] {
   }
 }
 
-function roleList(parsed: Parsed): number {
+function roleList(parsed: Parsed, roster: RosterRead | null): number {
   const dir = process.cwd();
   const names = listRoleNames(dir);
   // A name is user-authored when a `.musterd/roles/<name>.json` exists; a user file that shadows a
@@ -116,10 +151,43 @@ function roleList(parsed: Parsed): number {
   });
 
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify(rows) + '\n');
+    // Shape change (close-out): { team, templates } — was a bare template array.
+    process.stdout.write(
+      JSON.stringify({
+        team: roster
+          ? {
+              team: roster.team,
+              roles: roster.roles.map((r) => ({
+                name: r.name,
+                summary: r.summary,
+                holders: holdersOf(roster, r.name),
+              })),
+            }
+          : null,
+        templates: rows,
+      }) + '\n',
+    );
     return 0;
   }
-  process.stdout.write(`${theme.accent('roles')} ${theme.meta(`(in ${dir})`)}\n`);
+  if (roster) {
+    process.stdout.write(`${theme.accent('team roles')} ${theme.meta(`(${roster.team})`)}\n`);
+    for (const role of roster.roles) {
+      const holders = holdersOf(roster, role.name);
+      const held = holders.length ? holders.join(', ') : theme.meta('(unheld)');
+      process.stdout.write(
+        `  ${theme.meta(sym.bullet)} ${theme.accent(role.name)} — ${held}` +
+          (role.summary ? `  ${theme.meta(role.summary)}` : '') +
+          '\n',
+      );
+    }
+    process.stdout.write(
+      theme.meta('assign with: musterd role assign <seat> <role> (run in the roster home)') +
+        '\n\n',
+    );
+    process.stdout.write(`${theme.accent('provisioning templates')} ${theme.meta('(local)')}\n`);
+  } else {
+    process.stdout.write(`${theme.accent('roles')} ${theme.meta(`(in ${dir})`)}\n`);
+  }
   for (const { name, origin } of rows) {
     const tag =
       origin === 'built-in'
@@ -138,9 +206,41 @@ function roleList(parsed: Parsed): number {
   return 0;
 }
 
-function roleShow(parsed: Parsed): number {
+function roleShow(parsed: Parsed, roster: RosterRead | null): number {
   const name = parsed.positionals[1];
   if (!name) throw new CliError('usage: musterd role show <name>', 2);
+
+  // Roster-first (close-out): a team-role match wins; the template renders only when no team role
+  // carries the name (or no roster is reachable).
+  const teamRole = roster?.roles.find((r) => r.name === name);
+  if (roster && teamRole) {
+    const holders = holdersOf(roster, name);
+    if (parsed.flags['json']) {
+      process.stdout.write(JSON.stringify({ ...teamRole, holders }, null, 2) + '\n');
+      return 0;
+    }
+    process.stdout.write(
+      `${theme.accent(teamRole.name)} ${theme.meta(`(team role, ${roster.team})`)}\n`,
+    );
+    if (teamRole.summary) process.stdout.write(`  ${teamRole.summary}\n`);
+    process.stdout.write(
+      `  holders: ${holders.length ? holders.join(', ') : theme.meta('(unheld)')}\n`,
+    );
+    if (teamRole.charter) process.stdout.write(`  charter:\n${indent(teamRole.charter, 4)}\n`);
+    const caps = teamRole.capabilities;
+    if (caps && typeof caps === 'object' && Object.keys(caps as object).length) {
+      process.stdout.write(`  capability defaults: ${JSON.stringify(caps)}\n`);
+    }
+    if (listRoleNames(process.cwd()).includes(name)) {
+      process.stdout.write(
+        theme.meta(
+          '  a provisioning template also has this name — show is roster-first; the template renders when no team role matches',
+        ) + '\n',
+      );
+    }
+    return 0;
+  }
+
   let role: RoleTemplate;
   try {
     role = loadRole(process.cwd(), name);

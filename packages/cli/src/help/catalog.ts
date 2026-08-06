@@ -308,9 +308,16 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'role',
-    signature: 'list | show <name> | create <name> [--from <builtin>] [--force]',
-    summary: 'manage role provisioning templates (.musterd/roles/)',
+    signature:
+      'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <builtin>] [--force]',
+    summary: "the team's role library (ADR 227) + local provisioning templates",
     group: 'team',
+    detail:
+      'Two worlds under one name: the durable team library (roles/<name>.toml — list/show read it ' +
+      'from the daemon roster; assign edits seats/<seat>.toml in the roster home) and the local ' +
+      'ADR 026 provisioning templates (create scaffolds one; list/show fall back to them when no ' +
+      'team is reachable).',
+    examples: ['musterd role list', 'musterd role assign wanderer platform'],
   },
 
   // ── Messaging ──────────────────────────────────────────────────────────────────────────────

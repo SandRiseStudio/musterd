@@ -511,6 +511,41 @@ describe('team_inbox_check handler', () => {
 });
 
 describe('team_members handler', () => {
+  // ADR 227 close-out: the role filter rides the wire so the daemon can audit the discovery query
+  // (`roster.role_query`). The handler must PASS the arg — a local-only filter is invisible to the
+  // eval. (A defensive local pass stays for older daemons that ignore `?role=`.)
+  it('passes the role filter to the server instead of filtering locally', async () => {
+    const calls: Array<string | undefined> = [];
+    const handler = capture(registerMembers, {
+      roster: (async (role?: string) => {
+        calls.push(role);
+        return {
+          members:
+            role === 'platform'
+              ? [member({ name: 'izzo', role: 'platform', roles: ['platform'] })]
+              : [member({ name: 'izzo', role: 'platform', roles: ['platform'] }), member()],
+          roles: [{ name: 'platform', summary: 'infra toucher' }],
+        };
+      }) as any,
+    });
+    const out = text(await handler({ role: 'platform' }));
+    expect(calls).toEqual(['platform']);
+    expect(out).toContain('izzo');
+    expect(out).not.toContain('Ada');
+  });
+
+  it('renders the known-roles hint from the server library on a miss', async () => {
+    const handler = capture(registerMembers, {
+      roster: (async () => ({
+        members: [],
+        roles: [{ name: 'platform', summary: null }],
+      })) as any,
+    });
+    const out = text(await handler({ role: 'nonesuch' }));
+    expect(out).toContain('no seat holds role "nonesuch"');
+    expect(out).toContain('team roles: platform');
+  });
+
   it('lists members with their facets, and no empty-field noise', async () => {
     const handler = capture(registerMembers, {
       roster: (async () => ({ members: [member()] })) as any,

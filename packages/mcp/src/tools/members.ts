@@ -22,7 +22,9 @@ export function registerMembers(server: McpServer, client: MusterdClient): void 
     },
     async (args) => {
       try {
-        const { members, roles } = await client.roster();
+        // The role filter rides the wire (ADR 227 close-out) so the daemon audits the discovery
+        // query; the local pass below is defensive-only, for an older daemon that ignored `?role=`.
+        const { members, roles } = await client.roster(args.role);
         let selected = args.name ? members.filter((m) => m.name === args.name) : members;
         if (args.role) selected = selected.filter((m) => (m.roles ?? []).includes(args.role!));
         if (selected.length === 0) {

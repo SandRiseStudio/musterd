@@ -1290,8 +1290,28 @@ export async function handleHttp(
 
       if (method === 'GET' && rest === '/members') {
         const team = requireTeam(ctx.db, slug);
+        const viewer = tryAuth(ctx, slug, req);
+        let members = summarize(ctx, slug, team.id, viewer);
+        // ADR 227 close-out: the discovery filter runs HERE, not in the client, so the daemon can
+        // see role queries at all. Each authenticated filtered read leaves a `roster.role_query`
+        // row — the countable inc-1 signal, and half of the role-addressed-send reopening trigger
+        // (join to a directed send within 120s). Anonymous reads still filter but write nothing:
+        // the eval joins actor→send, and an anonymous read has no seat to join.
+        const role = url.searchParams.get('role');
+        if (role) {
+          members = members.filter((m) => (m.roles ?? []).includes(role));
+          if (viewer) {
+            appendAudit(ctx.db, team.id, {
+              actor: viewer.name,
+              action: 'roster.role_query',
+              target: null,
+              result: 'allow',
+              detail: { role, holders: members.map((m) => m.name) },
+            });
+          }
+        }
         return sendJson(res, 200, {
-          members: summarize(ctx, slug, team.id, tryAuth(ctx, slug, req)),
+          members,
           // The team's role library (ADR 227 discovery): the roster answers "who can do X" only if
           // the roles themselves are visible beside the seats that hold them. Additive — an older
           // client ignores it.

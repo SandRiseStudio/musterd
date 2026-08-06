@@ -30,6 +30,52 @@ function parsed(positionals: string[], flags: Record<string, string | boolean> =
   return { positionals, flags, metaPairs: [] };
 }
 
+describe('role list/show roster-first (ADR 227 close-out)', () => {
+  const roster = {
+    team: 'revive',
+    members: [
+      { name: 'izzo', roles: ['platform'] },
+      { name: 'miley', roles: ['designer'] },
+    ] as any[],
+    roles: [
+      { name: 'designer', summary: 'Owns the design surfaces', charter: '…', capabilities: {} },
+      { name: 'observer', summary: 'read-only watcher', charter: '…', capabilities: {} },
+      { name: 'platform', summary: 'infra toucher', charter: 'You touch infra.', capabilities: {} },
+    ],
+  };
+
+  it('role list renders the team library first when a roster is reachable', async () => {
+    expect(await roleCommand(parsed(['list']), { fetchRoster: async () => roster })).toBe(0);
+    expect(out.indexOf('team roles')).toBeGreaterThanOrEqual(0);
+    expect(out.indexOf('team roles')).toBeLessThan(out.indexOf('provisioning templates'));
+    expect(out).toContain('platform');
+    expect(out).toContain('izzo');
+    expect(out).toContain('(unheld)'); // observer has no holder
+  });
+
+  it('role list falls back to template-only output when no roster is reachable', async () => {
+    expect(await roleCommand(parsed(['list']), { fetchRoster: async () => null })).toBe(0);
+    expect(out).not.toContain('team roles');
+    expect(out).toContain('built-in'); // today's output, unchanged
+  });
+
+  it('role show prefers the team role and names its holders', async () => {
+    expect(
+      await roleCommand(parsed(['show', 'platform']), { fetchRoster: async () => roster }),
+    ).toBe(0);
+    expect(out).toContain('infra toucher');
+    expect(out).toContain('You touch infra.');
+    expect(out).toContain('izzo');
+  });
+
+  it('role show falls through to the provisioning template when the roster has no such role', async () => {
+    expect(
+      await roleCommand(parsed(['show', 'backend']), { fetchRoster: async () => roster }),
+    ).toBe(0);
+    expect(out).toContain('built-in'); // template path, unchanged
+  });
+});
+
 describe('role assign (ADR 227 — roster roles, run in the roster home)', () => {
   function writeRosterHome() {
     const m = join(cwd, '.musterd');
@@ -117,9 +163,11 @@ describe('role list', () => {
       JSON.stringify({ role: 'backend', charter: 'mine' }),
     );
     await roleCommand(parsed(['list'], { json: true }));
-    const rows = JSON.parse(out);
-    expect(rows).toEqual(expect.arrayContaining([{ name: 'data', origin: 'user' }]));
-    expect(rows).toEqual(expect.arrayContaining([{ name: 'backend', origin: 'override' }]));
+    // Close-out shape: { team, templates } — team is null when no roster is reachable.
+    const { team, templates } = JSON.parse(out);
+    expect(team).toBeNull();
+    expect(templates).toEqual(expect.arrayContaining([{ name: 'data', origin: 'user' }]));
+    expect(templates).toEqual(expect.arrayContaining([{ name: 'backend', origin: 'override' }]));
   });
 });
 

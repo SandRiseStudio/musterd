@@ -24,6 +24,10 @@ export type AuditAction =
   | 'account_status.change'
   // ADR 227 inc 2: a non-`platform` agent seat ran an infra verb — warned + recorded, never blocked.
   | 'infra.touch.warned'
+  // ADR 227 close-out: a seat asked the roster "who holds <role>?" — the discovery signal the
+  // inc-1 eval counts, and half of the role-addressed-send reopening trigger (join to a directed
+  // send within 120s). Written only for authenticated callers; detail: { role, holders }.
+  | 'roster.role_query'
   // P3.2 (ADR 077): claim handshake + request lane.
   | 'claim.occupied'
   | 'claim.refused'
