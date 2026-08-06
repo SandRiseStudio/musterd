@@ -19,7 +19,7 @@ import {
   laneEvent,
   laneEventDetail,
   type LaneEventDetail,
-  memberColor,
+  memberColor, memberAvatar,
   proseSegments,
   recipientName,
   recipientScope,
@@ -316,7 +316,7 @@ function Row({
       <div className="lc-row__head">
         <time className="lc-row__ts">{clock(env.ts)}</time>
         <span className={`lc-chip lc-chip--${kind}`}>
-          <span className="lc-chip__avatar" style={{ background: memberColor(env.from, kind) }}>
+          <span className="lc-chip__avatar" style={{ background: memberAvatar(env.from, kind) }}>
             {initial(env.from)}
           </span>
           <span className="lc-chip__name">{env.from}</span>

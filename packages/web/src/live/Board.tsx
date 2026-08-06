@@ -20,7 +20,7 @@ import {
   type LaneAction,
   type MovedLanes,
 } from './boardWrite';
-import { initial, kindOf, memberColor } from './format';
+import { initial, kindOf, memberAvatar } from './format';
 
 /**
  * The work board (ADR 104): the team's lanes as a kanban, one column per lane state. Lane state *is*
@@ -435,7 +435,7 @@ function LaneCard({
           <span className="lc-card__owner">
             <span
               className="lc-card__avatar"
-              style={{ background: memberColor(lane.owner_seat, ownerKind) }}
+              style={{ background: memberAvatar(lane.owner_seat, ownerKind) }}
             >
               {initial(lane.owner_seat)}
             </span>
@@ -557,7 +557,7 @@ function SeatPicker({
         >
           <span
             className="lc-card__avatar"
-            style={{ background: memberColor(m.name, m.kind === 'human' ? 'human' : 'agent') }}
+            style={{ background: memberAvatar(m.name, m.kind === 'human' ? 'human' : 'agent') }}
             aria-hidden="true"
           >
             {initial(m.name)}

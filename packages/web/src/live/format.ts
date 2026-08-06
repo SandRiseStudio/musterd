@@ -313,12 +313,102 @@ export function kindOf(name: string, idx: Map<string, MemberSummary>): Kind {
  * golden-ratio hash spreads similar names apart. Returns an `hsl()` string usable in CSS and three.js.
  */
 export function memberColor(name: string, kind: Kind): string {
+  return `hsl(${memberHue(name, kind)}, 68%, 62%)`;
+}
+
+/**
+ * The identity hue on its own. Everything a member is painted with derives from this one number, so
+ * the fill on the floor, the avatar they get in the roster and their name in the rail are all
+ * unmistakably the same person.
+ */
+export function memberHue(name: string, kind: Kind): number {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   const t = (h * 0.618033988749895) % 1;
   // agents: 150°→280° (green · teal · cyan · blue · indigo); humans: 320°→70° (magenta · rose · coral · amber)
-  const hue = kind === 'human' ? Math.round((320 + t * 110) % 360) : Math.round(150 + t * 130);
-  return `hsl(${hue}, 68%, 62%)`;
+  return kind === 'human' ? Math.round((320 + t * 110) % 360) : Math.round(150 + t * 130);
+}
+
+/* ─── the readable half of an identity colour ────────────────────────────────────────────────────
+ *
+ * Same law as the CSS palette (see the --lc-*-ink block in Live.css): a colour that is both SEEN
+ * and READ needs two values. `memberColor` is a FILL — a body on the floor, a dot in the reel — and
+ * it is very good at that. It cannot carry text, and the reason is worth stating because it is not
+ * a near miss that a nudge fixes.
+ *
+ * `hsl(h, 68%, 62%)` holds LIGHTNESS constant across both hue bands, but relative luminance at a
+ * fixed HSL lightness varies enormously with hue: measured across the bands the fill spans
+ * 0.154 to 0.699, so amber reads 4.6x louder than indigo despite both being "62% light".
+ *
+ * The precise consequence, because the loose version of it is wrong: for any ONE background at
+ * least one pole always clears AA — white-fails and black-fails are mutually exclusive conditions.
+ * What breaks is that the correct pole FLIPS partway across the band. White fails on 214 of the
+ * hues here and black fails on 21, so a component that hard-codes either one is wrong for part of
+ * its own roster. All four avatar components hard-code a pole, two of them disagreed about which,
+ * and the CSS asserted in a comment that white "reads on any hue" — measured, 1.40:1 at worst.
+ *
+ * The fix is to stop holding lightness constant and hold LUMINANCE constant instead, which makes
+ * ONE pole correct for every member — so the initials can be uniformly white by design rather than
+ * computed per seat — and evens out that 4.6x loudness spread as a side effect worth having.
+ */
+
+/** sRGB relative luminance of `hsl(hue, sat%, light%)`, per WCAG 2.1. */
+function hslLuminance(hue: number, sat: number, light: number): number {
+  const s = sat / 100;
+  const l = light / 100;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const k = (n + hue / 30) % 12;
+    return l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+  };
+  const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * lin(f(0)) + 0.7152 * lin(f(8)) + 0.0722 * lin(f(4));
+}
+
+/**
+ * The lightness at which this hue hits `target` luminance. Luminance rises monotonically with
+ * lightness at a fixed hue, so a short bisection is exact enough and the result is memoised per
+ * (hue, target) — these run inside render paths.
+ */
+const lightnessCache = new Map<number, number>();
+function lightnessForLuminance(hue: number, target: number): number {
+  const key = hue * 1000 + Math.round(target * 1000);
+  const hit = lightnessCache.get(key);
+  if (hit !== undefined) return hit;
+  let lo = 0;
+  let hi = 100;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + hi) / 2;
+    if (hslLuminance(hue, 68, mid) < target) lo = mid;
+    else hi = mid;
+  }
+  const out = Math.round(((lo + hi) / 2) * 10) / 10;
+  lightnessCache.set(key, out);
+  return out;
+}
+
+/**
+ * The member's colour, deepened until WHITE initials on it clear WCAG AA — for an avatar circle,
+ * which is a fill that has to carry a letter. Luminance 0.165 puts white at ~4.9:1 on every hue in
+ * both bands.
+ *
+ * The floor's fill is deliberately NOT changed to match: a body carries no text, so it keeps the
+ * lighter `memberColor` and the room is untouched. The hue — which is what actually says *who* —
+ * is identical, so the roster avatar and the person on the floor still read as one identity.
+ */
+export function memberAvatar(name: string, kind: Kind): string {
+  const hue = memberHue(name, kind);
+  return `hsl(${hue}, 68%, ${lightnessForLuminance(hue, 0.165)}%)`;
+}
+
+/**
+ * The member's colour as TEXT on paper — deepened to luminance 0.095, which clears 4.5:1 against
+ * the darkest paper in the family (--lc-surface-3). Amber is the binding constraint: it is the
+ * lightest hue in either band and drags the target well below where the cool hues would need it.
+ */
+export function memberInk(name: string, kind: Kind): string {
+  const hue = memberHue(name, kind);
+  return `hsl(${hue}, 68%, ${lightnessForLuminance(hue, 0.095)}%)`;
 }
 
 /* ─── roster posture + governance projection (ADR 138 / 073 / 070) ────────────────────────────────

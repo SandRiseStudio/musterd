@@ -5,7 +5,7 @@ import {
   capabilityBadges,
   initial,
   isFeatureBehind,
-  memberColor,
+  memberAvatar,
   rosterOrder,
   rosterPrimaryChip,
 } from './format';
@@ -153,7 +153,7 @@ function SeatRow({
         className={`lc-seat__dot lc-seat__dot--${dotState}`}
         title={online ? `online · ${m.presence}` : reconnecting ? 'reconnecting — seat held within reclaim grace' : 'offline'}
       />
-      <span className="lc-seat__avatar" style={{ background: memberColor(m.name, kind) }}>
+      <span className="lc-seat__avatar" style={{ background: memberAvatar(m.name, kind) }}>
         {initial(m.name)}
       </span>
       <div className="lc-seat__body">
