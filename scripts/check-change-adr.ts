@@ -25,6 +25,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isAcceptedAdr } from './adr-status.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
@@ -148,7 +149,9 @@ function decisionSection(text: string): string | null {
   return (end === -1 ? rest : rest.slice(0, end)).join('\n').trim();
 }
 
-const isAccepted = (text: string): boolean => /^-\s*Status:\s*accepted\s*$/im.test(text);
+// The status parser lives in `adr-status.ts` — its own module so a test can import it without
+// running this script. Only the DETECTOR was widened there; what counts as frozen is unchanged:
+// `## Decision` and nothing else.
 
 for (const { path, status } of changed) {
   if (status !== 'M') continue; // only in-place edits; a new ADR is the sanctioned path
@@ -157,7 +160,7 @@ for (const { path, status } of changed) {
   const before = fileAt(base, path);
   const after = fileAt('HEAD', path);
   if (before === null || after === null) continue;
-  if (!isAccepted(before)) continue; // a proposed ADR is still being drafted — editable
+  if (!isAcceptedAdr(before)) continue; // a proposed ADR is still being drafted — editable
 
   const wasDecision = decisionSection(before);
   const nowDecision = decisionSection(after);
@@ -167,8 +170,10 @@ for (const { path, status } of changed) {
   process.stderr.write(
     `✗ ${path} — the \`## Decision\` of an accepted ADR was edited.\n` +
       `  Accepted decisions are immutable: they are the dated record of what was decided and why.\n` +
-      `  Write a new ADR that supersedes this one instead. (Context / Consequences /\n` +
-      `  Observability & Evaluation remain editable — only Decision is frozen.)\n\n`,
+      `  USUALLY WHAT YOU WANT: move the new text into \`## Consequences\` as a dated note. That is\n` +
+      `  the amendment mechanism 07-conventions prescribes — Context / Consequences / Observability\n` +
+      `  are all editable, and only Decision is frozen. A paragraph move, not a new document.\n` +
+      `  Write a superseding ADR only when the DECISION ITSELF is being reversed.\n\n`,
   );
 }
 
