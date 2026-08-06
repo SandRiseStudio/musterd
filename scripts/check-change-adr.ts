@@ -153,6 +153,60 @@ function decisionSection(text: string): string | null {
 // running this script. Only the DETECTOR was widened there; what counts as frozen is unchanged:
 // `## Decision` and nothing else.
 
+/**
+ * Is this Decision text one this file has held before on `main`? Then the edit is a RESTORATION,
+ * not a rewrite, and it passes.
+ *
+ * WHY THIS EXISTS. #739 turned rule 3 on for 94 ADRs that had been unprotected for months, so
+ * `main` already contains Decision edits that slipped through. Removing one is itself a Decision
+ * edit — the gate diffs against the merge-base, and the merge-base now HAS the violating text. So
+ * the fix froze the violations it revealed: the 94 became protected and simultaneously unfixable.
+ * Raised as a challenge by dolly with a live reproduction (PR #737, the exact remedy this gate's own
+ * message prescribes, failing this gate), and upheld.
+ *
+ * The trigger is the prescribed workflow, which is what makes it certain rather than occasional: her
+ * branch PASSED while its merge-base predated the bad edit, and rebasing onto main — ADR 106 says
+ * rebase, never merge — moved the base past it and armed the gate.
+ *
+ * A revert is not a rewrite. Mechanical, no flag, no human judgement, and a genuine edit still fails
+ * by construction because new text has never existed before.
+ *
+ * REJECTED ALTERNATIVES, both for reasons worth keeping:
+ *   - "compare against the ADR's last ACCEPTED form" (dolly's own first preference) converts this
+ *     from a diff check into a TREE check, so it would fire on every PR touching one of those 94
+ *     ADRs — including PRs that only edit Consequences — accusing whoever shows up next of drift
+ *     they did not cause. With ~40% of the corpus carrying unknown drift, week one is near-all false
+ *     positives: exactly the warn-rail-with-a-bad-rate failure ADR 239's verdict retired.
+ *   - an env override / opt-out flag: an escape that only says "trust me" gets used for the case it
+ *     was not meant for. Same shape as the ADR 239 override.
+ *
+ * THE RESIDUAL, stated rather than discovered: this also permits restoring to a state that was
+ * ITSELF the product of a violation, because nothing here can tell an original Decision from a
+ * well-aged bad one. Accepted deliberately — every prior state is one the ADR actually had, and the
+ * alternative is the tree check above.
+ */
+function wasEverOnMain(path: string, decision: string): boolean {
+  // Bounded by construction: only ADRs actually changed in this diff reach here (typically one),
+  // and `--follow` keeps the walk to that file's own history rather than the corpus.
+  let revs: string[];
+  try {
+    // FROM THE BASE, NEVER FROM HEAD. `git log` defaults to HEAD, which on a PR branch INCLUDES the
+    // PR's own commits — so the new text this change introduces would trivially count as "previously
+    // held" and rule 3 would pass everything. Measured while building this: with the default ref,
+    // replaying #733 (a genuine Decision rewrite) exited 0. The escape silently disabled the gate it
+    // was patching, which is the exact defect class this gate exists to catch.
+    revs = git('log', '--format=%H', '--follow', base, '--', path).split('\n').filter(Boolean);
+  } catch {
+    return false; // no history to appeal to — treat as a rewrite
+  }
+  for (const rev of revs) {
+    const text = fileAt(rev, path);
+    if (text === null) continue;
+    if (decisionSection(text) === decision) return true;
+  }
+  return false;
+}
+
 for (const { path, status } of changed) {
   if (status !== 'M') continue; // only in-place edits; a new ADR is the sanctioned path
   if (!/^docs\/decisions\/\d{3}-.*\.md$/.test(path)) continue;
@@ -165,6 +219,15 @@ for (const { path, status } of changed) {
   const wasDecision = decisionSection(before);
   const nowDecision = decisionSection(after);
   if (wasDecision === null || wasDecision === nowDecision) continue;
+  // A restoration passes: this exact Decision text is one the file has held before (see
+  // `wasEverOnMain`). Undoing an edit that slipped through the blind years must not be blocked by
+  // the gate that just started watching.
+  if (nowDecision !== null && wasEverOnMain(path, nowDecision)) {
+    process.stdout.write(
+      `• ${path} — \`## Decision\` restored to a form this file previously held; allowed.\n`,
+    );
+    continue;
+  }
 
   failed = true;
   process.stderr.write(
