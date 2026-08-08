@@ -3,7 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit, listAudit } from './audit.js';
-import { openLane } from './lanes.js';
+import { openLane, updateLane } from './lanes.js';
 import { addMember, getMemberByName } from './members.js';
 import { insertMessage } from './messages.js';
 import { attach } from './presence.js';
@@ -273,6 +273,64 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
     msg(db, team, ada, nick, 'accept', 'a1', 2_000, { meta: { in_reply_to: 'h1' } });
     expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  // ADR 090's `answered` predicate is an accept/decline naming the act, or a resolve on its thread.
+  // A HANDOFF is not discharged that way in practice — it is discharged by DOING THE WORK. Measured
+  // on the live ledger 2026-08-06: miley handed ryder lane 01KZ9W0R29, he shipped it (ADR 246,
+  // #716/#722, lane submitted 18:19:57), and no accept ever named the handoff and no resolve ever
+  // landed on its thread. So the candidate query never learned it was done and kept spawning
+  // sessions three hours later — three per envelope, and her one handoff was TWO envelopes, so six
+  // paid wakes for work already merged.
+  // A fresh db per assertion, deliberately: `claimWakeLeases` CLAIMS a lease, so a second call on
+  // the same db is suppressed by the live lease and by the cooldown — which made the first draft of
+  // this test pass before the fix existed, for entirely the wrong reason. (The file's db2/db3 idiom
+  // is here for the same hazard.)
+  const handoffOfLane = (laneState?: 'awaiting_acceptance' | 'done' | 'abandoned' | 'active') => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    const lane = openLane(db, team.id, team.slug, 'nick', {
+      title: 'the handed work',
+      claim: false,
+    });
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000, {
+      meta: { lane_handoff: { lane: lane.id, branch: null } },
+    });
+    if (laneState) {
+      updateLane(db, team.id, lane.id, team.slug, { state: laneState, owner_seat: 'Ada' });
+    }
+    return claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+  };
+
+  it('skips a lane handoff whose lane the recipient already discharged', () => {
+    // Still owed while the lane is live work — the control.
+    expect(handoffOfLane()).toHaveLength(1);
+    // Submitted for acceptance: shipped and merged. Waking to redo it is the defect.
+    expect(handoffOfLane('awaiting_acceptance')).toHaveLength(0);
+    expect(handoffOfLane('done')).toHaveLength(0);
+    expect(handoffOfLane('abandoned')).toHaveLength(0);
+  });
+
+  // The property that makes DERIVING this (rather than storing a flag) the right shape: a rejected
+  // acceptance sends the lane back to active and the handoff becomes owed again by itself.
+  it('re-owes the handoff when acceptance sends the lane back to active', () => {
+    expect(handoffOfLane('active')).toHaveLength(1);
+  });
+
+  // Narrow on purpose: only a handoff that NAMES a live lane is discharged this way. A bare handoff,
+  // or one naming a lane that no longer exists, keeps the old behaviour rather than going quiet.
+  it('leaves a handoff that names no lane exactly as it was', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+
+    const { db: db2, team: team2, nick: nick2, ada: ada2 } = seed();
+    enroll(db2, team2, ada2);
+    msg(db2, team2, nick2, ada2, 'handoff', 'h1', 1_000, {
+      meta: { lane_handoff: { lane: '01NOSUCHLANE0000000000000', branch: null } },
+    });
+    expect(claimWakeLeases(db2, team2.id, team2.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
   });
 
   it('applies the batched-lane cooldown but lets the immediate lane through', () => {

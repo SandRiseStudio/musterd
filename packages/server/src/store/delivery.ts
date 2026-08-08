@@ -1,4 +1,11 @@
-import { normalizeSeatName, type ActDelivery, type DeliveryRecipient } from '@musterd/protocol';
+import {
+  isAwaitingAcceptance,
+  LANE_TERMINAL_STATES,
+  normalizeSeatName,
+  type ActDelivery,
+  type DeliveryRecipient,
+  type LaneState,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { getCursor } from './cursors.js';
 import type { MessageRow } from './rows.js';
@@ -78,6 +85,53 @@ function answerBy(
 }
 
 /**
+ * A handoff is discharged by DOING THE WORK, and that is invisible to the two reply-shaped clauses
+ * above. This is the third clause: the lane a `lane_handoff` names has left the recipient's plate.
+ *
+ * WHY IT HAD TO EXIST, measured on the live ledger 2026-08-06. miley handed ryder lane
+ * `01KZ9W0R29`; he diagnosed it, shipped ADR 246 (#716/#722) and submitted at 18:19:57. No `accept`
+ * ever named the handoff and no `resolve` ever landed on its thread — because that is not how anyone
+ * discharges a handoff. So the wake-candidate query never learned the work was done and kept
+ * spawning sessions three hours later. Her ONE handoff was TWO envelopes and the attempt cap keys
+ * per act, so it bought six wakes for already-merged work, entirely within policy.
+ *
+ * DERIVED, NEVER STORED — the same posture as the rest of this file, and here it buys a property a
+ * stored flag could not: if acceptance REJECTS the lane it returns to an active state and the
+ * handoff becomes owed again on the next read, with nothing to un-set.
+ *
+ * Deliberately narrow. Only a handoff that NAMES a lane, and only when that lane currently exists
+ * and is out of play: submitted for acceptance (either ADR 169/192 spelling) or terminal. A bare
+ * handoff, or one naming a lane that no longer exists, keeps its old behaviour rather than silently
+ * going quiet — a wake that should not have fired is expensive, but a handoff that stops asking is
+ * work dropped on the floor, and only one of those is recoverable.
+ */
+function laneHandoffDischarged(
+  db: Database,
+  msg: MessageRow,
+): { act: string; id: string; ts: number } | null {
+  if (msg.act !== 'handoff' || !msg.meta) return null;
+  let laneId: unknown;
+  try {
+    const meta = JSON.parse(msg.meta) as { lane_handoff?: { lane?: unknown } };
+    laneId = meta.lane_handoff?.lane;
+  } catch {
+    return null; // unparseable meta is not evidence of discharge
+  }
+  if (typeof laneId !== 'string' || laneId === '') return null;
+  const lane = db
+    .prepare<
+      [string, string],
+      { state: string; updated_at: number }
+    >('SELECT state, updated_at FROM lanes WHERE team_id = ? AND id = ?')
+    .get(msg.team_id, laneId);
+  if (!lane) return null;
+  const out = isAwaitingAcceptance(lane.state) || LANE_TERMINAL_STATES.has(lane.state as LaneState);
+  // `id` names the LANE, not a message: this closure has no envelope of its own, and pointing at a
+  // real lane is more useful to a reader of the ledger than a synthetic message id would be.
+  return out ? { act: `lane:${lane.state}`, id: laneId, ts: lane.updated_at } : null;
+}
+
+/**
  * Has this recipient ANSWERED the act, by the ledger's own definition — an accept/decline naming
  * it via `meta.in_reply_to`, or a `resolve` closing its thread? Exported for the wake metrics
  * (ADR 131 O&E: "woken acts that reach `answered` in the ADR 090 ledger"), so the report reads
@@ -88,7 +142,7 @@ export function actAnswered(
   msg: MessageRow,
   recipientId: string,
 ): { act: string; id: string; ts: number } | null {
-  return answerBy(db, msg, recipientId) ?? threadResolve(db, msg);
+  return answerBy(db, msg, recipientId) ?? threadResolve(db, msg) ?? laneHandoffDischarged(db, msg);
 }
 
 /** ADR 088 interrupt raises recorded for this (act, recipient) — the attempt history. */
@@ -127,7 +181,7 @@ function recipientLedger(
   recipient: RecipientRow,
   resolve: { act: string; id: string; ts: number } | null,
 ): DeliveryRecipient {
-  const answered = answerBy(db, msg, recipient.id) ?? resolve;
+  const answered = answerBy(db, msg, recipient.id) ?? resolve ?? laneHandoffDischarged(db, msg);
   const cursor = getCursor(db, recipient.id);
   const seen = cursor.last_read_ts >= msg.ts;
   const nudges = ccdNudges(db, msg);
