@@ -195,6 +195,35 @@ function birthtimeOf(path: string): number | undefined {
   }
 }
 
+/** Does the slot's occupant still look like a working session? — its transcript touched within
+ *  the same LOCAL_SESSION_LIVE_MS clock every other liveness read uses. No transcript path, a
+ *  vanished file, or a quiet one all read as not-live: the newcomer takes the slot, exactly as
+ *  before the interloper gate. */
+function slotLooksLive(occupant: SessionCapture): boolean {
+  if (!occupant.transcript_path) return false;
+  try {
+    return Date.now() - statSync(occupant.transcript_path).mtimeMs < LOCAL_SESSION_LIVE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** The interloper gate's activity predicate: the transcript exists AND carries a real turn.
+ *  A bounded head read — an empty interloper has no file at all, and a genuine resumed session's
+ *  transcript opens with its history, so 64KB is ample to find the first user/assistant entry. */
+function transcriptHasTurn(path: string | undefined): boolean {
+  if (!path) return false;
+  try {
+    const head = readFileSync(path, { encoding: 'utf8' }).slice(0, 65536);
+    // Either JSONL shape counts — `type` (hook/transcript entries) or `role` (message objects,
+    // the shape `readModelFromTranscript` already accepts). An empty interloper has neither,
+    // because it has no file at all.
+    return /"(?:type|role)"\s*:\s*"(?:user|assistant)"/.test(head);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ask the harness that owns this capture what model it is actually running. Never throws: a probe
  * failure must not fail a hook, and `undefined` simply falls through to the declared tier.
@@ -233,6 +262,34 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
 
   let session: SessionCapture;
   if (event === 'start') {
+    // ── The interloper gate (lane 01KZAEGF2K step 3) ──────────────────────────────────────────
+    // Measured 2026-08-06: empty ~4-second claude-code processes fire real SessionStart/SessionEnd
+    // hooks in seat folders (same-digest pairs; no transcript anywhere; no marker), capture the
+    // slot on start, and their perfectly honest `ended` demotes the LIVE session mid-work. ADR
+    // 108's probe-displacement finding one layer down — probe-safety was applied to autojoin and
+    // never to capture. So: a newcomer may not TAKE a live-looking slot until its own transcript
+    // shows a turn. Gated means invisible — no slot write AND no daemon attestation, so the pair
+    // never exists on the ledger (its `end` is already a no-op via the mismatched-id guard below).
+    //
+    // Deliberately the OVERWRITE is gated, never the capture itself (dolly's variant, this lane):
+    // an empty or ended or stale slot keeps today's newest-wins, so a fresh workspace still
+    // captures on SessionStart — which matters wherever enumeration cannot see the workspace and
+    // the slot IS the whole local-session guard (ADR 131). The activity predicate is
+    // transcript-HAS-A-TURN, not file-exists: correct under both readings of the `birthtimeOf`
+    // contradiction (does the file appear at start or at first turn? — unsettled, follow-up in
+    // the lane). Known bounded residual: a crashed (never-ended) predecessor defers a genuine
+    // newcomer's takeover for up to LOCAL_SESSION_LIVE_MS; enumeration-first liveness keeps the
+    // guard honest meanwhile, and the slot self-corrects at the next SessionStart.
+    const occupant = binding.session;
+    if (
+      occupant &&
+      occupant.id !== payload.session_id &&
+      !occupant.ended_at &&
+      slotLooksLive(occupant) &&
+      !transcriptHasTurn(payload.transcript_path)
+    ) {
+      return;
+    }
     session = {
       harness: CAPTURE_HARNESS,
       id: payload.session_id,

@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BindingSchema, type Binding } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
+import { HttpClient } from '../client.js';
 import {
   captureSession,
   LABEL_SWEEP_STALE_MS,
@@ -110,6 +111,86 @@ describe('musterd session (capture)', () => {
     const s = readBinding(wsA).session!;
     expect(s.id).toBe('sid-2');
     expect(s.ended_at).toBeUndefined();
+  });
+
+  // ── The interloper gate (lane 01KZAEGF2K step 3) ─────────────────────────────────────────────
+  // Measured 2026-08-06: empty ~4s claude-code processes fired real SessionStart/SessionEnd hooks
+  // in seat folders, captured the slot on start, and their honest `ended` demoted the LIVE session
+  // mid-work (same-digest pairs, no transcript, no marker — the ADR 108 probe-displacement shape,
+  // applied to capture). The gate: a newcomer may not TAKE a live-looking slot until its own
+  // transcript shows a turn. Empty slot / ended slot / stale slot keep today's newest-wins.
+  describe('the interloper gate — an empty newcomer cannot steal a live slot', () => {
+    /** A transcript with one real user turn, mtime = now (a live working session's). */
+    const liveTranscript = (ws: string, name: string): string => {
+      const p = join(ws, `${name}.jsonl`);
+      writeFileSync(p, JSON.stringify({ type: 'user', message: { content: 'hi' } }) + '\n');
+      return p;
+    };
+
+    it('gates an empty newcomer: live un-ended slot survives, nothing is attested', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const t = liveTranscript(wsA, 'live-1');
+      await captureSession('start', { session_id: 'live-1', cwd: wsA, transcript_path: t });
+      attest.mockClear();
+      // The interloper: fresh id, transcript path that does not exist (it never wrote one).
+      await captureSession('start', {
+        session_id: 'ghost-1',
+        cwd: wsA,
+        transcript_path: join(wsA, 'ghost-1.jsonl'),
+      });
+      expect(readBinding(wsA).session?.id).toBe('live-1'); // slot untouched
+      expect(attest).not.toHaveBeenCalled(); // no captured row → its later `ended` cannot demote
+      // …and its `end` is already a no-op (mismatched id), so the pair vanishes entirely.
+      await captureSession('end', { session_id: 'ghost-1', cwd: wsA });
+      expect(readBinding(wsA).session?.ended_at).toBeUndefined();
+    });
+
+    it('a newcomer WITH a turn in its transcript still takes a live slot (genuine turnover)', async () => {
+      const t1 = liveTranscript(wsA, 'live-1');
+      await captureSession('start', { session_id: 'live-1', cwd: wsA, transcript_path: t1 });
+      const t2 = liveTranscript(wsA, 'live-2'); // resumed/real session: has a user turn already
+      await captureSession('start', { session_id: 'live-2', cwd: wsA, transcript_path: t2 });
+      expect(readBinding(wsA).session?.id).toBe('live-2');
+    });
+
+    it('an empty newcomer takes an ENDED slot — quit→reopen keeps newest-wins', async () => {
+      const t = liveTranscript(wsA, 'live-1');
+      await captureSession('start', { session_id: 'live-1', cwd: wsA, transcript_path: t });
+      await captureSession('end', { session_id: 'live-1', cwd: wsA });
+      await captureSession('start', {
+        session_id: 'fresh-2',
+        cwd: wsA,
+        transcript_path: join(wsA, 'fresh-2.jsonl'),
+      });
+      expect(readBinding(wsA).session?.id).toBe('fresh-2');
+    });
+
+    it('an empty newcomer takes a STALE slot — the crashed-predecessor residual is bounded', async () => {
+      const t = liveTranscript(wsA, 'live-1');
+      utimesSync(t, new Date(Date.now() - 11 * 60_000), new Date(Date.now() - 11 * 60_000));
+      await captureSession('start', { session_id: 'live-1', cwd: wsA, transcript_path: t });
+      // Slot un-ended, but its transcript went quiet past LOCAL_SESSION_LIVE_MS — not live-looking.
+      const slot = readBinding(wsA).session!;
+      writeBinding(wsA, { ...readBinding(wsA), session: slot });
+      await captureSession('start', {
+        session_id: 'fresh-2',
+        cwd: wsA,
+        transcript_path: join(wsA, 'fresh-2.jsonl'),
+      });
+      expect(readBinding(wsA).session?.id).toBe('fresh-2');
+    });
+
+    it('a slot with NO transcript path is not live-looking — newcomer takes it', async () => {
+      await captureSession('start', { session_id: 'live-1', cwd: wsA }); // no transcript_path
+      await captureSession('start', {
+        session_id: 'fresh-2',
+        cwd: wsA,
+        transcript_path: join(wsA, 'fresh-2.jsonl'),
+      });
+      expect(readBinding(wsA).session?.id).toBe('fresh-2');
+    });
   });
 
   it('never fails, never writes: no session_id / no workspace on the walk-up', async () => {
