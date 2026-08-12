@@ -17,7 +17,9 @@ function fmtGoal(g: Goal): string {
   // The plan epoch (ADR 111) — how many times this Goal has been steered/deferred; shown only when > 0.
   const epoch = g.epoch > 0 ? ` epoch=${g.epoch}` : '';
   const story = g.story ? ` — "${g.story}"` : '';
-  return `${g.id} [${g.status}] "${g.title}"${story}${wave}${deps}${epoch} — declared by ${g.declared_by}`;
+  // value-layer design: the outcome line — what shipping this changed for a user, with provenance.
+  const outcome = g.outcome ? `\n    ⇒ ${g.outcome.text} — ${g.outcome.by}` : '';
+  return `${g.id} [${g.status}] "${g.title}"${story}${wave}${deps}${epoch} — declared by ${g.declared_by}${outcome}`;
 }
 
 export function registerGoals(server: McpServer, client: MusterdClient): void {
@@ -67,6 +69,35 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
       try {
         const { goal } = await client.declareGoal(args);
         return textResult(`goal declared\n${fmtGoal(goal)}`);
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'team_goal_outcome',
+    {
+      description:
+        'Record what a shipped goal changed for a user — one plain sentence of evidence, shown ' +
+        'beside the goal wherever it renders. Anyone may amend by recording a new note; the ' +
+        'latest wins and provenance is kept.',
+      inputSchema: {
+        goal_id: z.string().describe('the goal this note is about'),
+        outcome: z
+          .string()
+          .max(280)
+          .describe('what changed for a user — evidence, not a slogan'),
+      },
+    },
+    async (args) => {
+      try {
+        const { goal } = await client.goalOutcome(args);
+        return textResult(
+          goal
+            ? `outcome recorded\n${fmtGoal(goal)}`
+            : 'outcome recorded (goal not yet declared — queued until it is)',
+        );
       } catch (err) {
         return errorResult(err);
       }

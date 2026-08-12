@@ -387,6 +387,8 @@ export class MusterdClient {
   ): Promise<{
     lane: Lane;
     warnings: LaneWarning[];
+    /** value-layer design: advisory lines for THIS caller only (e.g. the ship nudge) — never a wake. */
+    notices?: string[];
     /** ADR 169: present when the patch entered ready_for_review — the review routing. */
     review?: {
       reviewer?: string;
@@ -442,6 +444,11 @@ export class MusterdClient {
 
   declareGoal(body: unknown): Promise<{ goal: Goal }> {
     return this.request('POST', `/teams/${this.config.team}/goals`, body);
+  }
+
+  /** Record a goal outcome note (value-layer design). `goal: null` = not yet declared (queued). */
+  goalOutcome(body: { goal_id: string; outcome: string }): Promise<{ goal: Goal | null }> {
+    return this.request('POST', `/teams/${this.config.team}/goals/outcome`, body);
   }
 
   /** The insight report (ADR 050/084) — one server-side projection. */

@@ -123,13 +123,20 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
       description:
         'Take ownership of an open lane. Refuses a lane a live teammate already owns — ask them to ' +
         'hand it over or release it. Returns the lane + contention warnings.',
-      inputSchema: { id: z.string().describe('lane id') },
+      inputSchema: {
+        id: z.string().describe('lane id'),
+        goal_id: z
+          .string()
+          .optional()
+          .describe('link the lane to a goal as you take it — one call, no follow-up lane_update'),
+      },
     },
     async (args) => {
       try {
         if (!client.member) return textResult('claim a seat first (team_join)');
         const { lane, warnings } = await client.updateLane(args.id, {
           owner_seat: client.member,
+          ...(args.goal_id ? { goal_id: args.goal_id } : {}),
         });
         return laneResult('lane claimed', lane, warnings);
       } catch (err) {
@@ -405,7 +412,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           ...(args.sha !== undefined ? { sha: args.sha } : {}),
           ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
         };
-        const { lane, warnings } = await client.updateLane(args.id, {
+        const { lane, warnings, notices } = await client.updateLane(args.id, {
           state: 'done',
           ...(Object.keys(merged).length ? { merged } : {}),
         });
@@ -415,7 +422,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           client.member && lane.owner_seat === client.member
             ? '\n\nunconfirmed close recorded — prefer lane_submit when an acceptor is live (ADR 192).'
             : '';
-        const hint = nudge + branchCleanupHint(lane);
+        // value-layer design: the daemon's advisory notices (e.g. the ship nudge) reach the closer.
+        const noticeText = notices?.length ? '\n\n' + notices.join('\n') : '';
+        const hint = noticeText + nudge + branchCleanupHint(lane);
         return laneResult('lane done', lane, warnings, hint || undefined);
       } catch (err) {
         return errorResult(err);
@@ -488,6 +497,14 @@ function fmtNext(b: NextBrief): string {
   if (b.in_flight.length) {
     lines.push(`\ncarrying (${b.in_flight.length}):`);
     for (const l of b.in_flight) lines.push('  ' + fmtLane(l));
+  }
+  // value-layer design: ambient review debt — the oldest lanes waiting on ANY seat's acceptance
+  // (owed_reviews above is the directed slice). Same `?? []` daemon-skew tolerance as the rest.
+  const debt = b.review_debt ?? [];
+  if (debt.length) {
+    lines.push(`\n⧗ review debt — waiting on any seat's acceptance:`);
+    for (const r of debt)
+      lines.push(`  ${r.id} "${r.title}" — waiting ${Math.floor(r.waited_ms / 3_600_000)}h`);
   }
   if (b.up_next.length) {
     lines.push('\nup next — open lanes you could pick up:');
