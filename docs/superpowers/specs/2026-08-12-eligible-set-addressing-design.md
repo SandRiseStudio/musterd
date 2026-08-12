@@ -62,8 +62,8 @@ silent inbox bug. **This design touches none of them.**
 
 ### Three rules
 
-1. **Eligibility is enumerated, not derived.** `meta.eligible` is an array of 2+ distinct seat names:
-   live, non-observer members of the team, excluding the sender.
+1. **Eligibility is enumerated, not derived.** `meta.eligible` is an array of 2–4 distinct seat names:
+   live, non-observer members of the team, excluding the sender. (On the cap, see "The cap is four".)
 2. **Any-of discharge.** The first `accept` or `decline` naming the act via `meta.in_reply_to`
    discharges it for every eligible seat. No per-recipient status is stored; the ledger keeps
    deriving.
@@ -235,7 +235,11 @@ reopen — the likely fix is making stand-down interrupt-class rather than inbox
 ## Testing
 
 - **Protocol:** shape validation — reject `eligible` on a disallowed act, reject `<2` names, reject
-  duplicates; accept the good case. Pure unit tests on `actMetaRules`.
+  `>4`, reject duplicates; accept the good case. Pure unit tests on `actMetaRules`.
+- **Surface arity:** the table in "Surface" is the test matrix — `[]` → `@team`, `['a']` → directed
+  member (asserting the existing `coerce.ts` repair is untouched), `['a','b']` → team + eligible, five
+  names → rejected with a message naming `@team`. The 0/1 rows are regression guards, not new
+  behaviour.
 - **Server routing:** through-DB integration test per the standing rule — reject unknown / departed /
   observer / self names; assert exactly one row inserted with `to_kind='team'`.
 - **Ledger:** `recipientsOf` returns only eligible seats; `answered` flips for both on the first
@@ -250,16 +254,16 @@ reopen — the likely fix is making stand-down interrupt-class rather than inbox
 
 ## Blast radius
 
-| File                                            | Change                                           |
-| ----------------------------------------------- | ------------------------------------------------ |
-| `packages/protocol/src/envelope.ts:54`          | `actMetaRules` — shape validation                |
-| `packages/server/src/protocol/route.ts`         | roster validation of the named set               |
-| `packages/server/src/store/delivery.ts:30`      | `recipientsOf` — eligible branch                 |
-| `packages/server/src/store/messages.ts:220-244` | discharge set + `actionNeeded`                   |
-| `packages/server/src/store/residency.ts:878`    | the act-scoped wake hold                         |
-| `packages/mcp/src/tools/send.ts`                | accept an array for `to`, or an `eligible` param |
-| `packages/mcp/src/coerce.ts:83`                 | the 2+ case stops bouncing                       |
-| `packages/cli/src/commands/send.ts:69`          | `--to a,b`                                       |
+| File                                            | Change                                          |
+| ----------------------------------------------- | ----------------------------------------------- |
+| `packages/protocol/src/envelope.ts:54`          | `actMetaRules` — shape validation               |
+| `packages/server/src/protocol/route.ts`         | roster validation of the named set              |
+| `packages/server/src/store/delivery.ts:30`      | `recipientsOf` — eligible branch                |
+| `packages/server/src/store/messages.ts:220-244` | discharge set + `actionNeeded`                  |
+| `packages/server/src/store/residency.ts:878`    | the act-scoped wake hold                        |
+| `packages/mcp/src/tools/send.ts`                | `to` accepts an array                           |
+| `packages/mcp/src/coerce.ts:83`                 | the 2+ case stops bouncing, normalises by arity |
+| `packages/cli/src/commands/send.ts:69`          | `--to a,b`                                      |
 
 Unchanged: the `messages` schema, all seven copies of the inbox visibility predicate, wake policy,
 rate caps, and cost accounting.
@@ -283,12 +287,48 @@ use. Shipping it blind would be tuning a hold window against zero observations.
 If increment 1 shows eligible-set acts are almost never `urgent`, increment 2 may not be worth
 building at all — that is a real possible outcome and the measurement in (3) below is what decides it.
 
+## Surface: `to` accepts an array
+
+`to` takes an array of seat names, and the surface normalises by **arity**. This makes the thing agents
+are already attempting start working, rather than teaching them a second parameter.
+
+| `to`                        | Result                                     | Status              |
+| --------------------------- | ------------------------------------------ | ------------------- |
+| omitted / `[]`              | `{kind:'team'}`                            | existing, unchanged |
+| `'stanley'` / `['stanley']` | `{kind:'member', name:'stanley'}`          | existing, unchanged |
+| `['stanley','izzo']`        | `{kind:'team'}` + `meta.eligible`          | **new**             |
+| 5+ names                    | reject — "use @team, or name at most four" | **new**             |
+
+The 0- and 1-element rows are exactly what `coerce.ts:75-82` already does, so this is additive: the
+only behaviour that changes is the `return null` bounce at line 83 becoming a real path.
+
+**The array is sugar; the envelope stays canonical.** A 2-name send is persisted and audited as
+`to_kind='team'` with `meta.eligible`, not as some array-shaped recipient. Nothing downstream of
+`routeEnvelope` learns a new wire shape, and the audit log reads consistently: one act, team-visible,
+two seats on the hook.
+
+CLI takes the same set as `--to a,b` (`commands/send.ts:69`), with `@team`/`@broadcast` still rejected
+as list members — a set is named seats or it is not a set.
+
+### The cap is four
+
+`MAX_ELIGIBLE = 4`, enforced in shape validation alongside the other `meta.eligible` rules (no roster
+needed to count).
+
+Two reasons, and the second is the one that made it worth fixing now rather than leaving open:
+
+1. **Above four it is `@team` with extra steps.** The primitive's whole value is that a small, named
+   group owes an answer. A six-name set on a twenty-seat team is diffusion of responsibility wearing an
+   enumeration, and the sender should be made to say `@team` and mean it.
+2. **It bounds the escalation tail.** With increment 2's 5-minute hold, an unanswered urgent act walks
+   the set serially. A cap of four bounds the worst case at ~20 minutes and at most four `wake_cost`
+   charges. Uncapped, both the latency and the spend are unbounded — which would quietly reintroduce
+   the duplicate-wake problem the gate exists to prevent, just spread over time instead of at once.
+
+That second reason means the cap is not merely taste: it is what makes the escalation chain's cost
+statable in advance.
+
 ## Open questions
 
-1. **Surface ergonomics.** Does `to` accept an array (matching what models already try, per
-   `coerce.ts`), or is there a separate `eligible` parameter with `to` staying `@team`? The former
-   matches observed behaviour; the latter keeps `to` single-valued and makes the accountability
-   narrowing explicit. Leaning toward accepting the array and normalising it into `meta.eligible`, so
-   the thing agents already do starts working.
-2. **Upper bound on set size.** Is a 6-seat eligible set meaningful, or does it collapse back into
-   `@team` with extra steps? A cap (say 4) would keep the primitive honest. Not blocking.
+None outstanding. Both prior questions (surface ergonomics, set-size cap) were resolved by nick on
+2026-08-12 and are written up above.
