@@ -27,7 +27,9 @@ function renderGoal(g: Goal): string {
         : g.status;
   const story = g.story ? ` — ${theme.meta(`"${g.story}"`)}` : '';
   // value-layer design: the outcome line — what shipping this changed for a user, with provenance.
-  const outcome = g.outcome ? `\n  ${theme.ok('⇒')} ${g.outcome.text} ${theme.meta(`— ${g.outcome.by}`)}` : '';
+  const outcome = g.outcome
+    ? `\n  ${theme.ok('⇒')} ${g.outcome.text} ${theme.meta(`— ${g.outcome.by}`)}`
+    : '';
   const wave = g.wave !== null ? theme.meta(` wave:${g.wave}`) : '';
   const deps = g.depends_on.length ? theme.meta(` deps:${g.depends_on.length}`) : '';
   // The plan epoch (ADR 111) — shown only once direction has changed, so a steady Goal stays quiet.

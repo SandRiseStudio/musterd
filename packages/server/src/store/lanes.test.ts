@@ -667,7 +667,17 @@ describe('stale_acceptance warning (value-layer design)', () => {
     db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(`sa${ts}-${target}`, teamId, ts, 'June', 'lane.ready_for_review', target, 'allow', null, ts);
+    ).run(
+      `sa${ts}-${target}`,
+      teamId,
+      ts,
+      'June',
+      'lane.ready_for_review',
+      target,
+      'allow',
+      null,
+      ts,
+    );
   }
   function awaitingLane(db: ReturnType<typeof seed>['db'], teamId: string) {
     const lane = openLane(db, teamId, 'bravo', 'June', { title: 'w', claim: true });

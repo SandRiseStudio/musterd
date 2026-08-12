@@ -104,12 +104,9 @@ describe('goal command', () => {
     expect(arr[0]!.id).toBe('g');
   });
 
-
   it('records an outcome note and renders it (value-layer design)', async () => {
     await capture(() => goalCommand(parseArgs(['declare', 'G', '--goal-id', 'g'])));
-    const res = await capture(() =>
-      goalCommand(parseArgs(['outcome', 'g', 'users can now X'])),
-    );
+    const res = await capture(() => goalCommand(parseArgs(['outcome', 'g', 'users can now X'])));
     expect(res.code).toBe(0);
     expect(res.out).toContain('outcome recorded');
     expect(res.out).toContain('users can now X');

@@ -84,10 +84,7 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
         'latest wins and provenance is kept.',
       inputSchema: {
         goal_id: z.string().describe('the goal this note is about'),
-        outcome: z
-          .string()
-          .max(280)
-          .describe('what changed for a user — evidence, not a slogan'),
+        outcome: z.string().max(280).describe('what changed for a user — evidence, not a slogan'),
       },
     },
     async (args) => {

@@ -57,5 +57,8 @@
 // is the cue for why its lane_update refuses the field.
 // Epoch 10 — no_goal lane warning + Goal.story (goals front door). An epoch-9 seat neither emits nor
 // renders either.
-export const FEATURE_EPOCH = 10 as const;
+// Epoch 11 — value layer (ADR 257): team_goal_outcome + Goal.outcome, lane_claim {goal_id},
+// stale_acceptance warning, review_debt in the brief, notices on lane mutations. An epoch-10 seat
+// reads goals/briefs as before (all fields additive) but cannot record an outcome or claim-link.
+export const FEATURE_EPOCH = 11 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

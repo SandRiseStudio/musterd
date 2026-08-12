@@ -1465,9 +1465,7 @@ describe('value layer: goal outcome + review debt + claim-time linking', () => {
       why: null,
       next_goal: null,
       goals: [],
-      review_debt: [
-        { id: 'laneZ', title: 'stuck work', owner: 'June', waited_ms: 26 * 3_600_000 },
-      ],
+      review_debt: [{ id: 'laneZ', title: 'stuck work', owner: 'June', waited_ms: 26 * 3_600_000 }],
     }));
     const handlers = captureAll(registerLanes, { next } as Partial<MusterdClient>);
     const out = text(await handlers['team_next']!({}));

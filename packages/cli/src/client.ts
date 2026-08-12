@@ -511,7 +511,10 @@ export class HttpClient {
   }
 
   /** Record a goal outcome note (value-layer design). `null` = goal not yet declared (queued). */
-  async goalOutcome(slug: string, body: { goal_id: string; outcome: string }): Promise<Goal | null> {
+  async goalOutcome(
+    slug: string,
+    body: { goal_id: string; outcome: string },
+  ): Promise<Goal | null> {
     const json = await this.request('POST', `/teams/${slug}/goals/outcome`, body);
     const raw = (json as { goal: unknown }).goal;
     if (raw === null) return null;

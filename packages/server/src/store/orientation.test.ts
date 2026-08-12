@@ -404,9 +404,24 @@ describe('review_debt (value-layer design)', () => {
     db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(`rd${ts}-${target}`, teamId, ts, 'stanley', 'lane.ready_for_review', target, 'allow', null, ts);
+    ).run(
+      `rd${ts}-${target}`,
+      teamId,
+      ts,
+      'stanley',
+      'lane.ready_for_review',
+      target,
+      'allow',
+      null,
+      ts,
+    );
   }
-  function awaiting(db: ReturnType<typeof seed>['db'], teamId: string, title: string, agoMs: number) {
+  function awaiting(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    title: string,
+    agoMs: number,
+  ) {
     const lane = openLane(db, teamId, 'revive', 'stanley', { title, claim: true });
     const moved = updateLane(db, teamId, lane.id, 'revive', { state: 'awaiting_acceptance' })!;
     insertReadyAudit(db, teamId, moved.id, Date.now() - agoMs);
