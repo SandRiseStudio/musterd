@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { EnvelopeSchema, makeEnvelope } from './envelope.js';
+import {
+  ELIGIBLE_ACTS,
+  EnvelopeSchema,
+  eligibleOf,
+  makeEnvelope,
+  MAX_ELIGIBLE,
+} from './envelope.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 const base = {
@@ -266,5 +272,81 @@ describe('EnvelopeSchema', () => {
     expect(makeEnvelope({ ...base, to: { kind: 'broadcast' }, act: 'message' }).to).toEqual({
       kind: 'broadcast',
     });
+  });
+});
+
+describe('meta.eligible (the eligible set)', () => {
+  /** A team-addressed act, which is what an eligible set always rides on. */
+  const teamBase = { ...base, to: { kind: 'team' } as const };
+  const withEligible = (eligible: unknown, act = 'message') =>
+    makeEnvelope({ ...teamBase, act, body: 'either of you know?', meta: { eligible } });
+
+  it('accepts two names', () => {
+    expect(withEligible(['Lin', 'Ada2']).meta).toMatchObject({ eligible: ['Lin', 'Ada2'] });
+  });
+
+  it('accepts the cap exactly', () => {
+    expect(withEligible(['a', 'b', 'c', 'd']).meta).toMatchObject({
+      eligible: ['a', 'b', 'c', 'd'],
+    });
+  });
+
+  it('rejects more than MAX_ELIGIBLE, pointing at @team', () => {
+    expect(() => withEligible(['a', 'b', 'c', 'd', 'e'])).toThrow(/@team/);
+  });
+
+  it('rejects a single name — one seat is a directed act', () => {
+    expect(() => withEligible(['Lin'])).toThrow(/at least 2/);
+  });
+
+  it('rejects a repeated seat', () => {
+    expect(() => withEligible(['Lin', 'Lin'])).toThrow(/same seat twice/);
+  });
+
+  it('rejects an empty name', () => {
+    expect(() => withEligible(['Lin', '  '])).toThrow(/empty name/);
+  });
+
+  it('rejects a non-array', () => {
+    expect(() => withEligible('Lin,Ada2')).toThrow(/array of seat names/);
+  });
+
+  it('rejects a mixed-type array', () => {
+    expect(() => withEligible(['Lin', 3])).toThrow(/array of seat names/);
+  });
+
+  it.each(['message', 'request_help', 'challenge'])('allows an eligible set on %s', (act) => {
+    expect(withEligible(['Lin', 'Ada2'], act).meta).toMatchObject({ eligible: ['Lin', 'Ada2'] });
+  });
+
+  // A handoff to two seats is incoherent — two owners is zero owners — and the single-target acts
+  // have nowhere to put a second addressee. This restriction is what earns one global discharge rule.
+  it.each(['handoff', 'accept', 'decline', 'defer', 'steer', 'status_update', 'ask', 'resolve'])(
+    'rejects an eligible set on %s',
+    (act) => {
+      expect(() => withEligible(['Lin', 'Ada2'], act)).toThrow(/cannot carry meta\.eligible/);
+    },
+  );
+
+  it('leaves an envelope without the key alone', () => {
+    expect(makeEnvelope({ ...teamBase, act: 'message', body: 'hi' }).meta).toBeNull();
+  });
+
+  it('eligibleOf reads the shape, and returns null rather than a filtered list', () => {
+    expect(eligibleOf(null)).toBeNull();
+    expect(eligibleOf(undefined)).toBeNull();
+    expect(eligibleOf({})).toBeNull();
+    expect(eligibleOf({ eligible: 'Lin' })).toBeNull();
+    // Dropping the non-string silently would mean silently dropping an obligation.
+    expect(eligibleOf({ eligible: ['Lin', 3] })).toBeNull();
+    expect(eligibleOf({ eligible: ['Lin', 'Ada2'] })).toEqual(['Lin', 'Ada2']);
+  });
+
+  it('MAX_ELIGIBLE is four', () => {
+    expect(MAX_ELIGIBLE).toBe(4);
+  });
+
+  it('ELIGIBLE_ACTS is exactly the three question-shaped acts', () => {
+    expect([...ELIGIBLE_ACTS].sort()).toEqual(['challenge', 'message', 'request_help']);
   });
 });
