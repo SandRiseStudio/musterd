@@ -1,8 +1,9 @@
-import type { LaneBoard, MemberSummary } from '@musterd/protocol';
+import type { Goal, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ESCAPE_SCOPES, OPEN_TILT, shouldDismiss, zoomTransform } from './boardOverlayMath';
 import type { LiveConfig } from './client';
 import { useBoardData } from './useBoardData';
+import { goalFilter, resolveBoardView } from './goalGrid';
 
 /**
  * The work board, lazy — kept out of /live's eager graph (ADR 151: heavy, occasional code gets a
@@ -30,13 +31,15 @@ const CLOSE_MS = 320;
  *
  * Data-wise this is the same board as `/board`: the same `useBoardData` half (optimistic echo fold,
  * write gate, status line) over the same `base` the route already fetched for the reel — nothing is
- * fetched twice, and a write made here shows up everywhere the lane board does. Goals view is
- * deliberately absent (nick, 2026-07-31: reevaluating goals) — columns only.
+ * fetched twice, and a write made here shows up everywhere the lane board does. Since the
+ * goals-front-door design the overlay leads with the same goals grid as /board (that resolved the
+ * 2026-07-31 hold), with the grid ⇄ columns toggle in its bar.
  */
 export function BoardOverlay({
   cfg,
   roster,
   base,
+  goals,
   origin,
   focusLane = null,
   onClose,
@@ -44,6 +47,8 @@ export function BoardOverlay({
   cfg: LiveConfig | null;
   roster: MemberSummary[];
   base: LaneBoard | null;
+  /** Declared Goals from the route's report — the grid's mission cards. */
+  goals: Goal[];
   /** The wall hotspot's viewport rect — the zoom's origin and its destination on close. Null when
    * the board was opened by a deep link rather than a click: there is no object to grow out of. */
   origin: DOMRect | null;
@@ -53,6 +58,12 @@ export function BoardOverlay({
 }) {
   const { board, me, busyId, note, doCreate, doPatch } = useBoardData(cfg, roster, base);
   const [composing, setComposing] = useState(false);
+  // Same default rule as /board (no stored preference in the overlay): grid iff goals exist.
+  const unshipped = goals.filter((g) => g.status !== 'shipped').length;
+  const [chosenView, setChosenView] = useState<'grid' | 'columns' | null>(null);
+  const view = chosenView ?? resolveBoardView(null, unshipped);
+  // Drill-in inside the overlay: a card click filters the columns to that goal's lanes.
+  const [goalFocus, setGoalFocus] = useState<string | null | undefined>(undefined);
   const [closing, setClosing] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -134,6 +145,22 @@ export function BoardOverlay({
           <span className="lc-boardoverlay__title">
             work board <span className="lc-boardoverlay__team">· {cfg?.team ?? ''}</span>
           </span>
+          <div className="lc-board__views" role="group" aria-label="Board view">
+            <button
+              className={`lc-board__view${view === 'grid' ? ' lc-board__view--on' : ''}`}
+              aria-pressed={view === 'grid'}
+              onClick={() => setChosenView('grid')}
+            >
+              goals
+            </button>
+            <button
+              className={`lc-board__view${view === 'columns' ? ' lc-board__view--on' : ''}`}
+              aria-pressed={view === 'columns'}
+              onClick={() => setChosenView('columns')}
+            >
+              columns
+            </button>
+          </div>
           <span
             className={`lc-board__note${note ? ` lc-board__note--${note.tone}` : ''} lc-boardoverlay__note`}
             aria-live="polite"
@@ -150,15 +177,30 @@ export function BoardOverlay({
           </button>
         </header>
         <div className="lc-board__main lc-boardoverlay__main">
+          {view === 'columns' && goalFocus !== undefined && (
+            <button
+              className="lc-board__view lc-board__goalback"
+              onClick={() => {
+                setGoalFocus(undefined);
+                setChosenView('grid');
+              }}
+            >
+              ← goals · showing {goalFocus === null ? 'lanes on no goal' : goalFocus}
+            </button>
+          )}
           {board == null ? (
             <p className="lc-col__empty">Opening the board…</p>
           ) : (
             <Suspense fallback={<div className="lc-boardoverlay__loading" aria-hidden="true" />}>
               <LazyBoard
-                lanes={board.lanes}
+                lanes={view === 'columns' ? goalFilter(board.lanes, goalFocus) : board.lanes}
                 warnings={board.warnings}
-                view="columns"
-                goals={[]}
+                view={view}
+                goals={goals}
+                onOpenGoal={(id) => {
+                  setGoalFocus(id);
+                  setChosenView('columns');
+                }}
                 roster={roster}
                 me={me}
                 busyId={busyId}

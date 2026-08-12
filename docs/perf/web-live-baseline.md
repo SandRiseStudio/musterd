@@ -325,3 +325,13 @@ If the next ceiling arrives on the same schedule, the answer is not a third rais
 deliberate decision that the office's visual richness is worth a permanently larger CSS budget (say
 so, and set it once, high), or a structural change — `Live.css` is 4,500+ lines and 69% of all shipped
 CSS, and it is the only file that has ever moved this number.
+
+## 2026-08-12 — the goals-grid front door (raise, not re-baseline)
+
+The board's new default view (goals-front-door design: `goalGrid.ts` model, `GoalGridView.tsx`,
+`GoalGrid.css`, route drill-in, overlay toggle) landed with both totals >99% consumed and tipped
+them: **total JS 238,899 B vs 238,000 budget; total CSS 25,395 B vs 25,300 budget.** The swimlane
+regroup it replaces (`groupByGoal` + its suite) was deleted in the same change, so the delta is
+net of the retirement. Initial JS is untouched (grid rides the existing lazy board chunk).
+Raised `totalJsGzipBytes` 238000 → 241000 and `totalCssGzipBytes` 25300 → 26400 — measured + ~1%
+headroom on JS, +4% on CSS; both were tight-fit ceilings, not calibration drift.
