@@ -23,9 +23,12 @@ import { getTeamBySlug } from '../store/teams.js';
 let server: RunningServer;
 let base: string;
 let wsUrl: string;
+/** The same handle the server holds — tests that need to reach past the API keep it here. */
+let db: ReturnType<typeof openDb>;
 
 beforeEach(async () => {
-  server = createServer({ db: openDb(':memory:'), port: 0 });
+  db = openDb(':memory:');
+  server = createServer({ db, port: 0 });
   const { port } = await server.listen();
   base = `http://127.0.0.1:${port}`;
   wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -191,6 +194,17 @@ class TestWs {
   }
   countFrames(type: string) {
     return this.frames.filter((f) => f.type === type).length;
+  }
+  /** Resolves when the server closes this socket — the "you are done here" signal a client needs. */
+  closed(ms = 1000): Promise<void> {
+    if (this.ws.readyState === this.ws.CLOSED) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('timeout waiting for close')), ms);
+      this.ws.on('close', () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
   }
   close() {
     this.ws.close();
@@ -624,6 +638,52 @@ describe('WebSocket', () => {
     );
     expect((await get('/health')).json.connections).toBe(1);
     a.close();
+  });
+
+  /**
+   * The silent-claim-failure regression (found 2026-08-12 during the ADR 251 live wake). A claim
+   * whose presence write is refused by the storage layer must come back LOUD: the real cause on an
+   * error frame, an audit row, and a closed socket — because the client cannot distinguish "still
+   * thinking" from "already dead" on a socket that stays open.
+   *
+   * The trigger reproduces the exact shape without mocking: the protocol accepts the frame, the
+   * storage layer refuses the row. That is enum-vs-storage drift, which is how this class of bug
+   * always arrives (migration 39 was one: the surface CHECK predated the `musterd` enum value).
+   */
+  it('a claim whose presence write is refused fails loudly — error frame, audit row, closed socket', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+    db.exec(`
+      CREATE TRIGGER refuse_ios BEFORE INSERT ON presence WHEN NEW.surface = 'ios'
+      BEGIN SELECT RAISE(ABORT, 'CHECK constraint failed: surface'); END;
+    `);
+
+    const a = new TestWs();
+    await a.open();
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'ios',
+    });
+
+    // 1. The client learns WHY, in-band, without waiting for a timeout.
+    const err = (await a.waitFor('error')) as { code: string; message: string };
+    expect(err.code).toBe('server_error');
+    expect(err.message).toContain('CHECK constraint failed');
+    // 2. The socket is terminal: an unauthenticated connection whose claim died is not a waiting
+    //    room. This is the second net — a client that ignores the frame still unblocks on close.
+    await a.closed();
+    // 3. The failure is in the ledger. A claim that fails left NO trace before this fix, so the
+    //    only evidence of the four-round hunt was in the agent's own transcript.
+    const audit = listAudit(db, getTeamBySlug(db, 'dawn')!.id, 50);
+    const failed = audit.find((r) => r.action === 'claim.failed');
+    expect(failed).toBeDefined();
+    expect(failed!.result).toBe('deny');
   });
 
   it('delivers live to a present recipient and acks the sender', async () => {

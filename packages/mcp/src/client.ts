@@ -538,12 +538,25 @@ export class MusterdClient {
           if (settled) return;
           settled = true;
           this.joinTimer = null;
-          reject(new Error(this.lastJoinErrorMsg ?? 'timed out waiting for admin approval'));
+          reject(new Error(this.lastJoinErrorMsg ?? this.unexplainedTimeout()));
         }, timeoutMs);
         this.joinTimer.unref?.();
       }
       this.openSocket();
     });
+  }
+
+  /**
+   * What to say when join() times out with nothing else to go on. Only an actually-opened request
+   * licenses naming an approval: the old unconditional "timed out waiting for admin approval" was a
+   * guess that read as a finding, and it sent a live diagnosis hunting for a `requests` row that had
+   * never existed. An unexplained timeout must read as unexplained.
+   */
+  private unexplainedTimeout(): string {
+    return this.pendingRequestId
+      ? `timed out waiting for admin approval (request ${this.pendingRequestId})`
+      : `no answer from the server on the claim — it was never accepted, refused, or queued ` +
+          `(${this.config.server}); check the daemon log for a claim.failed row`;
   }
 
   /** The open claim request id while this session is parked awaiting approval (ADR 087), or null. */
@@ -758,6 +771,28 @@ export class MusterdClient {
           this.pendingJoin = null;
           ws.close();
         }
+      } else if (frame.type === 'error' && frame.code !== 'superseded') {
+        // EVERY server error settles an in-flight claim. This branch used to match `superseded`
+        // alone, so a claim that failed for any other reason — a constraint the storage layer
+        // refused, a bad grant, an internal fault — had its diagnosis delivered here and dropped one
+        // line before it would have been reported (found 2026-08-12, ADR 251 live wake: the server
+        // said "CHECK constraint failed: surface" and the agent was told it had timed out waiting
+        // for an approval nobody requested).
+        const msg = `${frame.code}: ${frame.message}`;
+        this.lastJoinErrorMsg = msg;
+        if (this.pendingJoin || !this.joinedFlag) {
+          // The claim never completed: this socket is unauthenticated and useless. Stop holding the
+          // seat and don't thrash — a reconnect would hit the same fault (ADR 108 autojoin brings
+          // the seat back on the next tool call, once the cause is actually fixed).
+          this.wantPresence = false;
+          this.pendingRequestId = null;
+          this.waitOnPending = false;
+          this.pendingJoin?.reject(new Error(msg));
+          this.pendingJoin = null;
+          ws.close();
+        }
+        // Already occupied: an error about some later frame is NOT a reason to tear down a working
+        // session. Recorded above so the next join()/timeout can name it.
       } else if (frame.type === 'error' && frame.code === 'superseded') {
         // Newest-wins (ADR 017): a newer session of this seat took it over. Stop holding and do **not**
         // reconnect — otherwise two sessions of one identity ping-pong displacing each other forever

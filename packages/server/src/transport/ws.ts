@@ -739,6 +739,38 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
         const me = asMusterdError(err);
         recordError(me.code);
         send(ws, me.toFrame());
+        // A claim that dies inside the handler is TERMINAL for this socket, and saying so is the
+        // whole fix (found 2026-08-12, ADR 251 live wake). The error frame above already carried the
+        // real cause; what was missing is that the connection stayed open in an unauthenticated
+        // half-state, so a client that made nothing of the frame had no second signal and waited out
+        // its own timeout instead. Closing is that second signal — and the audit row is the first
+        // trace a failed claim has ever left, which is why the original diagnosis had to be done
+        // from an agent's transcript rather than from the ledger.
+        if (frame.type === 'claim' && !state.authenticated) {
+          try {
+            const team = requireTeam(ctx.db, frame.team);
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'claim.failed',
+              target: encodeTarget(frame.target),
+              result: 'deny',
+              detail: { code: me.code, error: me.message, surface: frame.surface },
+            });
+          } catch {
+            // Best-effort: an unresolvable team is itself a plausible cause of the throw, and a
+            // failed audit write must never mask the failure it was trying to record.
+          }
+          log.warn({
+            msg: 'ws_claim_failed',
+            team: frame.team,
+            target: encodeTarget(frame.target),
+            surface: frame.surface,
+            code: me.code,
+            error: me.message,
+            conn: state.connId,
+          });
+          ws.close();
+        }
       }
     });
 
