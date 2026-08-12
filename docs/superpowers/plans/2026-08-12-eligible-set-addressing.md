@@ -879,7 +879,11 @@ git commit -m "CLI: musterd send --to a,b names an eligible set"
 
 ---
 
-### Task 7: The "who answered" trace on the inbox
+### Task 7: The "who answered" trace on the inbox ✅ DONE (96418f60)
+
+> **Contention cleared** — wanderer's ADR 253 merged, no open lane touches `transport/http.ts`.
+>
+> **Plan corrections:** the sketched SQL was invalid (`GROUP BY id` is ambiguous against `messages.id`/`members.id`; SQLite rejects it, surfacing as `discharged: undefined` only for seats that owed something). Groups on `ref` with `by` as a bare column beside one `MIN(ts)`. **Scope extended:** the plan stopped at the JSON field, but a trace no surface renders is still silent retirement — the MCP client type, `team_inbox_check` render, and `structuredContent` all carry it now.
 
 **Files:**
 
