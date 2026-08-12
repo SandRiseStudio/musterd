@@ -16,7 +16,8 @@ function fmtGoal(g: Goal): string {
   const deps = g.depends_on.length ? ` deps=[${g.depends_on.join(', ')}]` : '';
   // The plan epoch (ADR 111) — how many times this Goal has been steered/deferred; shown only when > 0.
   const epoch = g.epoch > 0 ? ` epoch=${g.epoch}` : '';
-  return `${g.id} [${g.status}] "${g.title}"${wave}${deps}${epoch} — declared by ${g.declared_by}`;
+  const story = g.story ? ` — "${g.story}"` : '';
+  return `${g.id} [${g.status}] "${g.title}"${story}${wave}${deps}${epoch} — declared by ${g.declared_by}`;
 }
 
 export function registerGoals(server: McpServer, client: MusterdClient): void {
@@ -50,6 +51,11 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
       inputSchema: {
         id: z.string().describe('stable Goal id, e.g. "orientation-spine"'),
         title: z.string().describe('the outcome, short'),
+        story: z
+          .string()
+          .max(140)
+          .optional()
+          .describe('one plain-language line for outsiders — what this goal means'),
         wave: z
           .union([z.number().int(), z.literal('later')])
           .optional()

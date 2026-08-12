@@ -2657,7 +2657,13 @@ export async function handleHttp(
           act: 'message',
           body: `[goal] declared "${body.title}"`,
           meta: {
-            goal: { id: body.id, title: body.title, wave: body.wave, depends_on: body.depends_on },
+            goal: {
+              id: body.id,
+              title: body.title,
+              story: body.story,
+              wave: body.wave,
+              depends_on: body.depends_on,
+            },
           },
         });
         routeEnvelope(ctx, team, member, env);
