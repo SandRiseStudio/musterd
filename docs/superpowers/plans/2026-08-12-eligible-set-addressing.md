@@ -366,7 +366,9 @@ git commit -m "Server: validate eligible-set names against the roster, reject ra
 
 ---
 
-### Task 3: Ledger — the obligation holders
+### Task 3: Ledger — the obligation holders ✅ DONE (5443638b)
+
+> **Design correction found while implementing:** any-of discharge is NOT free. `answerBy` is scoped per recipient (`from_member = recipientId`, `delivery.ts:78`), so one seat's answer left the others owing. Required a genuinely new `anyAnswer(db, msg)` clause, applied only when an eligible set is present. **Task 7's `discharged` trace must use the same any-sender query** — not `answerBy`. Spec updated with a dated correction.
 
 **Files:**
 
