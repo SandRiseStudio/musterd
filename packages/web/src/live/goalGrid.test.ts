@@ -31,7 +31,7 @@ const lane = (over: Partial<Lane> = {}): Lane => ({
 const goal = (over: Partial<Goal> = {}): Goal => ({
   id: 'g1',
   title: 'Native harness',
-  wave: 1,
+  wave: null,
   depends_on: [],
   declared_by: 'nick',
   declared_at: 1,
@@ -116,10 +116,12 @@ describe('buildGoalGrid — zones', () => {
 
 describe('buildGoalGrid — cards', () => {
   it('chip derivation: planned→queued, in-flight 0 done→just started, else in flight', () => {
+    // declared_at is explicit: ADR 257 breaks status ties by recency, so leaving it equal would
+    // make the expected order depend on sort stability rather than on the rule under test.
     const goals = [
-      goal({ id: 'q', title: 'Q', wave: 1, status: 'planned' }),
-      goal({ id: 'j', title: 'J', wave: 2, status: 'in-flight' }),
-      goal({ id: 'f', title: 'F', wave: 3, status: 'in-flight' }),
+      goal({ id: 'q', title: 'Q', status: 'planned', declared_at: 3 }),
+      goal({ id: 'j', title: 'J', status: 'in-flight', declared_at: 2 }),
+      goal({ id: 'f', title: 'F', status: 'in-flight', declared_at: 1 }),
     ];
     const lanes = [
       lane({ id: 'a', goal_id: 'j', state: 'active', owner_seat: 'june' }),
@@ -127,17 +129,18 @@ describe('buildGoalGrid — cards', () => {
       lane({ id: 'c', goal_id: 'f', state: 'active', owner_seat: 'cleo' }),
     ];
     const cards = buildGoalGrid(lanes, goals, NOW).cards;
+    // in-flight sorts ahead of planned (ADR 257), newest-declared first within a status.
     expect(cards.map((c) => [c.id, c.chip])).toEqual([
-      ['q', 'queued'],
       ['j', 'just started'],
       ['f', 'in flight'],
+      ['q', 'queued'],
     ]);
   });
 
   it('story uses goal.story, falls back to lane facts, else null', () => {
-    const withStory = goal({ id: 'g1', story: 'plain words' });
-    const noStory = goal({ id: 'g2', title: 'Other', wave: 2 });
-    const bare = goal({ id: 'g3', title: 'Bare', wave: 3, status: 'planned' });
+    const withStory = goal({ id: 'g1', story: 'plain words', declared_at: 3 });
+    const noStory = goal({ id: 'g2', title: 'Other', declared_at: 2 });
+    const bare = goal({ id: 'g3', title: 'Bare', status: 'planned', declared_at: 1 });
     const lanes = [lane({ id: 'a', goal_id: 'g2', state: 'active', owner_seat: 'x', created_at: NOW - 86_400_000 })];
     const cards = buildGoalGrid(lanes, [withStory, noStory, bare], NOW).cards;
     expect(cards[0]!.story).toBe('plain words');
@@ -167,15 +170,23 @@ describe('buildGoalGrid — cards', () => {
     expect(attached.some((c) => c.id === null)).toBe(false);
   });
 
-  it('shipped goals go to the shelf, not cards; wave orders the cards', () => {
+  it('shipped goals go to the shelf, not cards; the newest declaration leads (ADR 257)', () => {
     const goals = [
-      goal({ id: 'g2', title: 'Second', wave: 2 }),
-      goal({ id: 'g1', title: 'First', wave: 1 }),
-      goal({ id: 'gs', title: 'Landed', wave: 0, status: 'shipped' }),
+      goal({ id: 'older', title: 'Older', declared_at: 1 }),
+      goal({ id: 'newer', title: 'Newer', declared_at: 2 }),
+      goal({ id: 'gs', title: 'Landed', declared_at: 3, status: 'shipped' }),
     ];
     const model = buildGoalGrid([], goals, NOW);
-    expect(model.cards.map((c) => c.id)).toEqual(['g1', 'g2']);
+    expect(model.cards.map((c) => c.id)).toEqual(['newer', 'older']);
     expect(model.shippedShelf).toEqual([{ id: 'gs', title: 'Landed' }]);
+  });
+
+  it('a shelved goal ("later") sorts behind everything unshelved, however recent', () => {
+    const goals = [
+      goal({ id: 'shelved', title: 'Shelved', wave: 'later', declared_at: 99 }),
+      goal({ id: 'live', title: 'Live', declared_at: 1 }),
+    ];
+    expect(buildGoalGrid([], goals, NOW).cards.map((c) => c.id)).toEqual(['live', 'shelved']);
   });
 
   it('pulse is the team-wide latest done lane; lastMoved is per-card', () => {

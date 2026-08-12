@@ -2729,9 +2729,9 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const stan = await post('/teams/dawn/members', { name: 'stan', kind: 'human' }, nickTok);
     const stanTok = stan.json.human_credential;
 
-    // Two declared Goals; `spine` sorts first by wave.
-    await post('/teams/dawn/goals', { id: 'spine', title: 'Spine', wave: 1 }, nickTok);
-    await post('/teams/dawn/goals', { id: 'client', title: 'Client', wave: 2 }, nickTok);
+    // Two declared Goals; `spine` is declared last so it leads (ADR 257: newest declaration first).
+    await post('/teams/dawn/goals', { id: 'client', title: 'Client' }, nickTok);
+    await post('/teams/dawn/goals', { id: 'spine', title: 'Spine' }, nickTok);
 
     // stan claims a lane on `spine` — building against epoch 0.
     const lane = await post(
@@ -5159,17 +5159,13 @@ describe('declared Goals + next_goal (ADR 048/084)', () => {
     const ada = { key: team.json.agent_key, seat: 'Ada' };
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
-    // Two Goals: 'engine' (wave 1) and 'surface' (wave 2, depends on engine).
-    const g1 = await post(
-      '/teams/dawn/goals',
-      { id: 'engine', title: 'Insight engine', wave: 1 },
-      nickTok,
-    );
+    // Two Goals: 'engine', and 'surface' which depends on it.
+    const g1 = await post('/teams/dawn/goals', { id: 'engine', title: 'Insight engine' }, nickTok);
     expect(g1.status).toBe(201);
     expect(g1.json.goal.status).toBe('planned');
     await post(
       '/teams/dawn/goals',
-      { id: 'surface', title: 'CLI surface', wave: 2, depends_on: ['engine'] },
+      { id: 'surface', title: 'CLI surface', depends_on: ['engine'] },
       nickTok,
     );
 
@@ -5177,7 +5173,7 @@ describe('declared Goals + next_goal (ADR 048/084)', () => {
     const goals = await get('/teams/dawn/goals', ada);
     expect(goals.json.goals.map((g: { id: string }) => g.id).sort()).toEqual(['engine', 'surface']);
 
-    // next_goal = first planned by wave = engine (surface is blocked on engine).
+    // next_goal = engine — 'surface' is newer but blocked on it (deps outrank recency, ADR 257).
     let brief = await get('/teams/dawn/next', ada);
     expect(brief.json.next_goal.id).toBe('engine');
 
@@ -5210,7 +5206,7 @@ describe('insight report (ADR 050/084)', () => {
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
     // A shipped lane (throughput + goal status) and a blocked lane (the exception).
-    await post('/teams/dawn/goals', { id: 'engine', title: 'Engine', wave: 1 }, nickTok);
+    await post('/teams/dawn/goals', { id: 'engine', title: 'Engine' }, nickTok);
     const shipped = await post(
       '/teams/dawn/lanes',
       { title: 'built', goal_id: 'engine', claim: true },

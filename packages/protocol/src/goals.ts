@@ -19,14 +19,29 @@ export type GoalStatus = z.infer<typeof GoalStatusSchema>;
 /** plain-language one-liner for the stranger — what this goal means, not its title */
 export const GoalStorySchema = z.string().trim().min(1).max(140);
 
+/**
+ * A Goal's build-order marker, as it reads **today** (ADR 257): `'later'` shelves a Goal, `null` is the
+ * ordinary unset. The numeric rank is retired — see {@link LegacyDeclaredWaveSchema}.
+ */
+export const GoalWaveSchema = z.literal('later').nullable();
+
+/**
+ * The wave as it may appear **in the durable log** (ADR 257 migration). The journal is append-only and
+ * pre-257 declarations carry integers (`wave: 7`), so the *read* schema must keep accepting them or
+ * every legacy Goal fails `GoalDeclareMetaSchema.parse` and silently drops out of the projection. The
+ * fold coerces an integer to `null` — history stays readable, but a number no longer orders anything.
+ * The *write* path ({@link DeclareGoalSchema}) is closed to numbers.
+ */
+export const LegacyDeclaredWaveSchema = z.union([z.number().int(), z.literal('later')]);
+
 export const GoalDeclareMetaSchema = z.object({
   goal: z.object({
     id: z.string().min(1),
     title: z.string().min(1),
     /** plain-language one-liner for the stranger — what this goal means, not its title */
     story: GoalStorySchema.optional(),
-    /** Build-order lane, mirroring roadmap.data.ts's Wave — a plain rank, or 'later' (sorts last). */
-    wave: z.union([z.number().int(), z.literal('later')]).optional(),
+    /** Tolerant on read only (ADR 257): a pre-257 integer parses, then folds to `null`. */
+    wave: LegacyDeclaredWaveSchema.optional(),
     /** Goal ids this Goal is blocked on — `nextGoal` skips a candidate until all of these ship. */
     depends_on: z.array(z.string()).optional(),
   }),
@@ -37,7 +52,8 @@ export type GoalDeclareMeta = z.infer<typeof GoalDeclareMetaSchema>;
 export const GoalSchema = z.object({
   id: z.string(),
   title: z.string(),
-  wave: z.union([z.number().int(), z.literal('later')]).nullable(),
+  /** `'later'` = shelved, `null` = unset (ADR 257 retired the numeric rank; legacy ints fold to null). */
+  wave: GoalWaveSchema,
   depends_on: z.array(z.string()),
   declared_by: z.string(),
   declared_at: z.number().int(),
@@ -69,7 +85,32 @@ export const DeclareGoalSchema = z.object({
   title: z.string().min(1),
   /** plain-language one-liner for the stranger — what this goal means, not its title */
   story: GoalStorySchema.optional(),
-  wave: z.union([z.number().int(), z.literal('later')]).optional(),
+  /** ADR 257: `'later'` shelves; omit for the ordinary case. A numeric rank is no longer accepted. */
+  wave: z.literal('later').optional(),
   depends_on: z.array(z.string()).optional(),
 });
 export type DeclareGoal = z.infer<typeof DeclareGoalSchema>;
+
+/**
+ * The order Goals are offered in (ADR 257), shared by every consumer — `nextGoal`, the orientation
+ * brief, the `no_goal` suggestion and the web grid — so the four cannot drift apart again (drifting
+ * copies of a rank function are what let the retired numeric wave mis-steer the board unnoticed).
+ *
+ * Shelved last, then `in-flight` before `planned` before `shipped`, then **most recently declared
+ * first**. Recency is the self-maintaining signal the numeric rank was not: re-declaring or amending a
+ * Goal is itself the statement that the team cares about it now, so the order cannot go stale while
+ * nobody is looking. `depends_on` remains a separate, harder filter — a blocked Goal is not a
+ * candidate at all, which is correctness, where this is only preference.
+ */
+const STATUS_RANK: Record<GoalStatus, number> = { 'in-flight': 0, planned: 1, shipped: 2 };
+
+export function compareGoals(
+  a: Pick<Goal, 'wave' | 'status' | 'declared_at'>,
+  b: Pick<Goal, 'wave' | 'status' | 'declared_at'>,
+): number {
+  return (
+    Number(a.wave === 'later') - Number(b.wave === 'later') ||
+    STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
+    b.declared_at - a.declared_at
+  );
+}

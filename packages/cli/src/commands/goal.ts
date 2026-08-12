@@ -14,7 +14,7 @@ import { resolve } from './helpers.js';
 
 const USAGE =
   'usage:\n' +
-  '  musterd goal declare "<title>" --goal-id <id> [--story "<line>"] [--wave <n|later>] [--depends <id>[,<id>…]]\n' +
+  '  musterd goal declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>[,<id>…]]\n' +
   '  musterd goal list [--json]';
 
 function renderGoal(g: Goal): string {
@@ -41,9 +41,17 @@ export async function goalCommand(parsed: Parsed): Promise<number> {
     const id = flagStr(parsed.flags, 'goal-id');
     if (!title || !id) throw new CliError(USAGE, 2);
     const story = flagStr(parsed.flags, 'story');
+    // ADR 257 retired the numeric rank; `later` is all that is left. Fail here with the reason rather
+    // than shipping a number to the server for a bare schema rejection.
     const waveRaw = flagStr(parsed.flags, 'wave');
-    const wave =
-      waveRaw === undefined ? undefined : waveRaw === 'later' ? 'later' : Number(waveRaw);
+    if (waveRaw !== undefined && waveRaw !== 'later') {
+      throw new CliError(
+        `--wave takes only "later" (numeric waves retired, ADR 257): goals order themselves by ` +
+          `dependency and recency, so there is no rank to set. Use --depends to say what must ship first.`,
+        2,
+      );
+    }
+    const wave = waveRaw;
     const dependsRaw = flagStr(parsed.flags, 'depends');
     const depends_on = dependsRaw
       ? dependsRaw

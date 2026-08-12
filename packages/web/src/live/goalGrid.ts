@@ -1,5 +1,5 @@
 import type { Goal, Lane } from '@musterd/protocol';
-import { isAwaitingAcceptance } from '@musterd/protocol';
+import { compareGoals, isAwaitingAcceptance } from '@musterd/protocol';
 
 /**
  * The goals-grid front door (goals-front-door design) — the pure model behind `GoalGrid.tsx`.
@@ -86,10 +86,6 @@ function relAge(ms: number): string {
   if (s >= 3600) return `${Math.floor(s / 3600)}h ago`;
   if (s >= 60) return `${Math.floor(s / 60)}m ago`;
   return 'just now';
-}
-
-function waveRank(wave: Goal['wave']): number {
-  return wave === null || wave === 'later' ? Number.POSITIVE_INFINITY : wave;
 }
 
 function buildDots(lanes: Lane[]): { dots: RunwayDot[]; overflow: number } {
@@ -201,7 +197,7 @@ export function buildGoalGrid(lanes: Lane[], goals: Goal[], now: number): GoalGr
 
   const cards: GoalCardModel[] = [];
   const shippedShelf: { id: string; title: string }[] = [];
-  for (const g of [...goals].sort((a, b) => waveRank(a.wave) - waveRank(b.wave))) {
+  for (const g of [...goals].sort(compareGoals)) {
     const owned = byGoal.get(g.id) ?? [];
     byGoal.delete(g.id);
     if (g.status === 'shipped') {

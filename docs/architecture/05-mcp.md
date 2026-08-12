@@ -187,7 +187,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it to a Goal); challenge = demand justification (answered by an accept with evidence); defer = re-sequence a Goal (meta.goal_id, meta.wave: a number reorders, 'later' defers). Goal-scoped steer/defer re-sequence the plan and flag lanes building against the old one.",
+  "description": "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it to a Goal); challenge = demand justification (answered by an accept with evidence); defer = shelve a Goal (meta.goal_id). Goal-scoped steer/defer re-sequence the plan and flag lanes building against the old one.",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
