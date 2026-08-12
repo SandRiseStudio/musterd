@@ -4,13 +4,14 @@
 
 ## 1. Problem
 
-A fresh Claude Code / Cursor agent dropped into a session where the musterd MCP tools are *available* doesn't know how to use them. It doesn't know it's on a team, doesn't know to `team_join`, doesn't know to check its inbox at task boundaries, and improvises in plain chat instead of using the acts. The tool *descriptions* are written for the agent, but a tool description is only read when the model is already deciding to call that tool — nothing gives the agent **standing context at session start**. This made the flagship 3-pane recording impossible to land (3 dead takes, 2026-06-12) and, more importantly, is what a real first user would hit.
+A fresh Claude Code / Cursor agent dropped into a session where the musterd MCP tools are _available_ doesn't know how to use them. It doesn't know it's on a team, doesn't know to `team_join`, doesn't know to check its inbox at task boundaries, and improvises in plain chat instead of using the acts. The tool _descriptions_ are written for the agent, and — because MCP `tools/list` sits in context on every turn — they are in fact standing instructions, not call-time reference (a mood distinction the descriptions themselves must respect; see ADR 144). But descriptions describe individual capabilities; nothing gives the agent the **team working-loop as standing context at session start**. This made the flagship 3-pane recording impossible to land (3 dead takes, 2026-06-12) and, more importantly, is what a real first user would hit.
 
 The harness-native fix for "give an agent standing context every session" is the agent-context file the harness already reads on every run: **`AGENTS.md`** (the cross-tool convention — read by both Claude Code and Cursor). So: when `musterd init` wires an agent into a folder, it should also seed that folder's `AGENTS.md` with a musterd primer.
 
 **Two follow-ups (2026-06-24 dogfood).** The original primer assumed two things that don't always hold, so it's now (a) **channel-aware** and (b) **self-claim-aware**:
-- *Channel.* The first cut spoke only of the `team_*` MCP tools and **banned the `musterd` CLI**. But an agent without the MCP server provisioned — e.g. a fresh session in musterd's *own* repo — coordinates via the CLI; the ban actively misled it. The primer now documents both forms (`team_*` tool / `musterd` CLI) and keeps the one-channel-at-a-time caution (don't drive the CLI *alongside* the tools — different identity → failed sends) only where it applies.
-- *Seat.* `renderPrimer`'s `member` is now optional. A provisioned agent is named (`You are **Ada** …`); an **unprovisioned** agent is told to claim its seat first (`musterd claim <name>`), which is exactly the fresh-agent path and avoids a primer that names a seat the agent doesn't hold.
+
+- _Channel._ The first cut spoke only of the `team_*` MCP tools and **banned the `musterd` CLI**. But an agent without the MCP server provisioned — e.g. a fresh session in musterd's _own_ repo — coordinates via the CLI; the ban actively misled it. The primer now documents both forms (`team_*` tool / `musterd` CLI) and keeps the one-channel-at-a-time caution (don't drive the CLI _alongside_ the tools — different identity → failed sends) only where it applies.
+- _Seat._ `renderPrimer`'s `member` is now optional. A provisioned agent is named (`You are **Ada** …`); an **unprovisioned** agent is told to claim its seat first (`musterd claim <name>`), which is exactly the fresh-agent path and avoids a primer that names a seat the agent doesn't hold.
 
 ## 2. Decision
 
@@ -18,19 +19,20 @@ After a successful `configure()` (and in the manual-setup path), `musterd init` 
 
 Non-goals: we do **not** try to make the agent autonomous or script its behavior. The primer gives context; the agent still decides.
 
-**Update (ADR 085): the primer is now the loop _kernel_, not the whole manual.** The always-loaded block was carrying playbook depth (seat claiming, handoff-with-branch, lane contention, the wait loop, recovery) that taxes every session. That depth moved into an on-demand **skill** (`renderSkillBody` in `@musterd/protocol`, written by `musterd init` to `.claude/skills/musterd/SKILL.md` / `.cursor/rules/musterd.mdc` / the canonical `.musterd/skill/SKILL.md`); the primer shrank to identity + channel rule + the join/inbox/status/handoff one-liners + a pointer to the skill. So the original "we do not write per-harness rule files" non-goal no longer holds — the *skill* deliberately does, single-sourced and content-stamped for drift detection. The primer's own single-source (`renderPrimer`, AGENTS.md + MCP `instructions`) is unchanged. See ADR 085 for the layering doctrine (one fact per layer; names verified by `pnpm guidance:check`).
+**Update (ADR 085): the primer is now the loop _kernel_, not the whole manual.** The always-loaded block was carrying playbook depth (seat claiming, handoff-with-branch, lane contention, the wait loop, recovery) that taxes every session. That depth moved into an on-demand **skill** (`renderSkillBody` in `@musterd/protocol`, written by `musterd init` to `.claude/skills/musterd/SKILL.md` / `.cursor/rules/musterd.mdc` / the canonical `.musterd/skill/SKILL.md`); the primer shrank to identity + channel rule + the join/inbox/status/handoff one-liners + a pointer to the skill. So the original "we do not write per-harness rule files" non-goal no longer holds — the _skill_ deliberately does, single-sourced and content-stamped for drift detection. The primer's own single-source (`renderPrimer`, AGENTS.md + MCP `instructions`) is unchanged. See ADR 085 for the layering doctrine (one fact per layer; names verified by `pnpm guidance:check`).
 
 ## 3. Where it's written / delivered
 
 Two surfaces, **one source** (`renderPrimer` in `@musterd/protocol`):
+
 - **`AGENTS.md` (file surface)** — `<cwd>/AGENTS.md`, the folder `init` is run in (the binding folder for both harnesses — `claude mcp add -s local` keys on cwd; Cursor's `.cursor/mcp.json` is written under cwd). The cross-tool convention; one file, no per-harness branching. This covers the **CLI / no-MCP** path (incl. musterd's own dev repo).
-- **MCP `instructions` (file-free surface, 2026-06-24)** — `buildMcpServer` returns the same primer as the server's `instructions` on initialize, which every MCP-speaking harness injects as standing context. This covers the **provisioned (MCP)** path on *any* harness **without touching `CLAUDE.md` or per-harness files** — the deliberate boundary below.
-- **We do not write into harness-owned files** (`CLAUDE.md`, `GEMINI.md`, `.cursor/rules`, `.github/copilot-instructions.md`). That would be invasive, proliferating, and a wider uninstall surface; `AGENTS.md` + MCP `instructions` cover both paths. A user *may* add a one-line `@AGENTS.md`-style import to their own `CLAUDE.md` — single-sourced, their choice, not something musterd writes.
+- **MCP `instructions` (file-free surface, 2026-06-24)** — `buildMcpServer` returns the same primer as the server's `instructions` on initialize, which every MCP-speaking harness injects as standing context. This covers the **provisioned (MCP)** path on _any_ harness **without touching `CLAUDE.md` or per-harness files** — the deliberate boundary below.
+- **We do not write into harness-owned files** (`CLAUDE.md`, `GEMINI.md`, `.cursor/rules`, `.github/copilot-instructions.md`). That would be invasive, proliferating, and a wider uninstall surface; `AGENTS.md` + MCP `instructions` cover both paths. A user _may_ add a one-line `@AGENTS.md`-style import to their own `CLAUDE.md` — single-sourced, their choice, not something musterd writes.
 - **Extension point:** an optional `primerPath?(cwd: string): string` on the `Harness` interface (default → `join(cwd, 'AGENTS.md')`) if a future harness needs a different file location. Not implemented.
 
 ## 4. File format — marker-delimited, idempotent
 
-The primer lives in a fenced, managed block so re-running `init` updates *only* that block and the user's own `AGENTS.md` prose is never touched:
+The primer lives in a fenced, managed block so re-running `init` updates _only_ that block and the user's own `AGENTS.md` prose is never touched:
 
 ```
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
@@ -39,6 +41,7 @@ The primer lives in a fenced, managed block so re-running `init` updates *only* 
 ```
 
 `upsertPrimer(dir, block)` behavior:
+
 - **No `AGENTS.md`** → create it containing just the block (+ a trailing newline).
 - **`AGENTS.md` exists, no markers** → append `\n` + the block (preserve all existing content above).
 - **`AGENTS.md` exists, has markers** → replace the text between `musterd:start` and `musterd:end` in place.
@@ -51,13 +54,14 @@ The primer lives in a fenced, managed block so re-running `init` updates *only* 
 
 ```markdown
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
+
 ## Your musterd team
 
-<identity>. musterd is your coordination layer: your teammates — other agents *and* humans —
+<identity>. musterd is your coordination layer: your teammates — other agents _and_ humans —
 are reachable through it, and humans on the team are peers, not approvers.
-  · provisioned:   You are **{{member}}**{{, the {{role}}}} on the **{{team}}** team.
-  · unprovisioned: You are a member of the **{{team}}** team — **claim your seat first**
-                   (`team_join`, or `musterd claim <name>` then `musterd status`) …
+· provisioned: You are **{{member}}**{{, the {{role}}}} on the **{{team}}** team.
+· unprovisioned: You are a member of the **{{team}}** team — **claim your seat first**
+(`team_join`, or `musterd claim <name>` then `musterd status`) …
 
 **Your channel.** If this session has the `team_*` tools (the musterd MCP server), use them.
 If it does not, coordinate with the `musterd` CLI instead — the same team and acts. Use one
@@ -75,6 +79,7 @@ Work as a teammate, not in isolation — `team_*` tool form / `musterd` CLI form
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox.
 Keep messages short and purposeful — use the acts instead of narrating in free text.
+
 <!-- musterd:end -->
 ```
 
@@ -91,7 +96,7 @@ In `onboard/init.ts`, after a successful `configure()` (right after the `scope` 
 
 The recording also died on identity collisions — member names reused across folders (two `Ada`s, one auto-joining), tokens minted against a since-replaced db, orphaned adapters, a stray `inbox --watch` as the wrong member. The primer doesn't fix that; a small **init-time collision guard** does, and belongs to the same finding:
 
-- **Name already bound elsewhere:** before minting, scan known binding locations (each folder's `.musterd/binding.json` `claim: seat:<name>`, which is where the seat now lives — a baked `MUSTERD_CLAIM=seat:<name>` may still appear only in legacy/manual-override MCP registrations, PR #58) for a seat equal to the proposed name on the same `MUSTERD_SERVER`/`MUSTERD_TEAM`. If found, warn: *"`<name>` is already wired into `<other folder>` — two folders sharing one seat name is the 'N minds, one name' trap. Use a distinct name, or repoint that folder."*
+- **Name already bound elsewhere:** before minting, scan known binding locations (each folder's `.musterd/binding.json` `claim: seat:<name>`, which is where the seat now lives — a baked `MUSTERD_CLAIM=seat:<name>` may still appear only in legacy/manual-override MCP registrations, PR #58) for a seat equal to the proposed name on the same `MUSTERD_SERVER`/`MUSTERD_TEAM`. If found, warn: _"`<name>` is already wired into `<other folder>` — two folders sharing one seat name is the 'N minds, one name' trap. Use a distinct name, or repoint that folder."_
 - **Stale key / replaced db:** when `init` reuses a saved identity, verify the agent key/credential still authenticates (`GET` a cheap authed endpoint); if it 401s, the db was likely replaced — offer to re-claim rather than silently binding a dead key.
 - These are warnings/offers, not hard blocks. Full identity enforcement is the v0.3 seat model; this is the cheap operational guard that would have prevented the recording mess.
 

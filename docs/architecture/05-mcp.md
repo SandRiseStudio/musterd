@@ -175,7 +175,7 @@ Resolves the target (`as` → named seat; `role` → next `<role>-<n>` handle; n
 ```json
 {
   "name": "team_leave",
-  "description": "Go offline and release your seat — call when you finish working or step away. The seat is held ~45s for a quick rejoin; team_join brings you back.",
+  "description": "Goes offline and releases your seat. Use when wrapping a session or stepping away, not mid-task. The seat is held ~45s for a quick rejoin; team_join brings you back.",
   "inputSchema": { "type": "object", "properties": {} }
 }
 ```
