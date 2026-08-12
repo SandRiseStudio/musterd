@@ -2,8 +2,8 @@
   "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context — tools/list render, primer, hook nudges, including the due-gated label nudge — measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
   "items": {
     "toolsListDefaultBytes": {
-      "budget": 14138,
-      "justification": "baseline 2026-08-03 (13464 B) + 5% headroom"
+      "budget": 14944,
+      "justification": "2026-08-12 (14230 B, +story param on team_goal_declare — ADR 256 goals front door, epoch 10) + 5% headroom"
     },
     "toolsListMutedBytes": {
       "budget": 4694,
@@ -26,8 +26,8 @@
       "justification": "post-trim 2026-08-03 (98 B) + 5% headroom"
     },
     "perTurnTotalBytes": {
-      "budget": 14337,
-      "justification": "post-trim 2026-08-03 (13654 B) + 5% headroom"
+      "budget": 15141,
+      "justification": "2026-08-12 (14420 B, +story param on team_goal_declare — ADR 256 goals front door) + 5% headroom"
     },
     "perSessionTotalBytes": {
       "budget": 17556,

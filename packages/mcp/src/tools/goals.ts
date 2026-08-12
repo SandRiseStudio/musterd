@@ -51,11 +51,7 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
       inputSchema: {
         id: z.string().describe('stable Goal id, e.g. "orientation-spine"'),
         title: z.string().describe('the outcome, short'),
-        story: z
-          .string()
-          .max(140)
-          .optional()
-          .describe('one plain-language line for outsiders — what this goal means'),
+        story: z.string().max(140).optional().describe('plain-language line for outsiders'),
         wave: z
           .union([z.number().int(), z.literal('later')])
           .optional()
