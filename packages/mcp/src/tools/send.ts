@@ -39,9 +39,7 @@ const DESCRIPTION =
   'steer/defer re-sequence the plan and flag lanes building against the old one. ' +
   'e.g. {act:"status_update",body:"…"}; an ask needs meta: ' +
   '{act:"ask",to:"nick",body:"…",meta:{species:"consult",tier:"standard"}}. ' +
-  'Name 2-4 seats in `to` when EITHER could answer: each owes a reply, the first accept/decline ' +
-  'stands the rest down, and the whole team still sees it. Only message/request_help/challenge ' +
-  'take a set. e.g. {act:"message",to:["stanley","izzo"],body:"either of you know why it pinned?"}.';
+  'to:["a","b"] (2-4) = either may answer, first reply stands the rest down.';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
@@ -145,9 +143,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         to: z
           .union([z.string(), z.array(z.string())])
           .default('@team')
-          .describe(
-            "member name, or '@team', or '@broadcast' — or 2-4 names, any one of whom can answer",
-          ),
+          .describe("member name, '@team', '@broadcast', or 2-4 names (either may answer)"),
         // Derived from ACTS (the protocol's single source of truth) so the MCP surface can never drift
         // from the enum — a new act lands here the moment it's appended (ADR 103). Rebuilt with this
         // package's zod (4) rather than importing ActSchema: the protocol package is still on zod 3,
