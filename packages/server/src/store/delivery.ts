@@ -161,10 +161,62 @@ export function handoffNamedLaneOutOfPlay(
   db: Database,
   teamId: string,
   meta: string | null,
+  body?: string | null,
 ): boolean {
   const lane = namedHandoffLane(db, teamId, meta);
-  if (!lane) return false;
-  return isAwaitingAcceptance(lane.state) || LANE_TERMINAL_STATES.has(lane.state as LaneState);
+  if (lane) return laneOutOfPlay(lane.state);
+  // No structured lane. ADR 231 (#662) made every handoff carry one, but the 24 that predate it
+  // never will, and a bare handoff is always "in play" — so the newest one wins the `why` slot
+  // PERMANENTLY, outranking every structured handoff older than it, with no event able to retire
+  // it. Measured 2026-08-12: 34 handoffs, 24 bare, 7 naming their lane in the body, the oldest
+  // still served as a live instruction 16 days after its lane shipped.
+  //
+  // A lane id in prose is not prose: it resolves to a lane row or it does not. What keeps this on
+  // the right side of "only a recorded fact earns a label" is that nothing here reads MEANING —
+  // an identifier is matched, and an ambiguous or unresolvable one abstains.
+  return bodyNamedLanesAllOutOfPlay(db, teamId, body);
+}
+
+function laneOutOfPlay(state: string): boolean {
+  return isAwaitingAcceptance(state) || LANE_TERMINAL_STATES.has(state as LaneState);
+}
+
+/**
+ * Lane ids as they appear in prose: rendered TRUNCATED (`01KYJ8B5AB` for the full 26-char ULID), so
+ * this matches a Crockford-base32 ULID prefix of at least 10 characters. Below that a prefix stops
+ * being distinguishing; `I`, `L`, `O` and `U` are outside the alphabet.
+ */
+const LANE_ID_IN_PROSE = /\b01[0-9A-HJKMNP-TV-Z]{8,24}\b/g;
+
+/**
+ * True only when the body names at least one lane and EVERY lane it names has left play.
+ *
+ * All-or-nothing on purpose. Real handoffs name more than one lane — the one being handed off and a
+ * lane it overlaps or supersedes (the measured example named both its subject and a surface-overlap
+ * neighbour). Discharging on "some named lane is done" would silence a live handoff because it
+ * mentioned a finished one in passing, and this file's own rule is that a wake which should not have
+ * fired is expensive while a handoff that stops asking is work dropped on the floor — only one of
+ * those is recoverable. So any still-live mention keeps the whole handoff showing.
+ */
+function bodyNamedLanesAllOutOfPlay(db: Database, teamId: string, body?: string | null): boolean {
+  if (!body) return false;
+  const prefixes = [...new Set(body.match(LANE_ID_IN_PROSE) ?? [])];
+  if (prefixes.length === 0) return false;
+  let resolved = 0;
+  for (const prefix of prefixes) {
+    // An ambiguous prefix picked out no single lane, so it is not evidence about any of them.
+    // LIMIT 2 is enough to tell "exactly one" from "more than one" without scanning the rest.
+    const matches = db
+      .prepare<
+        [string, string],
+        { state: string }
+      >("SELECT state FROM lanes WHERE team_id = ? AND id LIKE ? || '%' LIMIT 2")
+      .all(teamId, prefix);
+    if (matches.length !== 1) continue;
+    if (!laneOutOfPlay(matches[0]!.state)) return false;
+    resolved++;
+  }
+  return resolved > 0;
 }
 
 function namedHandoffLane(

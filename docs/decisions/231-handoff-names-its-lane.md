@@ -98,6 +98,35 @@ from 24 of 30 to 16 of 30 automatically, with the warning aimed at 6 more.
   Lane-less handoffs are still shown (this Decision's "What this does not do" stands). CLI `next`
   and MCP `team_next` render that projection; they do not re-derive it.
 
+- **2026-08-12 — the handoffs that predate this Decision can never satisfy it, and one of them held
+  a `why` slot for 16 days.** This Decision makes every new handoff name its lane, and the note
+  above rightly left lane-less handoffs shown. But those two facts compose into a defect neither
+  saw: a bare handoff is permanently "in play", so the newest one wins the `why` slot **forever**,
+  outranking every structured handoff older than it, with no event able to retire it. Measured on
+  the live db: 34 handoffs, 24 of them bare — and the last bare one is dated 2026-08-04, the day
+  this Decision landed, so the population is closed at 24 and can only be retired, never reduced.
+  The live example was a handoff from 2026-07-27 still presented to izzo as the reason to work,
+  16 days after its lane shipped.
+  `handoffNamedLaneOutOfPlay` now takes the body as well as the meta. Structured meta still wins
+  where it exists — it says which lane the handoff **is about**, where a body only says which lanes
+  it **mentions**. Resolving an id out of prose stays on the right side of "only a recorded fact
+  earns a label" because nothing reads meaning: ids render truncated, so a ULID prefix is matched
+  against the lane table, and an unresolvable or ambiguous prefix abstains.
+  The rule is **all-or-nothing** across every lane a body names, which is the part worth keeping:
+  real handoffs name their subject _and_ a lane it overlaps or supersedes, so discharging on "some
+  named lane is done" would silence a live handoff that merely mentioned a finished one. This file's
+  own asymmetry decides it — a wake that should not have fired is expensive, a handoff that stops
+  asking is work dropped on the floor, and only one of those is recoverable.
+  Effect on the live ledger: 9 handoffs discharged before, 23 after — 14 retired, 11 still shown
+  (genuinely lane-less, or naming a lane still in play).
+  This **qualifies** the Decision's "What this does not do", and the distinction is the whole
+  argument: that clause protects the _unjudgeable_ handoff, and ADR 173's abstain-by-showing is
+  about abstaining when the question cannot be answered. A handoff whose body names lanes that all
+  resolve is not unjudgeable — the question can be answered, and showing it is no longer an
+  abstention but a wrong answer. The genuinely lane-less handoff is untouched and still shown,
+  which is the set that clause was written for. The rejected age heuristic stays rejected: nothing
+  here reads a clock.
+
 - `meta.lane_handoff` is an existing shape written by an existing path; no protocol schema changes.
   The ack gains an additive `handoff_lane` field, the same contract as `ask_contract` (ADR 147) and
   `delivery_hint` (ADR 167): older clients ignore it, older daemons omit it.

@@ -138,7 +138,12 @@ export function deriveNext(
     )
     .all(teamId, member, member, WHY_SCAN_DEPTH);
 
-  const row = rows.find((r) => !handoffNamedLaneOutOfPlay(db, teamId, r.meta));
+  // The body is passed as well as the meta: every handoff since ADR 231 (#662) names its lane in
+  // meta, but the 24 that predate it never will, and a bare row is always "in play" — so without
+  // this the newest bare handoff holds the `why` slot permanently. See
+  // `handoffNamedLaneOutOfPlay` for why resolving an id out of prose is a recorded fact and not a
+  // guess, and why it is all-or-nothing across every lane the body names.
+  const row = rows.find((r) => !handoffNamedLaneOutOfPlay(db, teamId, r.meta, r.body));
 
   const why = row
     ? {
