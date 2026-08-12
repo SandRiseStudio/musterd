@@ -100,7 +100,7 @@ src/
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
-    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | show (ADR 131 §5 / ADR 160 / ADR 186)
+    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | show (ADR 131 §5 / ADR 160 / ADR 186). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start)
     gate.ts           // musterd gate check --stdin — the PreToolUse enforcement gate (hook-driven): match the tool call vs the team's class table client-side, adjudicate matches via POST /gate; fail-open (ADR 150)
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     human.ts          // musterd human <name>: the mirror of `agent` — stands a person in the team home (~/musterd/<team>) with their 0600 binding, mints/reuses/re-issues the credential, self-claims, sets current (ADR 176)

@@ -197,15 +197,22 @@ function birthtimeOf(path: string): number | undefined {
 }
 
 /** Does the slot's occupant still look like a working session? — its transcript touched within
- *  the same LOCAL_SESSION_LIVE_MS clock every other liveness read uses. No transcript path, a
- *  vanished file, or a quiet one all read as not-live: the newcomer takes the slot, exactly as
- *  before the interloper gate. */
+ *  the same LOCAL_SESSION_LIVE_MS clock every other liveness read uses. No transcript path, or a
+ *  quiet one, still read as not-live: the newcomer takes the slot, exactly as before the
+ *  interloper gate.
+ *
+ *  A named path that is not on disk yet is the measured exception (2026-08-12 /clear): Claude
+ *  Code's SessionStart names `transcript_path` before the file exists — the file appears at first
+ *  turn, not at start. A stat miss used to read as not-live and an empty newcomer took a live
+ *  slot 4s after capture. That occupant is live by construction for the same clock: `started_at`
+ *  is already in the slot and needs no filesystem. Past the clock, a missing file is the
+ *  crashed-predecessor residual and newest-wins resumes. */
 function slotLooksLive(occupant: SessionCapture): boolean {
   if (!occupant.transcript_path) return false;
   try {
     return Date.now() - statSync(occupant.transcript_path).mtimeMs < LOCAL_SESSION_LIVE_MS;
   } catch {
-    return false;
+    return Date.now() - occupant.started_at < LOCAL_SESSION_LIVE_MS;
   }
 }
 
@@ -276,11 +283,13 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
     // an empty or ended or stale slot keeps today's newest-wins, so a fresh workspace still
     // captures on SessionStart — which matters wherever enumeration cannot see the workspace and
     // the slot IS the whole local-session guard (ADR 131). The activity predicate is
-    // transcript-HAS-A-TURN, not file-exists: correct under both readings of the `birthtimeOf`
-    // contradiction (does the file appear at start or at first turn? — unsettled, follow-up in
-    // the lane). Known bounded residual: a crashed (never-ended) predecessor defers a genuine
-    // newcomer's takeover for up to LOCAL_SESSION_LIVE_MS; enumeration-first liveness keeps the
-    // guard honest meanwhile, and the slot self-corrects at the next SessionStart.
+    // transcript-HAS-A-TURN, not file-exists. The `birthtimeOf` contradiction is settled
+    // (measured 2026-08-12): the file appears at first turn, not at start — so a named-but-
+    // missing occupant transcript is live by construction via `started_at` for
+    // LOCAL_SESSION_LIVE_MS (see `slotLooksLive`). Known bounded residual: a crashed
+    // (never-ended) predecessor defers a genuine newcomer's takeover for up to
+    // LOCAL_SESSION_LIVE_MS; enumeration-first liveness keeps the guard honest meanwhile, and
+    // the slot self-corrects at the next SessionStart.
     const occupant = binding.session;
     if (
       occupant &&

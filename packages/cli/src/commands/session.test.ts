@@ -5,6 +5,7 @@ import { BindingSchema, type Binding } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
+import { LOCAL_SESSION_LIVE_MS } from '../session/liveness.js';
 import {
   captureSession,
   LABEL_SWEEP_STALE_MS,
@@ -217,6 +218,54 @@ describe('musterd session (capture)', () => {
 
     it('a slot with NO transcript path is not live-looking — newcomer takes it', async () => {
       await captureSession('start', { session_id: 'live-1', cwd: wsA }); // no transcript_path
+      await captureSession('start', {
+        session_id: 'fresh-2',
+        cwd: wsA,
+        transcript_path: join(wsA, 'fresh-2.jsonl'),
+      });
+      expect(readBinding(wsA).session?.id).toBe('fresh-2');
+    });
+
+    it('gates an empty newcomer when the occupant named a transcript that is not on disk yet', async () => {
+      // Measured 2026-08-12 (/clear): SessionStart names transcript_path, but the file appears at
+      // first turn, not at start. slotLooksLive's stat threw, the live occupant read as not-live,
+      // and interloper 1261e672 took the slot 4s later. An occupant captured just now is live by
+      // construction — started_at is already in the slot and needs no filesystem.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const namedButMissing = join(wsA, 'newborn.jsonl'); // do not write the file
+      await captureSession('start', {
+        session_id: 'live-1',
+        cwd: wsA,
+        transcript_path: namedButMissing,
+      });
+      attest.mockClear();
+      await captureSession('start', {
+        session_id: 'ghost-1',
+        cwd: wsA,
+        transcript_path: join(wsA, 'ghost-1.jsonl'),
+      });
+      expect(readBinding(wsA).session?.id).toBe('live-1');
+      expect(attest).not.toHaveBeenCalled();
+      await captureSession('end', { session_id: 'ghost-1', cwd: wsA });
+      expect(readBinding(wsA).session?.ended_at).toBeUndefined();
+    });
+
+    it('an empty newcomer takes a named-but-missing occupant past LOCAL_SESSION_LIVE_MS', async () => {
+      // The crashed-predecessor residual: SessionStart named a path that never appeared, and
+      // the clock has run out. Newest-wins resumes — same bound as a quiet transcript.
+      const namedButMissing = join(wsA, 'vanished.jsonl');
+      await captureSession('start', {
+        session_id: 'live-1',
+        cwd: wsA,
+        transcript_path: namedButMissing,
+      });
+      const binding = readBinding(wsA);
+      writeBinding(wsA, {
+        ...binding,
+        session: { ...binding.session!, started_at: Date.now() - LOCAL_SESSION_LIVE_MS - 1 },
+      });
       await captureSession('start', {
         session_id: 'fresh-2',
         cwd: wsA,

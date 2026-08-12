@@ -283,6 +283,20 @@ _Deliberately NOT done in the same change: the ladder is untouched. If the harne
 false `ended`, teaching ADR 164 to tolerate it hides the defect and leaves the ledger wrong. The
 digest is the instrument; the diagnosis comes after it has run._
 
+**Follow-up note (2026-08-12, lane 01KZAEGF2K, step 3 residual):** the interloper gate shipped in
+#744 (`slotLooksLive` + transcript-has-a-turn). A live experiment (`/clear` on wanderer) showed it
+was blind for the first seconds of a session: Claude Code's SessionStart names `transcript_path`
+before the file exists (the file appears at first turn, not at start), the occupant's stat threw,
+and an empty newcomer took the slot 4s later. The predicate now treats a named-but-missing
+occupant transcript as live by construction for `LOCAL_SESSION_LIVE_MS` via `started_at` — the
+same clock every other liveness read uses, no extra filesystem. Past that clock, newest-wins
+resumes (the crashed-predecessor residual, unchanged). The ADR 164 ladder is still untouched:
+an already-ended slot still admits an interloper pair onto the ledger, and that pair demotes
+only if a heartbeat tick observes the interloper while it still looks alive; a start+end between
+ticks is never adopted (fail open). A working session that called a tool within `HEARTBEAT_MS`
+is not released even then (`shouldReleaseOnVerdict`). That residual is ledger noise for an
+active seat, not a second gate.
+
 ## Observability & Evaluation
 
 **Traces** — one `musterd.residency.wake` span per actuation (lease → spawn → occupied →
