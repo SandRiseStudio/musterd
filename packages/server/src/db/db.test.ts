@@ -14,7 +14,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('38');
+    expect(ver?.value).toBe('39');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -244,7 +244,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(38); // runs v18…v38 (… + stakes provenance + seeds cursor + wake turns)
+    expect(runMigrations(db)).toBe(39); // runs v18…v39 (… + seeds cursor + wake turns + presence surface)
 
     const scope = (id: string) =>
       db
@@ -308,7 +308,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(38);
+    expect(runMigrations(db)).toBe(39);
 
     const policy = (id: string) =>
       db
@@ -319,6 +319,37 @@ describe('db', () => {
     expect(JSON.parse(policy('t1') as string)).toEqual({ standing_reseat_known_agents: true });
     // A team that never wrote a policy is not touched — NULL is already "everything inherited".
     expect(policy('t2')).toBeNull();
+    db.close();
+  });
+});
+
+describe('v39 — the presence surface CHECK admits `musterd` (ADR 251 §2)', () => {
+  it('accepts a native occupancy, and still refuses an unknown surface', () => {
+    // Measured live 2026-08-12 on the second native wake: the protocol enum reserved `musterd`
+    // (ADR 131 §7) but the v1 CHECK never grew it, so the presence INSERT threw inside the WS claim
+    // handler and the client hung with no response at all. ADR 251 §2's roster-distinctness — the
+    // whole reason native occupancies carry their own surface — was unimplementable as shipped, and
+    // was only masked because the binding re-read used to overwrite the surface before it was sent.
+    const db = openDb(':memory:');
+    db.prepare(
+      "INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t1','dawn',1,1)",
+    ).run();
+    db.prepare(
+      `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+       VALUES ('m1','t1','compo','agent','','forever',0,1,1)`,
+    ).run();
+    const insert = (surface: string) =>
+      db
+        .prepare(
+          `INSERT INTO presence (id, member_id, surface, status, last_seen_at, created_at)
+           VALUES (?, 'm1', ?, 'online', 1, 1)`,
+        )
+        .run(`p-${surface}`, surface);
+
+    expect(() => insert('musterd')).not.toThrow();
+    expect(() => insert('claude-code')).not.toThrow();
+    // The constraint must stay a constraint — widening is not opening.
+    expect(() => insert('definitely-not-a-surface')).toThrow();
     db.close();
   });
 });

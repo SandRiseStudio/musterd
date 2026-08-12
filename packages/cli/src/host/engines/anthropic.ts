@@ -51,6 +51,9 @@ export function priceUsage(model: string, usage: Partial<EngineUsage>): number |
 /** Injectable client so the scripted suite never opens a socket or needs a key. */
 export interface AnthropicEngineDeps {
   client?: Anthropic;
+  /** Injectable construction — the SDK resolves credentials here, so this is the seam that makes
+   *  the keyless-host path testable without touching a real credential. */
+  createClient?: () => Anthropic;
 }
 
 const emptyUsage = (): EngineUsage => ({
@@ -75,10 +78,24 @@ function toEngineUsage(raw: {
   };
 }
 
-/** Auth failures are the deferral signal (a machine property, ADR 221); an abort is the watchdog. */
-function classifyFailure(err: unknown): 'auth' | 'aborted' | 'error' {
-  const e = err as { status?: number; name?: string };
+/**
+ * Auth failures are the deferral signal (a machine property, ADR 221); an abort is the watchdog.
+ *
+ * Two distinct auth shapes, and the second is the one that matters most in practice. A 401 is a key
+ * the server rejected. But a host that was never given a key at all fails EARLIER, with the SDK's
+ * credential-resolution error and no status code — and that is the ordinary state of any machine
+ * running the actuator without native credentials. Measured live on the first native wake
+ * (2026-08-12): unclassified, it read as a work failure and the daemon charged the act two of its
+ * three attempts in four minutes, heading for `wake_exhausted` on an act no session ever received.
+ * That is exactly the retire-the-act outcome ADR 221 exists to prevent, so the resolution failure
+ * is matched on its message — the SDK raises a bare `AnthropicError` carrying no machine-readable
+ * discriminator, and a keyless host must never burn budget.
+ */
+export function classifyEngineFailure(err: unknown): 'auth' | 'aborted' | 'error' {
+  const e = err as { status?: number; name?: string; message?: string };
   if (e.status === 401) return 'auth';
+  if (/could not resolve authentication|authentication method/i.test(e.message ?? ''))
+    return 'auth';
   if (e.name === 'APIUserAbortError' || e.name === 'AbortError') return 'aborted';
   return 'error';
 }
@@ -88,9 +105,21 @@ export function anthropicEngine(deps: AnthropicEngineDeps = {}): AgentLoopEngine
     provider: 'anthropic',
 
     async run(spec: EngineRunSpec): Promise<EngineRunResult> {
-      // Constructed lazily so a host with no key only fails when a native wake actually runs —
-      // and that failure classifies as `auth` → a deferral, not a charged attempt.
-      const client = deps.client ?? new Anthropic();
+      // Constructed lazily so a host with no key only fails when a native wake actually runs — and
+      // guarded, because the SDK resolves credentials during construction on some paths and at
+      // request time on others. Both roads lead to the same honest answer: this machine cannot
+      // actuate, which defers (ADR 221) rather than charging the act.
+      let client: Anthropic;
+      try {
+        client = deps.client ?? (deps.createClient ?? (() => new Anthropic()))();
+      } catch (err) {
+        return {
+          turns: 0,
+          end: classifyEngineFailure(err),
+          usage: emptyUsage(),
+          reason: ((err as Error).message ?? String(err)).slice(0, 200),
+        };
+      }
       const tools = spec.tools.map((t) => ({
         name: t.name,
         description: t.description,
@@ -150,7 +179,7 @@ export function anthropicEngine(deps: AnthropicEngineDeps = {}): AgentLoopEngine
         }
       } catch (err) {
         failure = {
-          end: classifyFailure(err),
+          end: classifyEngineFailure(err),
           reason: ((err as Error).message ?? String(err)).slice(0, 200),
         };
       }
