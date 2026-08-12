@@ -14,7 +14,7 @@ import { resolve } from './helpers.js';
 
 const USAGE =
   'usage:\n' +
-  '  musterd goal declare "<title>" --goal-id <id> [--wave <n|later>] [--depends <id>[,<id>…]]\n' +
+  '  musterd goal declare "<title>" --goal-id <id> [--story "<line>"] [--wave <n|later>] [--depends <id>[,<id>…]]\n' +
   '  musterd goal list [--json]';
 
 function renderGoal(g: Goal): string {
@@ -24,11 +24,12 @@ function renderGoal(g: Goal): string {
       : g.status === 'in-flight'
         ? theme.warn(g.status)
         : g.status;
+  const story = g.story ? ` — ${theme.meta(`"${g.story}"`)}` : '';
   const wave = g.wave !== null ? theme.meta(` wave:${g.wave}`) : '';
   const deps = g.depends_on.length ? theme.meta(` deps:${g.depends_on.length}`) : '';
   // The plan epoch (ADR 111) — shown only once direction has changed, so a steady Goal stays quiet.
   const epoch = g.epoch > 0 ? theme.warn(` epoch:${g.epoch}`) : '';
-  return `${theme.meta(sym.goal)} ${theme.meta(g.id)} ${status} "${g.title}"${wave}${deps}${epoch} ${theme.meta(`— declared by ${g.declared_by}`)}`;
+  return `${theme.meta(sym.goal)} ${theme.meta(g.id)} ${status} "${g.title}"${story}${wave}${deps}${epoch} ${theme.meta(`— declared by ${g.declared_by}`)}`;
 }
 
 export async function goalCommand(parsed: Parsed): Promise<number> {
@@ -39,6 +40,7 @@ export async function goalCommand(parsed: Parsed): Promise<number> {
     const title = parsed.positionals[1];
     const id = flagStr(parsed.flags, 'goal-id');
     if (!title || !id) throw new CliError(USAGE, 2);
+    const story = flagStr(parsed.flags, 'story');
     const waveRaw = flagStr(parsed.flags, 'wave');
     const wave =
       waveRaw === undefined ? undefined : waveRaw === 'later' ? 'later' : Number(waveRaw);
@@ -52,6 +54,7 @@ export async function goalCommand(parsed: Parsed): Promise<number> {
     const goal = await http.declareGoal(team, {
       id,
       title,
+      ...(story !== undefined ? { story } : {}),
       ...(wave !== undefined ? { wave } : {}),
       ...(depends_on ? { depends_on } : {}),
     });
