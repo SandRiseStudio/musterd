@@ -64,6 +64,23 @@ describe('goal command', () => {
     expect(res.out).toContain('deps:2');
   });
 
+  it('declares with a story and renders it (goals-front-door design)', async () => {
+    const res = await capture(() =>
+      goalCommand(
+        parseArgs([
+          'declare',
+          'Native harness',
+          '--goal-id',
+          'native',
+          '--story',
+          'the daemon becomes its own harness',
+        ]),
+      ),
+    );
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('"the daemon becomes its own harness"');
+  });
+
   it('declares with wave "later"', async () => {
     const res = await capture(() =>
       goalCommand(parseArgs(['declare', 'Later goal', '--goal-id', 'later1', '--wave', 'later'])),
