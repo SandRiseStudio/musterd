@@ -324,8 +324,8 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'send',
     signature:
-      '--to <name|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body…>',
-    summary: 'send a typed act to a teammate, the team, or everyone',
+      '--to <name|a,b|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body…>',
+    summary: 'send a typed act to a teammate, a few teammates, the team, or everyone',
     group: 'messaging',
     primary: true,
     detail:
@@ -333,10 +333,12 @@ export const CATALOG: readonly CommandEntry[] = [
       'wait · resolve, plus the steering acts (ADR 103): steer (change direction, always interrupts, ' +
       'supersedes prior), challenge (justify-or-reconsider), defer (--meta goal_id=<id> [--meta ' +
       'wave=<n|later>] to reorder/defer a Goal). accept/decline auto-target the latest open request ' +
-      'unless you pass --reply-to.',
+      'unless you pass --reply-to. Name 2-4 seats (--to a,b) when EITHER could answer: each owes a ' +
+      'reply, the first accept/decline stands the rest down, and the team still sees it (message/request_help/challenge only).',
     examples: [
       "musterd send --to lin --act request_help 'stuck on the auth redirect'",
       "musterd send --to @team --act status_update 'shipping the lane board'",
+      "musterd send --to stanley,izzo --act message 'either of you know why the daemon pinned?'",
       'musterd send --act accept',
     ],
   },

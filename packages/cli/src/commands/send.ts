@@ -6,6 +6,7 @@ import {
   AskTierSchema,
   type Envelope,
   makeEnvelope,
+  MAX_ELIGIBLE,
   type Recipient,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
@@ -74,11 +75,43 @@ function parseRecipient(to: string): Recipient {
   return { kind: 'member', name: to };
 }
 
+/**
+ * ADR NNN: `--to a,b` names an eligible set — 2–MAX_ELIGIBLE seats, any one of whom can answer.
+ *
+ * Mirrors the MCP surface's arity rules on purpose (empty → `@team`, one name → a directed act,
+ * 2–4 → a team act carrying `meta.eligible`, 5+ → refused), each package keeping its own error
+ * convention. A single value keeps its EXACT existing behaviour, including the `@alias` rejection,
+ * so nothing a seat types today changes meaning.
+ */
+export function parseRecipients(to: string): { to: Recipient; eligible: string[] | null } {
+  const names = to
+    .split(',')
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0);
+  // A trailing comma or a stray space is a typo, not an intent to address nobody — so a list that
+  // collapses to one name is a directed act, and one that collapses to none is `@team`.
+  if (names.length <= 1) return { to: parseRecipient(names[0] ?? '@team'), eligible: null };
+  if (names.length > MAX_ELIGIBLE) {
+    throw new CliError(
+      `too many recipients (${names.length}) — name at most ${MAX_ELIGIBLE} seats, or use @team`,
+      2,
+    );
+  }
+  // `@team`/`@broadcast` are whole-audience aliases, not seats. Dropping one silently would send to
+  // a narrower audience than was asked for, so it is refused.
+  const alias = names.find((n) => n.startsWith('@'));
+  if (alias) {
+    throw new CliError(`"${alias}" cannot appear in a list of seats — send to it on its own`, 2);
+  }
+  return { to: { kind: 'team' }, eligible: names };
+}
+
 export async function sendCommand(parsed: Parsed): Promise<number> {
   const { team, identity, http } = resolve(parsed.flags);
   const to = flagStr(parsed.flags, 'to') ?? '@team';
   const act = flagStr(parsed.flags, 'act') as Act | undefined;
-  if (!act) throw new CliError('usage: musterd send --to <name|@team> --act <act> <body...>', 2);
+  if (!act)
+    throw new CliError('usage: musterd send --to <name|a,b|@team> --act <act> <body...>', 2);
   const body = parsed.positionals.join(' ');
   const replyTo = flagStr(parsed.flags, 'reply-to');
 
@@ -113,13 +146,19 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     if (reason) meta['urgent_reason'] = reason;
   }
 
+  // ADR NNN: resolve `--to` before composing. This can REFUSE (too many names, an alias inside a
+  // list), and it must do so outside the try below — that catch relabels everything as
+  // "invalid message", which would bury a precise, actionable recipient error.
+  const { to: recipientTo, eligible } = parseRecipients(to);
+  if (eligible) meta['eligible'] = eligible;
+
   let envelope;
   try {
     envelope = makeEnvelope({
       id: ulid(),
       team,
       from: identity.name,
-      to: parseRecipient(to),
+      to: recipientTo,
       act,
       body,
       thread: thread ?? null,
