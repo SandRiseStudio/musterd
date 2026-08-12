@@ -454,6 +454,76 @@ describe('team_send handler', () => {
     expect(text(r)).toContain('no open request to accept');
     expect(sent).toHaveLength(0); // nothing sent
   });
+
+  // ADR NNN: naming 2-4 seats in `to` sends ONE team-addressed act carrying meta.eligible. The
+  // array is surface sugar — nothing below routeEnvelope learns a new wire shape.
+  describe('an eligible set in `to`', () => {
+    const liveClient = () => {
+      const sendEnvelope = vi.fn(async () => undefined);
+      return {
+        sendEnvelope,
+        client: {
+          joined: true,
+          holdsSeat: true,
+          lastJoinError: null,
+          sendEnvelope: sendEnvelope as any,
+          markSeen: vi.fn(),
+        },
+      };
+    };
+
+    it('sends one team act carrying the set, not two directed acts', async () => {
+      const { sendEnvelope, client } = liveClient();
+      const handler = capture(registerSend, client, config);
+      const r = await handler({
+        to: ['stanley', 'izzo'],
+        act: 'message',
+        body: 'either of you know why the daemon pinned?',
+      });
+
+      expect(sendEnvelope).toHaveBeenCalledTimes(1);
+      const sent = sendEnvelope.mock.calls[0]![0] as Envelope;
+      expect(sent.to).toEqual({ kind: 'team' });
+      expect(sent.meta?.['eligible']).toEqual(['stanley', 'izzo']);
+      expect(text(r)).toContain('stanley, izzo');
+    });
+
+    it('reports the set in structuredContent so a programmatic caller need not parse prose', async () => {
+      const { client } = liveClient();
+      const handler = capture(registerSend, client, config);
+      const r = await handler({ to: ['stanley', 'izzo'], act: 'challenge', body: 'justify it' });
+      expect(r.structuredContent).toMatchObject({
+        act: 'challenge',
+        to: 'stanley, izzo',
+        eligible: ['stanley', 'izzo'],
+      });
+    });
+
+    it('refuses five names without sending, and says to use @team', async () => {
+      const { sendEnvelope, client } = liveClient();
+      const handler = capture(registerSend, client, config);
+      const r = await handler({ to: ['a', 'b', 'c', 'd', 'e'], act: 'message', body: 'x' });
+      expect(sendEnvelope).not.toHaveBeenCalled();
+      expect(text(r)).toContain('@team');
+    });
+
+    it('refuses an eligible set on handoff — the protocol rejects it, and nothing is sent', async () => {
+      const { sendEnvelope, client } = liveClient();
+      const handler = capture(registerSend, client, config);
+      const r = await handler({ to: ['stanley', 'izzo'], act: 'handoff', body: 'take this' });
+      expect(sendEnvelope).not.toHaveBeenCalled();
+      expect(text(r)).toMatch(/eligible/i);
+    });
+
+    it('regression: a one-element array still sends a plain directed act', async () => {
+      const { sendEnvelope, client } = liveClient();
+      const handler = capture(registerSend, client, config);
+      await handler({ to: ['Lin'], act: 'handoff', body: 'take this' });
+      const sent = sendEnvelope.mock.calls[0]![0] as Envelope;
+      expect(sent.to).toEqual({ kind: 'member', name: 'Lin' });
+      expect(sent.meta?.['eligible']).toBeUndefined();
+    });
+  });
 });
 
 describe('team_inbox_check handler', () => {

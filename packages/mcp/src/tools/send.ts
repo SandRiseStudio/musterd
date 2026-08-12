@@ -8,6 +8,7 @@ import {
   askContractText,
   type Envelope,
   makeEnvelope,
+  MAX_ELIGIBLE,
   type Recipient,
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
@@ -37,12 +38,54 @@ const DESCRIPTION =
   'blocking) — the reply tells you how long to wait and what to do if no answer comes. Goal-scoped ' +
   'steer/defer re-sequence the plan and flag lanes building against the old one. ' +
   'e.g. {act:"status_update",body:"…"}; an ask needs meta: ' +
-  '{act:"ask",to:"nick",body:"…",meta:{species:"consult",tier:"standard"}}.';
+  '{act:"ask",to:"nick",body:"…",meta:{species:"consult",tier:"standard"}}. ' +
+  'Name 2-4 seats in `to` when EITHER could answer: each owes a reply, the first accept/decline ' +
+  'stands the rest down, and the whole team still sees it. Only message/request_help/challenge ' +
+  'take a set. e.g. {act:"message",to:["stanley","izzo"],body:"either of you know why it pinned?"}.';
 
 function recipient(to: string): Recipient {
   if (to === '@team') return { kind: 'team' };
   if (to === '@broadcast') return { kind: 'broadcast' };
   return { kind: 'member', name: to };
+}
+
+/**
+ * ADR NNN: `to` normalised by ARITY.
+ *
+ * | `to`                    | result                            |
+ * | ----------------------- | --------------------------------- |
+ * | `[]`                    | `@team`                           |
+ * | `'x'` / `['x']`         | directed act                      |
+ * | `['x','y']` (2-4)       | team act + `meta.eligible`        |
+ * | 5+                      | rejected                          |
+ *
+ * The first two rows are exactly what `coerce.ts` already repaired (`to:[]→default`,
+ * `to:[one]→string`), so this is additive: the only behaviour that changes is that its 2+ bounce
+ * becomes a real path.
+ *
+ * The array is SURFACE SUGAR. A multi-name send is persisted and audited as a team act carrying
+ * `meta.eligible`, never as an array-shaped recipient, so nothing below `routeEnvelope` learns a new
+ * wire shape.
+ */
+export function normalizeTo(to: string | string[]): {
+  to: Recipient;
+  eligible: string[] | null;
+} {
+  const names = (Array.isArray(to) ? to : [to]).map((n) => n.trim()).filter((n) => n.length > 0);
+  if (names.length === 0) return { to: { kind: 'team' }, eligible: null };
+  if (names.length === 1) return { to: recipient(names[0]!), eligible: null };
+  if (names.length > MAX_ELIGIBLE) {
+    throw new Error(
+      `too many recipients (${names.length}) — name at most ${MAX_ELIGIBLE} seats, or use @team`,
+    );
+  }
+  // `@team`/`@broadcast` are whole-audience aliases, not seats: a set is named seats or it is not a
+  // set. Silently dropping the alias would send to a narrower audience than the caller asked for.
+  const alias = names.find((n) => n.startsWith('@'));
+  if (alias) {
+    throw new Error(`"${alias}" cannot appear in a list of seats — send to ${alias} on its own`);
+  }
+  return { to: { kind: 'team' }, eligible: names };
 }
 
 /** Acts an `accept`/`decline` can answer: a call for help, a handoff, a `challenge` (ADR 103), or a
@@ -97,7 +140,14 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
     {
       description: DESCRIPTION,
       inputSchema: {
-        to: z.string().default('@team').describe("member name, or '@team', or '@broadcast'"),
+        // ADR NNN: an array is accepted because agents were already sending one — `coerce.ts`
+        // repaired the 0- and 1-element cases and bounced 2+. Now 2-4 names mean "either of you".
+        to: z
+          .union([z.string(), z.array(z.string())])
+          .default('@team')
+          .describe(
+            "member name, or '@team', or '@broadcast' — or 2-4 names, any one of whom can answer",
+          ),
         // Derived from ACTS (the protocol's single source of truth) so the MCP surface can never drift
         // from the enum — a new act lands here the moment it's appended (ADR 103). Rebuilt with this
         // package's zod (4) rather than importing ActSchema: the protocol package is still on zod 3,
@@ -164,13 +214,26 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
 
       // Ride the adapter's active trace context along as meta.otel (ADR 011) so a handoff links the
       // sender's and receiver's traces across runtimes. Inert when there's no active context.
+      // ADR NNN: resolve `to` before composing. Normalisation can REJECT (too many names, an alias
+      // inside a list), and that has to happen before anything is sent — a refusal the caller reads
+      // as text is recoverable; a send to the wrong audience is not.
+      let addressed: { to: Recipient; eligible: string[] | null };
+      try {
+        addressed = normalizeTo(args.to);
+      } catch (err) {
+        return textResult(err instanceof Error ? err.message : String(err));
+      }
+      if (addressed.eligible) meta['eligible'] = addressed.eligible;
+      /** What to call the audience in prose and structured output — the names, never the raw array. */
+      const toLabel = addressed.eligible ? addressed.eligible.join(', ') : String(args.to);
+
       const metaToSend = withTraceContext(Object.keys(meta).length ? meta : null);
       try {
         const envelope = makeEnvelope({
           id: ulid(),
           team: config.team,
           from: config.member,
-          to: recipient(args.to),
+          to: addressed.to,
           act: args.act as Act,
           body: args.body,
           thread: thread ?? null,
@@ -217,8 +280,8 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         // exchange threaded (reply_to / thread on the next send), without parsing the prose.
         const text =
           (askGuidance
-            ? `sent ask to ${args.to} (id=${envelope.id}). ${askGuidance}`
-            : `sent ${args.act} to ${args.to} (id=${envelope.id})`) +
+            ? `sent ask to ${toLabel} (id=${envelope.id}). ${askGuidance}`
+            : `sent ${args.act} to ${toLabel} (id=${envelope.id})`) +
           hintGuidance +
           handoffGuidance;
         return {
@@ -226,8 +289,11 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           structuredContent: {
             id: envelope.id,
             act: args.act,
-            to: args.to,
+            // Stays a STRING even for a set, so a consumer reading `.to` never has to handle two
+            // types; the machine-readable set rides beside it rather than changing this field's shape.
+            to: toLabel,
             thread: envelope.thread,
+            ...(addressed.eligible ? { eligible: addressed.eligible } : {}),
             ...(args.act === 'ask' && isAskTier(meta['tier'])
               ? { ask_contract: serverContract ?? askContract(meta['tier']) }
               : {}),
