@@ -532,6 +532,40 @@ export function supervised(env: NodeJS.ProcessEnv = process.env): boolean {
   return v !== undefined && v !== '' && v !== '0';
 }
 
+/**
+ * A run has to survive this long before a lost Chrome socket counts as an accident worth relaunching.
+ *
+ * Below it, the failure is almost certainly *this* configuration — a bad flag, a page that never
+ * loads, a Chrome that cannot allocate — and relaunching only re-runs the same failure on a machine
+ * that bills by the hour. `entrypoint.sh`'s `RESTART_MIN_INTERVAL` paces a restart loop; nothing
+ * caps it, so the floor has to come from whether the run ever actually worked.
+ */
+export const RESTARTABLE_AFTER_MS = 60_000;
+
+/**
+ * Exit code for a Chrome DevTools socket that dropped underneath us.
+ *
+ * Observed 2026-08-12 on the hosted stream: the daemon bounced, and the page's disturbance raced the
+ * build-poller. When the poller won, `daemonRebuilt()` exited RESTART_EXIT_CODE and `entrypoint.sh`
+ * relaunched a working stream in ~3s on the same machine. When the SOCKET won, this path exited 1 —
+ * which the supervisor does not rerun (`entrypoint.sh`: `[ "$code" -eq "$RESTART_EXIT_CODE" ] ||
+ * exit "$code"`) — so Fly tore down a VM that a supervisor was standing by to restart. Same cause,
+ * same recovery available, opposite outcome, decided by which callback fired first.
+ *
+ * So a lost socket is a RESTARTABLE condition wherever something is willing to run us again — and it
+ * generalises past the bounce that exposed it, to a Chrome OOM, a crash, or a stray kill.
+ *
+ * Unsupervised (a laptop run) keeps exiting 1: there is no supervisor, and a shell that silently
+ * relaunched a stream the operator watched die would be worse than the error.
+ */
+export function socketLossExitCode(
+  ranMs: number,
+  isSupervised: boolean = supervised(),
+  restartableAfterMs: number = RESTARTABLE_AFTER_MS,
+): number {
+  return isSupervised && ranMs >= restartableAfterMs ? RESTART_EXIT_CODE : 1;
+}
+
 /** The daemon's current build ref (ADR 130's `/health.build`), or undefined if it can't be read. */
 async function fetchDaemonBuild(server: string): Promise<string | undefined> {
   try {
@@ -745,8 +779,12 @@ async function connectCdp(debugPort: number): Promise<Cdp> {
     for (const p of [...pending.values()]) p.rej(err);
     pending.clear();
   };
-  ws.onclose = () => failAll(new CliError('the Chrome DevTools socket closed', 1));
-  ws.onerror = () => failAll(new CliError('the Chrome DevTools socket errored', 1));
+  // Losing the socket is not automatically fatal — see `socketLossExitCode`. Measured from the
+  // moment we attached, which is the only "has this run ever worked" signal available here.
+  const attachedAt = Date.now();
+  const lossCode = (): number => socketLossExitCode(Date.now() - attachedAt);
+  ws.onclose = () => failAll(new CliError('the Chrome DevTools socket closed', lossCode()));
+  ws.onerror = () => failAll(new CliError('the Chrome DevTools socket errored', lossCode()));
   ws.onmessage = (e) => {
     const m = JSON.parse(String(e.data)) as {
       id?: number;
