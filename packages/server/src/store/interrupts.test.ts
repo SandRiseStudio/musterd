@@ -238,3 +238,120 @@ describe('pendingInterrupts (ADR 088)', () => {
     });
   });
 });
+
+/**
+ * ADR NNN: an eligible set narrows *obligation*. These cases pin the two properties the primitive
+ * rests on — the named seats owe it and nobody else does, and the first answer stands the rest down —
+ * plus the regressions that prove the default rules are untouched for every act without a set.
+ */
+describe('pendingInterrupts with an eligible set (ADR NNN)', () => {
+  const env = (
+    over: Partial<Envelope> & Pick<Envelope, 'id' | 'from' | 'to' | 'act'>,
+  ): Envelope => ({
+    v: PROTOCOL_VERSION,
+    team: 'dawn',
+    body: 'x',
+    thread: null,
+    meta: null,
+    ts: 1,
+    ...over,
+  });
+  const urgent = { urgent: true, urgent_reason: 'the daemon is pinned' };
+  const toTeam = { kind: 'team' as const };
+  const eligible = (extra: Record<string, unknown> = {}) => ({
+    eligible: ['me', 'izzo'],
+    ...urgent,
+    ...extra,
+  });
+  const ask = env({ id: 'e1', from: 'nick', to: toTeam, act: 'message', meta: eligible() });
+
+  it('a named seat owes it', () => {
+    expect(pendingInterrupts([ask], 'me').map((m) => m.id)).toEqual(['e1']);
+  });
+
+  it('a seat outside the set owes nothing, though it can still read it', () => {
+    expect(pendingInterrupts([ask], 'wanderer')).toEqual([]);
+  });
+
+  it('the first accept stands the other named seats down', () => {
+    const answer = env({
+      id: 'a1',
+      from: 'izzo',
+      to: { kind: 'member', name: 'nick' },
+      act: 'accept',
+      meta: { in_reply_to: 'e1' },
+      ts: 2,
+    });
+    expect(pendingInterrupts([ask, answer], 'me')).toEqual([]);
+  });
+
+  it('a decline stands them down too — "not me" is an answer', () => {
+    const answer = env({
+      id: 'd1',
+      from: 'izzo',
+      to: { kind: 'member', name: 'nick' },
+      act: 'decline',
+      meta: { in_reply_to: 'e1' },
+      ts: 2,
+    });
+    expect(pendingInterrupts([ask, answer], 'me')).toEqual([]);
+  });
+
+  it('an accept naming a DIFFERENT act does not discharge this one', () => {
+    const answer = env({
+      id: 'a2',
+      from: 'izzo',
+      to: { kind: 'member', name: 'nick' },
+      act: 'accept',
+      meta: { in_reply_to: 'something-else' },
+      ts: 2,
+    });
+    expect(pendingInterrupts([ask, answer], 'me').map((m) => m.id)).toEqual(['e1']);
+  });
+
+  it('an eligible set NARROWS request_help instead of raising it team-wide', () => {
+    const m = env({ id: 'r1', from: 'nick', to: toTeam, act: 'request_help', meta: eligible() });
+    expect(pendingInterrupts([m], 'me').map((m) => m.id)).toEqual(['r1']);
+    expect(pendingInterrupts([m], 'wanderer')).toEqual([]);
+  });
+
+  it('is inbox-class, not interrupt-class, without the urgent flag', () => {
+    const quiet = env({
+      id: 'q1',
+      from: 'nick',
+      to: toTeam,
+      act: 'message',
+      meta: { eligible: ['me', 'izzo'] },
+    });
+    expect(pendingInterrupts([quiet], 'me')).toEqual([]);
+  });
+
+  it('regression: a plain urgent request_help still raises for every seat', () => {
+    const m = env({ id: 'r2', from: 'nick', to: toTeam, act: 'request_help', meta: urgent });
+    expect(pendingInterrupts([m], 'wanderer').map((m) => m.id)).toEqual(['r2']);
+  });
+
+  it('regression: an accept does NOT discharge a plain directed act', () => {
+    const direct = env({
+      id: 'p1',
+      from: 'nick',
+      to: { kind: 'member', name: 'me' },
+      act: 'handoff',
+      meta: urgent,
+    });
+    const answer = env({
+      id: 'a3',
+      from: 'izzo',
+      to: { kind: 'member', name: 'nick' },
+      act: 'accept',
+      meta: { in_reply_to: 'p1' },
+      ts: 2,
+    });
+    expect(pendingInterrupts([direct, answer], 'me').map((m) => m.id)).toEqual(['p1']);
+  });
+
+  it('my own eligible-set send never raises my own line', () => {
+    const mine = env({ id: 'm1', from: 'me', to: toTeam, act: 'message', meta: eligible() });
+    expect(pendingInterrupts([mine], 'me')).toEqual([]);
+  });
+});
