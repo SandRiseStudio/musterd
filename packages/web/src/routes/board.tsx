@@ -19,6 +19,7 @@ import {
   saveMemberIdentity,
 } from '../live/memberIdentity';
 import { filterLanes, UNOWNED } from '../live/boardWrite';
+import { goalFilter, resolveBoardView } from '../live/goalGrid';
 import { useBoardData } from '../live/useBoardData';
 import { initial, kindOf, memberColor, memberAvatar } from '../live/format';
 import { InsightRail } from '../live/InsightRail';
@@ -95,16 +96,43 @@ function BoardPage() {
   const { board, me, busyId, note, doCreate, doPatch } = useBoardData(cfg, roster, base);
 
   // View + rail preferences — sticky per browser, read once on mount (client-only).
-  const [view, setView] = useState<'columns' | 'goals'>('columns');
+  // `stored` may be the legacy 'goals' value; `resolveBoardView` maps it, and — when nothing is
+  // stored — defaults to the grid exactly when the team has unshipped goals. Because the resolve
+  // runs per render over the live report, the default settles itself when the report arrives.
+  const [storedView, setStoredView] = useState<string | null>(null);
+  const [chosenView, setChosenView] = useState<'grid' | 'columns' | null>(null);
   const [railCollapsed, setRailCollapsed] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (window.localStorage.getItem(VIEW_KEY) === 'goals') setView('goals');
+    setStoredView(window.localStorage.getItem(VIEW_KEY));
     if (window.localStorage.getItem(RAIL_KEY) === 'collapsed') setRailCollapsed(true);
   }, []);
-  const pickView = (v: 'columns' | 'goals') => {
-    setView(v);
+  const unshippedGoals = report?.goals.filter((g) => g.status !== 'shipped').length ?? 0;
+  const view = chosenView ?? resolveBoardView(storedView, unshippedGoals);
+  const pickView = (v: 'grid' | 'columns') => {
+    setChosenView(v);
     window.localStorage.setItem(VIEW_KEY, v);
+  };
+
+  // Drill-in (goals-front-door design): a grid card click filters the columns to that goal's lanes
+  // (null = the goal-less pool; undefined = no filter). Reflected into `?goal=` for deep links.
+  const [goalFocus, setGoalFocus] = useState<string | null | undefined>(undefined);
+  const openGoal = (goalId: string | null) => {
+    setGoalFocus(goalId);
+    pickView('columns');
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('goal', goalId ?? 'none');
+      window.history.replaceState(null, '', url);
+    }
+  };
+  const closeGoal = () => {
+    setGoalFocus(undefined);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('goal');
+      window.history.replaceState(null, '', url);
+    }
   };
   const collapseRail = (c: boolean) => {
     setRailCollapsed(c);
@@ -202,6 +230,11 @@ function BoardPage() {
     if (typeof window === 'undefined') return;
     const urlTeam = new URLSearchParams(window.location.search).get('team');
     setFocusLane(new URLSearchParams(window.location.search).get('lane'));
+    const goalParam = new URLSearchParams(window.location.search).get('goal');
+    if (goalParam !== null) {
+      setGoalFocus(goalParam === 'none' ? null : goalParam);
+      setChosenView('columns');
+    }
     const nonce = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('s');
     if (urlTeam && nonce) {
       const clean = `${window.location.pathname}${window.location.search}`;
@@ -244,18 +277,21 @@ function BoardPage() {
         {connected && (
           <div className="lc-board__views" role="group" aria-label="Board view">
             <button
+              className={`lc-board__view${view === 'grid' ? ' lc-board__view--on' : ''}`}
+              aria-pressed={view === 'grid'}
+              onClick={() => {
+                closeGoal();
+                pickView('grid');
+              }}
+            >
+              goals
+            </button>
+            <button
               className={`lc-board__view${view === 'columns' ? ' lc-board__view--on' : ''}`}
               aria-pressed={view === 'columns'}
               onClick={() => pickView('columns')}
             >
               columns
-            </button>
-            <button
-              className={`lc-board__view${view === 'goals' ? ' lc-board__view--on' : ''}`}
-              aria-pressed={view === 'goals'}
-              onClick={() => pickView('goals')}
-            >
-              goals
             </button>
           </div>
         )}
@@ -357,10 +393,20 @@ function BoardPage() {
             {board == null ? (
               <p className="lc-col__empty">Opening the board…</p>
             ) : (
-              <Board
-                lanes={shownLanes}
+              <>
+                {view === 'columns' && goalFocus !== undefined && (
+                  <button className="lc-board__view lc-board__goalback" onClick={() => {
+                    closeGoal();
+                    pickView('grid');
+                  }}>
+                    ← goals · showing {goalFocus === null ? 'lanes on no goal' : goalFocus}
+                  </button>
+                )}
+                <Board
+                lanes={view === 'columns' ? goalFilter(shownLanes, goalFocus) : shownLanes}
                 warnings={board.warnings}
-                view={view === 'columns' ? 'columns' : 'grid'}
+                view={view}
+                onOpenGoal={openGoal}
                 goals={report?.goals ?? []}
                 roster={roster}
                 me={me}
@@ -370,7 +416,8 @@ function BoardPage() {
                 onCreate={doCreate}
                 onPatch={doPatch}
                 focusLane={focusLane}
-              />
+                />
+              </>
             )}
           </div>
           <InsightRail

@@ -221,3 +221,23 @@ export function buildGoalGrid(lanes: Lane[], goals: Goal[], now: number): GoalGr
   }
   return { cards, shippedShelf, pulse };
 }
+
+/**
+ * Which view the board opens on. `'columns'` stored → columns; `'grid'` (or the legacy `'goals'`
+ * value the swimlane era persisted) → grid; nothing stored → grid iff the team has unshipped goals,
+ * else columns (a goal-less team's grid would be an empty stage).
+ */
+export function resolveBoardView(stored: string | null, goalCount: number): 'grid' | 'columns' {
+  if (stored === 'columns') return 'columns';
+  if (stored === 'grid' || stored === 'goals') return 'grid';
+  return goalCount > 0 ? 'grid' : 'columns';
+}
+
+/**
+ * The drill-in lens: `undefined` = no filter; `null` = goal-less lanes only; an id = that goal's
+ * lanes. Pure so the route stays wiring.
+ */
+export function goalFilter(lanes: Lane[], goalId: string | null | undefined): Lane[] {
+  if (goalId === undefined) return lanes;
+  return lanes.filter((l) => (l.goal_id ?? null) === goalId);
+}

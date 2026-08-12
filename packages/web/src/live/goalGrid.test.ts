@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Goal, Lane } from '@musterd/protocol';
 import { buildGoalGrid, RUNWAY_DOT_CAP } from './goalGrid';
+import * as grid from './goalGrid';
 
 const lane = (over: Partial<Lane> = {}): Lane => ({
   id: 'L1',
@@ -191,5 +192,32 @@ describe('buildGoalGrid — cards', () => {
   it('empty goals input yields no cards (route falls back to columns)', () => {
     const model = buildGoalGrid([lane({ id: 'a' })], [], NOW);
     expect(model.cards).toEqual([]);
+  });
+});
+
+describe('resolveBoardView', () => {
+  it('honors a stored choice, maps legacy goals to grid, defaults by goal count', () => {
+    const { resolveBoardView } = grid;
+    expect(resolveBoardView('columns', 5)).toBe('columns');
+    expect(resolveBoardView('grid', 0)).toBe('grid');
+    expect(resolveBoardView('goals', 0)).toBe('grid');
+    expect(resolveBoardView(null, 3)).toBe('grid');
+    expect(resolveBoardView(null, 0)).toBe('columns');
+    expect(resolveBoardView('nonsense', 0)).toBe('columns');
+    expect(resolveBoardView('nonsense', 2)).toBe('grid');
+  });
+});
+
+describe('goalFilter', () => {
+  it('undefined = all, null = goal-less only, id = that goal', () => {
+    const { goalFilter } = grid;
+    const lanes = [
+      lane({ id: 'a', goal_id: 'g1' }),
+      lane({ id: 'b', goal_id: null }),
+      lane({ id: 'c', goal_id: 'g2' }),
+    ];
+    expect(goalFilter(lanes, undefined).map((l) => l.id)).toEqual(['a', 'b', 'c']);
+    expect(goalFilter(lanes, null).map((l) => l.id)).toEqual(['b']);
+    expect(goalFilter(lanes, 'g1').map((l) => l.id)).toEqual(['a']);
   });
 });
