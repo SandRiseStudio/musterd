@@ -172,6 +172,7 @@ exact task targeting, lifecycle observation, and safe resume (ADR 216).
 - `MUSTERD_SERVER` env overrides `server`. `--team <slug>` overrides `current`. `--as <name>` selects identity within a team.
 - Tokens live here (chmod 600 on write). Never logged.
 - `bindings` (ADR 020) records _where_ each member is bound, so init can warn on cross-folder name reuse (`nameBoundElsewhere`). It is **tokenless** — secrets stay only in each folder's 0600 `.musterd/binding.json`, never duplicated here — and **optional/back-compatible** (older configs without it load with an empty map). `saveBinding` writes the entry; nothing reads it but the init guard.
+- **Concurrent saves (ADR 255).** `saveConfig` used to last-write-wins the whole snapshot, so two CLI processes that each loaded, mutated a different map, and saved dropped the other's identities/bindings/vault entries. It now exclusive-locks (`config.json.lock`), 3-way-merges those maps (and `server`/`current`) against the `loadConfig` snapshot vs disk, and writes tmp+rename at 0600. A Config built from scratch (`musterd reset`) has no snapshot and replaces. Callers keep passing the object `loadConfig` returned.
 
 **Identity resolution (ADR 018) — aligned with the MCP adapter.** This global config is the
 _last_ source, not the only one. `resolve()` picks the active team+identity in this order:

@@ -510,7 +510,27 @@ function coerceIdentity<T extends { name: string; surface: string }>(
   return { ...rest, key: raw.key ?? token ?? '' } as T & { key: string };
 }
 
-export function loadConfig(): Config {
+/**
+ * Snapshot taken at {@link loadConfig} time, keyed by the returned object. {@link saveConfig}
+ * 3-way-merges against this so a caller that loaded, mutated one map, and saved does not drop
+ * keys another process wrote in between (ADR 255). A Config constructed from scratch (reset)
+ * has no snapshot — that write replaces.
+ */
+const loadedSnapshots = new WeakMap<Config, Config>();
+
+function emptyConfig(): Config {
+  return {
+    server: process.env['MUSTERD_SERVER'] ?? DEFAULT.server,
+    identities: {},
+    knownIdentities: [],
+    bindings: {},
+    agentKeys: {},
+    rosterHome: {},
+    teamHome: {},
+  };
+}
+
+function readConfigFromDisk(): Config {
   try {
     const raw = readFileSync(configPath(), 'utf8');
     const parsed = JSON.parse(raw) as Partial<Config>;
@@ -534,27 +554,169 @@ export function loadConfig(): Config {
     };
   } catch {
     // Fresh objects (not DEFAULT's): callers like recordBinding mutate `bindings`/`identities`.
-    return {
-      server: process.env['MUSTERD_SERVER'] ?? DEFAULT.server,
-      identities: {},
-      knownIdentities: [],
-      bindings: {},
-      agentKeys: {},
-      rosterHome: {},
-      teamHome: {},
-    };
+    return emptyConfig();
   }
 }
 
-export function saveConfig(config: Config): void {
+export function loadConfig(): Config {
+  const config = readConfigFromDisk();
+  loadedSnapshots.set(config, structuredClone(config));
+  return config;
+}
+
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function mergeMap<V>(
+  base: Record<string, V>,
+  ours: Record<string, V>,
+  disk: Record<string, V>,
+): Record<string, V> {
+  const result: Record<string, V> = {};
+  const keys = new Set([...Object.keys(base), ...Object.keys(ours), ...Object.keys(disk)]);
+  for (const k of keys) {
+    const inBase = Object.hasOwn(base, k);
+    const inOurs = Object.hasOwn(ours, k);
+    const inDisk = Object.hasOwn(disk, k);
+    if (inOurs && !inBase) {
+      result[k] = ours[k]!;
+    } else if (inBase && !inOurs) {
+      // we deleted it — omit even if disk still has it
+    } else if (inOurs && inBase) {
+      if (!sameJson(ours[k], base[k])) result[k] = ours[k]!;
+      else if (inDisk) result[k] = disk[k]!;
+    } else if (inDisk) {
+      result[k] = disk[k]!;
+    }
+  }
+  return result;
+}
+
+function vaultKey(si: StoredIdentity): string {
+  return `${si.team}\0${si.name}`;
+}
+
+function vaultToMap(list: StoredIdentity[]): Record<string, StoredIdentity> {
+  return Object.fromEntries(list.map((si) => [vaultKey(si), si]));
+}
+
+function mergeScalar<T>(base: T, ours: T, disk: T): T {
+  return sameJson(ours, base) ? disk : ours;
+}
+
+function threeWayMerge(base: Config, ours: Config, disk: Config): Config {
+  const current = mergeScalar(base.current, ours.current, disk.current);
+  return {
+    server: mergeScalar(base.server, ours.server, disk.server),
+    ...(current !== undefined ? { current } : {}),
+    identities: mergeMap(base.identities, ours.identities, disk.identities),
+    knownIdentities: Object.values(
+      mergeMap(
+        vaultToMap(base.knownIdentities),
+        vaultToMap(ours.knownIdentities),
+        vaultToMap(disk.knownIdentities),
+      ),
+    ),
+    bindings: mergeMap(base.bindings, ours.bindings, disk.bindings),
+    agentKeys: mergeMap(base.agentKeys, ours.agentKeys, disk.agentKeys),
+    rosterHome: mergeMap(base.rosterHome, ours.rosterHome, disk.rosterHome),
+    teamHome: mergeMap(base.teamHome, ours.teamHome, disk.teamHome),
+  };
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isEexist(err: unknown): boolean {
+  return err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EEXIST';
+}
+
+const LOCK_WAIT_MS = 20;
+const LOCK_DEADLINE_MS = 5_000;
+let configLockDepth = 0;
+
+function acquireConfigLock(lockPath: string): void {
+  const deadline = Date.now() + LOCK_DEADLINE_MS;
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      writeFileSync(lockPath, `${process.pid}\n`, { flag: 'wx', encoding: 'utf8' });
+      return;
+    } catch (err) {
+      if (!isEexist(err)) throw err;
+      let stale = false;
+      try {
+        const pid = Number.parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
+        stale = !Number.isInteger(pid) || pid === process.pid || !pidAlive(pid);
+      } catch {
+        stale = true;
+      }
+      if (stale) {
+        try {
+          rmSync(lockPath, { force: true });
+        } catch {
+          // raced with another stealer
+        }
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for ${lockPath}`);
+      }
+      Atomics.wait(sleeper, 0, 0, LOCK_WAIT_MS);
+    }
+  }
+}
+
+function withConfigLock<T>(fn: () => T): T {
+  const lockPath = `${configPath()}.lock`;
+  if (configLockDepth === 0) acquireConfigLock(lockPath);
+  configLockDepth++;
+  try {
+    return fn();
+  } finally {
+    configLockDepth--;
+    if (configLockDepth === 0) {
+      try {
+        rmSync(lockPath, { force: true });
+      } catch {
+        // already gone
+      }
+    }
+  }
+}
+
+function writeConfigAtomic(config: Config): void {
   const p = configPath();
   mkdirSync(dirname(p), { recursive: true });
-  writeFileSync(p, JSON.stringify(config, null, 2) + '\n', 'utf8');
+  const tmp = `${p}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   try {
-    chmodSync(p, 0o600);
+    chmodSync(tmp, 0o600);
   } catch {
     // best-effort on platforms without chmod semantics
   }
+  renameSync(tmp, p);
+}
+
+/**
+ * Persist the global config. Callers that {@link loadConfig}'d, mutated, and save the same object
+ * 3-way-merge with disk under an exclusive lock so concurrent CLI processes cannot drop each
+ * other's identities, bindings, or vault entries (ADR 255). A Config built from scratch (reset)
+ * has no load snapshot and replaces the file.
+ */
+export function saveConfig(config: Config): void {
+  withConfigLock(() => {
+    const base = loadedSnapshots.get(config);
+    const merged = base ? threeWayMerge(base, config, readConfigFromDisk()) : config;
+    writeConfigAtomic(merged);
+    loadedSnapshots.set(config, structuredClone(merged));
+  });
 }
 
 /** Derive the WS base URL from the HTTP server URL. */
