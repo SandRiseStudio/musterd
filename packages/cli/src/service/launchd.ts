@@ -102,6 +102,15 @@ export function parsePlistProgramArguments(xml: string): string[] | null {
  * lands on has exactly that shape today, and a parser that only understood our own output would
  * "preserve" nothing on the one plist that most needs preserving.
  */
+/** The plist's `Label`, or null when the file isn't a parseable plist. Hand-authored files
+ *  walk past `service install` (ADR 232 §4) — the census reads the Label, never the filename. */
+export function parsePlistLabel(xml: string): string | null {
+  const m = xml.match(/<key>Label<\/key>\s*<string>([\s\S]*?)<\/string>/);
+  if (!m) return null;
+  const label = xmlUnescape(m[1]!).trim();
+  return label.length > 0 ? label : null;
+}
+
 export function parsePlistEnvironment(xml: string): Record<string, string> | null {
   const block = xml.match(/<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
   if (!block) return null;

@@ -1447,7 +1447,7 @@ const RAW: RawItem[] = [
     id: 'ledger-seats',
     frozenBy: 232,
     building:
-      'increments 2–5 — the census check in doctor/init --check, remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance. Increment 1 landed: kind service, the mskd_ service-token auth path, the kind-keyed exclusions, and the auto-refresher announcing its bounces in-band.',
+      'increments 3–5 — remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance. Increments 1–2 landed: kind service + the auto-refresher’s seat, and the warn-only census in doctor/init --check.',
     wave: 8,
     title: 'Ledger seats — every actor on the roster (services as members)',
     plan: 'increments 1–5: kind service + the auto-refresher’s seat, the census check, remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance',

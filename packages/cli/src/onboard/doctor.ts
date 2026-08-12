@@ -16,6 +16,7 @@ import { findBinding, findWorkspaceSpec, loadConfig } from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
+import { inspectCensus } from '../service/census.js';
 import { cliBuild } from '../version.js';
 import { foreignAdapterNote, primaryCheckoutFor, siblingWorkspaces } from './entryGuard.js';
 import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from './guidance.js';
@@ -914,6 +915,8 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
   report.notes.push(...(await buildSkewNotes()));
   // ADR 242: orphaned-sidecar note — a machine fact like the skew notes, warn-only, never drift.
   report.notes.push(...(await footprintNotes(cwd)));
+  // ADR 232 increment 2: LaunchAgent census vs roster service seats — warn-only, never drift.
+  report.notes.push(...(await inspectCensus({ cwd })));
   // The binary a WAKE would resolve is a different question from the one this shell resolves, and
   // nothing asked it until a poisoned shim went a day unnoticed. Warn-only for the same reason as
   // the skew notes: it is a fact about the machine, not this folder's provisioning.
