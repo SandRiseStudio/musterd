@@ -14,9 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
-import { listAudit } from '../store/audit.js';
+import { appendAudit, listAudit } from '../store/audit.js';
 import { openDirectedLedger } from '../store/delivery.js';
 import { getMemberByName, setMemberGovernance } from '../store/members.js';
+import { REVIEW_LOOP_BREAKER_N } from '../store/review.js';
 import { getTeamBySlug } from '../store/teams.js';
 
 let server: RunningServer;
@@ -3477,16 +3478,14 @@ describe('two-stage close (ADR 169)', () => {
     // Stage-one attestation persisted on the lane; not terminal (resolved_at unset).
     expect(ready.json.lane.merged).toEqual({ pr: 42, sha: 'abc123', authorized_by: 'nick' });
     expect(ready.json.lane.resolved_at).toBeNull();
-    // The reviewer is cross-family: ada attests claude-*, so gpt-* gee or human nick qualifies —
-    // humans sort first in the cross-family pool only when live; nick IS live (he created the team).
-    expect(ready.json.review.reviewer).toBeDefined();
-    expect(['nick', 'gee']).toContain(ready.json.review.reviewer);
+    // ADR 253: non-risky never asks a human. ada attests claude-*, so gpt-* gee is the acceptor —
+    // nick is live and created the team, and is not asked.
+    expect(ready.json.review.reviewer).toBe('gee');
     expect(ready.json.review.route).toBe('cross_family');
+    expect(ready.json.review.grade).toBe('cross_family');
 
     // The reviewer got a standard-tier approve ask with structured lane_review meta.
-    const reviewer = ready.json.review.reviewer as string;
-    const reviewerAuth: Auth = reviewer === 'nick' ? nickTok : gee;
-    const inbox = await get('/teams/dawn/inbox?unread=1', reviewerAuth);
+    const inbox = await get('/teams/dawn/inbox?unread=1', gee);
     const ask = inbox.json.messages.find(
       (m: { act: string; meta?: { lane_review?: unknown } }) =>
         m.act === 'ask' && m.meta?.lane_review,
@@ -3507,7 +3506,7 @@ describe('two-stage close (ADR 169)', () => {
     const rows = await auditRows(nickTok, 'lane.ready_for_review');
     expect(rows).toHaveLength(1);
     expect(rows[0].detail.merged.pr).toBe(42);
-    expect(['human', 'cross_family']).toContain(rows[0].detail.review_grade);
+    expect(rows[0].detail.review_grade).toBe('cross_family');
     expect(ask.meta.lane_review.grade).toBe(rows[0].detail.review_grade);
     expect(ready.json.review.grade).toBe(rows[0].detail.review_grade);
     // No overlap notice when the acceptor never owned the lane — the common case must stay quiet,
@@ -4430,27 +4429,27 @@ describe('two-stage close (ADR 169)', () => {
   });
 
   it('reviewer send-back audits lane.review_sent_back and the lane resumes', async () => {
-    const { nickTok, ada } = await setup();
+    const { nickTok, ada, gee } = await setup();
     const lane = await post('/teams/dawn/lanes', { title: 'needs work', claim: true }, ada);
     await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
 
     const back = await patchLane(
       lane.json.lane.id,
       { state: 'active', detail: 'the error path is untested — send it back through' },
-      nickTok,
+      gee,
     );
     expect(back.json.lane.state).toBe('active');
     const rows = await auditRows(nickTok, 'lane.review_sent_back');
     expect(rows).toHaveLength(1);
-    expect(rows[0].detail.reviewer).toBe('nick');
+    expect(rows[0].detail.reviewer).toBe('gee');
     expect(rows[0].detail.owner).toBe('ada');
   });
 
   it('chat rejection persists its concrete note in lane.review_sent_back', async () => {
-    const { nickTok, ada } = await setup();
+    const { nickTok, ada, gee } = await setup();
     const lane = await post('/teams/dawn/lanes', { title: 'needs a note', claim: true }, ada);
     await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
-    const inbox = await get('/teams/dawn/inbox?unread=1', nickTok);
+    const inbox = await get('/teams/dawn/inbox?unread=1', gee);
     const ask = inbox.json.messages.find(
       (m: any) => m.act === 'ask' && m.meta?.lane_review?.lane === lane.json.lane.id,
     );
@@ -4463,7 +4462,7 @@ describe('two-stage close (ADR 169)', () => {
           v: 'musterd/0.3',
           id: 'declinenote0000000000000000',
           team: 'dawn',
-          from: 'nick',
+          from: 'gee',
           to: { kind: 'member', name: 'ada' },
           act: 'decline',
           body: 'the error path is untested — please add the boundary case',
@@ -4471,7 +4470,7 @@ describe('two-stage close (ADR 169)', () => {
           ts: Date.now(),
         },
       },
-      nickTok,
+      gee,
     );
     expect(declined.status).toBe(201);
 
@@ -4739,8 +4738,48 @@ describe('two-stage close (ADR 169)', () => {
 
     const lane = await post('/teams/dawn/lanes', { title: 'diverse it', claim: true }, ada);
     const ready = await patchLane(lane.json.lane.id, { state: 'ready_for_review' }, ada);
-    // nick (human, live) is the only eligible cross-family counterpart — never mist.
-    expect(ready.json.review.reviewer).toBe('nick');
+    // ADR 253: nick is live and mist is ungradeable — a human is not a fallback. Nobody is asked.
+    expect(ready.json.review.reviewer).toBeUndefined();
+    expect(ready.json.review.self_close_sanctioned).toBe(true);
+  });
+
+  it('a non-risky breaker trip does not ask a live human (ADR 253)', async () => {
+    const t = await post('/teams', { slug: 'brk', creator: { name: 'n5', kind: 'human' } });
+    const n5 = t.json.human_credential as string;
+    await get('/teams/brk/inbox', n5); // human live
+    await post('/teams/brk/members', { name: 'solo', kind: 'agent' }, n5);
+    const solo: Auth = { key: t.json.agent_key as string, seat: 'solo' };
+    await fetch(base + '/teams/brk/inbox', {
+      headers: { ...authHeaders(solo), 'x-musterd-model': 'claude-opus-5' },
+    });
+    const lane = await post('/teams/brk/lanes', { title: 'bounced', claim: true }, solo);
+    const laneId = lane.json.lane.id as string;
+    const teamId = getTeamBySlug(server.db, 'brk')!.id;
+    for (let i = 0; i < REVIEW_LOOP_BREAKER_N; i++) {
+      appendAudit(server.db, teamId, {
+        actor: 'solo',
+        action: 'lane.ready_for_review',
+        target: laneId,
+        result: 'allow',
+        detail: { lane: laneId },
+      });
+    }
+    const ready = await fetch(base + `/teams/brk/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(solo) },
+      body: JSON.stringify({ state: 'ready_for_review' }),
+    }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    expect(ready.status).toBe(200);
+    expect(ready.json.review.reviewer).toBeUndefined();
+    expect(ready.json.review.self_close_sanctioned).toBe(true);
+    expect(ready.json.review.breaker_tripped).toBe(true);
+    const inbox = await get('/teams/brk/inbox?unread=1', n5);
+    expect(
+      inbox.json.messages.some(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      ),
+    ).toBe(false);
   });
 });
 

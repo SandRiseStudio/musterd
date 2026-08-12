@@ -110,6 +110,11 @@ human_ask_fired }`. The 17-row baseline table stays queryable and is the before-
 
 ## Consequences
 
+- **2026-08-12 — non-risky human-first rung superseded.** [ADR 253](253-non-risky-lanes-never-ask-a-human.md)
+  removes the live-human-first pick on non-risky lanes. §2's Decision text stays frozen; the live
+  pick for `risk.length === 0` is now the agents-only ladder. Risky peer-then-human (§4) is
+  untouched.
+
 - **Honesty limit (ADR 200):** the ladder grades what was **recorded**, and no rung can detect a seat
   presenting a human credential ([ADR 200](200-credential-custody-and-the-real-use-gate.md)).
   Accepted for dogfood; forbidden in any build promoted for real use.

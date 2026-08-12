@@ -2901,35 +2901,9 @@ export async function handleHttp(
           if (!pick && !exemption.exempt && lane.risk.length === 0 && posture) {
             if (reviewLoopBounceCount(ctx.db, team.id, lane.id) >= REVIEW_LOOP_BREAKER_N) {
               breakerTripped = true;
-              const human = pickHumanReviewer(
-                ctx.db,
-                team.id,
-                worker,
-                ctx.config.presenceTimeoutMs,
-              );
-              if (human) {
-                pick = human;
-                deliverLaneAskAct(
-                  ctx,
-                  team,
-                  member,
-                  human.reviewer,
-                  `[lane] review loop breaker: "${lane.title}" bounced ${String(REVIEW_LOOP_BREAKER_N)}+ times — decide (confirm or send back)`,
-                  {
-                    species: 'approve',
-                    tier: 'blocking',
-                    lane_review: {
-                      lane: lane.id,
-                      title: lane.title,
-                      branch: lane.branch,
-                      ...(lane.merged ? { merged: lane.merged } : {}),
-                      route: human.route,
-                      grade: human.grade,
-                      breaker: true,
-                    },
-                  },
-                );
-              }
+              // ADR 253: a non-risky breaker trip stops spending wakes. It does not ask a human —
+              // that would reintroduce the ask the agents-only live pick just refused. Degradation
+              // is sanctioned self-close with breaker_tripped, same as no_candidate.
             } else if (teamPolicy.loops?.review === true) {
               const wakePick = pickWakeReviewer(ctx.db, team.id, worker, posture);
               if (wakePick) {
@@ -3109,7 +3083,9 @@ export async function handleHttp(
                 : {}),
             };
           } else if (pick && breakerTripped) {
-            // Breaker already delivered the blocking human ask above.
+            // Unreachable on the ADR 253 path (breaker no longer sets pick). Kept so a future
+            // caller that does set both still reports the trip instead of falling through to
+            // a live-ask contract.
             review = {
               reviewer: pick.reviewer,
               route: pick.route,

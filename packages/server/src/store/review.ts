@@ -328,28 +328,20 @@ export function pickReviewCounterpart(
       hasLivePresence(db, m.id, presenceTimeoutMs),
   );
 
-  if (lane.risk.length > 0) {
-    // ADR 188 two-stage: a risky lane's FIRST review is the peer (agents-only ladder — humans are
-    // stage two, reached when the peer's accept lands, so their scarce attention reviews an
-    // already-screened change). The human requirement (ADR 172) is unchanged in strength: the
-    // caller records it at ready time either way, and the close still derives
-    // `human_review_missed` when no human ever confirmed. With no eligible peer the caller falls
-    // back to pickHumanReviewer directly — the requirement is not gated behind a stage that
-    // cannot happen.
-    return pickLadder(db, teamId, worker, candidates, { agentsOnly: true });
-  }
-
-  return pickLadder(db, teamId, worker, candidates, { agentsOnly: false });
+  // Live pick is always agents-only (ADR 253). Humans enter only via pickHumanReviewer: risky
+  // stage two, or risky no-peer fallback. Never on a non-risky lane — including the ADR 191
+  // breaker, which the caller must not reintroduce.
+  return pickLadder(db, teamId, worker, candidates, { agentsOnly: true });
 }
 
 /**
- * The graded ladder (ADR 188). Decorrelation is a spectrum, and the old boolean rule treated
- * its middle as its bottom: 16 of the first 17 review episodes closed no_candidate on an
+ * The graded ladder (ADR 188 / ADR 253). Decorrelation is a spectrum, and the old boolean rule
+ * treated its middle as its bottom: 16 of the first 17 review episodes closed no_candidate on an
  * all-claude roster while a *different claude model* was live and would have caught different
- * mistakes. Order: human (cross-family by construction, and the stronger claim) > cross_family >
- * cross_model. same_model and ungradeable seats are never routed — a same-checkpoint review
- * re-runs the worker's blind spots, and an unattested seat cannot prove anything (ADR 158).
- * `agentsOnly` is the risky lane's stage-one shape: humans are stage two there, not rungs here.
+ * mistakes. Live pick order: `cross_family` > `cross_model`. `same_model` and ungradeable seats
+ * are never routed — a same-checkpoint review re-runs the worker's blind spots, and an unattested
+ * seat cannot prove anything (ADR 158). `agentsOnly` is the live-pick shape (ADR 253): humans are
+ * never rungs here. They enter only via pickHumanReviewer, and only on a risky lane.
  */
 function pickLadder(
   db: Database,
