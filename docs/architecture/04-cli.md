@@ -68,7 +68,8 @@ src/
     sweep-series.ts   // ADR 166 follow-through: the one path + row shape for the slot-sweep's append-only JSONL, plus the repeat gate (a workspace demoted by two consecutive runs) read by `report` and by the sweep itself
     transcript-model.ts // readModelFromTranscript(path): the ONLY module that knows a harness transcript's on-disk shape — newest assistant turn's model, bounded tail, never throws (ADR 158)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
-    launchd.ts        // pure: plist generation (daemon + /live + wake-actuator agents) + launchctl argv builders + status parsing (platform seam)
+    launchd.ts        // pure: plist generation (daemon + /live + wake-actuator agents) + launchctl argv builders + status parsing (platform seam); parsePlistLabel for the census (ADR 232)
+    census.ts         // ADR 232 increment 2: warn-only census — musterd-labeled LaunchAgents vs roster service seats (unattributed jobs + platform seats whose job is gone); doctor/init --check consumes it
     manage.ts         // install/uninstall/start/stop/restart/status + log tail (injectable launchctl runner)
     live.ts           // `service --live`: the /live web-viewer bundle — generate scripts + 2 plists, worktree, bootstrap both agents (ADR 124)
     host.ts           // `service --wake`: the wake actuator (`musterd host`) as a KeepAlive LaunchAgent — residency survives reboots (ADR 131 inc 5)
@@ -77,7 +78,7 @@ src/
     logTrim.ts        // pure-ish: size-capped retention for the service logs (ADR 224) — copy-truncate to `<name>.1`, run by the auto-refresh tick; an explicit log list, never a `*.log` glob (the musterd home is a shared temp dir under test isolation)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
-    doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165); an entry read from a harness's machine-global config (DetectResult.registeredElsewhere) is reported with that path and its machine-wide reach, and never with a repair prescription — musterd does not write those files (ADR 031)
+    doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165); an entry read from a harness's machine-global config (DetectResult.registeredElsewhere) is reported with that path and its machine-wide reach, and never with a repair prescription — musterd does not write those files (ADR 031); ADR 232 increment 2 census notes ride the report (warn-only, never exit-1)
     workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath

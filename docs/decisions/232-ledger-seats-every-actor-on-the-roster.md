@@ -1,8 +1,8 @@
 # 232 — Ledger seats: every actor on the roster
 
-- Status: accepted — increment 1 built (`kind: service`, the mskd\_ service-token auth path, the
-  kind-keyed exclusions, `service install --auto` token delivery, and the tick's in-band bounce
-  announcement); increments 2–5 open
+- Status: accepted — increments 1–2 built (`kind: service`, the mskd\_ service-token auth path, the
+  kind-keyed exclusions, `service install --auto` token delivery, the tick's in-band bounce
+  announcement, and the warn-only census in `init --check`); increments 3–5 open
 - Date: 2026-08-05
 - Owner: izzo (design session with nick, 2026-08-04/05 — the lane-01KZ7KRG60 session)
 - Relates to: ADR 227 (roles — the system this completes and partly re-aims), ADR 230 (the re-eval
@@ -202,6 +202,15 @@ known-open dogfood topology, not designed around.
 - Two prior ADRs get their aim corrected without being reopened: ADR 227 (the gate was aimed at
   the attended case) and ADR 230 (whose "no identity" objection this answers, without re-answering
   its restart question).
+
+**2026-08-12 — increment 2 landed.** `musterd init --check` diffs musterd-labeled LaunchAgents
+(`studio.sandrise.musterd-*`) against roster `kind: service` seats and prints warn-only notes
+(never exit-1). The daemon plist (`studio.sandrise.musterd`, no suffix) is the runtime, not a
+ledger seat. "Job gone" only applies to the four platform labels increment 3 will auto-provision
+(`autorefresh`, `host`, `live`, `sweep`); a project-service seat is not a missing LaunchAgent.
+Hand-authored plists are identified by their `Label`, not their filename. Unreachable roster or
+a non-darwin host stays silent. The increment-2 eval's fake-plist line is the unit test; zero
+unattributed jobs on the live machine waits on increment 3's remaining seats.
 
 ## Observability & Evaluation
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildPlist, parsePlistEnvironment, SERVICE_LABEL } from './launchd.js';
+import { buildPlist, parsePlistEnvironment, parsePlistLabel, SERVICE_LABEL } from './launchd.js';
 
 /**
  * Daemon env in the plist (`service install --allowed-hosts`). The ADR 040 upgrade gate 403s a
@@ -72,5 +72,15 @@ describe('parsePlistEnvironment', () => {
     expect(parsePlistEnvironment('<plist><dict></dict></plist>')).toBeNull();
     // A plist with no EnvironmentVariables but other dict-ish content must not yield a false read.
     expect(parsePlistEnvironment(buildPlist({ ...base, path: '' }))).toBeNull();
+  });
+});
+
+describe('parsePlistLabel', () => {
+  it('reads the Label from a generated plist', () => {
+    expect(parsePlistLabel(buildPlist(base))).toBe(SERVICE_LABEL);
+  });
+
+  it('returns null when Label is missing', () => {
+    expect(parsePlistLabel('<plist><dict></dict></plist>')).toBeNull();
   });
 });
