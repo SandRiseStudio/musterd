@@ -32,6 +32,12 @@ export type AuditAction =
   | 'claim.occupied'
   | 'claim.refused'
   | 'claim.pending'
+  // The claim died inside the handler — a storage-layer refusal, a bad grant, an internal fault
+  // (added 2026-08-12, from the ADR 251 live wake). Every other outcome of a claim was already on
+  // the record; a FAILED one left nothing at all, so the only evidence was the agent's transcript.
+  // `result: deny`, target = the encoded claim target, `detail: { code, error, surface }` — the
+  // cause, in the ledger, where the next enum-vs-storage drift will be looked for first.
+  | 'claim.failed'
   // ADR 146 (dogfood-approval-grant, on ADR 145 §7): an agent harness re-occupied an already-bound
   // named seat under the `standing_reseat_known_agents` policy — the routine re-seat that used to open
   // a `claim.pending` request and wait on an admin. `result: allow`, actor/target = the seat name,
