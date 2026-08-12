@@ -6,6 +6,7 @@ import {
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   WakeReportBodySchema,
+  WakeTurnBodySchema,
   ResidencyPolicyOverrideSchema,
   ResidencyPolicySchema,
 } from './residency.js';
@@ -131,5 +132,35 @@ describe('portable wake context (ADR 209)', () => {
         transcript_age_ms: 3_000,
       }).delivery_outcome,
     ).toBe('fresh_fallback');
+  });
+});
+
+describe('WakeTurnBodySchema (ADR 251 §7 — per-turn telemetry + transcript capture)', () => {
+  const turn = {
+    lease_id: 'L1',
+    turn: 1,
+    usage: { input_tokens: 1000, output_tokens: 50 },
+    cost_usd: 0.0063,
+    stop_reason: 'tool_use',
+    transcript: { assistant: [{ type: 'text', text: 'checking inbox' }], tool_results: null },
+  };
+
+  it('accepts a full turn row and a minimal one (usage only)', () => {
+    expect(WakeTurnBodySchema.parse(turn).turn).toBe(1);
+    expect(
+      WakeTurnBodySchema.parse({ lease_id: 'L1', turn: 2, usage: { input_tokens: 1, output_tokens: 1 } })
+        .cost_usd,
+    ).toBeUndefined();
+  });
+
+  it('rejects a non-positive turn index and negative cost', () => {
+    expect(() => WakeTurnBodySchema.parse({ ...turn, turn: 0 })).toThrow();
+    expect(() => WakeTurnBodySchema.parse({ ...turn, cost_usd: -1 })).toThrow();
+  });
+
+  it('rejects a transcript over the capture byte bound — DB growth is accepted, unbounded rows are not', () => {
+    expect(() =>
+      WakeTurnBodySchema.parse({ ...turn, transcript: { blob: 'x'.repeat(300_000) } }),
+    ).toThrow();
   });
 });

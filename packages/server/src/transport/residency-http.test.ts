@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
+import { listWakeTurns } from '../store/residency.js';
 import { getTeamBySlug } from '../store/teams.js';
 
 /**
@@ -622,5 +623,97 @@ describe('POST /wake-context — residency.context_read audit (ADR 209 follow-up
       reason: 'forbidden',
       target_kind: 'act',
     });
+  });
+});
+
+describe('POST /teams/:slug/residency/wake-turn — per-turn telemetry + capture (ADR 251 §7)', () => {
+  async function leaseForUrgentAct(): Promise<string> {
+    await enrollAda();
+    const send = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: makeEnvelope({
+          id: 'u9',
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'message',
+          body: 'need you',
+          meta: { urgent: true, urgent_reason: 'wake me' },
+        }),
+      },
+      nickCred,
+    );
+    expect(send.status).toBe(201);
+    const leases = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    expect(leases.json.orders).toHaveLength(1);
+    return leases.json.orders[0].lease_id as string;
+  }
+
+  const turnBody = (leaseId: string, turn: number, cost: number) => ({
+    lease_id: leaseId,
+    turn,
+    usage: { input_tokens: 1000 * turn, output_tokens: 100 * turn },
+    cost_usd: cost,
+    stop_reason: turn === 2 ? 'end_turn' : 'tool_use',
+    transcript: { assistant: [{ type: 'text', text: `turn ${turn}` }], tool_results: null },
+  });
+
+  it('appends turn rows against a live lease, idempotent per (lease, turn)', async () => {
+    const leaseId = await leaseForUrgentAct();
+    const team = getTeamBySlug(server.db, 'dawn')!;
+
+    const r1 = await post('/teams/dawn/residency/wake-turn', turnBody(leaseId, 1, 0.0075), agentKey);
+    expect(r1.status).toBe(200);
+    expect(r1.json).toMatchObject({ ok: true, lease_id: leaseId, turn: 1 });
+    await post('/teams/dawn/residency/wake-turn', turnBody(leaseId, 2, 0.015), agentKey);
+    // A retried post of turn 2 overwrites — never a duplicate row.
+    const retry = await post(
+      '/teams/dawn/residency/wake-turn',
+      { ...turnBody(leaseId, 2, 0.016) },
+      agentKey,
+    );
+    expect(retry.status).toBe(200);
+
+    const rows = listWakeTurns(server.db, team.id, leaseId);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.turn)).toEqual([1, 2]);
+    expect(rows[1]!.cost_usd).toBeCloseTo(0.016, 9);
+    expect(rows[0]!.usage.input_tokens).toBe(1000);
+    expect(rows[0]!.transcript).toMatchObject({ assistant: [{ type: 'text', text: 'turn 1' }] });
+  });
+
+  it('accepts turns after the lease settled — outcome resolves at verify, the loop runs on', async () => {
+    const leaseId = await leaseForUrgentAct();
+    const settle = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true },
+      agentKey,
+    );
+    expect(settle.status).toBe(200);
+    const r = await post('/teams/dawn/residency/wake-turn', turnBody(leaseId, 1, 0.01), agentKey);
+    expect(r.status).toBe(200);
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    expect(listWakeTurns(server.db, team.id, leaseId)).toHaveLength(1);
+  });
+
+  it('404s an unknown lease and rejects a missing key', async () => {
+    await enrollAda();
+    const missing = await post(
+      '/teams/dawn/residency/wake-turn',
+      { lease_id: 'nope', turn: 1, usage: { input_tokens: 1, output_tokens: 1 } },
+      agentKey,
+    );
+    expect(missing.status).toBe(404);
+    const unauthed = await post('/teams/dawn/residency/wake-turn', {
+      lease_id: 'nope',
+      turn: 1,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    expect(unauthed.status).toBeGreaterThanOrEqual(401);
   });
 });

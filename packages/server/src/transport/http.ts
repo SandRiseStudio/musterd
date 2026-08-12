@@ -22,6 +22,7 @@ import {
   SessionAttestationBodySchema,
   WakeLeasesBodySchema,
   WakeReportBodySchema,
+  WakeTurnBodySchema,
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   ToolTelemetryReportSchema,
@@ -142,6 +143,7 @@ import {
 import { unblockerReachable } from '../store/reachability.js';
 import { createRequest, decideRequest, getRequest, listRequests } from '../store/requests.js';
 import {
+  appendWakeTurn,
   claimWakeLeases,
   buildWakeContext,
   effectiveWakePolicy,
@@ -1936,6 +1938,20 @@ export async function handleHttp(
       // The host's outcome report: settles the lease and writes the actuation audit — the
       // `residency.woke`/`wake_failed` rows the rate policy (cooldown / hourly cap / attempt cap)
       // is derived from. No session ids cross here (ADR 131 §5 — ids stay in `binding.session`).
+      // The native loop's per-turn rail (ADR 251 §7): usage + transcript capture, one row per
+      // turn, agent-key auth like the sibling wake routes. Deliberately NOT lease-status-gated —
+      // `outcome` settles at verification while the loop runs on, so most turns land on a
+      // `reported` lease. No audit row per turn: the wake_turns table IS the additive record, and
+      // one audit row per model turn would bloat the ledger the O&E reads.
+      if (method === 'POST' && rest === '/residency/wake-turn') {
+        const team = authAgentKeyOnly(ctx, slug, req);
+        const body = parseOrBadRequest(WakeTurnBodySchema, await readJson(req));
+        const appended = appendWakeTurn(ctx.db, team.id, body);
+        if (!appended)
+          throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
+        return sendJson(res, 200, { ok: true, lease_id: body.lease_id, turn: body.turn });
+      }
+
       if (method === 'POST' && rest === '/residency/wake-report') {
         const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeReportBodySchema, await readJson(req));

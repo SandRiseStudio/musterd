@@ -478,3 +478,38 @@ export const WakeReportBodySchema = z.object({
   wakeability: z.enum(WAKEABILITIES).optional(),
 });
 export type WakeReportBody = z.infer<typeof WakeReportBodySchema>;
+
+/** Serialized-transcript cap per turn row (ADR 251 §7): local `MUSTERD_DB` growth is accepted for
+ *  the dogfood scale, unbounded rows are not. The host truncates before posting; the schema is the
+ *  backstop. */
+export const WAKE_TURN_TRANSCRIPT_MAX_BYTES = 262_144;
+
+/**
+ * Body of `POST /teams/:slug/residency/wake-turn` (ADR 251 §7) — one native-loop turn, reported as
+ * it happens. Two substrate rails in one row: per-turn usage into the wake ledger (so cost exists
+ * even when a run dies unreported — the #745 report-survivor bias, closed for this backend) and
+ * daemon-owned transcript capture (the substrate phase-2 resume will replay). Keyed by
+ * (lease, turn) and idempotent: a re-posted turn overwrites, never duplicates.
+ */
+export const WakeTurnBodySchema = z.object({
+  lease_id: z.string(),
+  /** 1-based turn index within the run. */
+  turn: z.number().int().positive(),
+  usage: z.object({
+    input_tokens: z.number().int().nonnegative(),
+    output_tokens: z.number().int().nonnegative(),
+    cache_read_input_tokens: z.number().int().nonnegative().optional(),
+    cache_creation_input_tokens: z.number().int().nonnegative().optional(),
+  }),
+  /** This turn's usage priced by the harness (ADR 251 §6). Absent when the model is unpriceable. */
+  cost_usd: z.number().nonnegative().optional(),
+  stop_reason: z.string().max(40).optional(),
+  /** Structured turn record (assistant content + tool results), daemon-held from day one. */
+  transcript: z
+    .unknown()
+    .optional()
+    .refine((t) => t === undefined || JSON.stringify(t).length <= WAKE_TURN_TRANSCRIPT_MAX_BYTES, {
+      message: `transcript exceeds ${String(WAKE_TURN_TRANSCRIPT_MAX_BYTES)} serialized bytes`,
+    }),
+});
+export type WakeTurnBody = z.infer<typeof WakeTurnBodySchema>;

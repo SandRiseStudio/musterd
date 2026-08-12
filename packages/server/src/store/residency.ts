@@ -998,6 +998,102 @@ export function settleWakeLease(
   return row;
 }
 
+/** One captured native-loop turn (ADR 251 §7), read back with usage/transcript deserialized. */
+export interface WakeTurnRow {
+  lease_id: string;
+  member_id: string;
+  turn: number;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  };
+  cost_usd: number | null;
+  stop_reason: string | null;
+  transcript: unknown;
+  created_at: number;
+}
+
+/**
+ * Append one native-loop turn against a lease (ADR 251 §7). The lease may be in ANY status —
+ * `outcome` settles at verification while the loop runs on, so most turns land on a `reported`
+ * lease. Idempotent per (lease, turn): a retried post overwrites. Returns null for an unknown
+ * lease (the route 404s).
+ */
+export function appendWakeTurn(
+  db: Database,
+  teamId: string,
+  body: {
+    lease_id: string;
+    turn: number;
+    usage: WakeTurnRow['usage'];
+    cost_usd?: number | undefined;
+    stop_reason?: string | undefined;
+    transcript?: unknown;
+  },
+  now = Date.now(),
+): { member_id: string } | null {
+  const lease = db
+    .prepare<
+      [string, string],
+      { member_id: string }
+    >('SELECT member_id FROM wake_leases WHERE team_id = ? AND id = ?')
+    .get(teamId, body.lease_id);
+  if (!lease) return null;
+  db.prepare(
+    `INSERT INTO wake_turns (id, team_id, lease_id, member_id, turn, usage_json, cost_usd, stop_reason, transcript_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(lease_id, turn) DO UPDATE SET
+       usage_json = excluded.usage_json,
+       cost_usd = excluded.cost_usd,
+       stop_reason = excluded.stop_reason,
+       transcript_json = excluded.transcript_json,
+       created_at = excluded.created_at`,
+  ).run(
+    ulid(),
+    teamId,
+    body.lease_id,
+    lease.member_id,
+    body.turn,
+    JSON.stringify(body.usage),
+    body.cost_usd ?? null,
+    body.stop_reason ?? null,
+    body.transcript === undefined ? null : JSON.stringify(body.transcript),
+    now,
+  );
+  return { member_id: lease.member_id };
+}
+
+/** The captured turns for one lease, in turn order — the resume substrate and the cost ledger. */
+export function listWakeTurns(db: Database, teamId: string, leaseId: string): WakeTurnRow[] {
+  return db
+    .prepare<
+      [string, string],
+      {
+        lease_id: string;
+        member_id: string;
+        turn: number;
+        usage_json: string;
+        cost_usd: number | null;
+        stop_reason: string | null;
+        transcript_json: string | null;
+        created_at: number;
+      }
+    >('SELECT * FROM wake_turns WHERE team_id = ? AND lease_id = ? ORDER BY turn ASC')
+    .all(teamId, leaseId)
+    .map((r) => ({
+      lease_id: r.lease_id,
+      member_id: r.member_id,
+      turn: r.turn,
+      usage: JSON.parse(r.usage_json) as WakeTurnRow['usage'],
+      cost_usd: r.cost_usd,
+      stop_reason: r.stop_reason,
+      transcript: r.transcript_json === null ? null : (JSON.parse(r.transcript_json) as unknown),
+      created_at: r.created_at,
+    }));
+}
+
 /**
  * Expire live leases past `expires_at` (the reaper, mirroring `expireRequests`). Returns the expired
  * rows so the reaper can CLASSIFY each one (ADR 236): a host that was up and did not report burns
