@@ -1,4 +1,4 @@
-import { isAwaitingAcceptance, type Lane, type NextBrief } from '@musterd/protocol';
+import { isAwaitingAcceptance, type Goal, type Lane, type NextBrief } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { listGoals, nextGoal } from './goals.js';
 import { listLanes } from './lanes.js';
@@ -84,6 +84,8 @@ export function deriveNext(
   const up_next: Lane[] = all
     .filter((l) => l.state === 'open')
     .sort((a, b) => a.created_at - b.created_at)
+    // goals-front-door design: goal-attached lanes served first (stable within each group).
+    .sort((a, b) => Number(b.goal_id !== null) - Number(a.goal_id !== null))
     .slice(0, upNextLimit);
 
   // Owed reviews (ADR 233): lanes still in the acceptance stage whose review ask came to ME.
@@ -169,7 +171,20 @@ export function deriveNext(
 
   // The Goal-source seam (ADR 048/084): general-team declared Goals, if any exist. musterd's own
   // dogfood uses roadmap.data.ts instead, so this is null there — not every team opts into it.
-  const next_goal = nextGoal(listGoals(db, teamId, teamSlug));
+  const allGoals = listGoals(db, teamId, teamSlug);
+  const next_goal = nextGoal(allGoals);
 
-  return { member, in_flight, shipped, up_next, owed_reviews, why, next_goal };
+  // goals-front-door design: the brief leads with the unshipped Goals, wave-ordered, `in-flight`
+  // before `planned` at equal wave — the missions frame the lane pool, not the other way around.
+  const waveRank = (w: Goal['wave']) =>
+    w === null || w === 'later' ? Number.POSITIVE_INFINITY : w;
+  const goals = allGoals
+    .filter((g) => g.status !== 'shipped')
+    .sort(
+      (a, b) =>
+        waveRank(a.wave) - waveRank(b.wave) ||
+        Number(a.status === 'planned') - Number(b.status === 'planned'),
+    );
+
+  return { member, in_flight, shipped, up_next, owed_reviews, why, next_goal, goals };
 }

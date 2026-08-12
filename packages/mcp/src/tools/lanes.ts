@@ -455,6 +455,17 @@ function fmtNext(b: NextBrief): string {
   // `.length`. Additive means the OLD daemon can omit it, which makes tolerating that the new
   // client's job.
   const owed = b.owed_reviews ?? [];
+  // goals-front-door design: the brief leads with the missions. Same `?? []` skew tolerance as
+  // owed_reviews — an older daemon omits the key.
+  const goals = b.goals ?? [];
+  if (goals.length) {
+    lines.push(`\ngoals in flight (${goals.length}):`);
+    for (const g of goals) {
+      const story = g.story ? ` — "${g.story}"` : '';
+      const wave = g.wave !== null ? ` wave=${g.wave}` : '';
+      lines.push(`  ${g.id} [${g.status}] "${g.title}"${story}${wave}`);
+    }
+  }
   if (owed.length) {
     const now = Date.now();
     lines.push(`\n⧗ owed by you — ${owed.length} lane(s) waiting on your verdict:`);
@@ -473,7 +484,11 @@ function fmtNext(b: NextBrief): string {
   }
   if (b.up_next.length) {
     lines.push('\nup next — open lanes you could pick up:');
-    for (const l of b.up_next) lines.push('  ' + fmtLane(l));
+    for (const l of b.up_next) {
+      lines.push('  ' + fmtLane(l));
+      if ((b.goals ?? []).length > 0 && l.goal_id === null)
+        lines.push('    (on no goal — link it: lane_update {goal_id})');
+    }
   }
   if (b.shipped.length) {
     lines.push('\nrecently shipped:');
@@ -492,6 +507,7 @@ function fmtNext(b: NextBrief): string {
     lines.push('  ' + b.why.body);
   }
   if (
+    !goals.length &&
     !owed.length &&
     !b.in_flight.length &&
     !b.up_next.length &&

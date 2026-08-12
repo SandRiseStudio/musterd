@@ -436,5 +436,11 @@ export const NextBriefSchema = z.object({
    * musterd's own dogfood uses `roadmap.data.ts` instead, so this is null there) or nothing qualifies.
    */
   next_goal: GoalSchema.nullable(),
+  /**
+   * goals-front-door design: the team's unshipped Goals, wave-ordered (`in-flight` before `planned`
+   * at equal wave) — the brief leads with the missions, not the lane pool. `.default([])` keeps a
+   * brief from an older daemon parseable.
+   */
+  goals: z.array(GoalSchema).default([]),
 });
 export type NextBrief = z.infer<typeof NextBriefSchema>;
