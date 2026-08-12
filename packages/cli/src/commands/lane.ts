@@ -20,7 +20,7 @@ import { resolve } from './helpers.js';
 const USAGE =
   'usage:\n' +
   '  musterd lane open "<title>" [--surface <glob>[,<glob>…]] [--depends <id>[,<id>…]] [--goal <id>] [--project p] [--role r] [--branch b] [--detail d] [--stakes low|normal|high] [--claim]\n' +
-  '  musterd lane claim <id>\n' +
+  '  musterd lane claim <id> [--goal <id>]\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>] [--note <why>]\n' +
   '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high] [--goal <id>]\n' +
@@ -158,7 +158,13 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       team,
       id,
       sub === 'claim'
-        ? { owner_seat: identity.name }
+        ? {
+            owner_seat: identity.name,
+            // value-layer design: link the lane to a goal as you take it — one call.
+            ...(flagStr(parsed.flags, 'goal') !== undefined
+              ? { goal_id: flagStr(parsed.flags, 'goal')! }
+              : {}),
+          }
         : {
             state: submit ? 'awaiting_acceptance' : 'done',
             ...(Object.keys(merged).length ? { merged } : {}),
@@ -173,6 +179,8 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     const label = sub === 'claim' ? 'claimed' : submit ? 'submitted for acceptance' : 'done';
     process.stdout.write(`${theme.ok('✓')} lane ${label}\n${renderLane(res.lane)}\n`);
     renderWarnings(res.warnings);
+    // value-layer design: the daemon's advisory notices (e.g. the ship nudge) reach the closer.
+    for (const n of res.notices ?? []) process.stdout.write(`${theme.warn('▸')} ${n}\n`);
     if (submit) {
       // ADR 192: report the acceptor routing — who was asked, or that self-close is sanctioned.
       if (res.review?.standing) {

@@ -128,6 +128,13 @@ describe('lane commands', () => {
     expect(res.out).toContain('g1');
   });
 
+  it('claim --goal links the lane in the same call (value-layer design)', async () => {
+    const id = await openLane(['linkable']);
+    const claimed = await capture(() => laneCommand(parseArgs(['claim', id, '--goal', 'g1'])));
+    expect(claimed.out).toContain('lane claimed');
+    expect(claimed.out).toContain('g1');
+  });
+
   it('claim then resolve moves a lane to done', async () => {
     const id = await openLane(['claimable']);
     const claimed = await capture(() => laneCommand(parseArgs(['claim', id])));

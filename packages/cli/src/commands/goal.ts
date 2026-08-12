@@ -15,6 +15,7 @@ import { resolve } from './helpers.js';
 const USAGE =
   'usage:\n' +
   '  musterd goal declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>[,<id>…]]\n' +
+  '  musterd goal outcome <id> "<what changed for a user>"\n' +
   '  musterd goal list [--json]';
 
 function renderGoal(g: Goal): string {
@@ -25,11 +26,13 @@ function renderGoal(g: Goal): string {
         ? theme.warn(g.status)
         : g.status;
   const story = g.story ? ` — ${theme.meta(`"${g.story}"`)}` : '';
+  // value-layer design: the outcome line — what shipping this changed for a user, with provenance.
+  const outcome = g.outcome ? `\n  ${theme.ok('⇒')} ${g.outcome.text} ${theme.meta(`— ${g.outcome.by}`)}` : '';
   const wave = g.wave !== null ? theme.meta(` wave:${g.wave}`) : '';
   const deps = g.depends_on.length ? theme.meta(` deps:${g.depends_on.length}`) : '';
   // The plan epoch (ADR 111) — shown only once direction has changed, so a steady Goal stays quiet.
   const epoch = g.epoch > 0 ? theme.warn(` epoch:${g.epoch}`) : '';
-  return `${theme.meta(sym.goal)} ${theme.meta(g.id)} ${status} "${g.title}"${story}${wave}${deps}${epoch} ${theme.meta(`— declared by ${g.declared_by}`)}`;
+  return `${theme.meta(sym.goal)} ${theme.meta(g.id)} ${status} "${g.title}"${story}${wave}${deps}${epoch} ${theme.meta(`— declared by ${g.declared_by}`)}${outcome}`;
 }
 
 export async function goalCommand(parsed: Parsed): Promise<number> {
@@ -73,6 +76,22 @@ export async function goalCommand(parsed: Parsed): Promise<number> {
         '\n' +
         renderGoal(goal) +
         '\n',
+    );
+    return 0;
+  }
+
+  if (sub === 'outcome') {
+    const id = parsed.positionals[1];
+    const text = parsed.positionals[2];
+    if (!id || !text) throw new CliError(USAGE, 2);
+    const goal = await http.goalOutcome(team, { goal_id: id, outcome: text });
+    process.stdout.write(
+      goal
+        ? success('outcome recorded') + '\n' + renderGoal(goal) + '\n'
+        : success('outcome recorded') +
+            '\n' +
+            theme.meta('goal not yet declared — the note is queued until it is') +
+            '\n',
     );
     return 0;
   }

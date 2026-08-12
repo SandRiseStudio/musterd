@@ -510,6 +510,16 @@ export class HttpClient {
     return parsed.data;
   }
 
+  /** Record a goal outcome note (value-layer design). `null` = goal not yet declared (queued). */
+  async goalOutcome(slug: string, body: { goal_id: string; outcome: string }): Promise<Goal | null> {
+    const json = await this.request('POST', `/teams/${slug}/goals/outcome`, body);
+    const raw = (json as { goal: unknown }).goal;
+    if (raw === null) return null;
+    const parsed = GoalSchema.safeParse(raw);
+    if (!parsed.success) throw new CliError('goal response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
   async goals(slug: string): Promise<GoalList> {
     const json = await this.request('GET', `/teams/${slug}/goals`);
     const parsed = GoalListSchema.safeParse(json);
