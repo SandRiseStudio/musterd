@@ -182,6 +182,22 @@ cheap now:
   One datum worth keeping: the woken agent's own answer named a different model than the harness
   attested for the same occupancy. ADR 101's premise — attest from the harness, never ask the
   model — is not a formality.
+- _Amendment (dated note, 2026-08-12) — the one defect left open above is discharged, and this
+  ADR's account of it was wrong._ The experiment note records "a claim that fails server-side
+  hangs instead of rejecting" as recorded-and-open, and attributes the hang to the claim having
+  "threw server-side and the client hung with no error frame." Fixed in #761 (`8d365f41`), and the
+  diagnosis inverts the attribution: **the server always sent the error frame.** The MCP client's
+  only `error` branch matched `code: 'superseded'`, so every other server error was dropped on the
+  floor and `join()` waited out its own timer — then reported a fallback message blaming an
+  approval nobody had requested. Three layers changed: the client settles a claim on any server
+  error; the timeout message names approval only when a request actually exists; the server audits
+  `claim.failed` and closes the socket. Before this, a failed claim left **no ledger trace at
+  all**, which is the part that cost the four rounds — not the missing frame this ADR blamed, but
+  a present frame nobody was listening for, and no audit row to contradict the story.
+  The lesson generalizes past this bug: a client whose error handling enumerates known codes
+  fails **silently and slowly** on every unknown one, and a timeout message that guesses at a
+  cause will confidently name the wrong one. Neither is visible to a scripted test — both need a
+  real server refusing for a real reason, which is exactly what the phase-1 live run supplied.
 - _Phase-2 charter (dated note, 2026-08-12, owner-endorsed) — the ambition on record, not a
   frozen design._ The native harness is to be the most effective harness in the field, and
   its differentiators are musterd's substrate, not feature parity: **verification as
