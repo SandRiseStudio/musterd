@@ -128,7 +128,7 @@ src/
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
-    lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal join (ADR 083/084)
+    lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
     done.ts           // close your work — mark the lane done (auto-targets your live lane), then show next (ADR 049/084)
     goal.ts           // declare/list team Goals — the declared-outcome layer above lanes (ADR 048/084)

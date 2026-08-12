@@ -336,4 +336,40 @@ describe('tool-call telemetry end-to-end (ADR 144 inc 1)', () => {
 
     await harness.close();
   }, 15_000);
+
+  // ADR 256's no_goal warning tells seats to `lane_update {goal_id: …}`. The protocol and store
+  // already accept that patch; the MCP schema did not, so the call bounced as an unrecognized
+  // key — the warning named a call that could not succeed. Only an end-to-end test can pin this:
+  // the reject happens inside SDK validation, ahead of any handler.
+  it('lane_update accepts goal_id so a no_goal warning is actionable (ADR 256)', async () => {
+    const musterd = new MusterdClient(config);
+    closers.push(() => musterd.close());
+    await musterd.join();
+
+    const mcp = buildMcpServer(musterd, config);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const harness = new Client({ name: 'test-harness', version: '0.0.0' });
+    await Promise.all([mcp.connect(serverTransport), harness.connect(clientTransport)]);
+    closers.push(() => mcp.close());
+
+    const opened = await harness.callTool({
+      name: 'lane_open',
+      arguments: { title: 'unlinked work', claim: true },
+    });
+    expect(opened.isError ?? false).toBe(false);
+    const lane = (opened.structuredContent as { lane: { id: string; goal_id: string | null } })
+      .lane;
+    expect(lane.goal_id).toBeNull();
+
+    const updated = await harness.callTool({
+      name: 'lane_update',
+      arguments: { id: lane.id, goal_id: 'goals-front-door' },
+    });
+    expect(updated.isError ?? false).toBe(false);
+    expect((updated.structuredContent as { lane: { goal_id: string | null } }).lane.goal_id).toBe(
+      'goals-front-door',
+    );
+
+    await harness.close();
+  }, 15_000);
 });
