@@ -17,6 +17,8 @@ import {
   clearRunState,
   daemonRebuilt,
   RESTART_EXIT_CODE,
+  RESTARTABLE_AFTER_MS,
+  socketLossExitCode,
   supervised,
   liveRunState,
   pidAlive,
@@ -663,5 +665,33 @@ describe('run state (finding a stream without hunting PIDs)', () => {
       throw new Error('ESRCH');
     });
     expect(pidAlive(1234, dead)).toBe(false);
+  });
+});
+
+describe('a lost DevTools socket is restartable, not terminal', () => {
+  // THE BUG THIS PINS, observed on the hosted stream 2026-08-12. The daemon bounced twice under one
+  // machine. The first time, the build-poller noticed and exited RESTART_EXIT_CODE — entrypoint.sh
+  // relaunched a working stream in ~3s. The second time the DevTools socket dropped FIRST, that path
+  // exited 1, and because the supervisor reruns only on 75 (`[ "$code" -eq "$RESTART_EXIT_CODE" ] ||
+  // exit "$code"`) Fly destroyed a VM that was one exit code away from recovering. Same cause, same
+  // recovery sitting right there, opposite outcome, decided by which callback won a race.
+  it('asks the supervisor for a relaunch once the run has proven itself', () => {
+    expect(socketLossExitCode(RESTARTABLE_AFTER_MS, true)).toBe(RESTART_EXIT_CODE);
+    expect(socketLossExitCode(10 * 60_000, true)).toBe(RESTART_EXIT_CODE);
+  });
+
+  it('stays fatal for a run that never worked, so a broken config cannot bill in a loop', () => {
+    // entrypoint.sh paces restarts (RESTART_MIN_INTERVAL) but never caps them. A Chrome that cannot
+    // start would otherwise relaunch every 10s forever on a machine billed by the hour, so the floor
+    // is "did this run ever actually work" rather than a retry count.
+    expect(socketLossExitCode(0, true)).toBe(1);
+    expect(socketLossExitCode(RESTARTABLE_AFTER_MS - 1, true)).toBe(1);
+  });
+
+  it('never asks on a laptop, where nothing is standing by to run us again', () => {
+    // Unsupervised, exit 75 would just be a strange failure code — and a shell that silently
+    // relaunched a stream the operator watched die would be worse than the error.
+    expect(socketLossExitCode(10 * 60_000, false)).toBe(1);
+    expect(socketLossExitCode(0, false)).toBe(1);
   });
 });
