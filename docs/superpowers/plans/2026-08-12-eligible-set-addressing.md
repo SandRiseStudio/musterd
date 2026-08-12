@@ -254,7 +254,9 @@ git commit -m "Protocol: meta.eligible shape — 2-4 seats on message/request_he
 
 ---
 
-### Task 2: Server — roster validation in routeEnvelope
+### Task 2: Server — roster validation in routeEnvelope ✅ DONE (2287423d)
+
+> **Plan corrections found while implementing:** `MusterdError('invalid', …)` is not a real code — `ERROR_CODES` has no `invalid`; use `validation` (422). There is no `postEnvelope`/`del` helper in `integration.test.ts` — the idiom is `post('/teams/dawn/messages', { envelope }, tok)` returning `{status, json}`, with `server.db` for state the API cannot reach. Later tasks writing integration tests should follow the file, not the plan's sketch.
 
 **Files:**
 
