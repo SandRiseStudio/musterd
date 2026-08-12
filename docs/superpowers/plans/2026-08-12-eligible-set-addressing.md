@@ -771,7 +771,9 @@ git commit -m "MCP: team_send accepts 2-4 names in to, normalised by arity"
 
 ---
 
-### Task 6: CLI — `--to a,b`
+### Task 6: CLI — `--to a,b` ✅ DONE (37d576c0)
+
+> **Added beyond the plan:** the help catalog (`packages/cli/src/help/catalog.ts`) — signature, summary, detail, and an example. `musterd help send` is where a human learns the feature exists; the plan omitted it. **Task 7 note:** wanderer's ADR 253 has merged (`b573bfd7`), so the `transport/http.ts` contention that gated Task 7 should now be clear — re-check `lane_board` before starting.
 
 **Files:**
 
