@@ -1,4 +1,4 @@
-import { isAwaitingAcceptance, type Goal, type Lane, type NextBrief } from '@musterd/protocol';
+import { compareGoals, isAwaitingAcceptance, type Lane, type NextBrief } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
@@ -157,17 +157,10 @@ export function deriveNext(
   const allGoals = listGoals(db, teamId, teamSlug);
   const next_goal = nextGoal(allGoals);
 
-  // goals-front-door design: the brief leads with the unshipped Goals, wave-ordered, `in-flight`
-  // before `planned` at equal wave — the missions frame the lane pool, not the other way around.
-  const waveRank = (w: Goal['wave']) =>
-    w === null || w === 'later' ? Number.POSITIVE_INFINITY : w;
-  const goals = allGoals
-    .filter((g) => g.status !== 'shipped')
-    .sort(
-      (a, b) =>
-        waveRank(a.wave) - waveRank(b.wave) ||
-        Number(a.status === 'planned') - Number(b.status === 'planned'),
-    );
+  // goals-front-door design: the brief leads with the unshipped Goals — the missions frame the lane
+  // pool, not the other way around. Ordering is the shared ADR 257 rule (shelved last, `in-flight`
+  // before `planned`, then most recently declared first).
+  const goals = allGoals.filter((g) => g.status !== 'shipped').sort(compareGoals);
 
   return { member, in_flight, shipped, up_next, owed_reviews, why, next_goal, goals };
 }

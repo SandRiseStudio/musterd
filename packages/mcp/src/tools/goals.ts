@@ -46,16 +46,17 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
     {
       description:
         'Declare a Goal (a named outcome). Lanes link to it via goal_id; status is derived from ' +
-        'them, never stored. Re-declaring the same id amends it. wave sets build order; ' +
-        'depends_on names goals that must ship first.',
+        'them, never stored. Re-declaring the same id amends it (wholesale — pass every field you ' +
+        'want kept). depends_on names goals that must ship first; ordering is otherwise automatic ' +
+        '(most recently declared first), so there is no rank to maintain.',
       inputSchema: {
         id: z.string().describe('stable Goal id, e.g. "orientation-spine"'),
         title: z.string().describe('the outcome, short'),
         story: z.string().max(140).optional().describe('plain-language line for outsiders'),
         wave: z
-          .union([z.number().int(), z.literal('later')])
+          .literal('later')
           .optional()
-          .describe('build-order rank (lower = sooner); "later" sorts last'),
+          .describe('"later" shelves the goal; omit otherwise (numeric ranks retired, ADR 257)'),
         depends_on: z
           .array(z.string())
           .optional()

@@ -1,5 +1,5 @@
 import type { Goal, GoalDeclareMeta, Lane } from '@musterd/protocol';
-import { GoalDeclareMetaSchema } from '@musterd/protocol';
+import { compareGoals, GoalDeclareMetaSchema } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { deriveGoalStatus, listLanes } from './lanes.js';
 
@@ -78,10 +78,9 @@ function signalGoalId(meta: unknown): string | null {
   return typeof id === 'string' && id.trim().length > 0 ? id : null;
 }
 
-/** The wave a `defer` asserts: `meta.wave` when a number, else `'later'` (absent/"later" both defer). */
-function deferWave(meta: unknown): Wave {
-  const w = (meta as { wave?: unknown } | null | undefined)?.wave;
-  return typeof w === 'number' && Number.isInteger(w) ? w : 'later';
+/** ADR 257: a pre-257 declaration's integer wave is readable but inert — it orders nothing. */
+function normalizeDeclaredWave(wave: number | 'later' | undefined): Wave {
+  return wave === 'later' ? 'later' : null;
 }
 
 /**
@@ -89,9 +88,9 @@ function deferWave(meta: unknown): Wave {
  *
  * The declared skeleton is the latest `message`-to-`@team` carrying `meta.goal` per id (ADR 048/084).
  * On top of it, increment 3 (ADR 111) folds the direction-changing acts read out of the same log:
- *   - a **`defer`** naming the Goal asserts a new `wave` (the plan mutation ADR 103 stubbed) — latest
- *     wave-setting signal by `ts` wins, so a `defer` re-sequences `nextGoal` exactly as a re-declaration
- *     would, with no stored column and no write-path mutation;
+ *   - a **`defer`** naming the Goal **shelves** it (the plan mutation ADR 103 stubbed; ADR 257 made
+ *     shelving its whole meaning) — latest wave-setting signal by `ts` wins, so a re-declaration
+ *     un-shelves, with no stored column and no write-path mutation;
  *   - each **`defer`** and each goal-scoped **`steer`** (one that names `meta.goal_id`) bumps the epoch.
  * This is the same read-side-projection posture as steer supersession and derived Goal status.
  */
@@ -119,7 +118,9 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
     const acc = byId.get(goalId);
     if (!acc) return false; // target not (yet) declared — replay after all declarations are in.
     acc.epoch += 1;
-    if (act === 'defer') acc.waveEvents.push({ ts, wave: deferWave(meta) });
+    // ADR 257: a `defer` shelves, full stop. A pre-257 defer carrying `meta.wave: 3` meant "move it
+    // to position 3"; replayed today it simply shelves, which is what the word always meant.
+    if (act === 'defer') acc.waveEvents.push({ ts, wave: 'later' });
     return true;
   };
 
@@ -152,7 +153,10 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
       declared_by: row.from_name,
       declared_at: row.ts,
       // A re-declaration replaces the skeleton wholesale but never erases accrued epoch/defer history.
-      waveEvents: [...(prior?.waveEvents ?? []), { ts: row.ts, wave: g.wave ?? null }],
+      waveEvents: [
+        ...(prior?.waveEvents ?? []),
+        { ts: row.ts, wave: normalizeDeclaredWave(g.wave) },
+      ],
       epoch: prior?.epoch ?? 0,
     });
   }
@@ -182,20 +186,19 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
   }));
 }
 
-/** Rank a Goal's wave for sorting — `'later'` and undeclared both sort last, mirroring roadmap.data.ts. */
-function waveRank(wave: Goal['wave']): number {
-  return wave === null || wave === 'later' ? Number.POSITIVE_INFINITY : wave;
-}
-
 /**
- * The next Goal to pick up (ADR 049/084): the first `planned` Goal by `wave`, skipping any still
- * blocked by an unshipped `depends_on`. Pure — takes the already-derived list from {@link listGoals}.
+ * The next Goal to pick up (ADR 049/084, reordered by ADR 257): the first `planned` Goal in
+ * {@link compareGoals} order, skipping any still blocked by an unshipped `depends_on`. Pure — takes
+ * the already-derived list from {@link listGoals}.
+ *
+ * Before 257 this sorted on the numeric wave, which only legacy CLI-era Goals carried; because unset
+ * sorted last, every newly declared Goal was outranked by the oldest one on the board forever.
  */
 export function nextGoal(goals: Goal[]): Goal | null {
   const shipped = new Set(goals.filter((g) => g.status === 'shipped').map((g) => g.id));
   const candidates = goals
     .filter((g) => g.status === 'planned')
     .filter((g) => g.depends_on.every((d) => shipped.has(d)))
-    .sort((a, b) => waveRank(a.wave) - waveRank(b.wave));
+    .sort(compareGoals);
   return candidates[0] ?? null;
 }

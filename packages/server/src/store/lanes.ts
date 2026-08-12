@@ -1,4 +1,5 @@
 import {
+  compareGoals,
   DEFAULT_PROJECT,
   globToRegExp,
   LANE_CONTENDING_STATES,
@@ -464,13 +465,12 @@ function projectsContend(a: string, b: string): boolean {
  * another *contending* lane's in the same project (an unscoped lane contending with all of them).
  */
 /** goals-front-door design: advisory nudge — a lane on no goal while goals are in flight.
- *  `with` = the first unshipped goal by wave (a suggestion); owner null = never a directed wake. */
+ *  `with` = the first unshipped goal in ADR 257 order (a suggestion); owner null = never a directed wake. */
 export function noGoalWarning(lane: Lane, goals: Goal[]): LaneWarning | null {
   if (lane.goal_id !== null) return null;
   const unshipped = goals.filter((g) => g.status !== 'shipped');
   if (unshipped.length === 0) return null;
-  const rank = (w: Goal['wave']) => (w === null || w === 'later' ? Number.POSITIVE_INFINITY : w);
-  const suggest = [...unshipped].sort((a, b) => rank(a.wave) - rank(b.wave))[0]!;
+  const suggest = [...unshipped].sort(compareGoals)[0]!;
   return {
     kind: 'no_goal',
     subject: lane.id,

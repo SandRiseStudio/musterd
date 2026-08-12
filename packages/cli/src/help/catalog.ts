@@ -331,8 +331,8 @@ export const CATALOG: readonly CommandEntry[] = [
     detail:
       'Send a typed message. Acts: message · status_update · request_help · handoff · accept · decline · ' +
       'wait · resolve, plus the steering acts (ADR 103): steer (change direction, always interrupts, ' +
-      'supersedes prior), challenge (justify-or-reconsider), defer (--meta goal_id=<id> [--meta ' +
-      'wave=<n|later>] to reorder/defer a Goal). accept/decline auto-target the latest open request ' +
+      'supersedes prior), challenge (justify-or-reconsider), defer (--meta goal_id=<id> to shelve a ' +
+      'Goal). accept/decline auto-target the latest open request ' +
       'unless you pass --reply-to. Name 2-4 seats (--to a,b) when EITHER could answer: each owes a ' +
       'reply, the first accept/decline stands the rest down, and the team still sees it (message/request_help/challenge only).',
     examples: [
@@ -423,7 +423,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'goal',
     signature:
-      'declare "<title>" --goal-id <id> [--wave <n|later>] [--depends <id>,…]  |  list [--json]',
+      'declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>,…]  |  list [--json]',
     summary: 'declare a team Goal; lanes join it and status is derived',
     group: 'work',
     primary: true,

@@ -33,7 +33,7 @@ const DESCRIPTION =
   'ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its ' +
   'root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it ' +
   'to a Goal); challenge = demand justification (answered by an accept with evidence); defer = ' +
-  "re-sequence a Goal (meta.goal_id, meta.wave: a number reorders, 'later' defers); ask = a " +
+  'shelve a Goal (meta.goal_id); ask = a ' +
   'directed-to-human ask (meta.species: consult|escalate|approve, meta.tier: advisory|standard|' +
   'blocking) — the reply tells you how long to wait and what to do if no answer comes. Goal-scoped ' +
   'steer/defer re-sequence the plan and flag lanes building against the old one. ' +

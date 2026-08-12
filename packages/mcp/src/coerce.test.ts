@@ -308,48 +308,29 @@ describe('lane prose aliases: note/notes/summary → detail (2026-08-01 re-measu
   });
 });
 
-describe('team_goal_declare wave sent as a string (2026-08-12, measured live)', () => {
-  // Measured, not speculated: miley hit this declaring the ADR 256 stories. `{wave: 7}` bounced
-  // with `wave: Invalid input` while `{wave: "later"}` passed, and the same number landed first try
-  // through `team_send {act:'defer', meta:{wave: 7}}` — so the number survives everywhere the arg
-  // is not a union. The schema is `z.union([z.number().int(), z.literal('later')])`, which publishes
-  // as `anyOf[integer, const "later"]`; the string arrives as `"7"` and neither member accepts it.
-  //
-  // The cost was not the bounce. A re-declaration replaces the Goal skeleton wholesale, so the
-  // workaround (declare, then defer the wave back) bumped the epoch on insight-dashboard and
-  // board-loops — a re-sequencing the board showed but nobody performed.
-  it('coerces an unambiguous numeric wave', () => {
-    expect(
-      coerceToolArgs('team_goal_declare', { id: 'g', title: 't', wave: '7' }).args['wave'],
-    ).toBe(7);
+describe('team_goal_declare wave is not coerced (ADR 257 retired the numeric wave)', () => {
+  // #770 (izzo) coerced a numeric-string `wave` across the union boundary, correctly, for a union
+  // that no longer exists: ADR 257 narrowed `wave` to `'later' | undefined`. A coercion would now
+  // turn `"7"` into a `7` the schema rejects anyway — the same bounce, plus a `coerced` count for a
+  // repair that repaired nothing. So the rule is gone and every wave value passes through untouched;
+  // the schema alone decides, and it says `'later'` or omit.
+  it('passes a numeric wave through untouched, to be refused by the schema', () => {
+    const { args, applied } = coerceToolArgs('team_goal_declare', {
+      id: 'g',
+      title: 't',
+      wave: '7',
+    });
+    expect(args['wave']).toBe('7');
+    expect(applied).toEqual([]);
   });
 
-  it('leaves the "later" sentinel alone — it is a valid member of the union, not a near-miss', () => {
+  it('leaves the "later" sentinel alone — the one value the schema still accepts', () => {
     const { args, applied } = coerceToolArgs('team_goal_declare', {
       id: 'g',
       title: 't',
       wave: 'later',
     });
     expect(args['wave']).toBe('later');
-    expect(applied).toEqual([]);
-  });
-
-  it('leaves a real number alone', () => {
-    expect(coerceToolArgs('team_goal_declare', { id: 'g', title: 't', wave: 7 }).args['wave']).toBe(
-      7,
-    );
-  });
-
-  // The same discipline `pr:"local"` gets: a wave that is not mechanically a number keeps its
-  // bounce. Inventing an order here would silently re-sequence the board, which is the exact
-  // damage this lane exists to stop.
-  it('leaves an unparseable wave to bounce rather than inventing a build order', () => {
-    const { args, applied } = coerceToolArgs('team_goal_declare', {
-      id: 'g',
-      title: 't',
-      wave: 'soon-ish',
-    });
-    expect(args['wave']).toBe('soon-ish');
     expect(applied).toEqual([]);
   });
 });

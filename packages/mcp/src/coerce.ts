@@ -230,18 +230,13 @@ const RULES: Record<string, Rule[]> = {
     alias('content', 'body'),
     alias('message', 'body'),
   ],
-  // `wave` is the first union-typed argument on the surface, and a union is where the tool boundary
-  // stops carrying types: `z.union([z.number().int(), z.literal('later')])` publishes as
-  // `anyOf[integer, const "later"]`, the number arrives as `"7"`, and neither member accepts it —
-  // measured live 2026-08-12, where `{wave: 7}` bounced while `{wave: "later"}` passed and the same
-  // number landed first try through the `defer` meta path, which is a plain field.
-  //
-  // Worth the rule rather than a schema `z.coerce`: coercion here is COUNTED, so if union args keep
-  // costing bounces the measurement says so before anyone reasons about it (ADR 144's measure-then-
-  // craft order). It also keeps the refusal sharp — `numericString` fires only on `/^\d+$/`, so
-  // `"later"` passes through as the valid member it is and `"soon-ish"` still bounces. Inventing a
-  // build order from prose would silently re-sequence the board, which is the damage this fixes.
-  team_goal_declare: [numericString('wave')],
+  // No `team_goal_declare` rule. #770 (izzo) added `numericString('wave')` here to carry a numeric
+  // wave across the union boundary — the right fix for the defect as it stood, and its diagnosis
+  // (a union publishes as `anyOf`, so the number arrives as `"7"`) is what ADR 257 is built on.
+  // ADR 257 then retired the numeric wave itself, so `wave` accepts only `'later'`: the rule would
+  // coerce `"7"` into a `7` the schema rejects anyway — same bounce, plus a `coerced` count for a
+  // repair that repaired nothing. The union it existed to bridge is gone, so the rule goes with it.
+  // If a union-typed argument ever returns to this surface, `numericString` is still here for it.
   team_memory_save: [
     alias('note', 'body'),
     alias('content', 'body'),

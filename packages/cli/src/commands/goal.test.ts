@@ -42,26 +42,23 @@ describe('goal command', () => {
     }
   }
 
-  it('declares a goal with wave + deps and renders it', async () => {
+  it('declares a goal with deps and renders it', async () => {
     const res = await capture(() =>
       goalCommand(
-        parseArgs([
-          'declare',
-          'Ship the thing',
-          '--goal-id',
-          'ship',
-          '--wave',
-          '2',
-          '--depends',
-          'a, b',
-        ]),
+        parseArgs(['declare', 'Ship the thing', '--goal-id', 'ship', '--depends', 'a, b']),
       ),
     );
     expect(res.code).toBe(0);
     expect(res.out).toContain('goal declared');
     expect(res.out).toContain('Ship the thing');
-    expect(res.out).toContain('wave:2');
     expect(res.out).toContain('deps:2');
+  });
+
+  it('refuses a numeric --wave at the call site, and says what to use instead (ADR 257)', async () => {
+    // The server would reject it anyway; failing here means the seat gets the reason, not a schema error.
+    await expect(
+      goalCommand(parseArgs(['declare', 'Ship the thing', '--goal-id', 'ship', '--wave', '2'])),
+    ).rejects.toThrow(/--wave takes only "later".*--depends/s);
   });
 
   it('declares with a story and renders it (goals-front-door design)', async () => {
