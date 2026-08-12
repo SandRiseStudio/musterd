@@ -204,6 +204,78 @@ describe('handoffNamedLaneOutOfPlay (#745 discharge rule, shared with orientatio
   });
 });
 
+/**
+ * ADR 231 (#662, 2026-08-04) made a handoff act name its lane in meta, and every handoff since
+ * carries one. The 24 that predate it never will — and because a bare handoff is always "in play",
+ * the newest one wins the `why` slot permanently and no future event can retire it. Measured on the
+ * live db 2026-08-12: 34 handoffs, 24 bare, 7 of those naming a lane in their BODY, and the oldest
+ * still being served as a live instruction 16 days after its lane shipped.
+ *
+ * A lane id in prose is not prose: it either resolves to a lane row or it does not. Ids are rendered
+ * TRUNCATED (`01KYJ8B5AB` for `01KYJ8B5AB9MNZY8T35E2KKTTY`), so this is prefix resolution, and the
+ * discipline that makes it a recorded fact rather than a guess is unique resolution — an ambiguous
+ * prefix proves nothing and abstains.
+ */
+describe('a bare handoff whose BODY names its lane (the pre-ADR-231 population)', () => {
+  it('discharges when every lane the body names has left play', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, team.slug, 'nick', { title: 'recall arm', claim: true });
+    const body = `Lane ${lane.id.slice(0, 10)} — ADR 163 recall arm, yours.`;
+    expect(handoffNamedLaneOutOfPlay(db, team.id, null, body)).toBe(false);
+    updateLane(db, team.id, lane.id, team.slug, { state: 'done' });
+    expect(handoffNamedLaneOutOfPlay(db, team.id, null, body)).toBe(true);
+  });
+
+  // THE hazard, and the reason this is all-or-nothing. Real handoffs name more than one lane: the
+  // one being handed off AND a lane it overlaps or supersedes. Discharging on "some named lane is
+  // done" would silence a live handoff because it mentioned a finished one in passing — work
+  // dropped on the floor, which this file's own comment calls the unrecoverable direction.
+  it('keeps showing when ANY lane the body names is still in play', () => {
+    const { db, team } = seed();
+    const shipped = openLane(db, team.id, team.slug, 'nick', { title: 'shipped', claim: true });
+    const live = openLane(db, team.id, team.slug, 'nick', { title: 'still going', claim: true });
+    updateLane(db, team.id, shipped.id, team.slug, { state: 'done' });
+    const body = `Lane ${shipped.id.slice(0, 10)} is yours. Note it overlaps ${live.id.slice(0, 10)}.`;
+    expect(handoffNamedLaneOutOfPlay(db, team.id, null, body)).toBe(false);
+  });
+
+  it('abstains on an id-shaped token that resolves to no lane', () => {
+    const { db, team } = seed();
+    expect(handoffNamedLaneOutOfPlay(db, team.id, null, 'see 01ZZZZZZZZ for context')).toBe(false);
+  });
+
+  // An ambiguous prefix is not evidence. Two lanes sharing it means the body picked out neither.
+  it('abstains when a prefix resolves to more than one lane', () => {
+    const { db, team } = seed();
+    const a = openLane(db, team.id, team.slug, 'nick', { title: 'a', claim: true });
+    const b = openLane(db, team.id, team.slug, 'nick', { title: 'b', claim: true });
+    updateLane(db, team.id, a.id, team.slug, { state: 'done' });
+    updateLane(db, team.id, b.id, team.slug, { state: 'done' });
+    // ULIDs are time-ordered, so two lanes opened in the same millisecond band share a long prefix.
+    const shared = a.id.slice(0, 6);
+    if (b.id.startsWith(shared)) {
+      expect(handoffNamedLaneOutOfPlay(db, team.id, null, `lane ${shared}`)).toBe(false);
+    }
+  });
+
+  // Structured meta is the authority when present: it says which lane the handoff IS about, where
+  // the body only says which lanes it mentions.
+  it('lets structured meta win over the body', () => {
+    const { db, team } = seed();
+    const named = openLane(db, team.id, team.slug, 'nick', { title: 'named', claim: true });
+    const mentioned = openLane(db, team.id, team.slug, 'nick', { title: 'mentioned', claim: true });
+    updateLane(db, team.id, mentioned.id, team.slug, { state: 'done' });
+    const meta = JSON.stringify({ lane_handoff: { lane: named.id } });
+    const body = `see also ${mentioned.id.slice(0, 10)}`;
+    expect(handoffNamedLaneOutOfPlay(db, team.id, meta, body)).toBe(false);
+  });
+
+  it('is unchanged when no body is passed at all', () => {
+    const { db, team } = seed();
+    expect(handoffNamedLaneOutOfPlay(db, team.id, null)).toBe(false);
+  });
+});
+
 describe('the eligible set (ADR 254): obligation narrows, and any one answer discharges', () => {
   /** seed() gives nick/Ada/bob; a fourth seat is what distinguishes "the named few" from "everyone". */
   function seed4() {
