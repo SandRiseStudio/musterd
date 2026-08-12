@@ -290,6 +290,23 @@ increments 2–5 are done.
   authorization) — landscape material, not this arc; programmatic-calling-specific affordances beyond
   documented output schemas.
 
+- **2026-08-12 — grammatical mood is a craft axis distinct from concision (PR #762).** Because MCP
+  `tools/list` is standing context every turn, an imperative description ("Call at task start")
+  functions as a standing system instruction and can fire the behavior ambiently — even when the
+  turn has nothing to do with the tool. Increment 2 measured and cut *bytes*; it did not touch
+  *mood*. #762 applied the split for the optional tools: capability descriptions state the
+  **condition** ("Use when wrapping a session, not mid-task"), never the **cadence** — `lane_open`
+  lost "the usual task-start move" (cadence attached to a `claim:true` write was the sharpest
+  hazard), `team_leave`/`team_memory_save` gained scoped clauses. The ritual tools
+  (`team_inbox_check`, `team_status`, `lane_board`) were **deliberately left imperative**: their
+  ambient firing is the product (ADR 012/085), the schedule also lives in the primer's two standing
+  surfaces (AGENTS.md + MCP `instructions`, both delivered on all three supported harnesses), and
+  any mood demotion there must ship with a before/after on inbox-check compliance from
+  `tool_call_stats` (baseline 2026-08-12, 7d: team_inbox_check 170 calls, team_status 6,
+  lane_board 69, team_memory_save 28, team_leave 0). Also note: the context budgets (ADR 212,
+  `pnpm context:check`) now sit ~7 B under `toolsListDefaultBytes` — any description edit trips the
+  gate and must trim or re-justify.
+
 ## Observability & Evaluation
 
 **Traces** — increment 1 _is_ the instrument: one `musterd.mcp.tool_call` event per invocation (tool,
