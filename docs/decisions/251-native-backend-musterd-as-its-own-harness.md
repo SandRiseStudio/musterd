@@ -149,6 +149,15 @@ cheap now:
   rows is accepted for the dogfood scale; retention policy is a phase-2 concern.
 - A native wake spends real dollars against the configured model. Phase-1 rollout keeps the
   native backend opt-in (registry selection per enrollment), never the default.
+- _Implementation note (dated, 2026-08-12): phase 1 landed._ The dependencies this ADR gates
+  arrived as declared: `@anthropic-ai/sdk` (§1), plus `@modelcontextprotocol/client` and
+  `@modelcontextprotocol/server` promoted into `packages/cli`'s runtime deps for the §4 bridge —
+  the same 2.0.0 packages already in the tree, now direct because the backend stands the adapter
+  up in-process over an `InMemoryTransport`. The §7 per-turn rail landed as an additive protocol
+  schema (`WakeTurnBodySchema`, with a 256 KiB serialized-transcript backstop), the `wake_turns`
+  table (migration 38, idempotent per `(lease, turn)`), and `POST /residency/wake-turn`
+  (agent-key auth, deliberately not lease-status-gated — the loop outlives verification). The
+  seam held: no `ActuatorBackend`/`BackendContext` change was needed to express the native row.
 - _Phase-2 charter (dated note, 2026-08-12, owner-endorsed) — the ambition on record, not a
   frozen design._ The native harness is to be the most effective harness in the field, and
   its differentiators are musterd's substrate, not feature parity: **verification as
