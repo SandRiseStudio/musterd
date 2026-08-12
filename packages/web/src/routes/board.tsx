@@ -360,7 +360,7 @@ function BoardPage() {
               <Board
                 lanes={shownLanes}
                 warnings={board.warnings}
-                view={view}
+                view={view === 'columns' ? 'columns' : 'grid'}
                 goals={report?.goals ?? []}
                 roster={roster}
                 me={me}

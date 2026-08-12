@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { Goal, Lane, LaneBoard, LaneResult, LaneWarning } from '@musterd/protocol';
+import type { Lane, LaneBoard, LaneResult, LaneWarning } from '@musterd/protocol';
 import {
   applyLaneEcho,
   capColumn,
   centerScroll,
   filterLanes,
-  groupByGoal,
   handoffPatch,
   laneActions,
   laneStates,
@@ -144,51 +143,6 @@ describe('applyLaneEcho — the optimistic fold (the echo is the only copy the s
       warnings: [],
     });
     expect(out.warnings).toEqual([]);
-  });
-});
-
-describe('groupByGoal — the swimlane regroup (pure, no extra fetch)', () => {
-  const goal = (id: string, title: string, status: Goal['status'] = 'in-flight'): Goal => ({
-    id,
-    title,
-    wave: null,
-    depends_on: [],
-    declared_by: 'nick',
-    declared_at: 1,
-    status,
-    epoch: 0,
-  });
-
-  it('one row per declared Goal in order, lanes attached by goal_id, "no goal" last', () => {
-    const goals = [goal('g1', 'Ship the board'), goal('g2', 'Broadcast', 'planned')];
-    const lanes = [
-      lane({ id: 'A', goal_id: 'g2' }),
-      lane({ id: 'B', goal_id: 'g1' }),
-      lane({ id: 'C', goal_id: null }),
-      lane({ id: 'D', goal_id: 'g1' }),
-    ];
-    const rows = groupByGoal(lanes, goals);
-    expect(rows.map((r) => r.id)).toEqual(['g1', 'g2', null]);
-    expect(rows[0]!.lanes.map((l) => l.id)).toEqual(['B', 'D']);
-    expect(rows[0]!.status).toBe('in-flight');
-    expect(rows[1]!.lanes.map((l) => l.id)).toEqual(['A']);
-    expect(rows[2]!.title).toBe('no goal');
-    expect(rows[2]!.lanes.map((l) => l.id)).toEqual(['C']);
-  });
-
-  it('a lane naming an undeclared goal gets its own row after the declared ones, before "no goal"', () => {
-    const rows = groupByGoal([lane({ id: 'A', goal_id: 'ghost' }), lane({ id: 'B' })], [
-      goal('g1', 'Real'),
-    ]);
-    expect(rows.map((r) => r.id)).toEqual(['g1', 'ghost', null]);
-    expect(rows[1]!.title).toBe('ghost');
-    expect(rows[1]!.status).toBeNull();
-  });
-
-  it('declared Goals with no lanes keep their row (the plan is visible); an empty "no goal" is dropped', () => {
-    const rows = groupByGoal([lane({ id: 'A', goal_id: 'g1' })], [goal('g1', 'Real'), goal('g2', 'Empty')]);
-    expect(rows.map((r) => r.id)).toEqual(['g1', 'g2']);
-    expect(rows[1]!.lanes).toEqual([]);
   });
 });
 

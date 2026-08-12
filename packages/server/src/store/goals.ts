@@ -147,7 +147,7 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
       id: g.id,
       title: g.title,
       // Wholesale replacement like the rest of the skeleton: an undeclared story clears, latest wins.
-      story: g.story,
+      ...(g.story !== undefined ? { story: g.story } : {}),
       depends_on: g.depends_on ?? [],
       declared_by: row.from_name,
       declared_at: row.ts,

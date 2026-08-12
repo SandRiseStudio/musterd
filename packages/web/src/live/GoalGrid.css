@@ -1,0 +1,432 @@
+/* The goals-grid front door (goals-front-door design) — visual spec lifted from the v5 mockup.
+ * Own file, own palette (the warm mission-board paper); Live.css stays untouched. All animation is
+ * CSS-only and every keyframe is disabled under prefers-reduced-motion. */
+
+.gg-stage {
+  background: linear-gradient(160deg, #fdf6ea 0%, #f7ecd9 55%, #f3e3cc 100%);
+  border-radius: 18px;
+  padding: 18px 20px;
+  box-shadow:
+    inset 0 0 60px rgba(214, 166, 92, 0.12),
+    0 2px 12px rgba(90, 70, 40, 0.1);
+  position: relative;
+  overflow: hidden;
+}
+.gg-stage::before {
+  content: '✦';
+  position: absolute;
+  top: 10px;
+  right: 18px;
+  color: #e6c78a;
+  font-size: 12px;
+  animation: gg-twinkle 3.2s ease-in-out infinite;
+}
+@keyframes gg-twinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15) rotate(20deg);
+  }
+}
+
+.gg-hdr {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.gg-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: #4a3a26;
+  letter-spacing: -0.02em;
+}
+.gg-title em {
+  font-style: normal;
+  background: linear-gradient(90deg, #d98f2b, #c96a42);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.gg-sub {
+  margin: 0;
+  font-size: 11px;
+  color: #8a755a;
+  font-weight: 500;
+}
+.gg-pulse {
+  margin: 0;
+  font-size: 11px;
+  color: #7d6a4f;
+  background: #fffdf8;
+  border: 1px solid #eddfc6;
+  border-radius: 999px;
+  padding: 4px 12px;
+  box-shadow: 0 1px 3px rgba(90, 70, 40, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+.gg-pulse span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gg-pulse b {
+  color: #b0722a;
+}
+.gg-pulse__dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4a9d7f;
+  animation: gg-pulse 2s ease-in-out infinite;
+}
+@keyframes gg-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(74, 157, 127, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(74, 157, 127, 0);
+  }
+}
+
+.gg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+}
+
+.gg-card {
+  /* A drill-in button dressed as a card — inherit the page type, drop the button chrome. */
+  font: inherit;
+  text-align: left;
+  display: block;
+  width: 100%;
+  background: #fffdf8;
+  border-radius: 14px;
+  padding: 11px 14px 9px;
+  border: 1px solid #f0e4cd;
+  box-shadow: 0 2px 6px rgba(90, 70, 40, 0.07);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+  cursor: pointer;
+  position: relative;
+}
+.gg-card:hover,
+.gg-card:focus-visible {
+  transform: translateY(-2px) rotate(-0.25deg);
+  box-shadow: 0 8px 20px rgba(90, 70, 40, 0.14);
+}
+.gg-card:hover .gg-peek,
+.gg-card:focus-visible .gg-peek {
+  opacity: 1;
+  transform: translateX(0);
+}
+.gg-peek {
+  position: absolute;
+  right: 12px;
+  top: 11px;
+  font-size: 10px;
+  color: #a37b36;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: all 0.18s ease;
+  font-weight: 600;
+}
+.gg-trow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-right: 70px;
+}
+.gg-card__title {
+  font-size: 13.5px;
+  color: #4a3a26;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+.gg-card__story {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  color: #8a755a;
+}
+
+.gg-chip {
+  font-size: 9px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+.gg-chip--live {
+  background: #e2f2ea;
+  color: #2e7d5f;
+}
+.gg-chip--soon {
+  background: #fdeeda;
+  color: #b05c1f;
+}
+.gg-chip--ghost {
+  background: #f2ece1;
+  color: #857659;
+}
+
+.gg-runway {
+  display: block;
+  position: relative;
+  height: 40px;
+  margin-top: 8px;
+}
+.gg-runway__track {
+  position: absolute;
+  top: 15px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #f0e6d3 0%, #eeddbe 55%, #cfe8db 100%);
+  overflow: hidden;
+}
+.gg-runway__track::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
+  width: 40%;
+  animation: gg-shimmer 3.5s ease-in-out infinite;
+}
+@keyframes gg-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  60%,
+  100% {
+    transform: translateX(300%);
+  }
+}
+.gg-zone {
+  position: absolute;
+  top: 26px;
+  font-size: 8.5px;
+  color: #9c8b6e;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.gg-zmark {
+  position: absolute;
+  top: 13px;
+  width: 1px;
+  height: 8px;
+  background: #e4d8c2;
+}
+.gg-runway__more {
+  position: absolute;
+  right: 0;
+  top: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #8a755a;
+}
+
+.gg-dot {
+  position: absolute;
+  top: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ddd2bf;
+  border: 2px solid #fffdf8;
+  box-shadow: 0 1px 2px rgba(90, 70, 40, 0.15);
+}
+.gg-dot--done {
+  background: #4a9d7f;
+}
+.gg-dot--review {
+  background: #e8a33d;
+  animation: gg-wiggle 2.4s ease-in-out infinite;
+}
+.gg-dot--blocked {
+  background: #cd6f6f;
+  animation: gg-pulse 1.8s ease-in-out infinite;
+}
+@keyframes gg-wiggle {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.gg-rider {
+  position: absolute;
+  top: 0;
+  animation: gg-bob 2.8s ease-in-out infinite;
+}
+.gg-rider:nth-child(odd) {
+  animation-delay: 0.7s;
+}
+.gg-rider__av {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 800;
+  color: #fff;
+  border: 2px solid #fffdf8;
+  box-shadow: 0 2px 5px rgba(90, 70, 40, 0.22);
+}
+.gg-rider::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  width: 2px;
+  height: 4px;
+  background: #d9cfc0;
+}
+@keyframes gg-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+
+.gg-landed {
+  position: absolute;
+  top: -10px;
+  left: -3px;
+  font-size: 11px;
+  animation: gg-sparkle 2.6s ease-in-out infinite;
+}
+@keyframes gg-sparkle {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.3) rotate(12deg);
+  }
+}
+
+.gg-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.gg-foot__count {
+  font-size: 10px;
+  color: #8a755a;
+  font-weight: 600;
+}
+.gg-foot__stuck {
+  color: #a94f4f;
+  font-weight: 700;
+}
+.gg-foot__tick {
+  font-size: 10px;
+  color: #7d6f5c;
+  background: #faf3e6;
+  padding: 2px 8px;
+  border-radius: 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+.gg-foot__tick b {
+  color: #a3671f;
+  font-weight: 700;
+}
+
+.gg-card--loose {
+  border-style: dashed;
+  background: #fdfaf3;
+}
+.gg-card--loose .gg-card__title {
+  color: #857659;
+}
+.gg-card--loose .gg-runway {
+  opacity: 0.75;
+}
+.gg-card--loose .gg-runway__track {
+  background: #f0e9db;
+}
+
+.gg-shelf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding: 6px 10px;
+  background: #fbf5e9;
+  border: 1px solid #efe3cb;
+  border-radius: 10px;
+}
+.gg-shelf__label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8a755a;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.gg-shelf__item {
+  font: inherit;
+  font-size: 11px;
+  color: #2e7d5f;
+  background: #e2f2ea;
+  border: none;
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.gg-shelf__item:hover {
+  background: #d2ecdf;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gg-stage::before,
+  .gg-pulse__dot,
+  .gg-runway__track::after,
+  .gg-dot--review,
+  .gg-dot--blocked,
+  .gg-rider,
+  .gg-landed {
+    animation: none;
+  }
+  .gg-card,
+  .gg-peek {
+    transition: none;
+  }
+  .gg-card:hover,
+  .gg-card:focus-visible {
+    transform: none;
+  }
+}
