@@ -158,6 +158,30 @@ cheap now:
   table (migration 38, idempotent per `(lease, turn)`), and `POST /residency/wake-turn`
   (agent-key auth, deliberately not lease-status-gated — the loop outlives verification). The
   seam held: no `ActuatorBackend`/`BackendContext` change was needed to express the native row.
+- _Experiment result (dated note, 2026-08-12, owner-gated, run with nick present)._ The
+  measurement this ADR's Experiment section calls for has run, on seat `compo` with
+  `MUSTERD_MODEL=claude-sonnet-5` resolved over the binding's own declaration (the ADR 101 ladder
+  working as designed). **The `{occupied, answered}` pair was achieved and the in-process row beats
+  the CLI baseline as predicted:** occupancy 5.1 s against increment 3's 22.4 s, and an in-band
+  answer roughly 13 s after invocation against the CLI row's ~68 s (22.4 s + 46 s). **`cost_usd`
+  equalled the sum of the per-turn `wake_turns` rows exactly on both runs** ($0.0678 over 3 turns;
+  $0.3219 over 5 on the first) — §6's claim holds, and this is the first backend whose spend the
+  harness measured rather than a child process reporting it.
+  The run's real yield was four defects that no scripted test could reach, because each lives where
+  the real SDK or the real daemon meets this code: a keyless host **charging** a wake failure
+  instead of deferring (ADR 221 — it burned two of three attempts in four minutes); a `team_join`
+  issued in parallel with another tool **double-claiming** the seat, so the woken session watched
+  itself get evicted and declined to answer; the ADR 018 binding re-read **overwriting the
+  host-declared surface**, so the first native occupancy in history attested `cursor`; and — masked
+  by that third one — `musterd` never having been a **claimable** surface at all, because the
+  `presence` CHECK predates the enum that reserved it, so the claim threw server-side and the client
+  hung with no error frame. All four are fixed (#753 and the engine change alongside it); migration
+  39 widens the CHECK, so §2's roster-distinctness is real rather than reserved. One defect is
+  recorded and left open: **a claim that fails server-side hangs instead of rejecting**, which is
+  what turned a one-line bug into four rounds of diagnosis.
+  One datum worth keeping: the woken agent's own answer named a different model than the harness
+  attested for the same occupancy. ADR 101's premise — attest from the harness, never ask the
+  model — is not a formality.
 - _Phase-2 charter (dated note, 2026-08-12, owner-endorsed) — the ambition on record, not a
   frozen design._ The native harness is to be the most effective harness in the field, and
   its differentiators are musterd's substrate, not feature parity: **verification as
