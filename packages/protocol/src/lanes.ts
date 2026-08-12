@@ -239,7 +239,13 @@ export type Lane = z.infer<typeof LaneSchema>;
  * goals; advisory, owner-null, never woken.
  */
 export const LaneWarningSchema = z.object({
-  kind: z.enum(['unmet_dependency', 'surface_overlap', 'stale_plan', 'stale_dependency', 'no_goal']),
+  kind: z.enum([
+    'unmet_dependency',
+    'surface_overlap',
+    'stale_plan',
+    'stale_dependency',
+    'no_goal',
+  ]),
   /** The lane the acting party touched (staleness: the stale lane itself). */
   subject: z.string(),
   /** The other party: the depended-on/overlapping lane, or — for `stale_plan` — the moved Goal id. */

@@ -19,7 +19,13 @@ function declare(
   db: ReturnType<typeof seed>['db'],
   teamId: string,
   fromId: string,
-  goal: { id: string; title: string; story?: string; wave?: number | 'later'; depends_on?: string[] },
+  goal: {
+    id: string;
+    title: string;
+    story?: string;
+    wave?: number | 'later';
+    depends_on?: string[];
+  },
   ts = ++mid,
 ) {
   insertMessage(

@@ -30,7 +30,7 @@ reference is `.superpowers/brainstorm/78712-1786565615/content/top-level-layout-
 - Build the whole repo (`pnpm -r build`) before `pnpm -r typecheck` — protocol `.d.ts`
   phantoms otherwise. `pnpm lint` and `pnpm format:check` are separate gates. Format only
   your own files: `pnpm exec prettier --write <files>` (never `pnpm format`).
-- `pnpm vocab:check` gates new docs — no banned structural nouns (epic/milestone/sprint) in
+- `pnpm vocab:check` gates new docs — no banned structural nouns (epic/milestone/sprint) in <!-- vocab:ok -->
   the ADR.
 - `pnpm perf:check` (ADR 151 byte budgets) must stay green after the web tasks.
 - Warning stays advisory everywhere: `no_goal` must never fail a verb.

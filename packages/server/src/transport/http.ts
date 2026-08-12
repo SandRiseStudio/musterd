@@ -822,7 +822,12 @@ function noGoalNotice(goalId: string | null): string {
 /** ADR 192 acceptor checklist — judge the landed outcome, not the diff. */
 function acceptanceAskBody(
   title: string,
-  opts: { human?: boolean; peerFindings?: string; overlapNotice?: string; noGoalNotice?: string } = {},
+  opts: {
+    human?: boolean;
+    peerFindings?: string;
+    overlapNotice?: string;
+    noGoalNotice?: string;
+  } = {},
 ): string {
   const checklist =
     'Judge the LANDED OUTCOME (not a code review): ' +
