@@ -1,4 +1,4 @@
-# 257 — Shipped goals carry evidence: the value layer
+# 258 — Shipped goals carry evidence: the value layer
 
 - Status: accepted
 - Date: 2026-08-12
