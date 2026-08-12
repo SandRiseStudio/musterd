@@ -15,6 +15,7 @@ import {
   rememberIdentity,
   removeBinding,
   saveBinding,
+  saveConfig,
   type Config,
 } from './config.js';
 
@@ -117,6 +118,114 @@ describe('multi-identity vault (ADR 059)', () => {
     rememberIdentity(cfg, { team: 'alpha', name: 'David', key: 'mskey_d2', surface: 'cli' });
     const davids = cfg.knownIdentities.filter((i) => i.name === 'David');
     expect(davids).toEqual([{ team: 'alpha', name: 'David', key: 'mskey_d2', surface: 'cli' }]);
+  });
+});
+
+describe('saveConfig concurrent writers (ADR 255)', () => {
+  let dir: string;
+  let configPath: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-cfg-race-'));
+    configPath = join(dir, 'config.json');
+    process.env['MUSTERD_CONFIG'] = configPath;
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        server: 'http://localhost:4849',
+        current: 'alpha',
+        identities: { alpha: { name: 'Ada', key: 'mskey_a', surface: 'cli' } },
+        knownIdentities: [{ team: 'alpha', name: 'Ada', key: 'mskey_a', surface: 'cli' }],
+        bindings: { '/tmp/one': { team: 'alpha', seat: 'Ada', surface: 'cli' } },
+        agentKeys: { alpha: 'mskey_team_a' },
+        rosterHome: {},
+        teamHome: {},
+      }) + '\n',
+    );
+  });
+  afterEach(() => delete process.env['MUSTERD_CONFIG']);
+
+  it('keeps an identity one writer added when another writer adds a binding', () => {
+    // Two CLI processes each load, mutate a different map, and save. Last-write-wins of the
+    // whole file drops the first writer's keys — the bug that emptied identities/bindings
+    // on a busy machine. Both additions must survive.
+    const a = loadConfig();
+    const b = loadConfig();
+    a.identities['beta'] = { name: 'wanderer', key: 'mskey_w', surface: 'cli' };
+    rememberIdentity(a, { team: 'beta', name: 'wanderer', key: 'mskey_w', surface: 'cli' });
+    b.bindings['/tmp/two'] = { team: 'alpha', seat: 'Pim', surface: 'cli' };
+    saveConfig(a);
+    saveConfig(b);
+
+    const cfg = loadConfig();
+    expect(cfg.identities['beta']).toEqual({
+      name: 'wanderer',
+      key: 'mskey_w',
+      surface: 'cli',
+    });
+    expect(cfg.bindings['/tmp/two']).toEqual({
+      team: 'alpha',
+      seat: 'Pim',
+      surface: 'cli',
+    });
+    expect(cfg.identities['alpha']?.name).toBe('Ada');
+    expect(cfg.bindings['/tmp/one']?.seat).toBe('Ada');
+    expect(cfg.knownIdentities.map((i) => i.name).sort()).toEqual(['Ada', 'wanderer']);
+  });
+
+  it('a binding deletion still lands when a concurrent writer adds an identity', () => {
+    const a = loadConfig();
+    const b = loadConfig();
+    delete a.bindings['/tmp/one'];
+    b.identities['beta'] = { name: 'wanderer', key: 'mskey_w', surface: 'cli' };
+    saveConfig(a);
+    saveConfig(b);
+
+    const cfg = loadConfig();
+    expect(cfg.bindings['/tmp/one']).toBeUndefined();
+    expect(cfg.identities['beta']?.name).toBe('wanderer');
+  });
+
+  it('a writer that did not touch `current` keeps a concurrent current-team change', () => {
+    // team create sets current; a concurrent saveBinding rewrites the file from a stale
+    // snapshot. The new current must not revert.
+    const a = loadConfig();
+    const b = loadConfig();
+    a.current = 'beta';
+    a.agentKeys['beta'] = 'mskey_team_b';
+    b.bindings['/tmp/two'] = { team: 'alpha', seat: 'Pim', surface: 'cli' };
+    saveConfig(a);
+    saveConfig(b);
+
+    const cfg = loadConfig();
+    expect(cfg.current).toBe('beta');
+    expect(cfg.agentKeys['beta']).toBe('mskey_team_b');
+    expect(cfg.bindings['/tmp/two']?.seat).toBe('Pim');
+  });
+
+  it('a constructed saveConfig (reset) replaces rather than merging with disk', () => {
+    saveConfig({
+      server: 'http://localhost:4849',
+      identities: {},
+      knownIdentities: [],
+      bindings: {},
+      agentKeys: {},
+      rosterHome: {},
+      teamHome: {},
+    });
+    const cfg = loadConfig();
+    expect(cfg.identities).toEqual({});
+    expect(cfg.bindings).toEqual({});
+    expect(cfg.current).toBeUndefined();
+    expect(cfg.knownIdentities).toEqual([]);
+    expect(cfg.agentKeys).toEqual({});
+  });
+
+  it('leaves no tmp or lock file behind', () => {
+    const a = loadConfig();
+    a.identities['beta'] = { name: 'wanderer', key: 'mskey_w', surface: 'cli' };
+    saveConfig(a);
+    expect(existsSync(`${configPath}.${process.pid}.tmp`)).toBe(false);
+    expect(existsSync(`${configPath}.lock`)).toBe(false);
   });
 });
 
