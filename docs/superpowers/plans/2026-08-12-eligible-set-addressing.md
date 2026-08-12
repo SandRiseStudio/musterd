@@ -610,7 +610,9 @@ git commit -m "Stand-down: the first accept discharges an eligible-set act for e
 
 ---
 
-### Task 5: MCP — `to` accepts an array
+### Task 5: MCP — `to` accepts an array ✅ DONE (c5453d30)
+
+> **Notes for Task 6 (CLI), which mirrors this:** `normalizeTo` trims and drops blank entries, and a list that collapses to one name is a directed act, not a one-seat set — mirror that. `coerce.ts` needed no logic change: `recipientShape` is shared with `lane_handoff`, where 2+ must still bounce. There is no `send.test.ts` in MCP — handler tests live in `tools/tools.test.ts` via its `capture()` helper; pure unit tests went in a new `send.eligible.test.ts`.
 
 **Files:**
 
