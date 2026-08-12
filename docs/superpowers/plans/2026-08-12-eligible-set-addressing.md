@@ -40,7 +40,7 @@
 
 ---
 
-### Task 1: Protocol — the eligible set's shape
+### Task 1: Protocol — the eligible set's shape ✅ DONE (28a82b94)
 
 **Files:**
 
