@@ -766,6 +766,52 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 251 §2: the `musterd` surface makes a native-hosted occupancy roster-distinct — but the
+    // v1 CHECK was written before that surface existed and never grew it, so a native claim's
+    // presence INSERT threw inside the WS handler and the client hung with no response (measured
+    // live 2026-08-12, the second native wake: 60s to a client-side timeout, no error frame, and a
+    // misleading "waiting for admin approval" fallback message). The protocol enum had reserved
+    // `musterd` since increment 3; only the storage layer disagreed, and the disagreement was
+    // invisible because the binding re-read overwrote the surface before it was ever sent.
+    //
+    // SQLite cannot ALTER a CHECK, so this is the copy-drop-rename rebuild (the v5 precedent). The
+    // column list is enumerated rather than `SELECT *` because the table has grown eight columns
+    // across later migrations and positional copy would silently transpose them. `fkOff` is NOT
+    // needed: no table references `presence`.
+    version: 39,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE presence_new (
+          id            TEXT PRIMARY KEY,
+          member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          surface       TEXT NOT NULL CHECK (surface IN
+                          ('cli','claude-code','codex','cursor','web','ios','slack','other','musterd')),
+          status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
+          conn_id       TEXT,
+          last_seen_at  INTEGER NOT NULL,
+          created_at    INTEGER NOT NULL,
+          held_until    INTEGER,
+          provenance    TEXT,
+          workspace     TEXT,
+          driver        TEXT,
+          model         TEXT,
+          build         TEXT,
+          epoch         INTEGER,
+          wake_lease    TEXT
+        );
+        INSERT INTO presence_new (id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                                  held_until, provenance, workspace, driver, model, build, epoch, wake_lease)
+          SELECT id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                 held_until, provenance, workspace, driver, model, build, epoch, wake_lease
+          FROM presence;
+        DROP TABLE presence;
+        ALTER TABLE presence_new RENAME TO presence;
+        CREATE INDEX idx_presence_member ON presence(member_id);
+        CREATE INDEX idx_presence_last_seen ON presence(last_seen_at);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
