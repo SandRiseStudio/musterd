@@ -1,4 +1,5 @@
 import {
+  eligibleOf,
   isAwaitingAcceptance,
   LANE_TERMINAL_STATES,
   normalizeSeatName,
@@ -35,6 +36,24 @@ function recipientsOf(db: Database, msg: MessageRow): RecipientRow[] {
       .get(msg.to_member);
     return row ? [row] : [];
   }
+  // ADR NNN: an eligible set narrows OBLIGATION, not visibility. The act is team-addressed and every
+  // seat can read it — but only the named seats owe an answer, and this ledger tracks what is owed.
+  //
+  // Note this branch is strictly MORE precise than the roster query below: the names are pinned in
+  // the envelope, so a seat that has since left is still visibly the one who was asked. There is
+  // deliberately no `left_at IS NULL` filter here — dropping a departed seat would rewrite history
+  // into "we never asked them", which is the approximation the team branch is stuck with, not one to
+  // reproduce where the log actually knows better.
+  const eligible = eligibleOf(metaOf(msg));
+  if (eligible) {
+    const stmt = db.prepare<[string, string], RecipientRow>(
+      'SELECT id, name FROM members WHERE team_id = ? AND name = ?',
+    );
+    return eligible.flatMap((name) => {
+      const row = stmt.get(msg.team_id, name);
+      return row ? [row] : [];
+    });
+  }
   return db
     .prepare<
       [string, string],
@@ -43,13 +62,18 @@ function recipientsOf(db: Database, msg: MessageRow): RecipientRow[] {
     .all(msg.team_id, msg.from_member);
 }
 
-function isUrgent(msg: MessageRow): boolean {
-  if (!msg.meta) return false;
+/** An act's decoded `meta`, or null when absent/corrupt. */
+function metaOf(msg: MessageRow): Record<string, unknown> | null {
+  if (!msg.meta) return null;
   try {
-    return (JSON.parse(msg.meta) as Record<string, unknown>)['urgent'] === true;
+    return JSON.parse(msg.meta) as Record<string, unknown>;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isUrgent(msg: MessageRow): boolean {
+  return metaOf(msg)?.['urgent'] === true;
 }
 
 /** The resolve that closed this act's thread (thread_key = thread_id ?? id), if any. */
@@ -65,6 +89,30 @@ function threadResolve(
     >(`SELECT id, ts FROM messages WHERE team_id = ? AND act = 'resolve' AND thread_id = ? ORDER BY ts ASC LIMIT 1`)
     .get(msg.team_id, threadKey);
   return row ? { act: 'resolve', id: row.id, ts: row.ts } : null;
+}
+
+/**
+ * ADR NNN: ANY seat's accept/decline naming the act — the any-of discharge an eligible set promises.
+ *
+ * This clause has to exist, and the reason is worth recording because the design assumed it away:
+ * `answerBy` below is scoped to a single recipient (`from_member = recipientId`), which is exactly
+ * right for a directed act and exactly wrong for "either of you". Without this, bob answering would
+ * leave Ada owing the act forever, and the ledger — the instrument that decides what is still open —
+ * would contradict the primitive's whole promise.
+ *
+ * Applied ONLY when the act carries an eligible set. A plain team act keeps per-recipient answering,
+ * because there "someone replied" genuinely does not mean everyone else is off the hook.
+ */
+function anyAnswer(db: Database, msg: MessageRow): { act: string; id: string; ts: number } | null {
+  const row = db
+    .prepare<[string, string], { act: string; id: string; ts: number }>(
+      `SELECT act, id, ts FROM messages
+        WHERE team_id = ? AND act IN ('accept','decline')
+          AND json_extract(meta, '$.in_reply_to') = ?
+        ORDER BY ts ASC LIMIT 1`,
+    )
+    .get(msg.team_id, msg.id);
+  return row ?? null;
 }
 
 /** This recipient's accept/decline naming the act via `meta.in_reply_to`, if any. */
@@ -207,7 +255,10 @@ function recipientLedger(
   recipient: RecipientRow,
   resolve: { act: string; id: string; ts: number } | null,
 ): DeliveryRecipient {
-  const answered = answerBy(db, msg, recipient.id) ?? resolve ?? laneHandoffDischarged(db, msg);
+  // ADR NNN: on an eligible-set act the FIRST answer from anyone discharges it for every named seat
+  // (`anyAnswer`); everywhere else the per-recipient clause stands unchanged.
+  const ownAnswer = eligibleOf(metaOf(msg)) ? anyAnswer(db, msg) : answerBy(db, msg, recipient.id);
+  const answered = ownAnswer ?? resolve ?? laneHandoffDischarged(db, msg);
   const cursor = getCursor(db, recipient.id);
   const seen = cursor.last_read_ts >= msg.ts;
   const nudges = ccdNudges(db, msg);

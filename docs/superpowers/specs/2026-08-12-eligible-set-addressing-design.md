@@ -104,11 +104,20 @@ per broadcast; status here stays fully derived, so the doctrine holds.
 recipients are the eligible seats, not the whole roster. The ledger tracks **obligation**, and only
 those seats have one.
 
-Everything else is untouched and already correct:
+- `seen` stays each seat's own cursor comparison (`delivery.ts:186`) — untouched.
+- `answered` needs a **second clause**, corrected 2026-08-12 during implementation.
 
-- `seen` stays each seat's own cursor comparison (`delivery.ts:186`).
-- `answered` flips for the whole act on the first `accept`/`decline`, via the existing `answerBy`
-  (`delivery.ts:71`), which already returns **which seat** answered — the trace comes free.
+**Correction (2026-08-12).** This spec originally claimed any-of discharge fell out for free from the
+existing `answerBy`. It does not. `answerBy` is scoped to a single recipient — `from_member =
+recipientId` (`delivery.ts:78`) — which is exactly right for a directed act and exactly wrong for
+"either of you": bob answering would have left Ada owing the act forever, and the ledger, the
+instrument that decides what is still open, would have contradicted the primitive's whole promise.
+
+So the ledger takes one genuinely new function, `anyAnswer(db, msg)` — the first `accept`/`decline`
+naming the act **from anyone** — applied only when the act carries an eligible set. A plain team act
+keeps per-recipient answering, because there "someone replied" really does not mean everyone else is
+off the hook. Still derived, still nothing stored: ADR 090's doctrine holds, the derivation is just
+one clause larger than advertised.
 
 Note the pre-existing caveat this inherits: for team acts, recipients are "approximated by the roster
 of now." An eligible set is _better_ than the status quo here — the names are pinned in the envelope,
