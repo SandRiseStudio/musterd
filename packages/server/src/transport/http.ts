@@ -85,6 +85,7 @@ import {
   boardWarnings,
   getLane,
   laneWarnings,
+  noGoalWarning,
   listLanes,
   openLane,
   updateLane,
@@ -2706,6 +2707,12 @@ export async function handleHttp(
         }
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
+        // goals-front-door design: an unclaimed open isn't contending, so laneWarnings stays quiet —
+        // but the opener still gets the advisory in their own result. Nobody is woken (owner: null).
+        if (lane.state === 'open' && !warnings.some((w) => w.kind === 'no_goal')) {
+          const openNudge = noGoalWarning(lane, listGoals(ctx.db, team.id, team.slug));
+          if (openNudge) warnings.push(openNudge);
+        }
         deliverLaneTeamAct(ctx, team, member, `[lane] opened "${lane.title}"`, {
           lane_open: { lane: lane.id, title: lane.title, project: lane.project },
         });

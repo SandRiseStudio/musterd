@@ -1,4 +1,4 @@
-import type { Lane } from '@musterd/protocol';
+import { makeEnvelope, type Lane } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit } from './audit.js';
@@ -17,6 +17,7 @@ import {
   updateLane,
 } from './lanes.js';
 import { addMember } from './members.js';
+import { insertMessage } from './messages.js';
 import { createTeam } from './teams.js';
 
 function seed() {
@@ -570,5 +571,87 @@ describe('deriveHandoffLane (ADR 231) — a handoff act names the lane it hands 
       });
       expect(deriveHandoffLane(db, team.id, 'bravo', 'June', 'Cleo').kind).toBe('none');
     });
+  });
+});
+
+describe('no_goal warning (goals-front-door design)', () => {
+  function seedWithNick() {
+    const { db, team } = seed();
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+    return { db, team, nick };
+  }
+  let gts = 0;
+  function declareGoal(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    fromId: string,
+    goal: { id: string; title: string; wave?: number | 'later' },
+  ) {
+    const ts = ++gts;
+    insertMessage(
+      db,
+      teamId,
+      fromId,
+      null,
+      makeEnvelope({
+        id: `ng${ts}-${goal.id}`,
+        team: 'bravo',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'message',
+        body: `[goal] ${goal.title}`,
+        meta: { goal },
+        ts,
+      }),
+    );
+  }
+
+  it('a contending goal-less lane warns when an unshipped goal exists', () => {
+    const { db, team, nick } = seedWithNick();
+    declareGoal(db, team.id, nick.id, { id: 'g1', title: 'Native harness' });
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'work', claim: true });
+    const w = laneWarnings(db, team.id, 'bravo', lane);
+    expect(w.some((x) => x.kind === 'no_goal' && x.owner === null && x.with === 'g1')).toBe(true);
+  });
+
+  it('never warns: no goals declared / attached lane / backlog lane', () => {
+    const { db, team, nick } = seedWithNick();
+    const bare = openLane(db, team.id, 'bravo', 'June', { title: 'a', claim: true });
+    expect(laneWarnings(db, team.id, 'bravo', bare).some((x) => x.kind === 'no_goal')).toBe(false);
+    declareGoal(db, team.id, nick.id, { id: 'g1', title: 'G' });
+    const linked = openLane(db, team.id, 'bravo', 'Cleo', {
+      title: 'b',
+      goal_id: 'g1',
+      claim: true,
+    });
+    expect(laneWarnings(db, team.id, 'bravo', linked).some((x) => x.kind === 'no_goal')).toBe(
+      false,
+    );
+    // backlog (open, unclaimed) lane does not flag on the board:
+    const idle = openLane(db, team.id, 'bravo', 'Cleo', { title: 'c' });
+    expect(laneWarnings(db, team.id, 'bravo', idle).some((x) => x.kind === 'no_goal')).toBe(false);
+  });
+
+  it('never warns when the only goals are shipped', () => {
+    const { db, team, nick } = seedWithNick();
+    declareGoal(db, team.id, nick.id, { id: 'g1', title: 'G' });
+    const shipping = openLane(db, team.id, 'bravo', 'Cleo', {
+      title: 'ship it',
+      goal_id: 'g1',
+      claim: true,
+    });
+    updateLane(db, team.id, shipping.id, 'bravo', { state: 'done' });
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'work', claim: true });
+    expect(laneWarnings(db, team.id, 'bravo', lane).some((x) => x.kind === 'no_goal')).toBe(false);
+  });
+
+  it('board projection carries it once per lane', () => {
+    const { db, team, nick } = seedWithNick();
+    declareGoal(db, team.id, nick.id, { id: 'g1', title: 'G' });
+    openLane(db, team.id, 'bravo', 'June', { title: 'w', claim: true });
+    const lanes = listLanes(db, team.id, 'bravo');
+    expect(
+      boardWarnings(db, team.id, 'bravo', lanes).filter((w) => w.kind === 'no_goal'),
+    ).toHaveLength(1);
   });
 });
