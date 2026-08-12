@@ -169,6 +169,25 @@ the miss list belongs in the adoption lane's close.
 - Two files intentionally keep private `BOUNCE_RE`/`methodOf` copies (`repair.ts`, `coerce.ts`);
   the canaries anchor the shared definition in `toolTelemetry.ts` and the copies behaviorally.
 
+- **2026-08-12 — the era finding was incomplete, and the tripwire watched for a flip that will
+  never come.** The adoption checklist recorded "SDK 2.0.0 serves the 2026-07-28 era only via its
+  per-request HTTP entry" and armed a tripwire in `sdkSeams.test.ts` to go red "when an SDK bump
+  lets stdio negotiate a modern era." The SDK's migration doc
+  (`docs/migration/support-2026-07-28.md`) rules that flip out: a hand-wired
+  `connect(new StdioServerTransport())` serves *only* the 2025 era permanently — upgrading the SDK
+  changes nothing on that wire. Modern-era stdio is an **opt-in entry point**,
+  `serveStdio(() => buildServer())` from `@modelcontextprotocol/server/stdio` — per-connection
+  server factory, era selected by the opening exchange, `legacy: 'serve'` default keeps 2025-era
+  clients working — and it is already exported by the 2.0.0 package this repo has installed, so
+  "cannot reach musterd's wire in this release" was wrong at the time of writing. Consequences:
+  the tripwire was re-labeled a PIN on the legacy entry's behavior (same assertions, corrected
+  meaning); closing step 3's real wire assertions now rides a deliberate serveStdio adoption
+  (lane `01KZVZG5GE5GWX97F27CWBMC4C`), which requires `buildMcpServer` to become a per-connection
+  factory and is worth doing only once harnesses stop defaulting
+  `versionNegotiation` to legacy. The standing lesson: a dead-man switch is only a switch if the
+  watched event can occur — verify the trigger's reachability against the upstream's own
+  migration story, not against the shape of the release notes.
+
 ## Related
 
 - [ADR 144](144-mcp-tool-surface-measure-then-craft.md) — the seams' purpose; increment 6 closes.
