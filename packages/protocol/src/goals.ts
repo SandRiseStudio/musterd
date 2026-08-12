@@ -16,10 +16,15 @@ import { z } from 'zod';
 export const GoalStatusSchema = z.enum(['planned', 'in-flight', 'shipped']);
 export type GoalStatus = z.infer<typeof GoalStatusSchema>;
 
+/** plain-language one-liner for the stranger — what this goal means, not its title */
+export const GoalStorySchema = z.string().trim().min(1).max(140);
+
 export const GoalDeclareMetaSchema = z.object({
   goal: z.object({
     id: z.string().min(1),
     title: z.string().min(1),
+    /** plain-language one-liner for the stranger — what this goal means, not its title */
+    story: GoalStorySchema.optional(),
     /** Build-order lane, mirroring roadmap.data.ts's Wave — a plain rank, or 'later' (sorts last). */
     wave: z.union([z.number().int(), z.literal('later')]).optional(),
     /** Goal ids this Goal is blocked on — `nextGoal` skips a candidate until all of these ship. */
@@ -37,6 +42,8 @@ export const GoalSchema = z.object({
   declared_by: z.string(),
   declared_at: z.number().int(),
   status: GoalStatusSchema,
+  /** plain-language one-liner for the stranger (goals-front-door design); absent when never declared. */
+  story: z.string().optional(),
   /**
    * The Goal's **plan epoch** (ADR 111, ADR 088 increment 3) — a monotonic count of the direction-
    * changing acts that have landed on this Goal: every `defer` naming it (a re-sequence) and every
@@ -60,6 +67,8 @@ export type GoalList = z.infer<typeof GoalListSchema>;
 export const DeclareGoalSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
+  /** plain-language one-liner for the stranger — what this goal means, not its title */
+  story: GoalStorySchema.optional(),
   wave: z.union([z.number().int(), z.literal('later')]).optional(),
   depends_on: z.array(z.string()).optional(),
 });

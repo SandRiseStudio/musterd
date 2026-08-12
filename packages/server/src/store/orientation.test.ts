@@ -333,3 +333,63 @@ describe('owed_reviews — the verdicts someone is waiting on from ME (ADR 233)'
     expect(brief.owed_reviews.map((r) => r.ask_id)).toEqual(['ask-old', 'ask-new']);
   });
 });
+
+describe('brief leads with goals (goals-front-door design)', () => {
+  function declareGoal(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    fromId: string,
+    goal: { id: string; title: string; story?: string; wave?: number | 'later' },
+    ts: number,
+  ) {
+    insertMessage(
+      db,
+      teamId,
+      fromId,
+      null,
+      makeEnvelope({
+        id: `gd${ts}-${goal.id}`,
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'message',
+        body: `[goal] ${goal.title}`,
+        meta: { goal },
+        ts,
+      }),
+    );
+  }
+
+  it('brief leads with unshipped goals, wave-ordered, and up_next puts goal-attached lanes first', () => {
+    const { db, team, nick } = seed();
+    declareGoal(db, team.id, nick.id, { id: 'g2', title: 'Second', wave: 2 }, 10);
+    declareGoal(db, team.id, nick.id, { id: 'g1', title: 'First', wave: 1 }, 20);
+    // Two open lanes, the ungrouped one created first — attachment must still win the sort.
+    openLane(db, team.id, 'revive', 'nick', { title: 'ungrouped' });
+    openLane(db, team.id, 'revive', 'nick', { title: 'on g1', goal_id: 'g1' });
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.goals.map((g) => g.id)).toEqual(['g1', 'g2']);
+    expect(brief.up_next[0]!.goal_id).toBe('g1');
+  });
+
+  it('shipped goals are excluded and in-flight sorts before planned at equal wave', () => {
+    const { db, team, nick } = seed();
+    declareGoal(db, team.id, nick.id, { id: 'ga', title: 'A planned', wave: 1 }, 10);
+    declareGoal(db, team.id, nick.id, { id: 'gb', title: 'B in flight', wave: 1 }, 20);
+    declareGoal(db, team.id, nick.id, { id: 'gc', title: 'C shipped', wave: 1 }, 30);
+    const flight = openLane(db, team.id, 'revive', 'stanley', {
+      title: 'w',
+      goal_id: 'gb',
+      claim: true,
+    });
+    updateLane(db, team.id, flight.id, 'revive', { state: 'active' });
+    const done = openLane(db, team.id, 'revive', 'stanley', {
+      title: 'd',
+      goal_id: 'gc',
+      claim: true,
+    });
+    updateLane(db, team.id, done.id, 'revive', { state: 'done' });
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.goals.map((g) => g.id)).toEqual(['gb', 'ga']);
+  });
+});

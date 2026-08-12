@@ -85,6 +85,7 @@ import {
   boardWarnings,
   getLane,
   laneWarnings,
+  noGoalWarning,
   listLanes,
   openLane,
   updateLane,
@@ -812,10 +813,21 @@ function priorOwnerNotice(reviewer: string, priorOwners: string[]): string {
     : '';
 }
 
+/** goals-front-door design: close-time attribution nudge — appended, never blocking. */
+function noGoalNotice(goalId: string | null): string {
+  if (goalId !== null) return '';
+  return ' This lane is on no goal — if it advanced one, link it (lane_update {goal_id}) before resolving.';
+}
+
 /** ADR 192 acceptor checklist — judge the landed outcome, not the diff. */
 function acceptanceAskBody(
   title: string,
-  opts: { human?: boolean; peerFindings?: string; overlapNotice?: string } = {},
+  opts: {
+    human?: boolean;
+    peerFindings?: string;
+    overlapNotice?: string;
+    noGoalNotice?: string;
+  } = {},
 ): string {
   const checklist =
     'Judge the LANDED OUTCOME (not a code review): ' +
@@ -824,7 +836,7 @@ function acceptanceAskBody(
     '(3) Usable — exercise the path enough to say it works? ' +
     '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
     'Accept → move the lane to done; reject → send it back to active with a concrete note.';
-  const overlap = opts.overlapNotice ?? '';
+  const overlap = (opts.overlapNotice ?? '') + (opts.noGoalNotice ?? '');
   if (opts.human && opts.peerFindings !== undefined) {
     return (
       `[lane] human acceptance required: "${title}" — peer accepted with: "${opts.peerFindings}". ` +
@@ -2657,7 +2669,13 @@ export async function handleHttp(
           act: 'message',
           body: `[goal] declared "${body.title}"`,
           meta: {
-            goal: { id: body.id, title: body.title, wave: body.wave, depends_on: body.depends_on },
+            goal: {
+              id: body.id,
+              title: body.title,
+              story: body.story,
+              wave: body.wave,
+              depends_on: body.depends_on,
+            },
           },
         });
         routeEnvelope(ctx, team, member, env);
@@ -2700,6 +2718,12 @@ export async function handleHttp(
         }
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
+        // goals-front-door design: an unclaimed open isn't contending, so laneWarnings stays quiet —
+        // but the opener still gets the advisory in their own result. Nobody is woken (owner: null).
+        if (lane.state === 'open' && !warnings.some((w) => w.kind === 'no_goal')) {
+          const openNudge = noGoalWarning(lane, listGoals(ctx.db, team.id, team.slug));
+          if (openNudge) warnings.push(openNudge);
+        }
         deliverLaneTeamAct(ctx, team, member, `[lane] opened "${lane.title}"`, {
           lane_open: { lane: lane.id, title: lane.title, project: lane.project },
         });
@@ -3045,7 +3069,10 @@ export async function handleHttp(
               team,
               member,
               pick.reviewer,
-              acceptanceAskBody(lane.title, { overlapNotice }),
+              acceptanceAskBody(lane.title, {
+                overlapNotice,
+                noGoalNotice: noGoalNotice(lane.goal_id),
+              }),
               {
                 species: 'approve',
                 // ADR 172/188: the HUMAN acceptance ask carries the holding tier (required has

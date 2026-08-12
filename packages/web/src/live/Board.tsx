@@ -11,7 +11,6 @@ import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'rea
 import {
   capColumn,
   centerScroll,
-  groupByGoal,
   handoffPatch,
   laneActions,
   laneStates,
@@ -21,6 +20,7 @@ import {
   type MovedLanes,
 } from './boardWrite';
 import { initial, kindOf, memberAvatar } from './format';
+import { GoalGrid } from './GoalGridView';
 
 /**
  * The work board (ADR 104): the team's lanes as a kanban, one column per lane state. Lane state *is*
@@ -82,10 +82,12 @@ function ago(ts: number): string {
 export interface BoardProps {
   lanes: Lane[];
   warnings: LaneWarning[];
-  /** Columns (by lane state, the default) ⇄ goals (swimlane bands from the report's Goal list). */
-  view: 'columns' | 'goals';
-  /** Declared Goals with derived status — the swimlane bands (Inc B). Empty = "no goal" band only. */
+  /** Goals grid (the front door, goals-front-door design) ⇄ columns (by lane state). */
+  view: 'columns' | 'grid';
+  /** Declared Goals with derived status — the grid's mission cards. Empty = grid renders nothing. */
   goals: Goal[];
+  /** Drill into a goal's lanes (null = the goal-less pool). Absent = cards still render, inert. */
+  onOpenGoal?: (goalId: string | null) => void;
   /** Team roster — identity colors (jade agent / rose human) and the handoff seat picker. */
   roster: MemberSummary[];
   /** The signed-in member's seat name, or null for the read-only observer view. */
@@ -111,6 +113,7 @@ export function Board({
   warnings,
   view,
   goals,
+  onOpenGoal,
   roster,
   me,
   busyId,
@@ -256,69 +259,20 @@ export function Board({
     );
   };
 
-  if (view === 'goals') {
-    const rows = groupByGoal(lanes.filter((l) => l.state !== 'abandoned'), goals);
+  if (view === 'grid') {
     return (
-      <div className="lc-board lc-board--goals">
+      <div className="lc-board lc-board--grid">
         {composing && (
           <div className="lc-band lc-band--compose">
             <ComposeCard busy={busyId === 'compose'} onClose={onComposeClose} onCreate={onCreate} />
           </div>
         )}
-        {rows.length === 0 && !composing && (
-          <p className="lc-col__empty">No goals declared, nothing in flight. A blank page.</p>
-        )}
-        {rows.map((row) => (
-          <section
-            key={row.id ?? '∅'}
-            className="lc-band"
-            aria-label={`${row.title} — ${row.lanes.length} ${row.lanes.length === 1 ? 'lane' : 'lanes'}`}
-          >
-            <header className="lc-band__head">
-              <span className="lc-band__title">{row.title}</span>
-              {row.status && (
-                <span className={`lc-band__status lc-band__status--${row.status}`}>{row.status}</span>
-              )}
-              <span className="lc-col__count">{row.lanes.length}</span>
-            </header>
-            {row.lanes.length === 0 ? (
-              <p className="lc-col__empty">Declared, untouched. It waits.</p>
-            ) : (
-              <div className="lc-band__grid">
-                {COLUMNS.map((col) => {
-                  const items = row.lanes.filter((l) => l.state === col.key);
-                  if (items.length === 0) return null;
-                  const key = `${row.id ?? '∅'}:${col.key}`;
-                  const { shown, hidden } = capColumn(
-                    items,
-                    col.key === 'done' ? DONE_CAP : COLUMN_CAP,
-                    expanded.has(key),
-                    pin,
-                  );
-                  return (
-                    <div key={col.key} className={`lc-col lc-col--${col.tone}`}>
-                      <header className="lc-col__head">
-                        <span className="lc-col__label">{col.label}</span>
-                        <span className="lc-col__count">{items.length}</span>
-                      </header>
-                      <div className="lc-col__cards">
-                        {shown.map(renderCard)}
-                        {hidden > 0 && (
-                          <button
-                            className="lc-col__more"
-                            onClick={() => setExpanded((s) => new Set(s).add(key))}
-                          >
-                            …and {hidden} more
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
-        ))}
+        <GoalGrid
+          lanes={lanes.filter((l) => l.state !== 'abandoned')}
+          goals={goals}
+          roster={roster}
+          onOpenGoal={onOpenGoal ?? (() => undefined)}
+        />
       </div>
     );
   }

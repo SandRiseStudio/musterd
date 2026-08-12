@@ -30,6 +30,7 @@ interface WaveEvent {
 interface GoalAccumulator {
   id: string;
   title: string;
+  story?: string;
   depends_on: string[];
   declared_by: string;
   declared_at: number;
@@ -145,6 +146,8 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
     byId.set(g.id, {
       id: g.id,
       title: g.title,
+      // Wholesale replacement like the rest of the skeleton: an undeclared story clears, latest wins.
+      ...(g.story !== undefined ? { story: g.story } : {}),
       depends_on: g.depends_on ?? [],
       declared_by: row.from_name,
       declared_at: row.ts,
@@ -168,6 +171,7 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
   return [...byId.values()].map((g) => ({
     id: g.id,
     title: g.title,
+    ...(g.story !== undefined ? { story: g.story } : {}),
     // Effective wave = the newest wave assertion (declaration or defer) by ts; ties keep the later push.
     wave: g.waveEvents.reduce((best, e) => (e.ts >= best.ts ? e : best)).wave,
     depends_on: g.depends_on,

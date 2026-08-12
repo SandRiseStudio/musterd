@@ -19,7 +19,13 @@ function declare(
   db: ReturnType<typeof seed>['db'],
   teamId: string,
   fromId: string,
-  goal: { id: string; title: string; wave?: number | 'later'; depends_on?: string[] },
+  goal: {
+    id: string;
+    title: string;
+    story?: string;
+    wave?: number | 'later';
+    depends_on?: string[];
+  },
   ts = ++mid,
 ) {
   insertMessage(
@@ -66,6 +72,21 @@ function signal(
     }),
   );
 }
+
+describe('Goal.story (goals-front-door design)', () => {
+  it('story rides the declaration and re-declaration amends it', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'g1', title: 'Auth', story: 'first words' });
+    declare(db, team.id, nick.id, { id: 'g1', title: 'Auth', story: 'better words' });
+    const goals = listGoals(db, team.id, 'revive');
+    expect(goals[0]!.story).toBe('better words');
+  });
+  it('story is absent when never declared', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'g1', title: 'Auth' });
+    expect(listGoals(db, team.id, 'revive')[0]!.story).toBeUndefined();
+  });
+});
 
 describe('listGoals (declared-Goal seam, ADR 048/084)', () => {
   it('reads Goals from team messages carrying meta.goal, latest declaration per id wins', () => {

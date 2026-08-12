@@ -31,6 +31,7 @@ import { firehoseSound, roomTone } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 import { officeRoom } from '../live/officeRoom';
 import { useWorkingOn } from '../live/useWorkingOn';
+import { useReport } from '../live/useReport';
 import { roomEntries } from '../live/workingOn';
 
 export const Route = createFileRoute('/live')({
@@ -156,6 +157,7 @@ function LivePage() {
   // The office overlay's reel: everyone in the room and what they are on. Derived here (not in the
   // scene) so both routes hand the scene the same already-projected shape.
   const board = useWorkingOn(cfg, envelopes);
+  const report = useReport(cfg, envelopes);
   const entries = roomEntries(roster, board);
 
   /**
@@ -497,6 +499,7 @@ function LivePage() {
               cfg={cfg}
               roster={roster}
               base={board}
+              goals={report?.goals ?? []}
               origin={boardOrigin}
               focusLane={boardLane}
               onClose={closeBoard}

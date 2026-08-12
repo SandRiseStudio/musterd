@@ -3561,6 +3561,8 @@ describe('two-stage close (ADR 169)', () => {
     expect(ask.body).toContain('Principles');
     expect(ask.body).toContain('Usable');
     expect(ask.body).toContain('Feel');
+    // goals-front-door design: close-time attribution nudge on a goal-less lane, never blocking.
+    expect(ask.body).toContain('on no goal — if it advanced one, link it');
 
     // The audit recorded the worker's claim — and the achieved grade (ADR 188).
     const rows = await auditRows(nickTok, 'lane.ready_for_review');
@@ -3999,6 +4001,28 @@ describe('two-stage close (ADR 169)', () => {
     // …and it is still a real acceptance ask, not a refusal.
     expect(ask.body).toContain('acceptance requested');
     expect(ask.meta.lane_review.lane).toBe(laneId);
+  });
+
+  it('acceptance ask stays quiet about goals when the lane is attached to one', async () => {
+    const { ada, gee } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'attached work', branch: 'ada/att', goal_id: 'g1', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    await patchLane(
+      laneId,
+      { state: 'ready_for_review', merged: { pr: 43, sha: 'abc124', authorized_by: 'nick' } },
+      ada,
+    );
+    const inbox = await get('/teams/dawn/inbox?unread=1', gee);
+    const ask = inbox.json.messages.find(
+      (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+        m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+    );
+    expect(ask).toBeDefined();
+    expect(ask.body).not.toContain('on no goal');
   });
 
   // The ledger read is the whole mechanism, so pin it directly rather than only through the ask:

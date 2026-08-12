@@ -4,6 +4,7 @@ import {
   LANE_CONTENDING_STATES,
   LANE_TERMINAL_STATES,
   resolveStakesDefault,
+  type Goal,
   type Lane,
   type LaneState,
   type LaneWarning,
@@ -13,6 +14,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import type { AuditRow } from './audit.js';
+import { listGoals } from './goals.js';
 import { getPolicy } from './teams.js';
 
 /**
@@ -461,11 +463,29 @@ function projectsContend(a: string, b: string): boolean {
  * (a) unmet_dependency: a depends_on target not `done`. (b) surface_overlap: declared globs intersect
  * another *contending* lane's in the same project (an unscoped lane contending with all of them).
  */
+/** goals-front-door design: advisory nudge — a lane on no goal while goals are in flight.
+ *  `with` = the first unshipped goal by wave (a suggestion); owner null = never a directed wake. */
+export function noGoalWarning(lane: Lane, goals: Goal[]): LaneWarning | null {
+  if (lane.goal_id !== null) return null;
+  const unshipped = goals.filter((g) => g.status !== 'shipped');
+  if (unshipped.length === 0) return null;
+  const rank = (w: Goal['wave']) => (w === null || w === 'later' ? Number.POSITIVE_INFINITY : w);
+  const suggest = [...unshipped].sort((a, b) => rank(a.wave) - rank(b.wave))[0]!;
+  return {
+    kind: 'no_goal',
+    subject: lane.id,
+    with: suggest.id,
+    owner: null,
+    detail: `on no goal — ${unshipped.length} in flight; link it: lane_update {goal_id: "${suggest.id}"} (or another)`,
+  };
+}
+
 export function laneWarnings(
   db: Database,
   teamId: string,
   teamSlug: string,
   lane: Lane,
+  goals?: Goal[],
 ): LaneWarning[] {
   const warnings: LaneWarning[] = [];
   for (const depId of lane.depends_on) {
@@ -497,6 +517,10 @@ export function laneWarnings(
       }
     }
   }
+  if (CONTENDING.has(lane.state)) {
+    const w = noGoalWarning(lane, goals ?? listGoals(db, teamId, teamSlug));
+    if (w) warnings.push(w);
+  }
   return warnings;
 }
 
@@ -509,8 +533,9 @@ export function boardWarnings(
 ): LaneWarning[] {
   const out: LaneWarning[] = [];
   const seen = new Set<string>();
+  const goals = listGoals(db, teamId, teamSlug);
   for (const lane of lanes) {
-    for (const w of laneWarnings(db, teamId, teamSlug, lane)) {
+    for (const w of laneWarnings(db, teamId, teamSlug, lane, goals)) {
       // A surface overlap is symmetric — report each pair once (keyed order-independently).
       const key =
         w.kind === 'surface_overlap'
