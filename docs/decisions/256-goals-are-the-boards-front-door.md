@@ -1,4 +1,4 @@
-# 255 — Goals are the board's front door
+# 256 — Goals are the board's front door
 
 - Status: accepted
 - Date: 2026-08-12
