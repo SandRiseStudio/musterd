@@ -118,6 +118,11 @@ another work-order wake. Recorded, not amortized into spend. Never wedges.
 
 ## Consequences
 
+- **2026-08-12 — non-risky breaker no longer asks a human.** [ADR 253](253-non-risky-lanes-never-ask-a-human.md)
+  amends §5: a tripped breaker on a non-risky lane still stops spending wakes, but degrades to
+  sanctioned self-close instead of a blocking human ask. §5's Decision text stays frozen. Risky
+  lanes never entered this block.
+
 - Protocol: `ResidencyPolicy.flow`, `ResidencyPolicy.work_timeout_ms`,
   `Policy.loops.review`, optional `WakeOrder.derivation` + `WakeOrder.lane_id`.
 - Defaults keep every team bit-identical until an admin flips both knobs.

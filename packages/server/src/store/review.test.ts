@@ -403,13 +403,22 @@ describe('pickReviewCounterpart — graded ladder (ADR 188)', () => {
     expect(await pick(({ db, team }) => agent(db, team, 'mist'))).toBeNull();
   });
 
-  it('a live human outranks every agent grade and reads grade "human"', async () => {
+  it('a live human is never picked on a non-risky lane — the cross-family agent is (ADR 253)', async () => {
     const p = await pick(({ db, team }) => {
       agent(db, team, 'gptbot', 'gpt-5.6-sol');
       const { row } = addMember(db, team, { kind: 'human', name: 'nick', role: '' });
       attach(db, row.id, 'cli', 'conn-nick');
     });
-    expect(p).toMatchObject({ reviewer: 'nick', grade: 'human' });
+    expect(p).toMatchObject({ reviewer: 'gptbot', grade: 'cross_family' });
+  });
+
+  it('a live human alone is not a candidate on a non-risky lane (ADR 253)', async () => {
+    expect(
+      await pick(({ db, team }) => {
+        const { row } = addMember(db, team, { kind: 'human', name: 'nick', role: '' });
+        attach(db, row.id, 'cli', 'conn-nick');
+      }),
+    ).toBeNull();
   });
 });
 
