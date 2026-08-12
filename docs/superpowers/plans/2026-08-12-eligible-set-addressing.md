@@ -470,7 +470,9 @@ git commit -m "Ledger: an eligible-set act is owed by the named seats, not the r
 
 ---
 
-### Task 4: Stand-down — discharge in the interrupt line
+### Task 4: Stand-down — discharge in the interrupt line ✅ DONE (76dfb8e2)
+
+> **Note for later tasks:** `messages.ts` has TWO `const resolved = new Set<string>()` sites (lines ~232 and ~332); only the one inside `pendingInterrupts` takes the discharge set. Verify the full gate with `pnpm test` from the **repo root** — `pnpm -r test` fails on `@musterd/telemetry` for an unrelated pre-existing config reason (root-relative vitest include globs), not because anything here broke.
 
 **Files:**
 
