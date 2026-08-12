@@ -55,5 +55,7 @@
 // carrying a correction buried in its detail. An older seat is unaffected in what it reads — titles
 // render as they always did — it simply cannot issue the correction, and the roster's `behind` hint
 // is the cue for why its lane_update refuses the field.
-export const FEATURE_EPOCH = 9 as const;
+// Epoch 10 — no_goal lane warning + Goal.story (goals front door). An epoch-9 seat neither emits nor
+// renders either.
+export const FEATURE_EPOCH = 10 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

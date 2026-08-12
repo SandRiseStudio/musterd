@@ -235,9 +235,11 @@ export type Lane = z.infer<typeof LaneSchema>;
  * two staleness signals the interrupt line can't catch: `stale_plan` (the lane's own Goal moved epoch
  * since it was claimed) and `stale_dependency` (a lane it builds on had its Goal move). Both are
  * owner-directed, never broadcast — directory-based invalidation over the goal_id join + depends_on edge.
+ * goals-front-door design adds `no_goal` — a contending lane on no goal while the team has unshipped
+ * goals; advisory, owner-null, never woken.
  */
 export const LaneWarningSchema = z.object({
-  kind: z.enum(['unmet_dependency', 'surface_overlap', 'stale_plan', 'stale_dependency']),
+  kind: z.enum(['unmet_dependency', 'surface_overlap', 'stale_plan', 'stale_dependency', 'no_goal']),
   /** The lane the acting party touched (staleness: the stale lane itself). */
   subject: z.string(),
   /** The other party: the depended-on/overlapping lane, or — for `stale_plan` — the moved Goal id. */
