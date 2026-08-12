@@ -1,4 +1,4 @@
-import { makeEnvelope, type Lane } from '@musterd/protocol';
+import { ACCEPTANCE_STALE_MS, makeEnvelope, type Lane } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit } from './audit.js';
@@ -14,6 +14,7 @@ import {
   openLane,
   releaseDepartedSeatClaims,
   releaseInFlightClaimsForSeat,
+  staleAcceptanceWarning,
   updateLane,
 } from './lanes.js';
 import { addMember } from './members.js';
@@ -653,5 +654,66 @@ describe('no_goal warning (goals-front-door design)', () => {
     expect(
       boardWarnings(db, team.id, 'bravo', lanes).filter((w) => w.kind === 'no_goal'),
     ).toHaveLength(1);
+  });
+});
+
+describe('stale_acceptance warning (value-layer design)', () => {
+  function insertAuditAt(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    target: string,
+    ts: number,
+  ) {
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(`sa${ts}-${target}`, teamId, ts, 'June', 'lane.ready_for_review', target, 'allow', null, ts);
+  }
+  function awaitingLane(db: ReturnType<typeof seed>['db'], teamId: string) {
+    const lane = openLane(db, teamId, 'bravo', 'June', { title: 'w', claim: true });
+    return updateLane(db, teamId, lane.id, 'bravo', { state: 'awaiting_acceptance' });
+  }
+
+  it('warns once a lane has waited past the threshold — advisory, owner null', () => {
+    const { db, team } = seed();
+    const now = Date.now();
+    const lane = awaitingLane(db, team.id);
+    insertAuditAt(db, team.id, lane.id, now - ACCEPTANCE_STALE_MS - 60_000);
+    const w = staleAcceptanceWarning(db, team.id, lane, now);
+    expect(w).toMatchObject({ kind: 'stale_acceptance', subject: lane.id, owner: null });
+    expect(w!.detail).toMatch(/waiting 12h/);
+  });
+
+  it('stays silent under the threshold', () => {
+    const { db, team } = seed();
+    const now = Date.now();
+    const lane = awaitingLane(db, team.id);
+    insertAuditAt(db, team.id, lane.id, now - 60_000);
+    expect(staleAcceptanceWarning(db, team.id, lane, now)).toBeNull();
+  });
+
+  it('never warns for a non-waiting state, even past threshold', () => {
+    const { db, team } = seed();
+    const now = Date.now();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'w', claim: true });
+    insertAuditAt(db, team.id, lane.id, now - ACCEPTANCE_STALE_MS - 60_000);
+    expect(staleAcceptanceWarning(db, team.id, lane, now)).toBeNull();
+  });
+
+  it('falls back to updated_at with no audit row, and clock skew never emits', () => {
+    const { db, team } = seed();
+    const lane = awaitingLane(db, team.id); // updated_at ≈ now, no audit row
+    expect(staleAcceptanceWarning(db, team.id, lane, Date.now())).toBeNull();
+    // updated_at in the future (skew): waited < 0 — never emits.
+    expect(staleAcceptanceWarning(db, team.id, lane, lane.updated_at - 60_000)).toBeNull();
+  });
+
+  it('rides laneWarnings so the board projection carries it', () => {
+    const { db, team } = seed();
+    const now = Date.now();
+    const lane = awaitingLane(db, team.id);
+    insertAuditAt(db, team.id, lane.id, now - ACCEPTANCE_STALE_MS - 60_000);
+    const w = laneWarnings(db, team.id, 'bravo', lane, undefined, now);
+    expect(w.some((x) => x.kind === 'stale_acceptance')).toBe(true);
   });
 });

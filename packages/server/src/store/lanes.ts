@@ -1,7 +1,9 @@
 import {
+  ACCEPTANCE_STALE_MS,
   compareGoals,
   DEFAULT_PROJECT,
   globToRegExp,
+  isAwaitingAcceptance,
   LANE_CONTENDING_STATES,
   LANE_TERMINAL_STATES,
   resolveStakesDefault,
@@ -480,12 +482,44 @@ export function noGoalWarning(lane: Lane, goals: Goal[]): LaneWarning | null {
   };
 }
 
+/** value-layer design: review debt made visible — a lane waiting on acceptance past the threshold.
+ *  Advisory like `no_goal`: owner null, never a directed wake. Entry time = the latest
+ *  `lane.ready_for_review` audit row; falls back to `updated_at` for pre-audit lanes. A negative
+ *  wait (clock skew) never emits. */
+export function staleAcceptanceWarning(
+  db: Database,
+  teamId: string,
+  lane: Lane,
+  now: number,
+): LaneWarning | null {
+  if (!isAwaitingAcceptance(lane.state)) return null;
+  const row = db
+    .prepare<[string, string], { ts: number }>(
+      `SELECT ts FROM audit
+        WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+        ORDER BY ts DESC LIMIT 1`,
+    )
+    .get(teamId, lane.id);
+  const entered = row?.ts ?? lane.updated_at;
+  const waited = now - entered;
+  if (waited < ACCEPTANCE_STALE_MS) return null;
+  const hours = Math.floor(waited / 3_600_000);
+  return {
+    kind: 'stale_acceptance',
+    subject: lane.id,
+    with: lane.id,
+    owner: null,
+    detail: `waiting ${hours}h for acceptance — team_next surfaces it; any seat may answer per the acceptance ask`,
+  };
+}
+
 export function laneWarnings(
   db: Database,
   teamId: string,
   teamSlug: string,
   lane: Lane,
   goals?: Goal[],
+  now = Date.now(),
 ): LaneWarning[] {
   const warnings: LaneWarning[] = [];
   for (const depId of lane.depends_on) {
@@ -521,6 +555,9 @@ export function laneWarnings(
     const w = noGoalWarning(lane, goals ?? listGoals(db, teamId, teamSlug));
     if (w) warnings.push(w);
   }
+  // Independent of the CONTENDING gate: awaiting states are the review queue, not contention.
+  const stale = staleAcceptanceWarning(db, teamId, lane, now);
+  if (stale) warnings.push(stale);
   return warnings;
 }
 
