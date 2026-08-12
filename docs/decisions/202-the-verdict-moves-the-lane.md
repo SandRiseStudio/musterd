@@ -92,6 +92,26 @@ adapter's wording, so a reviewer meets the same refusal whichever surface they a
   is a verdict recorded against work it never looked at.
 - Both the CLI and the MCP adapter carry the disambiguation; a client that skips it can still
   mis-bind, so the honest place for this remains the client that knows the reviewer's intent.
+- _Dated note, 2026-08-12 — the third door, and the name it was dropping._ This ADR's confirmed
+  path requires the acceptor's **own seat**, which is right and stays unchanged. But there is a
+  third shape it did not cover: a human present **in an agent's session**, giving the verdict aloud,
+  with the agent relaying it as `lane_resolve {authorized_by}`. Observed live on lane
+  `01KXY9YRQWG6` (nick accepting, izzo relaying): the close recorded `verified: false` — correct,
+  since the name is client-attested and promoting it would let any seat mint its own acceptance,
+  the exact failure ADR 192 prevents — but the claimed authorizer reached the ledger through
+  `git.pr_merged` **only**, and a branchless lane never writes that row. So the human's name was
+  accepted by the API, stored on the lane, and audited nowhere.
+  `lane.closed` now carries `authorization_claimed` on unverified closes that name one. It is
+  deliberately a separate key from `verified`, per ADR 173: a self-close naming an authorizer is a
+  countable third shape, not the same event as a self-close naming nobody, and ADR 169's
+  review-catch rate must be able to tell "nobody accepted" from "a human did, through a seat". It
+  is written only when `verified` is false — where a counterpart genuinely confirmed, the closer is
+  the authority and a second client-attested one would blur which fact carried the confirmation.
+  The relay buys no better `reason` either: a lane that passed through review keeps ADR 217's wait
+  verdict, and the claim rides beside it.
+  What this does **not** do is make the relay equal to a seat-sent accept. It cannot: the daemon
+  knows the closer and only guesses the authorizer. The grade stays honest and the ask stays worth
+  sending — this only ensures the weaker evidence is still evidence, instead of nothing.
 
 ## Observability & Evaluation
 

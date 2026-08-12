@@ -164,6 +164,27 @@ export function recordLaneClose(
       ...(isAwaitingAcceptance(before.state) && routing.human_required === undefined
         ? { human_required_unknown: true }
         : {}),
+      // ADR 202 gave acceptance a confirmed door: the acceptor answers from their own seat and
+      // `verified` falls out of `closer !== owner-at-close`. This is the other door — a human's
+      // verdict given in-session, spoken to the agent and relayed as `{authorized_by}`. It is NOT
+      // promoted: the name is client-attested (see the ADR 109 note below), so trusting it would
+      // let any seat mint its own acceptance — precisely the failure ADR 192 exists to prevent.
+      //
+      // But it must not vanish either, and it did. `authorized_by` reached the ledger only through
+      // `git.pr_merged`, which a branchless lane never writes — so on a lane closed with no branch
+      // the claimed authorizer was accepted by the API, stored on the lane row, and recorded in the
+      // audit NOWHERE. Observed on lane 01KXY9YRQWG6 (2026-08-12): nick's acceptance, relayed by
+      // izzo, left no trace in the artifact ADR 109 and ADR 127 exist to make joinable.
+      //
+      // Recorded only on an UNVERIFIED close: when a counterpart genuinely confirmed, the closer is
+      // the authority and a second client-attested one alongside `verified: true` would blur which
+      // fact carried the confirmation. Keyed separately from `verified` on purpose — ADR 173: this
+      // is a countable third shape, a self-close that names an authorizer, which is not the same
+      // event as a self-close that names nobody. Folding them would leave ADR 169's review-catch
+      // rate unable to tell "nobody accepted" from "a human did, through a seat".
+      ...(!verified && mergedFromPatch?.authorized_by !== undefined
+        ? { authorization_claimed: mergedFromPatch.authorized_by }
+        : {}),
       worker_family: ownerAtClose ? workerFamily(db, teamId, ownerAtClose) : null,
       ...(verified ? { reviewer_family: workerFamily(db, teamId, closer.name) } : {}),
       // ADR 188 two-stage: which peer review a RISKY lane actually got — the newest
