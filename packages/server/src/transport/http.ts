@@ -813,10 +813,16 @@ function priorOwnerNotice(reviewer: string, priorOwners: string[]): string {
     : '';
 }
 
+/** goals-front-door design: close-time attribution nudge — appended, never blocking. */
+function noGoalNotice(goalId: string | null): string {
+  if (goalId !== null) return '';
+  return ' This lane is on no goal — if it advanced one, link it (lane_update {goal_id}) before resolving.';
+}
+
 /** ADR 192 acceptor checklist — judge the landed outcome, not the diff. */
 function acceptanceAskBody(
   title: string,
-  opts: { human?: boolean; peerFindings?: string; overlapNotice?: string } = {},
+  opts: { human?: boolean; peerFindings?: string; overlapNotice?: string; noGoalNotice?: string } = {},
 ): string {
   const checklist =
     'Judge the LANDED OUTCOME (not a code review): ' +
@@ -825,7 +831,7 @@ function acceptanceAskBody(
     '(3) Usable — exercise the path enough to say it works? ' +
     '(4) Feel — only if UI/copy/brand is in surface, else N/A. ' +
     'Accept → move the lane to done; reject → send it back to active with a concrete note.';
-  const overlap = opts.overlapNotice ?? '';
+  const overlap = (opts.overlapNotice ?? '') + (opts.noGoalNotice ?? '');
   if (opts.human && opts.peerFindings !== undefined) {
     return (
       `[lane] human acceptance required: "${title}" — peer accepted with: "${opts.peerFindings}". ` +
@@ -3058,7 +3064,10 @@ export async function handleHttp(
               team,
               member,
               pick.reviewer,
-              acceptanceAskBody(lane.title, { overlapNotice }),
+              acceptanceAskBody(lane.title, {
+                overlapNotice,
+                noGoalNotice: noGoalNotice(lane.goal_id),
+              }),
               {
                 species: 'approve',
                 // ADR 172/188: the HUMAN acceptance ask carries the holding tier (required has
