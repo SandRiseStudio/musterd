@@ -308,6 +308,52 @@ describe('lane prose aliases: note/notes/summary → detail (2026-08-01 re-measu
   });
 });
 
+describe('team_goal_declare wave sent as a string (2026-08-12, measured live)', () => {
+  // Measured, not speculated: miley hit this declaring the ADR 256 stories. `{wave: 7}` bounced
+  // with `wave: Invalid input` while `{wave: "later"}` passed, and the same number landed first try
+  // through `team_send {act:'defer', meta:{wave: 7}}` — so the number survives everywhere the arg
+  // is not a union. The schema is `z.union([z.number().int(), z.literal('later')])`, which publishes
+  // as `anyOf[integer, const "later"]`; the string arrives as `"7"` and neither member accepts it.
+  //
+  // The cost was not the bounce. A re-declaration replaces the Goal skeleton wholesale, so the
+  // workaround (declare, then defer the wave back) bumped the epoch on insight-dashboard and
+  // board-loops — a re-sequencing the board showed but nobody performed.
+  it('coerces an unambiguous numeric wave', () => {
+    expect(
+      coerceToolArgs('team_goal_declare', { id: 'g', title: 't', wave: '7' }).args['wave'],
+    ).toBe(7);
+  });
+
+  it('leaves the "later" sentinel alone — it is a valid member of the union, not a near-miss', () => {
+    const { args, applied } = coerceToolArgs('team_goal_declare', {
+      id: 'g',
+      title: 't',
+      wave: 'later',
+    });
+    expect(args['wave']).toBe('later');
+    expect(applied).toEqual([]);
+  });
+
+  it('leaves a real number alone', () => {
+    expect(coerceToolArgs('team_goal_declare', { id: 'g', title: 't', wave: 7 }).args['wave']).toBe(
+      7,
+    );
+  });
+
+  // The same discipline `pr:"local"` gets: a wave that is not mechanically a number keeps its
+  // bounce. Inventing an order here would silently re-sequence the board, which is the exact
+  // damage this lane exists to stop.
+  it('leaves an unparseable wave to bounce rather than inventing a build order', () => {
+    const { args, applied } = coerceToolArgs('team_goal_declare', {
+      id: 'g',
+      title: 't',
+      wave: 'soon-ish',
+    });
+    expect(args['wave']).toBe('soon-ish');
+    expect(applied).toEqual([]);
+  });
+});
+
 describe('normalization vs coercion', () => {
   it('trims strings silently — whitespace is not a mistake worth measuring', () => {
     const { args, applied } = coerceToolArgs('lane_claim', { id: '  01KYAG1M52 \n' });
