@@ -7,6 +7,7 @@ import {
   capitalizeSeat,
   parseSeatLabel,
   renderSeatLabel,
+  resolveAttestedWakeLease,
   type SessionCapture,
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
@@ -345,11 +346,18 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
         server: binding.server,
         key: binding.agent_key,
       }).presenceNeutral();
+      // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
+      // token rides the child's env, so it is attested here exactly as the presence-touch path
+      // attests it. Never defaulted — an ordinary session has no `MUSTERD_WAKE_LEASE` and says
+      // nothing (ADR 236). This is what lets a lease that dies `lease_expired` still be known to
+      // have PAID for a session: the captured row names the lease by identity, not by timing.
+      const wakeLease = resolveAttestedWakeLease(process.env);
       await http.attestSession(binding.team, {
         seat,
         harness: CAPTURE_HARNESS,
         event,
         session_digest: sessionDigest(binding.agent_key, session.id),
+        ...(wakeLease ? { wake_lease: wakeLease } : {}),
       });
     } catch {
       // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
@@ -412,11 +420,13 @@ export async function observeCursorSession(payload: HookPayload): Promise<string
           server: binding.server,
           key: binding.agent_key,
         }).presenceNeutral();
+        const wakeLease = resolveAttestedWakeLease(process.env);
         await http.attestSession(binding.team, {
           seat,
           harness: 'cursor',
           event: 'start',
           session_digest: sessionDigest(binding.agent_key, session.id),
+          ...(wakeLease ? { wake_lease: wakeLease } : {}),
         });
       } catch {
         /* daemon unreachable — local capture stands */

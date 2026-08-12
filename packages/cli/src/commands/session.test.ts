@@ -113,6 +113,39 @@ describe('musterd session (capture)', () => {
     expect(s.ended_at).toBeUndefined();
   });
 
+  // ADR 252: the wake token the actuator stamps on a woken child rides the attestation, so an
+  // expired lease can still be known to have PAID for a session. Never defaulted — an ordinary
+  // session attests nothing rather than claiming a lease it knows nothing about (ADR 236).
+  describe('the wake lease travels with the capture', () => {
+    const savedLease = process.env['MUSTERD_WAKE_LEASE'];
+    afterEach(() => {
+      if (savedLease === undefined) delete process.env['MUSTERD_WAKE_LEASE'];
+      else process.env['MUSTERD_WAKE_LEASE'] = savedLease;
+    });
+
+    it('attests MUSTERD_WAKE_LEASE when the session was spawned by a wake', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      process.env['MUSTERD_WAKE_LEASE'] = 'lease-abc';
+      await captureSession('start', { session_id: 'woken-1', cwd: wsA });
+      expect(attest).toHaveBeenCalledWith(
+        'dawn',
+        expect.objectContaining({ wake_lease: 'lease-abc' }),
+      );
+    });
+
+    it('omits the field entirely when unset — an unwoken session claims no lease', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      delete process.env['MUSTERD_WAKE_LEASE'];
+      await captureSession('start', { session_id: 'ordinary-1', cwd: wsA });
+      expect(attest).toHaveBeenCalledTimes(1);
+      expect(attest.mock.calls[0]![1]).not.toHaveProperty('wake_lease');
+    });
+  });
+
   // ── The interloper gate (lane 01KZAEGF2K step 3) ─────────────────────────────────────────────
   // Measured 2026-08-06: empty ~4s claude-code processes fired real SessionStart/SessionEnd hooks
   // in seat folders, captured the slot on start, and their honest `ended` demoted the LIVE session

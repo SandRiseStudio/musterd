@@ -793,6 +793,55 @@ describe('deriveWakeMetrics (ADR 131 inc 5) — latency, answer rate, cost, budg
     expect(k.cost_usd_per_wake).toBeCloseTo(0.9);
   });
 
+  // ADR 252: cost only ever arrives on the report path, so a lease that spawned a session and then
+  // expired unreported reads as free. The session's attested lease token is what makes that spend
+  // sayable — as a COUNT, never as an invented dollar figure folded into the totals.
+  it('counts a lease that paid for a session and reported no cost as unpriced, not as free', () => {
+    const { db, team, nick, ada } = wakeSeed();
+    directed(db, team, nick, ada, 'handoff', 'h1', NOW - 60 * 60_000);
+    // A wake that spawned a session and then died on its lease: the expiry row carries the fact.
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_failed',
+      'ada',
+      { act: 'h1', lease_id: 'L1', reason: 'lease_expired', session_captured: true },
+      NOW - 50 * 60_000,
+    );
+    // A second wake that also spawned a session but DID report its cost — priced, so not counted.
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_failed',
+      'ada',
+      { act: 'h1', lease_id: 'L2', reason: 'lease_expired', session_captured: true },
+      NOW - 49 * 60_000,
+    );
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_cost',
+      'ada',
+      { act: 'h1', lease_id: 'L2', cost_usd: 0.4 },
+      NOW - 48 * 60_000,
+    );
+    // A third expiry with no session evidence at all stays silent — absence is not a zero.
+    residencyRow(
+      db,
+      team.id,
+      'residency.wake_failed',
+      'ada',
+      { act: 'h1', lease_id: 'L3', reason: 'lease_expired' },
+      NOW - 47 * 60_000,
+    );
+
+    const k = deriveWakeMetrics(db, team.id, NOW);
+    expect(k.unpriced_sessions).toBe(1);
+    // The totals are untouched: the unpriced wake contributes no fabricated spend.
+    expect(k.cost_usd_total).toBeCloseTo(0.4);
+    expect(k.cost_reported).toBe(1);
+  });
+
   it('by_seat flags over_budget against the effective budget_usd (a per-run report bound)', () => {
     const { db, team, nick, ada } = wakeSeed();
     // Seat override: budget $0.50 per wake.

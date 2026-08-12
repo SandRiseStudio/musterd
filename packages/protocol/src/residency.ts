@@ -174,6 +174,16 @@ export const SessionAttestationBodySchema = z.object({
     .string()
     .regex(/^[0-9a-f]{8,32}$/)
     .optional(),
+  /** The wake lease this session was spawned by (ADR 241/252), attested from `MUSTERD_WAKE_LEASE` —
+   *  the same token the presence-touch path already carries. It is the only *identity* join between
+   *  a lease and the session it paid for: without it the ledger can correlate a wake to a session
+   *  only by timing, which is the "any fresh presence is my evidence" mistake ADR 238→241 removed.
+   *
+   *  **Never defaulted, ever** (ADR 236 — absence is not an assertion). The actuator sets the env
+   *  var only on a woken child, so an unrelated session omits the field and asserts nothing; a
+   *  defaulted token would have an unstamped session claim membership of a lease it knows nothing
+   *  about. Optional on the wire — an older CLI simply omits it. */
+  wake_lease: z.string().min(1).max(64).optional(),
 });
 export type SessionAttestationBody = z.infer<typeof SessionAttestationBodySchema>;
 

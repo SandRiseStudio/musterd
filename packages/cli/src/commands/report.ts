@@ -171,6 +171,13 @@ function renderWake(k: NonNullable<Report['wake']>, w: (s: string) => void): voi
       `  cost $${k.cost_usd_total.toFixed(2)} total · $${k.cost_usd_per_wake!.toFixed(2)}/wake ${theme.meta(`(${k.cost_reported} of ${k.wakes} reported)`)}\n`,
     );
   }
+  // ADR 252: spend the cost line structurally cannot show. Printed only when there is some — a zero
+  // here would read as "nothing went unpriced", which the token cannot yet promise.
+  if ((k.unpriced_sessions ?? 0) > 0) {
+    w(
+      `  ${theme.meta('unpriced')} ${k.unpriced_sessions} wake${k.unpriced_sessions === 1 ? '' : 's'} spawned a session and died unreported — paid, cost unknown\n`,
+    );
+  }
   // ADR 209/210 Eval split. Printed only when something was actually measured — a cohort of zero
   // must not render as a row of zeros, which reads like a measured result rather than no data. When
   // wakes exist but none reported a delivery, say so plainly: that is the ADR 209 baseline's real
