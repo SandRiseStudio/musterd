@@ -4,6 +4,7 @@ import { flagStr } from '../args.js';
 import type { ActuatorBackend } from '../host/backend.js';
 import { claudeCodeBackend } from '../host/backends/claudeCode.js';
 import { codexBackend } from '../host/backends/codex.js';
+import { nativeBackend } from '../host/backends/native.js';
 import { pollHostOnce, type HostPollDeps } from '../host/loop.js';
 import { hostRegistryPath, loadHostRegistry } from '../host/registry.js';
 import { theme } from '../render/theme.js';
@@ -50,6 +51,11 @@ export async function hostCommand(
   backends.set(claude.harness, claude);
   const codex = codexBackend();
   backends.set(codex.harness, codex);
+  // The native row (ADR 251): selected only by an enrollment that explicitly says
+  // `harness: musterd` — registered here, never a default (a native wake spends real dollars
+  // against the configured model; phase-1 rollout is opt-in per enrollment).
+  const native = nativeBackend();
+  backends.set(native.harness, native);
 
   const log = deps.log ?? ((line: string) => process.stdout.write(theme.meta(`  ${line}`) + '\n'));
   const hostLabel = flagStr(parsed.flags, 'host');

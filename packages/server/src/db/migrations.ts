@@ -739,6 +739,33 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 251 §7: the native backend's two substrate rails, one row per loop turn. Per-turn usage
+    // into the wake ledger (cost exists even when a run dies unreported — the #745 report-survivor
+    // bias, closed for this backend) and daemon-owned transcript capture (the substrate phase-2
+    // resume will replay). UNIQUE(lease_id, turn) makes a re-posted turn an overwrite, never a
+    // duplicate. member_id denormalized from the lease at insert so the capture stays keyed to the
+    // occupancy even if lease rows are ever pruned.
+    version: 38,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS wake_turns (
+          id              TEXT PRIMARY KEY,
+          team_id         TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          lease_id        TEXT NOT NULL,
+          member_id       TEXT NOT NULL,
+          turn            INTEGER NOT NULL,
+          usage_json      TEXT NOT NULL,
+          cost_usd        REAL,
+          stop_reason     TEXT,
+          transcript_json TEXT,
+          created_at      INTEGER NOT NULL,
+          UNIQUE(lease_id, turn)
+        );
+        CREATE INDEX IF NOT EXISTS idx_wake_turns_lease ON wake_turns(team_id, lease_id, turn);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

@@ -35,6 +35,7 @@ import {
   type SessionAttestationResponse,
   type WakeLeasesResponse,
   type WakeReportBody,
+  type WakeTurnBody,
   type WakeContextPacket,
   type WakeContextRequest,
   type ActDelivery,
@@ -624,6 +625,16 @@ export class HttpClient {
       ok: boolean;
       lease_id: string;
       status: string;
+    };
+  }
+
+  /** The native loop's per-turn rail (ADR 251 §7) — `POST /teams/:slug/residency/wake-turn`:
+   *  one usage/capture row per turn, best-effort from the backend's perspective (a failed post
+   *  never aborts the loop). Callers use `.presenceNeutral()` — telemetry must not animate. */
+  async wakeTurn(slug: string, body: WakeTurnBody): Promise<{ ok: boolean; turn: number }> {
+    return (await this.request('POST', `/teams/${slug}/residency/wake-turn`, body)) as {
+      ok: boolean;
+      turn: number;
     };
   }
 

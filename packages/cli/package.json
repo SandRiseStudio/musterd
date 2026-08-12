@@ -21,7 +21,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
     "@clack/prompts": "^0.9.1",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
     "@musterd/mcp": "workspace:*",
     "@musterd/protocol": "workspace:*",
     "@musterd/server": "workspace:*",
