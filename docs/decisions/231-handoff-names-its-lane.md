@@ -92,6 +92,12 @@ from 24 of 30 to 16 of 30 automatically, with the warning aimed at 6 more.
 
 ## Consequences
 
+- **2026-08-12 — the `why` uses the #745 out-of-play set.** `deriveNext` skipped only `done` /
+  `abandoned`, so a named handoff whose lane sat in `awaiting_acceptance` kept reading as a live
+  instruction. It now shares `handoffNamedLaneOutOfPlay` with the wake path: submitted or terminal.
+  Lane-less handoffs are still shown (this Decision's "What this does not do" stands). CLI `next`
+  and MCP `team_next` render that projection; they do not re-derive it.
+
 - `meta.lane_handoff` is an existing shape written by an existing path; no protocol schema changes.
   The ack gains an additive `handoff_lane` field, the same contract as `ask_contract` (ADR 147) and
   `delivery_hint` (ADR 167): older clients ignore it, older daemons omit it.

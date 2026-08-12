@@ -104,16 +104,31 @@ function answerBy(
  * handoff, or one naming a lane that no longer exists, keeps its old behaviour rather than silently
  * going quiet — a wake that should not have fired is expensive, but a handoff that stops asking is
  * work dropped on the floor, and only one of those is recoverable.
+ *
+ * Exported so every reader of a handoff-as-live-instruction (wake candidacy, orientation `why`)
+ * uses the same out-of-play test. A second copy in `orientation.ts` is how the `why` kept serving
+ * discharged work after this clause landed for wakes (#745).
  */
-function laneHandoffDischarged(
+export function handoffNamedLaneOutOfPlay(
   db: Database,
-  msg: MessageRow,
-): { act: string; id: string; ts: number } | null {
-  if (msg.act !== 'handoff' || !msg.meta) return null;
+  teamId: string,
+  meta: string | null,
+): boolean {
+  const lane = namedHandoffLane(db, teamId, meta);
+  if (!lane) return false;
+  return isAwaitingAcceptance(lane.state) || LANE_TERMINAL_STATES.has(lane.state as LaneState);
+}
+
+function namedHandoffLane(
+  db: Database,
+  teamId: string,
+  meta: string | null,
+): { id: string; state: string; updated_at: number } | null {
+  if (!meta) return null;
   let laneId: unknown;
   try {
-    const meta = JSON.parse(msg.meta) as { lane_handoff?: { lane?: unknown } };
-    laneId = meta.lane_handoff?.lane;
+    const parsed = JSON.parse(meta) as { lane_handoff?: { lane?: unknown } };
+    laneId = parsed.lane_handoff?.lane;
   } catch {
     return null; // unparseable meta is not evidence of discharge
   }
@@ -121,14 +136,25 @@ function laneHandoffDischarged(
   const lane = db
     .prepare<
       [string, string],
-      { state: string; updated_at: number }
-    >('SELECT state, updated_at FROM lanes WHERE team_id = ? AND id = ?')
-    .get(msg.team_id, laneId);
+      { id: string; state: string; updated_at: number }
+    >('SELECT id, state, updated_at FROM lanes WHERE team_id = ? AND id = ?')
+    .get(teamId, laneId);
+  return lane ?? null;
+}
+
+function laneHandoffDischarged(
+  db: Database,
+  msg: MessageRow,
+): { act: string; id: string; ts: number } | null {
+  if (msg.act !== 'handoff') return null;
+  const lane = namedHandoffLane(db, msg.team_id, msg.meta);
   if (!lane) return null;
-  const out = isAwaitingAcceptance(lane.state) || LANE_TERMINAL_STATES.has(lane.state as LaneState);
+  if (!isAwaitingAcceptance(lane.state) && !LANE_TERMINAL_STATES.has(lane.state as LaneState)) {
+    return null;
+  }
   // `id` names the LANE, not a message: this closure has no envelope of its own, and pointing at a
   // real lane is more useful to a reader of the ledger than a synthetic message id would be.
-  return out ? { act: `lane:${lane.state}`, id: laneId, ts: lane.updated_at } : null;
+  return { act: `lane:${lane.state}`, id: lane.id, ts: lane.updated_at };
 }
 
 /**

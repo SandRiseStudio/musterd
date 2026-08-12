@@ -4,7 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { appendAudit } from './audit.js';
 import { setCursor } from './cursors.js';
-import { actDelivery, crossedBySeen, openDirectedLedger } from './delivery.js';
+import {
+  actDelivery,
+  crossedBySeen,
+  handoffNamedLaneOutOfPlay,
+  openDirectedLedger,
+} from './delivery.js';
+import { openLane, updateLane } from './lanes.js';
 import { addMember } from './members.js';
 import { countOpenLoops, insertMessage } from './messages.js';
 import type { MemberRow, TeamRow } from './rows.js';
@@ -168,5 +174,32 @@ describe('openDirectedLedger (ADR 090: the open directed ledger)', () => {
     msg(db, team, ada, null, 'resolve', 'v1', 3_000, { thread: 't1' });
     expect(loopActs()).toBe(countOpenLoops(db));
     expect(countOpenLoops(db)).toBe(1);
+  });
+});
+
+describe('handoffNamedLaneOutOfPlay (#745 discharge rule, shared with orientation why)', () => {
+  function metaFor(laneId: string): string {
+    return JSON.stringify({ lane_handoff: { lane: laneId } });
+  }
+
+  it('is false for a bare handoff, a missing lane, and a still-live named lane', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, team.slug, 'nick', { title: 'live', claim: true });
+    expect(handoffNamedLaneOutOfPlay(db, team.id, null)).toBe(false);
+    expect(handoffNamedLaneOutOfPlay(db, team.id, '{}')).toBe(false);
+    expect(handoffNamedLaneOutOfPlay(db, team.id, metaFor('no-such-lane'))).toBe(false);
+    expect(handoffNamedLaneOutOfPlay(db, team.id, metaFor(lane.id))).toBe(false);
+  });
+
+  it('is true once the named lane is awaiting acceptance or terminal', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, team.slug, 'nick', { title: 'handed', claim: true });
+    const meta = metaFor(lane.id);
+    updateLane(db, team.id, lane.id, team.slug, { state: 'awaiting_acceptance' });
+    expect(handoffNamedLaneOutOfPlay(db, team.id, meta)).toBe(true);
+    updateLane(db, team.id, lane.id, team.slug, { state: 'done' });
+    expect(handoffNamedLaneOutOfPlay(db, team.id, meta)).toBe(true);
+    updateLane(db, team.id, lane.id, team.slug, { state: 'abandoned' });
+    expect(handoffNamedLaneOutOfPlay(db, team.id, meta)).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 import { isAwaitingAcceptance, type Lane, type NextBrief } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { handoffNamedLaneOutOfPlay } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
 import { listLanes } from './lanes.js';
 
@@ -22,9 +23,6 @@ import { listLanes } from './lanes.js';
  */
 const LIVE: ReadonlySet<string> = new Set(['claimed', 'active', 'blocked', 'awaiting_acceptance']);
 
-/** A handoff pointing at one of these is describing finished work — see `why` below. */
-const TERMINAL: ReadonlySet<string> = new Set(['done', 'abandoned']);
-
 /**
  * How far back to look for a handoff that still describes live work. Bounded on purpose: a team
  * whose last 20 handoffs all closed has no live why, and saying so beats scanning its whole history
@@ -41,14 +39,6 @@ function parseMeta(meta: string | null): Record<string, unknown> {
     // A malformed meta is not a reason to lose the human's words.
     return {};
   }
-}
-
-/** The lane a handoff carries (`meta.lane_handoff.lane`), or null when it names none. */
-function laneOf(meta: Record<string, unknown>): string | null {
-  const h = meta['lane_handoff'];
-  if (typeof h !== 'object' || h === null) return null;
-  const lane = (h as Record<string, unknown>)['lane'];
-  return typeof lane === 'string' ? lane : null;
 }
 
 interface OwedRow {
@@ -121,14 +111,16 @@ export function deriveNext(
     });
 
   // The why: the latest handoff addressed to me or the team (not one I sent). Enrichment, never
-  // required — but it is read as a live instruction, so a handoff whose lane has since closed is
-  // worse than no handoff at all. This brief served a four-day-old "finish step 7" for a lane whose
-  // PR had merged, and the seat reading it went looking for work that did not exist. So walk back
-  // from the newest and take the first that still describes something unfinished.
+  // required — but it is read as a live instruction, so a handoff whose named lane has left the
+  // recipient's plate is worse than no handoff at all. Walk back from the newest and take the first
+  // that is still in play, using the same #745 predicate the wake path uses (`handoffNamedLaneOutOfPlay`):
+  // awaiting_acceptance or terminal. A second, narrower copy here (terminal-only) is how this brief
+  // kept serving work that was already submitted.
   //
   // Deliberately NOT a `stale` marker on the payload: that forks `NextBriefSchema` for what the
-  // brief can answer on its own. And deliberately not a SQL join — a handoff's lane lives in
-  // `meta.lane_handoff.lane`, so filtering here keeps the JSON shape in one place.
+  // brief can answer on its own. Bare / unparseable / missing-lane handoffs stay shown (ADR 173
+  // abstain-by-showing; #745 is equally narrow). CLI `musterd next` and MCP `team_next` render this
+  // projection — they do not re-derive it (ADR 084).
   const rows = db
     .prepare<[string, string, string, number], HandoffRow>(
       `SELECT mf.name AS from_name, m.body AS body, m.meta AS meta, m.ts AS ts
@@ -144,16 +136,7 @@ export function deriveNext(
     )
     .all(teamId, member, member, WHY_SCAN_DEPTH);
 
-  const byId = new Map(all.map((l) => [l.id, l]));
-  const row = rows.find((r) => {
-    const meta = parseMeta(r.meta);
-    const laneId = laneOf(meta);
-    // Abstains by SHOWING, never by hiding (ADR 173): a handoff naming no lane, or naming one this
-    // team cannot resolve, is unjudgeable — and an unjudgeable why is still the human's words.
-    if (laneId === null) return true;
-    const lane = byId.get(laneId);
-    return lane === undefined || !TERMINAL.has(lane.state);
-  });
+  const row = rows.find((r) => !handoffNamedLaneOutOfPlay(db, teamId, r.meta));
 
   const why = row
     ? {

@@ -118,6 +118,71 @@ describe('deriveNext — the orientation brief (ADR 049/084)', () => {
     expect(brief.why!.body).toBe('this one is still real');
   });
 
+  // #745: a named lane that has been submitted is already off the recipient's plate. The why used
+  // to skip only `done`/`abandoned`, so a handoff whose PR had merged but whose lane was still
+  // awaiting_acceptance kept reading as a live instruction.
+  it('skips a handoff whose lane is awaiting acceptance — same #745 out-of-play rule as wakes', () => {
+    const { db, team, nick } = seed();
+    const submitted = openLane(db, team.id, 'revive', 'stanley', {
+      title: 'merged, waiting on accept',
+      claim: true,
+    });
+    const live = openLane(db, team.id, 'revive', 'stanley', { title: 'still going', claim: true });
+    for (const [id, lane, ts, body] of [
+      ['h-live', live.id, 1_000, 'this one is still real'],
+      ['h-submitted', submitted.id, 2_000, 'finish the merged one'],
+    ] as const) {
+      insertMessage(
+        db,
+        team.id,
+        nick.id,
+        null,
+        makeEnvelope({
+          id,
+          team: 'revive',
+          from: 'nick',
+          to: { kind: 'team' },
+          act: 'handoff',
+          body,
+          ts,
+          meta: { lane_handoff: { lane } },
+        }),
+      );
+    }
+    updateLane(db, team.id, submitted.id, 'revive', { state: 'awaiting_acceptance' });
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.why!.body).toBe('this one is still real');
+  });
+
+  // The property that makes DERIVING this (rather than storing a flag) the right shape: a rejected
+  // acceptance sends the lane back to active and the why becomes that handoff again.
+  it('re-serves the why when acceptance sends the named lane back to active', () => {
+    const { db, team, nick } = seed();
+    const lane = openLane(db, team.id, 'revive', 'stanley', { title: 'bounced', claim: true });
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      null,
+      makeEnvelope({
+        id: 'h-bounce',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'handoff',
+        body: 'this came back',
+        ts: 1_000,
+        meta: { lane_handoff: { lane: lane.id } },
+      }),
+    );
+    updateLane(db, team.id, lane.id, 'revive', { state: 'awaiting_acceptance' });
+    expect(deriveNext(db, team.id, 'revive', 'stanley').why).toBeNull();
+
+    updateLane(db, team.id, lane.id, 'revive', { state: 'active' });
+    expect(deriveNext(db, team.id, 'revive', 'stanley').why!.body).toBe('this came back');
+  });
+
   // A handoff that names no lane cannot be checked, so it must still be served: abstain by showing
   // it, never by hiding it (ADR 173 — an unknown is not a falsy).
   it('still serves a handoff that carries no lane reference', () => {
