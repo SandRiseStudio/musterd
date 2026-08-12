@@ -2,6 +2,7 @@ import {
   type AskSpecies,
   type AskTier,
   DeferUntilSchema,
+  eligibleOf,
   type Envelope,
   isAwaitingAcceptance,
   makeEnvelope,
@@ -246,7 +247,36 @@ function routeEnvelopeInner(
     recordActModel(attestedModel);
   }
 
-  // Resolve recipients.
+  // ADR NNN: the roster half of eligible-set validation. `actMetaRules` proved the shape; only the
+  // daemon can prove the *names*, and it REJECTS rather than dropping — a question addressed to a
+  // seat that cannot answer it is worse than a rejected send, because the sender goes on believing
+  // someone owes them a reply. Read off `outgoingEnv` so a meta rewrite above can never desync the
+  // set that gets validated from the set that gets persisted.
+  const eligible = eligibleOf(outgoingEnv.meta);
+  if (eligible) {
+    for (const name of eligible) {
+      const seat = getMemberByName(ctx.db, team.id, name);
+      if (!seat || seat.left_at !== null) {
+        throw new MusterdError('not_found', `no member "${name}" in ${team.slug}`);
+      }
+      // An observer isn't a participant (ADR 063) — it receives the act via the firehose and can't
+      // send, so it could never discharge one. Naming it would strand the act by construction.
+      if (seat.observer === 1) {
+        throw new MusterdError(
+          'validation',
+          `seat "${name}" is an observer and cannot owe an answer`,
+        );
+      }
+      if (seat.id === sender.id) {
+        throw new MusterdError('validation', `meta.eligible cannot name the sender ("${name}")`);
+      }
+    }
+  }
+
+  // Resolve recipients. Deliberately UNCHANGED by the eligible set: an eligible-set act is
+  // team-addressed, so every seat still receives the push and sees it in their inbox. Only the
+  // ledger (`recipientsOf`) and the obligation predicate (`pendingInterrupts`) narrow — visibility
+  // and accountability are separate axes, and only the latter was ever meant to shrink.
   let toMemberId: string | null = null;
   let recipients: string[];
   if (env.to.kind === 'member') {

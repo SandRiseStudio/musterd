@@ -330,6 +330,88 @@ describe('HTTP API', () => {
     expect(bad.json.error.code).toBe('validation');
   });
 
+  // ADR NNN: the eligible set. The roster half of validation — `actMetaRules` proved the shape, only
+  // the daemon can prove the names.
+  describe('meta.eligible roster validation', () => {
+    const sendEligible = async (
+      tok: unknown,
+      eligible: string[],
+      from = 'nick',
+      id = 'el' + Math.random().toString(36).slice(2, 8),
+    ) =>
+      post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id,
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from,
+            to: { kind: 'team' },
+            act: 'message',
+            body: 'either of you know why the daemon pinned?',
+            ts: Date.now(),
+            meta: { eligible },
+          },
+        },
+        tok,
+      );
+
+    const teamOfThree = async () => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      const tok = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, tok);
+      await post('/teams/dawn/members', { name: 'cy', kind: 'human' }, tok);
+      return tok;
+    };
+
+    it('stores ONE team-addressed row carrying the set — no fan-out, no new to_kind', async () => {
+      const tok = await teamOfThree();
+      const sent = await sendEligible(tok, ['bo', 'cy'], 'nick', 'el-ok');
+      expect(sent.status).toBe(201);
+
+      const timeline = await get('/teams/dawn/messages', tok);
+      const row = timeline.json.messages.find((m: { id: string }) => m.id === 'el-ok');
+      expect(row.to).toEqual({ kind: 'team' });
+      expect(row.meta.eligible).toEqual(['bo', 'cy']);
+    });
+
+    it('rejects a name that is not on the roster', async () => {
+      const tok = await teamOfThree();
+      const res = await sendEligible(tok, ['bo', 'nobody-here']);
+      expect(res.status).toBe(404);
+      expect(res.json.error.code).toBe('not_found');
+      expect(res.json.error.message).toContain('nobody-here');
+    });
+
+    it('rejects a set naming the sender — you cannot owe yourself an answer', async () => {
+      const tok = await teamOfThree();
+      const res = await sendEligible(tok, ['nick', 'bo']);
+      expect(res.status).toBe(422);
+      expect(res.json.error.code).toBe('validation');
+      expect(res.json.error.message).toContain('sender');
+    });
+
+    it('rejects a set naming an observer — observers receive, they do not owe (ADR 063)', async () => {
+      const tok = await teamOfThree();
+      await post('/teams/dawn/members', { name: 'eye', kind: 'human', observer: true }, tok);
+      const res = await sendEligible(tok, ['bo', 'eye']);
+      expect(res.status).toBe(422);
+      expect(res.json.error.code).toBe('validation');
+      expect(res.json.error.message).toContain('observer');
+    });
+
+    it('rejects a seat that has left the team', async () => {
+      const tok = await teamOfThree();
+      server.db.prepare("UPDATE members SET left_at = 1 WHERE name = 'cy'").run();
+      const res = await sendEligible(tok, ['bo', 'cy']);
+      expect(res.status).toBe(404);
+    });
+  });
+
   it('ambient presence: a one-shot authenticated command flips the agent present (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
