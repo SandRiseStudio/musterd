@@ -192,6 +192,33 @@ describe('anthropicEngine.run', () => {
     expect(result.turns).toBe(1);
   });
 
+  it('classifies an UNRESOLVABLE credential as auth, not error — the keyless-host case (ADR 221)', async () => {
+    // The exact shape the SDK raises on a host that was never given a key. Measured live on the
+    // first native wake (2026-08-12): it fell through to `error`, so the daemon CHARGED the act
+    // two of its three attempts in four minutes for a machine-local fault nobody could answer.
+    // A missing key is the native row's "harness binary not found" — it must defer, never burn.
+    const err = new Error(
+      'Could not resolve authentication method. Expected one of apiKey, authToken, credentials, ' +
+        'config, or profile to be set. Or for one of the "X-Api-Key" or "Authorization" headers to be explicitly omitted',
+    );
+    const result = await anthropicEngine({ client: fakeClient({ error: err }) as never }).run({
+      model: 'claude-opus-5',
+      prompt: 'hi',
+      tools: [],
+    });
+    expect(result.end).toBe('auth');
+  });
+
+  it('classifies a credential failure raised at CLIENT CONSTRUCTION as auth too', async () => {
+    const result = await anthropicEngine({
+      createClient: () => {
+        throw new Error('Could not resolve authentication method.');
+      },
+    }).run({ model: 'claude-opus-5', prompt: 'hi', tools: [] });
+    expect(result.end).toBe('auth');
+    expect(result.turns).toBe(0);
+  });
+
   it('classifies a 401 as auth — the deferral signal, a machine property not a work failure', async () => {
     const err = Object.assign(new Error('invalid x-api-key'), { status: 401 });
     const client = fakeClient({ error: err });

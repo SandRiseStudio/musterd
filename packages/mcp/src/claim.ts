@@ -42,6 +42,38 @@ export async function claimAndJoin(
     client.claimed && 'seat' in target && client.member === target.seat && client.joined;
   if (reused) return { member: client.member!, reused: true };
 
+  // Single-flight the claim (first live native wake, 2026-08-12). The `reused` guard above answers
+  // "have we ALREADY claimed", which a second caller that arrives while the first claim is still in
+  // flight passes straight through — and then the session claims its own seat twice. Measured: the
+  // native loop's model issued `team_join` in PARALLEL with `team_inbox_check` in one assistant
+  // turn; `AUTOJOIN_EXEMPT_TOOLS` correctly stopped the join itself from arming autojoin, but not
+  // its sibling, so the explicit join and the implicit one raced. The server did its job —
+  // `claim.duplicate_workspace`, then `claim.superseded {evicted:1}` — and the woken session
+  // watched itself get evicted and declined to answer the act it was woken for.
+  //
+  // Keyed by target: two callers converging on the same seat share one claim, while a deliberate
+  // re-target (a different seat or pool) is a distinct intent and still proceeds on its own.
+  const key = targetKey(target);
+  const pending = inFlight.get(client);
+  if (pending && pending.key === key) return pending.promise;
+  const promise = performClaim(client, config, target, waitMs).finally(() => {
+    if (inFlight.get(client)?.promise === promise) inFlight.delete(client);
+  });
+  inFlight.set(client, { key, promise });
+  return promise;
+}
+
+/** Claims in flight per client — the single-flight register (see {@link claimAndJoin}). */
+const inFlight = new WeakMap<MusterdClient, { key: string; promise: Promise<ClaimResult> }>();
+
+const targetKey = (t: ClaimTarget): string => ('seat' in t ? `seat:${t.seat}` : `role:${t.role}`);
+
+async function performClaim(
+  client: MusterdClient,
+  config: McpConfig,
+  target: ClaimTarget,
+  waitMs?: number,
+): Promise<ClaimResult> {
   // Re-read binding.json before an explicit named claim (#118 class / ADR 018 source-of-truth). The
   // boot config pins the grant + key read at launch, so an in-session binding *repair* — e.g. a
   // clobbered binding re-provisioned with `musterd agent <seat> --path <worktree>` — was invisible
@@ -54,7 +86,16 @@ export async function claimAndJoin(
     if (fresh && fresh.claim && fresh.claim.mode === 'seat' && fresh.claim.name === target.seat) {
       if (fresh.grant !== undefined) config.grant = fresh.grant;
       if (fresh.agent_key !== undefined) config.agent_key = fresh.agent_key;
-      config.surface = fresh.surface;
+      // Surface is NOT a credential, and adopting it here is only a repair when this session never
+      // knew its own (ADR 251 §2, measured live 2026-08-12). A grant or key on disk can be newer
+      // than the one we booted with — that is the whole point of the re-read. A surface cannot: it
+      // describes what is animating THIS session, which the process knows first-hand and the
+      // workspace file only guesses at. The native backend constructs its config in the host, with
+      // no workspace to read, and declares `musterd` precisely so native occupancies are
+      // roster-distinct; adopting the seat's binding here overwrote that with `cursor` and the
+      // first native occupancy in history attested the wrong harness. `other` is the one honest
+      // exception — it means boot could not tell, so a binding that can is an upgrade.
+      if (config.surface === 'other') config.surface = fresh.surface;
     }
   }
 

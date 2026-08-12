@@ -1,7 +1,13 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BINDING_DIR, BINDING_FILE, PENDING_DIR, RESOLVED_SUFFIX } from '@musterd/protocol';
+import {
+  BINDING_DIR,
+  BINDING_FILE,
+  PENDING_DIR,
+  RESOLVED_SUFFIX,
+  type Binding,
+} from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { adoptIdentity, ClaimConflictError, claimAndJoin } from './claim.js';
 import type { MusterdClient } from './client.js';
@@ -182,7 +188,11 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
       await claimAndJoin(joiningClient(config), config, { seat: 'Ada' });
       expect(config.grant).toBe('msgr_repaired');
       expect(config.agent_key).toBe('mskey_repaired');
-      expect(config.surface).toBe('cursor');
+      // The SURFACE is deliberately not adopted (changed 2026-08-12 off the first live native
+      // wake). Credentials on disk can be newer than the ones we booted with — that is what this
+      // re-read is for. A surface cannot: it says what is animating this session, which the process
+      // knows first-hand. Adopting it let a repaired binding retitle a running session's harness.
+      expect(config.surface).toBe('claude-code');
     } finally {
       rmSync(anchor, { recursive: true, force: true });
     }
@@ -326,3 +336,87 @@ describe('live claim adoption (ADR 034)', () => {
 function bindingPath(cwd: string): string {
   return join(cwd, BINDING_DIR, BINDING_FILE);
 }
+
+describe('claimAndJoin concurrency + surface authority (live native-wake findings, 2026-08-12)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-claim-race-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const writeBinding = (b: Partial<Binding>) => {
+    mkdirSync(join(dir, BINDING_DIR), { recursive: true });
+    writeFileSync(
+      join(dir, BINDING_DIR, BINDING_FILE),
+      JSON.stringify({
+        server: 'http://x',
+        team: 'dawn',
+        surface: 'cursor',
+        claim: { mode: 'seat', name: 'compo' },
+        ...b,
+      }),
+    );
+  };
+
+  it('single-flights a concurrent claim: two callers in one turn claim ONCE, not twice', async () => {
+    // The first live native wake (2026-08-12): the model issued `team_join` in PARALLEL with
+    // `team_inbox_check` in one assistant turn. The explicit join and the sibling call's deferred
+    // autojoin both passed the already-claimed guard (neither had finished), so the seat was
+    // claimed twice — `claim.duplicate_workspace`, then `claim.superseded {evicted:1}`. The session
+    // watched itself get evicted and declined to answer the act it was woken for.
+    const config = baseConfig({ bindingDir: dir, claim: { mode: 'chat' } });
+    let joins = 0;
+    const state = { member: undefined as string | undefined };
+    // Built inline rather than through `joiningClient(over)`: object spread EVALUATES getters and
+    // copies their values, so overridden accessors would freeze at their boot values.
+    const client = {
+      roster: async () => ({ members: [] as { name: string }[] }),
+      get claimed() {
+        return Boolean(state.member);
+      },
+      get joined() {
+        return Boolean(state.member);
+      },
+      get member() {
+        return state.member;
+      },
+      join: async () => {
+        joins += 1;
+        await new Promise((r) => setTimeout(r, 20)); // in flight — not yet claimed
+        state.member = 'compo';
+      },
+    } as unknown as MusterdClient;
+
+    const [a, b] = await Promise.all([
+      claimAndJoin(client, config, { seat: 'compo' }),
+      claimAndJoin(client, config, { seat: 'compo' }),
+    ]);
+
+    expect(joins).toBe(1);
+    expect(a.member).toBe('compo');
+    expect(b.member).toBe('compo');
+  });
+
+  it('does not let the binding re-read clobber a surface the HOST declared', async () => {
+    // ADR 251 §2: a native occupancy attests surface `musterd`, which is what makes it
+    // roster-distinct. The host constructs that config itself (it is not in the workspace), but the
+    // ADR 018 repair re-read adopted the binding's `cursor` over it — measured live, the first
+    // native occupancy attested `cursor` and the distinctness claim silently failed.
+    writeBinding({ grant: 'msgr_fresh', agent_key: 'mskey_fresh' });
+    const config = baseConfig({ bindingDir: dir, surface: 'musterd', claim: { mode: 'chat' } });
+    await claimAndJoin(joiningClient(config), config, { seat: 'compo' });
+    expect(config.surface).toBe('musterd');
+    // The credential half of the repair still applies — that is what the re-read is FOR.
+    expect(config.grant).toBe('msgr_fresh');
+    expect(config.agent_key).toBe('mskey_fresh');
+  });
+
+  it('still repairs an UNKNOWN surface from the binding — "other" means we could not tell', async () => {
+    writeBinding({});
+    const config = baseConfig({ bindingDir: dir, surface: 'other', claim: { mode: 'chat' } });
+    await claimAndJoin(joiningClient(config), config, { seat: 'compo' });
+    expect(config.surface).toBe('cursor');
+  });
+});
