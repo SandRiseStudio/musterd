@@ -176,18 +176,20 @@ describe('SDK seam canaries (ADR 175)', () => {
     }
   });
 
-  it('cache hint armed; TRIPWIRE — stdio still negotiates legacy, so it must not reach the wire yet', async () => {
-    // ADR 175 step 3, as far as SDK 2.0.0 allows: the `cacheHints` config on buildMcpServer is
-    // validated at construction (an invalid hint throws — that half is covered by connect()
-    // succeeding at all). But in this SDK release the modern 2026-07-28 era is served ONLY by the
-    // per-request HTTP entry (`createMcpHandler` → `installModernOnlyHandlers`); a stdio/in-memory
-    // `connect` negotiates the legacy list (max 2025-11-25), where cache fields are deliberately
-    // absent from the wire. musterd is stdio-only, so the fields CANNOT appear yet.
+  it('cache hint armed; PIN — the hand-wired connect entry serves the legacy era, by SDK design', async () => {
+    // ADR 175 step 3, as far as this entry point allows: the `cacheHints` config on buildMcpServer
+    // is validated at construction (an invalid hint throws — that half is covered by connect()
+    // succeeding at all). A hand-wired `connect(StdioServerTransport)` serves ONLY the legacy list
+    // (max 2025-11-25), where cache fields are deliberately absent from the wire.
     //
-    // This test is a tripwire, not a regret: when an SDK bump lets a stdio connection negotiate a
-    // modern (2026-07-28+) era, the assertions below go red — that is the signal to replace this
-    // test with the real wire assertion (`listed.ttlMs === 3_600_000`,
-    // `listed.cacheScope === 'private'`) and close ADR 175 step 3 fully.
+    // CORRECTED 2026-08-12 (ADR 175 Consequences note): this was written as a tripwire for "an SDK
+    // bump lets stdio negotiate a modern era" — a flip the SDK's own migration doc rules out. The
+    // legacy entry is *permanently* 2025-era; modern-era stdio is opt-in via `serveStdio(() =>
+    // buildServer())` from `@modelcontextprotocol/server/stdio` (already exported by 2.0.0). So
+    // these assertions are a PIN on the current entry's behavior, not a wake-up signal. The signal
+    // to write the real wire assertions (`listed.ttlMs === 3_600_000`, `cacheScope === 'private'`)
+    // is musterd adopting serveStdio — lane 01KZVZG5GE5GWX97F27CWBMC4C part (b), a deliberate
+    // per-connection-factory change, never an ambient dependency bump.
     const { harness, close } = await connect();
     try {
       const negotiated = harness.getNegotiatedProtocolVersion?.() as string | undefined;
