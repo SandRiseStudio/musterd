@@ -1,9 +1,9 @@
 {
-  "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context — tools/list render, primer, hook nudges, including the due-gated label nudge — measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
+  "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context \u2014 tools/list render, primer, hook nudges, including the due-gated label nudge \u2014 measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
   "items": {
     "toolsListDefaultBytes": {
       "budget": 14944,
-      "justification": "2026-08-12 (14230 B, +story param on team_goal_declare — ADR 256 goals front door, epoch 10) + 5% headroom"
+      "justification": "2026-08-12 (14230 B, +story param on team_goal_declare \u2014 ADR 256 goals front door, epoch 10) + 5% headroom"
     },
     "toolsListMutedBytes": {
       "budget": 4694,
@@ -27,11 +27,11 @@
     },
     "perTurnTotalBytes": {
       "budget": 15141,
-      "justification": "2026-08-12 (14420 B, +story param on team_goal_declare — ADR 256 goals front door) + 5% headroom"
+      "justification": "2026-08-12 (14420 B, +story param on team_goal_declare \u2014 ADR 256 goals front door) + 5% headroom"
     },
     "perSessionTotalBytes": {
-      "budget": 17556,
-      "justification": "post-trim 2026-08-03 (16720 B) + 5% headroom"
+      "budget": 18522,
+      "justification": "2026-08-12 (17640 B, +ADR 254 eligible sets: `to` accepts an array, which costs an anyOf branch in the team_send schema \u2014 structural \u2014 plus one clause teaching it) + 5% headroom. The sibling toolsList/perTurn items were re-baselined by ADR 256 in the same window and already had room; this one did not and was the only raise eligible sets needed."
     }
   }
 }

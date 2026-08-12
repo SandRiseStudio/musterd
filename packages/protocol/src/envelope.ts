@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ActSchema } from './acts.js';
+import { ActSchema, type Act } from './acts.js';
 import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
 import { PROTOCOL_VERSION } from './version.js';
 
@@ -27,6 +27,41 @@ export const DeferUntilSchema = z.union([
   z.object({ reply: z.literal(true) }).strict(),
 ]);
 export type DeferUntil = z.infer<typeof DeferUntilSchema>;
+
+/**
+ * ADR 254: the eligible set — 2–`MAX_ELIGIBLE` named seats, **any one of whom discharges the act**.
+ *
+ * Four is the cap for two reasons, and the second is the load-bearing one. Above four, a named set
+ * is `@team` with extra steps and the sender should be made to say so. But the cap also bounds the
+ * escalation tail a later increment walks: at a 5-minute hold, four seats is ~20 minutes and at most
+ * four `wake_cost` charges. Uncapped, both the latency and the spend of a serial walk are unbounded.
+ */
+export const MAX_ELIGIBLE = 4;
+
+/**
+ * Acts that may carry an eligible set. Deliberately narrow: a `handoff` to two seats is incoherent
+ * (two owners is zero owners), and accept/decline/defer/steer are structurally single-target. That
+ * restriction is what earns a single global "first answer wins" rule instead of a per-act table.
+ */
+export const ELIGIBLE_ACTS: ReadonlySet<Act> = new Set<Act>([
+  'message',
+  'request_help',
+  'challenge',
+]);
+
+/**
+ * The eligible set on an envelope's meta, or `null` when there isn't one (or it is malformed).
+ *
+ * The single reader of the shape — server, MCP, and CLI all come through here, so no package can
+ * interpret `meta.eligible` differently from the schema that validated it. A mixed-type array
+ * returns `null` rather than a filtered list: silently dropping a name would mean silently dropping
+ * an obligation.
+ */
+export function eligibleOf(meta: Record<string, unknown> | null | undefined): string[] | null {
+  const v = meta?.['eligible'];
+  if (!Array.isArray(v) || !v.every((n) => typeof n === 'string')) return null;
+  return v as string[];
+}
 
 /**
  * The on-wire message. `actMetaRules` enforces per-act meta requirements
@@ -114,6 +149,31 @@ export function actMetaRules(
         path: ['meta', 'tier'],
         message: 'act "ask" requires meta.tier (advisory | standard | blocking)',
       });
+    }
+  }
+  // ADR 254: the eligible set. **Shape only.** `actMetaRules` receives `{act, thread, meta}` — no
+  // `from`, no roster handle — so "these seats exist, none has left, none is an observer, and none is
+  // the sender" is necessarily a server-side check in `routeEnvelope`. Two-layer by structure, not by
+  // preference. Validated whenever the key appears, so acts without one stay unaffected.
+  if (meta['eligible'] !== undefined) {
+    const names = eligibleOf(meta);
+    const issue = (message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['meta', 'eligible'], message });
+    if (!names) {
+      issue('meta.eligible must be an array of seat names');
+    } else if (!ELIGIBLE_ACTS.has(env.act)) {
+      issue(
+        `act "${env.act}" cannot carry meta.eligible (only ${[...ELIGIBLE_ACTS].join(', ')}) — ` +
+          'an act with one owner cannot have several',
+      );
+    } else if (names.some((n) => n.trim().length === 0)) {
+      issue('meta.eligible must not contain an empty name');
+    } else if (names.length < 2) {
+      issue('meta.eligible needs at least 2 seats — to reach one seat, name it in `to`');
+    } else if (names.length > MAX_ELIGIBLE) {
+      issue(`meta.eligible allows at most ${MAX_ELIGIBLE} seats — to reach more, use @team`);
+    } else if (new Set(names).size !== names.length) {
+      issue('meta.eligible must not name the same seat twice');
     }
   }
   // The no-answer resolution (ADR 147 §4) rides `status_update` rather than a new act: when `meta.ask_outcome`

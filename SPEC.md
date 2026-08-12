@@ -46,6 +46,8 @@ Recipient (`to`) is one of:
 - `{"kind":"team"}` — delivered to every current Member of the Team except the sender.
 - `{"kind":"broadcast"}` — in v0.1, delivered as `team`. The distinct kind is RESERVED for future cross-Team/announce semantics; implementations MUST keep it distinct on the wire even while delivering it as team.
 
+An **eligible set** (ADR 254) narrows who OWES an answer without narrowing who can see the act: a `{"kind":"team"}` Envelope MAY carry `meta.eligible`, an array of 2–4 distinct Member names. It is delivered to the whole Team as above, but only the named Members owe a reply, and the FIRST `accept`/`decline` naming the act (via `meta.in_reply_to`) discharges it for all of them. Only `message`, `request_help`, and `challenge` may carry one; a server MUST reject an eligible set naming an unknown, departed, observer, or sending Member rather than silently dropping the name.
+
 Validation: an Envelope with an unknown `act` MUST be rejected. Unknown `meta` keys MUST be accepted and preserved (forward-compatibility). A server MUST reject an Envelope whose `from`/`team` do not match the authenticated Member.
 
 ## 3. Collaboration acts

@@ -80,7 +80,11 @@ function recipientShape(field: string): Rule {
         args[field] = v[0];
         return `${field}:[one]→string`;
       }
-      return null; // 2+ recipients: no single-recipient repair exists — bounce with the hint.
+      // 2+ recipients. On `team_send` this is now an eligible set (ADR 254) and the schema takes the
+      // array as-is — no repair to make, and the demand this branch used to bounce is the demand the
+      // primitive was built from. Everywhere else `recipientShape` is used (`lane_handoff`) the
+      // schema is still single-valued and 2+ still bounces, which is right: a lane has one owner.
+      return null;
     }
     if (v !== null && typeof v === 'object') {
       const r = v as { kind?: unknown; name?: unknown };

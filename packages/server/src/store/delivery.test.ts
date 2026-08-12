@@ -203,3 +203,58 @@ describe('handoffNamedLaneOutOfPlay (#745 discharge rule, shared with orientatio
     expect(handoffNamedLaneOutOfPlay(db, team.id, meta)).toBe(true);
   });
 });
+
+describe('the eligible set (ADR 254): obligation narrows, and any one answer discharges', () => {
+  /** seed() gives nick/Ada/bob; a fourth seat is what distinguishes "the named few" from "everyone". */
+  function seed4() {
+    const s = seed();
+    const cy = addMember(s.db, s.team, { name: 'cy', kind: 'agent' }).row;
+    return { ...s, cy };
+  }
+
+  it('is owed by the named seats, not the roster', () => {
+    const { db, team, nick } = seed4();
+    msg(db, team, nick, null, 'message', 'e1', 1_000, { meta: { eligible: ['Ada', 'bob'] } });
+    const d = actDelivery(db, team.id, 'e1', 10_000)!;
+    expect(d.recipients.map((r) => r.seat).sort()).toEqual(['Ada', 'bob']);
+  });
+
+  it('regression: a plain team act is still owed by the whole roster', () => {
+    const { db, team, nick } = seed4();
+    msg(db, team, nick, null, 'message', 't1', 1_000);
+    const d = actDelivery(db, team.id, 't1', 10_000)!;
+    expect(d.recipients.map((r) => r.seat).sort()).toEqual(['Ada', 'bob', 'cy']);
+  });
+
+  // The load-bearing one. `answerBy` is scoped per recipient (`from_member = recipientId`), so
+  // without an any-of clause bob's answer leaves Ada owing forever — the primitive's whole promise
+  // ("either of you") would be false at the ledger.
+  it('one seat answering discharges it for every eligible seat', () => {
+    const { db, team, nick, bob } = seed4();
+    msg(db, team, nick, null, 'message', 'e2', 1_000, { meta: { eligible: ['Ada', 'bob'] } });
+    msg(db, team, bob, nick, 'accept', 'a1', 2_000, { meta: { in_reply_to: 'e2' } });
+
+    const d = actDelivery(db, team.id, 'e2', 10_000)!;
+    expect(d.recipients.map((r) => r.state)).toEqual(['answered', 'answered']);
+    expect(d.recipients.every((r) => r.answered?.id === 'a1')).toBe(true);
+  });
+
+  it('regression: on a plain team act, one seat answering does NOT answer for the others', () => {
+    const { db, team, nick, bob } = seed4();
+    msg(db, team, nick, null, 'request_help', 't2', 1_000);
+    msg(db, team, bob, nick, 'accept', 'a2', 2_000, { meta: { in_reply_to: 't2' } });
+
+    const d = actDelivery(db, team.id, 't2', 10_000)!;
+    const byName = Object.fromEntries(d.recipients.map((r) => [r.seat, r.state]));
+    expect(byName['bob']).toBe('answered');
+    expect(byName['Ada']).not.toBe('answered');
+  });
+
+  it('names a seat that has since left — the set is pinned in the envelope', () => {
+    const { db, team, nick } = seed4();
+    msg(db, team, nick, null, 'message', 'e3', 1_000, { meta: { eligible: ['Ada', 'bob'] } });
+    db.prepare("UPDATE members SET left_at = 5000 WHERE name = 'bob'").run();
+    const d = actDelivery(db, team.id, 'e3', 10_000)!;
+    expect(d.recipients.map((r) => r.seat).sort()).toEqual(['Ada', 'bob']);
+  });
+});

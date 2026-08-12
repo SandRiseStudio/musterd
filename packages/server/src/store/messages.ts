@@ -1,5 +1,6 @@
 import {
   DeferUntilSchema,
+  eligibleOf,
   PROTOCOL_VERSION,
   type DeferUntil,
   type Envelope,
@@ -230,7 +231,18 @@ export function pendingInterrupts(
   opts: { obligations?: boolean } = {},
 ): Envelope[] {
   const resolved = new Set<string>();
-  for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
+  // ADR 254: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
+  // named seat at once. Built in the same pass as `resolved` and for the same reason: this predicate
+  // is pure over envelopes (no `Database`), so it cannot call the ledger's `actAnswered`. It does not
+  // need one — the discharging act is an envelope in the very list being scanned.
+  const discharged = new Set<string>();
+  for (const m of messages) {
+    if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
+    if (m.act === 'accept' || m.act === 'decline') {
+      const ref = (m.meta as { in_reply_to?: unknown } | null | undefined)?.['in_reply_to'];
+      if (typeof ref === 'string') discharged.add(ref);
+    }
+  }
   const isUrgent = (m: Envelope) =>
     (m.meta as { urgent?: unknown } | null | undefined)?.['urgent'] === true;
   // ADR 225: a routed acceptance is obligation-class. Keyed on the daemon-set `lane_review` marker,
@@ -239,9 +251,16 @@ export function pendingInterrupts(
     opts.obligations === true &&
     m.act === 'ask' &&
     (m.meta as { lane_review?: unknown } | null | undefined)?.['lane_review'] != null;
-  const actionNeeded = (m: Envelope) =>
-    m.act !== 'resolve' &&
-    (m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me));
+  // ADR 254: an eligible set REPLACES the default obligation rule rather than adding to it — which is
+  // what narrows `request_help` from "every seat on the team" (its behaviour without a set, below) to
+  // the named few. Discharge is checked here rather than at the filter so a stood-down act stops
+  // being action-needed *everywhere* at once, including in the `steer` winner scan.
+  const actionNeeded = (m: Envelope) => {
+    if (m.act === 'resolve') return false;
+    const names = eligibleOf(m.meta as Record<string, unknown> | null | undefined);
+    if (names) return names.includes(me) && !discharged.has(m.id);
+    return m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me);
+  };
   // The single winning steer: the newest steer directed at me across the WHOLE set — resolved or not —
   // so a resolved current steer can't revive an older one it already superseded, and the bar can't
   // collapse onto a stale steer just because the newest was filtered out. (With a ts-based read cursor,

@@ -360,6 +360,11 @@ export class MusterdClient {
      *  here — see the note on `GET /inbox`. Absent from an older daemon; callers degrade to
      *  treating everything as open, which is the pre-existing behaviour. */
     answered?: string[];
+    /** ADR 254: eligible-set acts in this inbox that someone else has already answered, and who.
+     *  Server-computed for the same reason as `answered`, and more so: the discharging reply is a DM
+     *  to the asker, so a second eligible seat is not a party to it and cannot see it at any price.
+     *  Absent from an older daemon; callers degrade to showing the act as still owed. */
+    discharged?: { id: string; by: string }[];
   }> {
     const q = unreadOnly ? '?unread=1' : '';
     return this.request('GET', `/teams/${this.config.team}/inbox${q}`);

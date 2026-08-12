@@ -773,3 +773,65 @@ describe('renderMachineLine (ADR 242) — the machine cost line', () => {
     expect(line).toContain('0 sidecar procs');
   });
 });
+
+/**
+ * ADR 254. Found by the live exercise, not by the suite: the CLI rendered an eligible-set act as
+ * `→ @team` with no trace, which is the silent retirement the design rejected — on the surface a
+ * human is most likely to be reading.
+ */
+describe('renderMessageRow with an eligible set (ADR 254)', () => {
+  const asked = env({
+    id: 'el-1',
+    from: 'nick',
+    act: 'message',
+    body: 'either of you know why the daemon pinned?',
+    meta: { eligible: ['stanley', 'izzo'] },
+  });
+
+  it('names the set instead of the useless "@team"', () => {
+    const out = renderMessageRow(asked, kindOf);
+    expect(out).toContain('stanley');
+    expect(out).toContain('izzo');
+    expect(out).not.toContain('@team');
+  });
+
+  it('marks it as any-of, not a directed act', () => {
+    expect(renderMessageRow(asked, kindOf)).toContain('?');
+  });
+
+  it('says who took it, and that the reader is off the hook', () => {
+    const out = renderMessageRow(asked, kindOf, { dischargedBy: 'izzo' });
+    expect(out).toContain('answered by izzo');
+    expect(out).toContain('no longer owe');
+  });
+
+  it('stays silent while the act is still owed', () => {
+    expect(renderMessageRow(asked, kindOf)).not.toContain('answered by');
+  });
+
+  it('regression: a plain team act still reads @team', () => {
+    expect(renderMessageRow(env({}), kindOf)).toContain('→ @team');
+  });
+
+  it('regression: a directed act is untouched', () => {
+    const out = renderMessageRow(env({ to: { kind: 'member', name: 'nick' } }), kindOf);
+    expect(out).toContain('→ nick');
+    expect(out).not.toContain('?');
+  });
+
+  it('renderInbox threads the trace through to the right row only', () => {
+    const other = env({ id: 'other', body: 'unrelated', meta: null });
+    const out = renderInbox([asked, other], kindOf, {
+      cursorTs: 0,
+      discharged: new Map([['el-1', 'izzo']]),
+      now: Date.UTC(2026, 5, 9, 15, 0),
+    });
+    expect(out).toContain('answered by izzo');
+    expect(out.split('unrelated')[1] ?? '').not.toContain('answered by');
+  });
+
+  it('renderInbox without a trace map renders exactly as before', () => {
+    const out = renderInbox([asked], kindOf, { cursorTs: 0, now: Date.UTC(2026, 5, 9, 15, 0) });
+    expect(out).not.toContain('answered by');
+  });
+});
