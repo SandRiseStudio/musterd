@@ -249,6 +249,21 @@ describe('lane commands', () => {
     expect(res.out).toContain('src/c.ts');
   });
 
+  // ADR 256's no_goal warning names `lane_update {goal_id}` / `musterd lane update --goal`.
+  // Open already takes --goal; update did not, so a goal-less lane had no CLI repair.
+  it('update --goal links a goal-less lane', async () => {
+    const id = await openLane(['unlinked']);
+    const res = await capture(() =>
+      laneCommand(parseArgs(['update', id, '--goal', 'goals-front-door'])),
+    );
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('lane updated');
+    expect(res.out).toContain('goals-front-door');
+    const board = await capture(() => lanesCommand(parseArgs(['--json'])));
+    const { lanes } = JSON.parse(board.out) as { lanes: { id: string; goal_id: string | null }[] };
+    expect(lanes.find((l) => l.id === id)?.goal_id).toBe('goals-front-door');
+  });
+
   it('lanes renders an empty board hint', async () => {
     const res = await capture(() => lanesCommand(parseArgs([])));
     expect(res.code).toBe(0);

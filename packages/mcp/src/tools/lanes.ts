@@ -215,7 +215,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     {
       description:
         'Update a lane: state (active/blocked/done/…), title, surface_globs, depends_on, branch, ' +
-        'detail, project. Going active re-runs contention checks.',
+        'detail, project, goal_id. Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // Derived from the protocol schema (ADR 169 consolidation) — this enum was hand-duplicated
@@ -231,6 +231,13 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         depends_on: z.array(z.string()).optional(),
         branch: z.string().optional(),
         project: z.string().optional().describe('re-scope the surface-space'),
+        // Protocol UpdateLaneSchema already has this; the MCP schema omitted it, so the ADR 256
+        // no_goal warning named a call (`lane_update {goal_id}`) that bounced as unknown.
+        goal_id: z
+          .string()
+          .nullable()
+          .optional()
+          .describe('link (or clear, with null) this lane to a Goal'),
       },
     },
     async (args) => {

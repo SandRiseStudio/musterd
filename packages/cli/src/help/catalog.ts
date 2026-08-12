@@ -384,7 +384,7 @@ export const CATALOG: readonly CommandEntry[] = [
       '  claim <id>                    take ownership\n' +
       '  release <id>                  let it go — open for anyone again\n' +
       '  handoff <id> --to <seat> [--branch <ref>]   transfer it, with its branch\n' +
-      '  update <id> [--state <s>] [--branch <ref>]  edit it\n' +
+      '  update <id> [--state <s>] [--branch <ref>] [--goal <id>]  edit it\n' +
       '  resolve <id>                  close it\n' +
       '--goal links a lane to a Goal (ADR 084).',
     examples: [

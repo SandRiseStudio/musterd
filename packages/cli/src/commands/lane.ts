@@ -23,7 +23,7 @@ const USAGE =
   '  musterd lane claim <id>\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>] [--note <why>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high]\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high] [--goal <id>]\n' +
   '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>] [--branch b]\n' +
   '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
@@ -311,6 +311,11 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         : {}),
       ...(flagStr(parsed.flags, 'stakes') !== undefined
         ? { stakes: parseStakes(flagStr(parsed.flags, 'stakes')!) }
+        : {}),
+      // Same flag as open: the ADR 256 no_goal warning names this repair, and open already
+      // took --goal. A goal-less lane had no CLI way to attach after the fact.
+      ...(flagStr(parsed.flags, 'goal') !== undefined
+        ? { goal_id: flagStr(parsed.flags, 'goal')! }
         : {}),
     });
     process.stdout.write(`${theme.ok('✓')} lane updated\n${renderLane(res.lane)}\n`);
