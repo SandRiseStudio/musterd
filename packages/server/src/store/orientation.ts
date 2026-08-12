@@ -2,7 +2,7 @@ import { compareGoals, isAwaitingAcceptance, type Lane, type NextBrief } from '@
 import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
-import { listLanes } from './lanes.js';
+import { acceptanceEnteredAt, listLanes } from './lanes.js';
 
 /**
  * The orientation brief (ADR 049), computed server-side so CLI + MCP render one projection (ADR 084 —
@@ -167,5 +167,30 @@ export function deriveNext(
   // before `planned`, then most recently declared first).
   const goals = allGoals.filter((g) => g.status !== 'shipped').sort(compareGoals);
 
-  return { member, in_flight, shipped, up_next, owed_reviews, why, next_goal, goals };
+  // value-layer design: the team's oldest lanes waiting on acceptance — review debt as ambient
+  // candidate work for ANY seat (owed_reviews stays the directed slice). Cap 3, oldest first.
+  const now = Date.now();
+  const review_debt = all
+    .filter((l) => isAwaitingAcceptance(l.state))
+    .map((l) => ({ lane: l, entered: acceptanceEnteredAt(db, teamId, l) }))
+    .sort((a, b) => a.entered - b.entered)
+    .slice(0, 3)
+    .map(({ lane, entered }) => ({
+      id: lane.id,
+      title: lane.title,
+      owner: lane.owner_seat,
+      waited_ms: Math.max(0, now - entered),
+    }));
+
+  return {
+    member,
+    in_flight,
+    shipped,
+    up_next,
+    owed_reviews,
+    why,
+    next_goal,
+    goals,
+    ...(review_debt.length ? { review_debt } : {}),
+  };
 }

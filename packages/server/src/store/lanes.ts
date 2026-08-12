@@ -482,6 +482,19 @@ export function noGoalWarning(lane: Lane, goals: Goal[]): LaneWarning | null {
   };
 }
 
+/** When a lane entered the acceptance stage: the latest `lane.ready_for_review` audit row, falling
+ *  back to `updated_at` for pre-audit lanes (value-layer design — shared by the warning + brief). */
+export function acceptanceEnteredAt(db: Database, teamId: string, lane: Lane): number {
+  const row = db
+    .prepare<[string, string], { ts: number }>(
+      `SELECT ts FROM audit
+        WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+        ORDER BY ts DESC LIMIT 1`,
+    )
+    .get(teamId, lane.id);
+  return row?.ts ?? lane.updated_at;
+}
+
 /** value-layer design: review debt made visible — a lane waiting on acceptance past the threshold.
  *  Advisory like `no_goal`: owner null, never a directed wake. Entry time = the latest
  *  `lane.ready_for_review` audit row; falls back to `updated_at` for pre-audit lanes. A negative
@@ -493,15 +506,7 @@ export function staleAcceptanceWarning(
   now: number,
 ): LaneWarning | null {
   if (!isAwaitingAcceptance(lane.state)) return null;
-  const row = db
-    .prepare<[string, string], { ts: number }>(
-      `SELECT ts FROM audit
-        WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
-        ORDER BY ts DESC LIMIT 1`,
-    )
-    .get(teamId, lane.id);
-  const entered = row?.ts ?? lane.updated_at;
-  const waited = now - entered;
+  const waited = now - acceptanceEnteredAt(db, teamId, lane);
   if (waited < ACCEPTANCE_STALE_MS) return null;
   const hours = Math.floor(waited / 3_600_000);
   return {
