@@ -113,6 +113,9 @@ export function isAwaitingAcceptance(state: string): boolean {
   return state === 'awaiting_acceptance' || state === 'ready_for_review';
 }
 
+/** value-layer design: a lane in `awaiting_acceptance` longer than this warns `stale_acceptance`. */
+export const ACCEPTANCE_STALE_MS = 12 * 60 * 60 * 1000;
+
 /** Canonical state to write when entering outcome acceptance (ADR 192). */
 export const AWAITING_ACCEPTANCE: LaneState = 'awaiting_acceptance';
 
@@ -245,6 +248,9 @@ export const LaneWarningSchema = z.object({
     'stale_plan',
     'stale_dependency',
     'no_goal',
+    /** value-layer design: a lane waiting on acceptance past ACCEPTANCE_STALE_MS — review debt
+     *  made visible. Advisory like `no_goal`: owner null, never a directed wake. */
+    'stale_acceptance',
   ]),
   /** The lane the acting party touched (staleness: the stale lane itself). */
   subject: z.string(),
@@ -375,6 +381,9 @@ export const LaneResultSchema = z.object({
         .optional(),
     })
     .optional(),
+  /** Advisory lines appended to this caller's result only (value-layer design: the ship nudge) —
+   *  rendered to the actor, never a wake, never stored. */
+  notices: z.array(z.string()).optional(),
 });
 export type LaneResult = z.infer<typeof LaneResultSchema>;
 
@@ -448,5 +457,20 @@ export const NextBriefSchema = z.object({
    * brief from an older daemon parseable.
    */
   goals: z.array(GoalSchema).default([]),
+  /**
+   * value-layer design: the team's oldest lanes waiting on acceptance (cap 3, oldest first) —
+   * review debt surfaced as candidate work for ANY seat, not just the routed acceptor
+   * (`owed_reviews` is the directed slice; this is the ambient one). Absent when nothing waits.
+   */
+  review_debt: z
+    .array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        owner: z.string().nullable(),
+        waited_ms: z.number().int().nonnegative(),
+      }),
+    )
+    .optional(),
 });
 export type NextBrief = z.infer<typeof NextBriefSchema>;
