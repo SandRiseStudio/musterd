@@ -177,5 +177,11 @@ per-turn usage rows (native target: 100% of settles carry cost, against the CLI 
 report-survivor bias); (3) a watchdog kill that leaves no orphaned loop and a
 `wake_failed` with the standard taxonomy when the agent never occupies. The scripted
 fake-engine suite must drive the backend through occupy/answer/timeout/deferral
-(`occupied && !lease_matched`) paths without a model; the live run is owner-gated, one
-measured wake, reported like increment 3's first-wake measurement.
+(`occupied && !lease_matched`) paths without a model.
+
+**Experiment.** One owner-gated live measurement, reported like increment 3's first-wake
+measurement: a single directed act to an enrolled native seat, timing occupancy and
+answer latency against the CLI baseline above and confirming `cost_usd` on the settled
+report matches the summed per-turn usage rows. No A/B — phase 1 has one implementation of
+the loop engine, so there is nothing to compare it against yet; the loop-engine seam is
+what makes a future engine-vs-engine experiment possible without touching this contract.
