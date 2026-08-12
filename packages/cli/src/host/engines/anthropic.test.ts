@@ -25,7 +25,10 @@ function fakeClient(script: {
   toolResults?: (unknown[] | null)[];
   error?: unknown;
   errorAfter?: number;
-  onCreate?: (params: Record<string, unknown>, options: Record<string, unknown> | undefined) => void;
+  onCreate?: (
+    params: Record<string, unknown>,
+    options: Record<string, unknown> | undefined,
+  ) => void;
 }) {
   return {
     beta: {
@@ -85,7 +88,12 @@ describe('priceUsage (ADR 251 §6 — cost computed by the harness, never self-r
   });
 
   it('prices each family off its own rate', () => {
-    const u = { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+    const u = {
+      input_tokens: 1_000_000,
+      output_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+    };
     expect(priceUsage('claude-haiku-4-5', u)).toBeCloseTo(1, 6);
     expect(priceUsage('claude-sonnet-5', u)).toBeCloseTo(3, 6);
     expect(priceUsage('claude-fable-5', u)).toBeCloseTo(10, 6);
@@ -102,8 +110,16 @@ describe('anthropicEngine.run', () => {
     const turns: EngineTurn[] = [];
     const client = fakeClient({
       messages: [
-        { content: [{ type: 'tool_use', name: 'team_inbox_check', input: {} }], stop_reason: 'tool_use', usage: usage(1000, 100) },
-        { content: [{ type: 'text', text: 'answered' }], stop_reason: 'end_turn', usage: usage(2000, 200) },
+        {
+          content: [{ type: 'tool_use', name: 'team_inbox_check', input: {} }],
+          stop_reason: 'tool_use',
+          usage: usage(1000, 100),
+        },
+        {
+          content: [{ type: 'text', text: 'answered' }],
+          stop_reason: 'end_turn',
+          usage: usage(2000, 200),
+        },
       ],
       toolResults: [[{ type: 'tool_result', content: 'ok' }], null],
     });
@@ -131,7 +147,10 @@ describe('anthropicEngine.run', () => {
       assistant: [{ type: 'tool_use', name: 'team_inbox_check' }],
       tool_results: [{ type: 'tool_result' }],
     });
-    expect(turns[1]!.transcript).toMatchObject({ assistant: [{ type: 'text' }], tool_results: null });
+    expect(turns[1]!.transcript).toMatchObject({
+      assistant: [{ type: 'text' }],
+      tool_results: null,
+    });
   });
 
   it('passes the resolved model and bounds through verbatim — never a hardcoded default', async () => {
@@ -155,7 +174,11 @@ describe('anthropicEngine.run', () => {
   it('reports max_turns when the cap cut off a loop that still wanted tools', async () => {
     const client = fakeClient({
       messages: [
-        { content: [{ type: 'tool_use', name: 'team_inbox_check', input: {} }], stop_reason: 'tool_use', usage: usage(10, 10) },
+        {
+          content: [{ type: 'tool_use', name: 'team_inbox_check', input: {} }],
+          stop_reason: 'tool_use',
+          usage: usage(10, 10),
+        },
       ],
       toolResults: [[{ type: 'tool_result', content: 'ok' }]],
     });
@@ -183,10 +206,16 @@ describe('anthropicEngine.run', () => {
 
   it('classifies an abort as aborted, keeping the usage of turns that already ran', async () => {
     const controller = new AbortController();
-    const abortErr = Object.assign(new Error('Request was aborted.'), { name: 'APIUserAbortError' });
+    const abortErr = Object.assign(new Error('Request was aborted.'), {
+      name: 'APIUserAbortError',
+    });
     const client = fakeClient({
       messages: [
-        { content: [{ type: 'tool_use', name: 'team_inbox_check', input: {} }], stop_reason: 'tool_use', usage: usage(50, 5) },
+        {
+          content: [{ type: 'tool_use', name: 'team_inbox_check', input: {} }],
+          stop_reason: 'tool_use',
+          usage: usage(50, 5),
+        },
       ],
       toolResults: [[{ type: 'tool_result', content: 'ok' }]],
       error: abortErr,

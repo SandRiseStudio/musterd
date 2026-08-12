@@ -130,7 +130,8 @@ export function anthropicEngine(deps: AnthropicEngineDeps = {}): AgentLoopEngine
           if (cost !== undefined) costTotal = (costTotal ?? 0) + cost;
           lastStop = message.stop_reason;
           // `generateToolResponse` caches, so reading the transcript never re-runs a tool.
-          const toolResponse = message.stop_reason === 'tool_use' ? await runner.generateToolResponse() : null;
+          const toolResponse =
+            message.stop_reason === 'tool_use' ? await runner.generateToolResponse() : null;
           const turn: EngineTurn = {
             index: turns,
             usage,
@@ -155,7 +156,13 @@ export function anthropicEngine(deps: AnthropicEngineDeps = {}): AgentLoopEngine
       }
 
       if (failure) {
-        return { turns, end: failure.end, usage: totals, cost_usd: costTotal, reason: failure.reason };
+        return {
+          turns,
+          end: failure.end,
+          usage: totals,
+          cost_usd: costTotal,
+          reason: failure.reason,
+        };
       }
       // A loop that ended while the model still wanted tools was cut by the iteration cap.
       const end = lastStop === 'tool_use' ? 'max_turns' : 'completed';

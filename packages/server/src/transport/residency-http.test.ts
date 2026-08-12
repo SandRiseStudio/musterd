@@ -667,7 +667,11 @@ describe('POST /teams/:slug/residency/wake-turn — per-turn telemetry + capture
     const leaseId = await leaseForUrgentAct();
     const team = getTeamBySlug(server.db, 'dawn')!;
 
-    const r1 = await post('/teams/dawn/residency/wake-turn', turnBody(leaseId, 1, 0.0075), agentKey);
+    const r1 = await post(
+      '/teams/dawn/residency/wake-turn',
+      turnBody(leaseId, 1, 0.0075),
+      agentKey,
+    );
     expect(r1.status).toBe(200);
     expect(r1.json).toMatchObject({ ok: true, lease_id: leaseId, turn: 1 });
     await post('/teams/dawn/residency/wake-turn', turnBody(leaseId, 2, 0.015), agentKey);

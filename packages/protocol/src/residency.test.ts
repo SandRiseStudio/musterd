@@ -148,8 +148,11 @@ describe('WakeTurnBodySchema (ADR 251 §7 — per-turn telemetry + transcript ca
   it('accepts a full turn row and a minimal one (usage only)', () => {
     expect(WakeTurnBodySchema.parse(turn).turn).toBe(1);
     expect(
-      WakeTurnBodySchema.parse({ lease_id: 'L1', turn: 2, usage: { input_tokens: 1, output_tokens: 1 } })
-        .cost_usd,
+      WakeTurnBodySchema.parse({
+        lease_id: 'L1',
+        turn: 2,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }).cost_usd,
     ).toBeUndefined();
   });
 

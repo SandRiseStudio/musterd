@@ -123,11 +123,19 @@ desktop host backend.
 
 ### Native (musterd's own harness) — the reference row
 
-Capture: **free** (session state is musterd's own store). Wake: **in-process invocation** of the
-agent loop hosted in `musterd host` (Agent-SDK-shaped; a chat surface is its front door; surface
-`musterd`, reserved). Verify: trivial. Caveats: none — which is the point: this row keeps the
-contract honest. Anything above the `ActuatorBackend` interface that cannot express this row is
-CLI-shaped and must move down into a backend. Increment 6, owner-gated.
+Capture: **free** (every turn lands as a daemon-held `wake_turns` row — usage, cost, transcript —
+the substrate phase-2 resume replays; phase-1 wakes are fresh-only). Wake: **in-process
+invocation** of the agent loop hosted in `musterd host` — no child process: the
+`AgentLoopEngine` seam (one implementation, `anthropicEngine` on the SDK tool runner; ADR 251
+deliberately rejected the Claude-Code-as-a-library SDK, which would have made "musterd's own
+harness" a second wrapper around backend #1) drives the seat's own MCP surface, bridged 1:1 over
+an in-memory transport with provenance `wake` and the ADR 241 lease attested on the connection.
+Verify: the same roster-derived, lease-bound path as every CLI row — loop internals are never a
+verification source. Caveats: none — which is the point: this row keeps the contract honest.
+Anything above the `ActuatorBackend` interface that cannot express this row is CLI-shaped and
+must move down into a backend. **Landed (ADR 251, phase 1: coordination-only tools, opt-in per
+enrollment via `harness: musterd`, never a default).** The contract expressed it with zero seam
+changes — §7's falsification test passed.
 
 ### Resident-class harnesses (OpenClaw, Hermes, gateways)
 
@@ -172,7 +180,7 @@ message-shaped rest.
 | 3   | `musterd host` + claude backend, fresh-first | `cli/src/host/{loop,registry,backend,backends/claudeCode}.ts`, shared `resolveClaudeBin` (LaunchAgent PATH gap), provenance `wake` + surface `musterd` reserved, telemetry carve-out — **first measured wake latency**                                                                                                                                                                 |
 | 4   | session capture                              | SessionStart/SessionEnd hooks → `musterd session start\|end --stdin`, `binding.session`, `init --check`/uninstall drift coverage, resume upgrade + hygiene in backend, local-session guard (`wake_deferred`)                                                                                                                                                                           |
 | 5   | policy + measurement + service               | **landed 2026-07-14** (#269 knobs + ping-pong demotion + provenance newest-wins, #271 wake metrics + `wake_cost` + resumable badge, + `service --wake` + the steward-swap wiring/pre-registration): knobs (team config + enrollment flags), wake latency/answer-rate in the report engine, the wake actuator as a LaunchAgent, steward cron→wake trigger, cookoff residency row pinned |
-| 6   | native backend (owner-gated)                 | thin Agent-SDK loop in the host, surface `musterd` live — the reference row proven                                                                                                                                                                                                                                                                                                     |
+| 6   | native backend (owner-gated)                 | **landed (ADR 251, phase 1)**: `AgentLoopEngine` seam + `anthropicEngine` (SDK tool runner), in-memory MCP bridge of the seat's own surface, surface `musterd` live, per-turn `wake_turns` capture/telemetry rail, harness-computed `cost_usd` — the reference row proven; phase-2 charter (working tools, resume replay) in ADR 251 Consequences                                      |
 
 ## 6. Deliberate deferrals
 

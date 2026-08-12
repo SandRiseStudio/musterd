@@ -14,7 +14,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('37');
+    expect(ver?.value).toBe('38');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -244,7 +244,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(37); // runs v18…v37 (… + footprint + stakes provenance + seeds cursor)
+    expect(runMigrations(db)).toBe(38); // runs v18…v38 (… + stakes provenance + seeds cursor + wake turns)
 
     const scope = (id: string) =>
       db
@@ -308,7 +308,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(37);
+    expect(runMigrations(db)).toBe(38);
 
     const policy = (id: string) =>
       db
