@@ -562,6 +562,64 @@ describe('team_inbox_check handler', () => {
     expect(text(r)).toContain("team_join {as:'Ada'}");
   });
 
+  // ADR NNN: an eligible-set act someone else answered still sits in the inbox, so it must SAY it
+  // has been taken — a silent retirement leaves a mid-draft reader working on a closed question.
+  describe('the eligible-set stand-down trace', () => {
+    const asked = {
+      id: 'el-1',
+      v: 1,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'team' as const },
+      act: 'message' as const,
+      body: 'either of you know why the daemon pinned?',
+      thread: null,
+      meta: { eligible: ['Ada', 'izzo'] },
+      ts: 1,
+    };
+
+    it('names who took it, and says the reader no longer owes it', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({
+            messages: [asked],
+            cursor: null,
+            discharged: [{ id: 'el-1', by: 'izzo' }],
+          })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('answered by izzo');
+      expect(text(r)).toContain('no longer owe');
+      expect((r.structuredContent as any).messages[0].discharged_by).toBe('izzo');
+    });
+
+    it('stays silent on an act nobody has answered', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({ messages: [asked], cursor: null, discharged: [] })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).not.toContain('answered by');
+      expect((r.structuredContent as any).messages[0].discharged_by).toBeUndefined();
+    });
+
+    it('degrades quietly against an older daemon that sends no trace', async () => {
+      const handler = capture(
+        registerInboxCheck,
+        inboxClient({
+          fetchInbox: (async () => ({ messages: [asked], cursor: null })) as any,
+        }),
+      );
+      const r = await handler({ unread_only: true, limit: 50 });
+      expect(text(r)).toContain('either of you know');
+      expect(text(r)).not.toContain('answered by');
+    });
+  });
+
   it('reports no new messages when empty', async () => {
     const handler = capture(
       registerInboxCheck,

@@ -412,6 +412,130 @@ describe('HTTP API', () => {
     });
   });
 
+  /**
+   * ADR NNN: stand-down needs a trace. A seat whose obligation just vanished may be mid-draft — it
+   * has to learn the question was taken, and by whom, so it can drop the work or disagree with what
+   * landed. A stand-down that says nothing is the same defect as an instrument going quiet.
+   */
+  describe('meta.eligible stand-down trace on GET /inbox', () => {
+    /** nick (sender) + bo, cy (eligible) + dee (not eligible), each with its own credential. */
+    const teamOfFour = async () => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      const nickTok = team.json.human_credential;
+      const toks: Record<string, unknown> = { nick: nickTok };
+      for (const name of ['bo', 'cy', 'dee']) {
+        const m = await post('/teams/dawn/members', { name, kind: 'human' }, nickTok);
+        toks[name] = m.json.human_credential;
+      }
+      return toks;
+    };
+
+    const ask = async (tok: unknown, id: string, eligible: string[]) =>
+      post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id,
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'nick',
+            to: { kind: 'team' },
+            act: 'message',
+            body: 'either of you know why the daemon pinned?',
+            ts: Date.now(),
+            meta: { eligible },
+          },
+        },
+        tok,
+      );
+
+    const answer = async (tok: unknown, from: string, id: string, ref: string, act = 'accept') =>
+      post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id,
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from,
+            to: { kind: 'member', name: 'nick' },
+            act,
+            body: 'the lockfile predicate self-heals',
+            ts: Date.now() + 1,
+            meta: { in_reply_to: ref },
+          },
+        },
+        tok,
+      );
+
+    it('names the seat that took the act I no longer owe', async () => {
+      const t = await teamOfFour();
+      await ask(t['nick'], 'el-a', ['bo', 'cy']);
+      await answer(t['cy'], 'cy', 'ans-a', 'el-a');
+
+      const inbox = await get('/teams/dawn/inbox', t['bo']);
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-a', by: 'cy' });
+    });
+
+    it('a decline discharges it too — "not me" is an answer', async () => {
+      const t = await teamOfFour();
+      await ask(t['nick'], 'el-b', ['bo', 'cy']);
+      await answer(t['cy'], 'cy', 'ans-b', 'el-b', 'decline');
+
+      const inbox = await get('/teams/dawn/inbox', t['bo']);
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-b', by: 'cy' });
+    });
+
+    it('the discharging act is invisible to bo in the timeline — this is why it needs its own read', async () => {
+      const t = await teamOfFour();
+      await ask(t['nick'], 'el-c', ['bo', 'cy']);
+      await answer(t['cy'], 'cy', 'ans-c', 'el-c');
+
+      // cy→nick is a DM: bo is not a party, so need-to-know scoping hides it. Without the trace, bo
+      // could not derive who answered at any price.
+      const timeline = await get('/teams/dawn/messages', t['bo']);
+      expect(timeline.json.messages.map((m: { id: string }) => m.id)).not.toContain('ans-c');
+      const inbox = await get('/teams/dawn/inbox', t['bo']);
+      expect(inbox.json.discharged).toContainEqual({ id: 'el-c', by: 'cy' });
+    });
+
+    it('reports the FIRST answer when two land', async () => {
+      const t = await teamOfFour();
+      await ask(t['nick'], 'el-d', ['bo', 'cy']);
+      await answer(t['cy'], 'cy', 'ans-d1', 'el-d');
+      await answer(t['bo'], 'bo', 'ans-d2', 'el-d');
+
+      const inbox = await get('/teams/dawn/inbox', t['bo']);
+      const rows = inbox.json.discharged.filter((d: { id: string }) => d.id === 'el-d');
+      expect(rows).toEqual([{ id: 'el-d', by: 'cy' }]);
+    });
+
+    it('says nothing to a seat outside the set — it never owed the act', async () => {
+      const t = await teamOfFour();
+      await ask(t['nick'], 'el-e', ['bo', 'cy']);
+      await answer(t['cy'], 'cy', 'ans-e', 'el-e');
+
+      const inbox = await get('/teams/dawn/inbox', t['dee']);
+      expect(inbox.json.discharged).toEqual([]);
+    });
+
+    it('stays empty while the act is still open', async () => {
+      const t = await teamOfFour();
+      await ask(t['nick'], 'el-f', ['bo', 'cy']);
+      const inbox = await get('/teams/dawn/inbox', t['bo']);
+      expect(inbox.json.discharged).toEqual([]);
+    });
+
+    it('is an empty list, never a missing key, on an ordinary inbox', async () => {
+      const t = await teamOfFour();
+      const inbox = await get('/teams/dawn/inbox', t['dee']);
+      expect(inbox.json.discharged).toEqual([]);
+    });
+  });
+
   it('ambient presence: a one-shot authenticated command flips the agent present (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

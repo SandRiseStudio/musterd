@@ -34,6 +34,7 @@ import {
   AskTierSchema,
   type AskTier,
   askContract,
+  eligibleOf,
   LANE_TERMINAL_STATES,
   isAwaitingAcceptance,
   makeEnvelope,
@@ -3348,6 +3349,46 @@ export async function handleHttp(
           ),
         ];
 
+        // ADR NNN: the stand-down trace. For each eligible-set act I owe that someone has already
+        // answered, name the seat that took it. Silent retirement was rejected: the reader may be
+        // mid-draft, and killing that work with no explanation ALSO denies them the chance to
+        // disagree with the answer that landed.
+        //
+        // This cannot be folded off `scan` the way `answered` above is. The discharging accept is a
+        // DM to the asker, so a second eligible seat is not a party to it and need-to-know scoping
+        // hides it — the trace is underivable client-side at any price, which is precisely why the
+        // server owes it. One query for the whole inbox, skipped entirely when nothing qualifies.
+        //
+        // ANY sender, not just this reader's: an eligible set is discharged by whoever answers first
+        // (the `anyAnswer` rule in store/delivery.ts). Using the per-recipient predicate here would
+        // report nothing in the only case that matters — someone ELSE took it.
+        const owed = messages
+          .filter((m) =>
+            eligibleOf(m.meta as Record<string, unknown> | null)?.includes(member.name),
+          )
+          .map((m) => m.id);
+        // The group key is `ref`, never `id`: both `messages` and `members` have an `id`, so grouping
+        // on that alias is ambiguous and SQLite rejects the statement outright. `by` is a bare column
+        // beside a single MIN(), which SQLite defines as taking its value from the row that supplied
+        // the minimum — so the seat named is the one whose answer landed FIRST. Ties on `ts` resolve
+        // arbitrarily, exactly as `anyAnswer` in store/delivery.ts already does; matching the ledger
+        // matters more here than a stricter rule, since a trace that disagreed with the ledger about
+        // who answered would be worse than one that is merely arbitrary in a tie.
+        const discharged =
+          owed.length === 0
+            ? []
+            : ctx.db
+                .prepare<unknown[], { ref: string; by: string }>(
+                  `SELECT json_extract(m.meta, '$.in_reply_to') AS ref, mem.name AS by, MIN(m.ts) AS first_ts
+                     FROM messages m JOIN members mem ON mem.id = m.from_member
+                    WHERE m.team_id = ?
+                      AND m.act IN ('accept','decline')
+                      AND json_extract(m.meta, '$.in_reply_to') IN (${owed.map(() => '?').join(',')})
+                    GROUP BY ref`,
+                )
+                .all(team.id, ...owed)
+                .map((r) => ({ id: r.ref, by: r.by }));
+
         // `total` is the full inbox size (visibility-scoped) so a bounded client can show "N of total".
         return sendJson(res, 200, {
           messages,
@@ -3355,6 +3396,7 @@ export async function handleHttp(
           total: countInbox(ctx.db, member),
           deferred,
           answered,
+          discharged,
         });
       }
 

@@ -54,7 +54,18 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const newest = messages[messages.length - 1]!;
         await client.markRead(newest.id).catch(() => undefined);
 
-        const text = messages.map(formatMessage).join('\n') + (await buildSkewWarning(client));
+        // ADR NNN: the stand-down trace. An eligible-set act someone else already answered is no
+        // longer this seat's to answer — but it still appears in the inbox, so saying nothing would
+        // be the silent retirement the design rejected: the reader may be mid-draft, and would
+        // neither know to stop nor get the chance to disagree with what landed. Rendered per act
+        // rather than as a summary line so it sits with the question it retires.
+        const dischargedBy = new Map((fetched.discharged ?? []).map((d) => [d.id, d.by]));
+        const line = (m: Envelope) => {
+          const by = dischargedBy.get(m.id);
+          return formatMessage(m) + (by ? `\n  ↳ answered by ${by} — you no longer owe this` : '');
+        };
+
+        const text = messages.map(line).join('\n') + (await buildSkewWarning(client));
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
@@ -66,6 +77,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
               ts: m.ts,
               thread: m.thread ?? null,
               meta: m.meta ?? null,
+              ...(dischargedBy.has(m.id) ? { discharged_by: dischargedBy.get(m.id) } : {}),
             })),
           },
         };
