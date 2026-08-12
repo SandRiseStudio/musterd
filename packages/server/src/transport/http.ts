@@ -29,6 +29,7 @@ import {
   OpenLaneSchema,
   UpdateLaneSchema,
   DeclareGoalSchema,
+  PostGoalOutcomeSchema,
   ActorAttestationSchema,
   GateCheckRequestSchema,
   AskTierSchema,
@@ -84,8 +85,10 @@ import { deriveReport } from '../store/insights.js';
 import { recordLaneClose } from '../store/laneClose.js';
 import {
   boardWarnings,
+  deriveGoalStatus,
   getLane,
   laneWarnings,
+  lanesForGoal,
   noGoalWarning,
   listLanes,
   openLane,
@@ -2684,6 +2687,27 @@ export async function handleHttp(
         return sendJson(res, 201, { goal });
       }
 
+      // value-layer design: a goal outcome note — an ordinary `message` act carrying
+      // `meta.goal_outcome`, replayed by listGoals beside defer/steer. Deliberately NOT a
+      // re-declaration: the skeleton replaces wholesale, and an outcome must survive that.
+      if (method === 'POST' && rest === '/goals/outcome') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(PostGoalOutcomeSchema, await readJson(req));
+        const env = makeEnvelope({
+          id: ulid(),
+          team: team.slug,
+          from: member.name,
+          to: { kind: 'team' },
+          act: 'message',
+          body: `[goal] outcome — ${body.goal_id}: ${body.outcome}`,
+          meta: { goal_outcome: { goal_id: body.goal_id, outcome: body.outcome } },
+        });
+        routeEnvelope(ctx, team, member, env);
+        // Pre-declaration notes are queued by the replay, not lost — `goal: null` says so honestly.
+        const goal = listGoals(ctx.db, team.id, team.slug).find((g) => g.id === body.goal_id);
+        return sendJson(res, 201, { goal: goal ?? null });
+      }
+
       if (method === 'POST' && rest === '/lanes') {
         const { team, member } = authTouch(ctx, slug, req);
         // Ledger seats hold no lanes (ADR 232 §1) — a service is an accountable actor, never a
@@ -2787,6 +2811,11 @@ export async function handleHttp(
         const beforeKeys = new Set(
           laneWarnings(ctx.db, team.id, team.slug, before).map(laneWarningKey),
         );
+        // value-layer design: the goal's derived status BEFORE the mutation — half of the flip
+        // detector behind the ship nudge (composed at the terminal edge below).
+        const goalShippedBefore =
+          before.goal_id !== null &&
+          deriveGoalStatus(lanesForGoal(ctx.db, team.id, team.slug, before.goal_id)) === 'shipped';
         const lane = updateLane(ctx.db, team.id, laneId, team.slug, body)!;
         // The claim edge is the one that decides who owns work, and it was the only lane edge
         // writing no audit row at all — which is why reconstructing the collision above from the
@@ -3203,6 +3232,7 @@ export async function handleHttp(
           });
         }
         // A resolve/abandon is a board-shape change — worth a team-visible note, same as an open.
+        const notices: string[] = [];
         if (LANE_TERMINAL_STATES.has(lane.state) && !LANE_TERMINAL_STATES.has(before.state)) {
           const verb = lane.state === 'abandoned' ? 'abandoned' : 'resolved';
           deliverLaneTeamAct(ctx, team, member, `[lane] ${verb} "${lane.title}"`, {
@@ -3212,6 +3242,17 @@ export async function handleHttp(
           // 188 grade, and the ADR 109 merge join — lives in `recordLaneClose` because an acceptor's
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
           recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
+          // value-layer design: when this close flips the goal to shipped, the CLOSER's own result
+          // carries the outcome nudge — appended, never blocking, never a wake. A goal that ships
+          // without an outcome stays visibly outcome-less; the daemon does not nag twice.
+          if (lane.goal_id !== null && !goalShippedBefore) {
+            const after = deriveGoalStatus(lanesForGoal(ctx.db, team.id, team.slug, lane.goal_id));
+            if (after === 'shipped')
+              notices.push(
+                `goal "${lane.goal_id}" just shipped — say what changed for a user: ` +
+                  `team_goal_outcome {goal_id: "${lane.goal_id}", outcome: "…"}`,
+              );
+          }
         }
         // ADR 235: whether this team has an acceptance backstop is a fact only the daemon holds —
         // it is a policy row plus a constant — and it is the fact that decides whether "self-close on
@@ -3232,6 +3273,7 @@ export async function handleHttp(
           lane,
           warnings,
           ...(review ? { review: { ...review, ...backstop } } : {}),
+          ...(notices.length ? { notices } : {}),
         });
       }
 
