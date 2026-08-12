@@ -124,6 +124,51 @@ describe('SessionAttestation (ADR 164)', () => {
     expect(a.adoptedSession).toBe('sess-ours');
   });
 
+  it('an already-ended slot: interloper start+end between ticks is not adopted — fail open', () => {
+    // Stanley's post-gate residual: the slot already had ended_at, so the interloper gate
+    // skipped, and a captured→ended pair landed on the ledger. If both hooks fire between
+    // heartbeats, the adapter only ever sees the corpse and never adopts it.
+    let session: SessionCapture = { ...ours, id: 'sess-old', ended_at: T0 - 1_000 };
+    const a = new SessionAttestation({
+      bindingDir: '/ws',
+      readSession: () => session,
+      statMtime: () => SETTLED,
+      ppid: () => 4242,
+      processStart: T0,
+    });
+    expect(a.check(SETTLED).verdict).toBe('live');
+    expect(a.adoptedSession).toBeNull();
+    session = { ...ours, id: 'sess-interloper', ended_at: SETTLED + 4_000 };
+    expect(a.check(SETTLED + 15_000).verdict).toBe('live');
+    expect(a.adoptedSession).toBeNull();
+  });
+
+  it('an already-ended slot: a tick that sees the live interloper then its end DOES demote', () => {
+    // The other half of the residual: if a heartbeat lands between SessionStart and SessionEnd,
+    // looksAlive is true (no ended_at yet), the adapter adopts the interloper, and the honest
+    // end demotes. Activity-outranks-inference (shouldReleaseOnVerdict) still saves a session
+    // that called a tool within HEARTBEAT_MS — this is the ladder's own verdict only.
+    let session: SessionCapture = { ...ours, id: 'sess-old', ended_at: T0 - 1_000 };
+    const a = new SessionAttestation({
+      bindingDir: '/ws',
+      readSession: () => session,
+      statMtime: () => SETTLED,
+      ppid: () => 4242,
+      processStart: T0,
+    });
+    expect(a.check(SETTLED).verdict).toBe('live');
+    expect(a.adoptedSession).toBeNull();
+    session = { ...ours, id: 'sess-interloper', started_at: SETTLED + 1_000 };
+    expect(a.check(SETTLED + 15_000).verdict).toBe('live');
+    expect(a.adoptedSession).toBe('sess-interloper');
+    session = { ...session, ended_at: SETTLED + 19_000 };
+    expect(a.check(SETTLED + 30_000)).toEqual({
+      verdict: 'dormant',
+      rung: 'ended',
+      session_id: 'sess-interloper',
+    });
+  });
+
   it('SessionEnd on our own adopted session goes dormant — recoverable, not an exit', () => {
     let session = ours;
     const a = new SessionAttestation({
