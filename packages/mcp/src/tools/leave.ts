@@ -4,8 +4,8 @@ import type { McpConfig } from '../config.js';
 import { textResult } from './format.js';
 
 const DESCRIPTION =
-  'Goes offline and releases your seat. Use when wrapping a session or stepping away, not ' +
-  'mid-task. The seat is held ~45s for a quick rejoin; team_join brings you back.';
+  'Goes offline and releases your seat. Use when wrapping a session, not mid-task. The seat ' +
+  'is held ~45s for a quick rejoin; team_join brings you back.';
 
 export function registerLeave(server: McpServer, client: MusterdClient, config: McpConfig): void {
   server.registerTool('team_leave', { description: DESCRIPTION, inputSchema: {} }, async () => {

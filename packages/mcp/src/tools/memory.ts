@@ -14,7 +14,7 @@ import { errorResult, notReadyMessage, textResult } from './format.js';
 
 const SAVE_DESCRIPTION =
   "Saves this seat's memory for the next session or occupant: what you were doing, decisions " +
-  'mid-flight, where you left off. Use when wrapping a session or handing off, not mid-task. ' +
+  'mid-flight, where you left off. Use when wrapping up or handing off, not mid-task. ' +
   'One note per seat, last-write-wins. headline ≤120 chars (shown on the next occupy); body ' +
   '≤8KB. Private to this seat; never store secrets.';
 
