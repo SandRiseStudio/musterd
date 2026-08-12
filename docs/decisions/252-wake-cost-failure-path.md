@@ -93,11 +93,15 @@ simply never carried onto the one row that proves a session existed.
   the expiry row is written is not retro-stamped; the read-time counter would need to join the two
   rows itself. Left open deliberately: capture fires at session start, which precedes expiry in
   every ordering this path produces.
-- **First live observation of the ADR 241 token.** A week after ADR 241 shipped, `wake_lease` had
-  never been observed landing anywhere — zero presence rows, zero audit rows — because no woken
-  session had existed to check. Inheritance was verified as strong-but-not-conclusive (the hook
-  scrubs no environment, and sibling `CLAUDE_*` variables demonstrably inherit), never observed.
-  This increment is therefore also the first live proof that the token arrives at all.
+- **First live observation of the ADR 241 token — done, and it arrives.** A week after ADR 241
+  shipped, `wake_lease` had never been observed landing anywhere: zero presence rows, zero audit
+  rows, because no woken session had existed to check. Inheritance was argued
+  strong-but-not-conclusive (the hook scrubs no environment; sibling `CLAUDE_*` variables inherit)
+  and never observed. It is observed now — see the Eval below.
+- **The probe ran against an isolated daemon, not the shared one.** The chain it exercised is the
+  real one (harness → SessionStart hook → CLI → daemon), and the lease was daemon-minted, but the
+  host loop's own poll/report cycle was driven by hand. A wake actuated end-to-end by `musterd host`
+  is still unobserved for this path.
 
 ## Observability & Evaluation
 
@@ -116,6 +120,24 @@ first:
 2. **The failure path is priced as unpriced.** A wake whose lease expires after such a capture
    produces a `residency.wake_failed` row with `session_captured: true`, and `unpriced_sessions`
    counts exactly that lease while `cost_usd_total` is unchanged.
+
+**Both halves observed live, 2026-08-12** (isolated daemon on this build; a temp seat workspace, a
+real `claude-code` session spawned with the actuator's own `wakeEnv` shape):
+
+1. A daemon-minted lease `01KZVGC2MM…` was polled for a real urgent act; the session spawned under
+   `MUSTERD_WAKE_LEASE=01KZVGC2MM…` produced
+   `residency.session_captured {"harness":"claude-code","enrolled":true,"session_digest":"4dd397959dac","wake_lease":"01KZVGC2MM…"}`.
+   That is the first `wake_lease` ever observed landing on any row, anywhere.
+2. Expiring that lease produced
+   `residency.wake_failed {…,"reason":"lease_expired","session_captured":true}` — no `cost_usd` — and
+   the report read `unpriced_sessions: 1` with `cost_reported: 0` and `cost_usd_total: null`. The
+   paid wake is now visible, and the totals stayed honest about knowing no price.
+
+One thing the probe surfaced that is worth recording: the second capture was initially **gated** by
+the interloper gate (#744) because the first probe session's slot was still un-ended and
+live-looking. That is the gate working, not a defect — but it means a wake into a workspace holding
+a live-looking slot attests no token, which is a real (and correctly-behaving) source of the floor
+in §5.
 
 Supporting read: `unpriced_sessions + cost_reported ≤ leases`, always — a lease that is both priced
 and counted unpriced is a bug in the dedupe, not a finding.
