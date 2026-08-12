@@ -113,6 +113,37 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     }
   });
 
+  // ADR 252: the identity join between a wake and the session it paid for. `wake_cost` exists only
+  // on the report path, so without this token a lease that spawns a session and then expires is
+  // free as far as the ledger can tell.
+  it('carries the attested wake lease onto the captured/ended rows, and omits it when unstamped', async () => {
+    await enrollAda();
+    for (const event of ['start', 'end'] as const) {
+      const r = await post(
+        '/teams/dawn/residency/session',
+        { seat: 'Ada', harness: 'claude-code', event, wake_lease: 'L-42' },
+        agentKey,
+      );
+      expect(r.status).toBe(200);
+    }
+    for (const action of ['residency.session_captured', 'residency.session_ended'] as const) {
+      expect(JSON.parse(audits(action)[0]!.detail as string)).toMatchObject({ wake_lease: 'L-42' });
+    }
+
+    // An ordinary session carries no token and asserts nothing (ADR 236) — the field is absent,
+    // never a placeholder that would let an unwoken session join a lease it knows nothing about.
+    await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'start' },
+      agentKey,
+    );
+    const captured = audits('residency.session_captured').map(
+      (r) => JSON.parse(r.detail as string) as Record<string, unknown>,
+    );
+    expect(captured).toHaveLength(2);
+    expect(captured.filter((d) => 'wake_lease' in d)).toHaveLength(1);
+  });
+
   it('rejects a session_digest that is not a digest — the field cannot become an id smuggler', async () => {
     await enrollAda();
     const r = await post(

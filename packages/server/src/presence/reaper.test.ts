@@ -193,6 +193,52 @@ describe('startReaper', () => {
       expect(rows(teamId, 'residency.wake_deferred')).toHaveLength(0);
     });
 
+    // ADR 252: `residency.wake_cost` is written only when a host REPORTS, so a wake that spawned a
+    // session and then died on its lease is paid for and invisible. The session's own attested
+    // token is the evidence — the expiry row carries the fact, and deliberately no dollar figure:
+    // no cost source exists on this path, and a made-up number is worse than an honest gap.
+    it('stamps session_captured on an expired lease that a session attested (paid, unpriced)', () => {
+      const { teamId } = leaseDueWake();
+      const leaseId = db
+        .prepare<[string], { id: string }>('SELECT id FROM wake_leases WHERE team_id = ?')
+        .get(teamId)!.id;
+      appendAudit(db, teamId, {
+        actor: null,
+        action: 'residency.session_captured',
+        target: 'Ada',
+        result: 'allow',
+        detail: { harness: 'claude-code', enrolled: true, wake_lease: leaseId },
+      });
+
+      stop = startReaper(ctx);
+      vi.advanceTimersByTime(WAKE_LEASE_TTL_MS + config.reaperIntervalMs);
+
+      const failed = detailOf(rows(teamId, 'residency.wake_failed')[0]!);
+      expect(failed.reason).toBe('lease_expired');
+      expect(failed.session_captured).toBe(true);
+      expect(failed).not.toHaveProperty('cost_usd');
+    });
+
+    it('says nothing when no session claimed the lease — silence, not a denial', () => {
+      const { teamId } = leaseDueWake();
+      // A session captured under a DIFFERENT lease must not be credited to this one: the join is
+      // by identity, never by "a session happened around then" (the ADR 238→241 inference).
+      appendAudit(db, teamId, {
+        actor: null,
+        action: 'residency.session_captured',
+        target: 'Ada',
+        result: 'allow',
+        detail: { harness: 'claude-code', enrolled: true, wake_lease: 'some-other-lease' },
+      });
+
+      stop = startReaper(ctx);
+      vi.advanceTimersByTime(WAKE_LEASE_TTL_MS + config.reaperIntervalMs);
+
+      expect(detailOf(rows(teamId, 'residency.wake_failed')[0]!)).not.toHaveProperty(
+        'session_captured',
+      );
+    });
+
     it('defers instead — and records the suspension — when the loop did not run', () => {
       const { teamId, seat } = leaseDueWake();
       stop = startReaper(ctx);

@@ -13,6 +13,7 @@ import {
   awakeMsSince,
   expireWakeLeases,
   firstWakeLeaseTs,
+  leaseCapturedSession,
   listResidencyTeamIds,
   wakeExhaustionKey,
 } from '../store/residency.js';
@@ -111,12 +112,22 @@ export function startReaper(ctx: Ctx): () => void {
         });
         continue;
       }
+      // ADR 252: an expired lease is not automatically a wake that cost nothing. If a session
+      // attested THIS lease id, the wake spawned a real, paid session that then died without ever
+      // reporting — `residency.wake_cost` exists only on the report path, so that spend is
+      // otherwise invisible. Stamp the fact, not a number: no cost source exists here, and
+      // inventing one would be worse than recording the spend as unpriced.
+      const paidSession = leaseCapturedSession(ctx.db, lease.team_id, lease.id);
       appendAudit(ctx.db, lease.team_id, {
         actor: null,
         action: 'residency.wake_failed',
         target: seat?.name ?? '?',
         result: 'deny',
-        detail: { ...detail, reason: 'lease_expired' },
+        detail: {
+          ...detail,
+          reason: 'lease_expired',
+          ...(paidSession ? { session_captured: true } : {}),
+        },
       });
     }
     if (expiredLeases.length > 0) {

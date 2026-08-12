@@ -509,6 +509,9 @@ interface WakeAuditRow {
     delivery_outcome?: string;
     /** ADR 210: why the exact-match rung resolved. Absent unless the order was resume_eligible. */
     exact_match?: string;
+    /** ADR 252: a session attested THIS lease before it expired — the wake was paid for. Present
+     *  only when true; absence is silence, not a denial. */
+    session_captured?: boolean;
   };
 }
 
@@ -623,6 +626,20 @@ export function deriveWakeMetrics(
   const costs = [...costByLease.values()].map((c) => c.cost);
   const costTotal = costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : null;
 
+  // ADR 252: wakes known to have PAID for a session and known to have no price. `wake_cost` is
+  // written only on the report path, so a lease that spawned a session and then expired unreported
+  // contributes nothing to `cost_usd_total` — it reads as free. This counts those, from the
+  // identity token the session itself attested. A FLOOR by construction: an un-upgraded CLI
+  // attests no token, and a wake it ran is simply not visible here (ADR 236 — absence is not a
+  // zero). It is deliberately not folded into the cost total: the honest statement is "this many
+  // wakes cost something we cannot name", never a made-up dollar figure.
+  const unpricedSessions = rows.filter(
+    (r) =>
+      r.detail.session_captured === true &&
+      r.detail.lease_id !== undefined &&
+      !costByLease.has(r.detail.lease_id),
+  ).length;
+
   // The ADR 209/210 Eval split, over the SAME attempt-deduped act set as every other wake number
   // here — so the cohorts are comparable by construction rather than by a reader's assumption.
   // Counted from the classifying (last) woke row; a supplementary wake_cost row re-states the same
@@ -663,6 +680,7 @@ export function deriveWakeMetrics(
     cost_usd_total: costTotal,
     cost_usd_per_wake: costTotal !== null ? costTotal / costs.length : null,
     cost_reported: costs.length,
+    unpriced_sessions: unpricedSessions,
     by_seat,
   };
 }

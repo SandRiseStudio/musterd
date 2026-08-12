@@ -2059,10 +2059,16 @@ export async function handleHttp(
           // a lifecycle event able to name its own subject, so `captured` then `ended` seconds later
           // can be read as one session flapping or two short ones — a distinction that decides the
           // fix. Absent from an older CLI, in which case the row degrades to seat + class as before.
+          // `wake_lease` (ADR 252) is the identity join between a wake and the session it paid for.
+          // Only a woken child carries the token, so its presence here is evidence and its absence
+          // is silence (ADR 236) — which is exactly why the failure path can be priced honestly:
+          // an expired lease with a captured session under it was PAID, whatever the cost turns
+          // out to have been.
           detail: {
             harness: body.harness,
             enrolled,
             ...(body.session_digest ? { session_digest: body.session_digest } : {}),
+            ...(body.wake_lease ? { wake_lease: body.wake_lease } : {}),
           },
         });
         return sendJson(res, 200, { ok: true, enrolled });

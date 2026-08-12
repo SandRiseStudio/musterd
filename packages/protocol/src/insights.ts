@@ -360,6 +360,14 @@ export const WakeMetricsSchema = z.object({
   /** How many woke acts carried a cost — the honesty denominator for the averages. */
   cost_reported: z.number().int(),
   /**
+   * ADR 252: wakes that PAID for a session and left no price. `residency.wake_cost` is written only
+   * when a host reports, so a lease that spawned a session and then expired unreported contributes
+   * nothing to the totals above and reads as free. This counts those leases — identified by the
+   * wake token the session itself attested, never by timing. A **floor**: a CLI that predates the
+   * token attests nothing, and the wakes it ran stay invisible here. Optional for back-compat.
+   */
+  unpriced_sessions: z.number().int().optional(),
+  /**
    * ADR 209/210 Eval split. `delivery` counts woken acts by the delivery the host observed;
    * `exact_match` counts the `resume_eligible` cohort by why the exact-match rung resolved as it
    * did. Both carry their own honesty denominator for the same reason `cost_reported` exists: an

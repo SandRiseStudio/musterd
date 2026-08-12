@@ -1048,6 +1048,27 @@ export function firstWakeLeaseTs(db: Database, teamId: string, actKey: string): 
   return row?.ts ?? null;
 }
 
+/**
+ * Did a session ever attest that it was spawned by this lease (ADR 252)? The join is by IDENTITY —
+ * the `MUSTERD_WAKE_LEASE` token the actuator stamps on the woken child, carried through the
+ * session attestation onto `residency.session_captured` — never by timing, which would re-admit the
+ * "any fresh presence is my evidence" inference ADR 238→241 spent two increments removing.
+ *
+ * **True is evidence; false is silence.** A pre-ADR-252 CLI attests no token, so a `false` here
+ * means "no session claimed this lease", not "no session ran". Every counter derived from this must
+ * read as a floor.
+ */
+export function leaseCapturedSession(db: Database, teamId: string, leaseId: string): boolean {
+  const row = db
+    .prepare<[string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action = 'residency.session_captured'
+          AND json_extract(detail, '$.wake_lease') = ?`,
+    )
+    .get(teamId, leaseId);
+  return (row?.n ?? 0) > 0;
+}
+
 export function expireWakeLeases(db: Database, now = Date.now()): WakeLeaseRow[] {
   const rows = db
     .prepare<
