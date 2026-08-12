@@ -11,12 +11,20 @@
 
 Agents use lanes well. Goals — the only other work-item noun — are almost never used: declaring
 one is an inert message (`meta.goal` on a `message` act) with no mechanical consequence, so lanes
-open `goal_id`-less and the goal layer stays empty. musterd's own team doesn't use declared goals
-at all (`content/roadmap.data.ts` is the dogfood roadmap), so `team_goals` is empty on the
-flagship team.
+open `goal_id`-less and the goal layer stays empty.
+
+**Measured on the revive team, 2026-08-12** (this corrects an earlier draft of this spec, which
+claimed the team declared no goals at all): eight goals _are_ declared — two in flight
+(`harness-residency`, `verify-adr111-scratch`), four shipped, two planned — but only **14 of
+~400 lanes carry a `goal_id`**, and seven of those 14 belong to one finished experiment. So the
+problem is not that goals are undeclared; it is that **declaration is where goals stop**. Nothing
+connects a new lane to them, nothing reads them back, and the roster has drifted: one live lane
+names `human-ask-stream`, a goal id nobody ever declared, and `verify-adr111-scratch` is a
+scratch goal whose own title says "delete after". A layer that is written once and never read
+rots exactly this way.
 
 Meanwhile the web board's only view of work is the six-column lane kanban. That is the right
-*deep-dive* view, but it is too granular as the front door: a stranger (the "twitch viewer" test)
+_deep-dive_ view, but it is too granular as the front door: a stranger (the "twitch viewer" test)
 cannot look at 20 lane cards and answer "what is this team building?" The board has a goals
 swimlane toggle, but the `/live` overlay deliberately omits it (`BoardOverlay.tsx:33`, "nick,
 2026-07-31: reevaluating goals"). This design resolves that reevaluation.
@@ -32,9 +40,10 @@ top level (so the stranger reads intentions, not inventory).
    `surface_overlap`); it never refuses. A hard gate was rejected because forced attachment
    produces garbage links, and warn-first is the house style (ADR 227 precedent). Close-time
    attribution is the backstop, not the primary.
-3. **Goals become the dogfood roadmap.** Active arcs get declared as real goals on the revive
-   team. `roadmap.data.ts` stays as the marketing-site roadmap for now (separate altitude;
-   drift risk accepted and noted).
+3. **The declared goals on the revive team become real.** The existing eight get tidied
+   (stories added, the scratch goal retired, the undeclared id resolved) and the running arcs
+   get declared. `roadmap.data.ts` stays as the marketing-site roadmap for now (separate
+   altitude; drift risk accepted and noted).
 4. **The board's default view becomes a goals grid** — the A+C hybrid from the brainstorm:
    mission-grid cards with per-goal runways. Today's column view survives as the drill-in.
 5. **Goals gain a `story` field** — an optional plain-language one-liner written for the
@@ -68,8 +77,8 @@ top level (so the stranger reads intentions, not inventory).
 ### 1c. Acceptance backstop (close-time attribution)
 
 When `lane_submit` moves a **goal-less** lane to `awaiting_acceptance`, the generated acceptance
-ask appends one line: *"This lane is on no goal — if it advanced one, link it
-(`lane_update goal_id`) before resolving."* The accepter (or owner) can attach; nothing blocks
+ask appends one line: _"This lane is on no goal — if it advanced one, link it
+(`lane_update goal_id`) before resolving."_ The accepter (or owner) can attach; nothing blocks
 if they don't. No new act, no new state — copy in the submit path only.
 
 ## Part 2 — The pull (`team_next`)
@@ -83,17 +92,22 @@ if they don't. No new act, no new state — copy in the submit path only.
   scope for this increment; ordering the brief is the minimum pull that makes attachment the
   path of least resistance.
 
-## Part 3 — Dogfood migration (operational, at rollout)
+## Part 3 — Dogfood tidy-up (operational, at rollout)
 
-Declare goals on the revive team for the active arcs, each with a story and wave, e.g.:
+Not a migration from nothing — a tidy-up of the eight goals that already exist:
 
-- *Musterd runs its own agents natively* (ADR 131 arc)
-- *Every wake is priced and visible* (ADR 252 arc)
-- *Speak to "either of you" — any-of asks* (eligible sets)
-- *The board leads with goals* (this work)
+1. **Add a `story` to each surviving goal.** `harness-residency` already has the best title on
+   the board; it needs the stranger's line under it.
+2. **Declare the arcs that are running without one**, each with story and wave — wake pricing
+   (ADR 252), any-of asks (eligible sets), the board's front door (this work).
+3. **Declare or retire `human-ask-stream`** — a live lane names it and no declaration exists.
+   Whichever way it goes, the grid's "undeclared id" card stops appearing for it.
+4. **Retire `verify-adr111-scratch`** — its own title says "delete after". A scratch goal on
+   the front door is exactly the noise the grid should not lead with.
+5. **Link in-flight lanes** with `lane_update goal_id`, or leave the fresh `no_goal` warnings to
+   prompt their owners — which is the honest test of whether the teeth work.
 
-Owners of in-flight lanes link them with `lane_update goal_id` (or leave them to the `no_goal`
-warning to prompt it). `roadmap.data.ts` is untouched.
+`roadmap.data.ts` is untouched.
 
 ## Part 4 — Web UI: the goals grid
 
