@@ -36,7 +36,7 @@ function recipientsOf(db: Database, msg: MessageRow): RecipientRow[] {
       .get(msg.to_member);
     return row ? [row] : [];
   }
-  // ADR NNN: an eligible set narrows OBLIGATION, not visibility. The act is team-addressed and every
+  // ADR 254: an eligible set narrows OBLIGATION, not visibility. The act is team-addressed and every
   // seat can read it — but only the named seats owe an answer, and this ledger tracks what is owed.
   //
   // Note this branch is strictly MORE precise than the roster query below: the names are pinned in
@@ -92,7 +92,7 @@ function threadResolve(
 }
 
 /**
- * ADR NNN: ANY seat's accept/decline naming the act — the any-of discharge an eligible set promises.
+ * ADR 254: ANY seat's accept/decline naming the act — the any-of discharge an eligible set promises.
  *
  * This clause has to exist, and the reason is worth recording because the design assumed it away:
  * `answerBy` below is scoped to a single recipient (`from_member = recipientId`), which is exactly
@@ -255,7 +255,7 @@ function recipientLedger(
   recipient: RecipientRow,
   resolve: { act: string; id: string; ts: number } | null,
 ): DeliveryRecipient {
-  // ADR NNN: on an eligible-set act the FIRST answer from anyone discharges it for every named seat
+  // ADR 254: on an eligible-set act the FIRST answer from anyone discharges it for every named seat
   // (`anyAnswer`); everywhere else the per-recipient clause stands unchanged.
   const ownAnswer = eligibleOf(metaOf(msg)) ? anyAnswer(db, msg) : answerBy(db, msg, recipient.id);
   const answered = ownAnswer ?? resolve ?? laneHandoffDischarged(db, msg);

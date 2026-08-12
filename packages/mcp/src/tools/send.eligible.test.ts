@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTo } from './send.js';
 
 /**
- * ADR NNN: `to` normalised by ARITY. The 0- and 1-element rows are what `coerce.ts` already
+ * ADR 254: `to` normalised by ARITY. The 0- and 1-element rows are what `coerce.ts` already
  * repaired, so they are regression guards here, not new behaviour — the only thing that changes is
  * that 2+ stops bouncing.
  */
-describe('normalizeTo (ADR NNN)', () => {
+describe('normalizeTo (ADR 254)', () => {
   it('a bare name is a directed act', () => {
     expect(normalizeTo('stanley')).toEqual({
       to: { kind: 'member', name: 'stanley' },

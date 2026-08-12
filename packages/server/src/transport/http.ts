@@ -3349,7 +3349,7 @@ export async function handleHttp(
           ),
         ];
 
-        // ADR NNN: the stand-down trace. For each eligible-set act I owe that someone has already
+        // ADR 254: the stand-down trace. For each eligible-set act I owe that someone has already
         // answered, name the seat that took it. Silent retirement was rejected: the reader may be
         // mid-draft, and killing that work with no explanation ALSO denies them the chance to
         // disagree with the answer that landed.

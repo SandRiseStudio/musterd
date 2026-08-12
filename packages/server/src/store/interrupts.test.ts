@@ -240,11 +240,11 @@ describe('pendingInterrupts (ADR 088)', () => {
 });
 
 /**
- * ADR NNN: an eligible set narrows *obligation*. These cases pin the two properties the primitive
+ * ADR 254: an eligible set narrows *obligation*. These cases pin the two properties the primitive
  * rests on — the named seats owe it and nobody else does, and the first answer stands the rest down —
  * plus the regressions that prove the default rules are untouched for every act without a set.
  */
-describe('pendingInterrupts with an eligible set (ADR NNN)', () => {
+describe('pendingInterrupts with an eligible set (ADR 254)', () => {
   const env = (
     over: Partial<Envelope> & Pick<Envelope, 'id' | 'from' | 'to' | 'act'>,
   ): Envelope => ({

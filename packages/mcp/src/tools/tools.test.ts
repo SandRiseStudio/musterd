@@ -455,7 +455,7 @@ describe('team_send handler', () => {
     expect(sent).toHaveLength(0); // nothing sent
   });
 
-  // ADR NNN: naming 2-4 seats in `to` sends ONE team-addressed act carrying meta.eligible. The
+  // ADR 254: naming 2-4 seats in `to` sends ONE team-addressed act carrying meta.eligible. The
   // array is surface sugar — nothing below routeEnvelope learns a new wire shape.
   describe('an eligible set in `to`', () => {
     const liveClient = () => {
@@ -562,7 +562,7 @@ describe('team_inbox_check handler', () => {
     expect(text(r)).toContain("team_join {as:'Ada'}");
   });
 
-  // ADR NNN: an eligible-set act someone else answered still sits in the inbox, so it must SAY it
+  // ADR 254: an eligible-set act someone else answered still sits in the inbox, so it must SAY it
   // has been taken — a silent retirement leaves a mid-draft reader working on a closed question.
   describe('the eligible-set stand-down trace', () => {
     const asked = {

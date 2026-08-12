@@ -54,7 +54,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const newest = messages[messages.length - 1]!;
         await client.markRead(newest.id).catch(() => undefined);
 
-        // ADR NNN: the stand-down trace. An eligible-set act someone else already answered is no
+        // ADR 254: the stand-down trace. An eligible-set act someone else already answered is no
         // longer this seat's to answer — but it still appears in the inbox, so saying nothing would
         // be the silent retirement the design rejected: the reader may be mid-draft, and would
         // neither know to stop nor get the chance to disagree with what landed. Rendered per act

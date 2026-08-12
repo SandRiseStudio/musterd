@@ -3,10 +3,10 @@ import { CliError } from '../errors.js';
 import { parseRecipients } from './send.js';
 
 /**
- * ADR NNN: `--to a,b` names an eligible set. Mirrors the MCP surface's arity rules deliberately —
+ * ADR 254: `--to a,b` names an eligible set. Mirrors the MCP surface's arity rules deliberately —
  * same behaviour, each package keeping its own error convention (CliError + exit code here).
  */
-describe('parseRecipients (ADR NNN)', () => {
+describe('parseRecipients (ADR 254)', () => {
   it('a single name is a directed act', () => {
     expect(parseRecipients('stanley')).toEqual({
       to: { kind: 'member', name: 'stanley' },

@@ -50,7 +50,7 @@ function recipient(to: string): Recipient {
 }
 
 /**
- * ADR NNN: `to` normalised by ARITY.
+ * ADR 254: `to` normalised by ARITY.
  *
  * | `to`                    | result                            |
  * | ----------------------- | --------------------------------- |
@@ -140,7 +140,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
     {
       description: DESCRIPTION,
       inputSchema: {
-        // ADR NNN: an array is accepted because agents were already sending one — `coerce.ts`
+        // ADR 254: an array is accepted because agents were already sending one — `coerce.ts`
         // repaired the 0- and 1-element cases and bounced 2+. Now 2-4 names mean "either of you".
         to: z
           .union([z.string(), z.array(z.string())])
@@ -214,7 +214,7 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
 
       // Ride the adapter's active trace context along as meta.otel (ADR 011) so a handoff links the
       // sender's and receiver's traces across runtimes. Inert when there's no active context.
-      // ADR NNN: resolve `to` before composing. Normalisation can REJECT (too many names, an alias
+      // ADR 254: resolve `to` before composing. Normalisation can REJECT (too many names, an alias
       // inside a list), and that has to happen before anything is sent — a refusal the caller reads
       // as text is recoverable; a send to the wrong audience is not.
       let addressed: { to: Recipient; eligible: string[] | null };

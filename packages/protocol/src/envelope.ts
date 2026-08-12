@@ -29,7 +29,7 @@ export const DeferUntilSchema = z.union([
 export type DeferUntil = z.infer<typeof DeferUntilSchema>;
 
 /**
- * ADR NNN: the eligible set — 2–`MAX_ELIGIBLE` named seats, **any one of whom discharges the act**.
+ * ADR 254: the eligible set — 2–`MAX_ELIGIBLE` named seats, **any one of whom discharges the act**.
  *
  * Four is the cap for two reasons, and the second is the load-bearing one. Above four, a named set
  * is `@team` with extra steps and the sender should be made to say so. But the cap also bounds the
@@ -151,7 +151,7 @@ export function actMetaRules(
       });
     }
   }
-  // ADR NNN: the eligible set. **Shape only.** `actMetaRules` receives `{act, thread, meta}` — no
+  // ADR 254: the eligible set. **Shape only.** `actMetaRules` receives `{act, thread, meta}` — no
   // `from`, no roster handle — so "these seats exist, none has left, none is an observer, and none is
   // the sender" is necessarily a server-side check in `routeEnvelope`. Two-layer by structure, not by
   // preference. Validated whenever the key appears, so acts without one stay unaffected.

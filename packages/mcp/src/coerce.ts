@@ -80,7 +80,7 @@ function recipientShape(field: string): Rule {
         args[field] = v[0];
         return `${field}:[one]→string`;
       }
-      // 2+ recipients. On `team_send` this is now an eligible set (ADR NNN) and the schema takes the
+      // 2+ recipients. On `team_send` this is now an eligible set (ADR 254) and the schema takes the
       // array as-is — no repair to make, and the demand this branch used to bounce is the demand the
       // primitive was built from. Everywhere else `recipientShape` is used (`lane_handoff`) the
       // schema is still single-valued and 2+ still bounces, which is right: a lane has one owner.

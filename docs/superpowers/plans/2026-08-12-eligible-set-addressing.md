@@ -19,7 +19,7 @@
 - **No migration.** The `messages` schema, `to_kind` CHECK, and all seven copies of the `(to_member = ? OR to_kind IN ('team','broadcast'))` predicate stay untouched. If you find yourself writing SQL DDL, stop — you have taken a wrong turn.
 - **`pendingInterrupts` stays pure over envelopes.** It takes no `Database`. Do not add one.
 - **Zod version split:** `packages/protocol` is on zod 3; `packages/mcp` is on zod 4 and rebuilds enums locally rather than importing protocol schema objects (see the comment at `packages/mcp/src/tools/send.ts:105`). Follow that pattern — do not import a protocol zod object into an MCP `registerTool` input schema.
-- **ADR number:** not yet allocated. Pick the next free number off `origin/main` **at PR time** (numbers collide both ways; `pnpm adr-numbers:check` fails on duplicates or an H1 that doesn't match the filename). Until then write `ADR NNN` in comments and fix them in Task 8.
+- **ADR number: 254**, allocated in Task 8 via `scripts/adr-next.ts` and reserved with a draft PR (ADR 223). Comments were written as `ADR NNN` until then. **Trap:** replacing that placeholder repo-wide with `perl -pi` also hits three unrelated files that use `ADR NNN` as their own generic placeholder — `docs/decisions/223-*.md`, `docs/superpowers/plans/2026-07-24-model-attestation-truth.md`, `docs/superpowers/plans/2026-08-06-cloud-seats.md`. Scope the replacement, or check `git diff --stat` afterwards.
 - **Git:** branch `ryder/eligible-set-addressing` (already exists, already carries the spec). Commit after every task. Never `git checkout <file>` to undo — it destroys uncommitted work across the file.
 - **Never run `pnpm format`.** Use `pnpm exec prettier --write <your files>`.
 - **Gates before PR:** `pnpm build` must run before `pnpm typecheck` (phantom `.d.ts` errors otherwise) and before `pnpm lint`. `pnpm lint` is a separate gate from `format:check`.
@@ -36,7 +36,7 @@
 | `packages/mcp/src/coerce.ts`            | Comment-only: the 2+ bounce is now a real path.                                                                                           |
 | `packages/cli/src/commands/send.ts`     | `--to a,b`.                                                                                                                               |
 | `packages/server/src/transport/http.ts` | Inbox `discharged` trace. **Sequencing risk — see Task 7.**                                                                               |
-| `docs/decisions/NNN-*.md`               | The ADR.                                                                                                                                  |
+| `docs/decisions/254-eligible-sets.md`   | The ADR.                                                                                                                                  |
 
 ---
 
@@ -172,7 +172,7 @@ In `packages/protocol/src/envelope.ts`, add `import type { Act } from './acts.js
 
 ```ts
 /**
- * ADR NNN: the eligible set — 2–`MAX_ELIGIBLE` named seats, **any one of whom discharges the act**.
+ * ADR 254: the eligible set — 2–`MAX_ELIGIBLE` named seats, **any one of whom discharges the act**.
  *
  * Four is the cap for two reasons, and the second is the load-bearing one. Above four, a named set
  * is `@team` with extra steps and the sender should be made to say so. But the cap also bounds the
@@ -212,7 +212,7 @@ export function eligibleOf(meta: Record<string, unknown> | null | undefined): st
 Inside `actMetaRules`, after the `ask` block (~line 110) and before the `wait` rules:
 
 ```ts
-// ADR NNN: the eligible set. **Shape only.** `actMetaRules` receives `{act, thread, meta}` — no
+// ADR 254: the eligible set. **Shape only.** `actMetaRules` receives `{act, thread, meta}` — no
 // `from`, no roster handle — so "these seats exist, none has left, none is an observer, and none
 // is the sender" is necessarily a server-side check in `routeEnvelope`. Two-layer by structure,
 // not by preference.
@@ -327,7 +327,7 @@ Expected: FAIL — the two rejection cases return 200.
 Add `eligibleOf` to the existing `@musterd/protocol` import in `route.ts`, then insert immediately before the `// Resolve recipients.` comment:
 
 ```ts
-// ADR NNN: the roster half of eligible-set validation. `actMetaRules` validated the shape; only
+// ADR 254: the roster half of eligible-set validation. `actMetaRules` validated the shape; only
 // the daemon can validate the *names*, and it rejects rather than dropping — a question addressed
 // to a seat that cannot answer it is worse than a rejected send, because the sender goes on
 // believing someone owes them a reply.
@@ -438,7 +438,7 @@ function metaOf(msg: MessageRow): Record<string, unknown> | null {
 Then in `recipientsOf`, after the `to_kind === 'member'` branch and before the roster query:
 
 ```ts
-// ADR NNN: an eligible set narrows OBLIGATION, not visibility. The act is team-addressed and every
+// ADR 254: an eligible set narrows OBLIGATION, not visibility. The act is team-addressed and every
 // seat can read it — but only the named seats owe an answer, and the ledger tracks what is owed.
 // Note this branch is strictly *more* precise than the roster query below: the names are pinned in
 // the envelope, so a seat that later leaves is still visibly the one who was asked, where a plain
@@ -561,7 +561,7 @@ Add `eligibleOf` to the `@musterd/protocol` import. Inside `pendingInterrupts`, 
 
 ```ts
 const resolved = new Set<string>();
-// ADR NNN: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
+// ADR 254: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
 // eligible seat at once. Built in the same pass as `resolved` and for the same reason: this
 // predicate has no DB handle, so it cannot call the ledger's `actAnswered`. It does not need one —
 // the discharging act is an envelope in the same list.
@@ -690,7 +690,7 @@ function recipient(to: string): Recipient {
 }
 
 /**
- * ADR NNN: `to` normalised by **arity**. The 0- and 1-element rows are exactly what `coerce.ts`
+ * ADR 254: `to` normalised by **arity**. The 0- and 1-element rows are exactly what `coerce.ts`
  * already repaired, so this is additive — the only behaviour that changes is that 2+ stops bouncing.
  *
  * The array is surface sugar: a multi-name send is persisted and audited as a team act carrying
@@ -753,7 +753,7 @@ Append to `DESCRIPTION`:
 Fix the now-false comment in `coerce.ts:83`:
 
 ```ts
-return null; // 2+ recipients: an eligible set (ADR NNN) — the schema takes it as-is.
+return null; // 2+ recipients: an eligible set (ADR 254) — the schema takes it as-is.
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -828,7 +828,7 @@ Replace `parseRecipient` with:
 
 ```ts
 /**
- * ADR NNN: `--to a,b` names an eligible set — 2–MAX_ELIGIBLE seats, any one of whom can answer.
+ * ADR 254: `--to a,b` names an eligible set — 2–MAX_ELIGIBLE seats, any one of whom can answer.
  * A single value keeps its exact existing behaviour, including the `@alias` rejection.
  */
 export function parseRecipients(to: string): { to: Recipient; eligible: string[] | null } {
@@ -937,7 +937,7 @@ Expected: FAIL — `discharged` is undefined.
 In the `GET /inbox` handler, beside the existing `answered` computation (~line 3332):
 
 ```ts
-// ADR NNN: stand-down needs a trace. For each eligible-set act in this inbox that someone else
+// ADR 254: stand-down needs a trace. For each eligible-set act in this inbox that someone else
 // has already answered, name the seat that took it — the reader may be mid-draft, and a silent
 // retirement would destroy that work AND deny them the chance to disagree with what landed.
 const discharged = messages.flatMap((m) => {
@@ -974,7 +974,7 @@ git commit -m "Inbox: name the seat that took an eligible-set act you no longer 
 
 ---
 
-### Task 8: The ADR, the spec's home, and the gates
+### Task 8: The ADR, the spec's home, and the gates ✅ DONE
 
 **Files:**
 
@@ -1007,13 +1007,13 @@ Add a fourth bullet under the recipient list:
 ```markdown
 - `{"kind":"team"}` with `meta.eligible: ["a","b"]` — delivered to every Member as above, but only the
   named 2–4 Members owe an answer, and the first `accept`/`decline` discharges it for all of them.
-  Visibility is team-wide; accountability is the named set (ADR NNN).
+  Visibility is team-wide; accountability is the named set (ADR 254).
 ```
 
-- [ ] **Step 4: Replace every `ADR NNN` placeholder**
+- [ ] **Step 4: Replace every `ADR 254` placeholder**
 
 ```bash
-grep -rn "ADR NNN" packages/ docs/ SPEC.md
+grep -rn "ADR 254" packages/ docs/ SPEC.md
 ```
 
 Expected after fixing: no results.
@@ -1030,7 +1030,7 @@ Build **before** typecheck (phantom `.d.ts` errors otherwise). All must pass.
 
 ```bash
 git add docs/decisions SPEC.md docs/superpowers/specs packages
-git commit -m "ADR NNN: eligible sets — accountability narrows, visibility does not"
+git commit -m "ADR 254: eligible sets — accountability narrows, visibility does not"
 ```
 
 ---

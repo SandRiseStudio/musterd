@@ -76,7 +76,7 @@ function parseRecipient(to: string): Recipient {
 }
 
 /**
- * ADR NNN: `--to a,b` names an eligible set — 2–MAX_ELIGIBLE seats, any one of whom can answer.
+ * ADR 254: `--to a,b` names an eligible set — 2–MAX_ELIGIBLE seats, any one of whom can answer.
  *
  * Mirrors the MCP surface's arity rules on purpose (empty → `@team`, one name → a directed act,
  * 2–4 → a team act carrying `meta.eligible`, 5+ → refused), each package keeping its own error
@@ -146,7 +146,7 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     if (reason) meta['urgent_reason'] = reason;
   }
 
-  // ADR NNN: resolve `--to` before composing. This can REFUSE (too many names, an alias inside a
+  // ADR 254: resolve `--to` before composing. This can REFUSE (too many names, an alias inside a
   // list), and it must do so outside the try below — that catch relabels everything as
   // "invalid message", which would bury a precise, actionable recipient error.
   const { to: recipientTo, eligible } = parseRecipients(to);

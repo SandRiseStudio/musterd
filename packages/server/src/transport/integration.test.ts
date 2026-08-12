@@ -330,7 +330,7 @@ describe('HTTP API', () => {
     expect(bad.json.error.code).toBe('validation');
   });
 
-  // ADR NNN: the eligible set. The roster half of validation — `actMetaRules` proved the shape, only
+  // ADR 254: the eligible set. The roster half of validation — `actMetaRules` proved the shape, only
   // the daemon can prove the names.
   describe('meta.eligible roster validation', () => {
     const sendEligible = async (
@@ -413,7 +413,7 @@ describe('HTTP API', () => {
   });
 
   /**
-   * ADR NNN: stand-down needs a trace. A seat whose obligation just vanished may be mid-draft — it
+   * ADR 254: stand-down needs a trace. A seat whose obligation just vanished may be mid-draft — it
    * has to learn the question was taken, and by whom, so it can drop the work or disagree with what
    * landed. A stand-down that says nothing is the same defect as an instrument going quiet.
    */

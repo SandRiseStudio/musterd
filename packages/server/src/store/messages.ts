@@ -231,7 +231,7 @@ export function pendingInterrupts(
   opts: { obligations?: boolean } = {},
 ): Envelope[] {
   const resolved = new Set<string>();
-  // ADR NNN: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
+  // ADR 254: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
   // named seat at once. Built in the same pass as `resolved` and for the same reason: this predicate
   // is pure over envelopes (no `Database`), so it cannot call the ledger's `actAnswered`. It does not
   // need one — the discharging act is an envelope in the very list being scanned.
@@ -251,7 +251,7 @@ export function pendingInterrupts(
     opts.obligations === true &&
     m.act === 'ask' &&
     (m.meta as { lane_review?: unknown } | null | undefined)?.['lane_review'] != null;
-  // ADR NNN: an eligible set REPLACES the default obligation rule rather than adding to it — which is
+  // ADR 254: an eligible set REPLACES the default obligation rule rather than adding to it — which is
   // what narrows `request_help` from "every seat on the team" (its behaviour without a set, below) to
   // the named few. Discharge is checked here rather than at the filter so a stood-down act stops
   // being action-needed *everywhere* at once, including in the `steer` winner scan.

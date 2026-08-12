@@ -204,7 +204,7 @@ describe('handoffNamedLaneOutOfPlay (#745 discharge rule, shared with orientatio
   });
 });
 
-describe('the eligible set (ADR NNN): obligation narrows, and any one answer discharges', () => {
+describe('the eligible set (ADR 254): obligation narrows, and any one answer discharges', () => {
   /** seed() gives nick/Ada/bob; a fourth seat is what distinguishes "the named few" from "everyone". */
   function seed4() {
     const s = seed();

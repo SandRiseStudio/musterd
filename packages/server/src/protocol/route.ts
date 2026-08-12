@@ -247,7 +247,7 @@ function routeEnvelopeInner(
     recordActModel(attestedModel);
   }
 
-  // ADR NNN: the roster half of eligible-set validation. `actMetaRules` proved the shape; only the
+  // ADR 254: the roster half of eligible-set validation. `actMetaRules` proved the shape; only the
   // daemon can prove the *names*, and it REJECTS rather than dropping — a question addressed to a
   // seat that cannot answer it is worse than a rejected send, because the sender goes on believing
   // someone owes them a reply. Read off `outgoingEnv` so a meta rewrite above can never desync the
