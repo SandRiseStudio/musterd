@@ -38,7 +38,7 @@ Every bounce there is a seat that tried to address two teammates and was told no
 
 ## Decision
 
-An act may carry an **eligible set**: two or more named seats, **any one of whom discharges it**.
+An act may carry an **eligible set**: two to four named seats, **any one of whom discharges it**.
 
 It is **not** a new recipient kind. The act is addressed `to: {kind:'team'}` and stays visible to the
 whole team and the firehose; `meta.eligible: ['stanley','izzo']` names who owes an answer.
@@ -81,7 +81,7 @@ semantics, so no per-act rule table is needed.
 `from` and no roster handle. So it can enforce **shape** and nothing more:
 
 - `meta.eligible` present ⇒ `act ∈ {message, request_help, challenge}`
-- array of ≥2 distinct, non-empty strings
+- array of 2–4 distinct, non-empty strings (`MAX_ELIGIBLE = 4`)
 
 **Roster validation happens server-side** in `routeEnvelope` (`packages/server/src/protocol/route.ts`),
 in the same place a `member` target is resolved today: every name exists, is `left_at IS NULL`, is not
