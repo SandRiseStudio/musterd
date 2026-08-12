@@ -241,6 +241,33 @@ No new timer, no new table, no change to wake policy, rate caps, or cost account
 **Reopening trigger:** if (2) exceeds 1.3 sustained, or (4) exceeds the directed-act baseline,
 reopen — the likely fix is making stand-down interrupt-class rather than inbox-class.
 
+### Live exercise, 2026-08-12 — one real gap found
+
+Run against a temp daemon on its own DB and port (`:4877`), four real seats over real HTTP, sends made
+through the CLI rather than curl so the `--to a,b` path was genuinely exercised. The shared daemon was
+not touched and was verified healthy after.
+
+**What held.** One row, `to_kind='team'`, `to_member=NULL`, `meta.eligible:["stanley","izzo"]` — no
+fan-out, no new `to_kind`. The ADR 090 ledger named exactly the two seats, not the roster of four. All
+four seats saw the act; only two owed it. izzo's single `accept` flipped **both** stanley and izzo to
+`answered` against the **same** accept id — any-of discharge, live. stanley's inbox named izzo;
+wanderer's `discharged` stayed empty.
+
+**What did not.** The CLI rendered the act as `→ @team` with no trace at all. A seat reading
+`musterd inbox` saw neither that it was one of the named few nor that izzo had already answered — the
+exact silent retirement this design rejects, on the surface a human is most likely to be reading. The
+MCP adapter had the trace because it was built there; the CLI was never wired.
+
+This is the value of exercising: the full suite was green at 3828 tests with this gap wide open, because
+every test asserted on the JSON the server returns, and none asserted on what a person actually sees.
+
+**Fixed in-lane.** `toLabel` renders the set (`→ stanley | izzo ?`, the `?` marking it any-of rather
+than directed), `renderMessageRow` takes `dischargedBy` and prints `↳ answered by izzo — you no longer
+owe this`, and the CLI client and `inbox` command carry `discharged` through. Eight render tests added,
+including two regressions pinning that a plain team act still reads `→ @team` and a directed act is
+untouched. Note wanderer — who never owed it — now sees _who is on it_ without being told to stand down
+from an obligation it never had, which is the right asymmetry.
+
 ## Testing
 
 - **Protocol:** shape validation — reject `eligible` on a disallowed act, reject `<2` names, reject

@@ -1035,7 +1035,7 @@ git commit -m "ADR 254: eligible sets — accountability narrows, visibility doe
 
 ---
 
-### Task 9: Exercise it live, then submit
+### Task 9: Exercise it live, then submit ✅ DONE — found and fixed a real gap (see spec)
 
 A green test suite is not evidence the primitive works — every prior increment that shipped on tests alone had a gap the first real use found.
 

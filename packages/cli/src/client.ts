@@ -301,6 +301,10 @@ export class HttpClient {
      *  inbox excludes our own sends, so the reply that answers an ask cannot be seen from here.
      *  Absent from an older daemon ⇒ callers treat everything as open, the prior behaviour. */
     answered?: string[];
+    /** ADR 254: eligible-set acts in this inbox that someone else has already answered, and who.
+     *  Server-computed and underivable here: the discharging reply is a DM to the asker, so a second
+     *  eligible seat is not a party to it. Absent from an older daemon ⇒ the act shows as still owed. */
+    discharged?: { id: string; by: string }[];
   }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');

@@ -1,4 +1,5 @@
 import {
+  eligibleOf,
   MODEL_UNKNOWN,
   type Activity,
   type Envelope,
@@ -47,7 +48,18 @@ export function renderBanner(): string {
 }
 
 /** A recipient label for a message row: `→ Lin`, `→ @team`, `→ @broadcast`. */
-function toLabel(to: Envelope['to'], kindOf: KindOf): string {
+function toLabel(to: Envelope['to'], kindOf: KindOf, eligible?: string[] | null): string {
+  // ADR 254: an eligible-set act IS a team act, so `→ @team` is not wrong — but it is useless. It
+  // tells a reader nothing about who owes an answer, and tells a sender who just typed
+  // `--to stanley,izzo` that their two names went nowhere. Name the set instead; the `?` marks it as
+  // "any one of you", distinguishing it from a directed `→ name`.
+  if (eligible && eligible.length > 0) {
+    return (
+      theme.meta('→ ') +
+      eligible.map((n) => theme.memberName(n, kindOf(n))).join(theme.meta(' | ')) +
+      theme.meta(' ?')
+    );
+  }
   if (to.kind === 'team') return theme.meta('→ @team');
   if (to.kind === 'broadcast') return theme.meta('→ @broadcast');
   return theme.meta('→ ') + theme.memberName(to.name, kindOf(to.name));
@@ -63,7 +75,9 @@ function toLabel(to: Envelope['to'], kindOf: KindOf): string {
 export function renderInbox(
   messages: Envelope[],
   kindOf: KindOf,
-  opts: { cursorTs: number; now?: number },
+  /** ADR 254: `discharged` maps an eligible-set act id → the seat that answered it, so the row can
+   *  say so instead of silently retiring it. */
+  opts: { cursorTs: number; now?: number; discharged?: Map<string, string> },
 ): string {
   const now = opts.now ?? Date.now();
   const out: string[] = [];
@@ -75,7 +89,13 @@ export function renderInbox(
       out.push((lastDay === null ? '' : '\n') + theme.dayHeader(day));
       lastDay = day;
     }
-    out.push(renderMessageRow(m, kindOf, { unread: m.ts > opts.cursorTs }));
+    const by = opts.discharged?.get(m.id);
+    out.push(
+      renderMessageRow(m, kindOf, {
+        unread: m.ts > opts.cursorTs,
+        ...(by ? { dischargedBy: by } : {}),
+      }),
+    );
   }
   return out.join('\n');
 }
@@ -83,15 +103,23 @@ export function renderInbox(
 export function renderMessageRow(
   env: Envelope,
   kindOf: KindOf,
-  opts: { unread?: boolean } = {},
+  /** ADR 254: `dischargedBy` names the seat that already answered this eligible-set act, when one
+   *  has. Omitted ⇒ the act is still owed (or is not an eligible-set act at all). */
+  opts: { unread?: boolean; dischargedBy?: string } = {},
 ): string {
   const marker = opts.unread ? theme.accent('▌') + ' ' : '  ';
-  const head = `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf)}`;
+  const eligible = eligibleOf(env.meta as Record<string, unknown> | null | undefined);
+  const head = `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf, eligible)}`;
   const indent = '    ';
   const body = wrapText(env.body, termWidth() - indent.length)
     .map((line) => `${indent}${line}`)
     .join('\n');
-  return env.body ? `${marker}${head}\n${body}` : `${marker}${head}`;
+  // The stand-down trace, on the line under the question it retires. Silence here would be the
+  // silent retirement the design rejected — the reader may be mid-draft on an answered question.
+  const stood = opts.dischargedBy
+    ? `\n${indent}${theme.meta(`↳ answered by ${opts.dischargedBy} — you no longer owe this`)}`
+    : '';
+  return (env.body ? `${marker}${head}\n${body}` : `${marker}${head}`) + stood;
 }
 
 export interface Health {
