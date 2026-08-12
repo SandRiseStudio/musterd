@@ -71,9 +71,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_open',
     {
       description:
-        'Declare a unit of work as a lane: title, the paths it touches, what it builds on. ' +
-        'claim:true owns it now — the usual task-start move. Returns the lane + advisory ' +
-        'contention warnings (unmet dependency, surface overlap) — never blocking.',
+        'Declares a unit of work as a lane: title, the paths it touches, what it builds on. ' +
+        'claim:true takes ownership when the work is yours. Returns the lane + ' +
+        'advisory contention warnings (unmet dependency, surface overlap) — never blocking.',
       inputSchema: {
         title: z.string().describe('the work-item, short'),
         detail: z.string().optional().describe('acceptance criteria / notes'),

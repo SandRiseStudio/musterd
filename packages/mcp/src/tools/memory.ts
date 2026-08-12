@@ -13,8 +13,8 @@ import { errorResult, notReadyMessage, textResult } from './format.js';
  */
 
 const SAVE_DESCRIPTION =
-  "Save this seat's memory for the next session or occupant: what you were doing, decisions " +
-  'mid-flight, where you left off. Call before a handoff, at wrap-up, or when winding down. ' +
+  "Saves this seat's memory for the next session or occupant: what you were doing, decisions " +
+  'mid-flight, where you left off. Use when wrapping up or handing off, not mid-task. ' +
   'One note per seat, last-write-wins. headline ≤120 chars (shown on the next occupy); body ' +
   '≤8KB. Private to this seat; never store secrets.';
 
