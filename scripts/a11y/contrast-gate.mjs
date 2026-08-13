@@ -250,6 +250,8 @@ if (!process.argv.includes('--static-only')) {
 if (failed.length) {
   console.log(
     `\ncontrast-gate FAILED on ${failed.length} route(s): ${failed.join(', ')}` +
+      '\nRoutes marked `!` did not measure at all — fix the harness there before reading anything' +
+      ' into the rest.' +
       '\nEach row is `ratio (need N) ink on paper`. Almost always the fix is the -ink variant of the' +
       ' token already in use (--lc-success → --lc-success-ink); packages/web/AGENTS.md has the split.' +
       '\nRe-measure one page with: pnpm a11y:contrast <url>',

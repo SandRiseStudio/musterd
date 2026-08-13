@@ -123,7 +123,11 @@ const cleanup = () => {
 process.on('exit', cleanup);
 
 let targets;
-for (let i = 0; i < 50; i++) {
+/* 30s, not 10. On a cold CI runner the first Chrome of a session takes appreciably longer to open
+   its debugging port than the third does — the 2026-08-13 gate run failed the first three routes
+   and then sailed through the remaining nine on the same machine. A timeout tuned on a warm laptop
+   is how a suite acquires a "flaky" reputation it does not deserve. */
+for (let i = 0; i < 150; i++) {
   try {
     targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     if (targets.some((t) => t.type === 'page')) break;
@@ -133,7 +137,13 @@ for (let i = 0; i < 50; i++) {
   await new Promise((r) => setTimeout(r, 200));
 }
 const page = targets?.find((t) => t.type === 'page');
-if (!page) throw new Error('Chrome DevTools endpoint never came up');
+if (!page) {
+  console.error(
+    `contrast-sweep — Chrome (${CHROME}) never opened its debugging port on :${port} within 30s.` +
+      ' Nothing was measured. This is a harness failure, not a contrast result.',
+  );
+  process.exit(2);
+}
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((res, rej) => {
@@ -531,6 +541,14 @@ try {
   });
   await evalIn(`document.getElementById('__a11y_glyphs_off')?.remove()`);
 
+  /* A THIRD reading, after the shutter. The first two bracket a 300ms window BEFORE the screenshot,
+     which catches a fade that is already moving — but not one that starts afterwards. The office
+     preview runs a timed choreography that pulls speech bubbles back out of the room, and on CI a
+     bubble sat at opacity 1 for both readings and was then halfway gone by the time the pixel was
+     taken. It reported 3.16 for text that is nowhere near that bad, which is a false FAILURE — the
+     one kind of wrong answer that costs a person a day chasing a colour that was never wrong.
+     Requiring stability across the whole window, shutter included, is what actually closes it. */
+  const opacity3 = await evalIn(OPACITY_IN_PAGE);
   const img = decodePng(Buffer.from(shot.data, 'base64'));
   // With a clip at scale 1 the image is CSS pixels; without one it is device pixels.
   const scale = tall ? geom.dpr : img.width / geom.docW;
@@ -546,7 +564,12 @@ try {
   const faded = [];
   for (const rc of geom.rects) {
     const now = opacity2[rc.key];
-    const moving = now === undefined || Math.abs(now - rc.opacity) > 0.01;
+    const after = opacity3[rc.key];
+    const moving =
+      now === undefined ||
+      after === undefined ||
+      Math.abs(now - rc.opacity) > 0.01 ||
+      Math.abs(after - rc.opacity) > 0.01;
     if (rc.opacity < 0.99 && moving) {
       unsettled.push(rc.key.split('|')[0] || '?');
       continue;

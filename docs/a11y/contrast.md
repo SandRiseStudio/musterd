@@ -112,7 +112,12 @@ Three rules stop that becoming a fourth wrong answer:
   the first run disagreed on three elements and the _walk_ was right about all three — they were
   mid-animation.
 - **A fade that is still moving is refused; a fade that has settled is measured with the fade
-  included.** Two opacity readings 300 ms apart tell them apart. Animations are also finished
+  included.** Three opacity readings tell them apart — two bracketing a 300 ms window before the
+  screenshot, and one _after the shutter_. The third is not belt-and-braces: the office preview runs
+  a timed choreography that pulls speech bubbles back out of the room, and on CI a bubble sat at
+  opacity 1 for both early readings and was halfway gone by the time the pixel was taken. It
+  reported 3.16 for text that is nowhere near that bad — a false **failure**, the one kind of wrong
+  answer that costs someone a day chasing a colour that was never wrong. Animations are also finished
   programmatically first, and the page is measured under `prefers-reduced-motion: reduce` — a real
   user state this project already writes CSS for, and the only one with a single settled appearance.
 - **Validated end to end against known values whenever it changes:** `#767676` on white 4.54,
