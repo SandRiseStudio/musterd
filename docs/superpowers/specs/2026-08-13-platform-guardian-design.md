@@ -1,6 +1,6 @@
 # The platform guardian, increment 1 — pure code on call
 
-- **Status:** designed in session (nick + izzo, 2026-08-13); spec awaiting review
+- **Status:** implementing (ADR 263)
 - **Date:** 2026-08-13
 - **Author:** izzo
 - **Seed:** [docs/design/roles-and-stewardship.md](../../design/roles-and-stewardship.md) — the
