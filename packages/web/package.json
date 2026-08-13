@@ -7,7 +7,9 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "stage:site": "node scripts/stage-site.mjs",
+    "deploy:site": "pnpm build && pnpm stage:site && pnpm dlx wrangler@4.83.0 deploy"
   },
   "dependencies": {
     "@fontsource/fraunces": "^5.2.9",

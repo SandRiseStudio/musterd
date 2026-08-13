@@ -30,14 +30,45 @@ The static artifact is `dist/client/` — deployable to any static host (Cloudfl
 Netlify, …). The page's text is in the prerendered HTML and never depends on JS; reduced-motion
 users get a static gradient instead of WebGL.
 
-## Serving (static now, daemon-serve later)
+## Serving
 
-This is the **static now** half of the agreed plan. The **daemon-serve later** half — having
-`@musterd/server` serve the built `dist/client/` from disk under a path, behind a flag — is
-intentionally not wired yet (it would add untested surface to the server package's coverage-gated
-core). When it lands it belongs in `packages/server/src/transport/http.ts`, which already does
-manual path routing: a small static-file handler guarded by a config flag, pointed at this build
-output. Tracked as a follow-up.
+### musterd.io — the public landing page
+
+```bash
+pnpm --filter @musterd/web deploy:site   # build → stage → wrangler deploy
+```
+
+One command, three steps, and the middle one is the important one:
+
+1. `pnpm build` prerenders **every** route, `/live` and `/board` included.
+2. `pnpm stage:site` (`scripts/stage-site.mjs`) copies **only** `index.html` + `assets/` into
+   `dist/site`, and prints the routes it withheld. This is a deliberate allowlist: `/live`,
+   `/board`, `/audit`, `/approvals` and the previews are daemon-connected, so on a public origin
+   with no daemon behind them they render dead UI — [ADR 132](../../docs/decisions/132-live-viewer-on-daemon-origin.md)
+   puts the live viewer on the daemon origin and
+   [ADR 156](../../docs/decisions/156-packaging-release-and-brew.md) keeps it out of packaged
+   installs.
+   The script fails rather than staging anything it did not expect.
+3. `wrangler deploy` (pinned via `pnpm dlx`, so the deploy does not depend on whatever wrangler
+   happens to be on your PATH) publishes `dist/site` as the assets-only Worker **`musterd-io`**,
+   configured in [`wrangler.jsonc`](./wrangler.jsonc) with the `musterd.io` custom domain and
+   `not_found_handling: "none"` — an unknown path 404s instead of falling back to the SPA shell and
+   booting the board client-side.
+
+**Never point wrangler at `dist/client` directly** — that ships the whole prerender, which is the
+one thing the staging step exists to prevent.
+
+Wrangler is deliberately **not** a workspace dependency: `workers/*` sits outside the pnpm
+workspace for the same reason, and a deploy-time CLI should not be in every contributor's install.
+The version is pinned in the `deploy:site` script; bumping it is a deliberate edit.
+
+### Daemon-serve (later)
+
+The **daemon-serve** half — having `@musterd/server` serve the built `dist/client/` from disk under
+a path, behind a flag — is intentionally not wired yet (it would add untested surface to the server
+package's coverage-gated core). When it lands it belongs in
+`packages/server/src/transport/http.ts`, which already does manual path routing: a small
+static-file handler guarded by a config flag, pointed at this build output. Tracked as a follow-up.
 
 ## Accessibility & performance notes
 
