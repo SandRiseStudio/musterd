@@ -2,11 +2,11 @@
 
 > Draft. Adapt for the target platform (X/Twitter, HN, dev.to, LinkedIn). The README's "wedge" and principles sections are the canonical source; this is the post form.
 >
-> **Ship blocker:** these posts point at **musterd.io** (registered 2026-08-13, Cloudflare — see
-> [name clearance](wiki/name-clearance.md)). As of 2026-08-13 it serves nothing
-> (falsify: `curl -I https://musterd.io`). Do not publish any cut of this post until that domain
-> resolves to a real page — a dead front door on launch day costs more than the domain buys. Until
-> then the GitHub repo is the only honest link, and every cut below keeps it alongside the site.
+> ~~**Ship blocker:** as of 2026-08-13 musterd.io serves nothing — do not publish until it
+> resolves.~~ CLEARED 2026-08-13: **musterd.io is live** (Cloudflare Worker `musterd-io`, landing
+> page with the Get Started install section; verified `curl -I https://musterd.io` → 200; see
+> [name clearance](wiki/name-clearance.md)). The remaining launch asset is the real 3-pane demo
+> recording (`docs/demo.md` form 3) — the GIF placeholder ships if it must.
 
 ---
 
