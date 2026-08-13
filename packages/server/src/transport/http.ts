@@ -1776,6 +1776,16 @@ export async function handleHttp(
       // secret webhook): every seat's hook needs it to match tool calls CLIENT-side, and a class name +
       // its globs are not secret. This is the ONLY policy sub-field exposed to members — the read is
       // scoped to `enforcement` so the webhook never leaks through it.
+      // Guardian tier map (ADR 263 follow-up): the probe runs as a service seat, and the full
+      // policy is admin-only because it carries the secret webhook — so the tier dial never
+      // reached the probe and every tick fell back to shipped defaults. Same posture as
+      // `/enforcement` below: a scoped member read of one non-secret sub-field, nothing else.
+      if (method === 'GET' && rest === '/guardian-tiers') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        return sendJson(res, 200, { guardian_tiers: getPolicy(ctx.db, team.id).guardian_tiers });
+      }
+
       if (method === 'GET' && rest === '/enforcement') {
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);

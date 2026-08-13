@@ -112,3 +112,32 @@ describe('the policy.change audit records the request, not the parsed result', (
     expect(JSON.parse(rows[0]!.detail as string)).toEqual({ residency: { cooldown_ms: 60_000 } });
   });
 });
+
+describe('GET /guardian-tiers — the scoped member read (ADR 263 follow-up)', () => {
+  it('a service seat reads the tier map without admin visibility; the webhook never rides along', async () => {
+    await post(
+      '/teams/dawn/policy',
+      { guardian_tiers: { daemon_down: 'auto' }, ask_slack_webhook: 'https://hooks.example.com/s' },
+      bearer(nickCred),
+    );
+    const minted = await post(
+      '/teams/dawn/members',
+      { name: 'guardian', kind: 'service', role: 'platform' },
+      bearer(nickCred),
+    );
+    const token = minted.json.token as string;
+
+    // The full policy stays admin-only for this seat…
+    expect((await get('/teams/dawn/policy', bearer(token))).status).toBe(403);
+    // …but the scoped read answers, tiers only (the /enforcement precedent).
+    const tiers = await get('/teams/dawn/guardian-tiers', bearer(token));
+    expect(tiers.status).toBe(200);
+    expect(tiers.json).toEqual({ guardian_tiers: { daemon_down: 'auto' } });
+  });
+
+  it('an untouched team answers the empty map, not an error', async () => {
+    const tiers = await get('/teams/dawn/guardian-tiers', bearer(nickCred));
+    expect(tiers.status).toBe(200);
+    expect(tiers.json).toEqual({ guardian_tiers: {} });
+  });
+});

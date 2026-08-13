@@ -87,3 +87,10 @@ two-week read is the review point for tier changes; each is an admin policy flip
   merging this.
 - The guardian's alert path is the first real exerciser of "ask the platform agent" — the
   role-addressed demand ADR 227's discovery eval has been waiting to observe.
+
+- **2026-08-13 — the tier dial reaches the probe** (izzo, lane `01KZYNQHQ7`; Decision untouched).
+  First armed tick revealed the full-policy read is admin-only (it carries the secret webhook), so
+  the guardian's service seat fell back to shipped defaults every tick and `--guardian-tier` was a
+  dial connected to nothing. Fixed with the `/enforcement` precedent: `GET
+  /teams/:slug/guardian-tiers`, a scoped member read of the one non-secret sub-field; the tick now
+  reads it and the per-tick "tiers unreadable" line fires only on genuine failure.

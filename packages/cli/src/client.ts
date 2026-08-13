@@ -15,6 +15,7 @@ import {
   resolveAttestedProvenance,
   resolveAttestedWakeLease,
   TOKEN_PREFIXES,
+  type GuardianTiers,
   type Policy,
   type PolicyOverride,
   type EnforcementPolicy,
@@ -707,6 +708,13 @@ export class HttpClient {
     return (await this.request('GET', `/teams/${slug}/policy`)) as {
       policy: Policy;
       stored: PolicyOverride;
+    };
+  }
+  /** The guardian tier map (ADR 263 follow-up) — the scoped member read the probe's service seat
+   *  is allowed, unlike the admin-only full policy above (which carries the secret webhook). */
+  async getGuardianTiers(slug: string): Promise<{ guardian_tiers: GuardianTiers }> {
+    return (await this.request('GET', `/teams/${slug}/guardian-tiers`)) as {
+      guardian_tiers: GuardianTiers;
     };
   }
 
