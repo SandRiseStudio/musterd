@@ -1965,9 +1965,11 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
     stampPath: join(gHome, 'stamp.json'),
     collect,
     getTiers: async () => {
+      // Scoped member read (ADR 263 follow-up) — the full policy is admin-only, which is exactly
+      // why the first armed build fell back to defaults on every tick.
       if (!auth) return DEFAULT_TIERS;
-      const { policy } = await auth.http.getPolicy(auth.team);
-      return resolveGuardianTiers(policy.guardian_tiers);
+      const { guardian_tiers } = await auth.http.getGuardianTiers(auth.team);
+      return resolveGuardianTiers(guardian_tiers);
     },
     healthBuild: async () => (await rawHealth()).build ?? null,
     act: async (incidents, actStamp, tiers) => {
