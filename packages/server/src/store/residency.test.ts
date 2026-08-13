@@ -22,6 +22,7 @@ import {
   recordSessionAttestation,
   revokeResidency,
   settleWakeLease,
+  markWakeSpawned,
 } from './residency.js';
 import type { MemberRow, TeamRow } from './rows.js';
 import { createTeam, getPolicy, setPolicy } from './teams.js';
@@ -1220,5 +1221,44 @@ describe('claimWakeLeases — stamps loop edge (ADR 262)', () => {
       .prepare('SELECT edge FROM wake_leases WHERE id = ?')
       .get(orders[0]!.lease_id) as { edge: string | null };
     expect(row.edge).toBeNull();
+  });
+});
+
+describe('markWakeSpawned (ADR 262)', () => {
+  function reviewDue() {
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { review: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    const lane = openLane(db, team.id, team.slug, nick.name, { title: 'a change', claim: true });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'ready_for_review' });
+    msg(db, team, nick, ada, 'ask', 'ask1', 1_000, {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+    });
+    return { db, team };
+  }
+
+  it('stamps spawned_at, does not settle, is idempotent, null on unknown', () => {
+    const { db, team } = reviewDue();
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    const first = markWakeSpawned(db, team.id, order!.lease_id, 1_700_000_000_000);
+    expect(first!.status).toBe('leased');
+    expect(first!.spawned_at).toBe(1_700_000_000_000);
+    const second = markWakeSpawned(db, team.id, order!.lease_id, 1_700_000_000_999);
+    expect(second!.spawned_at).toBe(1_700_000_000_000); // first stamp wins
+    expect(markWakeSpawned(db, team.id, 'nope')).toBeNull();
+
+    settleWakeLease(db, team.id, order!.lease_id);
+    const afterSettle = markWakeSpawned(db, team.id, order!.lease_id, 1_800_000_000_000);
+    expect(afterSettle!.status).toBe('reported');
+    expect(afterSettle!.spawned_at).toBe(1_700_000_000_000); // already set; settle-then-progress is a no-op stamp
+  });
+
+  it('after settle with null spawned_at, progress still stamps', () => {
+    const { db, team } = reviewDue();
+    const [order] = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    settleWakeLease(db, team.id, order!.lease_id);
+    const stamped = markWakeSpawned(db, team.id, order!.lease_id, 42);
+    expect(stamped!.status).toBe('reported');
+    expect(stamped!.spawned_at).toBe(42);
   });
 });

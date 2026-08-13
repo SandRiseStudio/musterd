@@ -1016,6 +1016,26 @@ export function settleWakeLease(
   return row;
 }
 
+/** Stamp spawned_at if null. Returns the lease row, or null if unknown id. Never settles. */
+export function markWakeSpawned(
+  db: Database,
+  teamId: string,
+  leaseId: string,
+  now = Date.now(),
+): WakeLeaseRow | null {
+  const row = db
+    .prepare<[string, string], WakeLeaseRow>(
+      'SELECT * FROM wake_leases WHERE team_id = ? AND id = ?',
+    )
+    .get(teamId, leaseId);
+  if (!row) return null;
+  if (row.spawned_at === null) {
+    db.prepare('UPDATE wake_leases SET spawned_at = ? WHERE id = ?').run(now, row.id);
+    row.spawned_at = now;
+  }
+  return row;
+}
+
 /** One captured native-loop turn (ADR 251 §7), read back with usage/transcript deserialized. */
 export interface WakeTurnRow {
   lease_id: string;
