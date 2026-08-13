@@ -1,0 +1,21 @@
+{
+  // musterd.io — the public landing page, as an assets-only Worker (no script).
+  //
+  // What it serves: ONLY the prerendered landing route, staged into `dist/site` by
+  // `scripts/stage-site.mjs`. The build also prerenders /live, /board, /audit and friends, and
+  // those must NEVER reach this origin: they are daemon-connected surfaces that would render dead
+  // UI on a public host (ADR 132 puts the live viewer on the daemon origin; ADR 156 keeps /live out
+  // of packaged installs). `not_found_handling: "none"` is the second half of that guarantee —
+  // an unknown path 404s instead of falling back to the SPA shell and booting the board client-side.
+  //
+  // Deploy with `pnpm --filter @musterd/web deploy:site` (build → stage → deploy), never by
+  // pointing wrangler at `dist/client` directly.
+  "name": "musterd-io",
+  "compatibility_date": "2026-08-01",
+  "assets": {
+    "directory": "./dist/site",
+    "not_found_handling": "none"
+  },
+  "routes": [{ "pattern": "musterd.io", "custom_domain": true }],
+  "observability": { "enabled": true }
+}
