@@ -164,6 +164,24 @@
   color: #8a755a;
 }
 
+/* value-layer design: the evidence line. Distinct from the story above it — the story is what we
+ * promised, this is what actually changed, so it gets the ink and the arrow. */
+.gg-card__outcome {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #6b5637;
+}
+.gg-card__ev {
+  color: #2e7d5f;
+  font-weight: 800;
+  margin-right: 4px;
+}
+
 .gg-chip {
   font-size: 9px;
   padding: 2px 8px;
@@ -274,6 +292,16 @@
   }
 }
 
+/* Review debt is lane-shaped, so it lands on the dot: a lane past the acceptance threshold stops
+ * wiggling hopefully and sits in a ring, waiting to be looked at. */
+.gg-dot--stale {
+  background: #d98f2b;
+  animation: none;
+  box-shadow:
+    0 1px 2px rgba(90, 70, 40, 0.15),
+    0 0 0 3px rgba(217, 143, 43, 0.22);
+}
+
 .gg-rider {
   position: absolute;
   top: 0;
@@ -349,6 +377,10 @@
   color: #a94f4f;
   font-weight: 700;
 }
+.gg-foot__owed {
+  color: #96601a;
+  font-weight: 700;
+}
 .gg-foot__tick {
   font-size: 10px;
   color: #7d6f5c;
@@ -380,35 +412,96 @@
 }
 
 .gg-shelf {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
   margin-top: 10px;
-  padding: 6px 10px;
+  padding: 8px 10px 10px;
   background: #fbf5e9;
   border: 1px solid #efe3cb;
   border-radius: 10px;
 }
+.gg-shelf__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+}
 .gg-shelf__label {
   font-size: 10px;
   font-weight: 700;
-  color: #8a755a;
+  /* Measured on the shelf paper (#fbf5e9), not computed: #8a755a read 4.05 and failed AA there. */
+  color: #7d6a4f;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.gg-shelf__item {
-  font: inherit;
-  font-size: 11px;
-  color: #2e7d5f;
-  background: #e2f2ea;
-  border: none;
-  border-radius: 999px;
-  padding: 2px 10px;
-  cursor: pointer;
+.gg-shelf__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 6px;
 }
-.gg-shelf__item:hover {
-  background: #d2ecdf;
+
+/* A shipped goal's slip. With an outcome it reads settled; without one it stays torn open. */
+.gg-slip {
+  font: inherit;
+  text-align: left;
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  background: #f2faf6;
+  border: 1px solid #d8ece2;
+  border-left: 3px solid #4a9d7f;
+  border-radius: 8px;
+  padding: 5px 9px 6px;
+  transition: background 0.16s ease;
+}
+.gg-slip:hover,
+.gg-slip:focus-visible {
+  background: #e9f5ef;
+}
+.gg-slip__title {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #2e6b55;
+  letter-spacing: -0.01em;
+}
+.gg-slip__outcome {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: #55503f;
+}
+.gg-slip__by {
+  color: #7d6a4f;
+  font-style: italic;
+}
+
+/* Shipped with nothing said about it — the ADR 256 silence, one step later in the lifecycle. */
+.gg-slip--owed {
+  background: #fdf6ea;
+  border-color: #ecdcbd;
+  border-left-style: dashed;
+  border-left-color: #d98f2b;
+}
+.gg-slip--owed:hover,
+.gg-slip--owed:focus-visible {
+  background: #fbefdb;
+}
+.gg-slip--owed .gg-slip__title {
+  color: #6b5637;
+}
+.gg-slip__owed {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: #96601a;
+  font-weight: 600;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -422,7 +515,8 @@
     animation: none;
   }
   .gg-card,
-  .gg-peek {
+  .gg-peek,
+  .gg-slip {
     transition: none;
   }
   .gg-card:hover,

@@ -1,4 +1,4 @@
-import type { Goal, Lane } from '@musterd/protocol';
+import type { Goal, Lane, LaneWarning } from '@musterd/protocol';
 import { compareGoals, isAwaitingAcceptance } from '@musterd/protocol';
 
 /**
@@ -20,6 +20,27 @@ export interface RunwayDot {
   owner: string | null;
   /** ✨ — the card's most recently resolved done lane. */
   latest: boolean;
+  /**
+   * value-layer design: this lane has been waiting on acceptance past the 12h threshold — review
+   * debt, which is lane-shaped, so it lands on the dot rather than on the goal card. True iff the
+   * daemon sent a `stale_acceptance` warning for it; we never re-derive the age (see
+   * {@link GoalCardModel.staleNote}).
+   */
+  stale: boolean;
+}
+
+/** value-layer design: a goal's outcome note — what shipped changed. Evidence, not the promise. */
+export interface OutcomeNote {
+  text: string;
+  by: string;
+  at: number;
+}
+
+/** A goal that has shipped. `outcome: null` is review debt made visible, not a clean finish. */
+export interface ShippedGoal {
+  id: string;
+  title: string;
+  outcome: OutcomeNote | null;
 }
 
 export interface GoalCardModel {
@@ -28,13 +49,26 @@ export interface GoalCardModel {
   title: string;
   /** goal.story, else a lane-facts fallback ("N lanes · started <rel>"), else null. */
   story: string | null;
+  /**
+   * value-layer design: the goal's outcome note, if one has been written. Deliberately NOT folded
+   * into `story` — the story is the promise, the outcome is the evidence, and a card wants both.
+   */
+  outcome: OutcomeNote | null;
   /** false → "declare me" chip (a goal id lanes name but nobody declared). */
   declared: boolean;
   chip: 'queued' | 'just started' | 'in flight' | 'shipped' | 'lanes';
   dots: RunwayDot[];
   /** Dots beyond the cap — render "+N". */
   overflow: number;
-  counts: { total: number; done: number; blocked: number; review: number };
+  counts: { total: number; done: number; blocked: number; review: number; stale: number };
+  /**
+   * The daemon's own words for the oldest stale review on this card (`stale_acceptance.detail`,
+   * e.g. "waiting 14h for acceptance — …"), or null. The number is quoted, never recomputed: the
+   * server derives it from the `ready_for_review` audit row, which the client cannot see — a
+   * client-side guess from `updated_at` would read younger than the truth every time a lane was
+   * touched while it waited, and the board would contradict `team_next`.
+   */
+  staleNote: string | null;
   /** ⚡ pill — the card's most recently touched non-terminal lane. */
   lastMoved: { lane: string; title: string; at: number } | null;
 }
@@ -42,7 +76,7 @@ export interface GoalCardModel {
 export interface GoalGridModel {
   /** Wave-ordered; undeclared-id cards after declared; "Not on a goal yet" last; shipped excluded. */
   cards: GoalCardModel[];
-  shippedShelf: { id: string; title: string }[];
+  shippedShelf: ShippedGoal[];
   /** Team-wide latest done lane. */
   pulse: { title: string; at: number } | null;
 }
@@ -88,7 +122,10 @@ function relAge(ms: number): string {
   return 'just now';
 }
 
-function buildDots(lanes: Lane[]): { dots: RunwayDot[]; overflow: number } {
+function buildDots(
+  lanes: Lane[],
+  stale: Map<string, string>,
+): { dots: RunwayDot[]; overflow: number } {
   const latestDone = lanes
     .filter((l) => l.state === 'done')
     .reduce<Lane | null>(
@@ -109,6 +146,7 @@ function buildDots(lanes: Lane[]): { dots: RunwayDot[]; overflow: number } {
       tone: toneOf(l.state),
       owner: l.owner_seat,
       latest: latestDone !== null && l.id === latestDone.id,
+      stale: stale.has(l.id),
     });
   }
   return { dots: all.slice(0, RUNWAY_DOT_CAP), overflow: Math.max(0, all.length - RUNWAY_DOT_CAP) };
@@ -121,14 +159,17 @@ function buildCard(
   goal: Goal | null,
   lanes: Lane[],
   now: number,
+  stale: Map<string, string>,
 ): GoalCardModel {
   const live = lanes.filter((l) => l.state !== 'abandoned');
   const done = live.filter((l) => l.state === 'done').length;
+  const staleHere = live.filter((l) => stale.has(l.id));
   const counts = {
     total: live.length,
     done,
     blocked: live.filter((l) => l.state === 'blocked').length,
     review: live.filter((l) => isAwaitingAcceptance(l.state)).length,
+    stale: staleHere.length,
   };
 
   let chip: GoalCardModel['chip'];
@@ -159,23 +200,42 @@ function buildCard(
     null,
   );
 
-  const { dots, overflow } = buildDots(live);
+  // The oldest wait leads: the daemon lists lanes in creation order, so the first stale one is the
+  // longest-suffering, and its own sentence is what the card quotes.
+  const staleNote = staleHere.length > 0 ? (stale.get(staleHere[0]!.id) ?? null) : null;
+
+  const { dots, overflow } = buildDots(live, stale);
   return {
     id,
     title,
     story,
+    outcome: goal?.outcome ?? null,
     declared,
     chip,
     dots,
     overflow,
     counts,
+    staleNote,
     lastMoved: lastMoved
       ? { lane: lastMoved.id, title: lastMoved.title, at: lastMoved.updated_at }
       : null,
   };
 }
 
-export function buildGoalGrid(lanes: Lane[], goals: Goal[], now: number): GoalGridModel {
+/**
+ * @param warnings the board's live lane warnings — only `stale_acceptance` is read, and only to
+ *   mark review debt. Omitting them costs the debt render, never correctness.
+ */
+export function buildGoalGrid(
+  lanes: Lane[],
+  goals: Goal[],
+  now: number,
+  warnings: LaneWarning[] = [],
+): GoalGridModel {
+  const stale = new Map<string, string>();
+  for (const w of warnings) {
+    if (w.kind === 'stale_acceptance' && !stale.has(w.subject)) stale.set(w.subject, w.detail);
+  }
   const active = lanes.filter((l) => l.state !== 'abandoned');
   const doneLanes = active.filter((l) => l.state === 'done' && l.resolved_at !== null);
   const latest = doneLanes.reduce<Lane | null>(
@@ -196,24 +256,24 @@ export function buildGoalGrid(lanes: Lane[], goals: Goal[], now: number): GoalGr
   }
 
   const cards: GoalCardModel[] = [];
-  const shippedShelf: { id: string; title: string }[] = [];
+  const shippedShelf: ShippedGoal[] = [];
   for (const g of [...goals].sort(compareGoals)) {
     const owned = byGoal.get(g.id) ?? [];
     byGoal.delete(g.id);
     if (g.status === 'shipped') {
-      shippedShelf.push({ id: g.id, title: g.title });
+      shippedShelf.push({ id: g.id, title: g.title, outcome: g.outcome ?? null });
       continue;
     }
-    cards.push(buildCard(g.id, g.title, true, g, owned, now));
+    cards.push(buildCard(g.id, g.title, true, g, owned, now, stale));
   }
   const declaredIds = new Set(goals.map((g) => g.id));
   for (const [id, orphans] of byGoal) {
     if (id === null || declaredIds.has(id)) continue;
-    cards.push(buildCard(id, id, false, null, orphans, now));
+    cards.push(buildCard(id, id, false, null, orphans, now, stale));
   }
   const unassigned = byGoal.get(null);
   if (unassigned && unassigned.length > 0) {
-    cards.push(buildCard(null, 'Not on a goal yet', true, null, unassigned, now));
+    cards.push(buildCard(null, 'Not on a goal yet', true, null, unassigned, now, stale));
   }
   return { cards, shippedShelf, pulse };
 }
