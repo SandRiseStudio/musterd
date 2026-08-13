@@ -122,18 +122,19 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 
 `buildMcpServer` sets the server's **`instructions`** (returned on `initialize` under the legacy handshake; served from `server/discover` once a modern era is negotiated — same field, same contract) to the agent primer — `renderPrimer` from `@musterd/protocol`, the **same source** the CLI writes into `AGENTS.md`. This is the _file-free_ onboarding surface: any MCP-speaking harness injects `instructions` as standing context, so the agent learns it's on a team and how to coordinate **without touching `CLAUDE.md` or any per-harness file** (the boundary ADR 012 set; `AGENTS.md` remains the surface for the CLI / no-MCP path). `primerInstructions(config)` is the pure wiring: a **provisioned** session (`config.member` set) gets a named-seat primer; an **unclaimed** session gets the "claim a seat first" variant. The primer is channel-aware — it documents both the `team_*` tools and the `musterd` CLI.
 
-> **Era note (ADR 175, adoption executed 2026-07-31).** The 2026-07-28 spec removes the
+> **Era note (ADR 175; serveStdio adopted 2026-08-12).** The 2026-07-28 spec removes the
 > `initialize` handshake; `instructions` moves to the mandatory `server/discover` response (same
-> field, same contract). musterd ships the v2 SDK (`@modelcontextprotocol/server` 2.0.0) with every
-> adoption seam armed — but **the modern era has not reached musterd's wire yet**: this SDK release
-> serves 2026-07-28 only via its per-request HTTP entry (`createMcpHandler`), while a stdio
-> connection negotiates the legacy list (max `2025-11-25`), and musterd is stdio-only. So on the
-> live wire, `initialize` still happens and `instructions` still rides it; `server/discover`,
-> `tools/list` cache fields, and required `resultType` are armed in config and canaried but absent
-> from stdio traffic. A tripwire test in `sdkSeams.test.ts` goes red when an SDK bump lets stdio
-> negotiate a modern era — that is the signal to swap tripwires for real wire assertions and update
-> this note. See [ADR 175](../decisions/175-mcp-spec-2026-07-28-readiness.md) for the executed
-> checklist.
+> field, same contract). musterd's entry is `serveStdio(factory, { legacy: 'serve' })`
+> (`startStdioEntry` in `index.ts`): the opening exchange selects the era per connection. Every
+> current harness opens with `initialize`, so the live wire today is still the legacy era,
+> byte-identical to the old hand-wired entry — but the modern era is now **reachable**: a client
+> that opens with `server/discover` gets 2026-07-28, where `instructions`/serverInfo ride discover
+> and `tools/list` carries the step-3 cache hints (`ttlMs`/`cacheScope`, armed since #565). Both
+> eras are wire-asserted in `serveStdio.test.ts`; `sdkSeams.test.ts` keeps the PIN on the legacy
+> era's shape, which `legacy: 'serve'` contractually preserves. The day a harness flips its
+> `versionNegotiation` default, no musterd release is needed. See
+> [ADR 175](../decisions/175-mcp-spec-2026-07-28-readiness.md) for the executed checklist and the
+> 2026-08-12 Consequences notes.
 
 ## The core tools (JSON schemas — verbatim contract)
 

@@ -184,12 +184,13 @@ describe('SDK seam canaries (ADR 175)', () => {
     //
     // CORRECTED 2026-08-12 (ADR 175 Consequences note): this was written as a tripwire for "an SDK
     // bump lets stdio negotiate a modern era" — a flip the SDK's own migration doc rules out. The
-    // legacy entry is *permanently* 2025-era; modern-era stdio is opt-in via `serveStdio(() =>
-    // buildServer())` from `@modelcontextprotocol/server/stdio` (already exported by 2.0.0). So
-    // these assertions are a PIN on the current entry's behavior, not a wake-up signal. The signal
-    // to write the real wire assertions (`listed.ttlMs === 3_600_000`, `cacheScope === 'private'`)
-    // is musterd adopting serveStdio — lane 01KZVZG5GE5GWX97F27CWBMC4C part (b), a deliberate
-    // per-connection-factory change, never an ambient dependency bump.
+    // hand-wired connect entry is *permanently* 2025-era; modern-era stdio is opt-in via
+    // `serveStdio`. RESOLVED 2026-08-12 (lane 01KZVZG5GE5GWX97F27CWBMC4C part b): production
+    // adopted `serveStdio(factory, { legacy: 'serve' })`, and the real wire assertions this PIN
+    // deferred (`ttlMs === 3_600_000`, `cacheScope === 'private'`, discover payload) live in
+    // `serveStdio.test.ts`. This test stays as the PIN on the legacy era's wire — which
+    // `legacy: 'serve'` contractually serves unchanged, so its assertions now guard the
+    // equivalence the adoption depends on.
     const { harness, close } = await connect();
     try {
       const negotiated = harness.getNegotiatedProtocolVersion?.() as string | undefined;

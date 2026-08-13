@@ -188,6 +188,27 @@ the miss list belongs in the adoption lane's close.
   watched event can occur — verify the trigger's reachability against the upstream's own
   migration story, not against the shape of the release notes.
 
+- **2026-08-12 — serveStdio adopted; the "wait for harnesses to flip" gate was itself unwatchable
+  (lane `01KZVZG5GE5GWX97F27CWBMC4C` part b).** The note above deferred adoption until "harnesses
+  stop defaulting `versionNegotiation` to legacy" — but reading the client SDK showed that trigger
+  is unobservable from musterd's side of the wire: an `'auto'`-mode client probes via a **sibling
+  process whose stderr is discarded**, then falls back to a legacy connect byte-identical to
+  today's traffic. Watching for the flip means watching every harness's release notes, which is
+  not a mechanism — the same dead-man-switch failure the note above corrected, one level up. So
+  the calculus reversed: production `main()` now enters through
+  `serveStdio(factory, { legacy: 'serve' })` (`startStdioEntry` in `index.ts`), where the deciding
+  facts are (1) `legacy: 'serve'` pins a 2025-era instance served exactly as the hand-wired entry
+  served it, so every current harness sees an unchanged wire; (2) the flip was also **safe** to be
+  early on — `'auto'` falls back conservatively, so there was no outage to race — but being early
+  makes the modern era reachable with no musterd release on whatever day a harness moves; (3) the
+  factory may mint more than one instance per process (probe + fallback pin), which
+  `buildMcpServer` tolerates by sharing only the MusterdClient, the recorder, and the caller's
+  memoized harness capture. Step 3's deferred real wire assertions now exist
+  (`serveStdio.test.ts`: discover payload, `ttlMs`/`cacheScope` on the modern wire, repair/bounce
+  seams on both eras, the ADR 108 probe boundary through discover, the shutdown-seam wrap order);
+  the step-3 PIN in `sdkSeams.test.ts` stays as the legacy-equivalence guard. `05-mcp.md`'s era
+  note updated to match.
+
 ## Related
 
 - [ADR 144](144-mcp-tool-surface-measure-then-craft.md) — the seams' purpose; increment 6 closes.
