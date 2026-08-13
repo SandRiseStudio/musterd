@@ -37,9 +37,11 @@ building something else nearby). Every one was the same mistake — a **fill** t
 with its `-ink` sibling already defined a line away. That is not a lapse in care; it is what an
 unautomated check measures over time.
 
-**What the gate still cannot see**, so a green run is not over-read: gradient-backed text (reported
-SKIPPED, counted per route in the summary); hover, error and empty states, which never render; and
-any surface the fixture team does not seed. A surface nobody seeds is a surface nobody measures.
+**What the gate still cannot see**, so a green run is not over-read: hover, error and empty states,
+which never render; text with no line box to sample or sitting off the captured page (still reported
+SKIPPED, counted per route in the summary); elements caught mid-fade, which keep their composited
+estimate rather than a frame nobody stays on; and any surface the fixture team does not seed. A
+surface nobody seeds is a surface nobody measures.
 
 **The gradient blind spot is closed** (2026-08-13). It used to be the largest hole in the gate —
 13–21 elements a route, and seeding the office made it _worse_, because a loud asks rail meant more
@@ -138,9 +140,15 @@ Anything merely hard to fix belongs in the failure list.
 
 ## Reading the output honestly
 
-- **SKIPPED** lists text over a gradient, which this method cannot measure. It is printed on every
-  run and is never dropped silently — a clean sweep with 21 unmeasurable elements is itself a
-  finding. Read that surface's own paper token (`--lc-paper`, `--lc-paper-2`) instead.
+- **SKIPPED** is what neither method could reach: no line box to sample, or text off the captured
+  page. It is printed on every run and never dropped silently — a sweep that skips a lot is itself a
+  finding. It used to mean "over a gradient", which was the bulk of it; that hole closed on
+  2026-08-13 and the list is normally empty now.
+- **`! … mid-animation`** means an element was still moving and kept its composited estimate. Not a
+  measurement of the painted pixel, and not a pass to lean on — if a surface reports this every run,
+  something is animating that should have settled.
+- **`! … permanently translucent`** is the opposite, and it IS authoritative: a settled fade, with
+  the ink composited at that alpha because that is what the reader gets.
 - **A DOM sweep only sees what is rendered.** Hover, error, empty and card/tier states are invisible
   unless you pass `--probe`.
 - **`--probe` output is advisory** and never sets the exit code, because a class injected into a

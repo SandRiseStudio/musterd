@@ -748,12 +748,10 @@ if (!QUIET) {
   // Never let a clean run hide what it could not see.
   if (out.skipped.length) {
     console.log(
-      `\nSKIPPED ${out.skipped.length} — text over a gradient, which cannot be measured this way.`,
+      `\nSKIPPED ${out.skipped.length} — neither method could reach these: the walk stopped at a` +
+        ' gradient AND the pixel pass found no line box to sample (or the text sits off the' +
+        ' captured page). Do not read this as passing.',
     );
-    console.log(
-      '  The pixel pass could not reach these either (no line box, or off the captured page).',
-    );
-    console.log('  Read that surface’s own paper token instead; do not read this as passing.');
     const by = {};
     for (const s of out.skipped) (by[s.over] ??= []).push(s.el);
     for (const [over, els] of Object.entries(by)) {
