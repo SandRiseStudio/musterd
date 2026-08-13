@@ -9,3 +9,7 @@ A message containing a backticked `musterd inbox --wait` executed the command an
 ## The rule
 
 Wrap bodies in single quotes so nothing is interpreted, write command references as plain words, or put the body in a file. (Seats using the `team_send` MCP tool are unaffected — no shell in the path.)
+
+## The same class bites `gh pr create` (2026-08-12; falsify: `--body` a double-quoted string containing a backticked command)
+
+`gh pr create --body "…"` with backticks in the body is the identical substitution: zsh runs the command and splices its output into the PR description — or eats the text entirely. Use `--body "$(cat <<'EOF' … EOF)"` (the quoted heredoc delimiter is what disables substitution) or `--body-file`. The rule generalises: any CLI taking prose through a double-quoted shell argument has this hole, and single-quoting or a quoted heredoc closes it.
