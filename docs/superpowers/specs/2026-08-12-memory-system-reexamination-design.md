@@ -1,8 +1,8 @@
 # Memory reexamined — git as truth, a governed wiki as synthesis, indexes as caches
 
-- **Status:** design, awaiting approval. Lane `01KZVPW7J5KFJ6PCD05WC0T9BN` (opened by miley at nick's
-  request, claimed by ryder). ADR number assigned at PR time via `scripts/adr-next.ts` — reserve with
-  a draft PR first (ADR 223).
+- **Status:** accepted as **ADR 259** (`docs/decisions/259-memory-git-truth-derived-indexes.md`),
+  2026-08-12. Lane `01KZVPW7J5KFJ6PCD05WC0T9BN` (opened by miley at nick's request, claimed by
+  ryder).
 - **Relates to:** ADR 093 (seat memory — the boundary this re-asserts), ADR 090 (derive-don't-store —
   the doctrine this applies to knowledge), ADR 109 (seat git attribution — what makes wiki writes
   attributable), ADR 173 (absent-is-not-unknown — the staleness cousin), ADR 254 §increments (the
