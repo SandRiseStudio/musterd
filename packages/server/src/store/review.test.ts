@@ -422,6 +422,72 @@ describe('pickReviewCounterpart — graded ladder (ADR 188)', () => {
   });
 });
 
+describe('pickReviewCounterpart — drops busy live agents (quiet-set inc 1)', () => {
+  const acted = (
+    db: ReturnType<typeof seed>['db'],
+    team: { id: string },
+    actor: string,
+    agoMs: number,
+  ) =>
+    db
+      .prepare(
+        `INSERT INTO audit (id, team_id, actor, action, target, result, ts, created_at)
+         VALUES (?, ?, ?, 'x.did', NULL, 'allow', ?, ?)`,
+      )
+      .run(`aud-${actor}-${String(agoMs)}`, team.id, actor, Date.now() - agoMs, Date.now() - agoMs);
+
+  async function pick(setup: (h: ReturnType<typeof seed>) => void) {
+    const { openLane } = await import('./lanes.js');
+    const { pickReviewCounterpart } = await import('./review.js');
+    const h = seed();
+    agent(h.db, h.team, 'worker', 'claude-opus-5');
+    setup(h);
+    const lane = openLane(h.db, h.team.id, 'dawn', 'worker', {
+      title: 'a change',
+      claim: true,
+    });
+    return pickReviewCounterpart(h.db, h.team.id, lane, 'worker', TIMEOUT);
+  }
+
+  it('a live busy cross-family seat loses to a quiet cross-model seat', async () => {
+    const p = await pick(({ db, team }) => {
+      agent(db, team, 'gptbot', 'gpt-5.6-sol');
+      agent(db, team, 'dolly', 'claude-opus-4-8');
+      acted(db, team, 'gptbot', 5_000); // busy
+      acted(db, team, 'dolly', 180_000); // quiet (≥ 120s)
+    });
+    expect(p).toMatchObject({ reviewer: 'dolly', grade: 'cross_model' });
+  });
+
+  it('a team of only-busy live agents finds no live candidate (wake / no_candidate is the caller)', async () => {
+    const p = await pick(({ db, team }) => {
+      agent(db, team, 'gptbot', 'gpt-5.6-sol');
+      acted(db, team, 'gptbot', 5_000);
+    });
+    expect(p).toBeNull();
+  });
+
+  it('unknown (no work audit) stays eligible — occupancy attestation is not work', async () => {
+    // agent() calls attach(), which writes occupancy.model_attested as actor=name at now.
+    // If the picker treats that as work, this is null and every ladder test above breaks.
+    const p = await pick(({ db, team }) => agent(db, team, 'gptbot', 'gpt-5.6-sol'));
+    expect(p).toMatchObject({ reviewer: 'gptbot', grade: 'cross_family' });
+  });
+
+  it('pickHumanReviewer still returns a live human who acted seconds ago', async () => {
+    const { pickHumanReviewer } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'ada', 'claude-opus-5');
+    const { row } = addMember(db, team, { kind: 'human', name: 'nick', role: '' });
+    attach(db, row.id, 'cli', 'conn-nick');
+    acted(db, team, 'nick', 5_000);
+    expect(pickHumanReviewer(db, team.id, 'ada', TIMEOUT)).toMatchObject({
+      reviewer: 'nick',
+      grade: 'human',
+    });
+  });
+});
+
 describe('pickWakeReviewer (ADR 191)', () => {
   function wentOffline(
     db: ReturnType<typeof seed>['db'],
