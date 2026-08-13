@@ -5,6 +5,8 @@ import { CliError } from '../errors.js';
 import { infraTouchWarning } from '../infra-gate.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { buildEntry } from '../onboard/mcpEntry.js';
+import { installSeatPermissions } from '../onboard/permissions.js';
+import { loadRole } from '../onboard/role.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
@@ -153,6 +155,18 @@ export async function agentCommand(
     ...(driver ? { driver } : {}),
   };
   saveBinding(ws.dir, binding);
+  // ADR 261: the permissions floor — plus the role's profile when --role names one — lands with
+  // the binding, so a NON-INTERACTIVE session in this worktree can work on day one. Until this
+  // write, a fresh seat's first Write failed closed with no way to prompt and presented as a
+  // broken tool (the 2026-08-13 ryder incident). Best-effort like hook install: a permissions
+  // hiccup never fails seat creation. Dir-aware on purpose — ws.dir is never process.cwd().
+  try {
+    const template = role ? loadRole(ws.dir, role) : undefined;
+    installSeatPermissions(ws.dir, template);
+  } catch {
+    /* an unknown role name or a broken settings file must not block the seat — init --check
+       (ADR 261 increment 2) is the surface that reports it */
+  }
   // Also write the secret-free committed launch spec (ADR: committed launch spec) so this worktree
   // self-wires via `musterd wire` on a fresh clone/machine — the key stays out of the committed file.
   saveWorkspaceSpec(ws.dir, {

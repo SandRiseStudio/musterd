@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -144,6 +144,34 @@ describe('musterd agent <name>', () => {
     const specArg = h.saveWorkspaceSpec.mock.calls[0]![1] as Record<string, unknown>;
     expect(specArg.agent_key).toBeUndefined();
     expect(specArg.grant).toBeUndefined();
+  });
+
+  it('writes the ADR 261 permissions floor into the WORKTREE so a non-interactive seat works day one', async () => {
+    const code = await agentCommand(parseArgs(['June']));
+    expect(code).toBe(0);
+    const settings = JSON.parse(
+      readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { permissions?: { allow?: string[]; deny?: string[] } };
+    // The ryder shape, closed at the source: Edit/Write and the repo gates present, no deny.
+    expect(settings.permissions?.allow).toEqual(expect.arrayContaining(['Edit', 'Write', 'Read']));
+    expect(settings.permissions?.allow?.some((e) => e.startsWith('Bash(pnpm '))).toBe(true);
+    expect(settings.permissions?.deny ?? []).toEqual([]);
+  });
+
+  it('--role read-only layers the deny ceiling over the floor (ADR 261 decision 3)', async () => {
+    const code = await agentCommand(parseArgs(['Watcher', '--role', 'read-only']));
+    expect(code).toBe(0);
+    const settings = JSON.parse(
+      readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { permissions?: { allow?: string[]; deny?: string[] } };
+    expect(settings.permissions?.deny).toEqual(expect.arrayContaining(['Edit', 'Write']));
+    // Deny-wins-allows-kept: the floor's allows stay present and inert under the ceiling.
+    expect(settings.permissions?.allow).toContain('Read');
+  });
+
+  it('an unknown --role still creates the seat — permissions are best-effort (floor-only, no throw)', async () => {
+    const code = await agentCommand(parseArgs(['Zed', '--role', 'no-such-role']));
+    expect(code).toBe(0);
   });
 
   it('--driver <you> records the driver in binding.json, never the shared entry (ADR 155/165 inc 2)', async () => {

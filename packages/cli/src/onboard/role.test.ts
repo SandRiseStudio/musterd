@@ -50,12 +50,13 @@ describe('parseRole', () => {
 });
 
 describe('built-in library', () => {
-  it('ships the five seed archetypes, all valid', () => {
+  it('ships the six seed archetypes, all valid', () => {
     expect(Object.keys(BUILTIN_ROLES).sort()).toEqual([
       'backend',
       'docs',
       'frontend',
       'generalist',
+      'read-only', // ADR 261: the ceiling archetype — deny-made-real
       'reviewer',
     ]);
   });

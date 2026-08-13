@@ -87,6 +87,7 @@ src/
     manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
     guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
     pending.ts        // client-side pending-presence markers (ADR 033)
+    permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact
     primer.ts         // renderPrimer + idempotent upsertPrimer → AGENTS.md agent primer (ADR 012)
     role.ts           // Role = harness-agnostic provisioning template; resolve/apply (ADR 026/029/038)
     roles/builtins.ts // the shipped built-in role template seed library
