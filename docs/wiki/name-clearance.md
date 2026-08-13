@@ -1,13 +1,17 @@
 # Name clearance — musterd domains and the trademark neighborhood
 
-As of 2026-08-13, every good musterd developer TLD is unregistered, the UK is the one jurisdiction with a true exact-mark blocker (Restranaut's registered MUSTERD in classes 9/42), and the US/EU registers are crowded-but-coexistent for the MUSTER/MUSTARD family — screening-grade findings, not legal clearance.
+musterd.io is the product's registered home as of 2026-08-13, the UK is the one jurisdiction with a true exact-mark blocker (Restranaut's registered MUSTERD in classes 9/42), and the US/EU registers are crowded-but-coexistent for the MUSTER/MUSTARD family — screening-grade findings, not legal clearance.
 
 ## Domains (checked 2026-08-13 via RDAP + whois; falsify: re-run `whois musterd.<tld>`)
 
-Available: **musterd.io, musterd.dev, musterd.sh, musterd.ai, musterd.co, musterd.team**.
+**musterd.io is ours — registered 2026-08-13 at Cloudflare Registrar** (creation 2026-08-13T22:04:11Z, expiry 2027-08-13, on `chad`/`melody.ns.cloudflare.com`; falsify: `whois musterd.io`). It is the canonical domain; nothing is deployed on it yet (falsify: `curl -I https://musterd.io`). Renewal falls due 2027-08-13 — the registration is auto-renew-capable at Cloudflare but that setting has not been verified from this seat.
+
+Still unregistered at the 2026-08-13 check: **musterd.dev, musterd.sh, musterd.ai, musterd.co, musterd.team**, plus every compound tried (musterdlabs .com/.io/.ai, musterdhq.com, musterdteam.com, get/use/trymusterd.com).
 Taken: **musterd.com** (Thinking Software / Restranaut Ltd — see below) and **musterd.app** (an unrelated free group-scheduling poll tool).
 
-Recommendation given to nick: musterd.dev as primary, musterd.io/.ai as defensive redirects. None purchased as of 2026-08-13 (falsify: whois shows a SandRise/nick registration).
+~~Recommendation given to nick: musterd.dev as primary, musterd.io/.ai as defensive redirects. None purchased as of 2026-08-13.~~ SUPERSEDED 2026-08-13: nick narrowed the choice to .ai vs .io and bought **.io**. The reasoning that decided it, worth keeping because it generalises to future naming calls: musterd is infrastructure, not an AI product — `.ai` claims category membership in the register [brand.md](../design/brand.md) §4 explicitly bans ("no revolutionary, magic, supercharge, 10x"), costs roughly double, and dates itself to this trend cycle. `.io` reads as developer infrastructure and doesn't. The one honest knock on `.io` is the Chagos-handover question over the ccTLD's long-term future, judged low-risk given registry continuity signals and any retirement's multi-year runway.
+
+**Compound names were rejected on architecture, not taste.** "musterd labs" (or any musterd-\<suffix\> entity) would invent a second maker entity competing with SandRise Studio for the role [positioning](positioning.md) already assigns it, and would make the product name the parent of itself. `get-`/`use-`/`try-` prefixes exist to work around a taken bare name; ours was not taken.
 
 ## The two other Musterds (both live products, neither in our market)
 
