@@ -6,7 +6,7 @@ import { makeEnvelope } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { configPath, loadConfig } from '../config.js';
+import { configPath, loadConfig, serverProvenance } from '../config.js';
 import { CliError } from '../errors.js';
 import { loadHostRegistry } from '../host/registry.js';
 import { infraTouchWarning } from '../infra-gate.js';
@@ -2158,7 +2158,10 @@ async function renderStatus(
   fetchHealthFn: () => Promise<DaemonHealth>,
 ): Promise<number> {
   const st = status(ctx);
-  const server = loadConfig().server;
+  // Not just the URL — where it came from. This reader is machine-global by construction, so when
+  // the default is wrong it reports a healthy daemon as unreachable with total confidence.
+  const provenance = serverProvenance(ctx.workingDir);
+  const server = provenance.server;
   let health: DaemonHealth | undefined;
   try {
     health = await fetchHealthFn();
@@ -2177,10 +2180,19 @@ async function renderStatus(
   process.stdout.write(
     `  ${theme.meta('health:')} ${
       health
-        ? theme.ok(`up`) + theme.meta(` · ${server} · ${health.db} (schema ${health.schema})`)
-        : theme.err('unreachable') + theme.meta(` · ${server}`)
+        ? theme.ok(`up`) +
+          theme.meta(` · ${server} (${provenance.source}) · ${health.db} (schema ${health.schema})`)
+        : theme.err('unreachable') + theme.meta(` · ${server} (${provenance.source})`)
     }\n`,
   );
+  // The one line that ends the 2026-08-12 diagnosis in seconds: this folder uses a different daemon
+  // than the one just measured, so "unreachable" above is a statement about somebody else's port.
+  if (provenance.disagreeingBinding) {
+    process.stdout.write(
+      `  ${theme.warn('!')} this folder is bound to ${theme.accent(provenance.disagreeingBinding.server)} ` +
+        `(${provenance.disagreeingBinding.team}) — the line above measured the ${provenance.source}, not your seat\n`,
+    );
+  }
   // The ADR 040 allow-list, so a broken overlay is diagnosable without reading a plist. Labelled
   // plist-derived on purpose: this is what someone WROTE, not what the running daemon enforces, and
   // the two can disagree (a plist edited after the last bounce). `musterd stream doctor` settles it

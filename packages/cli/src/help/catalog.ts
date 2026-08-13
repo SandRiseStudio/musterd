@@ -258,7 +258,9 @@ export const CATALOG: readonly CommandEntry[] = [
     primary: true,
     detail:
       'Manage the standing roster:\n' +
-      '  create <slug> [--as <you>] [--role <role>] [--display <name>]\n' +
+      '  create <slug> [--as <you>] [--role <role>] [--display <name>] [--switch]\n' +
+      '                               binds the creating folder; --switch also points every UNBOUND\n' +
+      '                               folder on this machine at the new team (skip it for a probe)\n' +
       '  add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]\n' +
       '  credential <name>            re-issue a human’s lost mscr_ credential, shown once (localhost, or admin off-host)\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +

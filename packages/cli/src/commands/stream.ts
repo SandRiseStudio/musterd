@@ -35,7 +35,7 @@ import {
   type Check,
   type Exec,
 } from '../broadcast/hosted.js';
-import { loadConfig } from '../config.js';
+import { loadConfig, serverProvenance, type ServerProvenance } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 
@@ -87,6 +87,9 @@ export async function streamCommand(parsed: Parsed, deps: StreamDeps = {}): Prom
         repoRoot,
         out,
         json: parsed.flags['json'] === true,
+        // Only when the CALLER did not name the server: an injected/flagged one has no provenance
+        // question, and the doctor's own checks are about the resolved origin either way.
+        ...(deps.server ? {} : { provenance: serverProvenance(cwd) }),
       });
     case 'build':
       return buildVerb({ exec, app, repoRoot, out });
@@ -111,6 +114,7 @@ async function doctorVerb(a: {
   repoRoot: string | null;
   out: (s: string) => void;
   json: boolean;
+  provenance?: ServerProvenance;
 }): Promise<number> {
   const checks = await runChecks({
     exec: a.exec,
@@ -128,6 +132,20 @@ async function doctorVerb(a: {
   }
 
   a.out(`${theme.accent('stream doctor')} ${theme.meta(`— ${a.app}`)}\n\n`);
+  // Say which daemon these checks are ABOUT before printing them. Every check below resolves from
+  // the machine-wide default, so when that default is wrong (2026-08-12: a probe's `team create`
+  // repointed it) the doctor fails correctly about somebody else's port — and prescribes real
+  // repairs for infrastructure that is fine. The binding line is the tell.
+  if (a.provenance) {
+    a.out(theme.meta(`  daemon: ${a.provenance.server} (${a.provenance.source})\n`));
+    if (a.provenance.disagreeingBinding) {
+      a.out(
+        `  ${theme.warn('!')} this folder is bound to ${theme.accent(a.provenance.disagreeingBinding.server)} ` +
+          `(${a.provenance.disagreeingBinding.team}) — the checks below are about the ${a.provenance.source}\n`,
+      );
+    }
+    a.out('\n');
+  }
   for (const c of checks) a.out(renderCheck(c));
 
   if (failed.length === 0) {
