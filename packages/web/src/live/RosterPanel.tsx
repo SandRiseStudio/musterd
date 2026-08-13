@@ -3,6 +3,7 @@ import {
   acceptanceCapacity,
   accountStatusException,
   capabilityBadges,
+  initial,
   isFeatureBehind,
   memberAvatar,
   rosterOrder,
@@ -152,15 +153,21 @@ function SeatRow({
         className={`lc-seat__dot lc-seat__dot--${dotState}`}
         title={online ? `online · ${m.presence}` : reconnecting ? 'reconnecting — seat held within reclaim grace' : 'offline'}
       />
-      {/* A dot, not a monogram — the same call as the board's card avatar (#781). The seat's name is
-          on the very next line, so the initial was duplicated text, and at 22px it was white on the
-          identity fill: no single ink clears AA across that hue band, and on a dimmed offline row it
-          measured 1.73. */}
+      {/* The monogram, restored (2026-08-13) — white on `memberAvatar` measures 4.86 at its worst
+          across 24 names, and the 3.42 that took it away in #781/#789 came from a different
+          component's disc (the owner-filter chip, painted with the office FILL) that the sweep's
+          class+ink key had silently merged with this one.
+          The offline dim was the one real constraint here: at 0.55 a letter reads ~1.73 whatever
+          paints it. So the dim now applies to the presence dot alone (Live.css) — an offline row
+          still says so twice, in the dot and in the posture chip, neither of which is text inside a
+          disc. `aria-hidden` stays: the name is on the next line. */}
       <span
         className="lc-seat__avatar"
         style={{ background: memberAvatar(m.name, kind) }}
         aria-hidden="true"
-      />
+      >
+        {initial(m.name)}
+      </span>
       <div className="lc-seat__body">
         <div className="lc-seat__line">
           <span className="lc-seat__name">{m.name}</span>

@@ -21,7 +21,7 @@ import {
 import { filterLanes, UNOWNED } from '../live/boardWrite';
 import { goalFilter, resolveBoardView } from '../live/goalGrid';
 import { useBoardData } from '../live/useBoardData';
-import { kindOf, memberColor, memberAvatar } from '../live/format';
+import { initial, kindOf, memberColor, memberAvatar } from '../live/format';
 import { InsightRail } from '../live/InsightRail';
 import { useLiveStream } from '../live/useLiveStream';
 import { useReport } from '../live/useReport';
@@ -304,7 +304,9 @@ function BoardPage() {
                   background: memberAvatar(me, kindOf(me, new Map(roster.map((m) => [m.name, m])))),
                 }}
                 aria-hidden="true"
-              />
+              >
+                {initial(me)}
+              </span>
               {me}
             </span>
             <button className="lc__identity-out" onClick={signOut}>

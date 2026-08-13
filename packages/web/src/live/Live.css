@@ -2051,8 +2051,11 @@
    method reported the name at 14.34. Found by sampling the painted pixel, 2026-08-13.
    So: dim the glyphs that carry no text — the presence dot and the avatar disc — and leave the words
    at full strength, where their own quiet inks already do the de-emphasising and already clear AA. */
-.lc-seat--offline .lc-seat__dot,
-.lc-seat--offline .lc-seat__avatar {
+/* The dim stays on the dot and off the disc, because the disc carries a letter again (2026-08-13).
+   A monogram inside a 0.55 fade reads ~1.73 no matter which function paints the disc — the fade
+   dims ink and paper together — and "offline" is already said twice on this row without it, by this
+   dot and by the posture chip. */
+.lc-seat--offline .lc-seat__dot {
   opacity: 0.55;
 }
 .lc-seat__dot {
@@ -2115,14 +2118,21 @@
   border: 1px solid color-mix(in srgb, var(--lc-muted) 28%, transparent);
   background: color-mix(in srgb, var(--lc-muted) 8%, transparent);
 }
-/* A colour dot for the seat, deliberately empty — the name is on the next line. It carried a white
-   initial until 2026-08-13; see `.lc-card__avatar` for why no ink can be chosen for that band. */
+/* The seat's monogram — white on `memberAvatar`, which targets a constant LUMINANCE (0.165) rather
+   than a constant lightness, so the ink clears AA across the whole identity hue band. See
+   `.lc-card__avatar` for the measurement that briefly took this letter away. */
 .lc-seat__avatar {
   flex: 0 0 auto;
   width: 22px;
   height: 22px;
   margin-top: 1px;
   border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
 }
 .lc-seat__body {
   flex: 1;
@@ -3517,15 +3527,23 @@
   font-size: 11px;
   color: var(--lc-muted);
 }
-/* A colour dot for the seat, deliberately empty — the name is always written beside it. It carried
-   a white initial until 2026-08-12, which measured 3.42 on the seat colour and could not be fixed
-   by picking a better ink: across the identity hue band white scores 1.61–3.90 and near-black
-   4.42–10.73, so no single ink clears AA everywhere and the purple seat clears neither pole. */
+/* The seat's monogram, white on the identity ink. The 3.42 that removed it on 2026-08-12 was real
+   but belonged to a DIFFERENT element wearing this class: the owner-filter chip paints its disc
+   with `memberColor` — the office fill, luminance 0.257 — while every disc that carries a letter is
+   painted by `memberAvatar`, luminance 0.165, where white measures 4.86 at its worst across 24
+   names. The sweep keyed rows by class + ink and merged the four, so one component's number was
+   read as the verdict for all of them. The key now carries the painted background too.
+   A disc with no letter keeps `memberColor` and is correct: a fill carrying no text. */
 .lc-card__avatar {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 16px;
   height: 16px;
   border-radius: 50%;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
 }
 .lc-card__chip {
   padding: 1px 7px;

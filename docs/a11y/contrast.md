@@ -178,29 +178,51 @@ The fix is the same shape as the fill/ink split: **fade the glyphs that carry no
 presence dot, the avatar disc — and let a quieter _ink_ do the de-emphasising, where the value is
 chosen and measured rather than arrived at by multiplication.
 
-**And its sharper form, 2026-08-12:** a band can be wide enough that _neither_ pole works. The 16px
-seat avatar carried a white initial; measured across the identity band, white scored 1.61–3.90 and
-near-black 4.42–10.73, and the purple seat cleared **neither** at the 4.5 small-text threshold. No
-ink choice was available. Since the seat's name is written immediately beside the disc in all four
-places it appears, the initial was duplicated text and the disc became a plain colour dot. Retuning
-the band to a constant luminance is the other fix, and it stays open — it is a visible change to the
-office, where the same values colour the characters' bodies.
+**And its sharper form, 2026-08-12 — withdrawn 2026-08-13, because the measurement behind it was
+not measuring what it named.** The claim was that the seat-identity band is wide enough that
+_neither_ ink pole works, so the avatar initials had to go. What was actually measured was the
+owner-filter chip's disc, which is painted by `memberColor` — the office **fill**, luminance 0.257.
+Every disc that carries a letter is painted by `memberAvatar`, the **ink**, luminance 0.165, where
+white measures **4.86 at its worst across 24 names**. The retune the paragraph called still-open had
+shipped in #728; the band already targets a constant luminance, and always deliberately left the
+office floor alone. The initials are back.
+
+### The dedupe key must carry the paper, not just the ink
+
+The reason one component's number was read as four components' verdict: the sweep keyed each text
+node as `class | computed-colour` and measured only the first node per key. Four components render
+`.lc-card__avatar` in white — same class, same ink, **different background** — so they collapsed
+into one row.
+
+The key now carries a signature of the painted background as well (`paperSig`, walking the same
+ancestor chain `effBg` composites and stopping at the first opaque layer or gradient). It is shared
+verbatim by all three in-page walkers so their rows still join.
+
+This was never only about avatars. Turning it on took connected `/board` from 41 measured rows to
+45, and one of the four newly-visible rows was a **live AA failure of its own**: `.gg-zone` under
+`.gg-card--loose`'s 0.75 runway fade, 3.30 where the same class on every other card measures 5.72.
+Any shared utility class in the codebase was one background away from the same blind spot.
+
+The general rule: **a dedupe key that omits any input to the measurement will hide exactly the
+instances that differ in it** — and it hides them as a pass, which is the one direction an
+accessibility tool must never fail in.
 
 ## Log
 
-| Date       | Surface                                   | Result                                                                        |
-| ---------- | ----------------------------------------- | ----------------------------------------------------------------------------- |
-| 2026-08-05 | `/live`, `/broadcast` focus rings (#710)  | ring was `--accent` at 2.66:1 on paper; added `--lc-focus`                    |
-| 2026-08-05 | `/live` badge + status palette (#723)     | 19 failures, worst 1.48:1; ten `-ink` siblings, quiet tiers re-spaced         |
-| 2026-08-05 | seat identity (#728)                      | avatar initials; `memberAvatar` / `memberInk`                                 |
-| 2026-08-12 | goal grid shelf label                     | `.gg-shelf__label` 4.05 on shelf paper (#8a755a); first sign of the below     |
-| 2026-08-12 | approval card + asks preview              | 9 failures, worst 1.50:1; all fill-token-as-text → `-ink` siblings            |
-| 2026-08-12 | connected `/board` + `/live` (first ever) | 12 failures; goal grid's eight one-off browns → one measured ink set          |
-| 2026-08-12 | seat avatar disc                          | white initial 3.42; band clears NEITHER pole, so the glyph went               |
-| 2026-08-12 | `/live` with the room occupied            | 0 failures — but +14 pairs measured for the first time, +8 shown unmeasurable |
-| 2026-08-13 | pixel sampling — the gradient blind spot  | 12 failures nothing could previously see; `SKIPPED` 21 → 0 on `/live`         |
-| 2026-08-13 | `.lc-seat--offline` opacity dim           | ink read 14.34, eye got 3.55 — dim the dot and avatar, not the words          |
-| 2026-08-13 | hero eyebrow + cursor + `--text-faint`    | 1.18 / 2.54 / 4.09 on the landing page; added `--accent-ink`                  |
+| Date       | Surface                                   | Result                                                                                 |
+| ---------- | ----------------------------------------- | -------------------------------------------------------------------------------------- |
+| 2026-08-05 | `/live`, `/broadcast` focus rings (#710)  | ring was `--accent` at 2.66:1 on paper; added `--lc-focus`                             |
+| 2026-08-05 | `/live` badge + status palette (#723)     | 19 failures, worst 1.48:1; ten `-ink` siblings, quiet tiers re-spaced                  |
+| 2026-08-05 | seat identity (#728)                      | avatar initials; `memberAvatar` / `memberInk`                                          |
+| 2026-08-12 | goal grid shelf label                     | `.gg-shelf__label` 4.05 on shelf paper (#8a755a); first sign of the below              |
+| 2026-08-12 | approval card + asks preview              | 9 failures, worst 1.50:1; all fill-token-as-text → `-ink` siblings                     |
+| 2026-08-12 | connected `/board` + `/live` (first ever) | 12 failures; goal grid's eight one-off browns → one measured ink set                   |
+| 2026-08-12 | seat avatar disc                          | white initial 3.42; band clears NEITHER pole, so the glyph went                        |
+| 2026-08-12 | `/live` with the room occupied            | 0 failures — but +14 pairs measured for the first time, +8 shown unmeasurable          |
+| 2026-08-13 | dedupe key gains the painted paper        | 41 → 45 rows on `/board`; `.gg-zone` 3.30 under the loose-card fade; initials restored |
+| 2026-08-13 | pixel sampling — the gradient blind spot  | 12 failures nothing could previously see; `SKIPPED` 21 → 0 on `/live`                  |
+| 2026-08-13 | `.lc-seat--offline` opacity dim           | ink read 14.34, eye got 3.55 — dim the dot and avatar, not the words                   |
+| 2026-08-13 | hero eyebrow + cursor + `--text-faint`    | 1.18 / 2.54 / 4.09 on the landing page; added `--accent-ink`                           |
 
 After those three, `/live` and `/broadcast` measure **zero** live AA text-contrast failures — and
 since 2026-08-12 every prerendered route measures zero on every PR, because `pnpm a11y:check` says
