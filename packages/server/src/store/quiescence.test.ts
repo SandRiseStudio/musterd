@@ -180,6 +180,32 @@ describe('lastActionByActor (per-seat read for the roster + wake pool, ADR 219)'
     }
   });
 
+  it('excludeActions omits those rows from the newest-work map', () => {
+    vi.useFakeTimers();
+    try {
+      const { db, team } = seed();
+      const now = 10_000_000;
+      vi.setSystemTime(now - 60_000);
+      appendAudit(db, team.id, { actor: 'ada', action: 'x.did', target: null, result: 'allow' });
+      vi.setSystemTime(now);
+      appendAudit(db, team.id, {
+        actor: 'ada',
+        action: 'occupancy.model_attested',
+        target: 'ada',
+        result: 'allow',
+      });
+      const all = lastActionByActor(db, team.id, { now });
+      const work = lastActionByActor(db, team.id, {
+        now,
+        excludeActions: ['occupancy.model_attested'],
+      });
+      expect(all.get('ada')).toBe(now);
+      expect(work.get('ada')).toBe(now - 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('feeds resolveQuiescence at the documented default line', () => {
     // The default exists so the wire's `state` label means something; `quiet_for_ms` stays the
     // authority for any consumer drawing its own line.

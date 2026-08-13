@@ -69,18 +69,30 @@ export function resolveQuiescence(
 export function lastActionByActor(
   db: Database,
   teamId: string,
-  opts: { now?: number; lookbackMs?: number } = {},
+  opts: { now?: number; lookbackMs?: number; excludeActions?: string[] } = {},
 ): Map<string, number> {
   const now = opts.now ?? Date.now();
   const lookback = opts.lookbackMs ?? QUIESCENCE_LOOKBACK_MS;
-  const rows = db
-    .prepare<[string, number], { actor: string; last_ts: number }>(
-      `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
-         FROM audit a
-        WHERE a.team_id = ? AND a.ts > ?
-        GROUP BY a.actor`,
-    )
-    .all(teamId, now - lookback);
+  const exclude = opts.excludeActions ?? [];
+  const rows =
+    exclude.length === 0
+      ? db
+          .prepare<[string, number], { actor: string; last_ts: number }>(
+            `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
+               FROM audit a
+              WHERE a.team_id = ? AND a.ts > ?
+              GROUP BY a.actor`,
+          )
+          .all(teamId, now - lookback)
+      : db
+          .prepare<[string, number, ...string[]], { actor: string; last_ts: number }>(
+            `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
+               FROM audit a
+              WHERE a.team_id = ? AND a.ts > ?
+                AND a.action NOT IN (${exclude.map(() => '?').join(', ')})
+              GROUP BY a.actor`,
+          )
+          .all(teamId, now - lookback, ...exclude);
   return new Map(rows.map((r) => [r.actor, r.last_ts]));
 }
 
