@@ -109,9 +109,10 @@ describe('collectSignals', () => {
 
 describe('parseLaunchctlPrint', () => {
   it('parses runs and last exit code', () => {
-    expect(
-      parseLaunchctlPrint('\tstate = running\n\truns = 5\n\tlast exit code = 78\n'),
-    ).toEqual({ lastExit: 78, runs: 5 });
+    expect(parseLaunchctlPrint('\tstate = running\n\truns = 5\n\tlast exit code = 78\n')).toEqual({
+      lastExit: 78,
+      runs: 5,
+    });
   });
 
   it('absent service (print fails / empty) is zeros, not a throw', () => {
@@ -119,8 +120,9 @@ describe('parseLaunchctlPrint', () => {
   });
 
   it('"(never exited)" reads as exit 0', () => {
-    expect(
-      parseLaunchctlPrint('runs = 1\nlast exit code = (never exited)\n'),
-    ).toEqual({ lastExit: 0, runs: 1 });
+    expect(parseLaunchctlPrint('runs = 1\nlast exit code = (never exited)\n')).toEqual({
+      lastExit: 0,
+      runs: 1,
+    });
   });
 });

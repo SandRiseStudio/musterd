@@ -12,10 +12,7 @@ interface Captured {
   audits: Array<{ action: string }>;
 }
 
-function deps(
-  stamp: GuardianStamp,
-  over: Partial<ActDeps> = {},
-): { d: ActDeps; got: Captured } {
+function deps(stamp: GuardianStamp, over: Partial<ActDeps> = {}): { d: ActDeps; got: Captured } {
   const got: Captured = { service: [], notify: [], asks: [], audits: [] };
   const d: ActDeps = {
     now: () => NOW,

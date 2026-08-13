@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
 import { DEFAULT_TIERS } from '../guardian/classify.js';
 import { emptyStamp, loadStamp, saveStamp } from '../guardian/damp.js';
 import { guardianStatusLine, guardianTick, type GuardianTickDeps } from './guardian.js';

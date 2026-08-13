@@ -325,7 +325,9 @@ describe('team policy command', () => {
 
   it('setting a guardian tier does not clobber other policy knobs', async () => {
     await capture(() => teamCommand(parseArgs(['policy', '--review-loop', 'on'])));
-    await capture(() => teamCommand(parseArgs(['policy', '--guardian-tier', 'error_rate=observe'])));
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--guardian-tier', 'error_rate=observe'])),
+    );
     const after = JSON.parse(
       (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
     );

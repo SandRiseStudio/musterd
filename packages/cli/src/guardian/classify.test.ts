@@ -51,21 +51,19 @@ describe('classify (guardian spec §4)', () => {
   });
 
   it('schema_drift and wrong_db come from the health payload', () => {
-    expect(
-      classify({ ...healthy, health: { ...healthy.health!, schemaOk: false } }),
-    ).toEqual([{ class: 'schema_drift' }]);
-    expect(
-      classify({ ...healthy, health: { ...healthy.health!, dbPathExpected: false } }),
-    ).toEqual([{ class: 'wrong_db' }]);
+    expect(classify({ ...healthy, health: { ...healthy.health!, schemaOk: false } })).toEqual([
+      { class: 'schema_drift' },
+    ]);
+    expect(classify({ ...healthy, health: { ...healthy.health!, dbPathExpected: false } })).toEqual(
+      [{ class: 'wrong_db' }],
+    );
   });
 
   it('error_rate fires at the floor, not below it', () => {
-    expect(
-      classify({ ...healthy, httpErrorRateSinceBoot: ERROR_RATE_FLOOR - 1 }),
-    ).toEqual([]);
-    expect(
-      classify({ ...healthy, httpErrorRateSinceBoot: ERROR_RATE_FLOOR }),
-    ).toEqual([{ class: 'error_rate' }]);
+    expect(classify({ ...healthy, httpErrorRateSinceBoot: ERROR_RATE_FLOOR - 1 })).toEqual([]);
+    expect(classify({ ...healthy, httpErrorRateSinceBoot: ERROR_RATE_FLOOR })).toEqual([
+      { class: 'error_rate' },
+    ]);
   });
 
   it('presence_churn fires on a reaper storm since boot', () => {

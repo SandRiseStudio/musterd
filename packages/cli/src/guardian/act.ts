@@ -27,7 +27,10 @@ export interface ActDeps {
 
 export interface GuardianActionReport {
   stamp: GuardianStamp;
-  acted: Array<{ class: GuardianClass; action: 'remediated' | 'alerted' | 'escalated' | 'observed' }>;
+  acted: Array<{
+    class: GuardianClass;
+    action: 'remediated' | 'alerted' | 'escalated' | 'observed';
+  }>;
 }
 
 const REMEDIATIONS: Partial<Record<GuardianClass, (s: GuardianStamp) => string[] | null>> = {

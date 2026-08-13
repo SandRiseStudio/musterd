@@ -8,6 +8,9 @@ import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { configPath, loadConfig, serverProvenance } from '../config.js';
 import { CliError } from '../errors.js';
+import { actOn } from '../guardian/act.js';
+import { resolveGuardianTiers, DEFAULT_TIERS } from '../guardian/classify.js';
+import { collectSignals, type HealthPayload } from '../guardian/signals.js';
 import { loadHostRegistry } from '../host/registry.js';
 import { infraTouchWarning } from '../infra-gate.js';
 import { osNotify, type NotifyItem } from '../notify/os.js';
@@ -23,9 +26,6 @@ import {
   uninstallAutoRefresh,
   type AutoRefreshCtx,
 } from '../service/autorefresh.js';
-import { actOn } from '../guardian/act.js';
-import { resolveGuardianTiers, DEFAULT_TIERS } from '../guardian/classify.js';
-import { collectSignals, type HealthPayload } from '../guardian/signals.js';
 import { guardianStatusLine, guardianTick } from '../service/guardian.js';
 import {
   installWakeHost,

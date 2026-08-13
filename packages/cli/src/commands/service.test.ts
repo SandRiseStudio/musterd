@@ -457,9 +457,7 @@ describe('serviceCommand', () => {
     expect(code).toBe(0);
     expect(calls.some((x) => x.cmd === 'git' && x.args.includes('fetch'))).toBe(false);
     expect(
-      calls.some(
-        (x) => x.cmd === 'git' && x.args.includes('switch') && x.args.includes('abc1234'),
-      ),
+      calls.some((x) => x.cmd === 'git' && x.args.includes('switch') && x.args.includes('abc1234')),
     ).toBe(true);
     expect(out).toContain('pinned');
   });
@@ -467,7 +465,8 @@ describe('serviceCommand', () => {
   it('refresh --pin with an unknown ref fails before any bounce', async () => {
     const runner = refreshRunner();
     const c = ctx(((cmd, args) => {
-      if (cmd === 'git' && args.includes('switch')) return { status: 1, stdout: '', stderr: 'bad ref' };
+      if (cmd === 'git' && args.includes('switch'))
+        return { status: 1, stdout: '', stderr: 'bad ref' };
       return runner(cmd, args);
     }) as Runner);
     await expect(

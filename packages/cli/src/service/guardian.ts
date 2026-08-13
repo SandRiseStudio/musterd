@@ -86,7 +86,8 @@ export const GUARDIAN_STALE_MS = 10 * 60_000;
 /** One `service status` line: last tick age, last incident, staleness. Never throws. */
 export function guardianStatusLine(stampPath: string, now: number): string {
   const s = loadStamp(stampPath);
-  if (s.lastTickAt === null) return 'guardian: never ticked (installed? run: musterd service --guardian install)';
+  if (s.lastTickAt === null)
+    return 'guardian: never ticked (installed? run: musterd service --guardian install)';
   const age = now - s.lastTickAt;
   const ageStr = age < 120_000 ? `${Math.round(age / 1000)}s` : `${Math.round(age / 60_000)}m`;
   const incident = s.lastIncident
