@@ -101,7 +101,7 @@ harness currently animating the seat:
 
 | class | examples | wake | interrupt mid-work |
 |---|---|---|---|
-| **turn-scoped** | Claude Code CLI/extension, Cursor | needs machinery: `inbox --wait` (idle), background-wait, external resume | tool-boundary hooks (the interrupt line) |
+| **turn-scoped** | Claude Code CLI/extension, Cursor, Pi | needs machinery: `inbox --wait` (idle), background-wait, external resume | tool-boundary hooks (the interrupt line) |
 | **resident** | OpenClaw, Hermes, musterd's own daemon | solved by architecture — a gateway is always listening and invokes the model on events | **not solved**: runs are serialized per session, so a steer *queues* behind the in-flight run — deafness becomes queue latency |
 | **scheduled** | heartbeat/cron, Claude Code routines | latency = time to next tick | same as turn-scoped once running |
 
