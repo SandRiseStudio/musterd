@@ -126,6 +126,91 @@ describe('role assign (ADR 227 — roster roles, run in the roster home)', () =>
     );
   });
 
+  /**
+   * ADR 261 increment 2 — the known trap: `role assign` re-roles a seat without re-provisioning,
+   * so the seat keeps the ceiling of the role it no longer holds. The roster home is not the seat's
+   * worktree, so the recompile has to resolve where the seat actually lives before it can write.
+   */
+  describe('recompiles the seat harness permissions (ADR 261 inc 2)', () => {
+    function seatDir(): string {
+      const ws = join(cwd, 'seat-worktree');
+      mkdirSync(join(ws, '.claude'), { recursive: true });
+      writeFileSync(
+        join(ws, '.claude', 'settings.local.json'),
+        JSON.stringify({ hooks: { SessionStart: [{ hooks: [] }] } }),
+      );
+      return ws;
+    }
+    function readPerms(ws: string): { allow?: string[]; deny?: string[] } {
+      return (
+        JSON.parse(readFileSync(join(ws, '.claude', 'settings.local.json'), 'utf8')).permissions ??
+        {}
+      );
+    }
+
+    it("compiles the assigned role ceiling into the seat's worktree, not the roster home", async () => {
+      const m = writeRosterHome();
+      writeFileSync(join(m, 'roles', 'read-only.toml'), 'summary = "watcher"\n');
+      const ws = seatDir();
+      expect(
+        await roleCommand(parsed(['assign', 'izzo', 'read-only']), { seatWorkspace: () => ws }),
+      ).toBe(0);
+      const perms = readPerms(ws);
+      // The ceiling is deny — that is the only thing that makes it a ceiling.
+      expect(perms.deny).toEqual(expect.arrayContaining(['Edit', 'Write']));
+      // …and the floor rides along, so the seat can still do its (read-only) job non-interactively.
+      expect(perms.allow).toContain('Read');
+      // The roster home is a different folder and must not have been written.
+      expect(() => readFileSync(join(cwd, '.claude', 'settings.local.json'), 'utf8')).toThrow();
+    });
+
+    it('preserves the hooks already in the seat file (merge-never-clobber)', async () => {
+      const m = writeRosterHome();
+      writeFileSync(join(m, 'roles', 'read-only.toml'), 'summary = "watcher"\n');
+      const ws = seatDir();
+      await roleCommand(parsed(['assign', 'izzo', 'read-only']), { seatWorkspace: () => ws });
+      const s = JSON.parse(readFileSync(join(ws, '.claude', 'settings.local.json'), 'utf8'));
+      expect(s.hooks?.SessionStart).toBeDefined();
+    });
+
+    it('says so plainly when it cannot find the seat worktree, instead of silently skipping', async () => {
+      const m = writeRosterHome();
+      writeFileSync(join(m, 'roles', 'read-only.toml'), 'summary = "watcher"\n');
+      expect(
+        await roleCommand(parsed(['assign', 'izzo', 'read-only']), {
+          seatWorkspace: () => undefined,
+        }),
+      ).toBe(0);
+      // The assignment still succeeds — the roster file is the source of truth. But an un-recompiled
+      // ceiling is exactly the trap, so it must be visible rather than assumed.
+      expect(out).toMatch(/refresh-permissions/);
+    });
+
+    it('warns on --remove that the old ceiling stays in force until it is reversed by hand', async () => {
+      const m = writeRosterHome();
+      writeFileSync(join(m, 'roles', 'read-only.toml'), 'summary = "watcher"\n');
+      const ws = seatDir();
+      await roleCommand(parsed(['assign', 'izzo', 'read-only']), { seatWorkspace: () => ws });
+      out = '';
+      await roleCommand(parsed(['assign', 'izzo', 'read-only'], { remove: true }), {
+        seatWorkspace: () => ws,
+      });
+      // The merge is additive by construction, so it cannot lift a deny. Saying nothing here would
+      // leave a seat read-only after its read-only role was removed — the trap, inverted.
+      expect(out).toMatch(/deny|ceiling/i);
+      expect(readPerms(ws).deny).toEqual(expect.arrayContaining(['Edit']));
+    });
+
+    it('skips silently when the assigned roster role has no provisioning template', async () => {
+      // `platform` is a roster label with no permission profile — there is nothing to compile, and
+      // inventing a ceiling for it would be worse than doing nothing.
+      const ws = seatDir();
+      writeRosterHome();
+      await roleCommand(parsed(['assign', 'izzo', 'platform']), { seatWorkspace: () => ws });
+      expect(readPerms(ws).deny ?? []).toEqual([]);
+    });
+  });
+
   it('refuses an unknown role, naming the library (typo-guard; --force overrides)', async () => {
     const m = writeRosterHome();
     await expect(roleCommand(parsed(['assign', 'izzo', 'platfrom']))).rejects.toThrow(

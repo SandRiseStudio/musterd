@@ -2,7 +2,9 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path';
 import { parseSeatFile, seatNameFromPath, seatRoles, serializeSeat } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
+import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
+import { installSeatPermissions } from '../onboard/permissions.js';
 import {
   BUILTIN_ROLES,
   GENERALIST,
@@ -37,6 +39,24 @@ export interface RosterRead {
 }
 export interface RoleDeps {
   fetchRoster?: (flags: Parsed['flags']) => Promise<RosterRead | null>;
+  /** Where a seat's worktree lives (ADR 261 inc 2) — injectable so tests need no global registry. */
+  seatWorkspace?: (seat: string) => string | undefined;
+}
+
+/**
+ * Resolve a seat's worktree from the global bindings registry (ADR 020), which is the only index
+ * of where a seat is bound — the roster home holds the seat *file*, never the seat's folder.
+ */
+function defaultSeatWorkspace(seat: string): string | undefined {
+  try {
+    const { bindings } = loadConfig();
+    for (const [dir, ref] of Object.entries(bindings)) {
+      if (ref.seat === seat && existsSync(dir)) return dir;
+    }
+  } catch {
+    // No readable config — the recompile is skipped and said out loud by the caller.
+  }
+  return undefined;
 }
 
 async function defaultFetchRoster(flags: Parsed['flags']): Promise<RosterRead | null> {
@@ -56,7 +76,7 @@ export async function roleCommand(parsed: Parsed, deps: RoleDeps = {}): Promise<
   if (sub === 'list') return roleList(parsed, await fetchRoster(parsed.flags));
   if (sub === 'show') return roleShow(parsed, await fetchRoster(parsed.flags));
   if (sub === 'create') return roleCreate(parsed);
-  if (sub === 'assign') return roleAssign(parsed);
+  if (sub === 'assign') return roleAssign(parsed, deps.seatWorkspace ?? defaultSeatWorkspace);
   throw new CliError('usage: musterd role <list|show|create|assign> ...', 2);
 }
 
@@ -73,7 +93,10 @@ function holdersOf(roster: RosterRead, name: string): string[] {
  * An unknown role is refused with the library named (a typo-guard, not enforcement — `--force`
  * writes it anyway and reconcile will warn).
  */
-async function roleAssign(parsed: Parsed): Promise<number> {
+async function roleAssign(
+  parsed: Parsed,
+  seatWorkspace: (seat: string) => string | undefined,
+): Promise<number> {
   const seatName = parsed.positionals[1];
   const roleName = parsed.positionals[2];
   if (!seatName || !roleName) {
@@ -112,8 +135,12 @@ async function roleAssign(parsed: Parsed): Promise<number> {
   if (!roles) delete (body as { roles?: string[] }).roles;
   writeFileSync(seatPath, serializeSeat(body), 'utf8');
 
+  const recompile = recompileSeatPermissions(seatName, roleName, remove, seatWorkspace);
+
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify({ seat: seatName, roles: next }) + '\n');
+    process.stdout.write(
+      JSON.stringify({ seat: seatName, roles: next, permissions: recompile.json }) + '\n',
+    );
     return 0;
   }
   process.stdout.write(
@@ -124,7 +151,75 @@ async function roleAssign(parsed: Parsed): Promise<number> {
       { next: 'commit the seat file — the daemon reconciles on merge' },
     ) + '\n',
   );
+  for (const line of recompile.lines) process.stdout.write(`${line}\n`);
   return 0;
+}
+
+/**
+ * ADR 261 increment 2 — recompile the seat's harness permission block when its role changes.
+ *
+ * THE TRAP THIS CLOSES: `role assign` re-roles a seat by editing the roster file and stops there,
+ * so the seat kept whatever ceiling its previous role compiled. A ceiling that no longer matches
+ * the role is worse than none — it is the ADR 261 incident with the blame pointing at the role
+ * label instead of the settings file.
+ *
+ * Two truths make this necessarily partial, and both are reported rather than papered over:
+ *
+ *  - **The roster home is not the seat's worktree.** The seat's folder comes from the bindings
+ *    registry; a seat with no binding on this machine cannot be recompiled from here at all.
+ *  - **The merge is additive, so it cannot lift a `deny`.** Removing a role therefore leaves its
+ *    ceiling in force. Exact reversal is the ADR 030 manifest's job and is not wired to this path
+ *    yet, so `--remove` says so instead of implying a lifted ceiling.
+ *
+ * A roster role with no provisioning template of the same name has no profile to compile — the
+ * common case (`platform`, `designer` are labels, not ceilings) — and is silently skipped, because
+ * inventing a ceiling for a label would be worse than doing nothing.
+ */
+function recompileSeatPermissions(
+  seatName: string,
+  roleName: string,
+  remove: boolean,
+  seatWorkspace: (seat: string) => string | undefined,
+): { lines: string[]; json: string } {
+  let template: RoleTemplate | undefined;
+  try {
+    template = loadRole(process.cwd(), roleName);
+  } catch {
+    return { lines: [], json: 'no-template' }; // a roster label with no profile — nothing to compile
+  }
+  const perms = template.tools.permissions;
+  if (perms.allow.length + perms.ask.length + perms.deny.length === 0) {
+    return { lines: [], json: 'no-template' };
+  }
+
+  const ws = seatWorkspace(seatName);
+  if (!ws) {
+    return {
+      lines: [
+        `  ${theme.meta(`no worktree for ${seatName} on this machine, so its harness permissions were NOT recompiled — the ceiling it had before is still in force. In that seat's folder: \`musterd init --refresh-permissions\` (ADR 261).`)}`,
+      ],
+      json: 'unresolved-workspace',
+    };
+  }
+  if (remove) {
+    return {
+      lines: [
+        `  ${theme.meta(`${roleName}'s deny entries are still in ${join(ws, '.claude', 'settings.local.json')} — the merge is additive and cannot lift a ceiling. Remove them by hand if the seat should regain what they denied.`)}`,
+      ],
+      json: 'ceiling-retained',
+    };
+  }
+  const added = installSeatPermissions(ws, template);
+  const count = added.allow.length + added.ask.length + added.deny.length;
+  return {
+    lines:
+      count === 0
+        ? []
+        : [
+            `  ${theme.meta(`recompiled ${seatName}'s harness permissions (+${String(count)}) into ${join(ws, '.claude', 'settings.local.json')}`)}`,
+          ],
+    json: count === 0 ? 'already-current' : 'recompiled',
+  };
 }
 
 /** The durable roster-role library: `.musterd/roles/*.toml` stems, sorted. */

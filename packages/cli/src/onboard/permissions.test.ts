@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { installSeatPermissions, STANDARD_FLOOR } from './permissions.js';
+import { inspectSeatPermissions, installSeatPermissions, STANDARD_FLOOR } from './permissions.js';
 import { BUILTIN_ROLES } from './role.js';
 
 /**
@@ -146,5 +146,92 @@ describe('installSeatPermissions (ADR 261 decision 4)', () => {
     const second = installSeatPermissions(dir);
     expect(second.allow).toEqual([]);
     expect(second.deny).toEqual([]);
+  });
+});
+
+/**
+ * ADR 261 increment 2 — the freshness half. Increment 1 armed provisioning, but its last
+ * consequence is the gap here: EXISTING seats stay unprovisioned until something surfaces them,
+ * and until now nothing did. The finding's *wording* is the deliverable as much as its detection —
+ * the entire cost of the 2026-08-13 incident was hours spent looking at the innocent layer.
+ */
+describe('inspectSeatPermissions (ADR 261 increment 2)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-perm-check-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function writeSettings(settings: unknown): void {
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(join(dir, '.claude', 'settings.local.json'), JSON.stringify(settings));
+  }
+
+  it('stays silent on a folder musterd never provisioned', () => {
+    // No settings file at all is not a musterd seat — the posture inspectClaudeHookDrift already
+    // takes. Inventing drift for someone's unrelated checkout is noise at every session start.
+    expect(inspectSeatPermissions(dir)).toEqual([]);
+  });
+
+  it('reports the ryder shape: hooks present, no permissions block at all', () => {
+    writeSettings({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'x' }] }] } });
+    const findings = inspectSeatPermissions(dir);
+    expect(findings).toHaveLength(1);
+    // The layer must be named. A finding that says only "permissions are missing" reproduces the
+    // incident: three layers compose as AND, and the reader has to know which one to look at.
+    expect(findings[0]).toMatch(/harness/i);
+    expect(findings[0]).toMatch(/settings\.local\.json/);
+    // And it must say what the consequence is, or a reader defers it as cosmetic.
+    expect(findings[0]).toMatch(/non-interactive|fails closed/i);
+  });
+
+  it('reports a partial floor as stale, naming the count and not one line per entry', () => {
+    writeSettings({ permissions: { allow: ['Read', 'Glob'] } });
+    const findings = inspectSeatPermissions(dir);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain(String(STANDARD_FLOOR.allow.length - 2));
+  });
+
+  it('is silent once the floor is installed', () => {
+    installSeatPermissions(dir);
+    expect(inspectSeatPermissions(dir)).toEqual([]);
+  });
+
+  it('reports a surplus allow that the file own deny already makes inert — never strips it', () => {
+    installSeatPermissions(dir, BUILTIN_ROLES['read-only']);
+    // A human approved Write at a prompt before the ceiling arrived. Decision 5: it stays, and it
+    // is reported for a human to resolve — deleting approved state on a schedule nobody chose is
+    // the same silent misattribution this ADR exists to end.
+    const path = join(dir, '.claude', 'settings.local.json');
+    const s = JSON.parse(readFileSync(path, 'utf8'));
+    s.permissions.allow.push('Bash(rm -rf *)');
+    s.permissions.deny.push('Bash');
+    writeFileSync(path, JSON.stringify(s));
+
+    const findings = inspectSeatPermissions(dir);
+    expect(findings.some((f) => /surplus|inert/i.test(f))).toBe(true);
+    // Reporting must not mutate: the entry is still on disk afterwards.
+    const after = JSON.parse(readFileSync(path, 'utf8'));
+    expect(after.permissions.allow).toContain('Bash(rm -rf *)');
+  });
+
+  it('treats a bare tool-name deny as covering that tool parameterized allows', () => {
+    // `deny: ['Bash']` outranks `allow: ['Bash(git log *)']` — the allow is inert, not honoured.
+    writeSettings({
+      permissions: { allow: [...STANDARD_FLOOR.allow], deny: ['Bash'] },
+    });
+    const findings = inspectSeatPermissions(dir);
+    expect(findings.some((f) => /surplus|inert/i.test(f))).toBe(true);
+  });
+
+  it('never throws on a settings file a human broke', () => {
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(join(dir, '.claude', 'settings.local.json'), '{ not json');
+    // The probe runs at every session start; an unparseable file is a human's problem to fix, and
+    // a crash here would take the session start with it.
+    expect(() => inspectSeatPermissions(dir)).not.toThrow();
+    expect(inspectSeatPermissions(dir)).toEqual([]);
   });
 });

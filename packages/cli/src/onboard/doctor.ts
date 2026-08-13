@@ -24,6 +24,7 @@ import type { Harness } from './harness.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
 import { HARNESSES } from './harnesses/index.js';
 import { readProvisionManifest } from './manifest.js';
+import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
 
 /**
@@ -638,6 +639,10 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   // committed), so a provisioned folder can silently lose it. Check it only when Claude Code has the
   // server wired here — the only harness with a PostToolUse hook today.
   if (claudeConfigured) drift.push(...inspectClaudeHookDrift(cwd));
+  // ADR 261 increment 2: the harness permission layer, same machine-local settings file and the
+  // same silent-loss shape — except its failure is worse, because a missing hook fails open and a
+  // missing permission fails closed in a session that cannot prompt its way out.
+  if (claudeConfigured) drift.push(...inspectSeatPermissions(cwd));
   const guidance = inspectGuidance(cwd, HARNESSES);
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
@@ -839,11 +844,18 @@ function sameCommit(a: string, b: string): boolean {
  * `inspectClaudeHookDrift` only reads `.claude/settings.local.json`, so both qualify while
  * `inspectProvisioning` as a whole does not.
  */
-export function inspectArtifactDrift(cwd: string): { guidance: string[]; hooks: string[] } {
+export function inspectArtifactDrift(cwd: string): {
+  guidance: string[];
+  hooks: string[];
+  permissions: string[];
+} {
   return {
     guidance: inspectGuidance(cwd, HARNESSES).drift,
     // Returns [] when there is no local settings file, so an unprovisioned folder stays silent.
     hooks: inspectClaudeHookDrift(cwd),
+    // ADR 261 increment 2 — the harness permission layer. Qualifies for the cheap half on the same
+    // terms as the hook check: it reads the one settings file and nothing else.
+    permissions: inspectSeatPermissions(cwd),
   };
 }
 
@@ -887,15 +899,19 @@ export async function runSessionProbe(deps?: {
     }
   }
   try {
-    const { guidance, hooks } = inspectArtifactDrift(deps?.cwd ?? process.cwd());
-    if (guidance.length + hooks.length > 0) {
+    const { guidance, hooks, permissions } = inspectArtifactDrift(deps?.cwd ?? process.cwd());
+    if (guidance.length + hooks.length + permissions.length > 0) {
       const what = [
         guidance.length > 0 ? `${String(guidance.length)} guidance file(s)` : null,
         hooks.length > 0 ? `${String(hooks.length)} hook(s)` : null,
+        // Named as a layer, not a file count (ADR 261): the reader's next question is always
+        // "which of the three denied me", and this line is where that question gets answered.
+        permissions.length > 0 ? 'the harness permission layer' : null,
       ].filter(Boolean);
       const fix = [
         guidance.length > 0 ? '`musterd init --refresh-guidance`' : null,
         hooks.length > 0 ? '`musterd init --refresh-hooks`' : null,
+        permissions.length > 0 ? '`musterd init --refresh-permissions`' : null,
       ].filter(Boolean);
       process.stdout.write(
         `musterd: this folder's provisioning is behind what this build writes — ${what.join(' and ')} ` +

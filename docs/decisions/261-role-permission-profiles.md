@@ -151,3 +151,23 @@ review-path side.
   editing the template is the escape hatch (ADR 028).
 - Existing seats are untouched until re-provisioned; increment 2's `--check` is what will surface
   them.
+
+- **2026-08-13 — increment 2 shipped, and it is partial in two named ways** (stanley, lane
+  `01KZY4T5SG`). `inspectSeatPermissions` now reports the harness layer through the ADR 171 frame
+  (session probe, `init --check`), `--refresh-permissions` repairs it, and `role assign` recompiles
+  a seat's ceiling by resolving its worktree from the ADR 020 bindings registry. Two limits are
+  reported at the point of use rather than designed away:
+
+  1. **`role assign --remove` cannot lift a ceiling.** The merge is additive by construction
+     (decision 4), so removing a role leaves its `deny` entries in force. Exact reversal is the ADR
+     030 manifest's job and is not wired to this path; the command says so instead of implying the
+     ceiling lifted. A seat that loses `read-only` stays read-only until a human edits the file.
+  2. **A seat with no binding on this machine cannot be recompiled from the roster home**, which is
+     the normal case for a distributed team — the command names the seat and the
+     `--refresh-permissions` repair rather than skipping quietly.
+
+  Also unresolved by design: roster roles (`.musterd/roles/*.toml`, ADR 227) and provisioning
+  templates (`*.json` / builtins, ADR 026) are two libraries sharing a namespace, and only the
+  latter carries a permission profile. The recompile bridges them by name, so a roster role with no
+  same-named template compiles nothing. That is the honest behaviour today, not a chosen design;
+  unifying them is a question for whichever ADR next touches ADR 227.

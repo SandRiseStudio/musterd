@@ -96,7 +96,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'init',
     signature:
-      '[--check [--fix]] [--refresh-guidance] [--refresh-hooks] [--prune-bindings [--apply]]',
+      '[--check [--fix]] [--refresh-guidance] [--refresh-hooks] [--refresh-permissions] [--prune-bindings [--apply]]',
     summary: 'interactive first-run setup — wire this folder to musterd',
     group: 'setup',
     primary: true,
@@ -108,7 +108,11 @@ export const CATALOG: readonly CommandEntry[] = [
       'workspace, which the full flow is not (ADR 161). `--refresh-hooks` is its sibling for hooks ' +
       '(ADR 168): it rewrites only the hook entries, so a hook added after this seat was provisioned ' +
       'reaches it without re-provisioning, and it declines to overwrite a hook a newer musterd wrote. ' +
-      'In an already-bound folder the full flow ' +
+      '`--refresh-permissions` is the third sibling (ADR 261): it writes the standard permission ' +
+      'floor into this folder’s harness settings, merging under whatever is already there. A seat ' +
+      'with no permissions block fails closed on its first Write in a non-interactive session and ' +
+      'presents as a broken tool, so this is the repair for any seat provisioned before that floor ' +
+      'existed. In an already-bound folder the full flow ' +
       'defaults to that folder’s own team, never the last team this machine happened to use. ' +
       '`--prune-bindings` reports registry entries whose folder is gone (ADR 162) — add `--apply` to ' +
       'remove them; credentials are never touched.',
@@ -118,6 +122,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'musterd init --check --fix',
       'musterd init --refresh-guidance',
       'musterd init --refresh-hooks',
+      'musterd init --refresh-permissions',
       'musterd init --prune-bindings --apply',
     ],
   },
