@@ -20,6 +20,16 @@ GitHub never creates the pull_request CI run for an unmergeable (mergeStateStatu
 
 Anything that measures or reports on the repo should name the ref: `git fetch origin` first, then `git ls-tree origin/main <path>` and `git log origin/main`, never `ls`/`cat`/`git log` over the checked-out tree. To resume work, branch afresh (`git checkout -b <name> origin/main`) rather than pulling.
 
+## Branch cleanup is repo-wide, and tidying up is what removes the guard (2026-08-13; falsify: `git worktree list`, then try `git branch -D` on a branch another worktree holds)
+
+Every seat worktree shares one `.git`, so `refs/heads` is common — 19 worktrees on this machine, and from any one of them `git branch` lists, and can delete, every other seat's branches. "I pruned my branches" is always "I pruned the team's branches."
+
+Git's only guard is narrow: it refuses to delete a branch **currently checked out** in another worktree (`error: cannot delete branch 'x' used by worktree at …`), even under `-D`. That guard disappears exactly when a seat tidies up — detaching at `origin/main` at wrap-up, the recommended finish, leaves that seat's branches unprotected. Meanwhile squash-merge makes `-d` refuse on work that HAS landed (the tip is never an ancestor of main), so cleanup reaches for `-D`, which asks nothing.
+
+Prune by name, never by sweep: delete only branches you own and have verified landed — PR state `MERGED`, or `git cherry origin/main <branch>` marking every commit `-`. A neighbour's unmerged branch with no remote looks identical to your own dead one.
+
+## Never `pnpm format` (glob misalignment verified still present 2026-08-13; falsify: compare `format` vs `format:check` globs in package.json)
+
 `pnpm format` writes `**/*.{ts,js,mjs,json,md}` but `format:check` only checks `packages/**/*.ts`, `tests/**/*.ts`, `*.{ts,json}` — the committed markdown/json was never prettier-conformant, so `pnpm format` reflows ~100 unrelated docs, burying the real change and breaking `roadmap:check`. Format only your own files: `pnpm exec prettier --write <files>`, then `pnpm format:check`.
 
 ## Ordering landmine
