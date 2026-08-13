@@ -78,7 +78,7 @@
  * Treat probe output as "worth looking at", and the live sweep as authoritative.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -98,7 +98,44 @@ const QUIET = args.includes('--quiet');
 const PROBE_HOST = flag('probe-host') ?? '.lc-stream';
 
 const port = 9334;
-const profile = mkdtempSync(join(tmpdir(), 'contrast-sweep-'));
+const PROFILE_PREFIX = 'contrast-sweep-';
+/** Old enough that no live run's profile can match. A sweep takes ~10s; an hour is 300x that. */
+const PROFILE_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Delete profile directories left behind by earlier runs.
+ *
+ * Recovering ground already lost needs its own pass: a fix that only stops NEW leaks leaves the pile
+ * standing. Measured on this laptop 2026-08-13, two days after the sweep became a gate: 400
+ * directories, 240 MB — Chrome's component cache and Safe Browsing store, re-downloaded every run
+ * because every run starts from a virgin profile. Age-gated so it can never touch the profile of a
+ * sweep running concurrently (the gate runs twelve of them back to back).
+ *
+ * Same shape and same reason as `sweepStaleProfiles` in `packages/cli/src/commands/broadcast.ts`,
+ * which fixed this class for `musterd broadcast` after an incident left 23 profiles and 837 MB.
+ */
+const sweepStaleProfiles = (dir = tmpdir(), ttlMs = PROFILE_TTL_MS, now = Date.now()) => {
+  let removed = 0;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith(PROFILE_PREFIX)) continue;
+      const full = join(dir, name);
+      try {
+        if (now - statSync(full).mtimeMs < ttlMs) continue;
+        rmSync(full, { recursive: true, force: true });
+        removed++;
+      } catch {
+        /* raced with another sweep, or not ours to delete — skip it */
+      }
+    }
+  } catch {
+    /* no temp dir to read — nothing to sweep */
+  }
+  return removed;
+};
+sweepStaleProfiles();
+
+const profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
 const chrome = spawn(
   CHROME,
   [
@@ -112,6 +149,41 @@ const chrome = spawn(
   ],
   { stdio: 'ignore' },
 );
+const chromeGone = new Promise((res) => chrome.once('exit', res));
+
+/**
+ * Shut Chrome down and take its profile with it.
+ *
+ * The order is the whole fix. This used to be `kill()` then `rmSync()` in one synchronous breath,
+ * which reads correctly and leaks on EVERY run: `kill` only queues a signal, so the delete lands
+ * while Chrome is still up, and Chrome then re-creates its profile on the way out. Not a
+ * crash-only path — a clean `exit 0` sweep of one static route left a directory behind, and the
+ * gate's twelve sweeps left twelve.
+ *
+ * So: signal, WAIT for the process to actually be gone, then delete. SIGKILL after a grace period,
+ * because a Chrome wedged mid-screenshot must not hold the gate open. `process.on('exit')` keeps a
+ * synchronous best-effort copy for the paths that never get to await anything.
+ */
+const shutdown = async () => {
+  chrome.kill();
+  await Promise.race([
+    chromeGone,
+    new Promise((res) => setTimeout(res, 3000)).then(() => {
+      try {
+        chrome.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+      return chromeGone;
+    }),
+  ]);
+  try {
+    rmSync(profile, { recursive: true, force: true });
+  } catch {
+    /* best-effort: a profile on a busy volume can outlive one attempt */
+  }
+};
+
 const cleanup = () => {
   chrome.kill();
   try {
@@ -121,6 +193,12 @@ const cleanup = () => {
   }
 };
 process.on('exit', cleanup);
+
+/** Every deliberate exit goes through here, so the profile is gone before the process is. */
+const exit = async (code) => {
+  await shutdown();
+  process.exit(code);
+};
 
 let targets;
 /* 30s, not 10. On a cold CI runner the first Chrome of a session takes appreciably longer to open
@@ -142,7 +220,7 @@ if (!page) {
     `contrast-sweep — Chrome (${CHROME}) never opened its debugging port on :${port} within 30s.` +
       ' Nothing was measured. This is a harness failure, not a contrast result.',
   );
-  process.exit(2);
+  await exit(2);
 }
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -1007,4 +1085,4 @@ if (JSON_OUT) {
 }
 
 // Only the live sweep gates. The probe pass is advisory by construction.
-process.exit(liveFails.length ? 1 : 0);
+await exit(liveFails.length ? 1 : 0);
