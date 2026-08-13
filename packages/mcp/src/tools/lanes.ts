@@ -125,10 +125,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         'hand it over or release it. Returns the lane + contention warnings.',
       inputSchema: {
         id: z.string().describe('lane id'),
-        goal_id: z
-          .string()
-          .optional()
-          .describe('link the lane to a goal as you take it — one call, no follow-up lane_update'),
+        goal_id: z.string().optional().describe('link a goal as you take it (one call)'),
       },
     },
     async (args) => {

@@ -79,9 +79,8 @@ export function registerGoals(server: McpServer, client: MusterdClient): void {
     'team_goal_outcome',
     {
       description:
-        'Record what a shipped goal changed for a user — one plain sentence of evidence, shown ' +
-        'beside the goal wherever it renders. Anyone may amend by recording a new note; the ' +
-        'latest wins and provenance is kept.',
+        'Record what a shipped goal changed for a user — one sentence of evidence, rendered ' +
+        'beside the goal. Re-record to amend; latest wins.',
       inputSchema: {
         goal_id: z.string().describe('the goal this note is about'),
         outcome: z.string().max(280).describe('what changed for a user — evidence, not a slogan'),
