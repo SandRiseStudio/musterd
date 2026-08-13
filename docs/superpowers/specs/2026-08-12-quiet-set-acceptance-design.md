@@ -5,7 +5,7 @@
 - **Author:** wanderer
 - **Lane:** `01KZ9FNC6VQ8NJH7R2KAMCV5D1` (folded from the standing-acceptor capture)
 - **Seed:** [docs/design/the-standing-acceptor.md](../../design/the-standing-acceptor.md)
-- **Relates to:** ADR 188 (graded ladder), ADR 191 (review-loop wake), ADR 202 §3 (a verdict is never guessed — only the asked seat can `accept`), ADR 219 / 120s quiescence, ADR 225 (acceptance must reach someone), ADR 234 / 244 / 253 (stakes + agents-only live pick), ADR 235 (do not self-close on silence when the sweep is armed), ADR 254 (eligible sets), ADR 258 (`review_debt`)
+- **Relates to:** ADR 188 (graded ladder), ADR 191 (review-loop wake), ADR 202 §3 (a verdict is never guessed — only the asked seat can `accept`), ADR 219 / 120s quiescence, ADR 225 (acceptance must reach someone), ADR 227 (roles — possible later eligible-set refinement, record-don't-build), ADR 234 / 244 / 253 (stakes + agents-only live pick), ADR 235 (do not self-close on silence when the sweep is armed), ADR 252 (wake cost), ADR 254 (eligible sets), ADR 258 (`review_debt`)
 
 ## The question this lane asked
 
@@ -35,7 +35,7 @@ ADR 258's `review_debt` now advertises the oldest `awaiting_acceptance` lanes on
 
 ### Confounds the Eval must not swallow
 
-- **Jumped route.** A `lane_resolve` by a non-owner records `verified: true` (closer ≠ owner) even when the routed counterpart never reviewed. #779 (wanderer's stakes-default lane) is one such row, closed by izzo under nick, ask routed to miley. The ledger cannot distinguish jumped-route from counterpart confirm. Exclude #779 by hand; do not pretend the rate is clean.
+- **Jumped route.** A `lane_resolve` by a non-owner records `verified: true` (closer ≠ owner) even when the routed counterpart never reviewed. Ready-row `detail.reviewer` already names who was asked; closer ≠ that reviewer AND closer ≠ owner is a jumped route **by join**. Classify from day one. Do not hand-exclude #779 — Miley flagged that exclusion will recur and silently inflate the baseline.
 - **Attention, not absence.** izzo sat 3h on a named ask while live, cross-family, and qualified — misread the brief. Fan-out adds candidates to a problem that is sometimes attention. The 10-minute rate is still the primary; stall-*reason* is a secondary split if recoverable.
 - **Denominator moved today.** ADR 253 (agents-only live pick) + nick armed `stakes_defaults: packages/web/** → low`. No-risk web-only lanes now mostly route no ask. Size increments against **post-arming** ask volume, not the 14-day mix.
 - **Right-censoring.** ADR 229 sweeps at 24h. Median acceptance age among answered rows hides the tail. Use uncensored age-at-close (including `review_swept`) and the fraction >12h (stanley's ADR 258 Eval amendment).
@@ -105,7 +105,7 @@ The **10-minute bar is the routing Eval**, not the owner hint. Changing the hint
 
 Split so the first increment is measurable without the protocol change, and so we do not size fan-out against a denominator that just shrank.
 
-**Increment 1 — stop targeting busy.** `pickReviewCounterpart` drops non-quiet live **agents**. Same one-name ask, same wake fallback. Independently useful: the 273-minute path is this filter's absence. Do **not** quiet-filter `pickHumanReviewer`: a risky lane still needs a live human (ADR 172), and dropping a busy nick would convert required human review into `human_review_missed`. Ship, then measure 10-minute hit rate on **post-arming, non-exempt** submits for a few days.
+**Increment 1 — stop targeting busy.** `pickReviewCounterpart` drops non-quiet live **agents**. Same one-name ask, same wake fallback. Independently useful: the 273-minute path is this filter's absence. Do **not** quiet-filter `pickHumanReviewer`: a risky lane still needs a live human (ADR 172), and dropping a busy nick would convert required human review into `human_review_missed`. Ship, then measure 10-minute hit rate **and wake-route volume** on **post-arming, non-exempt** submits for a few days. Evenings here are everyone-live-but-heads-down; increment 1 moves those submits onto the ADR 191 paid-wake path, and that shift has to be priced (eval item 5 / ADR 252).
 
 **Increment 2 — quiet-set fan-out.** `ask` on `ELIGIBLE_ACTS`, compose `meta.eligible` when the quiet set is 2–4, fix `owed_reviews`, keep interrupt obligation-class. First accept wins. ADR + protocol in the same commit.
 
@@ -117,12 +117,13 @@ If increment 1 plus web-low already moves the 10-minute rate near the quiet-buck
 
 **Eval, pre-registered, post-arming window only:**
 
-1. **Good ≤10m** among routed (non-exempt) submits. Baseline: 24% live / 19% wake. Target: at or above the quiet-bucket 32% for quiet-set routes. Exclude known jumped-route closes by hand until the ledger can name them.
+1. **Good ≤10m** among routed (non-exempt) submits. Baseline: 24% live / 19% wake. Target: at or above the quiet-bucket 32% for quiet-set routes. A jumped route is `closer != ready-row reviewer AND closer != owner` — classify by join; drop those from the confirm numerator.
 2. **Uncensored age-at-close** including `review_swept`, plus fraction >12h (do not use median-among-answered).
 3. **Duplicate verdicts** on eligible-set asks. Predict ~1.0. Above 1.3 sustained → stand-down is not landing (same reopening trigger as ADR 254).
 4. **Ask volume** per day after web-low, so increment 2 is sized against the new denominator.
+5. **Wake-route volume** before vs after increment 1 (`wake_queued` / ADR 191 path, plus `residency.woke` and unpriced sessions — ADR 252: `cost_usd_total` under-prices the failure path). A 10-minute-rate win bought with extra paid wakes is not a win.
 
-**Reopening:** if (1) does not move after increment 1 and the stalls are attention (live, quiet, still no look), fan-out will not save us — that is izzo's 3h counterexample, and the next lever is the interrupt copy / `owed_reviews` surfacing, not a wider set.
+**Reopening:** if (1) does not move after increment 1 and the stalls are attention (live, quiet, still no look), fan-out will not save us — that is izzo's 3h counterexample, and the next lever is the interrupt copy / `owed_reviews` surfacing, not a wider set. If (1) moves and (5) rises sharply, the next lever is whether that wake cost is acceptable — not increment 2.
 
 ## Testing
 
@@ -145,3 +146,5 @@ Unchanged: inbox visibility predicate (seven copies), wake policy, sweep grace, 
 ## Open questions
 
 None that block increment 1. For increment 2, one call nick already made in conversation and this spec records: **not `@team`**. If increment 1's Eval is "attention, not candidate supply," we stop rather than widening the set.
+
+**Roles (ADR 227) as a later eligible-set refinement** — record, do not build. A designer on a web surface, a platform seat on infra, is a verdict-*quality* filter, not a latency one. No evidence yet that the quiet set's miss is the wrong *kind* of eyes. If increment 2 ships and quality is the remaining miss, reopen here.

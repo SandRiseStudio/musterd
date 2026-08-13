@@ -4183,6 +4183,15 @@ describe('two-stage close (ADR 169)', () => {
     }).then(async (r) => (await r.json()) as Record<string, any>);
     expect(handed.lane.owner_seat).toBe('shipper');
 
+    // ADR 260 drops a live agent whose newest *work* audit is inside 120s. `first` just opened
+    // and handed this lane, so without aging those rows the pick is null and this test would
+    // assert the quiet-filter instead of the overlap it exists to name. Occupancy attestation
+    // is already not work; lane open/handoff are.
+    db.prepare(
+      `UPDATE audit SET ts = ts - 180000
+        WHERE actor = 'first' AND action != 'occupancy.model_attested'`,
+    ).run();
+
     const ready = await fetch(base + `/teams/coauth/lanes/${laneId}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', ...authHeaders(shipper) },
