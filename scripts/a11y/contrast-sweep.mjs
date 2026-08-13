@@ -180,8 +180,6 @@ await send('Emulation.setEmulatedMedia', {
   features: [{ name: 'prefers-reduced-motion', value: 'reduce' }],
 }).catch(() => {});
 await send('Page.navigate', { url });
-// Let the app mount and settle; live surfaces stream in after first paint.
-await new Promise((r) => setTimeout(r, 4000));
 
 /**
  * The dedupe key, shared verbatim by all three in-page walkers so their rows join.
@@ -220,6 +218,85 @@ const PAPER_SIG = /* js */ `
   const rowKey = (el, cs) =>
     (el.className.toString() || el.tagName).slice(0, 48) + '|' + cs.color + '|' + paperSig(el);
 `;
+
+/* ── wait for the page to STOP CHANGING, rather than for a number of seconds ─────────────────────
+ *
+ * This was `setTimeout(4000)`, and a fixed wait measures whichever state the machine happened to be
+ * showing when it fired. On a prerendered route that is two different pages — the server's HTML,
+ * then whatever the app renders once it hydrates and finds no team — and the gate quietly measured
+ * either one. On one unchanged build, 2026-08-13: `/board` reported 7 text nodes on an idle laptop
+ * and 1 inside a full ten-route run, with `/character-sheet` and `/broadcast` flipping 0 ↔ 1 in the
+ * same pair of runs. Nothing was wrong with the page. The sweep was racing it, and a sweep that
+ * measures a different page under load still prints "0 below AA" — a green result for a page nobody
+ * looked at, which is the one direction this tool must never fail in.
+ *
+ * The obvious repair — wait for the DOM to go quiet — does not work here, and it is worth saying why
+ * rather than leaving it to be rediscovered: **this product's pages never go quiet.** `/live` writes
+ * `.lc-ask__clock` and `.lc-clock__time` about four times a second, forever, by design. A mutation
+ * watcher on it waits out the whole cap on every run.
+ *
+ * So settle on the thing actually being measured: the sweep's own KEY SET. Sample the keys, wait,
+ * sample again, and call it settled when two consecutive samples match. A ticking clock keeps its
+ * class, its ink and its paper, so it does not move the key set; hydration swapping the page,
+ * a route transition, a fade still in progress and the firehose's first frame all do. It is the
+ * direct statement of the precondition — "the page I am about to measure has stopped changing" —
+ * rather than a proxy for it.
+ *
+ * Stability alone is not sufficient, though, and the first cut of this lost coverage proving it:
+ * `/live` held a steady key set at 1.3s and measured 57 rows where the flat 4s wait measured 66,
+ * because the work stack arrives on a later frame and a page can be briefly still without being
+ * DONE. So the old wait survives as a FLOOR: never measure earlier than 4s.
+ *
+ * And two matching samples 400ms apart is not enough on top of it, which the same page showed the
+ * same afternoon: against a cold daemon `/live` sat at 13 rows for over a second before the room
+ * arrived, and a pair of samples inside that plateau reads as settled. The key set must therefore
+ * hold STILL FOR A WINDOW (2.5s), not merely twice. A connected `/live` profiled every 500ms goes
+ * 0 → 14 → 46 rows within 2.6s and then does not move for the next 36 seconds, so the window costs
+ * a couple of seconds and buys the difference between "stopped" and "paused".
+ */
+const SETTLE_MIN = Number(process.env.A11Y_SETTLE_MIN ?? 4000);
+const SETTLE_STEP = Number(process.env.A11Y_SETTLE_STEP ?? 400);
+const SETTLE_WINDOW = Number(process.env.A11Y_SETTLE_WINDOW ?? 2500);
+const SETTLE_CAP = Number(process.env.A11Y_SETTLE_CAP ?? 20000);
+const KEYS_IN_PAGE = /* js */ `(() => {
+  ${PAPER_SIG}
+  const keys = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent.trim()) continue;
+    const el = node.parentElement;
+    if (!el) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+    keys.push(rowKey(el, cs));
+  }
+  return document.readyState + '\\n' + keys.sort().join('\\n');
+})()`;
+const settle = await (async () => {
+  const t0 = Date.now();
+  let prev = null;
+  let since = Date.now();
+  while (Date.now() - t0 < SETTLE_CAP) {
+    const { result } = await send('Runtime.evaluate', {
+      expression: KEYS_IN_PAGE,
+      returnByValue: true,
+    });
+    const now = typeof result.value === 'string' ? result.value : null;
+    if (now === null || now !== prev) since = Date.now();
+    if (
+      Date.now() - t0 >= SETTLE_MIN &&
+      Date.now() - since >= SETTLE_WINDOW &&
+      now !== null &&
+      now.startsWith('complete')
+    ) {
+      return { how: 'settled', ms: Date.now() - t0 };
+    }
+    prev = now;
+    await new Promise((r) => setTimeout(r, SETTLE_STEP));
+  }
+  return { how: 'cap', ms: Date.now() - t0 };
+})();
 
 /**
  * The whole measurement, run inside the page. Kept as one self-contained function so it can also be
@@ -555,7 +632,22 @@ const OPACITY_IN_PAGE = /* js */ `(() => {
 
 let pixel = null;
 let pixelNote = null;
+/* The key set either side of the shutter — see the transient exclusion after the pixel pass. */
+let keysBeforeShutter = null;
+let keysAfterShutter = null;
+/** Rows whose line box slid between the rect pass and the shutter — reported, never measured. */
+const moved = [];
 try {
+  /* Hold the scene still for the length of the capture. Everything that moves on these surfaces
+     moves on a rAF loop — the office characters walk, and the speech bubbles are absolutely
+     positioned DOM pinned to them — so a no-op `requestAnimationFrame` freezes the room without
+     touching a single frame of what is already painted. The canvas keeps its last drawn content,
+     which is precisely the thing being sampled. Without this the bubbles slide a few pixels between
+     the rect pass and the shutter and the sample lands on a character's body; with it they are
+     measurable at all, which is worth more than a frozen millisecond costs. The `moved` guard below
+     stays as the check on this working: if anything still slides, it is excluded rather than
+     mis-sampled. */
+  await evalIn(`(() => { window.requestAnimationFrame = () => 0; return true; })()`);
   const geom = await evalIn(RECTS_IN_PAGE);
   /* Two readings, a beat apart. A fade that is still MOVING has no settled appearance and must not
      be measured. A fade that is STILL is a design decision — the office watermark sits at 0.45 on
@@ -566,6 +658,7 @@ try {
   const opacity2 = await evalIn(OPACITY_IN_PAGE);
   // Chrome refuses absurd capture areas, and a runaway page should not take the sweep down with it.
   const tall = geom.docH > 20000;
+  keysBeforeShutter = await evalIn(KEYS_IN_PAGE);
   await evalIn(`(() => {
     const s = document.createElement('style');
     s.id = '__a11y_glyphs_off';
@@ -581,6 +674,7 @@ try {
     ...(tall ? {} : { clip: { x: 0, y: 0, width: geom.docW, height: geom.docH, scale: 1 } }),
   });
   await evalIn(`document.getElementById('__a11y_glyphs_off')?.remove()`);
+  keysAfterShutter = await evalIn(KEYS_IN_PAGE);
 
   /* A THIRD reading, after the shutter. The first two bracket a 300ms window BEFORE the screenshot,
      which catches a fade that is already moving — but not one that starts afterwards. The office
@@ -590,6 +684,28 @@ try {
      one kind of wrong answer that costs a person a day chasing a colour that was never wrong.
      Requiring stability across the whole window, shutter included, is what actually closes it. */
   const opacity3 = await evalIn(OPACITY_IN_PAGE);
+
+  /* And a second GEOMETRY reading, for the same reason one step further out. The opacity guard
+     catches text that faded under the shutter; nothing caught text that MOVED under it. The office
+     runs its speech bubbles as absolutely-positioned DOM pinned to characters who walk, so between
+     the rect pass and the capture a bubble slides several pixels — and the pixel sampled at the
+     recorded rect is then the character's body, not the bubble's paper. That is not a subtle error:
+     over four runs of `/office-preview` the same `.lc-speech__text` reported 2.07, 2.29, 3.48 and
+     4.28 against papers of #3b5854, #7e4e21, #966e20 and #748b5d — four character colours, none of
+     them the paper the words are actually printed on, at a settled opacity of 1 every time.
+
+     A row whose line box moved is therefore excluded and counted, exactly like a row caught
+     mid-fade. Its ratio was never a property of the page. */
+  const geom2 = await evalIn(RECTS_IN_PAGE);
+  const movedKeys = new Set();
+  {
+    const then = new Map(geom.rects.map((r) => [r.key, r]));
+    for (const r of geom2.rects) {
+      const was = then.get(r.key);
+      if (was && (Math.abs(was.x - r.x) > 1 || Math.abs(was.y - r.y) > 1)) movedKeys.add(r.key);
+    }
+  }
+
   const img = decodePng(Buffer.from(shot.data, 'base64'));
   // With a clip at scale 1 the image is CSS pixels; without one it is device pixels.
   const scale = tall ? geom.dpr : img.width / geom.docW;
@@ -604,6 +720,10 @@ try {
   const unsettled = [];
   const faded = [];
   for (const rc of geom.rects) {
+    if (movedKeys.has(rc.key)) {
+      moved.push(rc.key.split('|')[0] || '?');
+      continue;
+    }
     const now = opacity2[rc.key];
     const after = opacity3[rc.key];
     const moving =
@@ -633,6 +753,12 @@ try {
     notes.push(
       `${faded.length} element(s) are permanently translucent — their ink is composited at that` +
         ` alpha rather than read at full strength: ${[...new Set(faded)].join(', ')}`,
+    );
+  if (moved.length)
+    notes.push(
+      `${moved.length} element(s) MOVED between the rect pass and the shutter, so the pixel under` +
+        ` their recorded line box is no longer what is behind them — excluded, not measured:` +
+        ` ${[...new Set(moved)].join(', ')}`,
     );
   if (unsettled.length)
     notes.push(
@@ -726,6 +852,44 @@ if (pixel) {
   out.disagreements = disagreements;
 }
 
+/* ── drop rows the page grew or discarded while we were measuring ────────────────────────────────
+ *
+ * The settle above guarantees the page had stopped changing when the walk started. It cannot
+ * guarantee the page stays that way: `/office-preview` speaks a new line every few seconds, and a
+ * speech bubble that appears between the walk and the shutter is measured MID-CROSS-FADE, ink and
+ * paper both part-composited over the room. That produced a `.lc-speech__text` row of 4.49 against a
+ * 4.5 threshold — a failing gate on a bubble that reads 6-plus once it lands, and only in runs where
+ * the timing lined up. The three opacity readings do not catch it, because a 160ms reduced-motion
+ * fade can begin and end inside the gaps between them.
+ *
+ * So the key set is read on both sides of the shutter, and a row whose key appears on exactly ONE
+ * side is dropped with a count. It is the same discipline as the mid-animation exclusion, applied to
+ * arrival and departure rather than to movement: an element that existed for part of a measurement
+ * was never a state of this page, and a number taken from it is a frame.
+ *
+ * Both readings are taken around the SHUTTER rather than compared against the walk. The walk runs
+ * before the rect pass finishes every animation, so a row's key legitimately changes across that
+ * boundary; a row missing from both sides is simply a pre-settle row carrying the composited
+ * estimate, and dropping those would delete most of the page (measured: 45 rows → 0).
+ *
+ * And the comparison drops the paper, coming down to class + ink, because PRESENCE is what is being
+ * tested. An infinite CSS animation cannot be finished and cannot be waited out — the asks rail's
+ * loud tier breathes forever — so its background differs between any two readings, and keying
+ * presence on the full row key threw out six perfectly measurable `.lc-ask__btn` rows a run.
+ */
+/** class|ink — the element's identity, without the paper that a live background keeps repainting. */
+const idOf = (k) => k.split('|').slice(0, 2).join('|');
+const asSet = (s) => (typeof s === 'string' ? new Set(s.split('\n').slice(1).map(idOf)) : null);
+const before = asSet(keysBeforeShutter);
+const after = asSet(keysAfterShutter);
+let transient = [];
+if (before?.size && after?.size) {
+  // A row without a key (rescued from SKIPPED) cannot be presence-checked; it stays.
+  const churned = (r) => r.key != null && before.has(idOf(r.key)) !== after.has(idOf(r.key));
+  transient = out.live.filter(churned);
+  if (transient.length) out.live = out.live.filter((r) => !churned(r));
+}
+
 /**
  * The only sanctioned exemptions, each with its reason, all of them printed on EVERY run.
  *
@@ -761,6 +925,24 @@ if (!QUIET) {
       (out.rescued ? ` (${out.rescued} of them only reachable by sampling the painted pixel)` : ''),
   );
   for (const r of liveFails) console.log(row(r));
+
+  /* A page that never stopped changing was measured mid-flight, and every number below is a frame
+     rather than a state. Louder than a footnote for that reason. */
+  if (settle.how !== 'settled') {
+    console.log(
+      `\n! the measurable text never stopped changing within ${SETTLE_CAP}ms — this page was` +
+        ' measured mid-flight, so treat every row as a frame rather than a state.',
+    );
+  }
+
+  /* Excluded, never silent — the same rule the EXEMPT section runs under. If this grows, the page is
+     churning enough that a single sweep of it is not measuring much. */
+  if (transient.length) {
+    console.log(
+      `\n! ${transient.length} element(s) came or went DURING the measurement and were excluded —` +
+        ` they were part-composited, not settled: ${[...new Set(transient.map((r) => r.el))].join(', ')}`,
+    );
+  }
 
   if (pixelNote) console.log(`\n! ${pixelNote}`);
 
@@ -817,7 +999,10 @@ if (!QUIET) {
 }
 
 if (JSON_OUT) {
-  writeFileSync(JSON_OUT, JSON.stringify({ ...out, liveFails, probeFails }, null, 2));
+  writeFileSync(
+    JSON_OUT,
+    JSON.stringify({ ...out, settle, transient, liveFails, probeFails }, null, 2),
+  );
   if (!QUIET) console.log(`\nwrote ${JSON_OUT}`);
 }
 
