@@ -10,6 +10,10 @@ Claude Code keys its local-scope MCP config by REPO ROOT, so every seat worktree
 
 `musterd agent <name>` once resolved its write target from ambient cwd and overwrote a sibling worktree's `binding.json` byte-identical (ADR 143 also guarded `resolveBindingDir`, the same hole from a second direction). After provisioning, diff the new worktree's binding against siblings — grants must differ (the grant is per-seat identity; agent_key is team-level and legitimately shared). Recovery for the clobbered seat: `musterd agent <seat> --path <workspace>` (idempotent, explicit path), run by an admin.
 
+## Roles (ADR 227)
+
+The route to un-mute or re-role a seat is `musterd role assign <seat> <role> [--remove]` run in the roster home (`/Users/nick/musterd/revive`) — the daemon reconciles the toml; never edit the DB. An `observer`-role seat has `can_message: none`, which presents as a muted seat.
+
 ## Recovery rules
 
 - **The adapter caches its boot-time grant.** In-session repair never takes: after fixing a binding or an expired grant, a live session needs `/mcp` reload; `team_join` silently rejoins as the old seat until then.
