@@ -1262,3 +1262,116 @@ describe('markWakeSpawned (ADR 262)', () => {
     expect(stamped!.spawned_at).toBe(42);
   });
 });
+
+describe('claimWakeLeases — spend breaker + still-true (ADR 262)', () => {
+  function reviewDue() {
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { review: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', attempt_cap: 10, hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, nick.name, { title: 'a change', claim: true });
+    updateLane(db, team.id, lane.id, team.slug, { state: 'ready_for_review' });
+    msg(db, team, nick, ada, 'ask', 'ask1', 1_000, {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+    });
+    return { db, team, ada, lane };
+  }
+
+  function failEdge(
+    db: Database,
+    teamId: string,
+    detail: Record<string, unknown>,
+    ts = Date.now() - WAKE_COOLDOWN_MS - 1,
+  ) {
+    appendAudit(db, teamId, {
+      actor: null,
+      action: 'residency.wake_failed',
+      target: 'Ada',
+      result: 'deny',
+      detail,
+    });
+    db.prepare(
+      'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
+    ).run(ts);
+  }
+
+  it('skips when last wake_failed wakeability is enrolled_dead_workspace', () => {
+    const { db, team, lane } = reviewDue();
+    failEdge(db, team.id, {
+      act: 'ask1',
+      lane_id: lane.id,
+      edge: 'review',
+      wakeability: 'enrolled_dead_workspace',
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('retries when last failure is lease_expired or enrolled_seat_busy', () => {
+    const { db, team, lane } = reviewDue();
+    failEdge(db, team.id, {
+      act: 'ask1',
+      lane_id: lane.id,
+      edge: 'review',
+      reason: 'lease_expired',
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+  });
+
+  it('trips after 3 wake_failed on the same edge, not after 3 woke, and not across edges', () => {
+    const { db, team, lane } = reviewDue();
+    for (let i = 0; i < 3; i++) {
+      failEdge(db, team.id, {
+        act: `ask${i}`,
+        lane_id: lane.id,
+        edge: 'review',
+        reason: 'lease_expired',
+      });
+    }
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+    const exhausted = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted');
+    expect(JSON.parse(exhausted.at(-1)!.detail as string)).toMatchObject({
+      breaker: true,
+      edge: 'review',
+    });
+  });
+
+  it('three woke on dispatch_continuation still derive', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', attempt_cap: 10, hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    for (let i = 0; i < 3; i++) {
+      appendAudit(db, team.id, {
+        actor: null,
+        action: 'residency.woke',
+        target: 'Ada',
+        result: 'allow',
+        detail: { act: `lane:${lane.id}`, lane_id: lane.id, edge: 'dispatch_continuation' },
+      });
+      db.prepare(
+        'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
+      ).run(Date.now() - WAKE_COOLDOWN_MS - 1);
+    }
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(true);
+  });
+
+  it('review failures do not trip dispatch_handoff on the same lane', () => {
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { review: true, dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', attempt_cap: 10, hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, nick.name, { title: 'h', claim: true });
+    updateLane(db, team.id, lane.id, team.slug, { owner_seat: ada.name, state: 'claimed' });
+    for (let i = 0; i < 3; i++) {
+      failEdge(db, team.id, {
+        lane_id: lane.id,
+        edge: 'review',
+        reason: 'lease_expired',
+      });
+    }
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000, {
+      meta: { lane_handoff: { lane: lane.id, branch: 'feat/x' } },
+    });
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.act_id === 'h1')).toBe(true);
+  });
+});

@@ -76,6 +76,17 @@ export const HOST_SUSPEND_GAP_MS = 90_000;
  */
 export const WAKE_UNREACHABLE_CEILING_MS = 6 * 3_600_000;
 /**
+ * ADR 262: work-order re-spend breaker. Counts `residency.wake_failed` rows on that
+ * (lane, edge), including reaper `lease_expired`. Successful `woke` / continuation
+ * chaining does not count.
+ */
+export const WORK_ORDER_EDGE_BREAKER_N = 3;
+/** Closed set: last failure on this edge is still true, so another lease cannot help. */
+export const STILL_TRUE_WAKEABILITIES: readonly string[] = [
+  'enrolled_dead_workspace',
+  'not_enrolled',
+];
+/**
  * How far back the wake derivation scans for deferring `wait`s (ADR 211 §4). Matches the inbox
  * read's bound: past this a deferral stops suppressing, and the act becomes a wake reason again —
  * the pre-ADR-211 behaviour.
@@ -514,6 +525,50 @@ function loopEdgeOf(candidate: WakeCandidate): LoopEdge | null {
   return null;
 }
 
+function workOrderEdgeFailureCount(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): number {
+  const row = db
+    .prepare<[string, string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action = 'residency.wake_failed'
+          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.edge') = ?`,
+    )
+    .get(teamId, laneId, edge);
+  return row?.n ?? 0;
+}
+
+function workOrderEdgeStillTrue(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): boolean {
+  const row = db
+    .prepare<[string, string, string], { detail: string }>(
+      `SELECT detail FROM audit
+        WHERE team_id = ? AND action = 'residency.wake_failed'
+          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.edge') = ?
+        ORDER BY ts DESC, rowid DESC LIMIT 1`,
+    )
+    .get(teamId, laneId, edge);
+  if (!row) return false;
+  let parsed: { wakeability?: string };
+  try {
+    parsed = JSON.parse(row.detail) as { wakeability?: string };
+  } catch {
+    return false;
+  }
+  return (
+    parsed.wakeability !== undefined && STILL_TRUE_WAKEABILITIES.includes(parsed.wakeability)
+  );
+}
+
 /** A due-wake candidate before leasing. Act fields optional on board continuation (ADR 199). */
 interface WakeCandidate {
   act_id?: string;
@@ -909,6 +964,29 @@ export function claimWakeLeases(
           continue;
         }
         const edge = loopEdgeOf(candidate);
+        if (edge && candidate.lane_id) {
+          if (
+            workOrderEdgeFailureCount(db, teamId, candidate.lane_id, edge) >=
+            WORK_ORDER_EDGE_BREAKER_N
+          ) {
+            appendAudit(db, teamId, {
+              actor: null,
+              action: 'residency.wake_exhausted',
+              target: member.name,
+              result: 'deny',
+              detail: {
+                act: exhKey,
+                edge,
+                lane_id: candidate.lane_id,
+                breaker: true,
+                attempts: WORK_ORDER_EDGE_BREAKER_N,
+                derivation: candidate.derivation,
+              },
+            });
+            continue;
+          }
+          if (workOrderEdgeStillTrue(db, teamId, candidate.lane_id, edge)) continue;
+        }
         const lease: WakeLeaseRow = {
           id: ulid(),
           team_id: teamId,
