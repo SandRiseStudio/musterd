@@ -1,6 +1,6 @@
 import { compareGoals, isAwaitingAcceptance, type Lane, type NextBrief } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { handoffNamedLaneOutOfPlay } from './delivery.js';
+import { handoffNamedLaneOutOfPlay, handoffNamesNoLane } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
 import { acceptanceEnteredAt, listLanes } from './lanes.js';
 
@@ -29,6 +29,28 @@ const LIVE: ReadonlySet<string> = new Set(['claimed', 'active', 'blocked', 'awai
  * to prove it.
  */
 const WHY_SCAN_DEPTH = 20;
+
+/**
+ * How long a handoff that names NO resolvable lane may hold the `why` slot (ADR 264).
+ *
+ * The #745 predicate retires a handoff when the lane it names leaves play. A handoff that names no
+ * lane has nothing to check, so it was served forever — and "forever" is not a corner case here.
+ * Measured against the real ledger 2026-08-13: 21 of 22 seats had a bare handoff in the slot, 19 of
+ * them the SAME 38-day-old completion notice ("ADR 100 landed — PR #133 … lane resolved") addressed
+ * to one seat and broadcast to the team, then served to nearly everyone as their standing why.
+ *
+ * So the bound is set from evidence, not taste: across the 24 handoffs whose named lane resolved,
+ * the subject work closed in a median 0.9d, p95 6.6d, max 12.8d. Fourteen days sits above the whole
+ * observed distribution — it can retire nothing that has ever still been live, while retiring every
+ * stale line in the ledger today.
+ *
+ * Age is the LAST resort and the narrowest one: it applies only where no recorded fact exists. A
+ * handoff naming a live lane keeps its slot however old (that lane is the fact). And this is the
+ * `why` slot alone — wake candidacy keeps ADR 173 abstain-by-showing untouched, because the trade
+ * differs: a spurious wake costs money and a dropped one costs work, but a dead instruction in the
+ * brief is not abstention, it is misdirection, and it is read every session by every seat.
+ */
+export const WHY_BARE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
 function parseMeta(meta: string | null): Record<string, unknown> {
   if (meta === null) return {};
@@ -62,7 +84,9 @@ export function deriveNext(
   member: string,
   shippedLimit = 3,
   upNextLimit = 5,
+  opts: { now?: number } = {},
 ): NextBrief {
+  const now = opts.now ?? Date.now();
   const all = listLanes(db, teamId, teamSlug);
   const mine = all.filter((l) => l.owner_seat === member);
 
@@ -121,7 +145,9 @@ export function deriveNext(
   //
   // Deliberately NOT a `stale` marker on the payload: that forks `NextBriefSchema` for what the
   // brief can answer on its own. Bare / unparseable / missing-lane handoffs stay shown (ADR 173
-  // abstain-by-showing; #745 is equally narrow). CLI `musterd next` and MCP `team_next` render this
+  // abstain-by-showing; #745 is equally narrow) — but no longer forever: past WHY_BARE_MAX_AGE_MS a
+  // handoff naming no resolvable lane gives up the slot (ADR 264), because that is the only case
+  // where nothing else can ever retire it. CLI `musterd next` and MCP `team_next` render this
   // projection — they do not re-derive it (ADR 084).
   const rows = db
     .prepare<[string, string, string, number], HandoffRow>(
@@ -143,7 +169,11 @@ export function deriveNext(
   // this the newest bare handoff holds the `why` slot permanently. See
   // `handoffNamedLaneOutOfPlay` for why resolving an id out of prose is a recorded fact and not a
   // guess, and why it is all-or-nothing across every lane the body names.
-  const row = rows.find((r) => !handoffNamedLaneOutOfPlay(db, teamId, r.meta, r.body));
+  const row = rows.find(
+    (r) =>
+      !handoffNamedLaneOutOfPlay(db, teamId, r.meta, r.body) &&
+      !(now - r.ts > WHY_BARE_MAX_AGE_MS && handoffNamesNoLane(db, teamId, r.meta, r.body)),
+  );
 
   const why = row
     ? {
@@ -169,7 +199,6 @@ export function deriveNext(
 
   // value-layer design: the team's oldest lanes waiting on acceptance — review debt as ambient
   // candidate work for ANY seat (owed_reviews stays the directed slice). Cap 3, oldest first.
-  const now = Date.now();
   // A seat's own lane is never its candidate review work: ADR 192 grades a same-seat close as
   // unconfirmed (`verified` requires closer ≠ owner), so serving it here invites the one
   // acceptance the model refuses to count.

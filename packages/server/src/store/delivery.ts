@@ -199,12 +199,19 @@ const LANE_ID_IN_PROSE = /\b01[0-9A-HJKMNP-TV-Z]{8,24}\b/g;
  * those is recoverable. So any still-live mention keeps the whole handoff showing.
  */
 function bodyNamedLanesAllOutOfPlay(db: Database, teamId: string, body?: string | null): boolean {
-  if (!body) return false;
+  const states = bodyNamedLaneStates(db, teamId, body);
+  return states.length > 0 && states.every(laneOutOfPlay);
+}
+
+/**
+ * The states of every lane this body names and resolves to exactly one row. An ambiguous prefix
+ * picked out no single lane, so it is not evidence about any of them and is dropped.
+ */
+function bodyNamedLaneStates(db: Database, teamId: string, body?: string | null): string[] {
+  if (!body) return [];
   const prefixes = [...new Set(body.match(LANE_ID_IN_PROSE) ?? [])];
-  if (prefixes.length === 0) return false;
-  let resolved = 0;
+  const states: string[] = [];
   for (const prefix of prefixes) {
-    // An ambiguous prefix picked out no single lane, so it is not evidence about any of them.
     // LIMIT 2 is enough to tell "exactly one" from "more than one" without scanning the rest.
     const matches = db
       .prepare<
@@ -213,10 +220,26 @@ function bodyNamedLanesAllOutOfPlay(db: Database, teamId: string, body?: string 
       >("SELECT state FROM lanes WHERE team_id = ? AND id LIKE ? || '%' LIMIT 2")
       .all(teamId, prefix);
     if (matches.length !== 1) continue;
-    if (!laneOutOfPlay(matches[0]!.state)) return false;
-    resolved++;
+    states.push(matches[0]!.state);
   }
-  return resolved > 0;
+  return states;
+}
+
+/**
+ * True when a handoff names NO lane this team can resolve — not in `meta`, not in prose. Such a
+ * handoff carries no recorded fact any event can act on: `handoffNamedLaneOutOfPlay` is false for
+ * it forever, so nothing can ever retire it. Callers that serve a handoff as a live instruction use
+ * this to decide whether they hold a checkable claim or only an uncheckable one; what they do about
+ * it is theirs (the orientation `why` bounds it by age — ADR 264 — while wake candidacy does not).
+ */
+export function handoffNamesNoLane(
+  db: Database,
+  teamId: string,
+  meta: string | null,
+  body?: string | null,
+): boolean {
+  if (namedHandoffLane(db, teamId, meta)) return false;
+  return bodyNamedLaneStates(db, teamId, body).length === 0;
 }
 
 function namedHandoffLane(
