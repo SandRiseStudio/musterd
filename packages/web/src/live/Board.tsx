@@ -19,7 +19,7 @@ import {
   type LaneAction,
   type MovedLanes,
 } from './boardWrite';
-import { initial, kindOf, memberAvatar } from './format';
+import { kindOf, memberAvatar } from './format';
 import { GoalGrid } from './GoalGridView';
 
 /**
@@ -388,12 +388,17 @@ function LaneCard({
       <div className="lc-card__meta">
         {lane.owner_seat && (
           <span className="lc-card__owner">
+            {/* A dot, not a monogram. The seat's name is written immediately to its right, so the
+                initial was duplicated text — and at 16px it was white on the identity fill, which
+                no single ink clears across that hue band (white scores 1.61–3.90 over it,
+                near-black 4.42–10.73; the purple seat fails both poles). Dropping the glyph removes
+                the unreadable text rather than hiding it from the sweep. Retuning the band to one
+                luminance is the other fix and belongs with the palette, not here. */}
             <span
               className="lc-card__avatar"
               style={{ background: memberAvatar(lane.owner_seat, ownerKind) }}
-            >
-              {initial(lane.owner_seat)}
-            </span>
+              aria-hidden="true"
+            />
             {lane.owner_seat}
           </span>
         )}
@@ -514,9 +519,7 @@ function SeatPicker({
             className="lc-card__avatar"
             style={{ background: memberAvatar(m.name, m.kind === 'human' ? 'human' : 'agent') }}
             aria-hidden="true"
-          >
-            {initial(m.name)}
-          </span>
+          />
           {m.name}
         </button>
       ))}

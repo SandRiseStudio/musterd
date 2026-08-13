@@ -70,7 +70,10 @@ jobs:
       # had accumulated by the time anyone measured. Sweeps the built client's prerendered routes in
       # real Chrome (contrast cannot be computed from hex — alpha tints and color-mix()), so it needs
       # Build first. ubuntu-latest ships Chrome; CHROME_BIN is named rather than discovered so a
-      # runner-image change fails loudly instead of silently skipping.
+      # runner-image change fails loudly instead of silently skipping. The second phase stands up a
+      # throwaway daemon over a synthetic team so `/board` and `/live` are measured CONNECTED —
+      # without it the sweep only ever reaches their sign-in screen, which is where eleven failures
+      # were hiding when the connected phase was first pointed at them.
       - name: A11y contrast
         run: pnpm a11y:check
         env:

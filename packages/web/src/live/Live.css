@@ -966,7 +966,10 @@
   letter-spacing: 0.03em;
   padding: 1px 6px;
   border-radius: 999px;
-  color: #8a6508;
+  /* Measured on the pill's own composited paper (#e6c799 over the office panel), not on --lc-paper:
+     #8a6508 read 3.29 there. The contrast gate's connected phase is what found it — a static sweep
+     never reaches this row. */
+  color: #734a05;
   background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
 }
 .lc-workstack__row.is-blocked .lc-workstack__state {
@@ -3508,16 +3511,15 @@
   font-size: 11px;
   color: var(--lc-muted);
 }
+/* A colour dot for the seat, deliberately empty — the name is always written beside it. It carried
+   a white initial until 2026-08-12, which measured 3.42 on the seat colour and could not be fixed
+   by picking a better ink: across the identity hue band white scores 1.61–3.90 and near-black
+   4.42–10.73, so no single ink clears AA everywhere and the purple seat clears neither pole. */
 .lc-card__avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  display: inline-block;
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  color: #fff;
-  font-size: 9px;
-  font-weight: 700;
 }
 .lc-card__chip {
   padding: 1px 7px;
