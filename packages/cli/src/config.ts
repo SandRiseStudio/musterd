@@ -564,6 +564,59 @@ export function loadConfig(): Config {
   return config;
 }
 
+/** Where a resolved server URL came from, in the order the resolution actually consults. */
+export interface ServerProvenance {
+  server: string;
+  source: 'MUSTERD_SERVER' | 'machine default' | 'built-in default';
+  /**
+   * Set only when the folder is bound to a DIFFERENT daemon than the one resolved above — i.e. the
+   * tool is about to report on a server this folder does not use.
+   */
+  disagreeingBinding?: { server: string; team: string };
+}
+
+/**
+ * Name the server a machine-global reader is about to measure, and where it came from.
+ *
+ * `service status` and `stream doctor` both resolve from `loadConfig().server` and then report
+ * without saying so. On 2026-08-12 that default had been repointed at a short-lived probe daemon by
+ * a `team create` elsewhere on the machine, and both tools failed their checks correctly — about
+ * the wrong port. The cost was in the diagnosis, not the failure: every reader is confidently wrong
+ * in the SAME direction, because the output is indistinguishable from infrastructure being down.
+ *
+ * `disagreeingBinding` is the line that would have ended it in seconds. A binding outranks the
+ * global default everywhere identity is resolved, so a folder bound to :4849 while this reader
+ * measures :4899 is not a subtle inconsistency — it is the whole diagnosis, printed.
+ */
+export function serverProvenance(dir: string = process.cwd()): ServerProvenance {
+  const config = loadConfig();
+  const fromEnv = process.env['MUSTERD_SERVER'];
+  const onDisk = readServerFromDiskRaw();
+  const source: ServerProvenance['source'] = fromEnv
+    ? 'MUSTERD_SERVER'
+    : onDisk
+      ? 'machine default'
+      : 'built-in default';
+  const binding = findBinding(dir);
+  return {
+    server: config.server,
+    source,
+    ...(binding && binding.server !== config.server
+      ? { disagreeingBinding: { server: binding.server, team: binding.team } }
+      : {}),
+  };
+}
+
+/** The `server` literally stored in the config file — `undefined` when the file is absent, unreadable,
+ *  or simply never wrote one. Distinguishes "someone set this machine's default" from the built-in. */
+function readServerFromDiskRaw(): string | undefined {
+  try {
+    return (JSON.parse(readFileSync(configPath(), 'utf8')) as Partial<Config>).server;
+  } catch {
+    return undefined;
+  }
+}
+
 function sameJson(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }

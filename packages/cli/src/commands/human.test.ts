@@ -243,8 +243,11 @@ describe('human command', () => {
   });
 
   it('sets the current team, and says which one it displaced', async () => {
-    // `create dawn` set current=dawn; move it away so the switch is observable.
-    await capture(() => teamCommand(parseArgs(['create', 'dusk', '--as', 'ada'])));
+    // `create dawn` set current=dawn; move it away so the switch is observable. `--switch` is
+    // required to move it: creating a team no longer claims an ESTABLISHED machine default on its
+    // own (lane 01KZVKF3H0R81XEA818G2QBRZC — that silent fleet-wide write is the bug). `musterd
+    // human` still asserts `current` unconditionally, which is exactly what this test covers.
+    await capture(() => teamCommand(parseArgs(['create', 'dusk', '--as', 'ada', '--switch'])));
     expect(readConfig().current).toBe('dusk');
 
     const res = await run(['lin', '--team', 'dawn', '--home', home]);

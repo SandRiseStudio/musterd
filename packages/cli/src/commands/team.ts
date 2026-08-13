@@ -419,7 +419,10 @@ function onOff(raw: unknown, flag: string): boolean | undefined {
 async function teamCreate(parsed: Parsed): Promise<number> {
   const slug = parsed.positionals[1];
   if (!slug)
-    throw new CliError('usage: musterd team create <slug> [--as <you>] [--role <role>]', 2);
+    throw new CliError(
+      'usage: musterd team create <slug> [--as <you>] [--role <role>] [--switch]',
+      2,
+    );
   const config = loadConfig();
   const server = flagStr(parsed.flags, 'server') ?? config.server;
   const name = flagStr(parsed.flags, 'as') ?? defaultUser();
@@ -432,8 +435,27 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   // credential** (mscr_) from the composite mint (SPEC A.7); the team **agent key** (mskey_) is what
   // agents claim with, handed out separately. `res.agent_key`/`res.human_credential` are shown once.
   const credential = res.human_credential as string;
-  config.server = server;
-  config.current = slug;
+  // WHETHER TO CLAIM THE MACHINE-WIDE DEFAULT. Writing `server`/`current` unconditionally made a
+  // LOCAL action a FLEET-WIDE one: creating an isolated team on another port (which ADR 252's live
+  // wake check required) silently repointed every unbound folder — and every reader that consults
+  // the global config directly, `service status` and `stream doctor` among them — at a daemon that
+  // vanished when the probe ended. Measured 2026-08-12: four checks failing correctly about the
+  // wrong port, ~1h lost to healthy infrastructure, and first cause of a second incident.
+  //
+  // The creating folder never needed it. `saveBinding` below writes this folder's own server + team,
+  // and a binding outranks the global default everywhere identity resolves — so on a machine that
+  // already has a default, the global write was pure side effect.
+  //
+  // Not a contradiction of `musterd human`, which asserts `current` unconditionally and says so
+  // (see human.ts): that command is a PERSON declaring which team they act on, and the declaration
+  // is the point. Creating a team is not that declaration — the probe case is exactly where the two
+  // come apart — so here it is opt-in via `--switch`, and never silent either way.
+  const takeDefault = parsed.flags['switch'] === true || !config.current;
+  const previousTeam = config.current;
+  if (takeDefault) {
+    config.server = server;
+    config.current = slug;
+  }
   config.agentKeys[slug] = res.agent_key as string; // ADR 075: keep the team key for `musterd agent`
   config.identities[slug] = { name, key: credential, surface: 'cli' };
   rememberIdentity(config, { team: slug, name, key: credential, surface: 'cli' }); // ADR 059 vault
@@ -459,6 +481,17 @@ async function teamCreate(parsed: Parsed): Promise<number> {
     `  on the team as ${theme.memberName(name, 'human')} ${theme.meta(`(human${role ? `, ${role}` : ''})`)}\n`,
   );
   process.stdout.write(theme.meta('bound this folder as your seat — act here with no --as') + '\n');
+  // Say what happened to the machine-wide default, in BOTH branches. The 2026-08-12 incident was
+  // expensive because the switch left no trace at the call site and none afterwards — the only
+  // evidence was the symptom, three tools away, presenting as something else entirely.
+  process.stdout.write(
+    takeDefault
+      ? theme.meta(`machine default now points at ${slug} ${theme.accent(server)}`) + '\n'
+      : theme.meta(
+          `machine default left on ${theme.accent(previousTeam as string)} — this folder is bound to ${slug}; ` +
+            `pass ${theme.accent('--switch')} to change it for every unbound folder`,
+        ) + '\n',
+  );
   process.stdout.write(hint('add members: musterd team add <name> --kind agent') + '\n');
   return 0;
 }
