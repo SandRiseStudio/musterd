@@ -66,7 +66,6 @@ const ROUTES = arg('routes', '')
   ? arg('routes', '').split(',')
   : [
       '/',
-      '/asks-preview',
       '/approval-preview',
       '/office-preview',
       '/character-sheet',
@@ -170,6 +169,10 @@ const report = ({ code, out }, label, floor = 0) => {
   const live = /live: (\d+) measured, (\d+) below AA/.exec(out);
   const skipped = /SKIPPED (\d+) —/.exec(out);
   const tail = skipped ? `, ${skipped[1]} unmeasurable` : '';
+  /* The sweep settles on its own key set before measuring; a route that never settled was measured
+     mid-flight, and its count and its verdict are both a frame. Carried up here because the gate's
+     one-line-per-route summary is what people actually read. */
+  const unsettled = /never stopped changing within/.test(out) ? ', MEASURED MID-FLIGHT' : '';
   if (code === 0 && floor > 0 && Number(live?.[1] ?? 0) < floor) {
     failed.push(label);
     console.log(
@@ -179,11 +182,11 @@ const report = ({ code, out }, label, floor = 0) => {
     return;
   }
   if (code === 0) {
-    console.log(`  ✓ ${label} — ${live?.[1] ?? '?'} measured${tail}`);
+    console.log(`  ✓ ${label} — ${live?.[1] ?? '?'} measured${tail}${unsettled}`);
     return;
   }
   failed.push(label);
-  console.log(`  ✗ ${label} — ${live?.[2] ?? '?'} below AA${tail}`);
+  console.log(`  ✗ ${label} — ${live?.[2] ?? '?'} below AA${tail}${unsettled}`);
   // The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
   for (const line of out.split('\n')) {
     if (/^\s+\d+(\.\d+)? \(need /.test(line)) console.log(`   ${line.trim()}`);

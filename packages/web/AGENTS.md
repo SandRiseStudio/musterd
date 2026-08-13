@@ -15,7 +15,8 @@ per-chunk JS gzip, CSS gzip, font bytes, and a font-family allowlist.
 
 - `initialJsGzipBytes` — the worst route's eager graph (entry + statically imported chunks), the
   number a viewer feels. **Lazy-loading moves this.** Measured, 2026-07-29: a `lazy()` split took
-  `/asks-preview` 124.1 → 118.3 KB.
+  `/asks-preview` 124.1 → 118.3 KB (that route was retired on 2026-08-13; the measurement stands as
+  the demonstration that lazy-loading moves this budget).
 - `totalJsGzipBytes` — every chunk, lazy included: how much code the product carries.
   **Lazy-loading cannot move this** and slightly raises it. Delete code or drop the dependency.
 
