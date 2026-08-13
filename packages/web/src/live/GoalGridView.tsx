@@ -1,6 +1,6 @@
-import type { Goal, Lane, MemberSummary } from '@musterd/protocol';
+import type { Goal, Lane, LaneWarning, MemberSummary } from '@musterd/protocol';
 import { useMemo } from 'react';
-import { buildGoalGrid, type GoalCardModel, type RunwayDot } from './goalGrid';
+import { buildGoalGrid, type GoalCardModel, type RunwayDot, type ShippedGoal } from './goalGrid';
 import { initial, kindOf, memberAvatar } from './format';
 import './GoalGrid.css';
 
@@ -33,16 +33,22 @@ function ago(now: number, ts: number): string {
 export function GoalGrid({
   lanes,
   goals,
+  warnings,
   roster,
   onOpenGoal,
 }: {
   lanes: Lane[];
   goals: Goal[];
+  /** The board's live warnings — the grid reads `stale_acceptance` to show review debt. */
+  warnings: LaneWarning[];
   roster: MemberSummary[];
   onOpenGoal: (goalId: string | null) => void;
 }) {
   const now = Date.now();
-  const model = useMemo(() => buildGoalGrid(lanes, goals, now), [lanes, goals, now]);
+  const model = useMemo(
+    () => buildGoalGrid(lanes, goals, now, warnings),
+    [lanes, goals, now, warnings],
+  );
   const rosterIdx = useMemo(() => new Map(roster.map((m) => [m.name, m])), [roster]);
 
   const team = lanes[0]?.team ?? goals[0]?.id ?? '';
@@ -91,18 +97,53 @@ export function GoalGrid({
 
       {model.shippedShelf.length > 0 && (
         <footer className="gg-shelf" aria-label="Shipped goals">
-          <span className="gg-shelf__flag" aria-hidden="true">
-            🏁
-          </span>
-          <span className="gg-shelf__label">shipped:</span>
-          {model.shippedShelf.map((g) => (
-            <button key={g.id} className="gg-shelf__item" onClick={() => onOpenGoal(g.id)}>
-              {g.title}
-            </button>
-          ))}
+          <p className="gg-shelf__head">
+            <span className="gg-shelf__flag" aria-hidden="true">
+              🏁
+            </span>
+            <span className="gg-shelf__label">shipped — and what changed</span>
+          </p>
+          <ul className="gg-shelf__list">
+            {model.shippedShelf.map((g) => (
+              <li key={g.id}>
+                <ShelfSlip goal={g} onOpen={() => onOpenGoal(g.id)} />
+              </li>
+            ))}
+          </ul>
         </footer>
       )}
     </div>
+  );
+}
+
+/**
+ * A shipped goal on the shelf (value-layer design). With an outcome note it reads settled — the
+ * evidence in the team's own words. Without one it reads *unfinished* rather than clean: shipping
+ * without saying what changed is the ADR 256 failure one step later in the lifecycle, so the slip
+ * keeps a torn edge and asks the question until someone answers it.
+ */
+function ShelfSlip({ goal, onOpen }: { goal: ShippedGoal; onOpen: () => void }) {
+  const { outcome } = goal;
+  return (
+    <button
+      className={`gg-slip${outcome ? '' : ' gg-slip--owed'}`}
+      onClick={onOpen}
+      aria-label={
+        outcome
+          ? `${goal.title} — shipped. ${outcome.text} (noted by ${outcome.by}). Open its lanes`
+          : `${goal.title} — shipped, but no outcome note yet. Open its lanes`
+      }
+    >
+      <span className="gg-slip__title">{goal.title}</span>
+      {outcome ? (
+        <span className="gg-slip__outcome">
+          {outcome.text}
+          <span className="gg-slip__by"> — {outcome.by}</span>
+        </span>
+      ) : (
+        <span className="gg-slip__owed">…what changed?</span>
+      )}
+    </button>
   );
 }
 
@@ -120,11 +161,17 @@ function GoalCard({
   const counts: string[] = [`${card.counts.total} lane${card.counts.total === 1 ? '' : 's'}`];
   if (card.counts.done > 0) counts.push(`${card.counts.done} shipped`);
   if (card.counts.review > 0) counts.push(`${card.counts.review} in review`);
+  const debt =
+    card.counts.stale > 0
+      ? `${card.counts.stale} need${card.counts.stale === 1 ? 's' : ''} eyes`
+      : null;
   return (
     <button
       className={`gg-card${card.id === null ? ' gg-card--loose' : ''}`}
       onClick={onOpen}
-      aria-label={`${card.title} — ${card.counts.total} ${card.counts.total === 1 ? 'lane' : 'lanes'}; open its lanes`}
+      aria-label={`${card.title} — ${card.counts.total} ${card.counts.total === 1 ? 'lane' : 'lanes'}${
+        card.staleNote ? `; review debt: ${card.staleNote}` : ''
+      }; open its lanes`}
     >
       <span className="gg-peek" aria-hidden="true">
         peek inside →
@@ -140,6 +187,14 @@ function GoalCard({
         </span>
       </span>
       {card.story && <span className="gg-card__story">{card.story}</span>}
+      {card.outcome && (
+        <span className="gg-card__outcome">
+          <span className="gg-card__ev" aria-hidden="true">
+            ⇒
+          </span>
+          {card.outcome.text}
+        </span>
+      )}
       <Runway dots={card.dots} overflow={card.overflow} rosterIdx={rosterIdx} />
       <span className="gg-foot">
         <span className="gg-foot__count">
@@ -149,6 +204,15 @@ function GoalCard({
               {' · '}
               <span className="gg-foot__stuck">
                 {card.counts.blocked} stuck
+              </span>
+            </>
+          )}
+          {debt && (
+            <>
+              {' · '}
+              {/* The daemon's own sentence carries the hours — we never recompute the age. */}
+              <span className="gg-foot__owed" title={card.staleNote ?? undefined}>
+                ⏳ {debt}
               </span>
             </>
           )}
@@ -203,7 +267,11 @@ function Runway({
             </span>
           </span>
         ) : (
-          <span key={d.lane} style={{ left: `${d.x}%` }} className={`gg-dot gg-dot--${d.tone}`}>
+          <span
+            key={d.lane}
+            style={{ left: `${d.x}%` }}
+            className={`gg-dot gg-dot--${d.tone}${d.stale ? ' gg-dot--stale' : ''}`}
+          >
             {d.latest && <span className="gg-landed">✨</span>}
           </span>
         ),

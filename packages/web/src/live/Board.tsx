@@ -270,6 +270,7 @@ export function Board({
         <GoalGrid
           lanes={lanes.filter((l) => l.state !== 'abandoned')}
           goals={goals}
+          warnings={warnings}
           roster={roster}
           onOpenGoal={onOpenGoal ?? (() => undefined)}
         />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Goal, Lane } from '@musterd/protocol';
+import type { Goal, Lane, LaneWarning } from '@musterd/protocol';
 import { buildGoalGrid, RUNWAY_DOT_CAP } from './goalGrid';
 import * as grid from './goalGrid';
 
@@ -38,6 +38,14 @@ const goal = (over: Partial<Goal> = {}): Goal => ({
   status: 'in-flight',
   epoch: 0,
   ...over,
+});
+
+const staleWarning = (subject: string, detail: string): LaneWarning => ({
+  kind: 'stale_acceptance',
+  subject,
+  with: subject,
+  owner: null,
+  detail,
 });
 
 const NOW = 1_000_000;
@@ -178,7 +186,7 @@ describe('buildGoalGrid — cards', () => {
     ];
     const model = buildGoalGrid([], goals, NOW);
     expect(model.cards.map((c) => c.id)).toEqual(['newer', 'older']);
-    expect(model.shippedShelf).toEqual([{ id: 'gs', title: 'Landed' }]);
+    expect(model.shippedShelf).toEqual([{ id: 'gs', title: 'Landed', outcome: null }]);
   });
 
   it('a shelved goal ("later") sorts behind everything unshelved, however recent', () => {
@@ -203,6 +211,81 @@ describe('buildGoalGrid — cards', () => {
   it('empty goals input yields no cards (route falls back to columns)', () => {
     const model = buildGoalGrid([lane({ id: 'a' })], [], NOW);
     expect(model.cards).toEqual([]);
+  });
+});
+
+describe('buildGoalGrid — the value layer (outcome notes, visible review debt)', () => {
+  const note = { text: 'seats stopped re-deriving the board', by: 'stanley', at: 4_000 };
+
+  it('carries a shipped goal outcome onto the shelf, and null when nobody wrote one', () => {
+    const goals = [
+      goal({ id: 'told', title: 'Told', status: 'shipped', declared_at: 2, outcome: note }),
+      goal({ id: 'mute', title: 'Mute', status: 'shipped', declared_at: 1 }),
+    ];
+    expect(buildGoalGrid([], goals, NOW).shippedShelf).toEqual([
+      { id: 'told', title: 'Told', outcome: note },
+      { id: 'mute', title: 'Mute', outcome: null },
+    ]);
+  });
+
+  it('an outcome on an unshipped goal rides the card beside the story, not instead of it', () => {
+    const card = buildGoalGrid(
+      [],
+      [goal({ id: 'g1', story: 'the promise', outcome: note })],
+      NOW,
+    ).cards[0]!;
+    expect(card.story).toBe('the promise');
+    expect(card.outcome).toEqual(note);
+  });
+
+  it('a card with no outcome reports null rather than borrowing the story', () => {
+    const card = buildGoalGrid([], [goal({ id: 'g1', story: 'the promise' })], NOW).cards[0]!;
+    expect(card.outcome).toBeNull();
+  });
+
+  it('a stale_acceptance warning marks its dot and counts on the card', () => {
+    const lanes = [
+      lane({ id: 'old', goal_id: 'g1', state: 'awaiting_acceptance', owner_seat: 'june' }),
+      lane({ id: 'fresh', goal_id: 'g1', state: 'awaiting_acceptance', owner_seat: 'june' }),
+    ];
+    const model = buildGoalGrid(lanes, [goal()], NOW, [
+      staleWarning('old', 'waiting 14h for acceptance — team_next surfaces it'),
+    ]);
+    const card = model.cards[0]!;
+    expect(card.counts.review).toBe(2);
+    expect(card.counts.stale).toBe(1);
+    expect(card.staleNote).toBe('waiting 14h for acceptance — team_next surfaces it');
+    const byId = new Map(card.dots.map((d) => [d.lane, d]));
+    expect(byId.get('old')!.stale).toBe(true);
+    expect(byId.get('fresh')!.stale).toBe(false);
+  });
+
+  it('quotes the daemon on age — no warning means no debt, however long the lane sat', () => {
+    const ancient = lane({
+      id: 'a',
+      goal_id: 'g1',
+      state: 'awaiting_acceptance',
+      owner_seat: 'june',
+      updated_at: NOW - 40 * 3_600_000,
+    });
+    const card = buildGoalGrid([ancient], [goal()], NOW).cards[0]!;
+    expect(card.counts.stale).toBe(0);
+    expect(card.staleNote).toBeNull();
+    expect(card.dots[0]!.stale).toBe(false);
+  });
+
+  it('ignores warnings of other kinds, and lanes on other cards', () => {
+    const lanes = [
+      lane({ id: 'mine', goal_id: 'g1', state: 'awaiting_acceptance', owner_seat: 'june' }),
+      lane({ id: 'theirs', goal_id: 'g2', state: 'awaiting_acceptance', owner_seat: 'june' }),
+    ];
+    const model = buildGoalGrid(lanes, [goal({ id: 'g1' }), goal({ id: 'g2' })], NOW, [
+      { kind: 'surface_overlap', subject: 'mine', with: 'theirs', owner: 'june', detail: 'overlap' },
+      staleWarning('theirs', 'waiting 20h for acceptance'),
+    ]);
+    const byGoal = new Map(model.cards.map((c) => [c.id, c]));
+    expect(byGoal.get('g1')!.counts.stale).toBe(0);
+    expect(byGoal.get('g2')!.counts.stale).toBe(1);
   });
 });
 
