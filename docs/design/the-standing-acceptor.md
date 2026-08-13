@@ -1,8 +1,9 @@
 # The standing acceptor — capture for a design session
 
-> **Status: capture, not design.** This records the owner's question (2026-08-05), the verified state
-> of the machinery, and the traps a session should not re-derive. It deliberately decides nothing.
-> The seed for it is nick's own framing, quoted below.
+> **Status: capture.** The design session ran 2026-08-12 as lane `01KZ9FNC6V` (folded to wanderer).
+> Decision: not a dedicated standing acceptor — quiet-set fan-out. Spec:
+> [docs/superpowers/specs/2026-08-12-quiet-set-acceptance-design.md](../superpowers/specs/2026-08-12-quiet-set-acceptance-design.md).
+> This file stays the seed (question, verified machinery, traps). Do not re-derive it.
 
 ## The question, verbatim
 
