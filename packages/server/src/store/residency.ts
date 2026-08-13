@@ -1,4 +1,5 @@
 import type {
+  LoopEdge,
   Residency,
   ResidencyPolicy,
   ResidencyPolicyOverride,
@@ -115,6 +116,10 @@ export interface WakeLeaseRow {
   status: string;
   created_at: number;
   expires_at: number;
+  /** Work-order board edge (ADR 262). Null on inbox wakes. */
+  edge: string | null;
+  /** Host exec ack via POST wake-progress (ADR 262). Null until stamped. */
+  spawned_at: number | null;
 }
 
 /** Rate/exhaustion key: message id, or `lane:<id>` for board continuation (ADR 199). */
@@ -498,6 +503,15 @@ function composeWorkOrderLine(
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
     `orient via team_next and begin.`
   );
+}
+
+function loopEdgeOf(candidate: WakeCandidate): LoopEdge | null {
+  if (candidate.derivation !== 'work_order') return null;
+  if (candidate.work_order_kind === 'review') return 'review';
+  if (candidate.work_order_kind === 'dispatch') {
+    return candidate.act_id ? 'dispatch_handoff' : 'dispatch_continuation';
+  }
+  return null;
 }
 
 /** A due-wake candidate before leasing. Act fields optional on board continuation (ADR 199). */
@@ -894,6 +908,7 @@ export function claimWakeLeases(
           });
           continue;
         }
+        const edge = loopEdgeOf(candidate);
         const lease: WakeLeaseRow = {
           id: ulid(),
           team_id: teamId,
@@ -905,10 +920,12 @@ export function claimWakeLeases(
           status: 'leased',
           created_at: now,
           expires_at: now + WAKE_LEASE_TTL_MS,
+          edge,
+          spawned_at: null,
         };
         db.prepare(
-          `INSERT INTO wake_leases (id, team_id, member_id, act_id, lane_id, host, lane, status, created_at, expires_at)
-           VALUES (@id, @team_id, @member_id, @act_id, @lane_id, @host, @lane, @status, @created_at, @expires_at)`,
+          `INSERT INTO wake_leases (id, team_id, member_id, act_id, lane_id, host, lane, status, created_at, expires_at, edge, spawned_at)
+           VALUES (@id, @team_id, @member_id, @act_id, @lane_id, @host, @lane, @status, @created_at, @expires_at, @edge, @spawned_at)`,
         ).run(lease);
         appendAudit(db, teamId, {
           actor: null,
@@ -929,6 +946,7 @@ export function claimWakeLeases(
             // ledger records that a resume was permitted, never anything about the local session.
             ...(isResumeEligible(candidate, policy, now) ? { resume_eligible: true } : {}),
             ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
+            ...(edge !== null ? { edge } : {}),
           },
         });
         const isWorkOrder = candidate.derivation === 'work_order';
