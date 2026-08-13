@@ -10,6 +10,10 @@ Branch `feat/`|`fix/`|`docs/` from fresh `origin/main`; commits are throwaway (s
 
 Cursor Bugbot can silently never register its check-run (2026-07-08, PR #170; intermittent — #167 minutes earlier ran normally): `gates` green for 20+ minutes while auto-merge waits on a check that does not exist, and nothing alerts. If a PR sits OPEN with `gates` SUCCESS and no `Cursor Bugbot` entry in `gh api repos/…/commits/<sha>/check-runs`, comment `bugbot run` on the PR — it registers and completes within ~90s (neutral conclusion = clean, auto-merge fires).
 
+## A conflicted PR gets ZERO check-runs (2026-08-13, PR #793; falsify: open a PR with a conflict and list its check-runs)
+
+GitHub never creates the pull_request CI run for an unmergeable (mergeStateStatus DIRTY) PR, so auto-merge waits on nothing forever — the same stalled-OPEN symptom as the Bugbot no-show but a different cause and fix. Diagnose with `gh pr view --json mergeStateStatus`; fix by rebasing onto origin/main + `--force-with-lease`, not by `bugbot run`. Corollary: branching from a stale or sibling branch invites this — branch from `origin/main` explicitly (`git checkout -b <name> origin/main`); `git checkout main` fails silently useless in a worktree checkout where another worktree holds main.
+
 ## Never `pnpm format` (glob misalignment verified still present 2026-08-13; falsify: compare `format` vs `format:check` globs in package.json)
 
 `pnpm format` writes `**/*.{ts,js,mjs,json,md}` but `format:check` only checks `packages/**/*.ts`, `tests/**/*.ts`, `*.{ts,json}` — the committed markdown/json was never prettier-conformant, so `pnpm format` reflows ~100 unrelated docs, burying the real change and breaking `roadmap:check`. Format only your own files: `pnpm exec prettier --write <files>`, then `pnpm format:check`.
