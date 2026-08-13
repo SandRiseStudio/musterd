@@ -23,6 +23,10 @@ import {
   uninstallAutoRefresh,
   type AutoRefreshCtx,
 } from '../service/autorefresh.js';
+import { actOn } from '../guardian/act.js';
+import { resolveGuardianTiers, DEFAULT_TIERS } from '../guardian/classify.js';
+import { collectSignals, type HealthPayload } from '../guardian/signals.js';
+import { guardianStatusLine, guardianTick } from '../service/guardian.js';
 import {
   installWakeHost,
   restartWakeHost,
@@ -39,6 +43,8 @@ import {
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
   SWEEP_LABEL,
+  GUARDIAN_LABEL,
+  printArgs,
   agentFailureNote,
   intervalAgentLabel,
   parsePlistEnvironment,
@@ -155,7 +161,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -787,6 +793,7 @@ export async function serviceCommand(
     liveCtx?: LiveCtx;
     wakeCtx?: WakeHostCtx;
     autoRefreshCtx?: AutoRefreshCtx;
+    guardianCtx?: AutoRefreshCtx;
     sweepCtx?: SweepCtx;
     health?: () => Promise<DaemonHealth>;
     /** Probe whether the daemon serves /live (injected so tests skip the network). */
@@ -919,6 +926,17 @@ export async function serviceCommand(
     }
     const arCtx = deps.autoRefreshCtx ?? resolveAutoRefreshCtx(ctx.run, parsed);
     return autoRefreshServiceCommand(sub, arCtx, parsed, ok, fail);
+  }
+
+  // `--guardian` targets the on-call probe (2026-08-13 guardian spec): `guardian-tick` runs one
+  // probe (collect → classify → act), every other verb manages the interval LaunchAgent that runs
+  // it — the exact `--auto` shape, reusing the autorefresh lifecycle module.
+  if (sub === 'guardian-tick') {
+    return runGuardianTick(ctx, parsed);
+  }
+  if (parsed.flags['guardian'] === true) {
+    const gCtx = deps.guardianCtx ?? resolveGuardianCtx(ctx.run, parsed);
+    return guardianServiceCommand(sub, gCtx, ok, fail);
   }
 
   // `--sweep` targets the ADR 166 liveness sweep. Same posture as `--live`/`--auto`: read-only, no
@@ -1732,6 +1750,293 @@ async function autoRefreshTick(
  * runs no server); the tick it schedules is what carries the live-session guard. (`refresh --auto`
  * is handled upstream — it IS the tick, not a lifecycle op.)
  */
+const GUARDIAN_SEAT = 'guardian';
+
+function guardianHome(): string {
+  return join(dirname(configPath()), 'guardian');
+}
+
+/**
+ * The guardian probe's LaunchAgent ctx (2026-08-13 guardian spec §1) — the autorefresh shape
+ * verbatim (same lifecycle module), pointed at `service guardian-tick`. Outside the daemon and
+ * autorefresh, both of which it watches; ~2-minute cadence; token file rides the plist env so the
+ * tick attributes as the `guardian` service seat, never a folder binding (ADR 232 §5).
+ */
+function resolveGuardianCtx(run: Runner, parsed: Parsed): AutoRefreshCtx {
+  const binJs = resolvePath(process.argv[1] ?? '');
+  const home = dirname(configPath());
+  const interval = flagStr(parsed.flags, 'interval');
+  return {
+    uid: typeof process.getuid === 'function' ? process.getuid() : '',
+    label: GUARDIAN_LABEL,
+    plistPath: join(homedir(), 'Library', 'LaunchAgents', `${GUARDIAN_LABEL}.plist`),
+    node: agentNode(),
+    binJs,
+    refreshArgs: ['guardian-tick'],
+    workingDir: resolvePath(binJs, '../../../..'),
+    logPath: join(home, 'guardian', 'guardian.log'),
+    errLogPath: join(home, 'guardian', 'guardian.log'),
+    // The tick shells `launchctl` + (on remediation) the CLI's own `service` verbs, which shell
+    // `git`/`pnpm` — same PATH needs as the autorefresh tick.
+    path: [
+      dirname(process.execPath),
+      '/opt/homebrew/bin',
+      join(homedir(), 'Library', 'pnpm'),
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ].join(':'),
+    intervalSeconds: interval ? Number(interval) : 120,
+    env: { MUSTERD_SERVICE_TOKEN_FILE: join(home, 'guardian', 'seat-token') },
+    run,
+  };
+}
+
+/**
+ * Provision the guardian's ledger seat (ADR 232 §5) — the autorefresh token flow with the
+ * guardian's name and token path. Best-effort: an unprovisioned guardian still probes and
+ * OS-notifies; only the in-band half (asks, heartbeat) stays silent.
+ */
+async function provisionGuardianToken(
+  ok: (s: string) => void,
+  meta: (s: string) => void,
+): Promise<void> {
+  const config = loadConfig();
+  const team = config.current;
+  const identity = team ? config.identities[team] : undefined;
+  if (!team || !identity) {
+    meta(
+      '  seat:    no current team identity — skipped the guardian service seat token (ADR 232); ' +
+        'join your team, then rerun `musterd service --guardian install`',
+    );
+    return;
+  }
+  try {
+    const http = new HttpClient({ server: config.server, key: identity.key, surface: 'cli' });
+    const res = (await http.addMember(team, {
+      name: GUARDIAN_SEAT,
+      kind: 'service',
+      role: 'platform',
+    })) as { token?: string };
+    if (!res.token) throw new Error('daemon returned no token');
+    const p = join(guardianHome(), 'seat-token');
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, res.token + '\n', { encoding: 'utf8', mode: 0o600 });
+    ok(`minted the ${GUARDIAN_SEAT} service seat token → ${theme.accent(p)} (0600)`);
+  } catch (err) {
+    meta(
+      `  seat:    could not provision the ${GUARDIAN_SEAT} service seat (${(err as Error).message}) — ` +
+        `the probe will run unattributed. For a file-backed roster, write seats/${GUARDIAN_SEAT}.toml ` +
+        `(kind = "service", roles = ["platform"]) and rerun install.`,
+    );
+  }
+}
+
+async function guardianServiceCommand(
+  sub: string,
+  gCtx: AutoRefreshCtx,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+): Promise<number> {
+  const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
+  switch (sub) {
+    case 'install': {
+      const res = installAutoRefresh(gCtx);
+      if (res.status !== 0) fail('guardian (bootstrap)', res);
+      ok(`installed + started the guardian probe (${theme.accent(gCtx.label)})`);
+      await provisionGuardianToken(ok, meta);
+      meta(`  runs:    musterd service guardian-tick every ${gCtx.intervalSeconds}s`);
+      meta(`  logs:    ${gCtx.logPath}`);
+      // Instrument-silence control probe: before believing this probe's future silence, make it
+      // observe an incident we cause — a fixture publisher failure through the real alert path,
+      // dry-run (no daemon touched, no ask sent).
+      const probed = await runGuardianTick(
+        { run: gCtx.run } as ServiceCtx,
+        { flags: { 'control-probe': true }, positionals: [] } as unknown as Parsed,
+      );
+      if (probed !== 0) fail('guardian control probe', { status: probed, stdout: '', stderr: '' });
+      return 0;
+    }
+    case 'uninstall': {
+      const res = uninstallAutoRefresh(gCtx);
+      ok(
+        res.removedPlist
+          ? 'stopped + removed the guardian probe'
+          : 'guardian probe was not installed — nothing to remove',
+      );
+      return 0;
+    }
+    case 'status': {
+      const st = statusAutoRefresh(gCtx);
+      ok(
+        `guardian probe: ${
+          st.loaded ? theme.ok(intervalAgentLabel(st) ?? 'loaded') : theme.warn('not installed')
+        }`,
+      );
+      const dead = agentFailureNote(st, agentProgramExists(gCtx.plistPath));
+      if (dead) process.stdout.write(`  ${theme.err('✗')} ${dead}\n`);
+      meta(`  ${guardianStatusLine(join(guardianHome(), 'stamp.json'), Date.now())}`);
+      return 0;
+    }
+    default:
+      throw new CliError(
+        'usage: musterd service <install|uninstall|status> --guardian [--interval <s>]',
+        2,
+      );
+  }
+}
+
+/**
+ * One guardian tick (`service guardian-tick`) — assemble the real runners and hand them to the
+ * injected-deps tick. `--control-probe` swaps the collector for a fixture publisher failure and
+ * the actors for dry-run captures: the alert path fires observably, nothing real is touched.
+ */
+async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number> {
+  const home = dirname(configPath());
+  const gHome = guardianHome();
+  const log = (l: string) => process.stdout.write(`${stamp()} ${l}\n`);
+  const controlProbe = parsed.flags['control-probe'] === true;
+
+  const rawHealth = async (): Promise<HealthPayload> => {
+    const server = loadConfig().server;
+    const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
+    if (!res.ok) throw new Error(`health ${res.status}`);
+    return (await res.json()) as HealthPayload;
+  };
+
+  /** mtime-gated read: a file untouched since `epochMs` contributes nothing (recency hard rule);
+   *  a touched file contributes its tail (cap 400 lines — bounded work on an 8 GB machine). */
+  const readSince = async (path: string, epochMs: number): Promise<string[]> => {
+    try {
+      const { statSync } = await import('node:fs');
+      if (statSync(path).mtimeMs < epochMs) return [];
+      return readFileSync(path, 'utf8').split('\n').slice(-400);
+    } catch {
+      return [];
+    }
+  };
+  const statMtime = async (path: string): Promise<number | null> => {
+    try {
+      const { statSync } = await import('node:fs');
+      return statSync(path).mtimeMs;
+    } catch {
+      return null;
+    }
+  };
+
+  const collect = controlProbe
+    ? async () => ({
+        now: Date.now(),
+        health: {
+          ok: true,
+          bootedAt: Date.now() - 60_000,
+          schemaOk: true,
+          dbPathExpected: true,
+        },
+        launchd: { lastExit: 0, runs: 1 },
+        publisherLog: { freshFailure: true },
+        errLinesSinceBoot: 0,
+        httpErrorRateSinceBoot: 0,
+        reaperStormSinceBoot: false,
+        lastRefreshAt: null,
+      })
+    : async () =>
+        collectSignals({
+          now: () => Date.now(),
+          fetchHealth: rawHealth,
+          launchctlPrint: async () => {
+            const uid = typeof process.getuid === 'function' ? process.getuid() : '';
+            return ctx.run('launchctl', printArgs(uid, SERVICE_LABEL)).stdout;
+          },
+          readSince,
+          statMtime,
+          expected: { dbPath: join(home, 'musterd.db'), schema: null },
+          daemonErrLogPath: join(home, 'daemon.err.log'),
+          publisherBuildLogPath: join(home, 'live', 'build.log'),
+          publisherOkStampPath: join(gHome, 'publisher.ok'),
+          lastRefreshAt: async () => statMtime(join(home, 'autorefresh', '.attempted-sha')),
+        });
+
+  const auth = serviceSeatAuth();
+  return guardianTick({
+    now: () => Date.now(),
+    stampPath: join(gHome, 'stamp.json'),
+    collect,
+    getTiers: async () => {
+      if (!auth) return DEFAULT_TIERS;
+      const { policy } = await auth.http.getPolicy(auth.team);
+      return resolveGuardianTiers(policy.guardian_tiers);
+    },
+    healthBuild: async () => (await rawHealth()).build ?? null,
+    act: async (incidents, actStamp, tiers) => {
+      const report = await actOn(incidents, {
+        now: () => Date.now(),
+        stamp: actStamp,
+        tiers: controlProbe ? { ...DEFAULT_TIERS, publisher_failed: 'alert' } : tiers,
+        runService: async (args) => {
+          if (controlProbe) {
+            log(`control probe: would run service ${args.join(' ')}`);
+            return { ok: true };
+          }
+          const r = ctx.run(process.execPath, [
+            resolvePath(process.argv[1] ?? ''),
+            'service',
+            ...args,
+          ]);
+          return { ok: r.status === 0 };
+        },
+        osNotify: (n) => {
+          if (controlProbe) log(`control probe: alert path fired ✓ ("${n.title}")`);
+          else {
+            osNotify(n);
+            log(`notified the operator: "${n.title}" — ${n.body}`);
+          }
+        },
+        sendAsk: async (body) => {
+          if (controlProbe) return;
+          if (!auth) return; // unprovisioned — OS notify already fired; degrade silently (ADR 232)
+          await auth.http.send(
+            auth.team,
+            makeEnvelope({
+              id: ulid(),
+              team: auth.team,
+              from: GUARDIAN_SEAT,
+              to: { kind: 'team' },
+              act: 'ask',
+              body,
+              meta: { species: 'consult', tier: 'standard' },
+            }),
+          );
+        },
+        audit: async (action, detail) => {
+          // No client-writable audit endpoint exists; the guardian's ledger is its own log plus
+          // the attributed acts above. One structured line per action, greppable.
+          log(`${action} ${JSON.stringify(detail)}`);
+        },
+        log,
+      });
+      return report;
+    },
+    heartbeat: async () => {
+      if (controlProbe || !auth) return;
+      await auth.http.send(
+        auth.team,
+        makeEnvelope({
+          id: ulid(),
+          team: auth.team,
+          from: GUARDIAN_SEAT,
+          to: { kind: 'team' },
+          act: 'status_update',
+          body: 'guardian: on watch (daily heartbeat) — all classes quiet',
+        }),
+      );
+    },
+    log,
+  });
+}
+
 async function autoRefreshServiceCommand(
   sub: string,
   ctx: AutoRefreshCtx,
@@ -2209,6 +2514,11 @@ async function renderStatus(
         `(${provenance.disagreeingBinding.team}) — the line above measured the ${provenance.source}, not your seat\n`,
     );
   }
+  // Guardian (spec §6): the probe's own liveness, from its stamp — a dead guardian must be
+  // distinguishable from a quiet one, in the same place the daemon's health is read.
+  process.stdout.write(
+    theme.meta(`  ${guardianStatusLine(join(guardianHome(), 'stamp.json'), Date.now())}`) + '\n',
+  );
   // The ADR 040 allow-list, so a broken overlay is diagnosable without reading a plist. Labelled
   // plist-derived on purpose: this is what someone WROTE, not what the running daemon enforces, and
   // the two can disagree (a plist edited after the last bounce). `musterd stream doctor` settles it

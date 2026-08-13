@@ -53,6 +53,10 @@ export const AUTOREFRESH_LABEL = 'studio.sandrise.musterd-autorefresh';
  */
 export const SWEEP_LABEL = 'studio.sandrise.musterd-sweep';
 
+/** Guardian probe (2026-08-13 guardian spec §1) — outside the daemon and autorefresh, both of
+ *  which it watches. */
+export const GUARDIAN_LABEL = 'studio.sandrise.musterd-guardian';
+
 /** Is process lifecycle management implemented for this platform yet? */
 export function serviceSupported(platform: NodeJS.Platform): boolean {
   return platform === 'darwin';

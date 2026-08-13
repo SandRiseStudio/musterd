@@ -14,6 +14,8 @@ export interface HealthPayload {
   db: string;
   schema: number;
   booted_at?: number;
+  /** The commit the daemon booted from (ADR 130) — the guardian's rollback target when healthy. */
+  build?: string;
 }
 
 export interface SignalDeps {
@@ -26,8 +28,9 @@ export interface SignalDeps {
   readSince: (path: string, epochMs: number) => Promise<string[]>;
   /** mtime of `path` in epoch ms, null when absent. */
   statMtime: (path: string) => Promise<number | null>;
-  /** What THIS build expects — drift is measured against the probe's own code. */
-  expected: { dbPath: string; schema: number };
+  /** What THIS build expects — drift is measured against the probe's own code. `schema: null`
+   *  skips the drift check (the CLI has no compiled-in schema constant to compare against yet). */
+  expected: { dbPath: string; schema: number | null };
   daemonErrLogPath: string;
   publisherBuildLogPath: string;
   /** Stamp updated on the last successful /live publish. */
@@ -54,7 +57,7 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
     health = {
       ok: h.ok,
       bootedAt,
-      schemaOk: h.schema === d.expected.schema,
+      schemaOk: d.expected.schema === null || h.schema === d.expected.schema,
       dbPathExpected: h.db === d.expected.dbPath,
     };
   } catch {
