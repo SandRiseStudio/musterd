@@ -4,7 +4,7 @@ import { openDb } from '../db/open.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
-import { deriveNext } from './orientation.js';
+import { WHY_BARE_MAX_AGE_MS, deriveNext } from './orientation.js';
 import { createTeam } from './teams.js';
 
 function seed() {
@@ -53,7 +53,9 @@ describe('deriveNext — the orientation brief (ADR 049/084)', () => {
         meta: { goal_id: 'orientation-spine' },
       }),
     );
-    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    // Pinned to the handoff's own clock: this one names no lane, so it is subject to the
+    // WHY_BARE_MAX_AGE_MS bound and would otherwise age out against a real `Date.now()`.
+    const brief = deriveNext(db, team.id, 'revive', 'stanley', 3, 5, { now: 1_000 });
     expect(brief.why).not.toBeNull();
     expect(brief.why!.from).toBe('nick');
     expect(brief.why!.body).toContain('orientation spine');
@@ -184,7 +186,8 @@ describe('deriveNext — the orientation brief (ADR 049/084)', () => {
   });
 
   // A handoff that names no lane cannot be checked, so it must still be served: abstain by showing
-  // it, never by hiding it (ADR 173 — an unknown is not a falsy).
+  // it, never by hiding it (ADR 173 — an unknown is not a falsy). Bounded by age, not unbounded:
+  // see the WHY_BARE_MAX_AGE_MS pair below.
   it('still serves a handoff that carries no lane reference', () => {
     const { db, team, nick } = seed();
     insertMessage(
@@ -203,8 +206,71 @@ describe('deriveNext — the orientation brief (ADR 049/084)', () => {
         meta: {},
       }),
     );
-    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    const brief = deriveNext(db, team.id, 'revive', 'stanley', 3, 5, { now: 3_000 });
     expect(brief.why?.body).toBe('no lane on this one');
+  });
+
+  // A bare handoff can never be discharged by any event — no lane to check, and nothing reads its
+  // prose. Left unbounded it holds the why slot PERMANENTLY. Measured 2026-08-13 across the real
+  // ledger: 21 of 22 seats were pinned to a bare handoff, 19 of them to the same 38-day-old
+  // completion notice. So age is the only recorded fact left that can retire one, and the bound is
+  // set above the whole observed distribution of live handoffs (max 12.8d, p95 6.6d) — it retires
+  // nothing that was ever live. Wakes are untouched: this is the why slot only, where showing a
+  // dead instruction is not abstention but misdirection.
+  it('stops serving a bare handoff once it is older than the age bound', () => {
+    const { db, team, nick } = seed();
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      null,
+      makeEnvelope({
+        id: 'h-bare-old',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'handoff',
+        body: 'a premise that died two weeks ago',
+        ts: 1_000,
+        meta: {},
+      }),
+    );
+    const fresh = deriveNext(db, team.id, 'revive', 'stanley', 3, 5, {
+      now: 1_000 + WHY_BARE_MAX_AGE_MS,
+    });
+    expect(fresh.why?.body).toBe('a premise that died two weeks ago');
+
+    const stale = deriveNext(db, team.id, 'revive', 'stanley', 3, 5, {
+      now: 1_000 + WHY_BARE_MAX_AGE_MS + 1,
+    });
+    expect(stale.why).toBeNull();
+  });
+
+  // The bound is the fallback for the uncheckable case only. A handoff that names a live lane is a
+  // recorded fact and outranks age — it keeps its slot however old it gets.
+  it('does not age out a handoff whose named lane is still live', () => {
+    const { db, team, nick } = seed();
+    const lane = openLane(db, team.id, 'revive', 'stanley', { title: 'still going', claim: true });
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      null,
+      makeEnvelope({
+        id: 'h-named-old',
+        team: 'revive',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'handoff',
+        body: 'this one is still real',
+        ts: 1_000,
+        meta: { lane_handoff: { lane: lane.id } },
+      }),
+    );
+    const brief = deriveNext(db, team.id, 'revive', 'stanley', 3, 5, {
+      now: 1_000 + WHY_BARE_MAX_AGE_MS * 10,
+    });
+    expect(brief.why?.body).toBe('this one is still real');
   });
 
   it('is the zero-compliance floor: empty when nothing is declared', () => {

@@ -457,7 +457,7 @@ function waitedFor(ms: number): string {
   return `${s}s`;
 }
 
-function fmtNext(b: NextBrief): string {
+export function fmtNext(b: NextBrief): string {
   const lines: string[] = [`next — as ${b.member}`];
   // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
   // someone else is blocked on, and it is the one that loses when a seat is busy: half the
@@ -526,8 +526,12 @@ function fmtNext(b: NextBrief): string {
     lines.push(`  claim a lane on it: lane_open {title, goal_id:"${g.id}", claim:true}`);
   }
   if (b.why) {
+    // Dated on purpose (ADR 264). This line is read as a standing instruction, and until the age
+    // was shown the only way to catch a dead one was to notice its content had gone stale — which
+    // took 15 days the last time, and 38 for the copy 19 other seats were reading.
     lines.push(
-      `\nwhy — handoff from ${b.why.from}${b.why.goal_id ? ` goal=${b.why.goal_id}` : ''}:`,
+      `\nwhy — handoff from ${b.why.from}${b.why.goal_id ? ` goal=${b.why.goal_id}` : ''}` +
+        ` (${waitedFor(Math.max(0, Date.now() - b.why.ts))} ago):`,
     );
     lines.push('  ' + b.why.body);
   }
