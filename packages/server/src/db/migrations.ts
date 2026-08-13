@@ -812,6 +812,22 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 262: per-edge firing ledger. `edge` is the work-order board edge (review /
+    // dispatch_handoff / dispatch_continuation); NULL on inbox wakes. `spawned_at` is the host
+    // exec ack (POST wake-progress). Do not backfill — inferring edge from act shape is the
+    // ADR 250 measurement trap.
+    version: 40,
+    up: (db) => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('wake_leases')").pluck().all();
+      if (!cols.includes('edge')) db.exec('ALTER TABLE wake_leases ADD COLUMN edge TEXT');
+      if (!cols.includes('spawned_at'))
+        db.exec('ALTER TABLE wake_leases ADD COLUMN spawned_at INTEGER');
+      db.exec(
+        'CREATE INDEX IF NOT EXISTS idx_wake_leases_edge ON wake_leases(team_id, lane_id, edge)',
+      );
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

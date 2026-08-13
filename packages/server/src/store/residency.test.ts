@@ -1140,3 +1140,15 @@ describe('claimWakeLeases — resume eligibility (ADR 210 exact-match continuity
     expect(detail).not.toHaveProperty('thread_id');
   });
 });
+
+describe('wake_leases edge + spawned_at (ADR 262)', () => {
+  it('migration adds nullable edge and spawned_at', () => {
+    const { db } = seed();
+    const cols = db
+      .prepare("SELECT name FROM pragma_table_info('wake_leases')")
+      .pluck()
+      .all() as string[];
+    expect(cols).toContain('edge');
+    expect(cols).toContain('spawned_at');
+  });
+});
