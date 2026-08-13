@@ -347,9 +347,11 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         code: actuation.outcome.occupied ? SpanStatusCode.OK : SpanStatusCode.ERROR,
       });
       if (!actuation.outcome.deferred) {
-        await client.wakeProgress(group.team, order.lease_id).catch((err: Error) =>
-          deps.log(`! wake-progress failed for lease ${order.lease_id}: ${err.message}`),
-        );
+        await client
+          .wakeProgress(group.team, order.lease_id)
+          .catch((err: Error) =>
+            deps.log(`! wake-progress failed for lease ${order.lease_id}: ${err.message}`),
+          );
       }
       // The loud-failure log for this outcome lives in `report` above, so every branch that settles
       // a lease — actuation and the pre-actuation bail-outs alike — is equally loud. It was here

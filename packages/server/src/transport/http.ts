@@ -1974,7 +1974,8 @@ export async function handleHttp(
         const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeProgressBodySchema, await readJson(req));
         const row = markWakeSpawned(ctx.db, team.id, body.lease_id);
-        if (!row) throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
+        if (!row)
+          throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
         return sendJson(res, 200, {
           ok: true,
           lease_id: row.id,
@@ -1990,7 +1991,12 @@ export async function handleHttp(
           const settled = ctx.db
             .prepare<
               [string, string],
-              { member_id: string; act_id: string | null; lane_id: string | null; edge: string | null }
+              {
+                member_id: string;
+                act_id: string | null;
+                lane_id: string | null;
+                edge: string | null;
+              }
             >('SELECT member_id, act_id, lane_id, edge FROM wake_leases WHERE team_id = ? AND id = ?')
             .get(team.id, body.lease_id);
           if (!settled)

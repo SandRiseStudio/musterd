@@ -564,9 +564,7 @@ function workOrderEdgeStillTrue(
   } catch {
     return false;
   }
-  return (
-    parsed.wakeability !== undefined && STILL_TRUE_WAKEABILITIES.includes(parsed.wakeability)
-  );
+  return parsed.wakeability !== undefined && STILL_TRUE_WAKEABILITIES.includes(parsed.wakeability);
 }
 
 /** A due-wake candidate before leasing. Act fields optional on board continuation (ADR 199). */
@@ -1102,9 +1100,10 @@ export function markWakeSpawned(
   now = Date.now(),
 ): WakeLeaseRow | null {
   const row = db
-    .prepare<[string, string], WakeLeaseRow>(
-      'SELECT * FROM wake_leases WHERE team_id = ? AND id = ?',
-    )
+    .prepare<
+      [string, string],
+      WakeLeaseRow
+    >('SELECT * FROM wake_leases WHERE team_id = ? AND id = ?')
     .get(teamId, leaseId);
   if (!row) return null;
   if (row.spawned_at === null) {
