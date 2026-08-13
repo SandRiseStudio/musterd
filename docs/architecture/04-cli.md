@@ -44,6 +44,11 @@ src/
     credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076; live post-P3 cutover)
   broadcast/          // the hosted half of `musterd broadcast` — run the capture on a rented machine
     hosted.ts         // `musterd stream doctor`'s precondition ladder + the tailscale/fly JSON parsers, all injected: checks are EMPIRICAL (the allow-list one attempts a real WS upgrade against the RUNNING daemon with the tailnet Host, rather than reading the plist) because every precondition here fails as the same "page never reported ready"
+  guardian/           // the platform guardian's pure logic (ADR 263) — every effect injected, zero model tokens
+    classify.ts       // recency-keyed signals → incident classes; shipped DEFAULT_TIERS + resolveGuardianTiers (policy over defaults, read-time)
+    signals.ts        // collectSignals: /health (booted_at-anchored), launchctl parse, boot-gated log reads — the collector owns staleness so classify never sees a stale line
+    damp.ts           // one remediation attempt per class per hour then forced escalation; stamp file (never the DB — the DB may be what's down) + daily-heartbeat bookkeeping
+    act.ts            // actOn: auto classes shell the guarded service verbs (refresh --live / refresh --pin <last-good> --force), alert classes notify + role-addressed ask; audit failure never breaks a tick
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)
     os.ts             // OS push notification (macOS/Linux/Windows)
     select.ts         // pick which away human to nudge
@@ -75,6 +80,7 @@ src/
     host.ts           // `service --wake`: the wake actuator (`musterd host`) as a KeepAlive LaunchAgent — residency survives reboots (ADR 131 inc 5)
     autorefresh.ts    // `service --auto`: the daemon auto-refresher as a StartInterval LaunchAgent — runs `refresh --auto` on a poll (ADR 152)
     sweep.ts          // `service --sweep`: the ADR 166 liveness sweep as a StartInterval LaunchAgent — read-only, every 5 min (≤ the 10-min window a demotion persists for, so it cannot miss one)
+    guardian.ts       // `service --guardian`: the pure-code on-call tick (collect → classify → act → stamp, never throws) + the instrument-silence status line (ADR 263)
     logTrim.ts        // pure-ish: size-capped retention for the service logs (ADR 224) — copy-truncate to `<name>.1`, run by the auto-refresh tick; an explicit log list, never a `*.log` glob (the musterd home is a shared temp dir under test isolation)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
