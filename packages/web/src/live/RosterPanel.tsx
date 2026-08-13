@@ -3,7 +3,6 @@ import {
   acceptanceCapacity,
   accountStatusException,
   capabilityBadges,
-  initial,
   isFeatureBehind,
   memberAvatar,
   rosterOrder,
@@ -153,9 +152,15 @@ function SeatRow({
         className={`lc-seat__dot lc-seat__dot--${dotState}`}
         title={online ? `online · ${m.presence}` : reconnecting ? 'reconnecting — seat held within reclaim grace' : 'offline'}
       />
-      <span className="lc-seat__avatar" style={{ background: memberAvatar(m.name, kind) }}>
-        {initial(m.name)}
-      </span>
+      {/* A dot, not a monogram — the same call as the board's card avatar (#781). The seat's name is
+          on the very next line, so the initial was duplicated text, and at 22px it was white on the
+          identity fill: no single ink clears AA across that hue band, and on a dimmed offline row it
+          measured 1.73. */}
+      <span
+        className="lc-seat__avatar"
+        style={{ background: memberAvatar(m.name, kind) }}
+        aria-hidden="true"
+      />
       <div className="lc-seat__body">
         <div className="lc-seat__line">
           <span className="lc-seat__name">{m.name}</span>

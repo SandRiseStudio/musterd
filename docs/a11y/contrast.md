@@ -41,12 +41,11 @@ unautomated check measures over time.
 SKIPPED, counted per route in the summary); hover, error and empty states, which never render; and
 any surface the fixture team does not seed. A surface nobody seeds is a surface nobody measures.
 
-**The office overlay is permanently in that first bucket, and seeding does not rescue it.** Filling
-the room moved eight more pairs _into_ SKIPPED rather than into coverage — `lc-asks__gist`,
-`lc-ask__tier`, `lc-ask__clock`, `lc-asks__routed`, the work stack's count and said, and both
-gl-labels — because they paint over `.lc-office`, a gradient. Making the asks rail loud made its
-tier chips **visible and still unmeasurable**. There is no fix inside this method; read those
-surfaces' own paper tokens, and treat `--probe` output as advisory, never as the gate.
+**The gradient blind spot is closed** (2026-08-13). It used to be the largest hole in the gate —
+13–21 elements a route, and seeding the office made it _worse_, because a loud asks rail meant more
+text painted over a gradient. Sampling the painted pixel measures all of it. `SKIPPED` is now
+normally empty; what remains reaches it only when there is no line box to sample or the text sits
+off the captured page.
 
 **The fixture's isolation contract is inherited whole** from
 [`scripts/perf/broadcast-bench-fixture.sh`](../../scripts/perf/broadcast-bench-fixture.sh), which
@@ -89,10 +88,48 @@ produced confident wrong numbers before this script existed:
 
 The script resolves colour by painting it to a 1×1 canvas **over white and over black** and solving
 for colour and alpha from the two composites — exact for any colour space, syntax or alpha — and it
-**stops at a gradient and says so** rather than guessing.
+**stops at a gradient** rather than guessing.
 
-Validated against the canonical reference greys: `#767676` on white passes at 4.54:1, `#777777`
-fails at 4.48:1.
+**There was a third wrong answer, and it survived the first two fixes.** Stopping at a gradient was
+honest about what it could not see; it said nothing about what it _could_ see but was reading wrong.
+The ancestor walk ignores `opacity` entirely, so a row faded to 0.55 had its ink measured at full
+strength — `.lc-seat--offline` reported **14.34** where the eye gets **3.55**. Refusing to answer
+where you cannot see is only half the discipline.
+
+## Sampling the painted pixel
+
+So the sweep no longer reasons about what the background _should_ be. After the walk, every glyph on
+the page is made transparent, the page is screenshotted over CDP, the PNG is decoded in-process
+(pure `node:zlib`, no dependency), and each text node's own line box is sampled. Whatever is under
+that pixel — gradient stop, photograph, live canvas, three translucent layers — is what the reader
+gets. The element's settled opacity is folded into the **ink** too, because a fade dims the words and
+the paper together.
+
+Three rules stop that becoming a fourth wrong answer:
+
+- **It must agree with the walk wherever the walk was valid.** Both run every time, and every
+  disagreement past rounding prints in a `DISAGREEMENT` section. This earned its place immediately:
+  the first run disagreed on three elements and the _walk_ was right about all three — they were
+  mid-animation.
+- **A fade that is still moving is refused; a fade that has settled is measured with the fade
+  included.** Two opacity readings 300 ms apart tell them apart. Animations are also finished
+  programmatically first, and the page is measured under `prefers-reduced-motion: reduce` — a real
+  user state this project already writes CSS for, and the only one with a single settled appearance.
+- **Validated end to end against known values whenever it changes:** `#767676` on white 4.54,
+  `#777777` 4.48, 30% black over white 2.11, and `#949494` over a gradient-painted black 6.92 — the
+  last of which the walk could not measure at all.
+
+### Exemptions
+
+Two, both WCAG 1.4.3's own carve-outs, both **printed in an `EXEMPT` section on every run** rather
+than filtered into silence:
+
+- **Logotypes** — "text that is part of a logo or brand name has no contrast requirement". The only
+  entry is the room's `musterd` watermark, whose 0.45 opacity is a tuned value.
+- **Inactive components** — a disabled control. Read off the element (`:disabled`, `aria-disabled`),
+  never off a list of class names, so a control that gets re-enabled stops being exempt by itself.
+
+Anything merely hard to fix belongs in the failure list.
 
 ## Reading the output honestly
 
@@ -120,6 +157,14 @@ palette held lightness at 62% and still spanned 4.6× in luminance, so amber rea
 indigo and the correct text pole flipped partway across the hue band. When one ink must serve a
 whole band, target a **luminance**.
 
+**A third form, 2026-08-13: `opacity` is not a de-emphasis tool for text.** It scales the ink and
+the paper behind it by the same factor, so it lowers contrast _by construction_ — and it does so
+invisibly, because every checker that reads CSS colours sees the ink at full strength and passes it.
+`.lc-seat--offline` faded whole roster rows to 0.55 and took three labels to 3.55, 2.59 and 2.34.
+The fix is the same shape as the fill/ink split: **fade the glyphs that carry no words** — the
+presence dot, the avatar disc — and let a quieter _ink_ do the de-emphasising, where the value is
+chosen and measured rather than arrived at by multiplication.
+
 **And its sharper form, 2026-08-12:** a band can be wide enough that _neither_ pole works. The 16px
 seat avatar carried a white initial; measured across the identity band, white scored 1.61–3.90 and
 near-black 4.42–10.73, and the purple seat cleared **neither** at the 4.5 small-text threshold. No
@@ -140,6 +185,9 @@ office, where the same values colour the characters' bodies.
 | 2026-08-12 | connected `/board` + `/live` (first ever) | 12 failures; goal grid's eight one-off browns → one measured ink set          |
 | 2026-08-12 | seat avatar disc                          | white initial 3.42; band clears NEITHER pole, so the glyph went               |
 | 2026-08-12 | `/live` with the room occupied            | 0 failures — but +14 pairs measured for the first time, +8 shown unmeasurable |
+| 2026-08-13 | pixel sampling — the gradient blind spot  | 12 failures nothing could previously see; `SKIPPED` 21 → 0 on `/live`         |
+| 2026-08-13 | `.lc-seat--offline` opacity dim           | ink read 14.34, eye got 3.55 — dim the dot and avatar, not the words          |
+| 2026-08-13 | hero eyebrow + cursor + `--text-faint`    | 1.18 / 2.54 / 4.09 on the landing page; added `--accent-ink`                  |
 
 After those three, `/live` and `/broadcast` measure **zero** live AA text-contrast failures — and
 since 2026-08-12 every prerendered route measures zero on every PR, because `pnpm a11y:check` says
