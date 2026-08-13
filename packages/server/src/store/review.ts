@@ -32,11 +32,12 @@ import { type MemberRow } from './rows.js';
  *      substitute: with no live human the pick is null and the close records `human_review_missed`,
  *      loudly, rather than an agent review quietly standing in for the one that was required.
  *      (Never a wedge: the close itself is still possible — a record, not a lock.)
- *   2. otherwise a live seat whose **model family differs from the worker's** (ADR 056: correlated
- *      models make correlated mistakes, so a same-family review re-runs the worker's blind spots).
- *      Family comes from the occupancy's attested model (ADR 158 observed-over-declared); a seat
- *      attesting `unknown` is NOT eligible — it cannot prove diversity, and musterd would rather
- *      say nothing than something false. A human seat is always cross-family by construction.
+ *   2. otherwise a live **and not busy** seat (quiescence 120s, work-audit; `unknown` kept) whose
+ *      **model family differs from the worker's** (ADR 056: correlated models make correlated
+ *      mistakes, so a same-family review re-runs the worker's blind spots). Family comes from the
+ *      occupancy's attested model (ADR 158 observed-over-declared); a seat attesting `unknown` is
+ *      NOT eligible — it cannot prove diversity, and musterd would rather say nothing than something
+ *      false. A human seat is always cross-family by construction.
  *   3. nobody qualifies → `null`: the caller emits no ask and the verb response sanctions
  *      self-close (the ADR 145 degradation — never a wedge).
  */
@@ -317,16 +318,29 @@ export function pickReviewCounterpart(
   worker: string,
   presenceTimeoutMs: number,
 ): ReviewPick | null {
-  const candidates = listMembers(db, teamId).filter(
-    // A service seat is never an acceptance candidate (ADR 232 / ADR 158): a cron cannot judge a
-    // landed outcome. Belt-and-braces — the ladder would drop it as ungradeable anyway, but the
-    // exclusion is a kind-level fact, not an accident of a missing attestation.
-    (m) =>
-      m.name !== worker &&
-      !m.observer &&
-      m.kind !== 'service' &&
-      hasLivePresence(db, m.id, presenceTimeoutMs),
-  );
+  const lastWork = lastActionByActor(db, teamId, {
+    excludeActions: ['occupancy.model_attested'],
+  });
+  const now = Date.now();
+  const candidates = listMembers(db, teamId).filter((m) => {
+    if (m.name === worker || m.observer || m.kind === 'service') return false;
+    if (!hasLivePresence(db, m.id, presenceTimeoutMs)) return false;
+    // Quiet-set inc 1: a live agent mid-turn is not an acceptor. `unknown` (no work
+    // audit in lookback) degrades to presence-only — same as before this filter.
+    // Agents only: a human in this list is dropped by pickLadder({agentsOnly:true})
+    // anyway, but do not mark humans busy here so a future caller cannot empty
+    // the human path by accident.
+    if (m.kind === 'agent') {
+      const actedAt = lastWork.get(m.name);
+      if (
+        actedAt !== undefined &&
+        resolveQuiescence(actedAt, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state === 'busy'
+      ) {
+        return false;
+      }
+    }
+    return true;
+  });
 
   // Live pick is always agents-only (ADR 253). Humans enter only via pickHumanReviewer: risky
   // stage two, or risky no-peer fallback. Never on a non-risky lane — including the ADR 191
