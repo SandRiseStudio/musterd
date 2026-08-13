@@ -13,10 +13,11 @@ import { errorResult, notReadyMessage, textResult } from './format.js';
  */
 
 const SAVE_DESCRIPTION =
-  "Saves this seat's memory for the next session or occupant: what you were doing, decisions " +
-  'mid-flight, where you left off. Use when wrapping up or handing off, not mid-task. ' +
-  'One note per seat, last-write-wins. headline ≤120 chars (shown on the next occupy); body ' +
-  '≤8KB. Private to this seat; never store secrets.';
+  "Saves this seat's working state for the next session or occupant: what you were doing, " +
+  'decisions mid-flight, where you left off. Working state ONLY — durable knowledge (traps, ' +
+  'technique, learned facts) goes in docs/wiki/ pages, not here (ADR 259). Use at wrap-up or ' +
+  'handoff, not mid-task. One note per seat, last-write-wins. headline ≤120 chars (shown on ' +
+  'the next occupy); body ≤8KB. Private to this seat; never store secrets.';
 
 /**
  * The empty state (ADR 144 inc 4). The daemon answers "nothing saved yet" with a 404, which is the
