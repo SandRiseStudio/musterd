@@ -56,16 +56,24 @@ export const STANDARD_FLOOR: PermissionLists = {
     'Bash(git push *)',
     'Bash(gh pr *)',
     // The repo gates a seat must run before any push (build → typecheck → lint → format → tests).
-    'Bash(pnpm build*)',
-    'Bash(pnpm typecheck*)',
-    'Bash(pnpm lint*)',
-    'Bash(pnpm format:check*)',
-    'Bash(pnpm test*)',
+    // Spelled in the DIALOG form — trailing ` *` — deliberately (docs-verified 2026-08-13):
+    // `Bash(cmd*)` also matches, but "Yes, don't ask again" writes the space form, and two working
+    // spellings that never string-match each other read as phantom drift in every diff and check.
+    // The space form is also the narrower one (word boundary), which is the safe direction.
+    'Bash(pnpm build *)',
+    'Bash(pnpm typecheck *)',
+    'Bash(pnpm lint *)',
+    'Bash(pnpm format:check *)',
+    'Bash(pnpm test *)',
     'Bash(pnpm vitest *)',
     'Bash(pnpm exec vitest *)',
     'Bash(pnpm exec prettier *)',
-    'Bash(pnpm context:check*)',
-    'Bash(pnpm wiki:*)',
+    'Bash(pnpm context:check *)',
+    // Enumerated, not `Bash(pnpm wiki:*)`: a trailing `:*` is parsed as the suffix form (≡ ` *`),
+    // so that spelling required a SPACE after "wiki" and never matched `pnpm wiki:check` at all —
+    // the same silently-inert shape as defect 3, caught while normalizing.
+    'Bash(pnpm wiki:check *)',
+    'Bash(pnpm wiki:index *)',
     // Read-shaped shell basics.
     'Bash(ls *)',
     'Bash(rg *)',
@@ -120,11 +128,15 @@ export function installSeatPermissions(dir: string, role?: RoleTemplate): Permis
   let changed = false;
   for (const list of LISTS) {
     const existing = settings.permissions[list] ?? [];
-    const have = new Set(existing);
+    // Canonical-form dedupe: a human-approved `Bash(pnpm test*)` / `Bash(pnpm test:*)` already IS
+    // the floor's `Bash(pnpm test *)`, and appending the third spelling of one rule turns every
+    // later diff of this file into noise. Same equivalence the inspector uses — install and check
+    // must agree on what "present" means, or a silent check follows a non-empty install forever.
+    const have = new Set(existing.map(canonicalRuleForm));
     for (const entry of profile[list]) {
-      if (!have.has(entry)) {
+      if (!have.has(canonicalRuleForm(entry))) {
         existing.push(entry);
-        have.add(entry);
+        have.add(canonicalRuleForm(entry));
         added[list].push(entry);
         changed = true;
       }
@@ -150,6 +162,24 @@ export function installSeatPermissions(dir: string, role?: RoleTemplate): Permis
  */
 function denyOutranks(rule: string, candidate: string): boolean {
   return candidate === rule || candidate.startsWith(rule + '(');
+}
+
+/**
+ * One canonical spelling for the three trailing-wildcard forms Claude Code treats alike.
+ *
+ * Docs-verified 2026-08-13: `Bash(cmd *)`, `Bash(cmd:*)` and `Bash(cmd*)` all match `cmd …`
+ * commands (the first two identically; the bare-star form is broader — no word boundary), but as
+ * strings they never match each other. The permission dialog writes the space form, so a seat
+ * whose human clicked "Yes, don't ask again" holds working equivalents the floor's exact strings
+ * would not find, and the missing-floor count reads as drift where none exists.
+ *
+ * SPELLING equivalence only, deliberately: the three forms of one prefix fold together, and
+ * nothing else does. No subsumption ("`Bash(git *)` covers `Bash(git push *)`") — that reasoning
+ * belongs to the harness's matcher, and a home-grown copy of it is where the defect-3 class lives.
+ */
+function canonicalRuleForm(entry: string): string {
+  const m = /^(.+\()(.+?)(?: \*|:\*|\*)\)$/.exec(entry);
+  return m ? `${m[1]}${m[2]} *)` : entry;
 }
 
 /**
@@ -182,7 +212,10 @@ export function inspectSeatPermissions(dir: string): string[] {
   }
   const findings: string[] = [];
   const allow = settings.permissions?.allow ?? [];
-  const missing = STANDARD_FLOOR.allow.filter((entry) => !allow.includes(entry));
+  // Compare in canonical form: a human-approved `Bash(pnpm test*)` or `Bash(pnpm test:*)` is a
+  // working spelling of the floor's `Bash(pnpm test *)`, not a gap.
+  const have = new Set(allow.map(canonicalRuleForm));
+  const missing = STANDARD_FLOOR.allow.filter((entry) => !have.has(canonicalRuleForm(entry)));
 
   if (!settings.permissions) {
     findings.push(

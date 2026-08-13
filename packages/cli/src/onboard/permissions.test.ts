@@ -147,6 +147,23 @@ describe('installSeatPermissions (ADR 261 decision 4)', () => {
     expect(second.allow).toEqual([]);
     expect(second.deny).toEqual([]);
   });
+
+  it('does not append a third spelling of a rule the human already approved', () => {
+    // The dialog wrote the no-space form once upon a time (or a human typed `:*`) — the floor's
+    // space form is the same rule, and install must count it present, exactly as the inspector does.
+    mkdirSync(join(dir, '.claude'), { recursive: true });
+    writeFileSync(
+      join(dir, '.claude', 'settings.local.json'),
+      JSON.stringify({ permissions: { allow: ['Bash(pnpm test*)', 'Bash(pnpm lint:*)'] } }),
+    );
+    const added = installSeatPermissions(dir);
+    expect(added.allow).not.toContain('Bash(pnpm test *)');
+    expect(added.allow).not.toContain('Bash(pnpm lint *)');
+    const s = readSettings();
+    // The human's spellings survive untouched (merge-never-clobber), and no duplicates joined them.
+    expect(s.permissions?.allow).toContain('Bash(pnpm test*)');
+    expect(s.permissions?.allow?.filter((e) => /pnpm test/.test(e))).toHaveLength(1);
+  });
 });
 
 /**
@@ -233,5 +250,55 @@ describe('inspectSeatPermissions (ADR 261 increment 2)', () => {
     // a crash here would take the session start with it.
     expect(() => inspectSeatPermissions(dir)).not.toThrow();
     expect(inspectSeatPermissions(dir)).toEqual([]);
+  });
+
+  /**
+   * Trailing-wildcard equivalence (docs-verified 2026-08-13): `Bash(cmd *)`, `Bash(cmd*)` and
+   * `Bash(cmd:*)` all match commands, but never string-match each other — and the permission
+   * dialog writes the SPACE form. A seat whose human approved `Bash(pnpm test *)` at a prompt
+   * holds a working equivalent of the floor's entry, and reporting it "missing" is drift noise
+   * that trains readers to ignore the finding (the real seat showed "missing 32 of 32" while
+   * holding 50 working allows).
+   */
+  it('counts a human-approved trailing-wildcard variant as satisfying the floor entry', () => {
+    // Every floor Bash entry, re-spelled the two other ways; plus the non-Bash floor verbatim.
+    const respell = (e: string, to: 'nospace' | 'colon'): string => {
+      const m = /^Bash\((.+) \*\)$/.exec(e);
+      if (!m) return e;
+      return to === 'nospace' ? `Bash(${m[1]}*)` : `Bash(${m[1]}:*)`;
+    };
+    writeSettings({
+      permissions: {
+        allow: STANDARD_FLOOR.allow.map((e, i) => respell(e, i % 2 ? 'nospace' : 'colon')),
+      },
+    });
+    expect(inspectSeatPermissions(dir)).toEqual([]);
+  });
+
+  it('does not let a broader user entry stand in for a narrower floor entry', () => {
+    // `Bash(git *)` matches more than `Bash(git push *)` ever would — but equivalence here is
+    // SPELLING equivalence only, never subsumption: reasoning "a broader rule covers it" is the
+    // harness matcher's job, and reimplementing that is the defect-3 class again.
+    writeSettings({ permissions: { allow: ['Bash(git *)'] } });
+    const findings = inspectSeatPermissions(dir);
+    expect(findings).toHaveLength(1);
+    // `Bash(git *)` is not itself a floor entry and stands in for none of them: all still missing.
+    expect(findings[0]).toContain(String(STANDARD_FLOOR.allow.length));
+  });
+});
+
+describe('the floor is written in the dialog form (ADR 261, space-form normalization)', () => {
+  it('every parameterized Bash floor entry uses the trailing space-star the dialog writes', () => {
+    // One canonical spelling, and it is the one "Yes, don't ask again" produces — so a floor entry
+    // and a dialog-approved entry for the same prefix are byte-identical, and neither the inspector
+    // nor a human diffing the file sees phantom drift. (`Bash(cmd*)` also *matches*, docs-verified,
+    // but it is a second spelling that string-matches nothing the dialog ever wrote.)
+    for (const entry of STANDARD_FLOOR.allow) {
+      if (/^Bash\(/.test(entry) && entry.includes('*')) {
+        expect(entry, `floor entry '${entry}' should end in ' *)' — the dialog's form`).toMatch(
+          / \*\)$/,
+        );
+      }
+    }
   });
 });
