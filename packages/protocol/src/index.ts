@@ -13,6 +13,7 @@ export * from './enforcement.js';
 export * from './loops.js';
 export * from './deliveryHint.js';
 export * from './credentials.js';
+export * from './guardian.js';
 export * from './claim.js';
 export * from './claim-handshake.js';
 export * from './envelope.js';

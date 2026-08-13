@@ -16,6 +16,8 @@ import {
   serializeSeat,
   serializeTeam,
   type StakesDefault,
+  GuardianClassSchema,
+  GuardianTierSchema,
   type TeamFile,
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
@@ -54,7 +56,8 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 /**
  * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]
  * [--review-loop on|off] [--dispatch-loop on|off] [--sweep-loop on|off]
- * [--ask-slack-webhook <url|off>] [--stakes-default <surface>=<low|normal|high>|off]` — show or set the
+ * [--ask-slack-webhook <url|off>] [--stakes-default <surface>=<low|normal|high>|off]
+ * [--guardian-tier <class>=<observe|alert|auto>|off]` — show or set the
  * team governance policy (admin-only, audited `policy.change`). ADR 146: `--reseat-known-agents on`
  * opts the team into dogfood-mode re-seat — an already-held agent seat re-occupies without an admin
  * decision. ADR 147: `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to
@@ -155,6 +158,7 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   const enforceChanged = applyEnforcementFlags(merged, parsed);
   if (enforceChanged) changed = true;
   const stakesDefaultChanged = applyStakesDefaultFlag(merged, parsed);
+  if (applyGuardianTierFlag(merged, parsed)) changed = true;
   if (stakesDefaultChanged) changed = true;
 
   if (changed) {
@@ -305,6 +309,31 @@ const STAKES_DEFAULT_USAGE =
  * surface: same path replaces in place (order preserved, first-match still wins); a new path
  * appends. Never replaces the whole list, so setting web-low cannot wipe a more specific rule.
  */
+const GUARDIAN_TIER_USAGE =
+  "usage: musterd team policy --guardian-tier '<class>=<observe|alert|auto> | off'";
+
+/**
+ * Guardian spec §4 — the autonomy dial. Upserts one class in the sparse `guardian_tiers` map
+ * (absent classes read as the guardian's shipped defaults); `off` deletes the key so the schema
+ * default (empty map) is restored, never stored as `{}` noise.
+ */
+function applyGuardianTierFlag(merged: PolicyOverride, parsed: Parsed): boolean {
+  const raw = flagStr(parsed.flags, 'guardian-tier');
+  if (raw === undefined) return false;
+  if (raw === 'off') {
+    delete merged.guardian_tiers;
+    return true;
+  }
+  const eq = raw.indexOf('=');
+  if (eq <= 0 || eq === raw.length - 1) throw new CliError(GUARDIAN_TIER_USAGE, 2);
+  const cls = GuardianClassSchema.safeParse(raw.slice(0, eq).trim());
+  const tier = GuardianTierSchema.safeParse(raw.slice(eq + 1).trim());
+  if (!cls.success || !tier.success) throw new CliError(GUARDIAN_TIER_USAGE, 2);
+  merged.guardian_tiers = { ...merged.guardian_tiers, [cls.data]: tier.data };
+  process.stdout.write(`${theme.ok('✓')} guardian tier: ${cls.data} → ${tier.data}\n`);
+  return true;
+}
+
 function applyStakesDefaultFlag(merged: PolicyOverride, parsed: Parsed): boolean {
   const raw = flagStr(parsed.flags, 'stakes-default');
   if (raw === undefined) return false;

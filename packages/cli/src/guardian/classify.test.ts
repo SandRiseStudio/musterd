@@ -3,6 +3,7 @@ import {
   classify,
   DEFAULT_TIERS,
   ERROR_RATE_FLOOR,
+  resolveGuardianTiers,
   type GuardianSignals,
 } from './classify.js';
 
@@ -80,6 +81,16 @@ describe('classify (guardian spec §4)', () => {
       reaperStormSinceBoot: true,
     });
     expect(out.map((i) => i.class)).toEqual(['publisher_failed', 'presence_churn']);
+  });
+});
+
+describe('resolveGuardianTiers (policy over defaults, read-time)', () => {
+  it('absent policy yields the defaults; a sparse override changes one class only', () => {
+    expect(resolveGuardianTiers(undefined)).toEqual(DEFAULT_TIERS);
+    const tiers = resolveGuardianTiers({ daemon_down: 'auto' });
+    expect(tiers.daemon_down).toBe('auto');
+    expect(tiers.publisher_failed).toBe('auto');
+    expect(tiers.presence_churn).toBe('alert');
   });
 });
 

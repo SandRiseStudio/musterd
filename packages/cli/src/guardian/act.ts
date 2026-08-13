@@ -51,7 +51,7 @@ export async function actOn(incidents: Incident[], d: ActDeps): Promise<Guardian
   };
 
   const alert = async (cls: GuardianClass, why: string): Promise<void> => {
-    d.osNotify({ title: `musterd guardian: ${cls}`, body: why });
+    d.osNotify({ id: `guardian-${cls}-${d.now()}`, title: `musterd guardian: ${cls}`, body: why });
     await d.sendAsk(`guardian: ${cls} — ${why}`);
   };
 

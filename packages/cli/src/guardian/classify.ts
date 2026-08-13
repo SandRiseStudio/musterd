@@ -7,16 +7,9 @@
  * defense against the 8-day-old-log ghost the seed recorded.
  */
 
-export type GuardianClass =
-  | 'publisher_failed'
-  | 'crashloop'
-  | 'daemon_down'
-  | 'schema_drift'
-  | 'wrong_db'
-  | 'error_rate'
-  | 'presence_churn';
+import type { GuardianClass, GuardianTier, GuardianTiers } from '@musterd/protocol';
 
-export type GuardianTier = 'observe' | 'alert' | 'auto';
+export type { GuardianClass, GuardianTier };
 
 export interface Incident {
   class: GuardianClass;
@@ -52,6 +45,13 @@ export const DEFAULT_TIERS: Record<GuardianClass, GuardianTier> = {
   error_rate: 'alert',
   presence_churn: 'alert',
 };
+
+/** Tier map in force: policy's sparse overrides over the shipped defaults (ADR 185 read-time). */
+export function resolveGuardianTiers(
+  policyTiers: GuardianTiers | undefined,
+): Record<GuardianClass, GuardianTier> {
+  return { ...DEFAULT_TIERS, ...(policyTiers ?? {}) };
+}
 
 export function classify(s: GuardianSignals): Incident[] {
   const auto: Incident[] = [];

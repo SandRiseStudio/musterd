@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EnforcementPolicySchema } from './enforcement.js';
+import { GuardianTiersSchema } from './guardian.js';
 import { StakesDefaultSchema } from './lanes.js';
 import { LoopsPolicySchema } from './loops.js';
 import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from './residency.js';
@@ -105,6 +106,12 @@ export const PolicySchema = z.object({
    * this is inert until a team asks for it — the same opt-in posture as `enforcement` and `loops`.
    */
   stakes_defaults: z.array(StakesDefaultSchema).default([]),
+  /**
+   * Guardian autonomy tiers per incident class (2026-08-13 guardian spec §4) — sparse overrides;
+   * absent classes read as the guardian's shipped defaults. `parse({})` yields an empty map: inert
+   * until an admin flips a class, same opt-in posture as `enforcement`/`loops`/`stakes_defaults`.
+   */
+  guardian_tiers: GuardianTiersSchema.default({}),
 });
 export type Policy = z.infer<typeof PolicySchema>;
 
