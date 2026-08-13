@@ -151,6 +151,14 @@ export default tseslint.config(
     },
   },
   {
+    // `packages/web` is a browser surface, so it is excluded from the Node block above and its own
+    // block gives it `globals.browser` — but its *build tooling* still runs in Node. Without this,
+    // a script there lands in the gap between the two blocks: no Node globals, so `console` and
+    // `process` fail `no-undef` (which is how `scripts/stage-site.mjs` first failed CI).
+    files: ['packages/web/scripts/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node } },
+  },
+  {
     // Tests may use throwaway bindings and looser typing.
     files: ['**/*.test.ts', 'tests/**', 'examples/**'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
