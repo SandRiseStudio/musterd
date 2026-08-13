@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import { McpServer } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+import type { Transport } from '@modelcontextprotocol/server';
+import {
+  serveStdio,
+  type StdioServerHandle,
+  StdioServerTransport,
+} from '@modelcontextprotocol/server/stdio';
 import { renderPrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
 import { MCP_ICONS } from './brand.js';
@@ -334,6 +339,57 @@ export function startResolutionWatcher(
   };
 }
 
+/**
+ * The production stdio entry (ADR 175 part b): `serveStdio` owns the era decision — the opening
+ * exchange selects it, ONE instance from the factory is pinned for the connection lifetime, and
+ * `legacy: 'serve'` pins a 2025-era instance served exactly as the old hand-wired
+ * `connect(StdioServerTransport)` served it. So every current harness (all of them open with
+ * `initialize`) sees a byte-identical wire, while a client that opens with `server/discover` gets
+ * the 2026-07-28 era — instructions and serverInfo on discover, the ADR 175 step-3 cache hints
+ * (armed since #565, unreachable on the legacy wire by SDK design) finally on `tools/list` — with
+ * no musterd release on the day a harness flips its `versionNegotiation` default. Adopted now
+ * rather than gated on that flip because the flip is unobservable from this side of the wire: an
+ * `'auto'` client probes via a sibling process whose stderr is discarded and then falls back to a
+ * connect indistinguishable from today's traffic (the part-(a) dead-man-switch lesson, applied one
+ * level up).
+ *
+ * The factory may run more than once per process — serveStdio's opening rules can draw a probe
+ * instance and a fallback pin from it — which is safe because `buildMcpServer` shares only the
+ * MusterdClient, the recorder, and the caller's memoized capture across instances. The legacy-era
+ * ADR 120 capture (`oninitialized`) is installed per instance here for the same reason.
+ */
+export function startStdioEntry(
+  client: MusterdClient,
+  config: McpConfig,
+  opts: {
+    onFirstToolCall?: () => Promise<void>;
+    recorder?: ToolCallRecorder;
+    onHarness?: (harness: HarnessContext | undefined) => void;
+    /** Tests inject an in-memory wire; production defaults to the process's stdio. */
+    transport?: Transport;
+  } = {},
+): StdioServerHandle {
+  const { transport, onHarness, ...buildOpts } = opts;
+  return serveStdio(
+    () => {
+      const server = buildMcpServer(client, config, {
+        ...buildOpts,
+        ...(onHarness ? { onHarness } : {}),
+      });
+      // Legacy clients still open with `initialize`, so the ADR 120 capture's legacy half rides
+      // every instance the factory mints; the modern half is installed inside buildMcpServer.
+      if (onHarness) observeHarnessInitialization(server.server, onHarness);
+      return server;
+    },
+    {
+      legacy: 'serve',
+      // Out-of-band entry errors are reporting-only; stderr is the one channel MCP leaves us.
+      onerror: (error) => process.stderr.write(`musterd stdio entry: ${error.message}\n`),
+      ...(transport ? { transport } : {}),
+    },
+  );
+}
+
 async function main(): Promise<void> {
   const config = loadMcpConfig();
   // Off by default: a no-op unless the operator set an OTLP endpoint (ADR 089 / ADR 015 posture).
@@ -364,15 +420,16 @@ async function main(): Promise<void> {
     harnessSeen = true;
     recordAdapterInitialization(config, harness);
   };
-  const server = buildMcpServer(client, config, {
+  // The transport is constructed here (not defaulted inside serveStdio) so the shutdown seam
+  // below can keep watching `transport.onclose` — serveStdio owns start/close, we wrap after.
+  const transport = new StdioServerTransport();
+  startStdioEntry(client, config, {
     onFirstToolCall: () => autojoin(client, config),
     recorder,
     onHarness: captureHarnessOnce,
+    transport,
   });
   const stopToolTelemetry = startToolTelemetryFlush(client, recorder);
-  observeHarnessInitialization(server.server, captureHarnessOnce);
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
 
   // The one graceful teardown, shared by every exit path: stop the resolution watcher, drop presence,
   // and flush the telemetry tail with a hard cap so a dead collector never hangs the exit.
