@@ -213,6 +213,10 @@ import {
  */
 const negotiatedEncoding = new WeakMap<ServerResponse, 'br' | 'gzip' | null>();
 
+// Guardian (2026-08-13 spec §3): the boot instant `/health` reports so an external probe can
+// discard log evidence older than this process. Module load ≈ boot for the daemon's purposes.
+const BOOTED_AT = Date.now();
+
 /**
  * Below ~1 MTU, compression framing + CPU costs more than the bytes it saves and adds latency to the
  * hot small responses (status, inbox-check). The big reads — the /live message backfill especially —
@@ -1134,6 +1138,8 @@ export async function handleHttp(
         // The daemon's own feature epoch (ADR 148) — the compiled-in capability counter of the code it
         // runs. The roster compares each seat's attested epoch against this to render a "behind" hint.
         epoch: FEATURE_EPOCH,
+        // Guardian probes filter log lines against this; older lines are evidence of nothing.
+        booted_at: BOOTED_AT,
       });
     }
 

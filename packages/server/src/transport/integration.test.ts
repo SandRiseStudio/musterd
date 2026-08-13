@@ -221,6 +221,10 @@ describe('HTTP API', () => {
     expect(r.json.connections).toBe(0);
     // ADR 130: no buildRef configured → the build field is omitted, never null/empty.
     expect(r.json).not.toHaveProperty('build');
+    // Guardian (2026-08-13 spec §3): recency classification needs the daemon's boot instant —
+    // log lines older than this are evidence of nothing.
+    expect(typeof r.json.booted_at).toBe('number');
+    expect(r.json.booted_at).toBeLessThanOrEqual(Date.now());
     // ADR 148: the daemon always names its own feature epoch — the roster's skew reference.
     expect(r.json.epoch).toBe(FEATURE_EPOCH);
     // Quiescence (2026-08-03): a fresh daemon has no live agent action to age, so the field is

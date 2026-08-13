@@ -296,6 +296,45 @@ describe('team policy command', () => {
     expect(cleared.stakes_defaults).toEqual([]);
   });
 
+  // Guardian spec §4: the autonomy dial — flip one class without a release, never clobber siblings.
+  it('sets a guardian tier, shows it, rejects junk, and clears with off', async () => {
+    const set = await capture(() =>
+      teamCommand(parseArgs(['policy', '--guardian-tier', 'daemon_down=auto'])),
+    );
+    expect(set.code).toBe(0);
+    expect(set.out).toContain('daemon_down → auto');
+
+    const json = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(json.guardian_tiers).toEqual({ daemon_down: 'auto' });
+
+    await expect(
+      capture(() => teamCommand(parseArgs(['policy', '--guardian-tier', 'nonsense=auto']))),
+    ).rejects.toThrow(/guardian-tier/);
+    await expect(
+      capture(() => teamCommand(parseArgs(['policy', '--guardian-tier', 'daemon_down=loud']))),
+    ).rejects.toThrow(/guardian-tier/);
+
+    await capture(() => teamCommand(parseArgs(['policy', '--guardian-tier', 'off'])));
+    const cleared = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(cleared.guardian_tiers).toEqual({});
+  });
+
+  it('setting a guardian tier does not clobber other policy knobs', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--review-loop', 'on'])));
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--guardian-tier', 'error_rate=observe'])),
+    );
+    const after = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(after.loops.review).toBe(true);
+    expect(after.guardian_tiers).toEqual({ error_rate: 'observe' });
+  });
+
   it('upserts the same surface in place and appends a new one', async () => {
     await capture(() =>
       teamCommand(parseArgs(['policy', '--stakes-default', 'packages/web/**=low'])),

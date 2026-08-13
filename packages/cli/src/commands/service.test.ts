@@ -65,8 +65,14 @@ describe('serviceCommand', () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'musterd-svccmd-'));
     calls = [];
+    // Guardian paths derive from configPath(); point them at the temp dir so a test tick's stamp
+    // and token reads never touch the real ~/.musterd.
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => {
+    delete process.env['MUSTERD_CONFIG'];
+    rmSync(dir, { recursive: true, force: true });
+  });
 
   it('requires a subcommand', async () => {
     await expect(serviceCommand(parseArgs([]))).rejects.toThrow(/usage/);
@@ -376,6 +382,101 @@ describe('serviceCommand', () => {
     expect(out).toContain('synced');
     expect(out).toContain('rebuilt dist');
     expect(out).toContain('restarted the musterd daemon on bbb222');
+  });
+
+  // Guardian probe (2026-08-13 spec §1/§6): install writes the guardian-tick plist and ends with
+  // the instrument-silence control probe — a fixture incident through the real alert path, dry-run.
+  it('service install --guardian writes the plist and the control probe fires the alert path', async () => {
+    const gCtx = {
+      uid: 501,
+      label: 'studio.sandrise.musterd-guardian',
+      plistPath: join(dir, 'guardian.plist'),
+      node: '/opt/homebrew/bin/node',
+      binJs: '/repo/packages/cli/dist/bin.js',
+      refreshArgs: ['guardian-tick'],
+      workingDir: '/repo',
+      logPath: join(dir, 'guardian.log'),
+      errLogPath: join(dir, 'guardian.log'),
+      path: '/usr/bin:/bin',
+      intervalSeconds: 120,
+      env: { MUSTERD_SERVICE_TOKEN_FILE: join(dir, 'guardian-seat-token') },
+      run: recorder(),
+      sleep: () => {},
+    };
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['install', '--guardian']), {
+        platform: 'darwin',
+        ctx: ctx(recorder()),
+        guardianCtx: gCtx,
+      }),
+    );
+    expect(code).toBe(0);
+    const plist = readFileSync(join(dir, 'guardian.plist'), 'utf8');
+    expect(plist).toContain('guardian-tick');
+    expect(plist).toContain('studio.sandrise.musterd-guardian');
+    expect(out).toContain('control probe: alert path fired ✓');
+  });
+
+  it('service status --guardian names a never-ticked probe', async () => {
+    const gCtx = {
+      uid: 501,
+      label: 'studio.sandrise.musterd-guardian',
+      plistPath: join(dir, 'guardian.plist'),
+      node: '/opt/homebrew/bin/node',
+      binJs: '/repo/packages/cli/dist/bin.js',
+      refreshArgs: ['guardian-tick'],
+      workingDir: '/repo',
+      logPath: join(dir, 'guardian.log'),
+      errLogPath: join(dir, 'guardian.log'),
+      path: '/usr/bin:/bin',
+      intervalSeconds: 120,
+      run: recorder(),
+      sleep: () => {},
+    };
+    const { out } = await capture(() =>
+      serviceCommand(parseArgs(['status', '--guardian']), {
+        platform: 'darwin',
+        ctx: ctx(recorder()),
+        guardianCtx: gCtx,
+      }),
+    );
+    expect(out).toContain('never ticked');
+  });
+
+  // Guardian crashloop rollback (2026-08-13 spec §4): `refresh --pin <ref>` targets a named ref
+  // instead of origin/main — no fetch (the ref already ran here), same build+restart+verify path.
+  it('refresh --pin switches to the named ref and never fetches origin/main', async () => {
+    const c = ctx(refreshRunner());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh', '--pin', 'abc1234']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'git' && x.args.includes('fetch'))).toBe(false);
+    expect(
+      calls.some((x) => x.cmd === 'git' && x.args.includes('switch') && x.args.includes('abc1234')),
+    ).toBe(true);
+    expect(out).toContain('pinned');
+  });
+
+  it('refresh --pin with an unknown ref fails before any bounce', async () => {
+    const runner = refreshRunner();
+    const c = ctx(((cmd, args) => {
+      if (cmd === 'git' && args.includes('switch'))
+        return { status: 1, stdout: '', stderr: 'bad ref' };
+      return runner(cmd, args);
+    }) as Runner);
+    await expect(
+      serviceCommand(parseArgs(['refresh', '--pin', 'nope']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    ).rejects.toThrow(/git switch nope failed/);
+    expect(calls.some((x) => x.cmd === 'launchctl')).toBe(false);
   });
 
   // The silent-pin bug (#565) and its retry hole: the first fix (#570) decided on the lockfile diff
