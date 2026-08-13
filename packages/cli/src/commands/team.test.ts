@@ -270,6 +270,73 @@ describe('team policy command', () => {
     expect(show.out).toContain('enforcement:');
     expect(show.out).toContain('src/tariff.ts');
   });
+
+  // ADR 244: the operable setter the daemon field shipped without. Read-merge-write, same as
+  // every other policy knob — a raw POST of only stakes_defaults would wipe loops/reseat/secrets.
+  it('sets a stakes-default rule, shows it, and clears it with off', async () => {
+    const set = await capture(() =>
+      teamCommand(parseArgs(['policy', '--stakes-default', 'packages/web/**=low'])),
+    );
+    expect(set.code).toBe(0);
+    expect(set.out).toContain('packages/web/** → low');
+
+    const show = await capture(() => teamCommand(parseArgs(['policy'])));
+    expect(show.out).toContain('stakes defaults:');
+    expect(show.out).toContain('packages/web/** → low');
+
+    const json = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(json.stakes_defaults).toEqual([{ surface: 'packages/web/**', stakes: 'low' }]);
+
+    await capture(() => teamCommand(parseArgs(['policy', '--stakes-default', 'off'])));
+    const cleared = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(cleared.stakes_defaults).toEqual([]);
+  });
+
+  it('upserts the same surface in place and appends a new one', async () => {
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--stakes-default', 'packages/web/**=low'])),
+    );
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--stakes-default', 'packages/web/**=normal'])),
+    );
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--stakes-default', 'packages/cli/**=high'])),
+    );
+    const json = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(json.stakes_defaults).toEqual([
+      { surface: 'packages/web/**', stakes: 'normal' },
+      { surface: 'packages/cli/**', stakes: 'high' },
+    ]);
+  });
+
+  it('setting a stakes-default does not clobber other policy knobs', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--reseat-known-agents', 'on'])));
+    await capture(() => teamCommand(parseArgs(['policy', '--review-loop', 'on'])));
+    await capture(() =>
+      teamCommand(parseArgs(['policy', '--stakes-default', 'packages/web/**=low'])),
+    );
+    const after = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['policy', '--json'])))).out,
+    );
+    expect(after.standing_reseat_known_agents).toBe(true);
+    expect(after.loops).toEqual({ review: true, dispatch: false, sweep: false });
+    expect(after.stakes_defaults).toEqual([{ surface: 'packages/web/**', stakes: 'low' }]);
+  });
+
+  it('rejects a stakes-default that is not surface=low|normal|high or off', async () => {
+    await expect(
+      teamCommand(parseArgs(['policy', '--stakes-default', 'packages/web/**'])),
+    ).rejects.toThrow(/--stakes-default/);
+    await expect(
+      teamCommand(parseArgs(['policy', '--stakes-default', 'packages/web/**=tiny'])),
+    ).rejects.toThrow(/--stakes-default/);
+  });
 });
 
 /**

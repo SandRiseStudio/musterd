@@ -104,6 +104,11 @@ written down where the next reader will find it.
   both wrote last week, which nothing but a merge conflict caught. A `migrations:check` gate on
   duplicate versions is still owed and this is the third week running it would have paid for itself.
 
+- **2026-08-12.** The field shipped without a CLI setter, so `packages/web/AGENTS.md` described a
+  default an admin had no safe one-liner to arm — a raw `POST /policy` of only `stakes_defaults`
+  would replace-semantics wipe loops and secrets (ADR 185). `musterd team policy --stakes-default
+  '<surface>=<low|normal|high>'` is now the read-merge-write knob; `off` clears the list.
+
 ## Observability & Evaluation
 
 **Traces.** `stakes_provenance` on every `lane.ready_for_review` row beside `stakes`, recorded

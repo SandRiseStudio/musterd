@@ -7,6 +7,7 @@ import {
   effectiveCapabilities,
   type EnforcementClass,
   type EnforcementPosture,
+  LaneStakesSchema,
   type Lifecycle,
   type MemberKind,
   type PolicyOverride,
@@ -14,6 +15,7 @@ import {
   type SeatFile,
   serializeSeat,
   serializeTeam,
+  type StakesDefault,
   type TeamFile,
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
@@ -52,7 +54,7 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
 /**
  * `musterd team policy [--reseat-known-agents on|off] [--ask-fallback-to-nonadmin on|off]
  * [--review-loop on|off] [--dispatch-loop on|off] [--sweep-loop on|off]
- * [--ask-slack-webhook <url|off>]` — show or set the
+ * [--ask-slack-webhook <url|off>] [--stakes-default <surface>=<low|normal|high>|off]` — show or set the
  * team governance policy (admin-only, audited `policy.change`). ADR 146: `--reseat-known-agents on`
  * opts the team into dogfood-mode re-seat — an already-held agent seat re-occupies without an admin
  * decision. ADR 147: `--ask-fallback-to-nonadmin on` lets an admin-unanswered ask fall back to
@@ -62,7 +64,9 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
  * `--ask-slack-webhook <url>` points the ask stream's loud reach at a Slack incoming webhook (`off`
  * clears it); the URL is a secret, so the display masks it to its host. ADR 248:
  * `--seeds-relay <url> --seeds-token <token>` points the seeds ingest loop at the capture relay
- * (`--seeds-relay off` clears both); the token is a secret and never displayed. Reads → merges the named
+ * (`--seeds-relay off` clears both); the token is a secret and never displayed. ADR 244:
+ * `--stakes-default <surface>=<low|normal|high>` upserts a default-stakes rule (same surface
+ * replaces in place; a new surface appends); `--stakes-default off` clears the list. Reads → merges the named
  * knob(s) → POSTs the policy (the residency-policy read-merge-write pattern), so setting one knob
  * never clobbers the wake-policy defaults.
  */
@@ -150,6 +154,8 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   // (the flag is an explicit opt-in to enforce; pass `--enforce-posture warn` for the advisory tier).
   const enforceChanged = applyEnforcementFlags(merged, parsed);
   if (enforceChanged) changed = true;
+  const stakesDefaultChanged = applyStakesDefaultFlag(merged, parsed);
+  if (stakesDefaultChanged) changed = true;
 
   if (changed) {
     const { policy: updated } = await http.setPolicy(team, merged);
@@ -202,6 +208,16 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
         ) + '\n',
       );
     }
+    if (stakesDefaultChanged) {
+      const rules = updated.stakes_defaults;
+      process.stdout.write(
+        hint(
+          rules.length === 0
+            ? "stakes defaults off — every lane opens at the worker's declaration (or normal)"
+            : `stakes defaults: ${rules.map((r) => `${r.surface} → ${r.stakes}`).join(', ')} — first match wins; mixed-surface lanes stay normal`,
+        ) + '\n',
+      );
+    }
     return 0;
   }
 
@@ -236,6 +252,20 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   process.stdout.write(
     `  seeds relay: ${current.seeds_relay_url ? theme.accent(maskWebhook(current.seeds_relay_url)) : 'off'}${inherited(stored, 'seeds_relay_url')}\n`,
   );
+  // ADR 244: admin-set default stakes by surface. Empty is the shipped default (inert).
+  const stakeRules = current.stakes_defaults;
+  if (stakeRules.length === 0) {
+    process.stdout.write(
+      `  stakes defaults: ${theme.meta('off (no rules)')}${inherited(stored, 'stakes_defaults')}\n`,
+    );
+  } else {
+    process.stdout.write(
+      `  stakes defaults: ${theme.accent(`${stakeRules.length} rule(s)`)}${inherited(stored, 'stakes_defaults')}\n`,
+    );
+    for (const r of stakeRules) {
+      process.stdout.write(`    · ${r.surface} → ${r.stakes}\n`);
+    }
+  }
   // ADR 150: the enforcement class table — the opt-in PreToolUse gate declaration.
   const classes = current.enforcement.classes;
   if (classes.length === 0) {
@@ -260,7 +290,44 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
       "       musterd team policy --enforce-surface 'src/tariff.ts' --enforce-posture block",
     ) + '\n',
   );
+  process.stdout.write(
+    theme.meta("       musterd team policy --stakes-default 'packages/web/**=low'") + '\n',
+  );
   return 0;
+}
+
+const STAKES_DEFAULT_USAGE =
+  "usage: musterd team policy --stakes-default '<surface>=<low|normal|high> | off'";
+
+/**
+ * ADR 244 — upsert or clear `stakes_defaults` on the sparse stored policy. `--stakes-default off`
+ * deletes the key (the empty list is the schema default). A `surface=stakes` value upserts by
+ * surface: same path replaces in place (order preserved, first-match still wins); a new path
+ * appends. Never replaces the whole list, so setting web-low cannot wipe a more specific rule.
+ */
+function applyStakesDefaultFlag(merged: PolicyOverride, parsed: Parsed): boolean {
+  const raw = flagStr(parsed.flags, 'stakes-default');
+  if (raw === undefined) return false;
+  if (raw === 'off') {
+    delete merged.stakes_defaults;
+    return true;
+  }
+  const eq = raw.lastIndexOf('=');
+  if (eq <= 0 || eq === raw.length - 1) {
+    throw new CliError(STAKES_DEFAULT_USAGE, 2);
+  }
+  const surface = raw.slice(0, eq).trim();
+  const stakesParsed = LaneStakesSchema.safeParse(raw.slice(eq + 1).trim());
+  if (surface.length === 0 || !stakesParsed.success) {
+    throw new CliError(STAKES_DEFAULT_USAGE, 2);
+  }
+  const rule: StakesDefault = { surface, stakes: stakesParsed.data };
+  const rules = [...(merged.stakes_defaults ?? [])];
+  const i = rules.findIndex((r) => r.surface === surface);
+  if (i >= 0) rules[i] = rule;
+  else rules.push(rule);
+  merged.stakes_defaults = rules;
+  return true;
 }
 
 /**
