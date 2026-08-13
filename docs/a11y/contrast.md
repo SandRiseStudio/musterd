@@ -11,8 +11,19 @@ beyond `pnpm build`:
 
 1. **Prerendered routes**, off a static server it runs itself.
 2. **`/board` and `/live` connected**, against a throwaway daemon over a synthetic team
-   ([`fixture-team.sh`](../../scripts/a11y/fixture-team.sh) — goals and lanes in every state the
-   board can paint). `--static-only` skips this phase and says so in the output.
+   ([`fixture-team.sh`](../../scripts/a11y/fixture-team.sh)) — goals and lanes in every state the
+   board can paint, **and an occupied room**: three seats that genuinely claim, a spread of acts
+   across the tone map, and one open ask per tier. `--static-only` skips this phase and says so.
+
+**Why the room has to be busy.** A team where nobody is present renders only its quiet states —
+`offline` chips, an empty asks rail, no posture but idle. Measured both ways (`A11Y_FIXTURE_SEATS=`
+gives the empty room): unoccupied `/live` yields 25 measurable text nodes, occupied 35. The count is
+the least of it. Fourteen element/ink pairs exist **only** in a busy room, and nothing had ever
+measured any of them — the act→tone badges (`help`, `status`, `handoff`), the `working` posture
+chip, a quote and its author in the sender's own ink, the work stack's task/name/state/overflow, the
+asks rail's avatar and rest-count. Seats must genuinely **claim**: `team add` alone leaves them
+unbound, their sends fall back to the admin identity, and the whole identity palette collapses to
+one colour — a seeded room that still measures almost nothing.
 
 Phase 2 is not optional polish. Phase 1 alone reaches `/board` and `/live` only at their sign-in
 screen — one measurable element each — and everything the product is made of lives past that point.
@@ -29,6 +40,13 @@ unautomated check measures over time.
 **What the gate still cannot see**, so a green run is not over-read: gradient-backed text (reported
 SKIPPED, counted per route in the summary); hover, error and empty states, which never render; and
 any surface the fixture team does not seed. A surface nobody seeds is a surface nobody measures.
+
+**The office overlay is permanently in that first bucket, and seeding does not rescue it.** Filling
+the room moved eight more pairs _into_ SKIPPED rather than into coverage — `lc-asks__gist`,
+`lc-ask__tier`, `lc-ask__clock`, `lc-asks__routed`, the work stack's count and said, and both
+gl-labels — because they paint over `.lc-office`, a gradient. Making the asks rail loud made its
+tier chips **visible and still unmeasurable**. There is no fix inside this method; read those
+surfaces' own paper tokens, and treat `--probe` output as advisory, never as the gate.
 
 **The fixture's isolation contract is inherited whole** from
 [`scripts/perf/broadcast-bench-fixture.sh`](../../scripts/perf/broadcast-bench-fixture.sh), which
@@ -112,15 +130,16 @@ office, where the same values colour the characters' bodies.
 
 ## Log
 
-| Date       | Surface                                   | Result                                                                |
-| ---------- | ----------------------------------------- | --------------------------------------------------------------------- |
-| 2026-08-05 | `/live`, `/broadcast` focus rings (#710)  | ring was `--accent` at 2.66:1 on paper; added `--lc-focus`            |
-| 2026-08-05 | `/live` badge + status palette (#723)     | 19 failures, worst 1.48:1; ten `-ink` siblings, quiet tiers re-spaced |
-| 2026-08-05 | seat identity (#728)                      | avatar initials; `memberAvatar` / `memberInk`                         |
-| 2026-08-12 | goal grid shelf label                     | `.gg-shelf__label` 4.05 on shelf paper (#8a755a); first sign of the below |
-| 2026-08-12 | approval card + asks preview              | 9 failures, worst 1.50:1; all fill-token-as-text → `-ink` siblings    |
-| 2026-08-12 | connected `/board` + `/live` (first ever) | 12 failures; goal grid's eight one-off browns → one measured ink set  |
-| 2026-08-12 | seat avatar disc                          | white initial 3.42; band clears NEITHER pole, so the glyph went       |
+| Date       | Surface                                   | Result                                                                        |
+| ---------- | ----------------------------------------- | ----------------------------------------------------------------------------- |
+| 2026-08-05 | `/live`, `/broadcast` focus rings (#710)  | ring was `--accent` at 2.66:1 on paper; added `--lc-focus`                    |
+| 2026-08-05 | `/live` badge + status palette (#723)     | 19 failures, worst 1.48:1; ten `-ink` siblings, quiet tiers re-spaced         |
+| 2026-08-05 | seat identity (#728)                      | avatar initials; `memberAvatar` / `memberInk`                                 |
+| 2026-08-12 | goal grid shelf label                     | `.gg-shelf__label` 4.05 on shelf paper (#8a755a); first sign of the below     |
+| 2026-08-12 | approval card + asks preview              | 9 failures, worst 1.50:1; all fill-token-as-text → `-ink` siblings            |
+| 2026-08-12 | connected `/board` + `/live` (first ever) | 12 failures; goal grid's eight one-off browns → one measured ink set          |
+| 2026-08-12 | seat avatar disc                          | white initial 3.42; band clears NEITHER pole, so the glyph went               |
+| 2026-08-12 | `/live` with the room occupied            | 0 failures — but +14 pairs measured for the first time, +8 shown unmeasurable |
 
 After those three, `/live` and `/broadcast` measure **zero** live AA text-contrast failures — and
 since 2026-08-12 every prerendered route measures zero on every PR, because `pnpm a11y:check` says

@@ -8,6 +8,11 @@
 # `contrast-gate.mjs` drives this; it is standalone so you can also stand the board up by hand and
 # look at it.
 #
+# `A11Y_FIXTURE_SEATS=` (empty) stands the team up with an EMPTY room. That is not a convenience
+# knob, it is how the room's worth was measured: unoccupied, `/live` yields 25 measurable text
+# nodes; occupied, 29 — and the four extra classes are the least of it, because the pairs that only
+# exist in a busy room are the ones nothing had ever checked. See the header of the room block below.
+#
 # ── Why this exists ─────────────────────────────────────────────────────────────────────────────
 #
 # The gate's first cut swept the built client off a static server, which covers the prerendered
@@ -49,9 +54,25 @@ LIVE_DB="${HOME}/.musterd/musterd.db"
 
 BIN="$ROOT/packages/cli/dist/bin.js"
 ADMIN="$FIX/admin"
+# Seats live BESIDE the admin folder, never under it: a binding resolves by walking up parents, so a
+# seat nested inside the admin's folder is refused as already bound.
+SEATDIR="$FIX/seats"
+# Who occupies the room. Names are load-bearing twice over: `memberAvatar`/`memberInk` derive colour
+# from the name, so a spread of names is a spread of inks — and the stream prints the sender's name
+# in its own ink, which is where that palette is actually read as text.
+SEATS="${A11Y_FIXTURE_SEATS-bo cy della}"
 
-as_admin() {
-  (cd "$ADMIN" && MUSTERD_CONFIG="$ADMIN/config.json" node "$BIN" "$@" --server "$SERVER")
+as_seat() {
+  local dir="$1"; shift
+  (cd "$dir" && MUSTERD_CONFIG="$dir/config.json" node "$BIN" "$@" --server "$SERVER")
+}
+as_admin() { as_seat "$ADMIN" "$@"; }
+
+approve_pending() {
+  for id in $(as_admin requests --pending --json | node -e \
+      "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const r of JSON.parse(s||'[]'))console.log(r.id)})"); do
+    as_admin requests decide "$id" --approve --standing >/dev/null 2>&1 || true
+  done
 }
 
 health_field() {
@@ -144,7 +165,71 @@ up() {
   as_admin lane update "$(ids 'stuck behind something')" --state blocked >/dev/null
   as_admin lane update "$(ids 'a lane on no goal at all')" --state awaiting_acceptance >/dev/null
 
-  echo "▸ a11y fixture up — team '$TEAM' at $SERVER"
+  # ── the room, occupied ────────────────────────────────────────────────────────────────────────
+  #
+  # Everything above paints the BOARD. `/live` is mostly a stream of acts, a rail of asks and a work
+  # stack, and on a team where nobody is present those render their QUIET states: an "nothing waiting
+  # on a human" rail, every roster chip reading `offline`, no posture but idle.
+  #
+  # Measured both ways rather than assumed (A11Y_FIXTURE_SEATS= gives the empty room): unoccupied
+  # /live yields 25 measurable text nodes, occupied 29. The interesting part is not the count but
+  # WHICH — fourteen element/ink pairs exist only in a busy room, and none of them had ever been
+  # measured by anything:
+  #
+  #   the act→tone badges (`lc-badge--accent` "help", `--status`, `--handoff`) · the `working`
+  #   posture chip · a quote and its author in the sender's own ink · the work stack's task, name,
+  #   state and overflow · the asks rail's avatar and rest-count · the roster gap line
+  #
+  # Seats must genuinely CLAIM to send under their own name; `team add` alone leaves them unbound and
+  # their sends fall back to the admin identity, which collapses the palette to one colour and is
+  # exactly how a seeded room can still measure nothing. `claim` blocks until an admin decides
+  # (ADR 077), so each claims in the background while the admin approves underneath them.
+  if [ -z "$SEATS" ]; then
+    echo "▸ a11y fixture up — team '$TEAM' at $SERVER (empty room: A11Y_FIXTURE_SEATS is unset)"
+    echo "  $SERVER/board?team=$TEAM"
+    return 0
+  fi
+  as_admin team policy --reseat-known-agents on >/dev/null 2>&1 || true
+  KEY="$(node -e "console.log(require('$ADMIN/config.json').agentKeys['$TEAM'])")"
+  for s in $SEATS; do
+    mkdir -p "$SEATDIR/$s"
+    (cd "$SEATDIR/$s" && MUSTERD_CONFIG="$SEATDIR/$s/config.json" \
+       node "$BIN" claim "$s" --team "$TEAM" --key "$KEY" --server "$SERVER" \
+       >"$SEATDIR/$s/claim.log" 2>&1) &
+  done
+  bound=0
+  for _ in $(seq 1 25); do
+    sleep 1; approve_pending
+    bound=0
+    for s in $SEATS; do grep -q 'occupied on' "$SEATDIR/$s/claim.log" 2>/dev/null && bound=$((bound + 1)); done
+    [ "$bound" -eq "$(echo $SEATS | wc -w | tr -d ' ')" ] && break
+  done
+  if [ "$bound" -eq 0 ]; then
+    echo "✗ no seat bound — /live would render an empty room and measure only its quiet states" >&2
+    echo "  see $SEATDIR/*/claim.log" >&2
+    exit 1
+  fi
+
+  # Acts across the tone map. `format.ts` paints each act a different colour and the stream is the
+  # largest DOM surface on the page, so this is the bulk of what phase 2 actually measures.
+  set -- $SEATS
+  A="${1:-}"; B="${2:-$A}"; C="${3:-$A}"
+  as_seat "$SEATDIR/$A" send --to @team --act status_update "carrying the story lane" >/dev/null 2>&1 || true
+  as_seat "$SEATDIR/$B" send --to @team --act request_help "stuck behind something and out of ideas" >/dev/null 2>&1 || true
+  as_seat "$SEATDIR/$C" send --to "$A" --act handoff "yours now — branch is pushed" >/dev/null 2>&1 || true
+  as_seat "$SEATDIR/$A" send --to "$C" --act accept "took it, thanks" >/dev/null 2>&1 || true
+  as_seat "$SEATDIR/$B" send --to @team --act status_update "back on it" >/dev/null 2>&1 || true
+
+  # The asks rail, loud. One per tier: the tier chips and their countdown clocks are separate inks,
+  # and a rail with nothing in it renders exactly one quiet line.
+  as_seat "$SEATDIR/$A" send --to evan --act ask --meta species=consult --meta tier=advisory \
+    "can you look at this before I go further?" >/dev/null 2>&1 || true
+  as_seat "$SEATDIR/$B" send --to gus --act ask --meta species=escalate --meta tier=standard \
+    "need a decision to keep moving" >/dev/null 2>&1 || true
+  as_seat "$SEATDIR/$C" send --to evan --act ask --meta species=approve --meta tier=blocking \
+    "approve this before it ships?" >/dev/null 2>&1 || true
+
+  echo "▸ a11y fixture up — team '$TEAM' at $SERVER ($bound seats in the room)"
   echo "  $SERVER/board?team=$TEAM"
 }
 
