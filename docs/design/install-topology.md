@@ -1,6 +1,10 @@
 # Install topology — the team home is where the human stands
 
-**Status:** design accepted by nick 2026-07-28 (this session); implementation lanes open, unclaimed.
+**Status:** design accepted by nick 2026-07-28; **all six §9 lanes shipped** (L1–L6, with
+[ADR 174](../decisions/174-human-credential-recovery.md), [ADR 176](../decisions/176-the-team-home.md)
+and [ADR 178](../decisions/178-lane-project-from-repo-identity.md) landed). What remains of the arc:
+/live for packaged installs (out of scope here — ADR 156 tracks it, §8) and the optional Appendix A
+checkout rename (operator runbook, not product).
 **Author:** miley, from the 2026-07-28 dogfood session that surfaced every gap below, live.
 **Companion ADRs:** two ride the implementing PRs — the _credential re-issue_ ADR (increment 3,
 landed as [ADR 174](../decisions/174-human-credential-recovery.md)) and the _team home_ ADR
