@@ -94,6 +94,30 @@ zero. Every primer line is a per-session token tax and the cap is load-bearing, 
 - A dependency-adding merge self-heals instead of pinning the daemon.
 - A tick that fails for any _other_ reason is now loud, so the next unknown failure mode surfaces in
   minutes rather than whenever a human happens to read the log.
+- **2026-08-12 — "a tick that fails for any other reason is now loud" was louder than it was true.**
+  The clause above is right that an unattended failure must surface. What it did not anticipate is
+  that the notice ASSERTED a cause it could not know: the `catch` around the refresh hardcoded
+  "the refresh to <tip> did not build" for any throw out of a routine spanning git sync, install,
+  build, restart and the health verify. Measured this day, the daemon sat pinned for 35 minutes
+  with that notice on screen while `main` compiled clean and nothing had ever been built — the log
+  carries no `synced →` and no `building…` line for the tip it blamed. A wrong cause in the only
+  surface an unattended failure has is worse than no notice: it sends whoever answers to debug a
+  phantom break in a healthy tree. The notice now carries the thrown error's own first line, and
+  every stage already names itself. Same discipline as #761's claim timeout, which stopped blaming
+  an approval nobody had requested.
+  The real cause that message was hiding is worth recording, because it is a shape rather than a
+  slip: **a decision made from a stale reading cannot survive a guard that takes a fresh one.** A
+  health probe blipped, so `health0.connections` was absent, `conns` read 0, and `force` — derived
+  as `conns > 0` — computed false. `guardLiveSessions` then took its OWN reading, found the one
+  session that had reconnected, and refused a bounce that notice mode was never meant to refuse.
+  `force` is now `mode === 'notice'`, derived from the mode rather than from a count, and `conns`
+  decides only whether there is anyone to announce to.
+  And the refusal was mis-filed twice over: it is a **policy hold, not a failure**, but it was
+  notified as a failure AND stamped into `.attempted-sha`, which parks a tip until an unrelated
+  commit clears it. That stamp is what turned a momentary "someone is using the daemon" into 35
+  minutes of pinned code, recovered only when an unrelated merge happened along. A live-session
+  refusal is now settled BEFORE the stamp: it logs a hold, leaves the tip unstamped, and the next
+  tick retries. **A hold must retry; only a failure may debounce.**
 - `GUIDANCE_CONTENT_VERSION` 11 → 13 (two content changes, each bumped per the ADR 085 ritual).
 - The manual verb keeps working, so hosts without a refresher are unaffected.
 

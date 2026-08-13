@@ -1347,6 +1347,48 @@ async function announceRefreshBounce(
   }
 }
 
+/**
+ * The daemon's CURRENT connection count, or 0 when it cannot be read.
+ *
+ * Unreachable means 0 on purpose — there is nothing to disrupt, which is the same reading
+ * {@link guardLiveSessions} takes. What this must never do is reuse an earlier tick's count: the
+ * whole defect this exists for is a decision made from a stale reading meeting a guard that takes a
+ * fresh one.
+ */
+async function liveConnections(health: () => Promise<DaemonHealth>): Promise<number> {
+  try {
+    return (await health()).connections ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The one-line cause for the failure notice — the thrown error's first line, clipped.
+ *
+ * WHY THIS EXISTS. The notice used to assert "the refresh to <tip> did not build" for ANY throw out
+ * of {@link refreshDaemon}, which spans git sync, install, build, restart and the health verify.
+ * Measured 2026-08-12: a tick died at the git stage during a merge burst and told the operator the
+ * tip "did not build" — while the log carried no `synced →` and no `building…` line for that tip,
+ * because nothing was ever built. `main` compiled clean the whole time. The notice is the only
+ * surface an unattended failure has, so an invented cause there sends whoever answers it to debug a
+ * phantom break in a healthy tree, which is strictly worse than saying nothing.
+ *
+ * Every stage already throws a message naming itself (`fail(step, r)` → "<step> failed …", the
+ * build's own CliError → "build failed …"). This carries that instead of overwriting it — the same
+ * discipline as #761, where a claim timeout stopped blaming an approval nobody had requested: never
+ * assert a cause the code does not know.
+ *
+ * First line only, because a notification body is a glance and the log keeps the full error (which
+ * is what the trailing "See …refresh.log" points at).
+ */
+function failureCause(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const first = raw.split('\n')[0]?.trim() ?? '';
+  if (!first) return 'no cause reported — see the log';
+  return first.length <= 120 ? first : `${first.slice(0, 119)}…`;
+}
+
 /** File-backed outage marker for the ADR 230 escalation ladder — its own file beside the attempted-tip
  *  stamp, so the two lifecycles (a broken build vs. a dead daemon) can never overwrite each other. */
 function fileOutageState(): { read: () => string | null; write: (s: string) => void } {
@@ -1603,21 +1645,45 @@ async function autoRefreshTick(
     ok(`${conns} live session${s(conns)} connected — deferring refresh (idle mode); will retry`);
     return 0;
   }
-  const force = conns > 0; // notice mode with live sessions → announced, forced bounce
+  // Notice mode means "tell them, then bounce", so it ALWAYS forces — decoupled from `conns`, which
+  // now decides only whether there is anyone to announce to. They were one expression, and that
+  // conflation cost 35 minutes on 2026-08-12: a health probe blipped, `health0.connections` came
+  // back absent, `conns` read 0, `force` computed false — and then `guardLiveSessions` took its own
+  // FRESH reading, found the 1 session that had reconnected, and refused the bounce it was never
+  // meant to refuse in notice mode. A decision made from a stale count cannot survive a guard that
+  // re-reads; the only fix is to stop deriving the decision from the count.
+  const force = mode === 'notice';
   // Announced at the bounce, not at the decision: the announcement is "your session is about to
   // reconnect", which is only true once the sync and build have landed. Firing it up front made one
   // merge cost the operator up to three notifications — announce, failure, then announce again on
-  // the retry — for a daemon that never moved (#631).
-  const announce = force
-    ? () => {
-        notify({
-          id: 'musterd-autorefresh',
-          title: 'musterd auto-refresh',
-          body: `Updating the daemon to latest main (${behind} commit${s(behind)} behind); ${conns} live session${s(conns)} will briefly reconnect.`,
-        });
-        ok(`${conns} live session${s(conns)} — notified the operator, forcing the bounce`);
-      }
-    : undefined;
+  // the retry — for a daemon that never moved (#631). Gated on `conns` rather than `force`: with
+  // nobody connected there is no reconnect to warn about.
+  const announce =
+    force && conns > 0
+      ? () => {
+          notify({
+            id: 'musterd-autorefresh',
+            title: 'musterd auto-refresh',
+            body: `Updating the daemon to latest main (${behind} commit${s(behind)} behind); ${conns} live session${s(conns)} will briefly reconnect.`,
+          });
+          ok(`${conns} live session${s(conns)} — notified the operator, forcing the bounce`);
+        }
+      : undefined;
+  // A live-session refusal is a HOLD, not a failure, so it is settled BEFORE the attempt is stamped.
+  // `guardLiveSessions` re-reads health, so it can refuse on evidence this tick never saw — and on
+  // 2026-08-12 that refusal was stamped as an attempt and notified as a build failure, parking the
+  // tip until an unrelated merge cleared it. 35 minutes pinned, on a daemon whose only problem was
+  // that somebody was using it. A hold must retry; only a failure may debounce.
+  if (!force) {
+    const live = await liveConnections(health);
+    if (live > 0) {
+      ok(
+        `${live} live session${s(live)} connected — holding the refresh (idle mode); ` +
+          `the tip stays unstamped, so the next tick retries`,
+      );
+      return 0;
+    }
+  }
   if (tip) autoState.write(tip); // mark the attempt BEFORE building, so a failed build debounces next tick
   try {
     const code = await refreshDaemon(ctx, health, force, ok, fail, undefined, health0, announce);
@@ -1636,7 +1702,7 @@ async function autoRefreshTick(
       title: 'musterd auto-refresh failed',
       body:
         `The daemon is pinned on ${health0.build.slice(0, 7)} — the refresh to ${tip.slice(0, 7)} ` +
-        `did not build, and nothing will retry until a new commit lands. ` +
+        `failed: ${failureCause(err)}. Nothing will retry until a new commit lands. ` +
         `See ~/.musterd/autorefresh/refresh.log.`,
     });
     throw err;

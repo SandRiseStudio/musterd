@@ -316,6 +316,124 @@ describe('service refresh --auto (the tick)', () => {
     expect(n.body).toContain('refresh.log');
   });
 
+  // Measured 2026-08-12: the tick gave up during a merge burst and told the operator "the refresh
+  // to 5db2943 did not build". Nothing had built — the log carries no `synced →` line and no
+  // `building…` line for that tip, because it failed at the git stage and never reached the build.
+  // The notification is the ONLY surface an unattended failure has, so a cause invented there sends
+  // whoever answers it to debug a phantom build break in a tree that compiles fine. Same defect
+  // class as #761's claim timeout blaming an approval nobody requested: do not assert a cause the
+  // code cannot know. Every stage already throws a message naming itself; the notice just has to
+  // carry it instead of overwriting it.
+  it('names the stage that actually failed, instead of always blaming the build', async () => {
+    const notify = vi.fn();
+    // Fails at `git switch origin/main` — the pre-build stage the live incident died at.
+    const switchFails: Runner = (cmd, args) => {
+      calls.push({ cmd, args });
+      if (cmd === 'git') {
+        if (args.includes('--is-inside-work-tree'))
+          return { status: 0, stdout: 'true', stderr: '' };
+        if (args.includes('--porcelain')) return { status: 0, stdout: '', stderr: '' };
+        if (args.includes('rev-list')) return { status: 0, stdout: '1', stderr: '' };
+        if (args.includes('rev-parse') && args.includes('origin/main'))
+          return { status: 0, stdout: 'freshtip77', stderr: '' };
+        if (args.includes('--short')) return { status: 0, stdout: 'aaa1111', stderr: '' };
+        if (args.includes('switch'))
+          return { status: 1, stdout: '', stderr: 'fatal: local changes would be overwritten' };
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    await expect(
+      serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'notice']), {
+        platform: 'darwin',
+        ctx: ctx(switchFails),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        notify,
+        autoState: memState(null),
+      }),
+    ).rejects.toThrow(/git switch/);
+    const body = (notify.mock.calls.at(-1)?.[0] as { body: string }).body;
+    // The claim it must NOT make: nothing was built, so "did not build" is a fabricated cause.
+    expect(body).not.toContain('did not build');
+    expect(body).toContain('git switch');
+    // Everything the notice was already right about survives.
+    expect(body).toContain('pinned');
+    expect(body).toContain('refresh.log');
+  });
+
+  // A build that genuinely fails must still say so — the fix is to stop INVENTING the cause, not to
+  // stop naming it when it is known.
+  it('still names the build when the build is what failed', async () => {
+    const notify = vi.fn();
+    await expect(
+      serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'notice']), {
+        platform: 'darwin',
+        ctx: ctx(autoRunner({ behind: 1, tip: 'freshtip77', buildStatus: 1 })),
+        health: async () => ({ connections: 0, build: 'oldsha0' }),
+        notify,
+        autoState: memState(null),
+      }),
+    ).rejects.toThrow(/build failed/);
+    expect((notify.mock.calls.at(-1)?.[0] as { body: string }).body).toContain('build failed');
+  });
+
+  /**
+   * THE incident, 2026-08-12. The daemon sat pinned on dc3b262 for 35 minutes while main was two
+   * commits ahead, and recovered only when an unrelated merge happened to clear the debounce.
+   *
+   * The chain: a health probe blipped at 16:21 ("daemon unreachable"), so the tick's `health0` had
+   * no `connections` and `force` computed as false. `guardLiveSessions` then took its OWN fresh
+   * reading, found 1 live session, and refused — correctly, on its own terms. But that refusal is a
+   * POLICY HOLD, not a failure: it was notified as "did not build", and the `.attempted-sha` stamp
+   * (written before the try) parked the tip so nothing would retry.
+   *
+   * A hold must retry; only a failure debounces. Conflating them means one live session, at the
+   * wrong moment, pins the daemon indefinitely.
+   */
+  it('does not refuse itself in notice mode — force does not depend on a stale connection count', async () => {
+    const notify = vi.fn();
+    let probes = 0;
+    // health0 reads 0 connections (the blip); the guard's fresh read finds one.
+    const health = async () => {
+      probes += 1;
+      return { connections: probes === 1 ? 0 : 1, build: 'oldsha0' };
+    };
+    await tick({
+      ctx: ctx(autoRunner({ behind: 1, tip: 'freshtip77' })),
+      health,
+      notify,
+      autoState: memState(null),
+    });
+    expect(
+      notify.mock.calls.some((c) => String((c[0] as { title: string }).title).includes('failed')),
+    ).toBe(false);
+  });
+
+  // The idle-mode half: there the refusal is CORRECT (idle mode yields to live sessions), so the
+  // fix is not to force through — it is to record a hold rather than a failure, leaving the tip
+  // un-stamped so the next tick tries again.
+  it('a live-session refusal leaves the tip unstamped, so the next tick retries', async () => {
+    const notify = vi.fn();
+    const state = memState(null);
+    let probes = 0;
+    const health = async () => {
+      probes += 1;
+      return { connections: probes === 1 ? 0 : 1, build: 'oldsha0' };
+    };
+    await serviceCommand(parseArgs(['refresh', '--auto', '--mode', 'idle']), {
+      platform: 'darwin',
+      ctx: ctx(autoRunner({ behind: 1, tip: 'freshtip77' })),
+      health,
+      notify,
+      autoState: state,
+    });
+    // Parked would mean this tip never retries until an unrelated commit lands — the 35-minute pin.
+    expect(state.read()).not.toBe('freshtip77');
+    expect(
+      notify.mock.calls.some((c) => String((c[0] as { title: string }).title).includes('failed')),
+    ).toBe(false);
+  });
+
   it('does NOT notify a failure when the tick succeeds', async () => {
     const notify = vi.fn();
     await tick({
