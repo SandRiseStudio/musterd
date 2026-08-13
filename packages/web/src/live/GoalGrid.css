@@ -3,6 +3,14 @@
  * CSS-only and every keyframe is disabled under prefers-reduced-motion. */
 
 .gg-stage {
+  /* The measured ink set. Every quiet brown in this file used to be its own hex, eight of them, and
+   * on 2026-08-12 ten measured below AA on the paper they actually sat on. These three clear 4.9+
+   * against every paper painted here (#fffdf8 card, #f2ece1 ghost chip, #fdfaf3 loose card,
+   * #faf3e6 tick, #fdeeda soon chip, #e2f2ea live chip, #fbf5e9 shelf) — measured in the browser,
+   * never computed. Reach for one of these rather than inventing a ninth brown. */
+  --gg-ink-quiet: #736349;
+  --gg-ink-accent: #8f5a10;
+  --gg-ink-success: #276b51;
   background: linear-gradient(160deg, #fdf6ea 0%, #f7ecd9 55%, #f3e3cc 100%);
   border-radius: 18px;
   padding: 18px 20px;
@@ -58,7 +66,7 @@
 .gg-sub {
   margin: 0;
   font-size: 11px;
-  color: #8a755a;
+  color: var(--gg-ink-quiet);
   font-weight: 500;
 }
 .gg-pulse {
@@ -81,7 +89,7 @@
   white-space: nowrap;
 }
 .gg-pulse b {
-  color: #b0722a;
+  color: var(--gg-ink-accent);
 }
 .gg-pulse__dot {
   flex-shrink: 0;
@@ -161,7 +169,7 @@
   display: block;
   margin-top: 1px;
   font-size: 11px;
-  color: #8a755a;
+  color: var(--gg-ink-quiet);
 }
 
 /* value-layer design: the evidence line. Distinct from the story above it — the story is what we
@@ -192,15 +200,15 @@
 }
 .gg-chip--live {
   background: #e2f2ea;
-  color: #2e7d5f;
+  color: var(--gg-ink-success);
 }
 .gg-chip--soon {
   background: #fdeeda;
-  color: #b05c1f;
+  color: var(--gg-ink-accent);
 }
 .gg-chip--ghost {
   background: #f2ece1;
-  color: #857659;
+  color: var(--gg-ink-quiet);
 }
 
 .gg-runway {
@@ -240,7 +248,7 @@
   position: absolute;
   top: 26px;
   font-size: 8.5px;
-  color: #9c8b6e;
+  color: var(--gg-ink-quiet);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   font-weight: 600;
@@ -258,7 +266,7 @@
   top: 2px;
   font-size: 9px;
   font-weight: 700;
-  color: #8a755a;
+  color: var(--gg-ink-quiet);
 }
 
 .gg-dot {
@@ -370,7 +378,7 @@
 }
 .gg-foot__count {
   font-size: 10px;
-  color: #8a755a;
+  color: var(--gg-ink-quiet);
   font-weight: 600;
 }
 .gg-foot__stuck {
@@ -383,7 +391,7 @@
 }
 .gg-foot__tick {
   font-size: 10px;
-  color: #7d6f5c;
+  color: var(--gg-ink-quiet);
   background: #faf3e6;
   padding: 2px 8px;
   border-radius: 7px;
@@ -393,7 +401,7 @@
   max-width: 55%;
 }
 .gg-foot__tick b {
-  color: #a3671f;
+  color: var(--gg-ink-accent);
   font-weight: 700;
 }
 
@@ -402,7 +410,7 @@
   background: #fdfaf3;
 }
 .gg-card--loose .gg-card__title {
-  color: #857659;
+  color: var(--gg-ink-quiet);
 }
 .gg-card--loose .gg-runway {
   opacity: 0.75;
@@ -427,8 +435,7 @@
 .gg-shelf__label {
   font-size: 10px;
   font-weight: 700;
-  /* Measured on the shelf paper (#fbf5e9), not computed: #8a755a read 4.05 and failed AA there. */
-  color: #7d6a4f;
+  color: var(--gg-ink-quiet);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }

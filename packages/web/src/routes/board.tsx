@@ -21,7 +21,7 @@ import {
 import { filterLanes, UNOWNED } from '../live/boardWrite';
 import { goalFilter, resolveBoardView } from '../live/goalGrid';
 import { useBoardData } from '../live/useBoardData';
-import { initial, kindOf, memberColor, memberAvatar } from '../live/format';
+import { kindOf, memberColor, memberAvatar } from '../live/format';
 import { InsightRail } from '../live/InsightRail';
 import { useLiveStream } from '../live/useLiveStream';
 import { useReport } from '../live/useReport';
@@ -304,9 +304,7 @@ function BoardPage() {
                   background: memberAvatar(me, kindOf(me, new Map(roster.map((m) => [m.name, m])))),
                 }}
                 aria-hidden="true"
-              >
-                {initial(me)}
-              </span>
+              />
               {me}
             </span>
             <button className="lc__identity-out" onClick={signOut}>
@@ -470,9 +468,7 @@ function FilterStrip({
             style={on ? { boxShadow: `0 0 0 1.5px ${color}` } : undefined}
             onClick={() => onToggle(m.name)}
           >
-            <span className="lc-card__avatar" style={{ background: color }} aria-hidden="true">
-              {initial(m.name)}
-            </span>
+            <span className="lc-card__avatar" style={{ background: color }} aria-hidden="true" />
             {m.name}
             {n > 0 && <span className="lc-filter__n">{n}</span>}
           </button>

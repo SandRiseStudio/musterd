@@ -6,8 +6,12 @@
  * Usage:
  *   node scripts/a11y/contrast-gate.mjs [--dir <built client>] [--port <n>] [--routes a,b,c]
  *
- * Exit code is 1 if any route reports a live failure. It serves `packages/web/dist/client` itself
- * (static, no deps, no daemon), so it needs `pnpm build` first and nothing else.
+ * Exit code is 1 if any route reports a live failure. Two phases, both self-contained — it needs
+ * `pnpm build` first and nothing else:
+ *
+ *   1. every prerendered route, off a static server it runs itself;
+ *   2. `/board` and `/live` CONNECTED, against a throwaway daemon over a synthetic team
+ *      (`fixture-team.sh`). `--static-only` skips this phase and says so.
  *
  * ── Why a separate runner ───────────────────────────────────────────────────────────────────────
  *
@@ -24,14 +28,18 @@
  *
  * ── What this can and cannot see, stated so a green run is not over-read ────────────────────────
  *
- * Each route is swept as it PRERENDERS. That is total coverage for the preview routes, which mount
- * real components against synthetic fixtures on purpose. It is thin for `/board` and `/live`: those
- * need a daemon, so a static server gets their pre-connect state and one measurable element. The
- * grid, the shelf, the cards and the office chrome are invisible here — the very surfaces the 4.05
- * was on. Closing THAT is a fixture route, and it is the next increment, not this one.
+ * Phase 1 sweeps each route as it PRERENDERS — total coverage for the preview routes, which mount
+ * real components against synthetic fixtures on purpose, and thin for `/board` and `/live`, which
+ * need a daemon and so render only their sign-in screen there. That gap was not academic: the grid,
+ * the shelf, the cards and the office chrome all live past it, and the 4.05 was on one of them.
+ * Phase 2 exists because of it, and the first time it ran it found eleven more.
  *
- * The sweep's own limits still apply and still print every run: gradient-backed text is reported
- * SKIPPED rather than passed, and hover/error/empty states are not rendered at all.
+ * What is still invisible, and worth saying so a green run is not over-read:
+ *   • gradient-backed text, which this method cannot measure — reported SKIPPED every run, never
+ *     silently passed, and counted per route in this runner's summary line;
+ *   • hover, error and empty states, which are not rendered at all;
+ *   • anything the fixture team does not produce. It seeds goals and lanes in every state the board
+ *     can paint, but a surface nobody seeds is a surface nobody measures.
  */
 import { spawn } from 'node:child_process';
 import { createReadStream, existsSync, statSync } from 'node:fs';
@@ -123,7 +131,19 @@ const server = createServer((req, res) => {
   createReadStream(file).pipe(res);
 });
 
-await new Promise((resolve) => server.listen(PORT, '127.0.0.1', resolve));
+await new Promise((resolve, reject) => {
+  server.once('error', reject);
+  server.listen(PORT, '127.0.0.1', resolve);
+}).catch((e) => {
+  // A raw EADDRINUSE stack reads like a broken gate. It is usually a previous run's server that
+  // outlived a Ctrl-C, and the fix is a different port, not a debugging session.
+  console.error(
+    e.code === 'EADDRINUSE'
+      ? `contrast-gate — port ${PORT} is busy (a previous run?). Retry with --port <n>.`
+      : `contrast-gate — could not serve ${DIR}: ${e.message}`,
+  );
+  process.exit(1);
+});
 
 const sweep = (url) =>
   new Promise((resolve) => {
@@ -138,24 +158,94 @@ const sweep = (url) =>
 
 console.log(`contrast-gate — ${ROUTES.length} routes over ${DIR}\n`);
 const failed = [];
-for (const route of ROUTES) {
-  const { code, out } = await sweep(`http://127.0.0.1:${PORT}${route}`);
+/**
+ * @param floor minimum text nodes this route must have measured for the pass to mean anything.
+ *   A connected route that measures ZERO is not clean, it is a page that never finished connecting
+ *   — and it passes, silently, exactly like a page with nothing wrong. Seen once during
+ *   development, which is once more than a gate premised on "under-reporting is worse than none"
+ *   can afford. Prerendered routes legitimately measure zero (a page can be all gradient), so the
+ *   floor is opt-in per route rather than global.
+ */
+const report = ({ code, out }, label, floor = 0) => {
   const live = /live: (\d+) measured, (\d+) below AA/.exec(out);
   const skipped = /SKIPPED (\d+) —/.exec(out);
   const tail = skipped ? `, ${skipped[1]} unmeasurable` : '';
-  if (code === 0) {
-    console.log(`  ✓ ${route} — ${live?.[1] ?? '?'} measured${tail}`);
-    continue;
+  if (code === 0 && floor > 0 && Number(live?.[1] ?? 0) < floor) {
+    failed.push(label);
+    console.log(
+      `  ✗ ${label} — only ${live?.[1] ?? 0} text nodes measured, expected ≥${floor}.` +
+        ' The page almost certainly never connected; a clean sweep of nothing is not a pass.',
+    );
+    return;
   }
-  failed.push(route);
-  console.log(`  ✗ ${route} — ${live?.[2] ?? '?'} below AA${tail}`);
+  if (code === 0) {
+    console.log(`  ✓ ${label} — ${live?.[1] ?? '?'} measured${tail}`);
+    return;
+  }
+  failed.push(label);
+  console.log(`  ✗ ${label} — ${live?.[2] ?? '?'} below AA${tail}`);
   // The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
   for (const line of out.split('\n')) {
     if (/^\s+\d+(\.\d+)? \(need /.test(line)) console.log(`   ${line.trim()}`);
   }
+};
+
+for (const route of ROUTES) {
+  report(await sweep(`http://127.0.0.1:${PORT}${route}`), route);
 }
 
 server.close();
+
+/* ── phase 2: the CONNECTED board ──────────────────────────────────────────────────────────────
+ *
+ * A static server only reaches `/board` and `/live` before they connect — one measurable element
+ * each, and none of the text the product is actually made of. So the gate stands up a throwaway
+ * daemon over a synthetic team and sweeps the real thing. Worth the ~15s: pointed at a connected
+ * board for the first time, this found eleven AA failures the static phase could not see.
+ *
+ * `--static-only` skips it (no CLI build, or you only want the fast pass). It is a narrowing of
+ * coverage, so it says so rather than passing quietly. */
+if (!process.argv.includes('--static-only')) {
+  const sh = (args) =>
+    new Promise((resolve) => {
+      const c = spawn('bash', [join(HERE, 'fixture-team.sh'), ...args], { stdio: 'pipe' });
+      let out = '';
+      c.stdout.on('data', (d) => (out += d));
+      c.stderr.on('data', (d) => (out += d));
+      c.on('close', (code) => resolve({ code, out }));
+    });
+
+  console.log('\n  … standing up a fixture team for the connected board');
+  const up = await sh(['up']);
+  if (up.code !== 0) {
+    console.log(
+      up.out
+        .trim()
+        .split('\n')
+        .map((l) => `    ${l}`)
+        .join('\n'),
+    );
+    console.log(
+      '\ncontrast-gate FAILED — the fixture daemon did not come up, so the connected board went' +
+        ' unmeasured. That is a gate failure, not a skip: passing here would report coverage the' +
+        ' run did not have. Needs `pnpm build` (CLI + web). `--static-only` skips this phase.',
+    );
+    process.exit(1);
+  }
+  const base = /(http:\/\/127\.0\.0\.1:\d+)\/board/.exec(up.out)?.[1];
+  const team = /team=([\w-]+)/.exec(up.out)?.[1] ?? 'paper';
+  try {
+    for (const route of ['/board', '/live']) {
+      // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
+      // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
+      report(await sweep(`${base}${route}?team=${team}`), `${route} (connected)`, 12);
+    }
+  } finally {
+    await sh(['down']);
+  }
+} else {
+  console.log('\n  ! --static-only: /board and /live went unmeasured past their connect screen');
+}
 
 if (failed.length) {
   console.log(

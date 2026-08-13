@@ -5,9 +5,18 @@ reach for when the gate fails, or when you are measuring a surface the gate cann
 
 ## The gate
 
-`pnpm a11y:check` runs [`scripts/a11y/contrast-gate.mjs`](../../scripts/a11y/contrast-gate.mjs):
-serves `packages/web/dist/client` itself and sweeps every prerendered route, failing on any live AA
-failure. No daemon, no dev server, no arguments.
+`pnpm a11y:check` runs [`scripts/a11y/contrast-gate.mjs`](../../scripts/a11y/contrast-gate.mjs) in
+two phases, failing on any live AA failure. No arguments, no running daemon, nothing to set up
+beyond `pnpm build`:
+
+1. **Prerendered routes**, off a static server it runs itself.
+2. **`/board` and `/live` connected**, against a throwaway daemon over a synthetic team
+   ([`fixture-team.sh`](../../scripts/a11y/fixture-team.sh) — goals and lanes in every state the
+   board can paint). `--static-only` skips this phase and says so in the output.
+
+Phase 2 is not optional polish. Phase 1 alone reaches `/board` and `/live` only at their sign-in
+screen — one measurable element each — and everything the product is made of lives past that point.
+The first time phase 2 ran it found **eleven** more AA failures, ten of them on the goal grid.
 
 It exists because measuring by hand does not scale past the person who remembers. `a11y:contrast`
 shipped in #723 and the surfaces it was pointed at went to zero — but nothing pointed it at anything
@@ -17,12 +26,17 @@ building something else nearby). Every one was the same mistake — a **fill** t
 with its `-ink` sibling already defined a line away. That is not a lapse in care; it is what an
 unautomated check measures over time.
 
-**What the gate can and cannot see.** Preview routes (`/asks-preview`, `/approval-preview`,
-`/office-preview`, `/character-sheet`) mount real components against fixtures, so their sweep is
-representative. `/board` and `/live` need a daemon, so a static server only reaches their
-pre-connect state — the grid, shelf, cards and office chrome stay invisible, which is exactly where
-the 4.05 was. A fixture route that renders those states is the next increment. Until then the gate's
-per-route "N unmeasurable" count is there to stop a green run being read as full coverage.
+**What the gate still cannot see**, so a green run is not over-read: gradient-backed text (reported
+SKIPPED, counted per route in the summary); hover, error and empty states, which never render; and
+any surface the fixture team does not seed. A surface nobody seeds is a surface nobody measures.
+
+**The fixture's isolation contract is inherited whole** from
+[`scripts/perf/broadcast-bench-fixture.sh`](../../scripts/perf/broadcast-bench-fixture.sh), which
+leaked teams into the **live** daemon's DB on 2026-07-27 with every env var apparently set right.
+Every CLI call carries `--server` explicitly, and before a single write the daemon at that port must
+report _our_ scratch DB on `/health`. Env vars say what was intended; `/health` says what will
+actually be written. Teardown kills by recorded PID — never `pkill -f serve`, which also kills the
+real daemon and every other seat's.
 
 ## The instrument
 
@@ -88,15 +102,25 @@ palette held lightness at 62% and still spanned 4.6× in luminance, so amber rea
 indigo and the correct text pole flipped partway across the hue band. When one ink must serve a
 whole band, target a **luminance**.
 
+**And its sharper form, 2026-08-12:** a band can be wide enough that _neither_ pole works. The 16px
+seat avatar carried a white initial; measured across the identity band, white scored 1.61–3.90 and
+near-black 4.42–10.73, and the purple seat cleared **neither** at the 4.5 small-text threshold. No
+ink choice was available. Since the seat's name is written immediately beside the disc in all four
+places it appears, the initial was duplicated text and the disc became a plain colour dot. Retuning
+the band to a constant luminance is the other fix, and it stays open — it is a visible change to the
+office, where the same values colour the characters' bodies.
+
 ## Log
 
-| Date       | Surface                                  | Result                                                                |
-| ---------- | ---------------------------------------- | --------------------------------------------------------------------- |
-| 2026-08-05 | `/live`, `/broadcast` focus rings (#710) | ring was `--accent` at 2.66:1 on paper; added `--lc-focus`            |
-| 2026-08-05 | `/live` badge + status palette (#723)    | 19 failures, worst 1.48:1; ten `-ink` siblings, quiet tiers re-spaced |
-| 2026-08-05 | seat identity (#728)                     | avatar initials; `memberAvatar` / `memberInk`                         |
-| 2026-08-12 | goal grid shelf label                    | `.gg-shelf__label` 4.05 on shelf paper; #8a755a → #7d6a4f (4.78)      |
-| 2026-08-12 | approval card + asks preview             | 9 failures, worst 1.50:1; all fill-token-as-text → `-ink` siblings    |
+| Date       | Surface                                   | Result                                                                |
+| ---------- | ----------------------------------------- | --------------------------------------------------------------------- |
+| 2026-08-05 | `/live`, `/broadcast` focus rings (#710)  | ring was `--accent` at 2.66:1 on paper; added `--lc-focus`            |
+| 2026-08-05 | `/live` badge + status palette (#723)     | 19 failures, worst 1.48:1; ten `-ink` siblings, quiet tiers re-spaced |
+| 2026-08-05 | seat identity (#728)                      | avatar initials; `memberAvatar` / `memberInk`                         |
+| 2026-08-12 | goal grid shelf label                     | `.gg-shelf__label` 4.05 on shelf paper (#8a755a); first sign of the below |
+| 2026-08-12 | approval card + asks preview              | 9 failures, worst 1.50:1; all fill-token-as-text → `-ink` siblings    |
+| 2026-08-12 | connected `/board` + `/live` (first ever) | 12 failures; goal grid's eight one-off browns → one measured ink set  |
+| 2026-08-12 | seat avatar disc                          | white initial 3.42; band clears NEITHER pole, so the glyph went       |
 
 After those three, `/live` and `/broadcast` measure **zero** live AA text-contrast failures — and
 since 2026-08-12 every prerendered route measures zero on every PR, because `pnpm a11y:check` says

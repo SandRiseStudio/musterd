@@ -39,9 +39,14 @@ one week in 2026-07 because raises were being used to fix a calibration problem.
 - **Contrast is a gate now, not a habit** — `pnpm a11y:check` (CI, after Build) sweeps every
   prerendered route and fails on any AA failure. It was added on 2026-08-12 after nine live failures
   had accumulated in the gap where "run the script sometimes" was the whole policy; eight were a
-  fill token used as text with its `-ink` sibling defined a line away. It cannot reach the states
-  `/board` and `/live` only render against a daemon, so a green gate is not full coverage — read the
-  per-route "N unmeasurable" count it prints.
+  fill token used as text with its `-ink` sibling defined a line away. It sweeps `/board` and
+  `/live` **connected**, against a throwaway daemon over a synthetic team — the first run of that
+  phase found eleven more, ten on the goal grid. A green gate is still not full coverage: read the
+  per-route "N unmeasurable" count it prints, and remember it can only measure states the fixture
+  team actually seeds.
+- **The goal grid has a measured ink set — use it, don't add a ninth brown.** `--gg-ink-quiet`,
+  `--gg-ink-accent` and `--gg-ink-success` (defined on `.gg-stage`) each clear 4.9+ against every
+  paper that file paints. They replaced eight one-off hexes, of which ten usages measured below AA.
 - **Contrast is measured in the browser, never computed from the hex.** `pnpm a11y:contrast <url>`
   ([docs/a11y/contrast.md](../../docs/a11y/contrast.md)) resolves each colour by painting it to a
   canvas, so alpha tints, `color-mix()` and translucent stacks are accounted for. Two things it
