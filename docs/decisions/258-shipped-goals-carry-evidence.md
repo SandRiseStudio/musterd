@@ -82,3 +82,34 @@ daemon-initiated wakes.
 - The `stale_acceptance` repair text deliberately names no exact accept/decline call — the
   acceptance ask owns that contract (lesson of #759: `no_goal` shipped prescribing a
   `lane_update` form the tool rejected).
+
+- **2026-08-12 — the pre-registered review-debt metric is amended before its window starts**
+  (izzo's acceptance findings 4 and 5 on the shipping lane, `01KZW10CV7XE855CEBE8THGZYR`; the
+  Decision is frozen, this note governs the Eval).
+
+  **(4) The median is right-censored by ADR 229.** The backstop sweep closes unanswered lanes at
+  24 h, so no lane can ever *show* an age above it — the long tail the signal exists to catch is
+  exactly the part the sweep truncates. A median that "does not fall" under censoring is
+  uninterpretable: it may be pinned by the ceiling, not by the posture. The two-week check
+  therefore reads, in place of the point-in-time median of open waits:
+
+  1. **Age-at-close over the window's closed lanes** — time from the `lane.ready_for_review`
+     audit row to the closing event, **including `review_swept` closures** (a sweep closure IS
+     the finding: it means no seat accepted within 24 h). Report the distribution, median, and
+     sweep count; a sweep count above zero can never be laundered into a "median fell" read.
+  2. **Fraction of closed lanes exceeding the 12 h `ACCEPTANCE_STALE_MS` threshold** — the
+     uncensored yes/no the advisory was built around: did the warning's own threshold get
+     crossed, and how often.
+
+  The disproof clause is restated in those terms: if the >12 h fraction does not fall (or sweeps
+  keep occurring) while `stale_acceptance` is live, the advisory-only posture is the thing
+  disproven, not tweaked.
+
+  **(5) The window is confounded from day one.** #768 (relayed authorization became a countable
+  third acceptance shape) and #771 (the `why` slot stopped serving discharged handoffs) landed
+  the same day as this ADR, and both plausibly move acceptance latency on a team small enough
+  that a handful of lanes moves any statistic. The two-week read is therefore an evaluation of
+  the **combined** 2026-08-12 acceptance-path changes, and its conclusion attaches to the
+  advisory posture only in the disproof direction (a fraction that fails to fall indicts
+  `stale_acceptance` regardless of the confounds' sign, since all three interventions aimed the
+  same way). Any *credit* read must name all three.
