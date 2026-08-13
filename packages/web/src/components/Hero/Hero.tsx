@@ -123,16 +123,12 @@ export function Hero() {
       <div className="hero__content shell">
         <p className="hero__eyebrow mono">SandRise Studio</p>
         <h1 className="hero__wordmark mono">
-          <MusterdChip size={56} className="hero__chip" />
+          <MusterdChip size={40} className="hero__chip" />
           <span className="hero__word">
             musterd<span className="hero__cursor" aria-hidden="true">_</span>
           </span>
         </h1>
         <p className="hero__tagline">{TAGLINE}</p>
-        <a className="hero__scroll" href="#roadmap">
-          <span>the roadmap</span>
-          <span className="hero__scroll-arrow" aria-hidden="true" />
-        </a>
       </div>
     </header>
   );

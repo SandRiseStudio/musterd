@@ -1,8 +1,12 @@
 .hero {
   position: relative;
-  min-height: 100svh;
+  /* Not full-bleed: a viewport-tall hero over the office scene read as overwhelming (nick,
+     2026-08-13). Tall enough to seat the wordmark on the room, short enough that the page starts
+     below the fold rather than being the fold. */
+  min-height: clamp(420px, 62svh, 640px);
   display: flex;
   align-items: center;
+  padding-block: clamp(48px, 8svh, 88px);
   overflow: hidden;
   isolation: isolate;
 }
@@ -70,8 +74,8 @@
   align-items: center;
   gap: clamp(0.8rem, 2.5vw, 1.4rem);
   font-weight: 700;
-  font-size: clamp(3.4rem, 13vw, 9rem);
-  line-height: 0.92;
+  font-size: clamp(2.6rem, 8vw, 5.2rem);
+  line-height: 0.95;
   letter-spacing: -0.04em;
   color: var(--text);
   text-shadow: 0 0 60px rgba(225, 173, 1, 0.25);
@@ -113,53 +117,13 @@
 }
 
 .hero__tagline {
-  margin: 1.6rem 0 0;
+  margin: 1.3rem 0 0;
   max-width: 30ch;
-  font-size: clamp(1.05rem, 2.6vw, 1.5rem);
+  font-size: clamp(1rem, 2.2vw, 1.3rem);
   line-height: 1.45;
   color: var(--text-dim);
 }
 
-.hero__scroll {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.7rem;
-  margin-top: 3rem;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-  transition: color 0.3s var(--ease-out);
-}
-.hero__scroll:hover {
-  color: var(--accent);
-}
-.hero__scroll-arrow {
-  width: 1px;
-  height: 34px;
-  background: linear-gradient(var(--text-faint), transparent);
-  position: relative;
-  overflow: hidden;
-}
-.hero__scroll-arrow::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(var(--accent), transparent);
-  transform: translateY(-100%);
-  animation: hero-scroll 2.2s var(--ease-in-out) infinite;
-}
-@keyframes hero-scroll {
-  0% {
-    transform: translateY(-100%);
-  }
-  60%,
-  100% {
-    transform: translateY(100%);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .hero__scroll-arrow::after {
-    animation: none;
-  }
-}
+/* The `.hero__scroll` cue was removed with the sections below it (2026-08-13): it pointed at
+   `#roadmap`, an anchor no section has ever defined, and with the wedge gone there is nothing
+   below the fold to send a reader to. */
