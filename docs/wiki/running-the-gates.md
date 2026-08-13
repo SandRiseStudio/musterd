@@ -13,3 +13,7 @@ Grepping `pnpm lint` output for "problems" missed eslint's singular "✖ 1 probl
 ## A stale dist/ makes you blame someone else's merged code (twice by 2026-07-13; falsify: clean rebuild)
 
 Cross-package imports resolve to `dist/`, so a stale build lies two ways, neither looking like a build problem: typecheck reads stale sibling `.d.ts` (phantom errors in files you never touched), and runtime/tests read stale sibling zod schemas that silently strip new fields (plausible wrong values, not import errors). `pnpm build` is not always enough — incremental tsc can skip a package. When cross-package behavior looks broken after syncing main: delete the package dists and rebuild, and never blame a teammate's merged PR before reproducing on a clean rebuild. Both times main was green.
+
+## Two noises under load that are the runner, not a test (2026-08-12; falsify: rerun the named file alone)
+
+On a busy machine the CLI suite can emit a spurious `[vitest-worker]: Timeout calling "onTaskUpdate"` — that is vitest's own worker RPC timing out, not a test failure; the verdict lines above it are still authoritative. Related but distinct: `pnpm -r test` intermittently fails 3–13 CLI tests (`service`/`inbox`/`archaeology`) that pass in isolation and under `pnpm coverage` — parallel-run spawn starvation (see #782: a test 10× under its cap failing at load 17.9). `pnpm coverage` is the real CI gate; chasing either noise as a defect has wasted sessions.
