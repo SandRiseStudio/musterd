@@ -1,5 +1,31 @@
 # Measuring colour contrast on the web surfaces
 
+**`pnpm a11y:check` is the gate** (CI, after Build). `pnpm a11y:contrast <url>` is the instrument you
+reach for when the gate fails, or when you are measuring a surface the gate cannot reach.
+
+## The gate
+
+`pnpm a11y:check` runs [`scripts/a11y/contrast-gate.mjs`](../../scripts/a11y/contrast-gate.mjs):
+serves `packages/web/dist/client` itself and sweeps every prerendered route, failing on any live AA
+failure. No daemon, no dev server, no arguments.
+
+It exists because measuring by hand does not scale past the person who remembers. `a11y:contrast`
+shipped in #723 and the surfaces it was pointed at went to zero — but nothing pointed it at anything
+afterwards, and by 2026-08-12 **nine live AA failures** had accumulated: eight on the approval card
+and one on the goal grid's shelf label (4.05, found only because a seat happened to measure while
+building something else nearby). Every one was the same mistake — a **fill** token used as text,
+with its `-ink` sibling already defined a line away. That is not a lapse in care; it is what an
+unautomated check measures over time.
+
+**What the gate can and cannot see.** Preview routes (`/asks-preview`, `/approval-preview`,
+`/office-preview`, `/character-sheet`) mount real components against fixtures, so their sweep is
+representative. `/board` and `/live` need a daemon, so a static server only reaches their
+pre-connect state — the grid, shelf, cards and office chrome stay invisible, which is exactly where
+the 4.05 was. A fixture route that renders those states is the next increment. Until then the gate's
+per-route "N unmeasurable" count is there to stop a green run being read as full coverage.
+
+## The instrument
+
 `pnpm a11y:contrast [url] [--probe cls,cls,…] [--json out.json]`
 
 Runs [`scripts/a11y/contrast-sweep.mjs`](../../scripts/a11y/contrast-sweep.mjs) against a rendered
@@ -69,5 +95,9 @@ whole band, target a **luminance**.
 | 2026-08-05 | `/live`, `/broadcast` focus rings (#710) | ring was `--accent` at 2.66:1 on paper; added `--lc-focus`            |
 | 2026-08-05 | `/live` badge + status palette (#723)    | 19 failures, worst 1.48:1; ten `-ink` siblings, quiet tiers re-spaced |
 | 2026-08-05 | seat identity (#728)                     | avatar initials; `memberAvatar` / `memberInk`                         |
+| 2026-08-12 | goal grid shelf label                    | `.gg-shelf__label` 4.05 on shelf paper; #8a755a → #7d6a4f (4.78)      |
+| 2026-08-12 | approval card + asks preview             | 9 failures, worst 1.50:1; all fill-token-as-text → `-ink` siblings    |
 
-After those three, `/live` and `/broadcast` measure **zero** live AA text-contrast failures.
+After those three, `/live` and `/broadcast` measure **zero** live AA text-contrast failures — and
+since 2026-08-12 every prerendered route measures zero on every PR, because `pnpm a11y:check` says
+so rather than because someone looked.
