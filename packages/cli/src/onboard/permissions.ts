@@ -137,3 +137,85 @@ export function installSeatPermissions(dir: string, role?: RoleTemplate): Permis
   }
   return added;
 }
+
+/**
+ * Does `deny` entry `rule` outrank `allow` entry `candidate`?
+ *
+ * Exact match, plus the tool-wide form: `Bash` denies every `Bash(...)` rule, because Claude Code
+ * matches a bare tool name against the whole tool. Deliberately NOT a specifier-prefix comparison
+ * (`Bash(git *)` vs `Bash(git log *)`) — that is the harness's own matcher, and reimplementing it
+ * here would be a second place for the defect-3 class to live. Under-reporting is the safe
+ * direction: a missed surplus is a stale note, an invented one sends a human to delete a working
+ * entry.
+ */
+function denyOutranks(rule: string, candidate: string): boolean {
+  return candidate === rule || candidate.startsWith(rule + '(');
+}
+
+/**
+ * ADR 261 increment 2 — the harness permission layer, as ADR 171 freshness sees it.
+ *
+ * Increment 1 arms `musterd agent` so new seats are born with a floor. Existing seats are untouched
+ * until re-provisioned, and this is what surfaces them.
+ *
+ * EVERY FINDING NAMES THE LAYER. Three permission layers compose as AND — capabilities → MCP
+ * surface, the ADR 150 lane gate, and this one — so "a write was denied" is ambiguous by
+ * construction, and the ambiguity is expensive: the 2026-08-13 incident cost hours spent auditing
+ * the two innocent layers. A finding that does not say *harness* and *settings.local.json* has not
+ * done the job.
+ *
+ * Silent for a folder with no settings file — that is not a musterd seat, and a session-start probe
+ * that invents drift for someone's unrelated checkout gets muted, taking the real findings with it.
+ * Returns findings; never mutates. Repair is `musterd init --refresh-permissions`, which reuses
+ * {@link installSeatPermissions} so repair and provisioning cannot drift apart.
+ */
+export function inspectSeatPermissions(dir: string): string[] {
+  const path = join(dir, '.claude', 'settings.local.json');
+  if (!existsSync(path)) return [];
+  let settings: SeatSettings;
+  try {
+    settings = JSON.parse(readFileSync(path, 'utf8')) as SeatSettings;
+  } catch {
+    // A human's broken edit. Announce-never-clobber has no announce channel here, and a throw would
+    // take the session start with it — the hook-drift inspector makes the same call.
+    return [];
+  }
+  const findings: string[] = [];
+  const allow = settings.permissions?.allow ?? [];
+  const missing = STANDARD_FLOOR.allow.filter((entry) => !allow.includes(entry));
+
+  if (!settings.permissions) {
+    findings.push(
+      'this seat has NO harness permissions block in .claude/settings.local.json — the third ' +
+        'permission layer (harness allow/ask/deny), which musterd now owns (ADR 261). A ' +
+        'non-interactive session cannot prompt, so its first Write fails closed and presents as a ' +
+        'broken tool, while the lane gate and MCP surface both look innocent. Repair: ' +
+        '`musterd init --refresh-permissions`.',
+    );
+  } else if (missing.length > 0) {
+    findings.push(
+      `this seat's harness permissions block (.claude/settings.local.json) is missing ` +
+        `${String(missing.length)} of the ${String(STANDARD_FLOOR.allow.length)} standard-floor ` +
+        `entries this build writes (ADR 261) — e.g. ${missing.slice(0, 3).join(', ')}. A ` +
+        `non-interactive session fails closed on the ones it needs. Repair: ` +
+        `\`musterd init --refresh-permissions\`.`,
+    );
+  }
+
+  // Decision 5: surplus allows are REPORTED, never stripped. Deny already makes them inert, so this
+  // costs nothing to leave in place and re-promotion restores them for free — but a human approved
+  // each one at a prompt, and silently deleting approved state on a schedule they did not choose is
+  // the misattributed-silent-failure shape this ADR exists to end.
+  const deny = settings.permissions?.deny ?? [];
+  const surplus = allow.filter((entry) => deny.some((rule) => denyOutranks(rule, entry)));
+  if (surplus.length > 0) {
+    findings.push(
+      `${String(surplus.length)} allow entr${surplus.length === 1 ? 'y' : 'ies'} in ` +
+        `.claude/settings.local.json ${surplus.length === 1 ? 'is' : 'are'} inert — the role ` +
+        `ceiling denies ${surplus.length === 1 ? 'it' : 'them'} and deny outranks allow ` +
+        `(${surplus.slice(0, 3).join(', ')}). Kept deliberately, not stripped (ADR 261 decision ` +
+        `5); resolve by widening the role or dropping the entr${surplus.length === 1 ? 'y' : 'ies'}.`,
+    );
+  }
+  return findings;
+}

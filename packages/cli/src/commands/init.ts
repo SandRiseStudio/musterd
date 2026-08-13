@@ -1,6 +1,12 @@
 import type { Parsed } from '../args.js';
 import { inspectProvisioning, runInitDoctor, runSessionProbe } from '../onboard/doctor.js';
-import { runInit, runPruneBindings, runRefreshGuidance, runRefreshHooks } from '../onboard/init.js';
+import {
+  runInit,
+  runPruneBindings,
+  runRefreshGuidance,
+  runRefreshHooks,
+  runRefreshPermissions,
+} from '../onboard/init.js';
 import { theme } from '../render/theme.js';
 import { wireCommand } from './wire.js';
 
@@ -12,6 +18,8 @@ import { wireCommand } from './wire.js';
  *   one command diagnoses *and* fixes, instead of the check telling you to run a second command).
  * `musterd init --refresh-guidance` — rewrite the stamped skill/command files only (ADR 161); no
  *   prompts, no identity changes, safe in a live seat's worktree.
+ * `musterd init --refresh-permissions` — write the standard harness permission floor into this
+ *   folder's `.claude/settings.local.json` and nothing else (ADR 261 inc 2); merges, never clobbers.
  * `musterd init --prune-bindings [--apply]` — report (or remove) registry entries whose folder is
  *   gone (ADR 162); credentials are never touched.
  */
@@ -22,6 +30,10 @@ export async function initCommand(parsed: Parsed): Promise<number> {
   // Hook-only refresh (ADR 168), same precedence rule and the same reason: a stale or missing hook
   // is not an identity problem, so its repair must not route through the identity-rewriting flow.
   if (parsed.flags['refresh-hooks']) return runRefreshHooks();
+  // Permissions-only refresh (ADR 261 inc 2), same precedence and the same reason: a seat missing
+  // its harness floor is not an identity problem. This is the only repair path for seats that
+  // existed before increment 1 armed `musterd agent` — the remaining surface of the ryder incident.
+  if (parsed.flags['refresh-permissions']) return runRefreshPermissions();
   // Registry prune (ADR 162): reports by default, removes only with --apply. Local-file maintenance
   // like the refresh above — no daemon call, no identity, no credentials.
   if (parsed.flags['prune-bindings']) {

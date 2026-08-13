@@ -26,6 +26,7 @@ import type { Harness } from './harness.js';
 import { HARNESSES } from './harnesses/index.js';
 import { writeProvisionManifest } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
+import { installSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
 import {
   GENERALIST,
@@ -208,6 +209,44 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
     }
   }
   return refused > 0 ? 1 : 0;
+}
+
+/**
+ * `musterd init --refresh-permissions` (ADR 261 increment 2): write the standard floor into this
+ * folder's harness permissions block and nothing else.
+ *
+ * The third sibling of `--refresh-guidance` and `--refresh-hooks`, and it exists for the delivery
+ * reason increment 1 left open: `musterd agent` now provisions a floor into *new* worktrees, but
+ * every seat that already existed on 2026-08-13 stays unprovisioned until something repairs it.
+ * That is the entire remaining surface of the incident class — ryder's seat was one of them.
+ *
+ * Floor only, deliberately. A role ceiling is recompiled where the role changes (`role assign`),
+ * not by a local repair flag: this command runs in a worktree and cannot know whether the daemon's
+ * view of the seat's role is newer than the template it would read. Repair reuses
+ * {@link installSeatPermissions}, so what a repair writes and what provisioning writes cannot drift.
+ */
+export function runRefreshPermissions(dir: string = process.cwd()): number {
+  const team = folderTeamHere(dir);
+  if (!team) {
+    process.stderr.write(
+      `${theme.warn(sym.warn)} no musterd binding here — run \`musterd init\` to set this folder up first\n`,
+    );
+    return 1;
+  }
+  const added = installSeatPermissions(dir);
+  const count = added.allow.length + added.ask.length + added.deny.length;
+  if (count === 0) {
+    process.stdout.write(
+      `${theme.ok(sym.ok)} harness permissions already carry the standard floor — nothing to add\n`,
+    );
+    return 0;
+  }
+  process.stdout.write(
+    `${theme.ok(sym.ok)} added ${String(count)} permission entr${count === 1 ? 'y' : 'ies'} to the harness layer\n` +
+      `  ${theme.meta(join(dir, '.claude', 'settings.local.json'))}\n` +
+      `  ${theme.meta('existing entries and hooks were kept — this merges, it never clobbers (ADR 261)')}\n`,
+  );
+  return 0;
 }
 
 /**
