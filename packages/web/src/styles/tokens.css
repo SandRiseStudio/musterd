@@ -98,6 +98,9 @@
 
   --accent: var(--mustard-500);
   --accent-bright: var(--mustard-300);
+  /* On the dusk palette the fill already reads as ink — dark paper, bright pigment. Defined so the
+     two themes stay swappable and no component has to know which one it is in. */
+  --accent-ink: var(--mustard-500);
   --glow-mustard: rgba(225, 173, 1, 0.45);
   --glow-mustard-soft: rgba(225, 173, 1, 0.16);
 
@@ -142,10 +145,16 @@
 
   --text: #2a2118;
   --text-dim: #4a3f30;
-  --text-faint: #7a6a56;
+  /* Measured on the hero's own painted paper (#f0e2ca), not computed: #7a6a56 read 4.09 there and
+     failed AA. Still the lightest of the three, so the hierarchy is unchanged. 2026-08-13. */
+  --text-faint: #6b5637;
 
   --accent: var(--mustard-700);
   --accent-bright: var(--mustard-500);
+  /* The fill/ink split, on the marketing palette. `--accent` is a FILL — chips, borders, glows, the
+     wordmark's glow — and it is too light to read as text on warm paper (2.54 on #f2e2c0). Anything
+     that is READ uses this. Same law as --lc-*-ink in Live.css (#723). */
+  --accent-ink: #7a5a12;
   --glow-mustard: rgba(184, 134, 11, 0.28);
   --glow-mustard-soft: rgba(184, 134, 11, 0.12);
 

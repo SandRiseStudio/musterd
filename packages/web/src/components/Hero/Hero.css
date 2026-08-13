@@ -58,8 +58,10 @@
   font-size: 12px;
   letter-spacing: 0.32em;
   text-transform: uppercase;
-  color: var(--mustard-300);
-  opacity: 0.85;
+  /* `--mustard-300` is a light-theme FILL: on the hero's warm paper it measured 1.18, and the 0.85
+     opacity took it further down — opacity dims the ink and the paper together, so it can never buy
+     de-emphasis for free. The ink de-emphasises instead. */
+  color: var(--accent-ink);
 }
 
 .hero__wordmark {
@@ -85,8 +87,10 @@
 }
 
 .hero__cursor {
-  color: var(--accent);
-  -webkit-text-fill-color: var(--accent);
+  /* Read, not painted — so the ink, not the fill. At `--accent` this measured 2.54 against a 3.0
+     large-text bar on the hero's paper. */
+  color: var(--accent-ink);
+  -webkit-text-fill-color: var(--accent-ink);
   animation: hero-blink 1.1s steps(1) infinite;
 }
 @keyframes hero-blink {

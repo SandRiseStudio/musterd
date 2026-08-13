@@ -894,7 +894,9 @@
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #8a6508;
+  /* Measured on the panel's own composited paper (#f1dfbd), which is a gradient — only reachable by
+     sampling the painted pixel. #8a6508 read 4.06 there. */
+  color: #734a05;
 }
 .lc-workstack__count,
 .lc-workstack__quiet {
@@ -2042,7 +2044,15 @@
 .lc-seat:hover {
   background: color-mix(in srgb, var(--lc-surface) 60%, transparent);
 }
-.lc-seat--offline {
+/* Offline reads quieter — but NOT by fading the row. `opacity` dims the text and the paper behind
+   it by the same factor, so it cannot de-emphasise a label without eating its contrast, and it does
+   so invisibly: every ancestor-walking checker reads the ink at full strength and passes it. At 0.55
+   these rows measured 3.55 (name), 2.59 (kind) and 2.34 (posture) against a 4.5 bar, while the old
+   method reported the name at 14.34. Found by sampling the painted pixel, 2026-08-13.
+   So: dim the glyphs that carry no text — the presence dot and the avatar disc — and leave the words
+   at full strength, where their own quiet inks already do the de-emphasising and already clear AA. */
+.lc-seat--offline .lc-seat__dot,
+.lc-seat--offline .lc-seat__avatar {
   opacity: 0.55;
 }
 .lc-seat__dot {
@@ -2105,18 +2115,14 @@
   border: 1px solid color-mix(in srgb, var(--lc-muted) 28%, transparent);
   background: color-mix(in srgb, var(--lc-muted) 8%, transparent);
 }
+/* A colour dot for the seat, deliberately empty — the name is on the next line. It carried a white
+   initial until 2026-08-13; see `.lc-card__avatar` for why no ink can be chosen for that band. */
 .lc-seat__avatar {
   flex: 0 0 auto;
   width: 22px;
   height: 22px;
   margin-top: 1px;
   border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  color: #fff;
 }
 .lc-seat__body {
   flex: 1;
