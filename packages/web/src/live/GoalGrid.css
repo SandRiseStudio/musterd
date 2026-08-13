@@ -412,7 +412,14 @@
 .gg-card--loose .gg-card__title {
   color: var(--gg-ink-quiet);
 }
-.gg-card--loose .gg-runway {
+/* The loose card fades its runway's FURNITURE, never its words. A blanket `opacity` on .gg-runway
+   dimmed the zone labels too, taking `--gg-ink-quiet` on this card's paper from 5.72 to 3.30 — a
+   real AA failure that the sweep could not see until it started keying rows by background as well
+   as ink (2026-08-13): the other .gg-zone instances pass, and one row per class hid this one. The
+   dashed border and the lighter track already say "loose". */
+.gg-card--loose .gg-runway__track,
+.gg-card--loose .gg-zmark,
+.gg-card--loose .gg-dot {
   opacity: 0.75;
 }
 .gg-card--loose .gg-runway__track {

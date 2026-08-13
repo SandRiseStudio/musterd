@@ -184,10 +184,49 @@ await send('Page.navigate', { url });
 await new Promise((r) => setTimeout(r, 4000));
 
 /**
+ * The dedupe key, shared verbatim by all three in-page walkers so their rows join.
+ *
+ * It used to be `class|ink`, and that was a hole with a cost. Four components render
+ * `.lc-card__avatar` with white text on discs painted by DIFFERENT functions — the identity ink
+ * (`memberAvatar`, luminance 0.165) and the office fill (`memberColor`, 0.257). Same class, same
+ * ink, different PAPER: they collapsed into one row, only the first-encountered one was measured,
+ * and its 3.42 was read as the verdict for all four. Three avatars lost their initials in #781/#789
+ * on a number that was never about them.
+ *
+ * So the key carries the background too. `paperSig` walks the same ancestor chain `effBg` composites
+ * and records what it finds, stopping at the first opaque layer or gradient — no colour maths, just
+ * a signature, because keying only needs elements that paint differently to LOOK different. Any
+ * shared utility class in the codebase was one background change away from the same trap.
+ */
+const PAPER_SIG = /* js */ `
+  const paperSig = (el) => {
+    const parts = [];
+    let n = el;
+    while (n && n.nodeType === 1) {
+      const cs = getComputedStyle(n);
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') {
+        parts.push('img:' + cs.backgroundImage.slice(0, 64));
+        break;
+      }
+      const bc = cs.backgroundColor;
+      if (bc && bc !== 'transparent' && !/,\\s*0\\s*\\)$/.test(bc)) {
+        parts.push(bc);
+        if (!/rgba/.test(bc)) break;
+      }
+      n = n.parentElement;
+    }
+    return parts.join('>') || 'root';
+  };
+  const rowKey = (el, cs) =>
+    (el.className.toString() || el.tagName).slice(0, 48) + '|' + cs.color + '|' + paperSig(el);
+`;
+
+/**
  * The whole measurement, run inside the page. Kept as one self-contained function so it can also be
  * pasted straight into a browser console when someone is poking at a surface by hand.
  */
 const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
+  ${PAPER_SIG}
   const cv = document.createElement('canvas');
   cv.width = cv.height = 1;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
@@ -275,7 +314,7 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     };
   };
 
-  /* ── live sweep: every rendered text node, deduped by (class, colour) ── */
+  /* ── live sweep: every rendered text node, deduped by (class, ink, paper) ── */
   const live = [], skipped = [], seen = new Set();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
@@ -286,7 +325,7 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     if (!el) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = (el.className.toString() || el.tagName).slice(0, 48) + '|' + cs.color;
+    const key = rowKey(el, cs);
     if (seen.has(key)) continue;
     seen.add(key);
     const m = measure(el, text.slice(0, 28), key);
@@ -444,6 +483,7 @@ const RECTS_IN_PAGE = /* js */ `(() => {
      shimmer) throw on finish() and are left alone — they are decorative loops with no end state,
      and reduced-motion emulation has already disabled the ones this project controls. */
   for (const a of document.getAnimations()) { try { a.finish(); } catch {} }
+  ${PAPER_SIG}
   const effOpacity = (el) => {
     let o = 1, n = el;
     while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; }
@@ -459,7 +499,7 @@ const RECTS_IN_PAGE = /* js */ `(() => {
     if (!el) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = (el.className.toString() || el.tagName).slice(0, 48) + '|' + cs.color;
+    const key = rowKey(el, cs);
     if (seen.has(key)) continue;
     seen.add(key);
     /* The TEXT's own box, not the element's: an element's bounding rect can include padding that
@@ -495,7 +535,8 @@ const evalIn = async (expression) => {
 
 /** Re-read effective opacity per key, to tell a transient fade from a permanent one. */
 const OPACITY_IN_PAGE = /* js */ `(() => {
-  const eff = (el) => { let o = 1, n = el; while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return o; };
+  ${PAPER_SIG}
+  const eff =(el) => { let o = 1, n = el; while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return o; };
   const outv = {}, seen = new Set();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
@@ -504,7 +545,7 @@ const OPACITY_IN_PAGE = /* js */ `(() => {
     const el = node.parentElement; if (!el) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = (el.className.toString() || el.tagName).slice(0, 48) + '|' + cs.color;
+    const key = rowKey(el, cs);
     if (seen.has(key)) continue;
     seen.add(key);
     outv[key] = eff(el);
