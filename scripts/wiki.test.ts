@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderIndex } from './wiki-index.ts';
+import { checkWiki } from './check-wiki.ts';
 
 const dirs: string[] = [];
 function fixture(pages: Record<string, string>): string {
@@ -35,5 +36,43 @@ describe('renderIndex', () => {
   it('throws, naming the file, when a page lacks an H1 or a summary line', () => {
     const dir = fixture({ 'bad.md': 'no heading here\n' });
     expect(() => renderIndex(dir)).toThrow(/bad\.md/);
+  });
+});
+
+describe('checkWiki', () => {
+  const good = {
+    'a.md':
+      '# A\n\nFine page.\n\nThe daemon never installs deps (2026-07-31; falsify: read service.ts). See [B](b.md).\n',
+    'b.md': '# B\n\nAlso fine.\n',
+  };
+  const withIndex = (pages: Record<string, string>) => {
+    const dir = fixture(pages);
+    writeFileSync(join(dir, 'INDEX.md'), renderIndex(dir));
+    return dir;
+  };
+
+  it('passes a synced index, dated claims, live links', () => {
+    expect(checkWiki(withIndex(good))).toEqual([]);
+  });
+
+  it('fails when INDEX.md drifts from the pages', () => {
+    const dir = withIndex(good);
+    writeFileSync(join(dir, 'a.md'), '# A retitled\n\nFine page.\n');
+    expect(checkWiki(dir).join('\n')).toMatch(/INDEX\.md.*wiki:index/);
+  });
+
+  it('fails an undated defect-shaped claim, naming file and line', () => {
+    const dir = withIndex({ 'a.md': '# A\n\nSummary.\n\nautorefresh never installs deps.\n' });
+    expect(checkWiki(dir).join('\n')).toMatch(/a\.md:5.*date/);
+  });
+
+  it('ignores defect-shaped phrases inside fenced code blocks', () => {
+    const dir = withIndex({ 'a.md': '# A\n\nSummary.\n\n```\nthis never runs\n```\n' });
+    expect(checkWiki(dir)).toEqual([]);
+  });
+
+  it('fails a dead intra-wiki link', () => {
+    const dir = withIndex({ 'a.md': '# A\n\nSee [gone](missing.md).\n' });
+    expect(checkWiki(dir).join('\n')).toMatch(/a\.md.*missing\.md/);
   });
 });
