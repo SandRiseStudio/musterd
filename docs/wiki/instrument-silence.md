@@ -6,7 +6,7 @@ Before reading a quiet instrument as "nothing happened", make it observe a contr
 
 Deploying the ADR 248 seeds relay cost roughly six instrument failures and zero system failures. Every one presented as the system being broken, and in every case the system was fine and the thing reporting on it was wrong. A tool that reports nothing is making a claim, and it is the claim least likely to be checked.
 
-The general form: **cause an event you know happened, and confirm the instrument sees it.** Only then does its silence mean anything. The same shape shows up outside tooling — see [Probing with a temp daemon](temp-daemon-probe.md) for why the *creating* session of a broken config never notices.
+The general form: **cause an event you know happened, and confirm the instrument sees it.** Only then does its silence mean anything. The same shape shows up outside tooling — see [Probing with a temp daemon](temp-daemon-probe.md) for why the _creating_ session of a broken config never notices.
 
 ## `wrangler tail` piped into `head` buffers silently (2026-08-06; falsify: tail a worker you are actively curling, piped to `head`)
 
@@ -16,7 +16,7 @@ The general form: **cause an event you know happened, and confirm the instrument
 
 ## Removing a Slack channel integration kicks the bot and revokes the webhook (2026-08-06; falsify: remove and re-add an integration, then post to the channel)
 
-Removing a channel integration in Slack's UI does two things it does not announce: it drops the **bot's membership** of that channel, so `message.channels` goes silent, and it **revokes that webhook's URL**. Every surface in the Slack UI stays green throughout. Re-invite the bot AND re-copy the *current* webhook URL — the old one in your secret store is dead.
+Removing a channel integration in Slack's UI does two things it does not announce: it drops the **bot's membership** of that channel, so `message.channels` goes silent, and it **revokes that webhook's URL**. Every surface in the Slack UI stays green throughout. Re-invite the bot AND re-copy the _current_ webhook URL — the old one in your secret store is dead.
 
 Related: with **Socket Mode on**, the Request URL is never called no matter how many times the console says `Verified ✓`. The checkmark describes a past handshake, not the live delivery path.
 
