@@ -1,4 +1,5 @@
 import type {
+  LoopEdge,
   Residency,
   ResidencyPolicy,
   ResidencyPolicyOverride,
@@ -75,6 +76,17 @@ export const HOST_SUSPEND_GAP_MS = 90_000;
  */
 export const WAKE_UNREACHABLE_CEILING_MS = 6 * 3_600_000;
 /**
+ * ADR 262: work-order re-spend breaker. Counts `residency.wake_failed` rows on that
+ * (lane, edge), including reaper `lease_expired`. Successful `woke` / continuation
+ * chaining does not count.
+ */
+export const WORK_ORDER_EDGE_BREAKER_N = 3;
+/** Closed set: last failure on this edge is still true, so another lease cannot help. */
+export const STILL_TRUE_WAKEABILITIES: readonly string[] = [
+  'enrolled_dead_workspace',
+  'not_enrolled',
+];
+/**
  * How far back the wake derivation scans for deferring `wait`s (ADR 211 §4). Matches the inbox
  * read's bound: past this a deferral stops suppressing, and the act becomes a wake reason again —
  * the pre-ADR-211 behaviour.
@@ -115,6 +127,10 @@ export interface WakeLeaseRow {
   status: string;
   created_at: number;
   expires_at: number;
+  /** Work-order board edge (ADR 262). Null on inbox wakes. */
+  edge: string | null;
+  /** Host exec ack via POST wake-progress (ADR 262). Null until stamped. */
+  spawned_at: number | null;
 }
 
 /** Rate/exhaustion key: message id, or `lane:<id>` for board continuation (ADR 199). */
@@ -498,6 +514,57 @@ function composeWorkOrderLine(
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
     `orient via team_next and begin.`
   );
+}
+
+function loopEdgeOf(candidate: WakeCandidate): LoopEdge | null {
+  if (candidate.derivation !== 'work_order') return null;
+  if (candidate.work_order_kind === 'review') return 'review';
+  if (candidate.work_order_kind === 'dispatch') {
+    return candidate.act_id ? 'dispatch_handoff' : 'dispatch_continuation';
+  }
+  return null;
+}
+
+function workOrderEdgeFailureCount(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): number {
+  const row = db
+    .prepare<[string, string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action = 'residency.wake_failed'
+          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.edge') = ?`,
+    )
+    .get(teamId, laneId, edge);
+  return row?.n ?? 0;
+}
+
+function workOrderEdgeStillTrue(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): boolean {
+  const row = db
+    .prepare<[string, string, string], { detail: string }>(
+      `SELECT detail FROM audit
+        WHERE team_id = ? AND action = 'residency.wake_failed'
+          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.edge') = ?
+        ORDER BY ts DESC, rowid DESC LIMIT 1`,
+    )
+    .get(teamId, laneId, edge);
+  if (!row) return false;
+  let parsed: { wakeability?: string };
+  try {
+    parsed = JSON.parse(row.detail) as { wakeability?: string };
+  } catch {
+    return false;
+  }
+  return parsed.wakeability !== undefined && STILL_TRUE_WAKEABILITIES.includes(parsed.wakeability);
 }
 
 /** A due-wake candidate before leasing. Act fields optional on board continuation (ADR 199). */
@@ -894,6 +961,30 @@ export function claimWakeLeases(
           });
           continue;
         }
+        const edge = loopEdgeOf(candidate);
+        if (edge && candidate.lane_id) {
+          if (
+            workOrderEdgeFailureCount(db, teamId, candidate.lane_id, edge) >=
+            WORK_ORDER_EDGE_BREAKER_N
+          ) {
+            appendAudit(db, teamId, {
+              actor: null,
+              action: 'residency.wake_exhausted',
+              target: member.name,
+              result: 'deny',
+              detail: {
+                act: exhKey,
+                edge,
+                lane_id: candidate.lane_id,
+                breaker: true,
+                attempts: WORK_ORDER_EDGE_BREAKER_N,
+                derivation: candidate.derivation,
+              },
+            });
+            continue;
+          }
+          if (workOrderEdgeStillTrue(db, teamId, candidate.lane_id, edge)) continue;
+        }
         const lease: WakeLeaseRow = {
           id: ulid(),
           team_id: teamId,
@@ -905,10 +996,12 @@ export function claimWakeLeases(
           status: 'leased',
           created_at: now,
           expires_at: now + WAKE_LEASE_TTL_MS,
+          edge,
+          spawned_at: null,
         };
         db.prepare(
-          `INSERT INTO wake_leases (id, team_id, member_id, act_id, lane_id, host, lane, status, created_at, expires_at)
-           VALUES (@id, @team_id, @member_id, @act_id, @lane_id, @host, @lane, @status, @created_at, @expires_at)`,
+          `INSERT INTO wake_leases (id, team_id, member_id, act_id, lane_id, host, lane, status, created_at, expires_at, edge, spawned_at)
+           VALUES (@id, @team_id, @member_id, @act_id, @lane_id, @host, @lane, @status, @created_at, @expires_at, @edge, @spawned_at)`,
         ).run(lease);
         appendAudit(db, teamId, {
           actor: null,
@@ -929,6 +1022,7 @@ export function claimWakeLeases(
             // ledger records that a resume was permitted, never anything about the local session.
             ...(isResumeEligible(candidate, policy, now) ? { resume_eligible: true } : {}),
             ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
+            ...(edge !== null ? { edge } : {}),
           },
         });
         const isWorkOrder = candidate.derivation === 'work_order';
@@ -995,6 +1089,27 @@ export function settleWakeLease(
     .get(teamId, leaseId);
   if (!row || row.status === 'reported') return null;
   db.prepare("UPDATE wake_leases SET status = 'reported' WHERE id = ?").run(row.id);
+  return row;
+}
+
+/** Stamp spawned_at if null. Returns the lease row, or null if unknown id. Never settles. */
+export function markWakeSpawned(
+  db: Database,
+  teamId: string,
+  leaseId: string,
+  now = Date.now(),
+): WakeLeaseRow | null {
+  const row = db
+    .prepare<
+      [string, string],
+      WakeLeaseRow
+    >('SELECT * FROM wake_leases WHERE team_id = ? AND id = ?')
+    .get(teamId, leaseId);
+  if (!row) return null;
+  if (row.spawned_at === null) {
+    db.prepare('UPDATE wake_leases SET spawned_at = ? WHERE id = ?').run(now, row.id);
+    row.spawned_at = now;
+  }
   return row;
 }
 

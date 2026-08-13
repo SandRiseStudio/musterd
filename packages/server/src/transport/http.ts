@@ -21,6 +21,7 @@ import {
   RevokeResidencyBodySchema,
   SessionAttestationBodySchema,
   WakeLeasesBodySchema,
+  WakeProgressBodySchema,
   WakeReportBodySchema,
   WakeTurnBodySchema,
   WakeContextRequestSchema,
@@ -155,6 +156,7 @@ import {
   enrollResidency,
   getResidency,
   listResidency,
+  markWakeSpawned,
   recordSessionAttestation,
   revokeResidency,
   settleWakeLease,
@@ -1968,6 +1970,19 @@ export async function handleHttp(
         return sendJson(res, 200, { ok: true, lease_id: body.lease_id, turn: body.turn });
       }
 
+      if (method === 'POST' && rest === '/residency/wake-progress') {
+        const team = authAgentKeyOnly(ctx, slug, req);
+        const body = parseOrBadRequest(WakeProgressBodySchema, await readJson(req));
+        const row = markWakeSpawned(ctx.db, team.id, body.lease_id);
+        if (!row)
+          throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
+        return sendJson(res, 200, {
+          ok: true,
+          lease_id: row.id,
+          spawned_at: row.spawned_at,
+        });
+      }
+
       if (method === 'POST' && rest === '/residency/wake-report') {
         const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeReportBodySchema, await readJson(req));
@@ -1976,8 +1991,15 @@ export async function handleHttp(
           const settled = ctx.db
             .prepare<
               [string, string],
-              { member_id: string; act_id: string | null; lane_id: string | null }
-            >('SELECT member_id, act_id, lane_id FROM wake_leases WHERE team_id = ? AND id = ?')
+              {
+                member_id: string;
+                act_id: string | null;
+                lane_id: string | null;
+                edge: string | null;
+              }
+            >(
+              'SELECT member_id, act_id, lane_id, edge FROM wake_leases WHERE team_id = ? AND id = ?',
+            )
             .get(team.id, body.lease_id);
           if (!settled)
             throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -1995,6 +2017,7 @@ export async function handleHttp(
               detail: {
                 act: wakeExhaustionKey(settled.act_id, settled.lane_id),
                 lease_id: body.lease_id,
+                ...(settled.edge ? { edge: settled.edge } : {}),
                 ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
                 ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
                 ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
@@ -2045,6 +2068,7 @@ export async function handleHttp(
             lease_id: lease.id,
             lane: lease.lane,
             ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
+            ...(lease.edge ? { edge: lease.edge } : {}),
             ...(enrollment?.grant_id ? { grant_id: enrollment.grant_id } : {}),
             ...(body.session ? { session: body.session } : {}),
             ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { PolicySchema } from './credentials.js';
 import { resolveAttestedProvenance } from './model.js';
 import {
+  LOOP_EDGES,
+  LoopEdgeSchema,
   WakeContextPacketSchema,
   WakeContextRequestSchema,
   WakeContextResponseSchema,
+  WakeProgressBodySchema,
   WakeReportBodySchema,
   WakeTurnBodySchema,
   ResidencyPolicyOverrideSchema,
@@ -165,5 +168,31 @@ describe('WakeTurnBodySchema (ADR 251 §7 — per-turn telemetry + transcript ca
     expect(() =>
       WakeTurnBodySchema.parse({ ...turn, transcript: { blob: 'x'.repeat(300_000) } }),
     ).toThrow();
+  });
+});
+
+describe('LOOP_EDGES (ADR 262)', () => {
+  it('is exactly the three work-order edges', () => {
+    expect([...LOOP_EDGES]).toEqual(['review', 'dispatch_handoff', 'dispatch_continuation']);
+  });
+
+  it('rejects inbox derivations as edges', () => {
+    expect(LoopEdgeSchema.safeParse('work_order').success).toBe(false);
+    expect(LoopEdgeSchema.safeParse('batched').success).toBe(false);
+    expect(LoopEdgeSchema.safeParse('immediate').success).toBe(false);
+  });
+});
+
+describe('WakeProgressBodySchema (ADR 262)', () => {
+  it('accepts { lease_id } and nothing else', () => {
+    expect(WakeProgressBodySchema.parse({ lease_id: '01KZY20ZRJ0SBH8WJ3CTFPKDP3' })).toEqual({
+      lease_id: '01KZY20ZRJ0SBH8WJ3CTFPKDP3',
+    });
+  });
+
+  it('rejects missing lease_id, empty, and extra keys', () => {
+    expect(WakeProgressBodySchema.safeParse({}).success).toBe(false);
+    expect(WakeProgressBodySchema.safeParse({ lease_id: '' }).success).toBe(false);
+    expect(WakeProgressBodySchema.safeParse({ lease_id: 'L1', spawned: true }).success).toBe(false);
   });
 });

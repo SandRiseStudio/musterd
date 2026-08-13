@@ -3,8 +3,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
+import { openLane, updateLane } from '../store/lanes.js';
+import { getMemberByName } from '../store/members.js';
+import { insertMessage } from '../store/messages.js';
 import { listWakeTurns } from '../store/residency.js';
-import { getTeamBySlug } from '../store/teams.js';
+import { getTeamBySlug, setPolicy } from '../store/teams.js';
 
 /**
  * Direct HTTP coverage for the increment-4 residency surfaces (ADR 131 §5): the resumable
@@ -750,5 +753,93 @@ describe('POST /teams/:slug/residency/wake-turn — per-turn telemetry + capture
       usage: { input_tokens: 1, output_tokens: 1 },
     });
     expect(unauthed.status).toBeGreaterThanOrEqual(401);
+  });
+});
+
+describe('POST /teams/:slug/residency/wake-progress (ADR 262)', () => {
+  async function leaseReviewOrder(): Promise<string> {
+    const enroll = await post(
+      '/teams/dawn/residency/enroll',
+      {
+        seat: 'Ada',
+        harness: 'claude-code',
+        host: 'laptop.local',
+        policy: { flow: 'auto' },
+      },
+      nickCred,
+    );
+    expect(enroll.status).toBe(201);
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    setPolicy(server.db, team.id, { loops: { review: true } });
+    const nick = getMemberByName(server.db, team.id, 'nick')!;
+    const ada = getMemberByName(server.db, team.id, 'Ada')!;
+    const lane = openLane(server.db, team.id, team.slug, nick.name, {
+      title: 'a change',
+      claim: true,
+    });
+    updateLane(server.db, team.id, lane.id, team.slug, { state: 'ready_for_review' });
+    insertMessage(
+      server.db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'ask1',
+        team: team.slug,
+        from: nick.name,
+        to: { kind: 'member', name: ada.name },
+        act: 'ask',
+        body: 'x',
+        meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+        ts: 1_000,
+      }),
+    );
+    const leased = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    expect(leased.status).toBe(200);
+    expect(leased.json.orders).toHaveLength(1);
+    return leased.json.orders[0].lease_id as string;
+  }
+
+  it('stamps spawned_at, does not settle, idempotent, 404 unknown, agent-key auth', async () => {
+    const leaseId = await leaseReviewOrder();
+
+    const unauth = await post('/teams/dawn/residency/wake-progress', { lease_id: leaseId });
+    expect(unauth.status).toBe(401);
+
+    const first = await post(
+      '/teams/dawn/residency/wake-progress',
+      { lease_id: leaseId },
+      agentKey,
+    );
+    expect(first.status).toBe(200);
+    expect(first.json.ok).toBe(true);
+    expect(first.json.lease_id).toBe(leaseId);
+    expect(typeof first.json.spawned_at).toBe('number');
+
+    const again = await post(
+      '/teams/dawn/residency/wake-progress',
+      { lease_id: leaseId },
+      agentKey,
+    );
+    expect(again.status).toBe(200);
+    expect(again.json.spawned_at).toBe(first.json.spawned_at);
+
+    const missing = await post(
+      '/teams/dawn/residency/wake-progress',
+      { lease_id: 'nope' },
+      agentKey,
+    );
+    expect(missing.status).toBe(404);
+
+    const report = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      agentKey,
+    );
+    expect(report.status).toBe(200);
   });
 });

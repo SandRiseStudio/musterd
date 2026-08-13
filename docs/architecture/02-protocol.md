@@ -104,6 +104,7 @@ Base `http://localhost:4849`. JSON in/out. Auth via `Authorization: Bearer <memb
 | `POST` | `/teams/:slug/inbox/cursor`                  | `{ "last_read_message_id" }`                                        | `{ "cursor" }`                                                    | mark read                                                                                                                                                                                                                                                                       |
 | `POST` | `/teams/:slug/presence`                      | `{ "surface","status?" }`                                           | `{ "presence" }`                                                  | stateless presence ping                                                                                                                                                                                                                                                         |
 | `POST` | `/teams/:slug/availability`                  | `{ "status","until?" }`                                             | `{ <member summary> }`                                            | set your own availability axis (ADR 044)                                                                                                                                                                                                                                        |
+| `POST` | `/teams/:slug/residency/wake-progress`       | `{ lease_id }`                                                      | `{ ok, lease_id, spawned_at }`                                    | host exec ack; does not settle (ADR 262)                                                                                                                                                                                                                                        |
 
 Roster projections also carry optional `working_hours`. A Team schedule is inherited by Members
 without their own schedule; a Member schedule replaces it wholesale. The value is recurring and
@@ -128,6 +129,11 @@ metadata may include inspected transcript byte/age values but never a path, ID, 
 `ResidencyPolicySchema.portable_inbox_replies` is the default-off team cohort flag: typed handoff,
 review, and work-order orders are portable/fresh regardless; ordinary inbox orders become
 portable/fresh only when the flag is enabled.
+
+`LOOP_EDGES` (`review | dispatch_handoff | dispatch_continuation`) names work-order board edges;
+inbox wakes are not edges. `WakeProgressBodySchema` is a strict `{ lease_id }` body for
+`POST /teams/:slug/residency/wake-progress` — presence of the POST means spawned; it does not
+settle the lease (ADR 262). Extra keys are rejected; this is not `wake-report`.
 
 **Serving the web UI (ADR 062).** With `--web-root <dir>` / `MUSTERD_WEB_ROOT` the daemon also serves a built web UI from that directory: any unmatched `GET` outside the API namespaces (`/health`, `/teams/*`) returns a file, with extensionless client routes (e.g. `/live`) falling back to `index.html`. This puts the dashboard, the HTTP API, and the WS on one origin — no CORS, no proxy — and the WS upgrade gate (above) admits a **same-origin** `Origin` (its host:port equals the `Host` header) so the daemon-served page can connect. Off by default (API-only).
 

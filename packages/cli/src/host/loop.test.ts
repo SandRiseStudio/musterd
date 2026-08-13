@@ -37,6 +37,7 @@ const entryOf = (over: Partial<HostRegistryEntry> = {}): HostRegistryEntry => ({
 interface FakeCalls {
   leases: { team: string; host: string }[];
   reports: WakeReportBody[];
+  progress: string[];
   rosters: number;
 }
 
@@ -47,7 +48,7 @@ function fakeClient(
   client: WakeClient;
   calls: FakeCalls;
 } {
-  const calls: FakeCalls = { leases: [], reports: [], rosters: 0 };
+  const calls: FakeCalls = { leases: [], reports: [], progress: [], rosters: 0 };
   const client: WakeClient = {
     wakeLeases: async (team, host) => {
       calls.leases.push({ team, host });
@@ -55,6 +56,10 @@ function fakeClient(
     },
     wakeReport: async (_team, body) => {
       calls.reports.push(body);
+      return { ok: true };
+    },
+    wakeProgress: async (_team, leaseId) => {
+      calls.progress.push(leaseId);
       return { ok: true };
     },
     roster: async () => {
@@ -758,5 +763,66 @@ describe('the supplementary wake-cost report (inc 5)', () => {
     );
     await Promise.all(result.settled);
     expect(calls.reports).toHaveLength(2); // the two primaries, zero supplements
+  });
+});
+
+describe('pollHostOnce — wake-progress after spawn (ADR 262)', () => {
+  it('posts wake-progress after a spawn, before the outcome report', async () => {
+    const { client, calls } = fakeClient([order({ derivation: 'work_order', lane_id: 'L' })]);
+    const { backend } = fakeBackend();
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    expect(calls.progress).toEqual(['L1']);
+    expect(calls.reports.length).toBeGreaterThan(0);
+  });
+
+  it('does not post progress on local-session defer or missing registry', async () => {
+    const { client, calls } = fakeClient([order()]);
+    const { backend } = fakeBackend();
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        liveness: () => ({
+          state: 'live',
+          session: { harness: 'claude-code', id: 'cap-1', started_at: 1 },
+        }),
+      }),
+    );
+    expect(calls.progress).toEqual([]);
+    expect(calls.reports[0]?.deferred).toBe(true);
+
+    const missing = fakeClient([order({ seat: 'ghost', lease_id: 'L9' })]);
+    await pollHostOnce(
+      deps({
+        backends: new Map(),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => missing.client,
+      }),
+    );
+    expect(missing.calls.progress).toEqual([]);
+  });
+
+  it('a failed wake-progress still reports the outcome', async () => {
+    const { client, calls } = fakeClient([order()]);
+    client.wakeProgress = async () => {
+      calls.progress.push('threw');
+      throw new Error('daemon old');
+    };
+    const { backend } = fakeBackend();
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+      }),
+    );
+    expect(calls.reports.length).toBeGreaterThan(0);
   });
 });

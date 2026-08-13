@@ -96,6 +96,7 @@ export function startReaper(ctx: Ctx): () => void {
         lease_id: lease.id,
         lane: lease.lane,
         ...(lease.lane_id ? { lane_id: lease.lane_id } : {}),
+        ...(lease.edge ? { edge: lease.edge } : {}),
       };
       const unreachable = lease.created_at < continuousSince;
       // The ceiling's clock starts at the act's FIRST lease, not this one — three attempts spread

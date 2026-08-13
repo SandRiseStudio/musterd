@@ -221,6 +221,16 @@ export const WAKE_DERIVATIONS = ['immediate', 'batched', 'work_order'] as const;
 export type WakeDerivation = (typeof WAKE_DERIVATIONS)[number];
 export const WakeDerivationSchema = z.enum(WAKE_DERIVATIONS);
 
+/** Work-order board edges (ADR 262). Inbox wakes are not edges — they keep edge NULL on the lease. */
+export const LOOP_EDGES = ['review', 'dispatch_handoff', 'dispatch_continuation'] as const;
+export type LoopEdge = (typeof LOOP_EDGES)[number];
+export const LoopEdgeSchema = z.enum(LOOP_EDGES);
+
+/** Body of `POST /teams/:slug/residency/wake-progress` — presence of the POST means spawned.
+ *  Does not settle the lease. Extra keys rejected (this is not wake-report). */
+export const WakeProgressBodySchema = z.object({ lease_id: z.string().min(1) }).strict();
+export type WakeProgressBody = z.infer<typeof WakeProgressBodySchema>;
+
 /** ADR 209: whether durable, fetchable context is enough, or active dialogue is required. */
 export const CONTINUITY_REQUIREMENTS = ['portable', 'transcript_required'] as const;
 export type ContinuityRequirement = (typeof CONTINUITY_REQUIREMENTS)[number];
