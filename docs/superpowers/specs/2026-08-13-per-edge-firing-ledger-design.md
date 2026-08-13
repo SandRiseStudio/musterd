@@ -66,7 +66,7 @@ Do not extend `WakeReportBody`. That route already means outcome (settle / defer
 
 For a work-order candidate, before inserting the lease:
 
-1. If `WORK_ORDER_EDGE_BREAKER_N` (3) leases already exist for this `(team, lane_id, edge)` → skip, write `residency.wake_exhausted` with `detail.breaker: true` and `detail.edge` (no new audit verb — ADR 179 rides detail on existing rows), continue to the next candidate.
+1. If `WORK_ORDER_EDGE_BREAKER_N` (3) **failed** leases already exist for this `(team, lane_id, edge)` → skip, write `residency.wake_exhausted` with `detail.breaker: true` and `detail.edge` (no new audit verb — ADR 179 rides detail on existing rows), continue to the next candidate. Count `residency.wake_failed` rows (including reaper `lease_expired`) on that edge, **not** `residency.woke`. Three successful continuation wakes on the same claimed lane must still derive — that edge is the chaining primitive (ADR 199).
 2. If the last **reported** `residency.wake_failed` on this `(lane_id, edge)` carries a still-true reason → skip. The failure row is the reason; do not write a second audit.
 
 `REVIEW_LOOP_BREAKER_N` is unchanged and stays in `review.ts`. It still counts ready-entries. This increment does not reuse it.
@@ -138,7 +138,7 @@ Through-DB unless noted:
 - Stamp `edge` on the three work-order constructors only; inbox leases stay NULL.
 - Same lane, two edges → two counters.
 - Last reported `enrolled_dead_workspace` or `not_enrolled` → skip. `enrolled_seat_busy` or `lease_expired` → retry.
-- Trip at 3 **leases** on that edge, not 3 `lane.ready_for_review` rows. The old bounce counter is not this test.
+- Trip at 3 **failed** leases on that edge (`wake_failed` / `lease_expired`), not 3 `lane.ready_for_review` rows and not 3 successful `woke` rows. The old bounce counter is not this test. Three `woke` continuation leases on the same lane still derive.
 - Progress HTTP: stamp, no settle, idempotent, 404 unknown; stamp-after-settle if null.
 - Host: progress after exec, not on dead-workspace short-circuit; progress failure does not skip `wake-report`.
 - Null `spawned_at` (old host) still derives; breaker still counts leases.
