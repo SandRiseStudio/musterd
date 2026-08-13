@@ -2,8 +2,8 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { renderIndex } from './wiki-index.ts';
 import { checkWiki } from './check-wiki.ts';
+import { renderIndex } from './wiki-index.ts';
 
 const dirs: string[] = [];
 function fixture(pages: Record<string, string>): string {
