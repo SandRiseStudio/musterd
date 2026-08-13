@@ -170,8 +170,11 @@ export function deriveNext(
   // value-layer design: the team's oldest lanes waiting on acceptance — review debt as ambient
   // candidate work for ANY seat (owed_reviews stays the directed slice). Cap 3, oldest first.
   const now = Date.now();
+  // A seat's own lane is never its candidate review work: ADR 192 grades a same-seat close as
+  // unconfirmed (`verified` requires closer ≠ owner), so serving it here invites the one
+  // acceptance the model refuses to count.
   const review_debt = all
-    .filter((l) => isAwaitingAcceptance(l.state))
+    .filter((l) => isAwaitingAcceptance(l.state) && l.owner_seat !== member)
     .map((l) => ({ lane: l, entered: acceptanceEnteredAt(db, teamId, l) }))
     .sort((a, b) => a.entered - b.entered)
     .slice(0, 3)

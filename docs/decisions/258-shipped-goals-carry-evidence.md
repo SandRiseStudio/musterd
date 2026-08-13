@@ -113,3 +113,13 @@ daemon-initiated wakes.
   advisory posture only in the disproof direction (a fraction that fails to fall indicts
   `stale_acceptance` regardless of the confounds' sign, since all three interventions aimed the
   same way). Any *credit* read must name all three.
+
+- **2026-08-12 — `review_debt` no longer invites self-acceptance** (izzo, lane
+  `01KZWMYE5M28MKRN2GB81AVZWZ`; the Decision is frozen, this note records the repair). The brief
+  projection served a seat its *own* awaiting-acceptance lanes as ambient candidate review work,
+  and the MCP renderer dropped `owner` — the one field that would have revealed it. ADR 192
+  grades a same-seat close as unconfirmed, so the field was steering seats toward the single
+  acceptance shape the model refuses to count. The projection now filters the requesting seat's
+  own lanes (the freed cap slot goes to the next-oldest teammate lane), and the renderer prints
+  `owner=` — kept even after the filter, because a skew-tolerant reader may face an older daemon
+  that still serves own lanes.

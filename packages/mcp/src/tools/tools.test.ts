@@ -1472,5 +1472,8 @@ describe('value layer: goal outcome + review debt + claim-time linking', () => {
     expect(out).toContain('review debt');
     expect(out).toContain('stuck work');
     expect(out).toMatch(/26h/);
+    // The owner is the field that reveals whose work this is — dropping it invited
+    // silent self-acceptance whenever a stale brief still listed the reader's own lane.
+    expect(out).toContain('owner=June');
   });
 });
