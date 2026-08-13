@@ -1,6 +1,12 @@
 # Launch post — musterd v0.2
 
 > Draft. Adapt for the target platform (X/Twitter, HN, dev.to, LinkedIn). The README's "wedge" and principles sections are the canonical source; this is the post form.
+>
+> **Ship blocker:** these posts point at **musterd.io** (registered 2026-08-13, Cloudflare — see
+> [name clearance](wiki/name-clearance.md)). As of 2026-08-13 it serves nothing
+> (falsify: `curl -I https://musterd.io`). Do not publish any cut of this post until that domain
+> resolves to a real page — a dead front door on launch day costs more than the domain buys. Until
+> then the GitHub repo is the only honest link, and every cut below keeps it alongside the site.
 
 ---
 
@@ -10,7 +16,7 @@
 >
 > One human + two agents. Three surfaces. One team. Durable inboxes, typed coordination acts, explicit presence.
 >
-> npm: `npx @musterd/cli init` · brew: `brew tap SandRiseStudio/musterd && brew install musterd` → https://github.com/SandRiseStudio/musterd
+> `npx @musterd/cli init` (or brew) → musterd.io
 
 ---
 
@@ -37,7 +43,7 @@ MAST found ~79% of multi-agent failures are coordination failures — not capabi
 
 Tech: Node/TypeScript monorepo, SQLite + WS + HTTP, MCP adapter, MIT.
 
-Repo: https://github.com/SandRiseStudio/musterd
+Site: https://musterd.io · Repo: https://github.com/SandRiseStudio/musterd
 
 ---
 
@@ -51,7 +57,7 @@ That assumption is the bug.
 
 **The coordination failure problem**
 
-[MAST](https://arxiv.org/abs/2503.13657) analyzed hundreds of multi-agent failures and found that about 79% were *coordination* failures — lost context on handoffs, agents working at cross purposes, no shared ground truth on who's doing what. Not capability failures. The models are good enough; the coordination layer is the gap.
+[MAST](https://arxiv.org/abs/2503.13657) analyzed hundreds of multi-agent failures and found that about 79% were _coordination_ failures — lost context on handoffs, agents working at cross purposes, no shared ground truth on who's doing what. Not capability failures. The models are good enough; the coordination layer is the gap.
 
 musterd is that coordination layer.
 
@@ -74,15 +80,15 @@ In most multi-agent systems, the human is an approver — a special node outside
 
 Every message carries a typed **act** from the [Co-Gym](https://arxiv.org/abs/2412.15701) collaboration-act taxonomy:
 
-| act | meaning |
-|---|---|
-| `message` | plain communication |
-| `status_update` | report what you're doing / have done |
-| `request_help` | ask a member or the team to assist |
-| `handoff` | transfer a unit of work |
+| act                  | meaning                              |
+| -------------------- | ------------------------------------ |
+| `message`            | plain communication                  |
+| `status_update`      | report what you're doing / have done |
+| `request_help`       | ask a member or the team to assist   |
+| `handoff`            | transfer a unit of work              |
 | `accept` / `decline` | answer a `request_help` or `handoff` |
-| `wait` | signal you're paused or blocked |
-| `resolve` | close a thread — its work is done |
+| `wait`               | signal you're paused or blocked      |
+| `resolve`            | close a thread — its work is done    |
 
 This isn't just structure for structure's sake. It lets the human — or a future agent — filter, prioritize, and respond to coordination events without parsing free text.
 
@@ -106,6 +112,7 @@ npx @musterd/cli init
 One command: starts the daemon, creates a team, detects Claude Code / Cursor, wires up the MCP adapter, and waits for your agent to join with a live spinner.
 
 Or manually:
+
 ```bash
 musterd serve
 musterd team create dawn --as nick --role lead
@@ -121,5 +128,6 @@ The observability layer (coordination-level OTel tracing, the "batond" product) 
 
 MIT. Contributions welcome.
 
+→ [musterd.io](https://musterd.io)
 → [github.com/SandRiseStudio/musterd](https://github.com/SandRiseStudio/musterd)
 → `npx @musterd/cli init`
