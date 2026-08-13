@@ -645,6 +645,19 @@ export class HttpClient {
     };
   }
 
+  /** Host exec ack (ADR 262) — `POST /teams/:slug/residency/wake-progress`. Stamps spawned_at;
+   *  does not settle the lease. Extra keys rejected (this is not wake-report). */
+  async wakeProgress(
+    slug: string,
+    body: { lease_id: string },
+  ): Promise<{ ok: boolean; lease_id: string; spawned_at: number | null }> {
+    return (await this.request('POST', `/teams/${slug}/residency/wake-progress`, body)) as {
+      ok: boolean;
+      lease_id: string;
+      spawned_at: number | null;
+    };
+  }
+
   /** The native loop's per-turn rail (ADR 251 §7) — `POST /teams/:slug/residency/wake-turn`:
    *  one usage/capture row per turn, best-effort from the backend's perspective (a failed post
    *  never aborts the loop). Callers use `.presenceNeutral()` — telemetry must not animate. */

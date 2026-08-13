@@ -37,6 +37,7 @@ const VERIFY_WINDOW_MS = 90_000;
 export interface WakeClient {
   wakeLeases(team: string, host: string): Promise<WakeLeasesResponse>;
   wakeReport(team: string, body: WakeReportBody): Promise<unknown>;
+  wakeProgress(team: string, leaseId: string): Promise<unknown>;
   roster(team: string): Promise<{ members: MemberSummary[] }>;
 }
 
@@ -69,8 +70,15 @@ const defaultReadAgentKey = (workspace: string): string | undefined =>
   // the *target workspace's* binding.
   findBinding(workspace, {})?.agent_key;
 
-const defaultClientFor = (server: string, agentKey: string): WakeClient =>
-  new HttpClient({ server, key: agentKey }).presenceNeutral();
+const defaultClientFor = (server: string, agentKey: string): WakeClient => {
+  const http = new HttpClient({ server, key: agentKey }).presenceNeutral();
+  return {
+    wakeLeases: (team, host) => http.wakeLeases(team, host),
+    wakeReport: (team, body) => http.wakeReport(team, body),
+    wakeProgress: (team, leaseId) => http.wakeProgress(team, { lease_id: leaseId }),
+    roster: (team) => http.roster(team),
+  };
+};
 
 /** Clock slack for the freshness bar: `last_seen_at` is daemon-stamped, `sinceTs` host-stamped —
  *  same machine today, but a couple of seconds of skew must not reject honest evidence. */
@@ -338,6 +346,11 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
       span.setStatus({
         code: actuation.outcome.occupied ? SpanStatusCode.OK : SpanStatusCode.ERROR,
       });
+      if (!actuation.outcome.deferred) {
+        await client.wakeProgress(group.team, order.lease_id).catch((err: Error) =>
+          deps.log(`! wake-progress failed for lease ${order.lease_id}: ${err.message}`),
+        );
+      }
       // The loud-failure log for this outcome lives in `report` above, so every branch that settles
       // a lease — actuation and the pre-actuation bail-outs alike — is equally loud. It was here
       // alone until 2026-07-31, which is why a dead registry entry could fail three times in silence.
