@@ -155,7 +155,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -1001,8 +1001,10 @@ export async function serviceCommand(
       await verifyDaemonUp(ctx, health, 'restart', ok, deps.sleep);
       return 0;
     }
-    case 'refresh':
-      return refreshDaemon(ctx, health, force, ok, fail, deps.sleep);
+    case 'refresh': {
+      const pin = typeof parsed.flags['pin'] === 'string' ? parsed.flags['pin'] : undefined;
+      return refreshDaemon(ctx, health, force, ok, fail, deps.sleep, undefined, undefined, pin);
+    }
     case 'status':
       return renderStatus(ctx, health);
     case 'logs': {
@@ -1120,6 +1122,12 @@ async function refreshDaemon(
    * never happen — and it stacks with the failure notice for the same tip (#631).
    */
   announce?: () => void,
+  /**
+   * Guardian crashloop rollback (2026-08-13 spec §4): refresh to this ref instead of origin/main.
+   * No fetch — a pin target is a commit this checkout already ran. Everything downstream (install
+   * consistency, build, restart, verify, sibling bounce) is identical to a normal refresh.
+   */
+  pinRef?: string,
 ): Promise<number> {
   // The checkout the daemon ACTUALLY runs from — read back from its installed plist, not derived
   // from where this CLI was invoked. `restart` already cycles the daemon by launchd label, but the
@@ -1154,16 +1162,24 @@ async function refreshDaemon(
   await guardLiveSessions(health, force);
 
   const before = git('rev-parse', '--short', 'HEAD').stdout.trim();
-  const fetched = git('fetch', 'origin', 'main', '--quiet');
-  if (fetched.status !== 0) fail('git fetch origin main', fetched);
-  const switched = git('switch', '--detach', 'origin/main');
-  if (switched.status !== 0) fail('git switch origin/main', switched);
+  if (pinRef !== undefined) {
+    const switched = git('switch', '--detach', pinRef);
+    if (switched.status !== 0) fail(`git switch ${pinRef}`, switched);
+    const after = git('rev-parse', '--short', 'HEAD').stdout.trim();
+    ok(`pinned ${dir} → ${after} ${theme.meta(`(was ${before})`)}`);
+  } else {
+    const fetched = git('fetch', 'origin', 'main', '--quiet');
+    if (fetched.status !== 0) fail('git fetch origin main', fetched);
+    const switched = git('switch', '--detach', 'origin/main');
+    if (switched.status !== 0) fail('git switch origin/main', switched);
+    const after = git('rev-parse', '--short', 'HEAD').stdout.trim();
+    ok(
+      after === before
+        ? `already on the latest main (${after})`
+        : `synced ${dir} → ${after} ${theme.meta(`(was ${before})`)}`,
+    );
+  }
   const after = git('rev-parse', '--short', 'HEAD').stdout.trim();
-  ok(
-    after === before
-      ? `already on the latest main (${after})`
-      : `synced ${dir} → ${after} ${theme.meta(`(was ${before})`)}`,
-  );
 
   // Install when `node_modules` does not match the (post-sync) lockfile. A refresh is sync → build
   // → restart, with no install — fast and correct for the ~99% of merges that touch no dependency.

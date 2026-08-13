@@ -15,10 +15,18 @@ export interface GuardianStamp {
   lastTickAt: number | null;
   lastHeartbeatAt: number | null;
   lastIncident: { class: GuardianClass; at: number } | null;
+  /** `/health.build` from the newest HEALTHY tick — the crashloop rollback target (`refresh --pin`). */
+  lastGoodBuild: string | null;
 }
 
 export function emptyStamp(): GuardianStamp {
-  return { lastAttemptAt: {}, lastTickAt: null, lastHeartbeatAt: null, lastIncident: null };
+  return {
+    lastAttemptAt: {},
+    lastTickAt: null,
+    lastHeartbeatAt: null,
+    lastIncident: null,
+    lastGoodBuild: null,
+  };
 }
 
 export function loadStamp(path: string): GuardianStamp {

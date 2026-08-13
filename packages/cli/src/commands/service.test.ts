@@ -378,6 +378,43 @@ describe('serviceCommand', () => {
     expect(out).toContain('restarted the musterd daemon on bbb222');
   });
 
+  // Guardian crashloop rollback (2026-08-13 spec §4): `refresh --pin <ref>` targets a named ref
+  // instead of origin/main — no fetch (the ref already ran here), same build+restart+verify path.
+  it('refresh --pin switches to the named ref and never fetches origin/main', async () => {
+    const c = ctx(refreshRunner());
+    const { code, out } = await capture(() =>
+      serviceCommand(parseArgs(['refresh', '--pin', 'abc1234']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+    expect(code).toBe(0);
+    expect(calls.some((x) => x.cmd === 'git' && x.args.includes('fetch'))).toBe(false);
+    expect(
+      calls.some(
+        (x) => x.cmd === 'git' && x.args.includes('switch') && x.args.includes('abc1234'),
+      ),
+    ).toBe(true);
+    expect(out).toContain('pinned');
+  });
+
+  it('refresh --pin with an unknown ref fails before any bounce', async () => {
+    const runner = refreshRunner();
+    const c = ctx(((cmd, args) => {
+      if (cmd === 'git' && args.includes('switch')) return { status: 1, stdout: '', stderr: 'bad ref' };
+      return runner(cmd, args);
+    }) as Runner);
+    await expect(
+      serviceCommand(parseArgs(['refresh', '--pin', 'nope']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    ).rejects.toThrow(/git switch nope failed/);
+    expect(calls.some((x) => x.cmd === 'launchctl')).toBe(false);
+  });
+
   // The silent-pin bug (#565) and its retry hole: the first fix (#570) decided on the lockfile diff
   // of the current hop, so a missed install — the hop's build failed, or the install itself failed —
   // was never retried once the lockfile-moving commit fell behind `before`, and the daemon stayed
