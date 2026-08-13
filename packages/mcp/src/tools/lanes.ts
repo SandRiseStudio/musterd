@@ -500,8 +500,12 @@ function fmtNext(b: NextBrief): string {
   const debt = b.review_debt ?? [];
   if (debt.length) {
     lines.push(`\n⧗ review debt — waiting on any seat's acceptance:`);
+    // Owner stays visible even though the daemon filters the reader's own lanes out: a skewed
+    // older daemon won't, and whose work it is decides whether accepting counts (ADR 192).
     for (const r of debt)
-      lines.push(`  ${r.id} "${r.title}" — waiting ${Math.floor(r.waited_ms / 3_600_000)}h`);
+      lines.push(
+        `  ${r.id} "${r.title}"${r.owner ? ` — owner=${r.owner}` : ''} — waiting ${Math.floor(r.waited_ms / 3_600_000)}h`,
+      );
   }
   if (b.up_next.length) {
     lines.push('\nup next — open lanes you could pick up:');

@@ -421,8 +421,9 @@ describe('review_debt (value-layer design)', () => {
     teamId: string,
     title: string,
     agoMs: number,
+    owner = 'stanley',
   ) {
-    const lane = openLane(db, teamId, 'revive', 'stanley', { title, claim: true });
+    const lane = openLane(db, teamId, 'revive', owner, { title, claim: true });
     const moved = updateLane(db, teamId, lane.id, 'revive', { state: 'awaiting_acceptance' })!;
     insertReadyAudit(db, teamId, moved.id, Date.now() - agoMs);
     return moved;
@@ -438,6 +439,27 @@ describe('review_debt (value-layer design)', () => {
     expect(brief.review_debt!.map((r) => r.id)).toEqual([old1.id, old2.id, old3.id]);
     expect(brief.review_debt![0]!.owner).toBe('stanley');
     expect(brief.review_debt![0]!.waited_ms).toBeGreaterThan(29 * 3_600_000);
+  });
+
+  it("excludes the requesting seat's own lanes — self-acceptance is never invited", () => {
+    const { db, team } = seed();
+    awaiting(db, team.id, 'mine-a', 30 * 3_600_000);
+    awaiting(db, team.id, 'mine-b', 20 * 3_600_000);
+    // ADR 192: `verified` requires closer ≠ owner, so a seat's own lane is never its
+    // candidate review work — the whole field disappears when nothing else waits.
+    expect(deriveNext(db, team.id, 'revive', 'stanley').review_debt).toBeUndefined();
+    expect(deriveNext(db, team.id, 'revive', 'nick').review_debt).toHaveLength(2);
+  });
+
+  it("an excluded own lane frees its cap slot for the next-oldest teammate's lane", () => {
+    const { db, team } = seed();
+    awaiting(db, team.id, 'mine', 40 * 3_600_000); // oldest, but requester-owned
+    const o1 = awaiting(db, team.id, 'a', 30 * 3_600_000, 'nick');
+    const o2 = awaiting(db, team.id, 'b', 20 * 3_600_000, 'nick');
+    const o3 = awaiting(db, team.id, 'c', 10 * 3_600_000, 'nick');
+    awaiting(db, team.id, 'd', 1_000, 'nick'); // freshest — capped out
+    const debt = deriveNext(db, team.id, 'revive', 'stanley').review_debt!;
+    expect(debt.map((r) => r.id)).toEqual([o1.id, o2.id, o3.id]);
   });
 
   it('is absent when nothing waits', () => {
