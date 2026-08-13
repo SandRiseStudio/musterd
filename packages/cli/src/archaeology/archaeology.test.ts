@@ -263,7 +263,24 @@ function actorEnv(name: string, email: string, when: number): Record<string, str
   };
 }
 
-describe('extractFacts + classify on a real repo', () => {
+/**
+ * The only block in this file that leaves the process: both tests build a real git repo in tmp,
+ * ~14 and ~5 `execFileSync('git')` spawns respectively. Everything above is pure and runs in ~1ms.
+ *
+ * Measured 2026-08-13: 497ms and 133ms standalone — a 10x margin under the 5s default. The same
+ * test still timed out at 5000ms inside a full `pnpm --filter @musterd/cli test`, on a machine at
+ * load average 17.9 with 5.2 GB of 6 GB swap in use. So the cost is **process-spawn starvation
+ * under contention**, not computation: 106 test files fork in parallel (`pool: 'forks'`) and each
+ * `git` here queues behind them. Nothing about the test got slower.
+ *
+ * Hence a block-level budget rather than a global bump: the timeout's job is to catch a HANG in
+ * extractFacts, and 30s still does that while no longer failing on a busy laptop. If other
+ * spawn-heavy suites start timing out (7 more files shell out — workingTree.predates, onboard/
+ * workspace, onboard/doctor, lane, claim, gate, session/continuity), the answer is not another
+ * per-file bump: it is that the suite's fork concurrency outgrew the machine, and that is one
+ * decision to make once rather than eight to make separately.
+ */
+describe('extractFacts + classify on a real repo', { timeout: 30_000 }, () => {
   it('measures abandonment, exact duplication, and clobbering end to end', () => {
     const repo = mkdtempSync(join(tmpdir(), 'march-'));
     made.push(repo);
