@@ -266,15 +266,19 @@ Runs the daemon as a background **service** so it survives a closed terminal/ses
 
 The one-time **db→file migration** for a team's durable roster (ADR 058 / migration-bootstrap.md). Run in the folder that should own the roster: reads the live roster, writes canonical `.musterd/team.toml` + one `seats/<name>.toml` per member (identity only — **no token touches a file**), runs the format-layer parity self-check, and records `rosterHome[slug]` in the global config (the per-team cutover signal — the daemon then treats this team as file-backed). Token-preserving by construction: the next reconcile is a match-by-name no-op, so live sessions keep their tokens. Refuses if `team.toml` already exists. Output: `✓ exported "<slug>" roster → .musterd/ (N seats)`.
 
-### `musterd team policy [--review-loop on|off] [--dispatch-loop on|off]`
+### `musterd team policy [--review-loop on|off] [--dispatch-loop on|off] [--stakes-default <surface>=<low|normal|high>|off]`
 
 Shows or updates the Team's admin-only governance policy. `--review-loop on` arms ADR 191's review
 work-order loop; `--dispatch-loop on` arms ADR 199's dispatch work-order loop; `off` restores each
-default. The command reads the sparse stored policy, updates only the named `loops.*` switch, then
-writes it back, so it never clobbers another policy setting or the sibling loop. The human-readable
-view shows whether each setting is explicit or inherited; `--json` includes effective `loops` plus
-the sparse `stored` policy. Either loop still also requires the target seat's residency `flow: auto`;
-the command only controls the Team-wide half of the gate.
+default. `--stakes-default <surface>=<low|normal|high>` upserts an ADR 244 default-stakes rule (the
+same surface replaces in place; a new surface appends; first match still wins); `--stakes-default off`
+clears the list so every lane opens at the worker's declaration again. The command reads the sparse
+stored policy, updates only the named knob, then writes it back, so it never clobbers another policy
+setting or the sibling loop. The human-readable view shows whether each setting is explicit or
+inherited; `--json` includes effective `loops` / `stakes_defaults` plus the sparse `stored` policy.
+Either loop still also requires the target seat's residency `flow: auto`; the command only controls
+the Team-wide half of the gate. A stakes default only applies at `lane_open`, and only when every
+declared surface sits under the rule — mixed web+server lanes stay `normal`.
 
 ### `musterd fmt [--check]`
 
