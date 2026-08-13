@@ -22,7 +22,7 @@ src/
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
   machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
-  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121)
+  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
   codexBin.ts         // PATH-robust, shell-free `codex` binary resolution plus read-only `--version`/help capability probe; an unresolved or incompatible install stays non-wakeable (ADR 216)
@@ -50,7 +50,7 @@ src/
   host/               // the `musterd host` wake actuator — harness residency's per-machine hand (ADR 131 inc 3)
     registry.ts       // machine-local seat → workspace/harness registry (~/.musterd/host-registry.json); written by `residency on`, never by the daemon
     backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
-    loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation
+    loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred)
     pinnedBin.ts      // a wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
     engine.ts         // the AgentLoopEngine seam (ADR 251 §3): prompt + tools + bounds → turns/usage/end-reason, provider-neutral; the named insertion point for a second provider (ADR 101/110), with per-turn observation for capture/telemetry
     engines/

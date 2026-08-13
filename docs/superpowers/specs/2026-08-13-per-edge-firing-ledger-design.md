@@ -4,10 +4,10 @@
 - Lane: `01KZY20ZRJ0SBH8WJ3CTFPKDP3`
 - Goal: `board-loops`
 - Author: wanderer
-- Status: design, approved in brainstorm — not yet implemented
-- Relates to: ADR 179 (umbrella), ADR 191 (review loop), ADR 199 (dispatch loop), ADR 250 §4 item 1 (this increment), ADR 131 (wake leases), ADR 189 (wakeability), ADR 236 (lease_expired vs sleeping host), ADR 247 (one payload, two consumers), ADR 253 (breaker does not ask a human)
+- Status: implementing (ADR 262)
+- Relates to: ADR 179 (umbrella), ADR 191 (review loop), ADR 199 (dispatch loop), ADR 250 §4 item 1 (this increment), ADR 131 (wake leases), ADR 189 (wakeability), ADR 236 (lease_expired vs sleeping host), ADR 247 (one payload, two consumers), ADR 253 (breaker does not ask a human), [ADR 262](../../decisions/262-per-edge-firing-ledger.md)
 
-This increment writes its own ADR (number from `pnpm adr:next` at implementation). ADR 179 stays the umbrella; ADR 250 stays the sequenced backlog. Do not amend either Decision.
+This increment's ADR is 262. ADR 179 stays the umbrella; ADR 250 stays the sequenced backlog. Do not amend either Decision.
 
 ## Problem
 
@@ -113,7 +113,7 @@ A failed progress POST is loud in the host log and non-fatal. The wake still rep
 - `packages/server/src/transport/http.ts` (+ `residency-http.test.ts`) — `POST …/wake-progress`
 - `packages/cli/src/client.ts` — progress client
 - `packages/cli/src/host/loop.ts` (+ tests) — POST after exec
-- `docs/decisions/NNN-*.md` — this increment's ADR
+- `docs/decisions/262-per-edge-firing-ledger.md` — this increment's ADR
 - `docs/architecture/02-protocol.md`, `03-server.md`, `04-cli.md` — living docs in the same commit as the behavior
 
 `packages/server/src/store/review.ts` is **not** in the change set. The bounce counter stays there; the spend breaker lives next to `claimWakeLeases`.
