@@ -20,6 +20,7 @@
     "tokens:check": "node --disable-warning=ExperimentalWarning scripts/check-css-tokens.ts",
     "perf:check": "node --disable-warning=ExperimentalWarning scripts/perf/check-budgets.ts",
     "a11y:contrast": "node scripts/a11y/contrast-sweep.mjs",
+    "a11y:check": "node scripts/a11y/contrast-gate.mjs",
     "context:check": "node --disable-warning=ExperimentalWarning scripts/context/check-budgets.ts",
     "guidance:check": "node --disable-warning=ExperimentalWarning scripts/check-guidance.ts",
     "roadmap:gen": "node --disable-warning=ExperimentalWarning scripts/gen-roadmap.ts",

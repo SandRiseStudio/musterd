@@ -64,6 +64,18 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # The other half of web a11y. `pnpm lint` gates the STRUCTURAL half (jsx-a11y as errors, #493);
+      # that eslint block names colour contrast as the first thing it cannot see, and until now
+      # nothing checked it — `a11y:contrast` ran only when someone remembered. Nine live AA failures
+      # had accumulated by the time anyone measured. Sweeps the built client's prerendered routes in
+      # real Chrome (contrast cannot be computed from hex — alpha tints and color-mix()), so it needs
+      # Build first. ubuntu-latest ships Chrome; CHROME_BIN is named rather than discovered so a
+      # runner-image change fails loudly instead of silently skipping.
+      - name: A11y contrast
+        run: pnpm a11y:check
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+
       # `pnpm coverage` runs the full suite AND enforces the per-package line floors (vitest.config.ts),
       # so a drop below the floor fails the gate — closes the silent coverage-drift gap (ADR 106).
       - name: Tests + coverage

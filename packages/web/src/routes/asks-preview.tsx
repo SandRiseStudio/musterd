@@ -155,7 +155,7 @@ function AsksPreviewPage() {
               key={k}
               type="button"
               className="lc-ask__btn"
-              style={k === scene ? { borderColor: 'var(--lc-accent)', color: 'var(--lc-accent)' } : undefined}
+              style={k === scene ? { borderColor: 'var(--lc-accent)', color: 'var(--lc-accent-ink)' } : undefined}
               onClick={() => setScene(k)}
             >
               {k}
@@ -164,7 +164,7 @@ function AsksPreviewPage() {
           <button
             type="button"
             className="lc-ask__btn"
-            style={asObserver ? { borderColor: 'var(--lc-accent)', color: 'var(--lc-accent)' } : undefined}
+            style={asObserver ? { borderColor: 'var(--lc-accent)', color: 'var(--lc-accent-ink)' } : undefined}
             onClick={() => setObserver((v) => !v)}
             title="Observers are hidden from the roster (ADR 063), so the rail renders read-only"
           >

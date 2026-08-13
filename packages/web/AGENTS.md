@@ -36,6 +36,12 @@ one week in 2026-07 because raises were being used to fix a calibration problem.
   which is what ADR 234 rejected and what this default is only admissible for *not* doing. The
   evidence it matters is on the record — on 2026-08-05 four web lanes routed `normal` and acceptance
   caught two real defects on one of them, both on a change a blanket path rule would have exempted.
+- **Contrast is a gate now, not a habit** — `pnpm a11y:check` (CI, after Build) sweeps every
+  prerendered route and fails on any AA failure. It was added on 2026-08-12 after nine live failures
+  had accumulated in the gap where "run the script sometimes" was the whole policy; eight were a
+  fill token used as text with its `-ink` sibling defined a line away. It cannot reach the states
+  `/board` and `/live` only render against a daemon, so a green gate is not full coverage — read the
+  per-route "N unmeasurable" count it prints.
 - **Contrast is measured in the browser, never computed from the hex.** `pnpm a11y:contrast <url>`
   ([docs/a11y/contrast.md](../../docs/a11y/contrast.md)) resolves each colour by painting it to a
   canvas, so alpha tints, `color-mix()` and translucent stacks are accounted for. Two things it
