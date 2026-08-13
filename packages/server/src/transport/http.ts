@@ -1997,7 +1997,9 @@ export async function handleHttp(
                 lane_id: string | null;
                 edge: string | null;
               }
-            >('SELECT member_id, act_id, lane_id, edge FROM wake_leases WHERE team_id = ? AND id = ?')
+            >(
+              'SELECT member_id, act_id, lane_id, edge FROM wake_leases WHERE team_id = ? AND id = ?',
+            )
             .get(team.id, body.lease_id);
           if (!settled)
             throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
