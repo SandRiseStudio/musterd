@@ -33,7 +33,12 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
     ],
     tools: {
       resource_scopes: ['**'],
-      permissions: { allow: ['read', 'bash(git diff*)', 'bash(git log*)'], ask: ['edit', 'bash'] },
+      // ADR 261: canonical Claude Code rule syntax — the historical lowercase forms ('read',
+      // 'bash(git diff*)') matched nothing, so this role's quasi-ceiling was inert until now.
+      permissions: {
+        allow: ['Read', 'Bash(git diff *)', 'Bash(git log *)'],
+        ask: ['Edit', 'Bash'],
+      },
     },
   },
 
@@ -54,7 +59,7 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
           env: { SUPABASE_ACCESS_TOKEN: '${SUPABASE_ACCESS_TOKEN}' },
         },
       ],
-      permissions: { allow: ['edit', 'read', 'bash(pnpm test*)'], ask: ['bash'] },
+      permissions: { allow: ['Edit', 'Read', 'Bash(pnpm test*)'], ask: ['Bash'] }, // ADR 261 canonical syntax
     },
   },
 
@@ -75,7 +80,37 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
           env: { FIGMA_API_KEY: '${FIGMA_API_KEY}' },
         },
       ],
-      permissions: { allow: ['edit', 'read', 'bash(pnpm test*)'], ask: ['bash'] },
+      permissions: { allow: ['Edit', 'Read', 'Bash(pnpm test*)'], ask: ['Bash'] }, // ADR 261 canonical syntax
+    },
+  },
+
+  // ADR 261: the ceiling archetype. Real because of `deny` — Claude Code's deny outranks allow and
+  // cannot be overridden interactively, which is what makes read-only a ceiling rather than a
+  // suggestion. No `ask` entries: in a non-interactive session `ask` is just a slower fail-closed.
+  // Bash stays allowed but only through read-shaped prefixes; the deny on the edit tools is the
+  // profile. (Observer members, ADR 063, are the coordination-layer precedent.)
+  'read-only': {
+    role: 'read-only',
+    charter: [
+      'Read, review, and report — never write. Surface findings through the team acts.',
+      'status_update when you start and finish; request_help instead of working around a limit.',
+    ],
+    tools: {
+      resource_scopes: ['**'],
+      permissions: {
+        allow: [
+          'Read',
+          'Glob',
+          'Grep',
+          'Bash(git diff *)',
+          'Bash(git log *)',
+          'Bash(git show *)',
+          'Bash(ls *)',
+          'Bash(rg *)',
+          'Bash(cat *)',
+        ],
+        deny: ['Edit', 'Write', 'NotebookEdit'],
+      },
     },
   },
 
@@ -87,7 +122,7 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
     ],
     tools: {
       resource_scopes: ['docs/**', '**/*.md'],
-      permissions: { allow: ['edit', 'read'], ask: ['bash'] },
+      permissions: { allow: ['Edit', 'Read'], ask: ['Bash'] }, // ADR 261 canonical syntax
     },
   },
 };

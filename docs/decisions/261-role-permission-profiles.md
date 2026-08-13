@@ -124,7 +124,7 @@ review-path side.
   actions.
 - **Eval:** the falsifiable claim is narrow — **no seat blocked by a missing harness permission
   again**. Baseline 2026-08-13: 2 of 4 active agent seats had no permissions block at all; ryder's
-  incident is the only counted case, and it is also the only one anybody *noticed* — the counter
+  incident is the only counted case, and it is also the only one anybody _noticed_ — the counter
   has never been instrumented, and silence is not evidence (`docs/wiki/instrument-silence.md`).
   Instrument first: a denial nobody records is the failure mode being fixed.
 - **The reading that would indict this ADR:** a steady stream of surplus-`allow` drift findings —
@@ -133,6 +133,9 @@ review-path side.
 - **Falsifier for the syntax claim (defect 3):** if lowercase `'read'` demonstrably gates a `Read`
   call in a current Claude Code build, the seed-library correction is cosmetic — record it and
   keep canonical form anyway for diffability.
+- **Experiment:** none — observational. The eval reads the live dogfood ledger (blocked-seat
+  incidents, surplus-allow drift once increment 2's `--check` exists); no controlled comparison is
+  warranted for a provisioning floor whose absence is the incident class being counted.
 
 ## Consequences
 
