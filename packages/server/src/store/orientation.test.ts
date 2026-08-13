@@ -393,3 +393,56 @@ describe('brief leads with goals (goals-front-door design)', () => {
     expect(brief.goals.map((g) => g.id)).toEqual(['gb', 'ga']);
   });
 });
+
+describe('review_debt (value-layer design)', () => {
+  function insertReadyAudit(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    target: string,
+    ts: number,
+  ) {
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      `rd${ts}-${target}`,
+      teamId,
+      ts,
+      'stanley',
+      'lane.ready_for_review',
+      target,
+      'allow',
+      null,
+      ts,
+    );
+  }
+  function awaiting(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    title: string,
+    agoMs: number,
+  ) {
+    const lane = openLane(db, teamId, 'revive', 'stanley', { title, claim: true });
+    const moved = updateLane(db, teamId, lane.id, 'revive', { state: 'awaiting_acceptance' })!;
+    insertReadyAudit(db, teamId, moved.id, Date.now() - agoMs);
+    return moved;
+  }
+
+  it('lists the 3 oldest awaiting-acceptance lanes, oldest first', () => {
+    const { db, team } = seed();
+    const old1 = awaiting(db, team.id, 'a', 30 * 3_600_000);
+    const old2 = awaiting(db, team.id, 'b', 20 * 3_600_000);
+    const old3 = awaiting(db, team.id, 'c', 10 * 3_600_000);
+    awaiting(db, team.id, 'd', 1_000); // freshest — capped out
+    const brief = deriveNext(db, team.id, 'revive', 'nick');
+    expect(brief.review_debt!.map((r) => r.id)).toEqual([old1.id, old2.id, old3.id]);
+    expect(brief.review_debt![0]!.owner).toBe('stanley');
+    expect(brief.review_debt![0]!.waited_ms).toBeGreaterThan(29 * 3_600_000);
+  });
+
+  it('is absent when nothing waits', () => {
+    const { db, team } = seed();
+    openLane(db, team.id, 'revive', 'stanley', { title: 'live', claim: true });
+    expect(deriveNext(db, team.id, 'revive', 'nick').review_debt).toBeUndefined();
+  });
+});

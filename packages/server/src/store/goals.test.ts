@@ -73,6 +73,76 @@ function signal(
   );
 }
 
+/** An outcome note — a team message carrying `meta.goal_outcome` (value-layer design). */
+function outcome(
+  db: ReturnType<typeof seed>['db'],
+  teamId: string,
+  fromId: string,
+  meta: unknown,
+  ts = ++mid,
+) {
+  insertMessage(
+    db,
+    teamId,
+    fromId,
+    null,
+    makeEnvelope({
+      id: `o${ts}`,
+      team: 'revive',
+      from: 'nick',
+      to: { kind: 'team' },
+      act: 'message',
+      body: '[goal] outcome',
+      meta: meta as Record<string, unknown>,
+      ts,
+    }),
+  );
+}
+
+describe('goal outcome replay (value-layer design)', () => {
+  it('attaches the latest outcome with provenance', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'g1', title: 'Auth' }, 10);
+    outcome(db, team.id, nick.id, { goal_outcome: { goal_id: 'g1', outcome: 'users can X' } }, 20);
+    outcome(
+      db,
+      team.id,
+      nick.id,
+      { goal_outcome: { goal_id: 'g1', outcome: 'users can X and Y' } },
+      30,
+    );
+    const g = listGoals(db, team.id, 'revive')[0]!;
+    expect(g.outcome).toEqual({ text: 'users can X and Y', by: 'nick', at: 30 });
+  });
+
+  it('queues an outcome that arrives before its declaration', () => {
+    const { db, team, nick } = seed();
+    outcome(db, team.id, nick.id, { goal_outcome: { goal_id: 'g2', outcome: 'early note' } }, 10);
+    declare(db, team.id, nick.id, { id: 'g2', title: 'Auth' }, 20);
+    expect(listGoals(db, team.id, 'revive')[0]!.outcome?.text).toBe('early note');
+  });
+
+  it('outcome survives a wholesale re-declaration of the skeleton (the footgun test)', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'g3', title: 'Auth', story: 's' }, 10);
+    outcome(db, team.id, nick.id, { goal_outcome: { goal_id: 'g3', outcome: 'note' } }, 20);
+    declare(db, team.id, nick.id, { id: 'g3', title: 'Auth v2' }, 30); // no story — story clears
+    const g = listGoals(db, team.id, 'revive')[0]!;
+    expect(g.story).toBeUndefined();
+    expect(g.outcome?.text).toBe('note');
+  });
+
+  it('ignores malformed goal_outcome meta and outcomes for undeclared goals', () => {
+    const { db, team, nick } = seed();
+    declare(db, team.id, nick.id, { id: 'g4', title: 'Auth' }, 10);
+    outcome(db, team.id, nick.id, { goal_outcome: { goal_id: 'g4' } }, 20); // no text
+    outcome(db, team.id, nick.id, { goal_outcome: { goal_id: 'ghost', outcome: 'x' } }, 30);
+    const goals = listGoals(db, team.id, 'revive');
+    expect(goals).toHaveLength(1);
+    expect(goals[0]!.outcome).toBeUndefined();
+  });
+});
+
 describe('Goal.story (goals-front-door design)', () => {
   it('story rides the declaration and re-declaration amends it', () => {
     const { db, team, nick } = seed();

@@ -1,5 +1,5 @@
 import type { Goal, GoalDeclareMeta, Lane } from '@musterd/protocol';
-import { compareGoals, GoalDeclareMetaSchema } from '@musterd/protocol';
+import { compareGoals, GoalDeclareMetaSchema, GoalOutcomeMetaSchema } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { deriveGoalStatus, listLanes } from './lanes.js';
 
@@ -111,6 +111,11 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
   // Deferred/steered signals whose target Goal we may not have declared yet — replayed after the scan
   // so signal-before-declaration ordering can't drop an epoch bump or a wave override.
   const pending: { act: string; meta: unknown; ts: number }[] = [];
+  // Outcome notes (value-layer design) live BESIDE the skeleton accumulator, never inside it — a
+  // re-declaration replaces the skeleton wholesale, and an outcome must survive that. Latest-by-ts
+  // wins (the scan is ts-ascending); notes before their declaration queue like any other signal.
+  const outcomes = new Map<string, { text: string; by: string; at: number }>();
+  const pendingOutcomes: { goalId: string; text: string; by: string; at: number }[] = [];
 
   const applySignal = (act: string, meta: unknown, ts: number): boolean => {
     const goalId = signalGoalId(meta);
@@ -135,10 +140,25 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
       if (!applySignal(row.act, meta, row.ts)) pending.push({ act: row.act, meta, ts: row.ts });
       continue;
     }
-    // A Goal declaration (latest per id wins for the skeleton; its base wave is a wave event).
+    // A Goal declaration or an outcome note (latest per id wins for the skeleton; its base wave is
+    // a wave event). Both ride ordinary team messages — try the outcome shape first, it's cheaper.
+    let rawMeta: unknown;
+    try {
+      rawMeta = JSON.parse(row.meta);
+    } catch {
+      continue;
+    }
+    const asOutcome = GoalOutcomeMetaSchema.safeParse(rawMeta);
+    if (asOutcome.success) {
+      const o = asOutcome.data.goal_outcome;
+      const rec = { text: o.outcome, by: row.from_name, at: row.ts };
+      if (byId.has(o.goal_id)) outcomes.set(o.goal_id, rec);
+      else pendingOutcomes.push({ goalId: o.goal_id, ...rec });
+      continue;
+    }
     let parsed: GoalDeclareMeta;
     try {
-      parsed = GoalDeclareMetaSchema.parse(JSON.parse(row.meta));
+      parsed = GoalDeclareMetaSchema.parse(rawMeta);
     } catch {
       continue; // not a Goal declaration — an ordinary message with unrelated meta.
     }
@@ -162,6 +182,9 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
   }
   // Replay signals that arrived before their Goal's declaration (rare, but order-independent now).
   for (const p of pending) applySignal(p.act, p.meta, p.ts);
+  // Same for early outcome notes — the pending list is ts-ordered, so the last set is the latest.
+  for (const p of pendingOutcomes)
+    if (byId.has(p.goalId)) outcomes.set(p.goalId, { text: p.text, by: p.by, at: p.at });
 
   // Derive status from lanes joined by goal_id — one lane scan, grouped in memory (not one per Goal).
   const lanesByGoal = new Map<string, Lane[]>();
@@ -176,6 +199,7 @@ export function listGoals(db: Database, teamId: string, teamSlug: string): Goal[
     id: g.id,
     title: g.title,
     ...(g.story !== undefined ? { story: g.story } : {}),
+    ...(outcomes.has(g.id) ? { outcome: outcomes.get(g.id)! } : {}),
     // Effective wave = the newest wave assertion (declaration or defer) by ts; ties keep the later push.
     wave: g.waveEvents.reduce((best, e) => (e.ts >= best.ts ? e : best)).wave,
     depends_on: g.depends_on,

@@ -1374,3 +1374,103 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
     expect(updateLane).toHaveBeenCalledWith('lane1', { state: 'done' });
   });
 });
+
+describe('value layer: goal outcome + review debt + claim-time linking', () => {
+  function vlLane(over: Partial<Lane> = {}): Lane {
+    return {
+      id: 'lane1',
+      team: 'dawn',
+      project: 'default',
+      title: 'the work',
+      detail: null,
+      owner_seat: 'Ada',
+      role: null,
+      surface_globs: [],
+      depends_on: [],
+      branch: null,
+      goal_id: null,
+      state: 'done',
+      created_by: 'Ada',
+      created_at: 0,
+      claimed_at: null,
+      resolved_at: null,
+      updated_at: 0,
+      ...over,
+    };
+  }
+
+  it('team_goal_outcome round-trips and renders the note', async () => {
+    const goalOutcome = vi.fn(async () => ({
+      goal: {
+        id: 'g1',
+        title: 'G1',
+        wave: null,
+        depends_on: [],
+        declared_by: 'nick',
+        declared_at: 0,
+        status: 'shipped',
+        epoch: 0,
+        outcome: { text: 'users can now X', by: 'stanley', at: 5 },
+      },
+    }));
+    const { registerGoals } = await import('./goals.js');
+    const handlers = captureAll(registerGoals, { goalOutcome } as Partial<MusterdClient>);
+    const out = text(
+      await handlers['team_goal_outcome']!({ goal_id: 'g1', outcome: 'users can now X' }),
+    );
+    expect(goalOutcome).toHaveBeenCalledWith({ goal_id: 'g1', outcome: 'users can now X' });
+    expect(out).toContain('outcome recorded');
+    expect(out).toContain('users can now X');
+  });
+
+  it('team_goal_outcome says so when the goal is not yet declared', async () => {
+    const goalOutcome = vi.fn(async () => ({ goal: null }));
+    const { registerGoals } = await import('./goals.js');
+    const handlers = captureAll(registerGoals, { goalOutcome } as Partial<MusterdClient>);
+    const out = text(await handlers['team_goal_outcome']!({ goal_id: 'ghost', outcome: 'x' }));
+    expect(out).toContain('queued');
+  });
+
+  it('lane_claim passes goal_id through to updateLane in the same call', async () => {
+    const updateLane = vi.fn(async () => ({ lane: vlLane({ goal_id: 'g1' }), warnings: [] }));
+    const handlers = captureAll(registerLanes, {
+      member: 'Ada',
+      updateLane,
+    } as Partial<MusterdClient>);
+    await handlers['lane_claim']!({ id: 'lane1', goal_id: 'g1' });
+    expect(updateLane).toHaveBeenCalledWith('lane1', { owner_seat: 'Ada', goal_id: 'g1' });
+    await handlers['lane_claim']!({ id: 'lane1' });
+    expect(updateLane).toHaveBeenLastCalledWith('lane1', { owner_seat: 'Ada' });
+  });
+
+  it('lane_resolve renders notices from the response (the ship nudge reaches the closer)', async () => {
+    const updateLane = vi.fn(async () => ({
+      lane: vlLane(),
+      warnings: [],
+      notices: ['goal "g2" just shipped — say what changed for a user: team_goal_outcome {…}'],
+    }));
+    const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('just shipped');
+    expect(out).toContain('team_goal_outcome');
+  });
+
+  it('team_next renders review debt with age', async () => {
+    const next = vi.fn(async () => ({
+      member: 'Ada',
+      in_flight: [],
+      shipped: [],
+      up_next: [],
+      owed_reviews: [],
+      why: null,
+      next_goal: null,
+      goals: [],
+      review_debt: [{ id: 'laneZ', title: 'stuck work', owner: 'June', waited_ms: 26 * 3_600_000 }],
+    }));
+    const handlers = captureAll(registerLanes, { next } as Partial<MusterdClient>);
+    const out = text(await handlers['team_next']!({}));
+    expect(out).toContain('review debt');
+    expect(out).toContain('stuck work');
+    expect(out).toMatch(/26h/);
+  });
+});

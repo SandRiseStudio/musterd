@@ -6845,3 +6845,69 @@ describe('infra-touch gate (ADR 227 inc 2): GET /teams/:slug/infra-gate', () => 
     expect(r.json.warn).toBeNull();
   });
 });
+
+describe('goal outcome + ship nudge (value-layer design)', () => {
+  async function setup() {
+    const team = await post('/teams', { slug: 'valyr', creator: { name: 'nick', kind: 'human' } });
+    return team.json.human_credential as Auth;
+  }
+  async function patchLane(id: string, body: unknown, auth: Auth) {
+    const r = await fetch(base + `/teams/valyr/lanes/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, json: (await r.json()) as Record<string, any> };
+  }
+
+  it('POST /goals/outcome records a note and the goal projection carries it', async () => {
+    const nickTok = await setup();
+    await post('/teams/valyr/goals', { id: 'g1', title: 'G1' }, nickTok);
+    const res = await post(
+      '/teams/valyr/goals/outcome',
+      { goal_id: 'g1', outcome: 'users can now X' },
+      nickTok,
+    );
+    expect(res.status).toBe(201);
+    expect(res.json.goal.outcome.text).toBe('users can now X');
+    expect(res.json.goal.outcome.by).toBe('nick');
+    const goals = await get('/teams/valyr/goals', nickTok);
+    expect(goals.json.goals[0].outcome.text).toBe('users can now X');
+  });
+
+  it('closing the last lane on a goal appends the ship nudge to the closer result only', async () => {
+    const nickTok = await setup();
+    await post('/teams/valyr/goals', { id: 'g2', title: 'G2' }, nickTok);
+    const lane = await post(
+      '/teams/valyr/lanes',
+      { title: 'only lane', goal_id: 'g2', claim: true },
+      nickTok,
+    );
+    const res = await patchLane(lane.json.lane.id, { state: 'done' }, nickTok);
+    expect(res.status).toBe(200);
+    expect(res.json.notices).toHaveLength(1);
+    expect(res.json.notices[0]).toContain('team_goal_outcome');
+    expect(res.json.notices[0]).toContain('g2');
+  });
+
+  it('closing a lane while the goal still has live lanes appends no nudge', async () => {
+    const nickTok = await setup();
+    await post('/teams/valyr/goals', { id: 'g3', title: 'G3' }, nickTok);
+    const a = await post(
+      '/teams/valyr/lanes',
+      { title: 'first', goal_id: 'g3', claim: true },
+      nickTok,
+    );
+    await post('/teams/valyr/lanes', { title: 'second', goal_id: 'g3', claim: true }, nickTok);
+    const res = await patchLane(a.json.lane.id, { state: 'done' }, nickTok);
+    expect(res.status).toBe(200);
+    expect(res.json.notices).toBeUndefined();
+  });
+
+  it('a goal-less close carries no nudge', async () => {
+    const nickTok = await setup();
+    const lane = await post('/teams/valyr/lanes', { title: 'free', claim: true }, nickTok);
+    const res = await patchLane(lane.json.lane.id, { state: 'done' }, nickTok);
+    expect(res.json.notices).toBeUndefined();
+  });
+});

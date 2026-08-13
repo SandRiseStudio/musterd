@@ -104,6 +104,26 @@ describe('goal command', () => {
     expect(arr[0]!.id).toBe('g');
   });
 
+  it('records an outcome note and renders it (value-layer design)', async () => {
+    await capture(() => goalCommand(parseArgs(['declare', 'G', '--goal-id', 'g'])));
+    const res = await capture(() => goalCommand(parseArgs(['outcome', 'g', 'users can now X'])));
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('outcome recorded');
+    expect(res.out).toContain('users can now X');
+    const listed = await capture(() => goalCommand(parseArgs(['list'])));
+    expect(listed.out).toContain('users can now X');
+  });
+
+  it('outcome for an undeclared goal reports queued', async () => {
+    const res = await capture(() => goalCommand(parseArgs(['outcome', 'ghost', 'note'])));
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('queued');
+  });
+
+  it('rejects outcome without id/text', async () => {
+    await expect(goalCommand(parseArgs(['outcome', 'g']))).rejects.toThrow(/usage/);
+  });
+
   it('rejects declare without title/id and unknown subcommands', async () => {
     await expect(goalCommand(parseArgs(['declare', 'notitle-id-missing']))).rejects.toThrow(
       /usage/,

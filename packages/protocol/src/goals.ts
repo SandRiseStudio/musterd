@@ -48,6 +48,19 @@ export const GoalDeclareMetaSchema = z.object({
 });
 export type GoalDeclareMeta = z.infer<typeof GoalDeclareMetaSchema>;
 
+/** A goal outcome note (value-layer design): what shipped changed for a user — evidence, not a slogan.
+ *  Longer cap than `story` (280 vs 140) because evidence names specifics. Never part of the declared
+ *  skeleton: re-declaration replaces the skeleton wholesale, and an outcome must survive that. */
+export const GoalOutcomeSchema = z.object({
+  goal_id: z.string().min(1),
+  outcome: z.string().trim().min(1).max(280),
+});
+export type GoalOutcome = z.infer<typeof GoalOutcomeSchema>;
+
+/** `meta.goal_outcome` on a team-visible `message` act — replayed by listGoals beside defer/steer. */
+export const GoalOutcomeMetaSchema = z.object({ goal_outcome: GoalOutcomeSchema });
+export type GoalOutcomeMeta = z.infer<typeof GoalOutcomeMetaSchema>;
+
 /** A declared Goal with its derived status attached (ADR 048 as amended by 084) — the read projection. */
 export const GoalSchema = z.object({
   id: z.string(),
@@ -60,6 +73,9 @@ export const GoalSchema = z.object({
   status: GoalStatusSchema,
   /** plain-language one-liner for the stranger (goals-front-door design); absent when never declared. */
   story: z.string().optional(),
+  /** Latest outcome note (value-layer design): what changed for a user. Derived from the newest
+   *  `meta.goal_outcome` signal — provenance free, survives skeleton re-declaration, anyone amends. */
+  outcome: z.object({ text: z.string(), by: z.string(), at: z.number().int() }).optional(),
   /**
    * The Goal's **plan epoch** (ADR 111, ADR 088 increment 3) — a monotonic count of the direction-
    * changing acts that have landed on this Goal: every `defer` naming it (a re-sequence) and every
@@ -114,3 +130,6 @@ export function compareGoals(
     b.declared_at - a.declared_at
   );
 }
+
+/** Body for `POST /teams/:slug/goals/outcome` — thin sugar over a `message` act to `@team`. */
+export const PostGoalOutcomeSchema = GoalOutcomeSchema;
