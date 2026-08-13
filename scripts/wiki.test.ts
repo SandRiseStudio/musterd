@@ -76,3 +76,37 @@ describe('checkWiki', () => {
     expect(checkWiki(dir).join('\n')).toMatch(/a\.md.*missing\.md/);
   });
 });
+
+describe('checkWiki — orphaned sections', () => {
+  const withIndex = (pages: Record<string, string>) => {
+    const dir = fixture(pages);
+    writeFileSync(join(dir, 'INDEX.md'), renderIndex(dir));
+    return dir;
+  };
+
+  it('fails a heading with no body before the next heading, naming file and line', () => {
+    const dir = withIndex({
+      'a.md': '# A\n\nSummary.\n\n## Eaten\n\n## Next\n\nBody here.\n',
+    });
+    expect(checkWiki(dir).join('\n')).toMatch(/a\.md:5.*Eaten/);
+  });
+
+  it('fails a trailing heading left with no body at end of file', () => {
+    const dir = withIndex({ 'a.md': '# A\n\nSummary.\n\n## Dangling\n' });
+    expect(checkWiki(dir).join('\n')).toMatch(/a\.md:5.*Dangling/);
+  });
+
+  it('accepts a heading whose body is a fenced code block', () => {
+    const dir = withIndex({
+      'a.md': '# A\n\nSummary.\n\n## Recipe\n\n```bash\nrun it\n```\n',
+    });
+    expect(checkWiki(dir)).toEqual([]);
+  });
+
+  it('ignores headings inside fenced code blocks', () => {
+    const dir = withIndex({
+      'a.md': '# A\n\nSummary.\n\n## Template\n\n```markdown\n# <Topic>\n\n## <Section>\n```\n',
+    });
+    expect(checkWiki(dir)).toEqual([]);
+  });
+});
