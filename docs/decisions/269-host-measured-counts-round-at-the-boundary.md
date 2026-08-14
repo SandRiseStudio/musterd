@@ -104,9 +104,12 @@ honestly; only its explanation was wrong.
   audit row for a refused wake report would make the next protocol drift one query instead of one
   lucky `tail`. Deliberately not built here — it is a ledger change with its own design, and this
   increment is worth landing without it. **Raised to nick as a consult.**
-- **The host actuator is not running as of this writing** (`launchctl` reports
-  `studio.sandrise.musterd-host` exited `-15`, no PID), so the live re-observation below cannot be
-  taken until someone restarts it — which spawns real, paid sessions and is therefore nick's call.
+- **The live re-observation needs the host's worktree rebuilt**, and that is the only thing gating
+  it. The actuator itself is healthy — `studio.sandrise.musterd-host` is up (pid 44627, `runs = 5`,
+  the restarts tracking autorefresh's daemon bounces). It executes
+  `/Users/nick/agents/packages/cli/dist/bin.js`, so it keeps running the pre-fix producer until that
+  worktree rebuilds; the daemon half of this ADR takes effect for it on the next daemon restart
+  regardless, which is why the rounding lives at the boundary.
 
 ## Observability & Evaluation
 
