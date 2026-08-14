@@ -594,6 +594,56 @@ export function announceIncidentRouted(
   }
 }
 
+/**
+ * Fan a resolved incident out to exactly the seats who reported it (ADR 270, spec §3).
+ *
+ * This is what every appended report was FOR. Increment 1 kept inserting a row per report even past
+ * the threshold, on the stated bet that more refs make a better fan-out at resolve — this collects
+ * it. A seat that parked a PR behind a shared red has no other way to learn it can move again short
+ * of a human noticing and relaying, which is the exact job the spec set out to delete.
+ *
+ * Called from BOTH close paths — the board's PATCH and the ADR 202 acceptor `accept` — because
+ * `recordLaneClose` deliberately cannot route envelopes (it is imported from the transport and the
+ * protocol layer both, and routing from it would make that a cycle). Non-incident lanes return
+ * immediately, so both call sites can call it unconditionally.
+ */
+export function announceIncidentResolved(
+  ctx: Ctx,
+  team: TeamRow,
+  lane: Lane,
+  closedBy: string,
+): void {
+  if (lane.kind !== 'incident') return;
+  const reporters = incidentReporters(ctx.db, team.id, lane.id);
+  const voice = getMemberByName(ctx.db, team.id, closedBy);
+  if (!voice) return;
+
+  for (const reporter of reporters) {
+    // The closer already knows; a self-send reaches no inbox anyway.
+    if (reporter === closedBy) continue;
+    const to = getMemberByName(ctx.db, team.id, reporter);
+    if (!to) continue;
+    routeEnvelope(
+      ctx,
+      team,
+      voice,
+      makeEnvelope({
+        id: ulid(),
+        team: team.slug,
+        from: voice.name,
+        to: { kind: 'member', name: reporter },
+        act: 'message',
+        body:
+          `[incident] resolved by ${closedBy}: ${lane.title.replace(/^incident: /, '')} — ` +
+          `lane ${lane.id}. Whatever you parked behind it can move; re-run before you trust it.`,
+        meta: { incident: { lane: lane.id, resolved_by: closedBy } },
+      }),
+      undefined,
+      true,
+    );
+  }
+}
+
 /** The seat incident traffic speaks as: the lane's owner, else its creator. */
 function laneVoice(ctx: Ctx, team: TeamRow, lane: Lane): MemberRow | null {
   return (
@@ -744,6 +794,10 @@ function applyAcceptanceVerdict(
 
   if (act === 'accept') {
     recordLaneClose(ctx.db, team.id, decider, before, lane);
+    // ADR 270: the same fan-out the board's PATCH does. An incident closed by an acceptor's `accept`
+    // owes its reporters exactly the same answer as one closed by a click — neither surface should
+    // have to know the other exists. No-op for every ordinary lane.
+    announceIncidentResolved(ctx, team, lane, decider.name);
   } else {
     // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the rejection
     // — the counterpart said "not what we wanted". Audit action stays `lane.review_sent_back`

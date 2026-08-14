@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { resolveConfig } from '../config.js';
 import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
-import { announceIncidentRouted } from '../protocol/route.js';
+import { announceIncidentResolved, announceIncidentRouted } from '../protocol/route.js';
 import { openIncidents, recordBlockedReport, routeUnclaimedIncidents } from './incidents.js';
+import { openLane } from './lanes.js';
 import { addMember, getMemberByRole } from './members.js';
 import { createTeam, setPolicy, type TeamRow } from './teams.js';
 
@@ -270,4 +271,72 @@ describe('the routed announcement (ADR 270)', () => {
     route();
     for (const m of directed()) expect(m.from).not.toBe(m.to);
   });
+});
+
+describe('resolve-time reporter fan-out (ADR 270)', () => {
+  let db: Database;
+  let team: TeamRow;
+  const GATE = 'ci:gates/A11y contrast';
+
+  function ctx(): Ctx {
+    const hub = new Proxy({}, { get: () => () => undefined }) as Ctx['hub'];
+    return { db, hub, config: resolveConfig({ db: ':memory:' }), rosterRoots: [] };
+  }
+
+  function directed(): { from: string; to: string; body: string }[] {
+    return db
+      .prepare<[string], { from: string; to: string; body: string }>(
+        `SELECT f.name AS "from", t.name AS "to", m.body AS body
+           FROM messages m
+           JOIN members f ON f.id = m.from_member
+           JOIN members t ON t.id = m.to_member
+          WHERE m.team_id = ? AND m.to_kind = 'member'`,
+      )
+      .all(team.id);
+  }
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    team = createTeam(db, { slug: 'dawn' });
+    for (const name of ['izzo', 'dolly', 'stanley'] as const) {
+      addMember(db, team, { name, kind: 'agent', role: 'platform' });
+    }
+    recordBlockedReport(db, team.id, 'dawn', 'izzo', { gate: GATE, ref: 'pr#828' }, 'm1', 1_000);
+    recordBlockedReport(db, team.id, 'dawn', 'dolly', { gate: GATE, ref: 'pr#830' }, 'm2', 1_000);
+  });
+
+  function incident(): Lane {
+    return openIncidents(db, team.id, 'dawn')[0]!;
+  }
+
+  it('tells every reporter the red is cleared, naming what they parked', () => {
+    // The fan-out is the point of keeping every report: a seat parked a PR behind this and has no
+    // other way to learn it can move again short of a human relaying it.
+    announceIncidentResolved(ctx(), team, incident(), 'stanley');
+    const told = directed().filter((m) => m.body.includes('[incident] resolved'));
+    expect(told.map((m) => m.to).sort()).toEqual(['dolly', 'izzo']);
+    expect(told.every((m) => m.body.includes(GATE))).toBe(true);
+  });
+
+  it('does not send the closer a note about their own close', () => {
+    updateOwnerTo('izzo');
+    announceIncidentResolved(ctx(), team, incident(), 'izzo');
+    const told = directed().filter((m) => m.body.includes('[incident] resolved'));
+    expect(told.map((m) => m.to)).toEqual(['dolly']);
+  });
+
+  it('never self-sends', () => {
+    announceIncidentResolved(ctx(), team, incident(), 'stanley');
+    for (const m of directed()) expect(m.from).not.toBe(m.to);
+  });
+
+  it('is silent for an ordinary lane', () => {
+    const ordinary = openLane(db, team.id, 'dawn', 'izzo', { title: 'not an incident' });
+    announceIncidentResolved(ctx(), team, ordinary, 'stanley');
+    expect(directed()).toHaveLength(0);
+  });
+
+  function updateOwnerTo(owner: string): void {
+    db.prepare('UPDATE lanes SET owner_seat = ? WHERE id = ?').run(owner, incident().id);
+  }
 });

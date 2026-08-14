@@ -57,10 +57,11 @@ import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
+import { log } from '../log.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import { deliveryHintFor } from '../protocol/nudge.js';
-import { routeEnvelope } from '../protocol/route.js';
+import { announceIncidentResolved, routeEnvelope } from '../protocol/route.js';
 import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import {
@@ -3282,6 +3283,14 @@ export async function handleHttp(
           // 188 grade, and the ADR 109 merge join — lives in `recordLaneClose` because an acceptor's
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
           recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
+          // ADR 270: a resolved incident owes its reporters an answer — they parked work behind it.
+          // Best-effort and after the close: the resolve is already durable and a delivery failure
+          // must not undo it. No-op for every ordinary lane.
+          try {
+            announceIncidentResolved(ctx, team, lane, member.name);
+          } catch (err) {
+            log.warn({ msg: 'incident_resolve_announce_failed', lane: lane.id, err: String(err) });
+          }
           // value-layer design: when this close flips the goal to shipped, the CLOSER's own result
           // carries the outcome nudge — appended, never blocking, never a wake. A goal that ships
           // without an outcome stays visibly outcome-less; the daemon does not nag twice.
