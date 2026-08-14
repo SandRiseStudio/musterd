@@ -289,6 +289,20 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
     expect(onDisk()['model_observed']).toEqual(newer);
   });
 
+  it('an explicit drop clears the on-disk observation (ADR 268) — omit still means preserve', () => {
+    // The capture writer that learns the session id changed cannot say "no observation" by
+    // omitting the field: omit is the claim/agent clobber shape and the merge-guard restores it.
+    // Drop is a different intent, at this call site (ADR 247).
+    const observation = { model: 'grok-4.6', harness: 'cursor' as const, observed_at: 1 };
+    saveBinding(dir, { ...base, model_observed: observation });
+    saveBinding(dir, { ...base, model: 'grok-4.5' }, { drop: { model_observed: true } });
+    expect(onDisk()['model_observed']).toBeUndefined();
+    expect(onDisk()['model']).toBe('grok-4.5');
+    // And a later omit still must not invent an observation that is gone.
+    saveBinding(dir, { ...base });
+    expect(onDisk()['model_observed']).toBeUndefined();
+  });
+
   it('leaves no tmp file behind (atomic rename)', () => {
     saveBinding(dir, base);
     const entries = readFileSync(join(dir, '.musterd', 'binding.json'), 'utf8');

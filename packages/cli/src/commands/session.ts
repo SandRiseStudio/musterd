@@ -379,14 +379,22 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
  * the live `model_id` from the hook payload. Same never-fail / never-erase / refresh-throttle
  * contract as Claude's transcript refresh — fidelity differs (hook fields, not JSONL).
  */
-export async function observeCursorSession(payload: HookPayload): Promise<string | undefined> {
-  if (!payload.session_id) return undefined;
-
+export async function observeCursorSession(
+  payload: HookPayload,
+  enumerate?: typeof enumerateClaudeSessions,
+): Promise<string | undefined> {
   const explicit = process.env['MUSTERD_BINDING'];
   const dir = explicit
     ? dirname(dirname(explicit))
     : findWorkspaceDir(payload.cwd ?? process.cwd());
   if (!dir) return undefined;
+
+  if (!payload.session_id) {
+    // cursor-agent often dispatches afterMCPExecution without conversation_id. Enumeration
+    // still knows the live .txt (ADR 268) — do not no-op.
+    refreshModelObservation(dir, enumerate);
+    return undefined;
+  }
 
   const binding = findBinding(dir, {});
   if (!binding) return undefined;
@@ -414,12 +422,21 @@ export async function observeCursorSession(payload: HookPayload): Promise<string
     priorObs.observed_at >= session.started_at &&
     now - priorObs.observed_at < OBSERVATION_REFRESH_MS;
 
-  const model_observed =
-    observed && !current
-      ? { model: observed, harness: 'cursor' as const, observed_at: now }
-      : binding.model_observed;
-
-  saveBinding(dir, { ...binding, session, ...(model_observed ? { model_observed } : {}) });
+  if (observed && !current) {
+    saveBinding(dir, {
+      ...binding,
+      session,
+      model_observed: { model: observed, harness: 'cursor', observed_at: now },
+    });
+    // fall through to attest-on-new-session below
+  } else if (!same && !observed) {
+    // New conversation, no model in the payload: a leftover observation is a stopped clock
+    // (ADR 268). Omit cannot say this — saveBinding's merge-guard treats omit as preserve.
+    const { model_observed: _dropped, ...rest } = binding;
+    saveBinding(dir, { ...rest, session }, { drop: { model_observed: true } });
+  } else {
+    saveBinding(dir, { ...binding, session, ...(priorObs ? { model_observed: priorObs } : {}) });
+  }
 
   if (!same || prior?.ended_at !== undefined) {
     const seat = bindingSeat(binding);
@@ -513,14 +530,17 @@ export function refreshModelObservation(
     // session never fires SessionStart again to take it back. So the tool boundary — the boundary
     // that always happens — gives the slot to the session that is actually running. `started_at`
     // comes from the transcript's birthtime (the file appears when the session begins); the heal is
-    // scoped to ended-and-contradicted, so live-beside-live co-tenancy is left to the wake guard.
+    // scoped to ended-and-contradicted for Claude (live-beside-live co-tenancy is left to the
+    // wake guard). Cursor CLI is the exception (ADR 268): the slot often still names a live
+    // desktop session with no ended_at while cursor-agent writes a sibling .txt — heal that too.
+    const priorId = session.id;
     let healedBinding = binding;
     let slot = session;
     // Tracked beside the slot because `SessionCapture.transcript_path` is optional in the type while
     // the guard above has already made it present here — and the heal below only ever replaces it
     // with another concrete path.
     let slotTranscript = session.transcript_path;
-    if (session.ended_at !== undefined && live) {
+    if (live && (session.ended_at !== undefined || session.harness === 'cursor')) {
       slot = {
         harness: session.harness,
         id: live.id,
@@ -555,7 +575,15 @@ export function refreshModelObservation(
       transcript_path: slotTranscript,
       session_id: slot.id,
     });
-    if (!observed) return undefined; // unreadable / moved format — the prior observation stands
+    if (!observed) {
+      // Cursor CLI transcripts have no model to parse. A healed-to-new-id observation from the
+      // previous conversation is a stopped clock — drop it (ADR 268). Claude still never-erases.
+      if (slot.harness === 'cursor' && slot.id !== priorId) {
+        const { model_observed: _dropped, ...rest } = healedBinding;
+        saveBinding(dir, { ...rest, session: slot }, { drop: { model_observed: true } });
+      }
+      return undefined; // unreadable / moved format — the prior observation stands
+    }
 
     saveBinding(dir, {
       ...healedBinding,
