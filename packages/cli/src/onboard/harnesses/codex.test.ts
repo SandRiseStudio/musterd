@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildEntry } from '../mcpEntry.js';
 import { codex } from './codex.js';
+import { inspectCodexHookDrift } from './codexHooks.js';
 import { hasServer, renderServer } from './codexToml.js';
 
 const binding = {
@@ -41,6 +42,7 @@ describe('codex.configure', () => {
 
     const after = await codex.detect();
     expect(after.configured).toBe(true);
+    expect(inspectCodexHookDrift(cwd)).toEqual([]);
   });
 
   it('preserves existing user config when adding musterd', async () => {

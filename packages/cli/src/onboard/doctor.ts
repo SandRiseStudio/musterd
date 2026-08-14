@@ -449,6 +449,11 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       configured: d.configured,
       ...(d.detail !== undefined ? { detail: d.detail } : {}),
     });
+    for (const hookDrift of d.hookDrift ?? []) {
+      drift.push(
+        `${h.label}: ${hookDrift} — run \`musterd wire\` to install the marker-owned hooks.`,
+      );
+    }
     // Value-coherence: a legacy baked MUSTERD_CLAIM that disagrees with binding.json pins this
     // harness's team_* tools to a stale seat while the CLI claims the current one (the re-claim drift).
     if (

@@ -9,6 +9,7 @@ import {
   type UnprovisionPlan,
 } from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
+import { inspectCodexHookDrift, installCodexHooks, removeCodexHooks } from './codexHooks.js';
 import {
   hasServer,
   readServerEnv,
@@ -85,6 +86,7 @@ export const codex: Harness = {
     const globalToml = inProject ? '' : readToml(globalConfigPath());
     const inGlobal = !inProject && hasServer(globalToml, 'musterd');
     const configured = inProject || inGlobal;
+    const hookDrift = inspectCodexHookDrift(process.cwd());
     return {
       installed,
       configured,
@@ -106,12 +108,14 @@ export const codex: Harness = {
             registeredElsewhere: globalConfigPath(),
           }
         : {}),
+      ...(hookDrift.length > 0 ? { hookDrift } : {}),
     };
   },
 
   async configure(entry: McpServerEntry) {
     const path = projectConfigPath();
     writeToml(path, upsertServer(readToml(path), 'musterd', toCodexServer(entry)));
+    installCodexHooks(process.cwd());
     return {
       target: path,
       activation:
@@ -150,5 +154,6 @@ export const codex: Harness = {
     if (toml.length === 0) return;
     const next = removeServers(toml, plan.servers);
     if (next !== toml) writeToml(path, next);
+    if (!hasServer(next, 'musterd')) removeCodexHooks(process.cwd());
   },
 };
