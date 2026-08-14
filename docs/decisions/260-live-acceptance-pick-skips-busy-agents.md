@@ -46,3 +46,61 @@ A team whose every live cross-model agent is mid-turn will wake an offline seat 
   increment 1 regardless of the confounds' sign (none of them aimed to make busy-agent targeting
   *worse*). Any *credit* read — "increment 1 moved the rate" — must name the whole stack, not this
   ADR alone.
+
+- **2026-08-14 — the Eval was run, and it cannot be read as a before/after. The disproof direction
+  is gone too** (izzo, lane `01M011HP1E`; instrument:
+  `scripts/research/adr-260-acceptance-eval.ts`, re-runnable and read-only — falsify by re-running
+  it, not by re-reading this note). Windows: ARM = 2026-08-12 21:14 (the `policy.change` arming
+  row); ON = **2026-08-13 10:02**, the first autorefresh bounce carrying #785 — not the 09:33 merge
+  and not the commit's 08-12 author date, because the filter lives in the daemon (falsify:
+  `git merge-base --is-ancestor 33489b4c 5f9d427`).
+
+  | window | n live-routed | good ≤10m | any confirm | median age | cross_family share |
+  | ------ | ------------- | --------- | ----------- | ---------- | ------------------ |
+  | baseline, pre-arming (13d) | 102 | **23%** | 61% | 17m | 21% |
+  | post-arm, increment 1 OFF (12.8h) | 9 | 89% | 89% | 4m | 100% |
+  | post-arm, increment 1 ON (28h) | 18 | **6%** | 83% | 60m | 61% |
+
+  The instrument reproduces the ADR's published 24% baseline at 23% on an independent
+  implementation, which is the only reason to trust the rest of the row.
+
+  **Why the OFF window is not a control:** 8 of its 9 goods are one seat (wanderer) clearing six
+  lanes between 21:45 and 22:10. That is a batch acceptance session, not a routing latency. Nobody
+  should cite "89% before".
+
+  **Why the disproof read is no longer safe.** The note above rests on "none of the confounds aimed
+  to make busy-agent targeting *worse*". One does. Acceptance routing concentrated onto a single
+  cross-family seat — `cross_family` share by day is 0–11% through 08-05, then **70% on 08-12, 57%
+  on 08-13, 83% on 08-14**, with wanderer as top reviewer every one of those days. That shift is
+  dated **08-12, a full day before #785 went live**, so increment 1 did not cause it: it is ADR 253
+  (#752, humans out of the live pick, merged 08-12 13:44) meeting the LADDER sort in
+  `packages/server/src/store/review.ts:369`, which puts `cross_family` first — and on a
+  claude-monoculture team with one grok seat, "highest grade available" resolves to the same name
+  every time. A queue at one acceptor depresses the 10-minute rate on its own. Increment 1 plausibly
+  *amplifies* it (dropping busy claude seats leaves that seat top of the ladder more often), but the
+  concentration predates it and cannot be charged to it. So the 23% → 6% move indicts nothing:
+  disproof and credit are both unavailable on this window.
+
+  **What survives the confounds, because it needs no baseline.** In the ON window the seat that was
+  asked answered **15 of 18** asks — only 2 jumped, 1 still open — at a 60m median, with exactly 1
+  inside 10 minutes. Candidate *supply* is not the binding constraint; the correctly-routed, quiet
+  seat is slow to look. On 12 of the 16 slow rows the asked seat has its own `lane.closed` /
+  `git.pr_merged` audits between the ask and the close: it was awake and servicing other lanes while
+  this ask sat. That is the attention signature this ADR pre-registered as the stop condition, and
+  it is visible without comparing windows at all.
+
+  **Eval item 2** (uncensored, sweeps included): median 60m and >12h at 9% (2/22) in the ON window
+  against 17m and 19% (30/161) at baseline — the tail improved while the head got worse, consistent
+  with a queue rather than abandonment.
+
+  **Eval item 5, the one clean before/after** (both sides post-arming, post-#752, both spanning a
+  night): wake leases **0.23/h → 1.10/h** (3 in 12.8h → 31 in 28.2h), `wake_deferred` **0 → 26**,
+  `residency.woke` 0 and `residency.wake_cost` 0 on both sides. This ADR's Consequences predicted
+  the shift onto the ADR 191 paid path and it happened at roughly 5× the rate; ADR 252's
+  under-pricing is visible in the same row, since 31 leases produced zero priced wakes.
+
+  **Verdict: do not build increment 2 from this Eval, and do not build it yet.** Not because
+  fan-out was disproved — it was not tested — but because the window cannot answer the question and
+  the one signal that does survive points at attention, which a wider candidate set does not fix.
+  n=18 over 28 hours, one of them the a11y incident evening with several seats heads-down. Re-run
+  the instrument after a week with no routing changes landing in it.
