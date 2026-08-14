@@ -9,6 +9,7 @@ import { availabilityCommand } from './commands/availability.js';
 import { boardCommand } from './commands/board.js';
 import { broadcastCommand } from './commands/broadcast.js';
 import { claimCommand } from './commands/claim.js';
+import { codexHookCommand } from './commands/codexHook.js';
 import { doneCommand } from './commands/done.js';
 import { fmtCommand } from './commands/fmt.js';
 import { gateCommand } from './commands/gate.js';
@@ -148,6 +149,7 @@ async function instrumentedDispatch(
 ): Promise<number> {
   const skip =
     command === 'serve' ||
+    command === 'codex-hook' ||
     (command === 'inbox' && rest.flags['interrupt-check'] === true) ||
     // The PreToolUse gate (ADR 150) rides every tool call like the interrupt probe — an SDK boot would
     // blow its budget and add latency to the loop. Best-effort + fail-open; no telemetry span.
@@ -239,6 +241,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return notifyCommand(rest);
     case 'claim':
       return claimCommand(rest);
+    case 'codex-hook':
+      return codexHookCommand(rest);
     case 'fmt':
       return fmtCommand(rest);
     case 'unbind':

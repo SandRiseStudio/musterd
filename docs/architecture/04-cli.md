@@ -101,7 +101,8 @@ src/
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
       cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks for model_id observe (ADR 198); CLI also wires afterShellExecution + afterMCPExecution (ADR 265)
-      codex.ts        // detect/configure via project-local .codex/config.toml (ADR 031)
+      codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249)
+      codexHooks.ts   // reversible .codex/hooks.json renderer: marker-owned SessionStart/SessionEnd/PostToolUse only (ADR 249)
       codexToml.ts    // TOML read/merge helper for the codex adapter
   archaeology/        // cookoff wasted-work reference collector — git-only, no daemon (ADR 122/123)
     engine.ts         // pure predicate-set-v1 classifier: W3 dup → W1 abandoned → W2 clobbered → W4 churn
@@ -109,6 +110,7 @@ src/
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
     wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
+    codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249)
     agent.ts          // musterd agent <name> [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness, via the ADR 038 registry) + standing grant + committed workspace.json (ADR 065/080/116)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)

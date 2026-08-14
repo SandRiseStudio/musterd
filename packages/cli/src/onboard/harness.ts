@@ -58,6 +58,8 @@ export interface DetectResult {
   registeredSurface?: string;
   /** The registered launch args, so the doctor can spot an adapter inside another seat's workspace. */
   registeredArgs?: string[];
+  /** Harness-local hook definitions missing or malformed; read-only doctor evidence. */
+  hookDrift?: string[];
   /**
    * Where the inspected entry lives, when that file is **not** the one this harness's `configure`
    * writes for this folder — a machine-global config no repair run here can rewrite.
