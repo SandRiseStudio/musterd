@@ -95,6 +95,13 @@ below — if grep demonstrably fails, evaluate; not before.
 - Increment 3: the re-scoping — `team_memory_save` description text, seats trim at next wrap-up,
   nick's CLAUDE.md rollout item (nick-only).
 - Increment 4: a retrieval index — **only if measure (4) fires; explicitly may never be built.**
+  - 2026-08-13: measure (4) was the one measure here with no instrument, and the obvious one — ask a
+    seat at wrap-up — is a guaranteed false negative, since a seat re-derives a fact precisely
+    because it did not know the page existed. `pnpm wiki:probe` inverts that (the seat names what it
+    learned; the machine searches the wiki), the message log is the ledger, and the comparison of
+    arms is pre-registered before any data exists:
+    `docs/design/2026-08-13-measure-4-retrieval-sufficiency.md`. No index built, and the reading is
+    _unmeasured_, not zero — the corpus is one day old; first honest read 2026-09-12.
 - Deliberately not done: no new musterd server surface; no hard enforcement on seat memory (blob
   caps stand); no retrieval-vendor commitment; no generalization beyond this repo.
 

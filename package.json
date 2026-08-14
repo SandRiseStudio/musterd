@@ -20,6 +20,7 @@
     "tokens:check": "node --disable-warning=ExperimentalWarning scripts/check-css-tokens.ts",
     "wiki:index": "node --disable-warning=ExperimentalWarning scripts/wiki-index.ts",
     "wiki:check": "node --disable-warning=ExperimentalWarning scripts/check-wiki.ts",
+    "wiki:probe": "node --disable-warning=ExperimentalWarning scripts/wiki-probe.ts",
     "perf:check": "node --disable-warning=ExperimentalWarning scripts/perf/check-budgets.ts",
     "a11y:contrast": "node scripts/a11y/contrast-sweep.mjs",
     "a11y:check": "node scripts/a11y/contrast-gate.mjs",
