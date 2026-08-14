@@ -74,6 +74,8 @@ merge-guard: it has no capture writer that needs `drop`.
   something else calls `refreshModelObservation` (CLI inbox interrupt-check) or a future hook fires.
   Enumeration already makes `session show` read `live`; attestation is a separate writer. This ADR
   does not add an MCP import of CLI session code (package boundary).
+  - 2026-08-14: [ADR 270](270-mcp-reconciles-cursor-capture-without-hooks.md) is that something else
+    — the MCP heartbeat reconciles Cursor capture without importing `session.ts`.
 - Claim/agent/autojoin continue to omit `model_observed` and continue to preserve it.
 - ADR 265's Decision is unchanged; this is the writer-intent change its Consequences named.
 

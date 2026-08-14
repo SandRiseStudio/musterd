@@ -22,6 +22,7 @@ import {
 import { WebSocket } from 'ws';
 import { clearGrantFromBinding } from './binding.js';
 import { refreshAttestation, type McpConfig } from './config.js';
+import { reconcileCursorCapture } from './cursorCapture.js';
 import { SessionAttestation } from './sessionLiveness.js';
 
 /**
@@ -585,6 +586,12 @@ export class MusterdClient {
     return null; // `chat` — assign-in-chat, no auto-claim target
   }
 
+  /** Write Cursor capture if the live `.txt` disagrees, then re-read attestation (ADR 270). */
+  private refreshObservedModel(): void {
+    reconcileCursorCapture(this.config.bindingDir);
+    refreshAttestation(this.config);
+  }
+
   /**
    * The ADR 164 ladder, run on the heartbeat tick. Returns true when this tick must NOT heartbeat.
    *
@@ -660,7 +667,7 @@ export class MusterdClient {
     const ws = new WebSocket(wsBase(this.config.server) + '/ws');
     this.ws = ws;
     const sendClaim = (includeGrant: boolean) => {
-      refreshAttestation(this.config);
+      this.refreshObservedModel();
       ws.send(
         JSON.stringify({
           type: 'claim',
@@ -724,9 +731,9 @@ export class MusterdClient {
             // session, not for the process sending it; an adapter that outlived its harness must
             // stop claiming the seat rather than hold it `working` forever.
             if (this.attestSession()) return;
-            // Re-read the observation off disk first (ADR 158 §7): the hook corrects it mid-session,
-            // long after this adapter resolved its boot-time attestation.
-            refreshAttestation(this.config);
+            // Reconcile Cursor capture then re-read (ADR 270 / ADR 158 §7): hookless cursor-agent
+            // never writes model_observed, so a re-read alone would keep the desktop leftover.
+            this.refreshObservedModel();
             ws.send(
               JSON.stringify({
                 type: 'heartbeat',
