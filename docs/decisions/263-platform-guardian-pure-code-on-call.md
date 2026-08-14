@@ -94,3 +94,16 @@ two-week read is the review point for tier changes; each is an admin policy flip
   dial connected to nothing. Fixed with the `/enforcement` precedent: `GET
   /teams/:slug/guardian-tiers`, a scoped member read of the one non-secret sub-field; the tick now
   reads it and the per-tick "tiers unreadable" line fires only on genuine failure.
+
+- **2026-08-13 — the control probe's firing became durable** (izzo, lane `01KZYW6YJW6HCH`; Decision
+  untouched). §7 ends install with a control probe so the instrument observes a caused event
+  *before* its silence is believed — but the probe wrote only to the install command's stdout, and
+  only scheduled ticks get the plist's redirect into `guardian.log`. So the one firing that
+  licenses reading the next two weeks of silence as health left no trace (miley, accepting lane
+  `01KZY2014`: the log begins 15:55, the install ran 15:53). That is uncitable from the Eval's own
+  declared dataset above — "the guardian log + the message stream + nick's own discovery reports"
+  names three places, and terminal scrollback is none of them. The probe path now appends to
+  `guardian.log` in the same `guardian.<action> {json}` shape. It stays a dry run: it writes no
+  incident or damping state, which is what keeps re-running it safe — a property now pinned by
+  test rather than left to convention. Re-running was the cheaper alternative considered and
+  rejected: a probe re-run on 2026-08-27 attests the instrument *then*, not the window being read.

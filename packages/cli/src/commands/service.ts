@@ -1,5 +1,12 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, platform as osPlatform } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
@@ -1896,8 +1903,27 @@ async function guardianServiceCommand(
 async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number> {
   const home = dirname(configPath());
   const gHome = guardianHome();
-  const log = (l: string) => process.stdout.write(`${stamp()} ${l}\n`);
   const controlProbe = parsed.flags['control-probe'] === true;
+  /**
+   * A scheduled tick persists because the plist redirects stdout to the guardian log; the
+   * install-time control probe's stdout is the operator's terminal, so its ONE firing used to
+   * survive only in scrollback (miley, 2026-08-13). ADR 263 §7 makes that probe the
+   * instrument-silence defense and the Eval's dataset is "the guardian log + the message stream +
+   * nick's own discovery reports" — evidence in none of the three cannot be cited. So the probe
+   * appends to the ledger itself, in the same `guardian.<action> {json}` shape and the same file
+   * scheduled ticks write, and stays a dry run: nothing here touches incident or damping state.
+   */
+  const log = (l: string) => {
+    const line = `${stamp()} ${l}\n`;
+    process.stdout.write(line);
+    if (!controlProbe) return;
+    try {
+      mkdirSync(gHome, { recursive: true });
+      appendFileSync(join(gHome, 'guardian.log'), line);
+    } catch {
+      // Evidence is best-effort: an unwritable log must never fail the install it documents.
+    }
+  };
 
   const rawHealth = async (): Promise<HealthPayload> => {
     const server = loadConfig().server;
