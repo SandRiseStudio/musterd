@@ -93,14 +93,58 @@ A team whose every live cross-model agent is mid-turn will wake an offline seat 
   against 17m and 19% (30/161) at baseline — the tail improved while the head got worse, consistent
   with a queue rather than abandonment.
 
-  **Eval item 5, the one clean before/after** (both sides post-arming, post-#752, both spanning a
+  ~~**Eval item 5, the one clean before/after** (both sides post-arming, post-#752, both spanning a
   night): wake leases **0.23/h → 1.10/h** (3 in 12.8h → 31 in 28.2h), `wake_deferred` **0 → 26**,
   `residency.woke` 0 and `residency.wake_cost` 0 on both sides. This ADR's Consequences predicted
   the shift onto the ADR 191 paid path and it happened at roughly 5× the rate; ADR 252's
-  under-pricing is visible in the same row, since 31 leases produced zero priced wakes.
+  under-pricing is visible in the same row, since 31 leases produced zero priced wakes.~~
+  **RETRACTED 2026-08-14 — see the correction note below. It was not clean and it was not 5×.**
 
   **Verdict: do not build increment 2 from this Eval, and do not build it yet.** Not because
   fan-out was disproved — it was not tested — but because the window cannot answer the question and
   the one signal that does survive points at attention, which a wider candidate set does not fix.
   n=18 over 28 hours, one of them the a11y incident evening with several seats heads-down. Re-run
   the instrument after a week with no routing changes landing in it.
+
+- **2026-08-14 (later) — I retract item 5, the one arm I vouched for; and the standing condition is
+  worse than "re-run in a clean window"** (izzo, lane `01M015ENX2M`; prompted by stanley's #844 /
+  ADR 269, verified here before believing it — falsify by re-running
+  `scripts/research/adr-260-acceptance-eval.ts`, which now prints both figures side by side).
+
+  **The lease rate was churn, not volume.** An act that cannot settle is re-leased, so a lease count
+  measures failure-to-settle as much as it measures wakes. Measured: one act held **12 leases**, and
+  leases-per-act ran **2.7** (baseline) → **5.2** (post-#785). On distinct wake *decisions* the
+  comparison is:
+
+  | window | leases | leases/h | **decisions** | **decisions/h** |
+  | ------ | ------ | -------- | ------------- | --------------- |
+  | OFF (12.8h) | 3 | 0.23 | **1** | 0.08 |
+  | ON (29.2h) | 31 | 1.06 | **6** | 0.21 |
+
+  One decision versus six is not a measurement, and the "roughly 5×" was mostly the same handful of
+  acts failing to settle. stanley's cause is upstream of mine and correct: `transcript_age_ms` used
+  `Date.now() - mtimeMs`, `mtimeMs` is fractional on APFS, the schema said `.int()`, so Zod rejected
+  the whole report and the settlement died with the cost — 48 refusals, $22.54 of real spend, and
+  **the refusal left no ledger row at all**.
+
+  **Two consequences, and the second is the important one.**
+
+  1. The guard's predicate was a category too narrow. It watched *who is asked* (`review.ts`,
+  `orientation.ts`, `envelope.ts`) while item 5 depends on *what moves act/lease volume*. #844
+  touches neither those paths nor policy, so the old guard would have passed it and let the re-run
+  read a genuine lease-rate drop as a routing result. The watched set now includes the wake path
+  (`WAKE_PATHS`), and the instrument reports decisions beside leases so the churn cannot hide again.
+
+  2. **A window boundary cannot exclude contamination that leaves no trace.** This defect ran ~3
+  weeks inside every window this Eval measured, in both arms, and nothing recorded it arriving. So
+  the note above — "re-run after a week with no routing changes" — promises more than any freeze can
+  deliver: holding files still excludes changes we can *see*. miley reached the same place from the
+  other side while considering a freeze that would have cost them work ("11 routing commits and 4
+  policy changes in 7 days" is a standing condition, not this window's workaround). The honest
+  standing claim for this ADR is therefore: **acceptance routing on this team changes faster than it
+  can be measured, and some of that change is structurally unobservable at the window boundary.**
+  Any future acceptance statistic quoted over a multi-day window here should carry that sentence.
+
+  What survives all of it, and is now the only claim in this report I would defend: the asked seat
+  answers 15/18 at a 60m median (attention, not supply), and **top-reviewer concentration**, which
+  has now reproduced at two different n (50% at n=18, 56% at n=57) and is untouched by the wake path.

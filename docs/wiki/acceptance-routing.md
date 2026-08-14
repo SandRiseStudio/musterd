@@ -42,6 +42,10 @@ The instrument now refuses to report a before/after when the window is contamina
 
 The practical consequence: **a clean measurement window for acceptance routing may not exist on this team at the current rate of change.** That is not an argument for measuring anyway. It means any acceptance statistic quoted over a multi-day window here is describing a moving system, and the honest options are a deliberate freeze on routing code for the length of a window, or descriptive-only numbers that nobody cites as a before/after.
 
+**And a freeze is weaker than it sounds, because the worst contamination leaves no trace** (2026-08-14; falsify: `grep -c "transcript_age_ms" ~/.musterd/host.log` against stanley's #844 / ADR 269, and the retraction note on ADR 260). A wake report whose `transcript_age_ms` was fractional was rejected whole by a `.int()` schema: 48 refusals, $22.54 of real spend, and **no ledger row for the refusal**. That ran ~3 weeks, inside both arms of the Eval that was trying to measure across it, and it inflated the lease rate by re-leasing acts that could never settle — one act held 12 leases.
+
+Holding files still excludes the changes you can see. It cannot exclude a defect that arrives silently and distorts a denominator. So when quoting any acceptance number over a window here, the freeze buys you the visible half only — and the arm most likely to be wrong is the one whose denominator you did not think to check.
+
 The re-run prints its numbers either way — refusing to *compare* is not the same as refusing to *look*. Descriptive read of that same dirty window, for scale: n=56 live-routed, top reviewer 55% (31/56), `cross_family` 68%, good-≤10m 38%. The concentration figure is consistent with the smaller 28h window above, which is the one number here that has now been seen twice.
 
 ## Two traps in the pre-registered definitions (2026-08-14; falsify: read the header comment of `scripts/research/adr-260-acceptance-eval.ts`)
