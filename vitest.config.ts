@@ -1,8 +1,12 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import { workspaceSrcAliases } from './tests/setup/workspace-src-aliases.ts';
 
 export default defineConfig({
+  // Workspace imports resolve to src, never to gitignored dist/ — a stale dist must not be able to
+  // fail (or pass) a test run. See tests/setup/workspace-src-aliases.ts for the incident history.
+  resolve: { alias: workspaceSrcAliases },
   test: {
     // `content/` earns its own glob: roadmap.data.ts moved out of packages/web when the roadmap map
     // was dropped from the UI, and its ADR 177 invariant tests moved with it. Without this line they
