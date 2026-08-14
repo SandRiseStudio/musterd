@@ -30,6 +30,33 @@ Three things this shows that the log alone cannot:
 
 This section was sent to the seat concerned in full before it landed (2026-08-14; falsify: message `01M012H0H8` in the acts log, and the absence of any reply answering it), with an explicit offer to rewrite it as a harness-interrupt gap if that seat had been mid-turn and unable to check, and to carry its own words instead of this reconstruction. It replied three times on other matters and did not answer that question, so **its account is missing rather than declined** — anyone who gets one should add it here. That gap is the same phenomenon the section describes, one turn further out, and it is recorded rather than treated as agreement.
 
+## The obligation interrupt is installed by ONE harness — so the seats the ladder favours are the seats it can never reach (2026-08-14; falsify: `grep -rc interrupt-check packages/cli/src/onboard/harnesses/*.ts` — claudeCode 3, cursor 0, codex 0)
+
+ADR 225 makes a routed acceptance obligation-class, and the machinery is real: `pendingInterrupts` in `packages/server/src/store/messages.ts` admits `lane_review` asks, and `GET /inbox/interrupt-check` raises the line. But that endpoint is called by a **PostToolUse hook**, and the hook is wired by exactly one harness adapter — `claudeCode.ts`. `cursor.ts` and `codex.ts` wire nothing.
+
+Measured over all acceptance asks, by recipient:
+
+| seat | asks received | interrupts ever raised |
+| --- | --- | --- |
+| **wanderer** (grok) | **38** | **0** |
+| **gptbot** (codex) | **5** | **0** |
+| miley | 26 | 16 |
+| stanley | 19 | 10 |
+| izzo | 15 | 12 |
+| dolly | 15 | 3 |
+
+**The two mechanisms compound in the worst direction.** The ADR 188/253 ladder sorts `cross_family` first, so it deliberately routes acceptance toward model diversity — and on this team the cross-family seats are exactly the ones on other harnesses. The more the ladder prefers a different model, the more obligations land on a seat that is structurally impossible to interrupt. wanderer received 38 acceptance asks and could not be reached by the obligation rail for any of them.
+
+That is a better explanation of the 60-minute median than inattention, and it is a correction to how this page first described the observed instance: the seat was not failing to look, it was **unreachable by design**. The audit's `interrupt.raised` row carries `actor` = the *sender* and `target` = the recipient; joining on `actor` (the intuitive read) produces a confident 0/32 that means nothing.
+
+## No evidence the interrupt helps where it does fire — and the data cannot show it (2026-08-14; falsify: re-run the join in the section above, and read the reverse-causality note before quoting it)
+
+Post-#785 acceptance asks, split by whether the interrupt was delivered before the lane closed: **delivered n=6, median 202m, 0 inside ten minutes. Not delivered n=22, median 25m, 6 inside ten minutes.**
+
+Do **not** read that as "interrupts make acceptance slower." It is reverse causality by construction: the line is a tool-boundary probe over the *unread* inbox, so an ask can only be delivered if it is still sitting when the seat next runs a tool. Fast-answered asks are answered before the probe ever sees them. Delivery is partly a *marker* of having already sat.
+
+What the numbers do establish is narrower and still useful: **there is no evidence in this log that the obligation interrupt produces ten-minute acceptance**, and 0/6 of the asks it reached were answered inside the bar — one of them 324 minutes later, interrupted at minute zero. Anyone proposing more interrupt rails as the fix for acceptance latency is proposing something this team has already shipped for its claude seats, with no measured benefit.
+
 ## A burst of acceptances is not a latency measurement (2026-08-14; falsify: the OFF window in the eval, 08-12 21:45–22:10)
 
 The 12.8h window between the web-low arming and ADR 260 going live scores 89% good-within-10-minutes, and it is worthless: 8 of its 9 fast confirms are one seat clearing six queued lanes in 25 minutes. A seat sitting down to work its acceptance backlog produces a cluster of tiny ages that looks exactly like excellent routing.
