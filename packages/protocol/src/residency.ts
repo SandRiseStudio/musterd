@@ -456,6 +456,24 @@ export const WakeLeasesResponseSchema = z.object({
 export type WakeLeasesResponse = z.infer<typeof WakeLeasesResponseSchema>;
 
 /**
+ * A count a HOST measured off its own filesystem, rounded at the boundary rather than refused.
+ *
+ * These come from `fs.stat()`, whose `mtimeMs`/`size` are IEEE doubles — `mtimeMs` is fractional on
+ * APFS, so `Date.now() - mtimeMs` is a float. A strict `.int()` here rejected the entire wake
+ * report, and the wake report is what settles the lease and carries `cost_usd`. One unusable digit
+ * of sub-millisecond precision therefore destroyed the price of the wake: 48 rejected reports in
+ * the live host log, $22.54 of harness-attested spend discarded, and each of those leases left to
+ * expire as `wake_failed {session_captured: true}` — the ledger calling a wake free that had just
+ * printed its own cost to stdout.
+ *
+ * Rounding is the correct domain type, not leniency: no consumer of an age-in-ms or a size-in-bytes
+ * can use a fraction. Validation still bites where it means something — negatives are refused, and
+ * every policy/config integer in this file stays strict, because those are values a caller CHOOSES
+ * rather than values a filesystem HANDED it.
+ */
+const HostMeasuredCount = z.number().nonnegative().transform(Math.round);
+
+/**
  * Body of `POST /teams/:slug/residency/wake-report` — the host's `WakeOutcome`, minus anything the
  * daemon must never learn: no session ids, no transcript paths (ADR 131 §5 — the resumable
  * attestation carries a class and a one-way digest; ids stay in the workspace `binding.session`).
@@ -474,9 +492,9 @@ export const WakeReportBodySchema = z.object({
    *  `resume_eligible`; absent means no exact match was ever considered. */
   exact_match: WakeExactMatchResultSchema.optional(),
   /** Local transcript size examined by the host; no path or content crosses the boundary. */
-  transcript_bytes: z.number().int().nonnegative().optional(),
+  transcript_bytes: HostMeasuredCount.optional(),
   /** Local capture age examined by the host; no session identifier crosses the boundary. */
-  transcript_age_ms: z.number().int().nonnegative().optional(),
+  transcript_age_ms: HostMeasuredCount.optional(),
   /** True ⇒ the host skipped this wake because a live local session already holds the workspace
    *  (the local-session guard — roster-offline ≠ workspace-idle). Settles the lease, audits
    *  `residency.wake_deferred`, and consumes NO attempt/cooldown/hourly budget: a working human

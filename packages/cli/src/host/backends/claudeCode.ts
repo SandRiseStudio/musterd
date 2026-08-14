@@ -567,7 +567,14 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
                 ? { transcript_bytes: liveness.transcriptBytes }
                 : {}),
               ...(liveness.transcriptMtime !== undefined
-                ? { transcript_age_ms: Math.max(0, Date.now() - liveness.transcriptMtime) }
+                ? // `mtimeMs` is fractional on APFS, so this difference is a float. The wire schema
+                  // now rounds it, but send the integer we mean rather than relying on that: the
+                  // boundary's tolerance is a backstop for pinned hosts, not this code's excuse.
+                  {
+                    transcript_age_ms: Math.round(
+                      Math.max(0, Date.now() - liveness.transcriptMtime),
+                    ),
+                  }
                 : {}),
             }),
       });

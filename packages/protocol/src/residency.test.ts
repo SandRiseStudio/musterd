@@ -136,6 +136,39 @@ describe('portable wake context (ADR 209)', () => {
       }).delivery_outcome,
     ).toBe('fresh_fallback');
   });
+
+  // The wake-pricing regression. `transcript_age_ms` is derived from `fs.stat().mtimeMs`, which is
+  // fractional on APFS — so `Date.now() - mtimeMs` is a float and `.int()` rejected the whole
+  // report. It took the lease settlement and the `cost_usd` down with it: 48 rejections in the
+  // live host log, $22.54 of harness-attested spend discarded, and every one of those leases then
+  // expiring as `wake_failed {session_captured: true}` — a wake that really cost money reading as
+  // free. Sub-millisecond precision is meaningless for an age, so the boundary rounds it rather
+  // than refusing it. Rounding here (not only at the producer) is deliberate: it fixes every host
+  // on contact, including a pinned `dist` that will not be rebuilt today.
+  it('rounds a fractional transcript_age_ms instead of rejecting the report that carries the cost', () => {
+    const parsed = WakeReportBodySchema.parse({
+      lease_id: 'L1',
+      occupied: true,
+      cost_usd: 1.3093,
+      // The exact shape of Date.now() - st.mtimeMs on APFS.
+      transcript_age_ms: 4674.7802734375,
+    });
+    expect(parsed.transcript_age_ms).toBe(4675);
+    expect(parsed.cost_usd).toBe(1.3093);
+  });
+
+  it('rounds a fractional transcript_bytes rather than dropping the report', () => {
+    expect(
+      WakeReportBodySchema.parse({ lease_id: 'L1', occupied: true, transcript_bytes: 262_144.5 })
+        .transcript_bytes,
+    ).toBe(262_145);
+  });
+
+  it('still refuses a negative age — rounding is not permission to send nonsense', () => {
+    expect(() =>
+      WakeReportBodySchema.parse({ lease_id: 'L1', occupied: true, transcript_age_ms: -1 }),
+    ).toThrow();
+  });
 });
 
 describe('WakeTurnBodySchema (ADR 251 §7 — per-turn telemetry + transcript capture)', () => {
