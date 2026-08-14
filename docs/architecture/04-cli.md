@@ -68,8 +68,8 @@ src/
   session/            // session capture (ADR 131 §5, inc 4) — the machine-local judgement layer
     continuity.ts     // ADR 210: the local continuity registry (.musterd/continuity.json, 0600, gitignored) — readRegistry/writeRegistry/bindThread/pruneOnDisk map a thread to the harness session holding its dialogue; a foreign, corrupt, or unknown-shaped registry is DISCARDED not adopted (ADR 143 posture), and a workspace with no capture binds nothing so its wakes stay fresh; prunes on every bind and on session end (missing transcript / past RESUME_GC_HORIZON_MS — resolved-thread pruning needs daemon knowledge, so a caller supplies it)
     digest.ts         // sessionDigest(agentKey, sessionId): the correlation handle the resumable attestation carries (ADR 131 Consequences, follow-up note 2026-08-05) — a keyed truncated HMAC, equal across one session's start and end, different across two, irreversible without the workspace key; keyed rather than a bare hash so the guarantee rests on construction, not on every harness picking high-entropy ids. The id itself still never crosses the wire
-    liveness.ts       // localSessionLiveness(workspace): harness-selected binding/session scan + transcript stat → none|live|resumable|gc-expired; shared by the host guard and `session show`, with registry harness outranking stale capture provenance (ADR 166/204)
-    enumerate.ts      // harness-owned read-only session scan: Claude transcripts and Codex rollouts are attributed only by their RECORDED cwd and exact identity (never filename/path guesses); undefined = "cannot tell" (never laundered into "none")
+    liveness.ts       // localSessionLiveness(workspace): harness-selected binding/session scan + transcript stat → none|live|resumable|gc-expired; shared by the host guard and `session show`, with registry harness outranking stale capture provenance (ADR 166/204/265)
+    enumerate.ts      // harness-owned read-only session scan: Claude transcripts and Codex rollouts are attributed only by their RECORDED cwd; Cursor sessions by `.workspace-trusted.workspacePath` (never filename/path guesses; ADR 265); undefined = "cannot tell" (never laundered into "none")
     sweep-series.ts   // ADR 166 follow-through: the one path + row shape for the slot-sweep's append-only JSONL, plus the repeat gate (a workspace demoted by two consecutive runs) read by `report` and by the sweep itself
     transcript-model.ts // readModelFromTranscript(path): the ONLY module that knows a harness transcript's on-disk shape — newest assistant turn's model, bounded tail, never throws (ADR 158)
   service/            // `musterd service` daemon lifecycle as a macOS LaunchAgent (ADR 045)
@@ -100,7 +100,7 @@ src/
     harnesses/
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
-      cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks for model_id observe (ADR 198)
+      cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks for model_id observe (ADR 198); CLI also wires afterShellExecution + afterMCPExecution (ADR 265)
       codex.ts        // detect/configure via project-local .codex/config.toml (ADR 031)
       codexToml.ts    // TOML read/merge helper for the codex adapter
   archaeology/        // cookoff wasted-work reference collector — git-only, no daemon (ADR 122/123)
@@ -113,7 +113,7 @@ src/
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
-    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | show (ADR 131 §5 / ADR 160 / ADR 186). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start)
+    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198/265) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | show (ADR 131 §5 / ADR 160 / ADR 186). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start)
     gate.ts           // musterd gate check --stdin — the PreToolUse enforcement gate (hook-driven): match the tool call vs the team's class table client-side, adjudicate matches via POST /gate; fail-open (ADR 150)
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     human.ts          // musterd human <name>: the mirror of `agent` — stands a person in the team home (~/musterd/<team>) with their 0600 binding, mints/reuses/re-issues the credential, self-claims, sets current (ADR 176)

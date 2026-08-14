@@ -1,7 +1,12 @@
 import { statSync } from 'node:fs';
 import type { SessionCapture } from '@musterd/protocol';
 import { findBinding } from '../config.js';
-import { enumerateClaudeSessions, enumerateCodexSessions, type SessionFile } from './enumerate.js';
+import {
+  enumerateClaudeSessions,
+  enumerateCodexSessions,
+  enumerateCursorSessions,
+  type SessionFile,
+} from './enumerate.js';
 
 /**
  * Local session liveness (ADR 131 §5 inc 4; ADR 166) — the machine-local judgement over a
@@ -12,7 +17,8 @@ import { enumerateClaudeSessions, enumerateCodexSessions, type SessionFile } fro
  * the enumerated judgement decides (`source: 'enumerated'`); `binding.session` is demoted to resume
  * material and a recorded counter-verdict. When the harness cannot enumerate, the slot judgement
  * still decides, unchanged (`source: 'slot'`) — the slot is a fallback, not deleted (ADR 166 §
- * "weaker than ADR 165").
+ * "weaker than ADR 165"). Cursor CLI sessions are enumerable via `.workspace-trusted` (ADR 265);
+ * they must not fall through to the Claude scanner.
  *
  * SessionEnd is advisory (it never fires on a crash), so `ended_at` alone cannot mean "not live" in
  * the other direction — a transcript's mtime is the liveness signal that survives a crash: the
@@ -116,7 +122,9 @@ export function localSessionLiveness(
     enumerate ??
     (selectedHarness === 'codex'
       ? (dir: string) => enumerateCodexSessions(dir)
-      : (dir: string) => enumerateClaudeSessions(dir));
+      : selectedHarness === 'cursor'
+        ? (dir: string) => enumerateCursorSessions(dir)
+        : (dir: string) => enumerateClaudeSessions(dir));
   const enumerated = enumeratedLiveness(workspace, now, selected);
   if (!enumerated) return { source: 'slot', ...slot };
   // ADR 199 / ADR 179: clean SessionEnd outranks a still-warm transcript on the deciding

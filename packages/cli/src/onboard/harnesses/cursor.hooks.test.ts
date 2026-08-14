@@ -23,7 +23,7 @@ function tmpProject(): string {
 }
 
 describe('Cursor hooks install (ADR 198)', () => {
-  it('writes sessionStart, postToolUse, and sessionEnd with musterd markers', () => {
+  it('writes sessionStart, postToolUse, afterShellExecution, afterMCPExecution, and sessionEnd with musterd markers', () => {
     const dir = tmpProject();
     const warnings = installMusterdCursorHooks(dir);
     expect(warnings).toEqual([]);
@@ -36,6 +36,8 @@ describe('Cursor hooks install (ADR 198)', () => {
     expect(file.hooks['sessionStart']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
     expect(file.hooks['sessionStart']?.[0]?.command).toContain('session observe --stdin');
     expect(file.hooks['postToolUse']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
+    expect(file.hooks['afterShellExecution']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
+    expect(file.hooks['afterMCPExecution']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
     expect(file.hooks['sessionEnd']?.[0]?.command).toContain(CURSOR_END_HOOK_MARKER);
     expect(file.hooks['sessionEnd']?.[0]?.command).toContain('session end --stdin');
   });

@@ -130,8 +130,10 @@ function dropCursorHook(path: string, event: string, marker: string): void {
 }
 
 /**
- * Install musterd's Cursor Agent hooks (ADR 198): sessionStart + postToolUse observe the live
- * `model_id`; sessionEnd stamps ended_at. Project-local `.cursor/hooks.json` only.
+ * Install musterd's Cursor Agent hooks (ADR 198 / 265): sessionStart + postToolUse +
+ * afterShellExecution + afterMCPExecution observe the live `model_id`; sessionEnd stamps
+ * ended_at. Project-local `.cursor/hooks.json` only. The extra observe events exist because
+ * cursor-agent does not dispatch the IDE set.
  */
 export function installMusterdCursorHooks(dir: string = process.cwd()): string[] {
   const path = projectHooksPath(dir);
@@ -139,6 +141,11 @@ export function installMusterdCursorHooks(dir: string = process.cwd()): string[]
   for (const [event, marker, command] of [
     ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
     ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
+    // ADR 265: cursor-agent's event surface is a subset of the IDE's. Older CLIs (measured:
+    // 2026.01.23) never dispatch sessionStart/postToolUse/sessionEnd; they do dispatch
+    // afterShellExecution. afterMCPExecution covers a CLI session that is almost entirely MCP.
+    ['afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
+    ['afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
     ['sessionEnd', CURSOR_END_HOOK_MARKER, sessionEndHookCommand()] as const,
   ]) {
     const w = upsertCursorHook(path, event, marker, command);
@@ -152,6 +159,8 @@ export function removeMusterdCursorHooks(dir: string = process.cwd()): void {
   if (!existsSync(path)) return;
   dropCursorHook(path, 'sessionStart', CURSOR_OBSERVE_HOOK_MARKER);
   dropCursorHook(path, 'postToolUse', CURSOR_OBSERVE_HOOK_MARKER);
+  dropCursorHook(path, 'afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER);
+  dropCursorHook(path, 'afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER);
   dropCursorHook(path, 'sessionEnd', CURSOR_END_HOOK_MARKER);
 }
 
