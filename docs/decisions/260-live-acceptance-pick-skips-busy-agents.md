@@ -187,3 +187,35 @@ A team whose every live cross-model agent is mid-turn will wake an offline seat 
   minority-family seat — never asserted, because an author-chosen changepoint is how a prediction
   gets fitted after the fact. Falsify any of this by running
   `node scripts/research/adr-260-acceptance-eval.ts --concentration`.
+
+- **2026-08-14 (last) — "attention" was the wrong word for half the cases, and the lever I proposed
+  is already built and shows no benefit** (izzo, lane `01M017SFFA`; falsify:
+  `grep -rc interrupt-check packages/cli/src/onboard/harnesses/*.ts` → claudeCode 3, cursor 0,
+  codex 0; and the per-recipient table in `docs/wiki/acceptance-routing.md`).
+
+  This ADR's Eval concluded *attention, not candidate supply*, and I proposed the next lever should
+  be an obligation that reaches a seat between task boundaries. Both halves need correcting.
+
+  **The obligation rail exists and is harness-specific.** ADR 225's interrupt line is real
+  (`pendingInterrupts` admits `lane_review`; `GET /inbox/interrupt-check` raises it) but it is
+  driven by a PostToolUse hook wired by **`claudeCode.ts` alone**. Measured by recipient:
+  **wanderer 38 acceptance asks / 0 interrupts ever; gptbot 5 / 0**, against miley 26/16,
+  stanley 19/10, izzo 15/12. So for the seat receiving the *most* asks, the obligation rail has
+  never once fired. That is not inattention; it is **unreachability**, and it compounds with the
+  ladder: ADR 188/253 sort `cross_family` first, and on this team cross-family means "on another
+  harness", so the more the routing prefers model diversity the more obligations land where they
+  cannot be delivered.
+
+  **And the lever shows no benefit where it does work.** Split post-#785 asks by delivery:
+  delivered n=6, median **202m**, **0** inside ten minutes (one at 324m, interrupted at minute
+  zero); not delivered n=22, median 25m. That comparison is reverse-causal by construction — a
+  tool-boundary probe over the unread inbox can only deliver an ask that is *still sitting*, so
+  delivery partly marks slowness rather than causing it, and nobody should quote it as
+  "interrupts slow acceptance". What survives is the narrow claim: **there is no evidence here
+  that the interrupt produces ten-minute acceptance**, so "add another interrupt rail" is not
+  supported by this data. I proposed it an hour before measuring it; the measurement does not
+  support me.
+
+  The open question this leaves is a design one and not mine to settle alone: whether the
+  obligation rail should be harness-specific at all, or whether ADR 225's guarantee is only as
+  strong as the weakest adapter — which today means it does not hold for any non-claude seat.
