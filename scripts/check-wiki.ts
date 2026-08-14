@@ -4,8 +4,9 @@
  *
  *   pnpm wiki:check   — exit 1 on any failure, one line each on stderr
  */
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderIndex, WIKI_DIR } from './wiki-index.ts';
 
@@ -24,6 +25,69 @@ const DATED_RE = /\(20\d\d-\d\d(?:-\d\d)?/;
  *  this gate. Do not read a green run as "no section was eaten". */
 const HEADING_RE = /^#{1,6}\s/;
 const LINK_RE = /\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g;
+
+/** Headings of a page paired with the first non-blank line beneath each — fence-aware, so a
+ *  `## <Section>` inside the README's template block is text, not structure. */
+function sections(content: string): { heading: string; firstBody: string | null }[] {
+  const out: { heading: string; firstBody: string | null }[] = [];
+  let fenced = false;
+  for (const line of content.split('\n')) {
+    if (/^\s*```/.test(line)) {
+      fenced = !fenced;
+      if (out.length > 0 && out[out.length - 1]!.firstBody === null)
+        out[out.length - 1]!.firstBody = line.trim();
+      continue;
+    }
+    if (fenced) continue;
+    if (HEADING_RE.test(line)) {
+      out.push({ heading: line.trim(), firstBody: null });
+      continue;
+    }
+    if (line.trim() === '') continue;
+    if (out.length > 0 && out[out.length - 1]!.firstBody === null)
+      out[out.length - 1]!.firstBody = line.trim();
+  }
+  return out;
+}
+
+/**
+ * The half `checkWiki` structurally cannot see: a heading REPLACED rather than deleted.
+ *
+ * #813 swapped the `## Never pnpm format` heading for a different one, so that section's body was
+ * absorbed into the section above — a well-formed file, no empty heading, every tree-pure check
+ * green, and a live trap left with no title, date or falsifier. Only the diff knows.
+ *
+ * A removed heading is reported ONLY when its first body line still exists in the new file AND is
+ * no longer the opening line of any section. That third clause is what separates the damage from a
+ * legitimate retitle: a renamed heading keeps its body at the top of its own section, whereas an
+ * absorbed body sits mid-section under someone else's heading. Deleting a section outright —
+ * heading and body together — is deliberate editing and passes.
+ */
+export function checkEatenSections(
+  base: Map<string, string>,
+  current: Map<string, string>,
+): string[] {
+  const failures: string[] = [];
+  for (const [name, before] of base) {
+    const after = current.get(name);
+    if (after === undefined) continue; // page deleted wholesale — not this check's business
+    const stillOpens = new Set(
+      sections(after)
+        .map((s) => s.firstBody)
+        .filter((b): b is string => b !== null),
+    );
+    const headingsAfter = new Set(sections(after).map((s) => s.heading));
+    for (const { heading, firstBody } of sections(before)) {
+      if (headingsAfter.has(heading) || firstBody === null) continue;
+      if (!after.includes(firstBody)) continue; // section removed entirely — deliberate
+      if (stillOpens.has(firstBody)) continue; // retitled — body still opens its own section
+      failures.push(
+        `${name} — a section lost its heading and its body was absorbed into a neighbour: "${heading.slice(0, 70)}"`,
+      );
+    }
+  }
+  return failures;
+}
 
 export function checkWiki(dir: string): string[] {
   const failures: string[] = [];
@@ -76,11 +140,55 @@ export function checkWiki(dir: string): string[] {
   return failures;
 }
 
+/** Read every wiki page as of `ref`. Returns null — never an empty map — when the ref does not
+ *  resolve, so the caller can say so out loud instead of reporting a vacuous pass. */
+function pagesAtRef(ref: string): Map<string, string> | null {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], { stdio: 'ignore' });
+  } catch {
+    return null;
+  }
+  const listed = execFileSync('git', ['ls-tree', '--name-only', ref, 'docs/wiki/'], {
+    encoding: 'utf8',
+  })
+    .split('\n')
+    .filter((p) => p.endsWith('.md') && basename(p) !== 'INDEX.md');
+  return new Map(
+    listed.map((p) => [
+      basename(p),
+      execFileSync('git', ['show', `${ref}:${p}`], { encoding: 'utf8', maxBuffer: 8 << 20 }),
+    ]),
+  );
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const failures = checkWiki(WIKI_DIR);
+
+  // The diff-aware half. Its base ref must exist or the check is inert — and an instrument that
+  // silently never fires is the defect class this whole gate was built against, so a missing base
+  // is announced, not swallowed. CI already checks out with fetch-depth: 0.
+  const baseRef = process.env['WIKI_BASE_REF'] ?? 'origin/main';
+  const base = pagesAtRef(baseRef);
+  let diffChecked = false;
+  if (base === null) {
+    process.stderr.write(
+      `⚠ eaten-section check SKIPPED — base ref '${baseRef}' does not resolve (set WIKI_BASE_REF)\n`,
+    );
+  } else {
+    diffChecked = true;
+    const current = new Map(
+      readdirSync(WIKI_DIR)
+        .filter((f) => f.endsWith('.md') && f !== 'INDEX.md')
+        .map((f) => [f, readFileSync(join(WIKI_DIR, f), 'utf8')]),
+    );
+    failures.push(...checkEatenSections(base, current));
+  }
+
   if (failures.length > 0) {
     for (const f of failures) process.stderr.write(`✗ ${f}\n`);
     process.exit(1);
   }
-  process.stdout.write(`✓ wiki clean — index in sync, claims dated, links live, sections whole\n`);
+  process.stdout.write(
+    `✓ wiki clean — index in sync, claims dated, links live, sections whole${diffChecked ? `, none eaten since ${baseRef}` : ''}\n`,
+  );
 }

@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { checkWiki } from './check-wiki.ts';
+import { checkEatenSections, checkWiki } from './check-wiki.ts';
 import { renderIndex } from './wiki-index.ts';
 
 const dirs: string[] = [];
@@ -108,5 +108,41 @@ describe('checkWiki — orphaned sections', () => {
       'a.md': '# A\n\nSummary.\n\n## Template\n\n```markdown\n# <Topic>\n\n## <Section>\n```\n',
     });
     expect(checkWiki(dir)).toEqual([]);
+  });
+});
+
+describe('checkEatenSections (diff-aware)', () => {
+  // The #813 shape: the heading line was REPLACED, so its body was absorbed into the section above.
+  const base = new Map([
+    [
+      'a.md',
+      '# A\n\nSummary.\n\n## Kept\n\nKept body.\n\n## Eaten (2026-01-01)\n\nOrphan body line.\n',
+    ],
+  ]);
+
+  it('flags a heading removed while its body survives absorbed into a neighbour', () => {
+    const current = new Map([
+      ['a.md', '# A\n\nSummary.\n\n## Kept\n\nKept body.\n\nOrphan body line.\n'],
+    ]);
+    expect(checkEatenSections(base, current).join('\n')).toMatch(/a\.md.*Eaten/);
+  });
+
+  it('allows a deliberate deletion of the whole section, heading and body together', () => {
+    const current = new Map([['a.md', '# A\n\nSummary.\n\n## Kept\n\nKept body.\n']]);
+    expect(checkEatenSections(base, current)).toEqual([]);
+  });
+
+  it('allows a retitle — heading text changes but the body still opens its own section', () => {
+    const current = new Map([
+      [
+        'a.md',
+        '# A\n\nSummary.\n\n## Kept\n\nKept body.\n\n## Renamed (2026-01-01)\n\nOrphan body line.\n',
+      ],
+    ]);
+    expect(checkEatenSections(base, current)).toEqual([]);
+  });
+
+  it('says nothing about a page that did not exist at the base', () => {
+    expect(checkEatenSections(new Map(), base)).toEqual([]);
   });
 });
