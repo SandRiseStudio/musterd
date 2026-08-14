@@ -1,7 +1,14 @@
-import { LANE_TERMINAL_STATES, type BlockedBy, type Lane } from '@musterd/protocol';
+import {
+  IncidentPolicySchema,
+  LANE_TERMINAL_STATES,
+  type BlockedBy,
+  type IncidentPolicy,
+  type Lane,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { appendAudit } from './audit.js';
 import { getLane, listLanes, openLane, updateLane } from './lanes.js';
+import { getPolicy } from './teams.js';
 
 /**
  * Incident convergence, increment 1 (spec 2026-08-14, lane 01M00PNG2Q). A `blocked_by` report on a
@@ -13,12 +20,22 @@ import { getLane, listLanes, openLane, updateLane } from './lanes.js';
  * identically without coordinating (the motivating episode printed two element-level signatures for
  * one defect). `sig` is carried for the eventual owner and never matched on.
  */
-export const CLUSTER_THRESHOLD = 2; // distinct seats; becomes per-team policy in increment 2
+/**
+ * Increment 1's hardcoded threshold, kept as the schema default's twin so the constant and the
+ * policy default cannot drift apart. Read the policy (`getPolicy(db, teamId).incident`), never this.
+ */
+export const CLUSTER_THRESHOLD = IncidentPolicySchema.parse({}).cluster_threshold;
 
 export type IncidentOutcome =
+  | { kind: 'disabled' } // the team opted out (policy incident.enabled = false)
   | { kind: 'recorded' } // pooled below threshold
   | { kind: 'opened'; lane: Lane } // this report tripped the threshold
   | { kind: 'appended'; lane: Lane }; // matched an already-open incident
+
+/** The team's incident knobs, defaults applied on read (never on write — ADR 185). */
+export function incidentPolicy(db: Database, teamId: string): IncidentPolicy {
+  return getPolicy(db, teamId).incident;
+}
 
 /** The derived, deterministic lane title — also the open-incident lookup key. */
 function incidentTitle(gate: string): string {
@@ -74,6 +91,10 @@ export function recordBlockedReport(
   messageId: string,
   now: number = Date.now(),
 ): IncidentOutcome {
+  const policy = incidentPolicy(db, teamId);
+  // The opt-out is a FULL one: no row is written either. A team that turned this off should not be
+  // accumulating a pool that springs into an incident the moment someone turns it back on.
+  if (!policy.enabled) return { kind: 'disabled' };
   const open = findOpenIncident(db, teamId, teamSlug, report.gate);
   const insert = (laneId: string | null) =>
     db
@@ -114,7 +135,7 @@ export function recordBlockedReport(
     )
     .all(teamId, report.gate)
     .map((r) => r.seat);
-  if (pool.length < CLUSTER_THRESHOLD) return { kind: 'recorded' };
+  if (pool.length < policy.cluster_threshold) return { kind: 'recorded' };
 
   const rows = db
     .prepare<

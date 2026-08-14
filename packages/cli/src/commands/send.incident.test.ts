@@ -125,6 +125,27 @@ describe('a CLI seat can converge a shared blocker (incident convergence inc 2)'
     expect(await incidentLanes()).toHaveLength(0);
   });
 
+  it('a raised threshold holds the incident back until the third seat reports', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--incident-threshold', '3'])));
+    await report('izzo');
+    await report('dolly');
+    expect(await incidentLanes()).toHaveLength(0);
+    await report('nick');
+    expect(await incidentLanes()).toHaveLength(1);
+  });
+
+  it('--incident off degrades to pre-increment-1 exactly', async () => {
+    await capture(() => teamCommand(parseArgs(['policy', '--incident', 'off'])));
+    await report('izzo');
+    await report('dolly');
+    expect(await incidentLanes()).toHaveLength(0);
+    // And nothing was pooled either, so turning it back on does not spring an incident out of
+    // reports filed while the team had it switched off.
+    await capture(() => teamCommand(parseArgs(['policy', '--incident', 'on'])));
+    await report('izzo');
+    expect(await incidentLanes()).toHaveLength(0);
+  });
+
   it('an ordinary status_update from both seats opens nothing', async () => {
     await capture(() =>
       sendCommand(parseArgs(['--as', 'izzo', '--act', 'status_update', 'shipping the lane board'])),

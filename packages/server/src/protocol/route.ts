@@ -459,7 +459,9 @@ function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: En
   const report = blockedByOf(env.meta);
   if (!report) return;
   const outcome = recordBlockedReport(ctx.db, team.id, team.slug, sender.name, report, env.id);
-  if (outcome.kind === 'recorded') return;
+  // `disabled` (team opted out) and `recorded` (still pooling) both mean there is no lane to point
+  // anyone at — and in the disabled case nothing was written down at all.
+  if (outcome.kind === 'recorded' || outcome.kind === 'disabled') return;
 
   const lane = outcome.lane;
   const fromRow = laneVoice(ctx, team, lane);
