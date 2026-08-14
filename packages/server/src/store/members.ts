@@ -12,7 +12,7 @@ import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
 import { releaseInFlightClaimsForSeat } from './lanes.js';
 import type { MemberRow, TeamRow } from './rows.js';
-import { resolveCapabilities } from './rows.js';
+import { parseRoles, resolveCapabilities } from './rows.js';
 import { getAgentKeyHash, requireTeam } from './teams.js';
 
 export function hashToken(token: string): string {
@@ -225,6 +225,30 @@ export function getMemberByName(db: Database, teamId: string, name: string): Mem
   return db
     .prepare<[string, string], MemberRow>('SELECT * FROM members WHERE team_id = ? AND name = ?')
     .get(teamId, name);
+}
+
+/**
+ * The seat holding a role (ADR 227) — the fallback owner for an unclaimed incident (ADR 270).
+ *
+ * Two things this does that the inline `WHERE role = ? LIMIT 1` copies in http.ts and ws.ts do not,
+ * both of which matter when the answer decides who gets assigned work:
+ *
+ * - It reads the ADR 227 **roles array**, not only the legacy single `role` column. A seat whose
+ *   platform role lives in the JSON is invisible to those copies, and a fallback owner who exists
+ *   but cannot be found is indistinguishable from no owner at all.
+ * - It is **deterministic**. `LIMIT 1` with no ORDER BY lets SQLite pick, so two seats holding one
+ *   role would route by whim and the assignment would not be reproducible from the audit log.
+ *
+ * Departed seats are skipped: assigning an incident to someone who left is a lane that will never
+ * move, and it looks owned on the board while nobody is on it.
+ */
+export function getMemberByRole(db: Database, teamId: string, role: string): MemberRow | undefined {
+  return db
+    .prepare<[string], MemberRow>(
+      'SELECT * FROM members WHERE team_id = ? AND left_at IS NULL ORDER BY created_at, id',
+    )
+    .all(teamId)
+    .find((row) => parseRoles(row).includes(role));
 }
 
 export function getMemberById(db: Database, id: string): MemberRow | undefined {

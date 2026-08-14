@@ -522,6 +522,78 @@ function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: En
   }
 }
 
+/**
+ * Tell the seat an unclaimed incident was just handed to (ADR 270, spec §3), and tell the reporters
+ * their red now has an owner.
+ *
+ * The voice cannot come from `laneVoice` here: assignment has ALREADY set `owner_seat`, so
+ * `laneVoice` would return the new owner and every message would be a self-send — which never
+ * reaches an inbox (the lesson increment 1 paid for on the open announcement). So the voice is
+ * explicitly a reporter other than the recipient.
+ *
+ * Called from the reaper rather than a transport, on the `seeds/ingest.ts` precedent: a
+ * daemon-composed act routed through normal delivery, so live sessions get the existing
+ * delivery-hint nudge for free. `daemonComposed` is set, which is also the recursion belt — these
+ * are `message` acts and would otherwise re-enter the blocked-report hook.
+ */
+export function announceIncidentRouted(
+  ctx: Ctx,
+  team: TeamRow,
+  lane: Lane,
+  owner: string,
+  waitedMs: number,
+): void {
+  const reporters = incidentReporters(ctx.db, team.id, lane.id);
+  const voiceFor = (recipient: string): MemberRow | null =>
+    reporters
+      .filter((r) => r !== recipient)
+      .map((r) => getMemberByName(ctx.db, team.id, r))
+      .find((m) => m != null) ??
+    (lane.created_by !== recipient
+      ? (getMemberByName(ctx.db, team.id, lane.created_by) ?? null)
+      : null);
+
+  const minutes = Math.round(waitedMs / 60_000);
+  // The owner first, and they are told they can hand it back — an assignment nobody chose is a
+  // routing default, not a verdict about who should fix it. Then the reporters, so the seats parked
+  // behind the red learn it has an owner without anyone asking a human to relay it.
+  const recipients: [string, string][] = [
+    [
+      owner,
+      `[incident] routed to you: "${lane.title}" — lane ${lane.id}, unclaimed for ${minutes}m so it fell to your role. ` +
+        `You did not choose it: hand it off or release it if someone with the context is closer.`,
+    ],
+    ...reporters
+      .filter((r) => r !== owner)
+      .map((r): [string, string] => [
+        r,
+        `[incident] "${lane.title}" now owned by ${owner} — lane ${lane.id}. Your report is on it; stay parked.`,
+      ]),
+  ];
+
+  for (const [recipient, body] of recipients) {
+    const to = getMemberByName(ctx.db, team.id, recipient);
+    const voice = voiceFor(recipient);
+    if (!to || !voice) continue;
+    routeEnvelope(
+      ctx,
+      team,
+      voice,
+      makeEnvelope({
+        id: ulid(),
+        team: team.slug,
+        from: voice.name,
+        to: { kind: 'member', name: recipient },
+        act: 'message',
+        body,
+        meta: { incident: { lane: lane.id, routed_to: owner } },
+      }),
+      undefined,
+      true,
+    );
+  }
+}
+
 /** The seat incident traffic speaks as: the lane's owner, else its creator. */
 function laneVoice(ctx: Ctx, team: TeamRow, lane: Lane): MemberRow | null {
   return (

@@ -1,6 +1,8 @@
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
+import { announceIncidentRouted } from '../protocol/route.js';
 import { appendAudit } from '../store/audit.js';
+import { routeUnclaimedIncidents } from '../store/incidents.js';
 import { releaseDepartedSeatClaims } from '../store/lanes.js';
 import { sweepAbandonedAcceptance } from '../store/laneSweep.js';
 import { getMemberById, reapExcessIdleObservers, reapStaleObservers } from '../store/members.js';
@@ -17,7 +19,7 @@ import {
   listResidencyTeamIds,
   wakeExhaustionKey,
 } from '../store/residency.js';
-import { getPolicy, listActiveTeams } from '../store/teams.js';
+import { getPolicy, getTeamBySlug, listActiveTeams } from '../store/teams.js';
 
 /** Periodically remove stale presence rows and emit offline events for members who lost all presence. */
 export function startReaper(ctx: Ctx): () => void {
@@ -140,6 +142,28 @@ export function startReaper(ctx: Ctx): () => void {
     const releasedClaims = releaseDepartedSeatClaims(ctx.db, now);
     if (releasedClaims.length > 0) {
       log.info({ msg: 'reap_departed_claims', count: releasedClaims.length });
+    }
+
+    // ADR 270 (incident spec §3): close the claim window on any incident nobody picked up, handing
+    // it to the fallback role. Deliberately NOT behind `loops.sweep` — that switch arms a loop that
+    // CLOSES other people's lanes, and this one only puts a name on a lane already open and visible.
+    // Its own `incident.enabled` is the switch, and it defaults on because increment 1 already does.
+    for (const team of listActiveTeams(ctx.db)) {
+      for (const { lane, owner } of routeUnclaimedIncidents(ctx.db, team.id, team.slug, now)) {
+        log.info({ msg: 'incident_routed', team: team.slug, lane: lane.id, owner });
+        // Assigning without telling anyone would make this a board-only fact — the seat would find
+        // its new lane by luck. Best-effort: the assignment is already durable, and a delivery
+        // failure must not roll it back or stop the rest of the sweep.
+        try {
+          // listActiveTeams returns {id, slug} only; routing needs the full row.
+          const teamRow = getTeamBySlug(ctx.db, team.slug);
+          if (teamRow) {
+            announceIncidentRouted(ctx, teamRow, lane, owner, now - lane.created_at);
+          }
+        } catch (err) {
+          log.warn({ msg: 'incident_route_announce_failed', lane: lane.id, err: String(err) });
+        }
+      }
     }
 
     // ADR 229: the acceptance backstop. A lane past the grace in `awaiting_acceptance` has no actor
