@@ -255,7 +255,7 @@ export const WAVE_META: Record<Wave, { label: string; tone: string }> = {
   },
   8: {
     label: 'Wave 8',
-    tone: 'Any harness, always on — residency (resume the offline) plus the reevaluated role-template/mixed-harness layer; the top of the reachability ladder.',
+    tone: 'Any harness, always on — team role routing across machines plus residency (resume the offline); the top of the reachability ladder.',
   },
   9: {
     label: 'Wave 9',
@@ -1416,6 +1416,20 @@ const RAW: RawItem[] = [
       'Today every seat runs on someone else’s harness (Claude Code, Cursor, Codex) with musterd as the coordination layer on top; the residency work (ADR 131) already names musterd’s own native harness as its reference actuator row. This item is that ambition whole: a musterd-native runtime a seat can live on directly, plus mixed-harness teams as the deliberately-supported composition (Track B finding 003: non-Claude harnesses coordinate through musterd today; ADR 101 makes model family a team-composition property). Role creation/assignment is deliberately NOT this item — roles are harness-independent (see roles-and-stewardship) and must work identically whether a seat runs on Claude Code, Codex, or musterd’s own harness. (Split 2026-07-13: this item previously also carried the role-template reevaluation.)',
     refs: [adr(26, 'ADRs 026–030'), adr(131, 'ADR 131')],
     dependsOn: ['harness-adapters'],
+  },
+  {
+    id: 'role-routing-profiles',
+    unfrozen: 'ADR 272 is proposed; implementation awaits acceptance',
+    wave: 8,
+    title: 'Role routing & workspace profiles — responsibility without harness lock-in',
+    plan: 'near-term',
+    category: 'platform',
+    blurb:
+      'Make a role a team-owned responsibility with explicit primary/alternate routing, while moving harness setup into separate local workspace profiles.',
+    detail:
+      'ADR 272 records the re-evaluation: a role is harness-independent charter, narrow-only capability defaults, approved holders, and routing policy; a profile is optional local setup for a workspace and Surface. Built-in roles are usable immediately; personal drafts become team/project roles only after human-admin approval; every durable assignment and policy change needs human-admin approval. The daemon owns live distributed routing and audit, while Git remains a reviewable declaration/export. A role route resolves primary (when active and available), then active alternates, then authenticated wakeable alternates, otherwise a durable no-eligible-holder result — always recording the selected named seat and reason. No model/harness gate, task requirement, or free-tag resolver is added until dogfood demonstrates an actual environment-mismatch failure. This replaces the ambiguous old “role template” boundary without changing the separate own-harness ambition.',
+    refs: [adr(272, 'ADR 272'), adr(227, 'ADR 227'), adr(26, 'ADRs 026–030')],
+    dependsOn: ['roles-and-stewardship', 'harness-residency'],
   },
   {
     id: 'install-topology',
