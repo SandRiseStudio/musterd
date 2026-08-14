@@ -23,9 +23,22 @@
     var(--hero-ground);
 }
 
+/* The scene's own box is deliberately LARGER than the hero, anchored top-left, so the hero shows a
+   corner of the room rather than the whole room — the crop is the composition, and it keeps the
+   left third clear for the wordmark. `--hero-room-scale` is the one knob: 100% shows the entire
+   room, higher values push further into the top-left corner (the scene centres itself in whatever
+   box it is given, and `.hero { overflow: hidden }` does the cropping).
+
+   Until 2026-08-13 this crop was an accident — the canvas rendered at devicePixelRatio× its host
+   (see `office-scene/index.ts` `sizeCanvases`), which on a 2× display made this exact ~200% window.
+   The scene now sizes itself correctly, so the framing is stated here instead of being a bug. */
 .hero__canvas {
+  --hero-room-scale: 178%;
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: var(--hero-room-scale);
+  height: var(--hero-room-scale);
   z-index: -2;
   opacity: 0;
   transition: opacity 1.2s var(--ease-out);
