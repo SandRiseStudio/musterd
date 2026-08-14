@@ -16,6 +16,7 @@ import {
   serializeSeat,
   serializeTeam,
   type StakesDefault,
+  TOKEN_PREFIXES,
   GuardianClassSchema,
   GuardianTierSchema,
   type TeamFile,
@@ -26,6 +27,7 @@ import {
   excludeCredentialFromGit,
   findBinding,
   loadConfig,
+  readBindingAt,
   recordRosterHome,
   rememberIdentity,
   saveBinding,
@@ -43,12 +45,13 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   if (sub === 'add') return teamAdd(parsed);
   if (sub === 'observe') return teamObserve(parsed);
   if (sub === 'credential') return teamCredential(parsed);
+  if (sub === 'agent-key') return teamAgentKey(parsed);
   if (sub === 'remove') return teamRemove(parsed);
   if (sub === 'archive') return teamArchive(parsed);
   if (sub === 'export') return teamExport(parsed);
   if (sub === 'policy') return teamPolicy(parsed);
   throw new CliError(
-    'usage: musterd team <create|add|observe|credential|remove|archive|export|policy> ...',
+    'usage: musterd team <create|add|observe|credential|agent-key|remove|archive|export|policy> ...',
     2,
   );
 }
@@ -750,6 +753,246 @@ async function teamCredential(parsed: Parsed): Promise<number> {
   } else {
     process.stdout.write(
       hint(`hand it over: musterd join ${team} --as ${res.member} --key <the line above>`) + '\n',
+    );
+  }
+  return 0;
+}
+
+/**
+ * Read the team agent key off the seat bindings this machine already holds.
+ *
+ * The key is a per-team secret recorded in `config.agentKeys` at `team create` (ADR 075) — and that
+ * map is the *only* copy the config keeps, so anything that empties it (an interrupted prune,
+ * `musterd reset`, a restored backup) takes `musterd agent` and `musterd human` down with it. But the
+ * key itself is rarely gone: every agent workspace `musterd agent` ever provisioned wrote it into its
+ * own gitignored `binding.json`. Measured on team `revive`, 2026-08-14: `agentKeys` empty, eleven
+ * seat bindings all carrying the same `mskey_`. The secret was on the machine the whole time.
+ *
+ * That is why recovery, not rotation, is this command's default. Rotating in that state mints a key
+ * none of those eleven bindings hold, so the repair for a bookkeeping gap would be a team-wide
+ * outage.
+ *
+ * Two abstentions are deliberate. Only `mskey_`-prefixed keys count — a human seat's binding carries
+ * that person's `mscr_` credential, and recording one as the team key would rebuild the dead binding
+ * `findHeldCredential` and `doctor.ts` both exist to catch. And disagreement returns no key at all:
+ * two keys in flight means a rotation landed partway, so this hands back every candidate and lets the
+ * operator choose with `--key` rather than guessing and re-breaking the other half.
+ *
+ * Pure and injectable (`read`) so the decision is testable without a filesystem.
+ */
+export function recoverAgentKey(
+  dirs: readonly string[],
+  team: string,
+  read: (dir: string) => Binding | null,
+): {
+  /** The single agreed key, or null when there is nothing to recover or the candidates disagree. */
+  key: string | null;
+  /** The folders that vouched for `key` — named in the output, because this writes a secret. */
+  sources: string[];
+  /** Every candidate with its folders, populated only when they disagree. */
+  conflicts: Array<{ key: string; dirs: string[] }>;
+} {
+  const byKey = new Map<string, string[]>();
+  for (const dir of dirs) {
+    const binding = read(dir);
+    if (binding?.team !== team) continue;
+    const key = binding.agent_key;
+    if (!key || !key.startsWith(TOKEN_PREFIXES.agent_key)) continue;
+    byKey.set(key, [...(byKey.get(key) ?? []), dir]);
+  }
+  if (byKey.size === 0) return { key: null, sources: [], conflicts: [] };
+  if (byKey.size > 1) {
+    return {
+      key: null,
+      sources: [],
+      conflicts: [...byKey].map(([key, dirs]) => ({ key, dirs })),
+    };
+  }
+  const [key, sources] = [...byKey][0]!;
+  return { key, sources, conflicts: [] };
+}
+
+/**
+ * `musterd team agent-key [--key <mskey_…>] [--rotate [--yes]] [--show]` — hold, recover, or replace
+ * the team agent key on this machine. See {@link recoverAgentKey} for why the default reads rather
+ * than rotates.
+ */
+async function teamAgentKey(parsed: Parsed): Promise<number> {
+  const config = loadConfig();
+  const team = flagStr(parsed.flags, 'team') ?? config.current;
+  if (!team) throw new CliError('no team — pass --team <slug> or set a current team', 2);
+  const json = parsed.flags['json'] === true;
+  const held = config.agentKeys[team];
+
+  const record = (key: string, how: string, sources: string[]): number => {
+    config.agentKeys[team] = key;
+    saveConfig(config);
+    if (json) {
+      process.stdout.write(JSON.stringify({ team, agent_key: key, source: how, sources }) + '\n');
+      return 0;
+    }
+    process.stdout.write(
+      success(`team agent key recorded for ${team} ${theme.meta(`(${how})`)}`) + '\n',
+    );
+    if (sources.length) {
+      process.stdout.write(
+        theme.meta(
+          `  read from ${sources.length} seat binding${sources.length === 1 ? '' : 's'}: `,
+        ) +
+          theme.meta(sources.join(', ')) +
+          '\n',
+      );
+    }
+    process.stdout.write(hint('musterd agent <name> now works here') + '\n');
+    return 0;
+  };
+
+  // `--show` — print what this machine holds. No round-trip; the key is already echoed by
+  // `team add`, so this exposes nothing new, but it stays behind an explicit flag.
+  if (parsed.flags['show'] === true) {
+    if (json) {
+      process.stdout.write(JSON.stringify({ team, agent_key: held ?? null }) + '\n');
+      return 0;
+    }
+    if (!held) {
+      process.stdout.write(
+        `${theme.warn(sym.warn)} no team agent key recorded for ${team} on this machine\n` +
+          theme.meta(`  try \`musterd team agent-key --team ${team}\` to recover it\n`),
+      );
+      return 4;
+    }
+    process.stdout.write(`${held}\n`);
+    return 0;
+  }
+
+  // `--key` — record a key the operator already holds (from another machine, or a conflict this
+  // command refused to resolve on its own).
+  const explicit = flagStr(parsed.flags, 'key');
+  if (explicit) {
+    if (!explicit.startsWith(TOKEN_PREFIXES.agent_key)) {
+      throw new CliError(
+        `"${explicit.slice(0, 6)}…" is not a team agent key — those start with ` +
+          `\`${TOKEN_PREFIXES.agent_key}\`. A \`${TOKEN_PREFIXES.credential}\` is a person's ` +
+          `credential (\`musterd join\`), not the team key.`,
+        2,
+      );
+    }
+    return record(explicit, 'given with --key', []);
+  }
+
+  if (parsed.flags['rotate'] === true) return rotateTeamAgentKey(parsed, config, team, held, json);
+
+  // The default: recover from the seat bindings this machine already holds.
+  const found = recoverAgentKey(Object.keys(config.bindings), team, readBindingAt);
+  if (found.key) {
+    if (found.key === held) {
+      if (json) {
+        process.stdout.write(
+          JSON.stringify({
+            team,
+            agent_key: held,
+            source: 'already recorded',
+            sources: found.sources,
+          }) + '\n',
+        );
+        return 0;
+      }
+      process.stdout.write(
+        success(`team agent key already recorded for ${team} — nothing to repair`) + '\n',
+      );
+      process.stdout.write(
+        theme.meta(`  ${found.sources.length} seat binding(s) here agree with it\n`),
+      );
+      return 0;
+    }
+    return record(found.key, 'recovered from seat bindings', found.sources);
+  }
+
+  if (found.conflicts.length) {
+    // Abstain loudly. Naming every candidate and its folders is the whole value here — the operator
+    // knows which rotation was the real one; this command does not.
+    const lines = found.conflicts
+      .map((c) => `  ${c.key.slice(0, 12)}…  ${c.dirs.length} seat(s): ${c.dirs.join(', ')}`)
+      .join('\n');
+    throw new CliError(
+      `the seat bindings on this machine disagree about "${team}"'s agent key, so nothing was ` +
+        `recorded — a rotation landed partway. Candidates:\n${lines}\n` +
+        `Pick one with \`musterd team agent-key --team ${team} --key <mskey_…>\`, or mint a fresh ` +
+        `one for everybody with \`--rotate\`.`,
+      4,
+    );
+  }
+
+  throw new CliError(
+    `no team agent key for "${team}" anywhere on this machine — not in the config, and no seat ` +
+      `binding here carries one. If you have it, record it with \`--key <mskey_…>\`; otherwise mint ` +
+      `a replacement with \`musterd team agent-key --team ${team} --rotate\` (which invalidates the ` +
+      `old key for every seat on every machine).`,
+    4,
+  );
+}
+
+/**
+ * `--rotate` — mint a new team agent key. The destructive branch, and gated accordingly: it counts
+ * the local seat bindings still carrying the current key and refuses without `--yes`. On team
+ * `revive` that count was eleven; rotating blind to fix an empty `agentKeys` map would have taken
+ * every agent on the machine offline to repair a bookkeeping gap.
+ *
+ * The stale bindings are LISTED, not rewritten. A silent multi-folder rewrite of files holding
+ * secrets is the wrong kind of convenience, and it could only ever reach this machine anyway — seats
+ * on other machines need the new key regardless, so the honest output is the list plus the repair.
+ */
+async function rotateTeamAgentKey(
+  parsed: Parsed,
+  config: ReturnType<typeof loadConfig>,
+  team: string,
+  held: string | undefined,
+  json: boolean,
+): Promise<number> {
+  const stale = Object.keys(config.bindings).filter((dir) => {
+    const binding = readBindingAt(dir);
+    return binding?.team === team && !!binding.agent_key?.startsWith(TOKEN_PREFIXES.agent_key);
+  });
+
+  if (parsed.flags['yes'] !== true) {
+    throw new CliError(
+      `rotating "${team}"'s agent key invalidates the key ${stale.length} seat binding(s) on this ` +
+        `machine currently authenticate with${stale.length ? `:\n  ${stale.join('\n  ')}\n` : ', '}` +
+        `plus every seat on every other machine. Nothing was changed. ` +
+        `If you only lost the local record, \`musterd team agent-key --team ${team}\` recovers it ` +
+        `without a rotation. To rotate anyway, re-run with \`--yes\`.`,
+      2,
+    );
+  }
+
+  // Admin act against a live daemon — `resolve` enforces an *active* identity (ADR 036), same bar as
+  // `team add`, and the daemon audits the rotate as `key.rotate`.
+  const { http } = resolve(parsed.flags);
+  const mint = await http.rotateAgentKey(team);
+  config.agentKeys[team] = mint.agent_key;
+  saveConfig(config);
+
+  if (json) {
+    process.stdout.write(
+      JSON.stringify({ team, agent_key: mint.agent_key, rotated: true, stale }) + '\n',
+    );
+    return 0;
+  }
+  process.stdout.write(success(`re-issued "${team}"'s team agent key`) + '\n');
+  process.stdout.write(
+    theme.meta('shown once — store it now, and hand it to any seat on another machine:') + '\n',
+  );
+  process.stdout.write(`  ${mint.agent_key}\n`);
+  process.stdout.write(theme.meta('recorded in this machine’s config') + '\n');
+  if (stale.length) {
+    const wasHeld = held ? '' : ' (the old key was not in this config, so it is not shown)';
+    process.stdout.write(
+      `${theme.warn(sym.warn)} ${stale.length} seat binding(s) here still hold the OLD key${wasHeld} — ` +
+        `they will 403 on their next claim:\n` +
+        stale.map((d) => theme.meta(`    ${d}`)).join('\n') +
+        '\n' +
+        theme.meta(`  repair each with \`musterd wire\` in the folder — it re-reads this config.`) +
+        '\n',
     );
   }
   return 0;

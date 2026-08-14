@@ -105,6 +105,24 @@ export function renderCommandHelp(name: string): string | null {
   return out.join('\n');
 }
 
+/**
+ * Is `musterd <command> help` a request for that command's help? — the trailing-`help` form.
+ *
+ * `help` used to be recognized only as argv[0] (`musterd help agent`) or as a `--help`/`-h` flag, so
+ * `musterd agent help` — the form most people reach for first — fell through to the command with
+ * "help" as its first positional. For `agent` that positional is a SEAT NAME: on 2026-08-05 the typo
+ * provisioned a member called `help` on team `revive`, complete with a git worktree, a branch and MCP
+ * wiring, and nobody noticed for nine days. Reserving the word here fixes every verb at once rather
+ * than teaching each command to distrust its own arguments.
+ *
+ * Deliberately narrow on both sides. It fires only when `help` is the SOLE positional, so
+ * `musterd team add help` still adds a member by that name; and only for a catalogued command, so
+ * `musterd bogus help` still reports an unknown command with a did-you-mean.
+ */
+export function wantsCommandHelp(command: string, positionals: readonly string[]): boolean {
+  return positionals.length === 1 && positionals[0] === 'help' && entry(command) !== undefined;
+}
+
 /** The whole catalog as JSON — a stable machine surface for agents and agentic workflows. */
 export function renderHelpJson(): string {
   return JSON.stringify({

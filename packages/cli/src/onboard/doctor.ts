@@ -11,8 +11,15 @@ import {
   type Binding,
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
+import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
-import { findBinding, loadBinding, loadConfig } from '../config.js';
+import {
+  type Config,
+  findBinding,
+  findWorkspaceSpec,
+  loadBinding,
+  loadConfig,
+} from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -787,6 +794,44 @@ export async function footprintNotes(
   ];
 }
 
+/**
+ * A `Binding | null` view of {@link loadBinding} — the recovery scan wants "is there a usable
+ * identity here?", not the legacy/invalid classification the doctor renders elsewhere. #858 was
+ * written against `readBindingAt`, which ADR 176 (#474) replaced with the classifying loader.
+ */
+function readValidBinding(dir: string): Binding | null {
+  const load = loadBinding(dir);
+  return load.kind === 'valid' ? load.value : null;
+}
+
+/**
+ * Is this machine's record of the team agent key missing while the key itself is still here?
+ *
+ * `config.agentKeys` is the only copy the config keeps (ADR 075), and losing it silently disables
+ * `musterd agent` — but the failure surfaces nowhere until someone runs that command and gets an
+ * error mid-provision. On team `revive` (2026-08-14) the map had been empty for long enough that
+ * nobody could say what emptied it, while eight seat bindings on the same machine still carried the
+ * key. This turns that into a warn-only note the operator sees *before* reaching for the command.
+ *
+ * Deliberately silent unless the repair is certain to work: it fires only when a key is actually
+ * recoverable from the local bindings. A note pointing at `--rotate` when nothing can be read back
+ * would be nagging at best and a nudge toward a team-wide outage at worst.
+ */
+export function agentKeyNotes(
+  config: Pick<Config, 'agentKeys' | 'bindings'>,
+  team: string | undefined,
+  read: (dir: string) => Binding | null = readValidBinding,
+): string[] {
+  if (!team || config.agentKeys[team]) return [];
+  const found = recoverAgentKey(Object.keys(config.bindings), team, read);
+  if (!found.key) return [];
+  return [
+    `no team agent key recorded for "${team}" on this machine, so \`musterd agent\` and ` +
+      `\`musterd human\` cannot provision — but ${found.sources.length} seat binding(s) here still ` +
+      `carry it. \`musterd team agent-key --team ${team}\` reads it back; nothing on the team changes.`,
+  ];
+}
+
 /** Render + exit-code for `musterd init --check`. Exit 1 on drift, 0 when healthy or unprovisioned. */
 /**
  * Build-skew notes (ADR 135): is the `musterd` you just typed the code you think it is? Two
@@ -960,6 +1005,8 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
   report.notes.push(...(await footprintNotes(cwd)));
   // ADR 232 increment 2: LaunchAgent census vs roster service seats — warn-only, never drift.
   report.notes.push(...(await inspectCensus({ cwd })));
+  // A lost local record of the team agent key — warn-only, and only when it is recoverable here.
+  report.notes.push(...agentKeyNotes(loadConfig(), findBinding(cwd)?.team ?? loadConfig().current));
   // The binary a WAKE would resolve is a different question from the one this shell resolves, and
   // nothing asked it until a poisoned shim went a day unnoticed. Warn-only for the same reason as
   // the skew notes: it is a fact about the machine, not this folder's provisioning.

@@ -15,6 +15,7 @@ import {
   resolveAttestedProvenance,
   resolveAttestedWakeLease,
   TOKEN_PREFIXES,
+  type AgentKeyMint,
   type GuardianTiers,
   type Policy,
   type PolicyOverride,
@@ -261,6 +262,14 @@ export class HttpClient {
    * the provisioning bar (localhost unauthenticated, admin off-host), so this deliberately does NOT
    * require the client to carry a key: the caller's whole problem is that they have none.
    */
+  /**
+   * Rotate the team **agent key** (ADR 075) — admin-only and audited daemon-side. Destructive by
+   * nature: every seat binding holding the old `mskey_` stops authenticating, so `musterd team
+   * agent-key` counts them and makes the operator confirm before calling this.
+   */
+  rotateAgentKey(slug: string): Promise<AgentKeyMint> {
+    return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-key/rotate`, {});
+  }
   rotateCredential(slug: string, name: string): Promise<{ member: string; credential: string }> {
     return this.request(
       'POST',

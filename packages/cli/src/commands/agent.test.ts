@@ -21,12 +21,15 @@ const h = vi.hoisted(() => ({
   // dir is set to a real temp dir per-test (the command chdir's into it to register MCP).
   workspace: { dir: '', kind: 'worktree' as const, branch: 'agent/June', created: true },
   rosterHome: {} as Record<string, string>,
+  // Mutable so a test can model the machine that has LOST the team agent key (the empty
+  // `agentKeys` map an interrupted config prune leaves behind) — see the preflight suite.
+  agentKeys: {} as Record<string, string>,
 }));
 
 vi.mock('./helpers.js', () => ({
   resolve: () => ({
     team: 'ritual',
-    config: { server: 'http://localhost:4849', agentKeys: { ritual: 'mskey_team' } },
+    config: { server: 'http://localhost:4849', agentKeys: h.agentKeys },
     http: { addMember: h.addMember, roster: h.roster, issueGrant: h.issueGrant },
   }),
 }));
@@ -52,6 +55,8 @@ describe('musterd agent <name>', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     h.rosterHome = {};
+    h.agentKeys = { ritual: 'mskey_team' };
+    delete process.env['MUSTERD_AGENT_KEY'];
     h.workspace.dir = mkdtempSync(join(tmpdir(), 'magent-'));
   });
   afterEach(() => {
@@ -339,5 +344,50 @@ describe('musterd agent <name>', () => {
 
   it('rejects a name with whitespace', async () => {
     await expect(agentCommand(parseArgs(['two words']))).rejects.toThrow(/usage/);
+  });
+});
+
+describe('the team agent key is a PREFLIGHT, not a late check', () => {
+  // Measured 2026-08-14 on team `revive`: the key check sat *below* `addMember`, so a run that could
+  // never finish still declared the seat. The roster kept a member the operator never got a workspace
+  // for, and the error named none of it. A credential this command cannot proceed without is checked
+  // before the first write, so a failure leaves the team exactly as it found it.
+  it('throws before addMember/writeSeatFile when no key is on this machine', async () => {
+    h.agentKeys = {};
+    h.rosterHome = { ritual: '/tmp/ritual-home' };
+    await expect(
+      agentCommand(parseArgs(['June']), { infraGate: async () => null }),
+    ).rejects.toThrow(CliError);
+    expect(h.addMember).not.toHaveBeenCalled();
+    expect(h.writeSeatFile).not.toHaveBeenCalled();
+    expect(h.issueGrant).not.toHaveBeenCalled();
+    expect(h.configure).not.toHaveBeenCalled();
+  });
+
+  it('names a repair that works on an EXISTING team — never `team create`', async () => {
+    h.agentKeys = {};
+    const err = await agentCommand(parseArgs(['June']), { infraGate: async () => null }).catch(
+      (e: CliError) => e,
+    );
+    const msg = (err as CliError).message;
+    expect(msg).toContain('musterd team agent-key');
+    // `team create <team>` was the old advice and is wrong for a team that already exists — running
+    // it is the one action an admin in this state must not take.
+    expect(msg).not.toContain('team create');
+  });
+
+  it('accepts MUSTERD_AGENT_KEY as the escape hatch and proceeds', async () => {
+    h.agentKeys = {};
+    process.env['MUSTERD_AGENT_KEY'] = 'mskey_from_env';
+    try {
+      expect(await agentCommand(parseArgs(['June']), { infraGate: async () => null })).toBe(0);
+    } finally {
+      delete process.env['MUSTERD_AGENT_KEY'];
+    }
+    expect(h.addMember).toHaveBeenCalled();
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ agent_key: 'mskey_from_env' }),
+    );
   });
 });

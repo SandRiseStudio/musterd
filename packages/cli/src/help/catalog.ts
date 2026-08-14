@@ -285,9 +285,9 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Team & seats ───────────────────────────────────────────────────────────────────────────
   {
     name: 'team',
-    signature: '<create|add|credential|remove|archive|export> …',
+    signature: '<create|add|credential|agent-key|remove|archive|export> …',
     summary:
-      'create a team, add/remove members, re-issue a lost credential, archive a team, export the roster to git',
+      'create a team, add/remove members, recover or re-issue a lost credential or team key, archive a team, export the roster to git',
     group: 'team',
     primary: true,
     detail:
@@ -297,6 +297,11 @@ export const CATALOG: readonly CommandEntry[] = [
       '                               folder on this machine at the new team (skip it for a probe)\n' +
       '  add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]\n' +
       '  credential <name>            re-issue a human’s lost mscr_ credential, shown once (localhost, or admin off-host)\n' +
+      '  agent-key [--key <mskey_…>] [--rotate --yes] [--show]\n' +
+      '                               the team agent key `musterd agent` provisions with. With no flags it\n' +
+      '                               RECOVERS it — reads it back off the seat bindings already on this\n' +
+      '                               machine and re-records it, changing nothing on the team. --rotate mints\n' +
+      '                               a new one and invalidates every seat’s (it counts them and needs --yes)\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
       '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
       '  export <slug> [--to <dir>]   move the roster onto git-tracked .musterd/ files (ADR 058);\n' +
@@ -304,6 +309,7 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: [
       'musterd team create acme --as nick',
       'musterd team add lin --kind human --role reviewer',
+      'musterd team agent-key            # `musterd agent` says no team agent key? start here',
     ],
   },
   {

@@ -6,6 +6,7 @@ import {
   renderGroupHelp,
   renderHelp,
   renderHelpJson,
+  wantsCommandHelp,
 } from './help.js';
 
 // Color is pinned OFF via NO_COLOR in vitest.config, so assertions are on visible text.
@@ -81,5 +82,30 @@ describe('nearestCommand', () => {
 
   it('returns null when nothing is close', () => {
     expect(nearestCommand('xyzzy-nonsense')).toBeNull();
+  });
+});
+
+describe('wantsCommandHelp — `musterd <cmd> help` is a help request, not an argument', () => {
+  // The footgun this closes: `musterd agent help` parsed "help" as a SEAT NAME and provisioned a
+  // member called `help` (roster row + git worktree + branch + MCP wiring) before erroring out on an
+  // unrelated missing credential. `help` was only ever recognized in argv[0] or as a --help flag.
+  it('fires for a bare `help` after a real command', () => {
+    expect(wantsCommandHelp('agent', ['help'])).toBe(true);
+    expect(wantsCommandHelp('team', ['help'])).toBe(true);
+    expect(wantsCommandHelp('lane', ['help'])).toBe(true);
+  });
+
+  it('does NOT fire when `help` is one of several positionals — `team add help` still adds', () => {
+    expect(wantsCommandHelp('team', ['add', 'help'])).toBe(false);
+    expect(wantsCommandHelp('agent', ['help', 'extra'])).toBe(false);
+  });
+
+  it('does not fire for a different positional', () => {
+    expect(wantsCommandHelp('agent', ['june'])).toBe(false);
+    expect(wantsCommandHelp('agent', [])).toBe(false);
+  });
+
+  it('does not fire for an uncatalogued command — `musterd bogus help` stays an unknown command', () => {
+    expect(wantsCommandHelp('bogus', ['help'])).toBe(false);
   });
 });
