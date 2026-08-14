@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>birth fixture</title>
+<style>
+  body { background: #ffffff; margin: 0; font: 16px sans-serif; }
+  /* Dark paint occupying the page's top-left corner — the "room papers". */
+  #patch { position: absolute; left: 0; top: 0; width: 420px; height: 80px; background: #1a1a1a; }
+  /* Bubbles: dark ink. Fine over the white body; invisible over the patch. */
+  .bub { position: absolute; left: 0; top: 0; color: #111111; }
+  #normal { position: absolute; left: 40px; top: 200px; color: #111; }
+</style></head>
+<body>
+  <div id="patch"></div>
+  <p id="normal">a normally measurable row</p>
+  <!-- The healthy sibling: same rowKey (class|ink|paper) as the born bubble, measured by the
+       composited pass BEFORE the freeze, safely over white. It owns the live row that the
+       stranded newcomer's pixel will corrupt. -->
+  <div class="bub" style="left: 40px; top: 400px">a healthy sibling speaks</div>
+  <script>
+    // The positioning hand: pins bubbles — but only while rAF is alive.
+    const orig = window.requestAnimationFrame.bind(window);
+    let frozen = false;
+    function tick() {
+      if (frozen) return; // a queued frame firing after the freeze must not place anything
+      window.requestAnimationFrame(tick);
+    }
+    orig(tick);
+    // The birth, made deterministic: trap the sweep's own freeze. The instant anything overwrites
+    // window.requestAnimationFrame (the sweep's no-op), a bubble is born SYNCHRONOUSLY inside that
+    // very evaluation — prepended, so it is first-of-key in tree order and supplies the pixel for
+    // the healthy sibling's row; never placed, so that pixel is the dark patch at (0,0).
+    let real = window.requestAnimationFrame;
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      configurable: true,
+      get() { return real; },
+      set(v) {
+        real = v;
+        if (frozen) return;
+        frozen = true;
+        const el = document.createElement('div');
+        el.className = 'bub';
+        el.textContent = 'stranded at the origin';
+        document.body.prepend(el);
+      },
+    });
+  </script>
+</body>
+</html>
