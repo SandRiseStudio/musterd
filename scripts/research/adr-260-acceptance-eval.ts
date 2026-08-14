@@ -74,12 +74,19 @@ function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 
     if (!closes.has(d.lane)) closes.set(d.lane, []);
     closes.get(d.lane)!.push({ ts: r.ts, d });
   }
+  const seatFamily = new Map<string, string>();
+  for (const r of db
+    .prepare("select actor, detail from audit where action = 'occupancy.model_attested' order by ts")
+    .all() as { actor: string; detail: string }[]) {
+    const j = JSON.parse(r.detail) as { new?: string };
+    if (r.actor && j.new) seatFamily.set(r.actor, familyOf(j.new));
+  }
   const submits: Submit[] = rows('lane.ready_for_review').map((r) => {
     const d = JSON.parse(r.detail) as ReadyDetail;
     const close = (closes.get(d.lane) ?? []).find((c) => c.ts >= r.ts);
     return close ? { ts: r.ts, d, close } : { ts: r.ts, d };
   });
-  return { db, submits };
+  return { db, submits, seatFamily };
 }
 
 const liveRouted = (rs: Submit[]) =>
@@ -306,6 +313,198 @@ export function routingCommitsSince(
     });
 }
 
+/* ────────────────────────────────────────────────────────────────────────────────────────────
+ * CONCENTRATION — the measurement that replaced the latency one (nick's call, 2026-08-14).
+ *
+ * WHY THIS AND NOT THE 10-MINUTE RATE. Every latency reading this Eval produced was unreadable,
+ * and the reasons are structural rather than fixable: routing changed 11 times in 7 days, and
+ * stanley's #844 showed a defect can sit in BOTH arms for three weeks leaving no ledger row at all.
+ * A freeze excludes only the contamination you can see.
+ *
+ * Concentration has the properties the latency number lacks:
+ *  - it REPRODUCED across a filthy window — 50% at n=18, 56% at n=57;
+ *  - it is a MECHANISM you can read, not an effect teased from noise: the ladder sorts
+ *    `cross_family` first (`packages/server/src/store/review.ts`), and on a claude team with one
+ *    grok seat "highest grade available" resolves to the same name every time;
+ *  - it is untouched by re-lease churn, refused wake reports, or stakes arming, because none of
+ *    those change who got NAMED as reviewer on a ready row.
+ *
+ * The boundary is DETECTED FROM THE DATA (the first ready row naming a second distinct
+ * `cross_family` reviewer), never asserted here — an author-chosen changepoint is how a prediction
+ * gets fitted after the fact.
+ * ──────────────────────────────────────────────────────────────────────────────────────────── */
+
+export interface ConcentrationPeriod {
+  label: string;
+  n: number;
+  topReviewer: string;
+  topShare: number;
+  crossFamilyShare: number;
+  crossFamilySeats: string[];
+}
+
+/**
+ * Model family from an attested model id. `cross_family` on a ready row is a property of the PAIR
+ * (worker vs reviewer), NOT of the seat — the first draft of this detector keyed on the pair grade
+ * and duly reported izzo, miley and stanley as "cross-family acceptors", which is true of those
+ * pairings and useless for the question. The intervention is a second seat from a DIFFERENT MODEL
+ * FAMILY becoming an acceptor, so family is what this keys on.
+ */
+export function familyOf(model: string | undefined): string {
+  if (!model) return 'unknown';
+  const m = model.toLowerCase();
+  if (m.startsWith('claude')) return 'claude';
+  if (m.startsWith('grok')) return 'grok';
+  if (m.startsWith('gpt') || m.startsWith('o1') || m.startsWith('codex')) return 'openai';
+  if (m.startsWith('gemini')) return 'google';
+  if (m.startsWith('kimi')) return 'moonshot';
+  return m.split('-')[0] ?? 'unknown';
+}
+
+/** The team's majority family — the one a "cross-family" acceptor is cross to. */
+export function majorityFamily(seatFamily: Map<string, string>): string {
+  const counts = new Map<string, number>();
+  for (const f of seatFamily.values()) if (f !== 'unknown') counts.set(f, (counts.get(f) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'claude';
+}
+
+/**
+ * Live-routed submits split at the first ask to the SECOND distinct minority-family seat.
+ * That edge is read from the data, never asserted — an author-chosen changepoint is how a
+ * prediction gets fitted after the fact.
+ */
+export function concentration(
+  submits: Submit[],
+  seatFamily: Map<string, string>,
+): {
+  boundary: number | null;
+  boundarySeat: string | null;
+  periods: ConcentrationPeriod[];
+} {
+  const rows = liveRouted(submits);
+  const majority = majorityFamily(seatFamily);
+  const seen = new Set<string>();
+  let boundary: number | null = null;
+  let boundarySeat: string | null = null;
+  for (const r of rows) {
+    const who = r.d.reviewer!;
+    const fam = seatFamily.get(who) ?? 'unknown';
+    if (fam === majority || fam === 'unknown') continue;
+    if (!seen.has(who)) {
+      seen.add(who);
+      if (seen.size === 2) {
+        boundary = r.ts;
+        boundarySeat = who;
+        break;
+      }
+    }
+  }
+  const describe = (label: string, rs: Submit[]): ConcentrationPeriod => {
+    const counts = new Map<string, number>();
+    for (const r of rs) counts.set(r.d.reviewer!, (counts.get(r.d.reviewer!) ?? 0) + 1);
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    // Asks that landed on a seat OUTSIDE the majority family — the population the ladder favours.
+    const cf = rs.filter((r) => {
+      const f = seatFamily.get(r.d.reviewer!) ?? 'unknown';
+      return f !== majority && f !== 'unknown';
+    });
+    return {
+      label,
+      n: rs.length,
+      topReviewer: top?.[0] ?? '-',
+      topShare: rs.length ? (top?.[1] ?? 0) / rs.length : 0,
+      crossFamilyShare: rs.length ? cf.length / rs.length : 0,
+      crossFamilySeats: [...new Set(cf.map((r) => r.d.reviewer!))].sort(),
+    };
+  };
+  // The BEFORE arm is a BOUNDED lookback, not all history. Measured 2026-08-14: top-reviewer share
+  // is 26% all-time but 55% over the trailing week, because the concentration only began when
+  // ADR 253 took humans out of the pick and one minority-family seat became the ladder's top
+  // answer. An all-time baseline would dilute exactly the effect this predicts a change in.
+  // SEVEN days, and the choice is load-bearing so it is stated: top-reviewer share is 26%
+  // all-time, 28% over 14 days, and 55% over 7 — because the concentration regime only began
+  // 2026-08-12, when ADR 253 took humans out of the live pick. A 14-day arm straddles that regime
+  // change and would compare the intervention against a mixture of two different systems. Both
+  // spans are printed so this choice can be audited rather than taken on trust.
+  const LOOKBACK_MS = 7 * 86_400_000;
+  if (boundary === null) {
+    const now = rows.length ? rows[rows.length - 1]!.ts : Date.now();
+    return {
+      boundary,
+      boundarySeat,
+      periods: [
+        describe('all history (context only)', rows),
+        describe('trailing 14d (context only — straddles the 08-12 regime change)',
+          rows.filter((r) => r.ts >= now - 14 * 86_400_000)),
+        describe('trailing 7d — THE BEFORE ARM', rows.filter((r) => r.ts >= now - LOOKBACK_MS)),
+      ],
+    };
+  }
+  return {
+    boundary,
+    boundarySeat,
+    periods: [
+      describe(
+        'BEFORE (7d up to the boundary)',
+        rows.filter((r) => r.ts < boundary! && r.ts >= boundary! - LOOKBACK_MS),
+      ),
+      describe('AFTER', rows.filter((r) => r.ts >= boundary!)),
+    ],
+  };
+}
+
+/**
+ * THE PRE-REGISTERED PREDICTION, written 2026-08-14 while exactly one cross-family seat exists —
+ * before the codex/gpt-5.6 seat has accepted anything, so it cannot be fitted afterwards.
+ *
+ * If the grade ladder is the mechanism, a second cross-family acceptor splits the asks that
+ * currently land on one name, and top-reviewer share should fall to roughly HALF the cross-family
+ * share. Observed now: cross_family ≈ 68%, top-reviewer ≈ 55%.
+ *
+ * PASS: top-reviewer share ≤ 40% over ≥ 20 live-routed submits after the boundary.
+ * FAIL: ≥ 50% sustained over that n — the ladder is NOT what concentrates the asks, my mechanism
+ *       claim in ADR 260 is wrong, and the next suspect is the quiescence filter or grading, not
+ *       the sort. A FAIL is the informative outcome and must be recorded as a disproof.
+ * INCONCLUSIVE: fewer than 20 submits after the boundary, or the second seat never accepts.
+ */
+export const CONCENTRATION_PREDICTION = { passAtOrBelow: 0.4, failAtOrAbove: 0.5, minN: 20 } as const;
+
+export function judgeConcentration(after: ConcentrationPeriod): 'PASS' | 'FAIL' | 'INCONCLUSIVE' {
+  if (after.n < CONCENTRATION_PREDICTION.minN) return 'INCONCLUSIVE';
+  if (after.topShare <= CONCENTRATION_PREDICTION.passAtOrBelow) return 'PASS';
+  if (after.topShare >= CONCENTRATION_PREDICTION.failAtOrAbove) return 'FAIL';
+  return 'INCONCLUSIVE';
+}
+
+function concentrationMain(): void {
+  const { submits, seatFamily } = load();
+  const { boundary, boundarySeat, periods } = concentration(submits, seatFamily);
+  console.log(
+    `  families: ${[...new Set(seatFamily.values())].sort().join(', ')} — majority ${majorityFamily(seatFamily)}`,
+  );
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  console.log('\n=== CONCENTRATION (ADR 260 successor measure) ===');
+  console.log(
+    boundary === null
+      ? '  boundary: NOT YET — only one cross-family acceptor has ever been asked.\n' +
+          '  This is the pre-intervention baseline; re-run once the second seat accepts.'
+      : `  boundary: ${new Date(boundary).toISOString().slice(0, 16)} — first ask to ${boundarySeat}`,
+  );
+  for (const p of periods) {
+    console.log(
+      `  ${p.label}: n=${p.n}  top=${p.topReviewer} ${pct(p.topShare)}  ` +
+        `minority-family share ${pct(p.crossFamilyShare)}  seats=[${p.crossFamilySeats.join(', ')}]`,
+    );
+  }
+  const after = periods[periods.length - 1]!;
+  if (boundary !== null) {
+    console.log(
+      `\n  PRE-REGISTERED VERDICT: ${judgeConcentration(after)} ` +
+        `(pass ≤${pct(CONCENTRATION_PREDICTION.passAtOrBelow)}, fail ≥${pct(CONCENTRATION_PREDICTION.failAtOrAbove)}, min n=${CONCENTRATION_PREDICTION.minN})`,
+    );
+  }
+}
+
 function main() {
   const { db, submits } = load();
   const now = Date.now();
@@ -408,13 +607,16 @@ export function rerun(
  * script must never be the reason a machine looks broken.
  */
 async function post(body: string): Promise<boolean> {
+  // `ulid` is the npm package, as every other caller in this repo has it (cli/src/commands/send.ts).
+  // This previously imported '../../packages/protocol/dist/ulid.js', a module that has NEVER
+  // existed — found by dolly on 2026-08-14 the first time scripts/ was ever typechecked.
   const [{ HttpClient }, { loadConfig }, { serviceTokenPath }, { makeEnvelope }, { ulid }] =
     await Promise.all([
       import('../../packages/cli/dist/client.js'),
       import('../../packages/cli/dist/config.js'),
       import('../../packages/cli/dist/commands/service.js'),
       import('../../packages/protocol/dist/envelope.js'),
-      import('../../packages/protocol/dist/ulid.js'),
+      import('ulid'),
     ]);
   const { readFileSync } = await import('node:fs');
   let token: string;
@@ -455,13 +657,23 @@ async function rerunMain() {
   const text = `[${verdict}] ${body}`;
   console.log(text);
   if (process.argv.includes('--post')) {
-    const sent = await post(text).catch(() => false);
-    console.log(sent ? '\nposted to the team as a service seat' : '\nnot posted (unprovisioned)');
+    // A genuine failure must NOT read as the ordinary unprovisioned case. The bug above hid behind
+    // exactly that catch: a broken import threw, and the run printed a benign "unprovisioned" while
+    // the announcement silently never happened. For a scheduled instrument that is identical to not
+    // existing — the same "the failure path writes nothing" shape this Eval spent the day on.
+    try {
+      const sent = await post(text);
+      console.log(sent ? '\nposted to the team as a service seat' : '\nnot posted (unprovisioned)');
+    } catch (err) {
+      console.error(`\nPOST FAILED (not the same as unprovisioned): ${(err as Error).message}`);
+      process.exitCode = 1;
+    }
   }
   // A dirty window is a finding, not a failure: exit 0 so launchd does not retry it as a crash.
 }
 
 if (process.argv[1]?.endsWith('adr-260-acceptance-eval.ts')) {
-  if (process.argv.includes('--rerun')) void rerunMain();
+  if (process.argv.includes('--concentration')) concentrationMain();
+  else if (process.argv.includes('--rerun')) void rerunMain();
   else main();
 }
