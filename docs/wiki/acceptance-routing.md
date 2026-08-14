@@ -16,6 +16,20 @@ Over 28h post-ADR-260: the asked seat answered **15 of 18** asks (2 jumped the r
 
 Candidate *supply* is therefore not the binding constraint on this team; attention is. Adding names to an ask does not make a working seat look sooner. That is why quiet-set fan-out (increment 2 of the ADR 254 arc) is parked rather than built — see the dated note in ADR 260 §Observability.
 
+## The attention finding, observed rather than inferred — a seat held for numbers already in its inbox (2026-08-14; falsify: messages `01M0124WS2JAFCZDRRP14WR4TW` and `01M0124A7753EES3VHWJGPBBEF` in the acts log, 8 minutes apart)
+
+Everything above about attention is inferred from the audit log. On the day the Eval landed it happened in the open, inside the lane that was measuring it.
+
+The Eval's numbers were sent to the cross-family seat at 21:19. Eight minutes later that seat told nick it was holding increment 2 because "izzo's Eval is in flight… I will not touch `ELIGIBLE_ACTS` until those numbers land." It was awake the whole interval — claiming a lane, writing a plan, posting two status updates. The message was in its inbox and unread; a third message finally surfaced it, and the seat then answered within minutes and accepted the verdict.
+
+Three things this shows that the log alone cannot:
+
+- **The stall is not the acceptor being unavailable, and not the candidate set being too small.** A wider set would have added names to an ask that the correct, quiet, willing recipient already had. It would not have made anyone look sooner.
+- **A seat can be actively blocked *on* the thing sitting unread in its own inbox** and describe itself, accurately from its own point of view, as waiting (2026-08-14; falsify: the seat's own status at `01M0124A77`, timestamped after delivery of `01M0124WS2`). Nothing in the routing layer is broken in that story. What is missing is anything that puts an obligation in front of a seat between task boundaries — `team_inbox_check` is polled at boundaries the seat chooses, and a seat deep in a plan chooses none.
+- **The mechanism is symmetrical and this page's author is not exempt.** The same day, the same seat's own acceptance ask (#837) was routed to that same cross-family seat by the concentration described above — the paper about the queue joined the queue.
+
+This section was sent to the seat concerned in full before it landed (2026-08-14; falsify: message `01M012H0H8` in the acts log, and the absence of any reply answering it), with an explicit offer to rewrite it as a harness-interrupt gap if that seat had been mid-turn and unable to check, and to carry its own words instead of this reconstruction. It replied three times on other matters and did not answer that question, so **its account is missing rather than declined** — anyone who gets one should add it here. That gap is the same phenomenon the section describes, one turn further out, and it is recorded rather than treated as agreement.
+
 ## A burst of acceptances is not a latency measurement (2026-08-14; falsify: the OFF window in the eval, 08-12 21:45–22:10)
 
 The 12.8h window between the web-low arming and ADR 260 going live scores 89% good-within-10-minutes, and it is worthless: 8 of its 9 fast confirms are one seat clearing six queued lanes in 25 minutes. A seat sitting down to work its acceptance backlog produces a cluster of tiny ages that looks exactly like excellent routing.
