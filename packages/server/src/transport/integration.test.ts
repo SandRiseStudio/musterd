@@ -6924,3 +6924,79 @@ describe('goal outcome + ship nudge (value-layer design)', () => {
     expect(res.json.notices).toBeUndefined();
   });
 });
+
+describe('incident convergence (spec 2026-08-14 inc 1)', () => {
+  const GATE = 'ci:gates/A11y contrast';
+  let nickTok: string;
+  const toks: Record<string, string> = {};
+
+  /** Team of one human + three human reporter seats (human creds keep the auth setup minimal). */
+  async function seedTeam() {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    nickTok = team.json.human_credential;
+    for (const name of ['izzo', 'dolly', 'stanley']) {
+      const m = await post('/teams/dawn/members', { name, kind: 'human' }, nickTok);
+      toks[name] = m.json.human_credential;
+    }
+  }
+
+  let seq = 0;
+  async function reportBlocked(fromSeat: string, ref: string, sig: string) {
+    const env = {
+      id: `inc-${++seq}`,
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: fromSeat,
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'red on a check my diff cannot touch',
+      meta: { blocked_by: { gate: GATE, ref, sig } },
+      ts: Date.now(),
+    };
+    const sent = await post('/teams/dawn/messages', { envelope: env }, toks[fromSeat]);
+    expect(sent.status).toBe(201);
+  }
+
+  it('second reporter opens an incident lane and both reporters are told the lane', async () => {
+    await seedTeam();
+    await reportBlocked('izzo', 'pr#828', 'lc 2.83');
+    await reportBlocked('dolly', 'pr#829', 'lc 2.85');
+    const lanes = await get('/teams/dawn/lanes', nickTok);
+    const incident = lanes.json.lanes.find((l: any) => l.kind === 'incident');
+    expect(incident).toBeDefined();
+    expect(incident.title).toBe(`incident: ${GATE}`);
+    expect(incident.owner_seat).toBeNull();
+    const izzoInbox = await get('/teams/dawn/inbox', toks['izzo']);
+    expect(JSON.stringify(izzoInbox.json)).toContain(incident.id);
+    const dollyInbox = await get('/teams/dawn/inbox', toks['dolly']);
+    expect(JSON.stringify(dollyInbox.json)).toContain(incident.id);
+  });
+
+  it('third reporter gets the park-behind-it auto-reply and no second lane opens', async () => {
+    await seedTeam();
+    await reportBlocked('izzo', 'pr#828', 'lc 2.83');
+    await reportBlocked('dolly', 'pr#829', 'lc 2.85');
+    await reportBlocked('stanley', 'pr#830', 'lc 2.11');
+    const lanes = await get('/teams/dawn/lanes', nickTok);
+    expect(lanes.json.lanes.filter((l: any) => l.kind === 'incident')).toHaveLength(1);
+    const stanleyInbox = await get('/teams/dawn/inbox', toks['stanley']);
+    expect(JSON.stringify(stanleyInbox.json)).toContain('park behind it');
+  });
+
+  it('a status_update without blocked_by opens nothing', async () => {
+    await seedTeam();
+    const env = {
+      id: 'plain-1',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'izzo',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'shipping',
+      ts: Date.now(),
+    };
+    await post('/teams/dawn/messages', { envelope: env }, toks['izzo']);
+    const lanes = await get('/teams/dawn/lanes', nickTok);
+    expect((lanes.json.lanes ?? []).filter((l: any) => l.kind === 'incident')).toHaveLength(0);
+  });
+});

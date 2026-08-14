@@ -1,10 +1,12 @@
 import {
   type AskSpecies,
   type AskTier,
+  blockedByOf,
   DeferUntilSchema,
   eligibleOf,
   type Envelope,
   isAwaitingAcceptance,
+  type Lane,
   makeEnvelope,
   modelFamily,
 } from '@musterd/protocol';
@@ -15,6 +17,7 @@ import { log } from '../log.js';
 import { formatAskSlackText, postSlackWebhook } from '../notify/slack.js';
 import { appendAudit } from '../store/audit.js';
 import { recordLaneClose } from '../store/laneClose.js';
+import { incidentReporters, recordBlockedReport } from '../store/incidents.js';
 import { deriveHandoffLane, getLane, type HandoffLaneBasis, updateLane } from '../store/lanes.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
@@ -349,6 +352,18 @@ function routeEnvelopeInner(
   // the daemon runs no timer — the agent owns the clock (ADR 147 §2). Shapes only, never bodies (ADR 051).
   recordAskLifecycle(ctx, team, sender.name, outgoingEnv);
 
+  // Incident convergence inc 1 (spec 2026-08-14): a `blocked_by` report on a status_update pools,
+  // opens, or appends to an incident lane. Best-effort like every daemon-side hook here — a failure
+  // must never fail the status_update that carried the report. `!daemonComposed` is the recursion
+  // belt; the composed replies being `act:'message'` (which this hook ignores) is the suspenders.
+  if (!daemonComposed && env.act === 'status_update') {
+    try {
+      handleBlockedReport(ctx, team, sender, outgoingEnv);
+    } catch (err) {
+      log.warn({ msg: 'incident_hook_failed', err: String(err) });
+    }
+  }
+
   // Self-reported token usage (meta.usage — ADR 082 slice 4): opt-in, harness-agnostic.
   recordTokenUsage(outgoingEnv);
 
@@ -426,6 +441,91 @@ function routeEnvelopeInner(
     });
   }
   return { message, recipients, delivered, ...(handoffLane ? { handoff_lane: handoffLane } : {}) };
+}
+
+/**
+ * Incident convergence inc 1 (spec 2026-08-14 §1–§3, no wakes). Records the `blocked_by` report,
+ * then closes the loop the store can't: a DUPLICATE reporter (report matched an open incident) gets
+ * the park-behind-it pointer immediately, and the OPENING pair each get one announcement naming the
+ * new lane — routed through the normal delivery path, so live sessions get the existing
+ * delivery-hint nudge for free and out seats get inbox rows. Daemon-composed envelopes are
+ * `act:'message'`, which the caller's status_update guard never matches (recursion bound).
+ *
+ * The composed messages are sent FROM the lane's owner when it has one, else from the lane's
+ * creator (the seat whose report tripped the threshold) — same posture as `fireGatedHumanAsk`,
+ * which routes as the lane owner: incident traffic reads as coming from whoever carries the lane.
+ */
+function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: Envelope): void {
+  const report = blockedByOf(env.meta);
+  if (!report) return;
+  const outcome = recordBlockedReport(ctx.db, team.id, team.slug, sender.name, report, env.id);
+  if (outcome.kind === 'recorded') return;
+
+  const lane = outcome.lane;
+  const fromRow = laneVoice(ctx, team, lane);
+  if (!fromRow) return; // nobody to speak as — the report itself is still durably recorded
+
+  if (outcome.kind === 'appended') {
+    // Don't answer the lane's own carrier: the owner re-reporting their own incident needs no pointer.
+    if (sender.name === fromRow.name) return;
+    const reply = makeEnvelope({
+      id: ulid(),
+      team: team.slug,
+      from: fromRow.name,
+      to: { kind: 'member', name: sender.name },
+      act: 'message',
+      body:
+        `[incident] already ${lane.owner_seat ? `owned by ${lane.owner_seat}` : 'open (unclaimed)'}, ` +
+        `lane ${lane.id} — park behind it.`,
+      thread: env.id,
+      meta: { incident: { lane: lane.id, gate: report.gate } },
+    });
+    routeEnvelope(ctx, team, fromRow, reply, undefined, true);
+    appendAudit(ctx.db, team.id, {
+      actor: sender.name,
+      action: 'incident.duplicate_replied',
+      target: lane.id,
+      result: 'allow',
+      detail: { gate: report.gate, lane: lane.id },
+    });
+    return;
+  }
+
+  // opened: announce to every distinct reporter (the threshold pair, typically). A self-send never
+  // reaches an inbox, so when the recipient IS the lane's voice (the tripping reporter created it),
+  // speak as another reporter instead — the threshold guarantees at least two exist.
+  const reporters = incidentReporters(ctx.db, team.id, lane.id);
+  for (const reporter of reporters) {
+    const voice =
+      reporter === fromRow.name
+        ? (reporters
+            .filter((r) => r !== reporter)
+            .map((r) => getMemberByName(ctx.db, team.id, r))
+            .find((m) => m != null) ?? null)
+        : fromRow;
+    const to = getMemberByName(ctx.db, team.id, reporter);
+    if (!to || !voice) continue;
+    const announce = makeEnvelope({
+      id: ulid(),
+      team: team.slug,
+      from: voice.name,
+      to: { kind: 'member', name: reporter },
+      act: 'message',
+      body:
+        `[incident] opened: ${report.gate} — lane ${lane.id}, unclaimed. ` +
+        `If your red matches, park behind it; any seat may claim.`,
+      meta: { incident: { lane: lane.id, gate: report.gate } },
+    });
+    routeEnvelope(ctx, team, voice, announce, undefined, true);
+  }
+}
+
+/** The seat incident traffic speaks as: the lane's owner, else its creator. */
+function laneVoice(ctx: Ctx, team: TeamRow, lane: Lane): MemberRow | null {
+  return (
+    (lane.owner_seat ? getMemberByName(ctx.db, team.id, lane.owner_seat) : null) ??
+    getMemberByName(ctx.db, team.id, lane.created_by)
+  );
 }
 
 /**
