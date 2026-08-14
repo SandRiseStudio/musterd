@@ -42,10 +42,11 @@ watcher, never gatekeeper) until the platform stabilizes enough to harden.
   `capabilities`; `roles/<name>.toml` carries role defaults + a charter; per-seat narrowing (never
   widening); in-band enforcement + the audit trail. "Only designated agents touch infra" is, at the
   mechanism level, a capability — most of the machinery is already live.
-- **Provisioning role templates (ADR 026–030).** `onboard/role.ts` + the built-in template library
-  render a role per harness at provisioning time. Needs re-freezing against ADR 101
-  (model-as-a-variable: a template should be able to declare a model family) — noted on the
-  `own-harness` item before this split.
+- **Workspace provisioning profiles (ADRs 026–030).** `onboard/role.ts` + the built-in template
+  library render harness-local setup at provisioning time. ADR 272 separates that local setup from
+  the durable role identity: the existing templates become profiles, while roles stay
+  harness-independent. The proposed migration replaces the earlier, unspecific call to make a
+  template model-aware.
 - **The steward (ADR 112).** The first _worked example_ of exactly the role pattern the owner wants:
   a named responsibility (keep the declared record honest) with its own charter
   (`scripts/steward/CHARTER.md`), autonomy knobs per task (`propose` vs `auto-merge`), and guardrails
