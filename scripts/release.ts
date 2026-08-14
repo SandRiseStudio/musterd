@@ -182,9 +182,13 @@ export function runRelease(argv: string[]): number {
   if (args.dryRun) {
     console.log('\n✓ dry-run complete — no registry writes');
   } else {
-    console.log(`\n✓ published @musterd/*@${args.version}`);
+    // A real publish cannot reach here without a version: the `!args.dryRun` precondition block
+    // returns 1 on a missing one, before anything is bumped, built, or written. Same fact
+    // `bumpAll(args.version!)` already relies on, asserted in one place here.
+    const version = args.version!;
+    console.log(`\n✓ published @musterd/*@${version}`);
     console.log('\nNext:');
-    for (const line of nextStepsAfterPublish(args.version)) {
+    for (const line of nextStepsAfterPublish(version)) {
       console.log(`  ${line}`);
     }
   }

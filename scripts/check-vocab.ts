@@ -92,7 +92,7 @@ function gatedDocs(): string[] {
   const plansDir = join(repoRoot, 'docs', 'superpowers', 'plans');
   for (const entry of readdirSync(plansDir)) {
     const m = /^(\d{4}-\d{2}-\d{2})-.*\.md$/.exec(entry);
-    if (!m) continue;
+    if (!m?.[1]) continue;
     if (m[1] >= PLANS_GATE_FROM && !GRANDFATHERED_PLANS.includes(entry))
       out.push(join(plansDir, entry));
   }

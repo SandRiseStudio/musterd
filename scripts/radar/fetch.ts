@@ -124,8 +124,8 @@ export function parseArxivAtom(xml: string): RadarCandidate[] {
       title,
       url: `https://arxiv.org/abs/${id}`,
       published,
-      abstract: summary ? truncateDescription(summary) : undefined,
-      categories: categories.length ? [...new Set(categories)] : undefined,
+      ...(summary ? { abstract: truncateDescription(summary) } : {}),
+      ...(categories.length ? { categories: [...new Set(categories)] } : {}),
     });
   }
   return out;
@@ -138,7 +138,7 @@ export function buildArxivSearchQuery(): string {
 
 export async function sweepArxiv(opts: {
   sinceDays: number;
-  fetchFn?: FetchFn;
+  fetchFn?: FetchFn | undefined;
 }): Promise<{ candidates: RadarCandidate[]; warning?: string }> {
   const fetchFn = opts.fetchFn ?? fetch;
   const query = buildArxivSearchQuery();
@@ -221,11 +221,15 @@ interface HfDailyRow {
   summary?: string;
 }
 
+// Explicitly `| undefined` rather than merely optional: every caller builds this from a parsed HF
+// payload where a field is present-but-undefined, and the function already treats absent and
+// undefined the same (`if (!paper.id || !paper.title) return null`). Saying so here beats spreading
+// the same conditional at three call sites.
 function candidateFromHfPaper(paper: {
-  id?: string;
-  title?: string;
-  summary?: string;
-  publishedAt?: string;
+  id?: string | undefined;
+  title?: string | undefined;
+  summary?: string | undefined;
+  publishedAt?: string | undefined;
 }): RadarCandidate | null {
   if (!paper.id || !paper.title) return null;
   const id = normalizeArxivId(paper.id);
@@ -239,7 +243,7 @@ function candidateFromHfPaper(paper: {
     title: collapseWs(paper.title),
     url: `https://huggingface.co/papers/${id}`,
     published,
-    abstract,
+    ...(abstract !== undefined ? { abstract } : {}),
   };
 }
 
@@ -265,7 +269,7 @@ export function parseHfDailyPapers(data: unknown): RadarCandidate[] {
 
 export async function sweepHf(opts: {
   sinceDays: number;
-  fetchFn?: FetchFn;
+  fetchFn?: FetchFn | undefined;
 }): Promise<{ candidates: RadarCandidate[]; warning?: string }> {
   const fetchFn = opts.fetchFn ?? fetch;
   const weeks = eachIsoWeekInWindow(opts.sinceDays);
@@ -300,7 +304,7 @@ export async function sweepHf(opts: {
   });
   return {
     candidates,
-    warning: warnings.length ? warnings.join('; ') : undefined,
+    ...(warnings.length ? { warning: warnings.join('; ') } : {}),
   };
 }
 

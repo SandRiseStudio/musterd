@@ -36,9 +36,9 @@ export type CompleteFn = typeof completeAnthropic;
 export interface TriageArgs {
   candidates: RadarCandidate[];
   apiKey: string;
-  fetchFn?: FetchFn;
-  completeFn?: CompleteFn;
-  promptBody?: string;
+  fetchFn?: FetchFn | undefined;
+  completeFn?: CompleteFn | undefined;
+  promptBody?: string | undefined;
   shortlistMax?: number;
   relevanceFloor?: number;
   tier1Model?: string;

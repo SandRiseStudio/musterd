@@ -42,7 +42,7 @@
     "coverage": "vitest run --coverage",
     "test:scenarios": "vitest run tests/scenarios",
     "test:codex-cli-real": "vitest run tests/codex-cli.acceptance.test.ts",
-    "typecheck": "pnpm dist:check && pnpm -r exec tsc --noEmit && pnpm exec tsc -p content/tsconfig.json",
+    "typecheck": "pnpm dist:check && pnpm -r exec tsc --noEmit && pnpm exec tsc -p content/tsconfig.json && pnpm exec tsc -p scripts/tsconfig.json",
     "change-adr:check": "node --disable-warning=ExperimentalWarning scripts/check-change-adr.ts"
   },
   "devDependencies": {
