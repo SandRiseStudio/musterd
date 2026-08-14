@@ -819,6 +819,10 @@ const RECTS_IN_PAGE = /* js */ `(() => {
       key,
       x: r.x + window.scrollX, y: r.y + window.scrollY, w: r.width, h: r.height,
       opacity: effOpacity(el),
+      /* Born into the frozen room: connected after the freeze marked the living page's elements, so
+         the rAF positioning hand never reached it. See the freeze comment — measured, this strands
+         bubbles at (0,0) over the room papers. Absent mark set (pre-freeze callers) = not born. */
+      born: !!window.__a11y_atFreeze && !window.__a11y_atFreeze.has(el),
     });
   }
   return {
@@ -866,6 +870,8 @@ let keysBeforeShutter = null;
 let keysAfterShutter = null;
 /** Rows whose line box slid between the rect pass and the shutter — reported, never measured. */
 const moved = [];
+/** Rows born after the freeze — stranded at (0,0), their geometry is the freeze's artifact. */
+const born = [];
 try {
   /* Hold the scene still for the length of the capture. Everything that moves on these surfaces
      moves on a rAF loop — the office characters walk, and the speech bubbles are absolutely
@@ -875,8 +881,28 @@ try {
      the rect pass and the shutter and the sample lands on a character's body; with it they are
      measurable at all, which is worth more than a frozen millisecond costs. The `moved` guard below
      stays as the check on this working: if anything still slides, it is excluded rather than
-     mis-sampled. */
-  await evalIn(`(() => { window.requestAnimationFrame = () => 0; return true; })()`);
+     mis-sampled.
+
+     The freeze has a birth hole, and it needs its own guard. Speech bubbles are BORN on timers
+     (`showSpeech` is deliberately not on the rAF loop, so the office can speak while it rests), but
+     they are POSITIONED by the rAF tick — so a bubble born after the no-op lands is real DOM whose
+     placing hand never arrives, and it strands at (0,0). Stationary and at settled opacity 1, it
+     walks through the `moved` and fade guards and its text is sampled over whatever paints in the
+     page's top-left corner: 6 of 6 verified strandings measured the room papers, not the bubble.
+     Key-set differencing cannot see this — rowKey is class|ink|paper, and a stranded bubble collides
+     with any healthy sibling born a beat earlier — so the mark has to be per ELEMENT: everything
+     connected now, while the room is still the living page's arrangement, goes in a WeakSet, and the
+     rect pass reports anything outside it as `born`. Born rows are excluded and counted, exactly
+     like `moved`: their geometry was never a property of the page. (Residual: an element born within
+     the final frame BEFORE the freeze is marked yet may also have missed its first positioning tick.
+     That window is one frame wide; the mark and the override land in the same evaluation to keep it
+     that narrow.) */
+  await evalIn(`(() => {
+    window.__a11y_atFreeze = new WeakSet();
+    for (const el of document.querySelectorAll('*')) window.__a11y_atFreeze.add(el);
+    window.requestAnimationFrame = () => 0;
+    return true;
+  })()`);
   const geom = await evalIn(RECTS_IN_PAGE);
   /* Two readings, a beat apart. A fade that is still MOVING has no settled appearance and must not
      be measured. A fade that is STILL is a design decision — the office watermark sits at 0.45 on
@@ -950,6 +976,12 @@ try {
   const faded = [];
   const invisible = [];
   for (const rc of geom.rects) {
+    /* Checked before `moved`: a born row is typically STATIONARY (stranded where it appeared), so
+       the movement guard is exactly the one it walks through. */
+    if (rc.born) {
+      born.push(rc.key.split('|')[0] || '?');
+      continue;
+    }
     if (movedKeys.has(rc.key)) {
       moved.push(rc.key.split('|')[0] || '?');
       continue;
@@ -1012,6 +1044,12 @@ try {
       `${moved.length} element(s) MOVED between the rect pass and the shutter, so the pixel under` +
         ` their recorded line box is no longer what is behind them — excluded, not measured:` +
         ` ${[...new Set(moved)].join(', ')}`,
+    );
+  if (born.length)
+    notes.push(
+      `${born.length} element(s) were BORN after the scene froze — the rAF positioning hand never` +
+        ` reached them, so their line box is the freeze's artifact, not the page's — excluded, not` +
+        ` measured: ${[...new Set(born)].join(', ')}`,
     );
   if (unsettled.length)
     notes.push(
