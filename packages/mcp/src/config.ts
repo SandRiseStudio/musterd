@@ -338,6 +338,8 @@ function attestationFor(
  * transcript was still empty — so a corrected observation sat on disk while the roster kept
  * reporting the boot-time value for the entire session. Measured on seat `ryder`: `binding.json`
  * read `claude-opus-5` and the roster read `claude-opus-4-8` at the same instant.
+ * ADR 270: the claim/heartbeat caller runs `reconcileCursorCapture` first, so a hookless
+ * cursor-agent occupancy has something on disk to re-read.
  *
  * Rides the 15s heartbeat, which already re-affirms the model precisely so "a mid-occupancy switch
  * or an attestation the claim missed lands without a reconnect" (ADR 101) — that path was correct

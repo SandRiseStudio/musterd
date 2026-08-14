@@ -388,6 +388,33 @@ describe('saveBinding merge-guard — the hook-written model observation', () =>
       rmSync(ws, { recursive: true, force: true });
     }
   });
+
+  it('an explicit drop clears the on-disk observation (ADR 270) — omit still means preserve', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-obs-drop-'));
+    try {
+      const boot = {
+        server: 'http://s1',
+        team: 'lab',
+        surface: 'cursor' as const,
+        claim: { mode: 'seat' as const, name: 'Ui' },
+      };
+      const observation = { model: 'grok-4.6', harness: 'cursor' as const, observed_at: 1 };
+      saveBinding(ws, { ...boot, model_observed: observation });
+      saveBinding(ws, { ...boot, model: 'grok-4.5' }, { drop: { model_observed: true } });
+      const afterDrop = JSON.parse(
+        readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(afterDrop['model_observed']).toBeUndefined();
+      expect(afterDrop['model']).toBe('grok-4.5');
+      saveBinding(ws, { ...boot });
+      const afterOmit = JSON.parse(
+        readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(afterOmit['model_observed']).toBeUndefined();
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 });
 
 /**

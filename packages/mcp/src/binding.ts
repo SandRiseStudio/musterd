@@ -246,6 +246,10 @@ function readWorkspaceSpec(path: string): WorkspaceSpec | null {
  * omits them; without the guard every autojoin would erase them moments after the hook wrote them.
  * `model_observed` matters especially: lose it and attestation silently falls back to the stale
  * declaration, which is precisely the failure this ADR closes.
+ * Omit still means preserve. An explicit `{ drop: { model_observed: true } }` is a different writer
+ * intent (ADR 268 / ADR 270): the Cursor capture reconcile that learned the session id changed, and
+ * has no new observation, must not keep the previous session's model. `persistBinding` never passes
+ * `drop`.
  *
  * Merge-guard on `session` (ADR 131 §5, increment 4): `persistBinding` rebuilds the binding from
  * boot-time config, and on every wake the SessionStart hook writes `binding.session` moments before
@@ -256,20 +260,30 @@ function readWorkspaceSpec(path: string): WorkspaceSpec | null {
  * refuses to destroy another writer's field. Tmp-file + rename keeps the concurrent-hook write
  * untorn (and 0600 from the first byte).
  */
-export function saveBinding(dir: string, binding: Binding): string {
+/** Capture-writer intent, distinct from omit. persistBinding never passes this (ADR 270). */
+export type SaveBindingOptions = { drop?: { model_observed?: boolean } };
+
+export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOptions): string {
   const bindingDir = join(dir, BINDING_DIR);
   mkdirSync(bindingDir, { recursive: true });
   const p = join(bindingDir, BINDING_FILE);
   const onDisk = readBinding(p);
-  const merged: Binding = {
+  const dropObserved = opts?.drop?.model_observed === true;
+  let merged: Binding = {
     ...binding,
     ...(binding.session === undefined && onDisk?.session !== undefined
       ? { session: onDisk.session }
       : {}),
-    ...(binding.model_observed === undefined && onDisk?.model_observed !== undefined
-      ? { model_observed: onDisk.model_observed }
-      : {}),
+    ...(dropObserved
+      ? {}
+      : binding.model_observed === undefined && onDisk?.model_observed !== undefined
+        ? { model_observed: onDisk.model_observed }
+        : {}),
   };
+  if (dropObserved && merged.model_observed !== undefined) {
+    const { model_observed: _dropped, ...rest } = merged;
+    merged = rest;
+  }
   // A binding the reader could not parse must not replace one it can — ahead of the tmp write, so a
   // refusal leaves no debris. Shared with the CLI copy so the two cannot drift.
   assertWritableBinding(merged);
