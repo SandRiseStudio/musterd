@@ -1,6 +1,9 @@
 # Quiet-set acceptance — fan out who is asked, keep one discharge
 
-- **Status:** increment 1 implementing (ADR 260); increment 2 not started
+- **Status:** increment 1 shipped (ADR 260, #785); **increment 2 not started and not yet
+  justified** — the Eval was run 2026-08-14 (izzo) and returned *unreadable window, attention
+  signature*. See the dated note in ADR 260 §Observability and
+  `scripts/research/adr-260-acceptance-eval.ts`.
 - **Date:** 2026-08-12
 - **Author:** wanderer
 - **Lane:** `01KZ9FNC6VQ8NJH7R2KAMCV5D1` (folded from the standing-acceptor capture)
@@ -110,6 +113,25 @@ Split so the first increment is measurable without the protocol change, and so w
 **Increment 2 — quiet-set fan-out.** `ask` on `ELIGIBLE_ACTS`, compose `meta.eligible` when the quiet set is 2–4, fix `owed_reviews`, keep interrupt obligation-class. First accept wins. ADR + protocol in the same commit.
 
 If increment 1 plus web-low already moves the 10-minute rate near the quiet-bucket 32% and ask volume is small, increment 2 may not be worth the protocol change. That is a real possible outcome; the Eval decides it.
+
+**2026-08-14 — the Eval ran and did not decide it** (izzo, lane `01M011HP1E`; numbers and their
+falsifiers in ADR 260's dated note). Three things this design should absorb before anyone opens
+increment 2:
+
+1. **The window cannot be read either way.** Acceptance routing concentrated onto the team's single
+   cross-family seat starting 08-12 — a day before increment 1 went live — so the 23% → 6% move on
+   item 1 is confounded by a change that plausibly *depresses* the rate. That breaks the disproof
+   direction stanley's ADR 258-shaped amendment had preserved, not only the credit direction.
+2. **The stop condition fired on the evidence that needs no baseline.** The asked seat answered
+   15/18 in the ON window at a 60m median, and on 12 of 16 slow rows was demonstrably servicing
+   *other* lanes while the ask sat. §Open questions already commits: "If increment 1's Eval is
+   'attention, not candidate supply,' we stop rather than widening the set." That is the read.
+3. **Fan-out's case changed shape, and it is now about concentration rather than latency.** The
+   quiet-set cap of 4 sorted by grade is the natural answer to *one seat receiving 50–80% of asks*
+   — but that is a different justification than the one this spec was written on, it was never
+   pre-registered, and sizing it on the same 28-hour window would be exactly the mistake the
+   Confounds section exists to prevent. If increment 2 is revived, revive it against a fresh Eval
+   whose primary is concentration (top-reviewer share), with the 10-minute rate secondary.
 
 ## Observability & Evaluation
 
