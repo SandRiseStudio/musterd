@@ -188,9 +188,18 @@ const report = ({ code, out }, label, floor = 0) => {
   }
   failed.push(label);
   console.log(`  ✗ ${label} — ${live?.[2] ?? '?'} below AA${tail}${unsettled}`);
-  // The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
-  for (const line of out.split('\n')) {
-    if (/^\s+\d+(\.\d+)? \(need /.test(line)) console.log(`   ${line.trim()}`);
+  /* The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
+     ONLY the failure block: the sweep prints EXEMPT rows (WCAG 1.4.3 logotype carve-out) in the
+     identical `ratio (need N) ink on paper` shape further down, and the old grep-the-whole-output
+     hoovered those up too. An exempt row listed under a ✗ route reads as a third failure — it cost
+     izzo an hour of chasing `lc-office__mark-lockup` on 2026-08-13, a row that never set the exit
+     code. Failure rows start directly under the `live:` line; the block ends at the first line
+     that is not a row. */
+  const lines = out.split('\n');
+  const start = lines.findIndex((l) => /^live: \d+ measured/.test(l));
+  for (let i = start + 1; i > 0 && i < lines.length; i++) {
+    if (!/^\s+\d+(\.\d+)? \(need /.test(lines[i])) break;
+    console.log(`   ${lines[i].trim()}`);
   }
 };
 
