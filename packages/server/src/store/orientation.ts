@@ -2,6 +2,7 @@ import { compareGoals, isAwaitingAcceptance, type Lane, type NextBrief } from '@
 import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay, handoffNamesNoLane } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
+import { openIncidents } from './incidents.js';
 import { acceptanceEnteredAt, listLanes } from './lanes.js';
 
 /**
@@ -214,6 +215,15 @@ export function deriveNext(
       waited_ms: Math.max(0, now - entered),
     }));
 
+  // Incident convergence inc 1 (spec §4): open incidents lead the brief for EVERY member — the
+  // banner is how a seat starting a session learns a shared red is already owned work.
+  const incidents = openIncidents(db, teamId, teamSlug).map((l) => ({
+    lane: l.id,
+    gate: l.title.replace(/^incident: /, ''),
+    owner_seat: l.owner_seat,
+    opened_at: l.created_at,
+  }));
+
   return {
     member,
     in_flight,
@@ -224,5 +234,6 @@ export function deriveNext(
     next_goal,
     goals,
     ...(review_debt.length ? { review_debt } : {}),
+    incidents,
   };
 }

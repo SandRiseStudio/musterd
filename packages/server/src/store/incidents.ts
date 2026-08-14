@@ -25,7 +25,10 @@ function incidentTitle(gate: string): string {
   return `incident: ${gate}`;
 }
 
-function detailLine(seat: string, r: { sig?: string | null; ref?: string | null }): string {
+function detailLine(
+  seat: string,
+  r: { sig?: string | null | undefined; ref?: string | null | undefined },
+): string {
   return `${seat}: ${r.sig ?? '(no sig)'}${r.ref ? ` [${r.ref}]` : ''}`;
 }
 

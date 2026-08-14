@@ -524,7 +524,8 @@ function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: En
 function laneVoice(ctx: Ctx, team: TeamRow, lane: Lane): MemberRow | null {
   return (
     (lane.owner_seat ? getMemberByName(ctx.db, team.id, lane.owner_seat) : null) ??
-    getMemberByName(ctx.db, team.id, lane.created_by)
+    getMemberByName(ctx.db, team.id, lane.created_by) ??
+    null
   );
 }
 
