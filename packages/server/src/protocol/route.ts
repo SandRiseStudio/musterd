@@ -459,7 +459,9 @@ function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: En
   const report = blockedByOf(env.meta);
   if (!report) return;
   const outcome = recordBlockedReport(ctx.db, team.id, team.slug, sender.name, report, env.id);
-  if (outcome.kind === 'recorded') return;
+  // `disabled` (team opted out) and `recorded` (still pooling) both mean there is no lane to point
+  // anyone at — and in the disabled case nothing was written down at all.
+  if (outcome.kind === 'recorded' || outcome.kind === 'disabled') return;
 
   const lane = outcome.lane;
   const fromRow = laneVoice(ctx, team, lane);
@@ -517,6 +519,128 @@ function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: En
       meta: { incident: { lane: lane.id, gate: report.gate } },
     });
     routeEnvelope(ctx, team, voice, announce, undefined, true);
+  }
+}
+
+/**
+ * Tell the seat an unclaimed incident was just handed to (ADR 271, spec §3), and tell the reporters
+ * their red now has an owner.
+ *
+ * The voice cannot come from `laneVoice` here: assignment has ALREADY set `owner_seat`, so
+ * `laneVoice` would return the new owner and every message would be a self-send — which never
+ * reaches an inbox (the lesson increment 1 paid for on the open announcement). So the voice is
+ * explicitly a reporter other than the recipient.
+ *
+ * Called from the reaper rather than a transport, on the `seeds/ingest.ts` precedent: a
+ * daemon-composed act routed through normal delivery, so live sessions get the existing
+ * delivery-hint nudge for free. `daemonComposed` is set, which is also the recursion belt — these
+ * are `message` acts and would otherwise re-enter the blocked-report hook.
+ */
+export function announceIncidentRouted(
+  ctx: Ctx,
+  team: TeamRow,
+  lane: Lane,
+  owner: string,
+  waitedMs: number,
+): void {
+  const reporters = incidentReporters(ctx.db, team.id, lane.id);
+  const voiceFor = (recipient: string): MemberRow | null =>
+    reporters
+      .filter((r) => r !== recipient)
+      .map((r) => getMemberByName(ctx.db, team.id, r))
+      .find((m) => m != null) ??
+    (lane.created_by !== recipient
+      ? (getMemberByName(ctx.db, team.id, lane.created_by) ?? null)
+      : null);
+
+  const minutes = Math.round(waitedMs / 60_000);
+  // The owner first, and they are told they can hand it back — an assignment nobody chose is a
+  // routing default, not a verdict about who should fix it. Then the reporters, so the seats parked
+  // behind the red learn it has an owner without anyone asking a human to relay it.
+  const recipients: [string, string][] = [
+    [
+      owner,
+      `[incident] routed to you: "${lane.title}" — lane ${lane.id}, unclaimed for ${minutes}m so it fell to your role. ` +
+        `You did not choose it: hand it off or release it if someone with the context is closer.`,
+    ],
+    ...reporters
+      .filter((r) => r !== owner)
+      .map((r): [string, string] => [
+        r,
+        `[incident] "${lane.title}" now owned by ${owner} — lane ${lane.id}. Your report is on it; stay parked.`,
+      ]),
+  ];
+
+  for (const [recipient, body] of recipients) {
+    const to = getMemberByName(ctx.db, team.id, recipient);
+    const voice = voiceFor(recipient);
+    if (!to || !voice) continue;
+    routeEnvelope(
+      ctx,
+      team,
+      voice,
+      makeEnvelope({
+        id: ulid(),
+        team: team.slug,
+        from: voice.name,
+        to: { kind: 'member', name: recipient },
+        act: 'message',
+        body,
+        meta: { incident: { lane: lane.id, routed_to: owner } },
+      }),
+      undefined,
+      true,
+    );
+  }
+}
+
+/**
+ * Fan a resolved incident out to exactly the seats who reported it (ADR 271, spec §3).
+ *
+ * This is what every appended report was FOR. Increment 1 kept inserting a row per report even past
+ * the threshold, on the stated bet that more refs make a better fan-out at resolve — this collects
+ * it. A seat that parked a PR behind a shared red has no other way to learn it can move again short
+ * of a human noticing and relaying, which is the exact job the spec set out to delete.
+ *
+ * Called from BOTH close paths — the board's PATCH and the ADR 202 acceptor `accept` — because
+ * `recordLaneClose` deliberately cannot route envelopes (it is imported from the transport and the
+ * protocol layer both, and routing from it would make that a cycle). Non-incident lanes return
+ * immediately, so both call sites can call it unconditionally.
+ */
+export function announceIncidentResolved(
+  ctx: Ctx,
+  team: TeamRow,
+  lane: Lane,
+  closedBy: string,
+): void {
+  if (lane.kind !== 'incident') return;
+  const reporters = incidentReporters(ctx.db, team.id, lane.id);
+  const voice = getMemberByName(ctx.db, team.id, closedBy);
+  if (!voice) return;
+
+  for (const reporter of reporters) {
+    // The closer already knows; a self-send reaches no inbox anyway.
+    if (reporter === closedBy) continue;
+    const to = getMemberByName(ctx.db, team.id, reporter);
+    if (!to) continue;
+    routeEnvelope(
+      ctx,
+      team,
+      voice,
+      makeEnvelope({
+        id: ulid(),
+        team: team.slug,
+        from: voice.name,
+        to: { kind: 'member', name: reporter },
+        act: 'message',
+        body:
+          `[incident] resolved by ${closedBy}: ${lane.title.replace(/^incident: /, '')} — ` +
+          `lane ${lane.id}. Whatever you parked behind it can move; re-run before you trust it.`,
+        meta: { incident: { lane: lane.id, resolved_by: closedBy } },
+      }),
+      undefined,
+      true,
+    );
   }
 }
 
@@ -670,6 +794,10 @@ function applyAcceptanceVerdict(
 
   if (act === 'accept') {
     recordLaneClose(ctx.db, team.id, decider, before, lane);
+    // ADR 271: the same fan-out the board's PATCH does. An incident closed by an acceptor's `accept`
+    // owes its reporters exactly the same answer as one closed by a click — neither surface should
+    // have to know the other exists. No-op for every ordinary lane.
+    announceIncidentResolved(ctx, team, lane, decider.name);
   } else {
     // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the rejection
     // — the counterpart said "not what we wanted". Audit action stays `lane.review_sent_back`

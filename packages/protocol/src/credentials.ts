@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EnforcementPolicySchema } from './enforcement.js';
 import { GuardianTiersSchema } from './guardian.js';
+import { IncidentPolicySchema } from './incident.js';
 import { StakesDefaultSchema } from './lanes.js';
 import { LoopsPolicySchema } from './loops.js';
 import { ResidencyPolicyOverrideSchema, ResidencyPolicySchema } from './residency.js';
@@ -112,6 +113,13 @@ export const PolicySchema = z.object({
    * until an admin flips a class, same opt-in posture as `enforcement`/`loops`/`stakes_defaults`.
    */
   guardian_tiers: GuardianTiersSchema.default({}),
+  /**
+   * Shared-blocker convergence (incident spec §5, ADR 268). Unlike every block above it, this one
+   * is NOT inert on `parse({})` — increment 1 shipped clustering on for every team, so the default
+   * reproduces it and `enabled: false` is the opt-out. The two wake knobs inside it are opt-in, for
+   * the reasons on `IncidentPolicySchema`.
+   */
+  incident: IncidentPolicySchema.default({}),
 });
 export type Policy = z.infer<typeof PolicySchema>;
 
@@ -130,6 +138,7 @@ export const PolicyOverrideSchema = PolicySchema.partial().extend({
   residency: ResidencyPolicyOverrideSchema.optional(),
   enforcement: EnforcementPolicySchema.partial().optional(),
   loops: LoopsPolicySchema.partial().optional(),
+  incident: IncidentPolicySchema.partial().optional(),
 });
 export type PolicyOverride = z.infer<typeof PolicyOverrideSchema>;
 
@@ -137,10 +146,23 @@ function sameValue(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+/**
+ * The nested policy blocks, by key. Sparsification has to know which keys are sub-objects, and
+ * naming them in a map rather than an inline ternary chain is what keeps the next block from being
+ * silently omitted — an omitted key falls through to the scalar path and is kept or dropped WHOLE,
+ * which is the ADR 185 bug one level down.
+ */
+const POLICY_SUB_SCHEMAS = {
+  residency: ResidencyPolicySchema,
+  enforcement: EnforcementPolicySchema,
+  loops: LoopsPolicySchema,
+  incident: IncidentPolicySchema,
+} as const;
+
 /** Strip the keys of one sub-object that equal their current schema default; undefined if none survive. */
 function sparsifySub(
   value: unknown,
-  schema: typeof ResidencyPolicySchema | typeof EnforcementPolicySchema | typeof LoopsPolicySchema,
+  schema: (typeof POLICY_SUB_SCHEMAS)[keyof typeof POLICY_SUB_SCHEMAS],
 ): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const defaults = schema.parse({}) as Record<string, unknown>;
@@ -168,15 +190,9 @@ export function sparsifyPolicy(stored: unknown): PolicyOverride {
   const defaults = PolicySchema.parse({}) as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(stored)) {
-    if (key === 'residency' || key === 'enforcement' || key === 'loops') {
-      const sub = sparsifySub(
-        value,
-        key === 'residency'
-          ? ResidencyPolicySchema
-          : key === 'enforcement'
-            ? EnforcementPolicySchema
-            : LoopsPolicySchema,
-      );
+    const subSchema = POLICY_SUB_SCHEMAS[key as keyof typeof POLICY_SUB_SCHEMAS];
+    if (subSchema) {
+      const sub = sparsifySub(value, subSchema);
       if (sub) out[key] = sub;
       continue;
     }

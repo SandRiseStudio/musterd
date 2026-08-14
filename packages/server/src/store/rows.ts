@@ -171,7 +171,7 @@ export function hasFullMessageVisibility(row: MemberRow): boolean {
 
 /** The roles a seat holds (ADR 227). Defensive parse; NULL/corrupt falls back to the legacy single
  * `role` as a one-entry list (empty ⇒ the roleless generalist). */
-function parseRoles(row: MemberRow): string[] {
+export function parseRoles(row: MemberRow): string[] {
   if (row.roles) {
     try {
       const parsed: unknown = JSON.parse(row.roles);

@@ -4,6 +4,7 @@ import {
   askContract,
   askContractText,
   AskTierSchema,
+  type BlockedBy,
   type Envelope,
   makeEnvelope,
   MAX_ELIGIBLE,
@@ -106,16 +107,66 @@ export function parseRecipients(to: string): { to: Recipient; eligible: string[]
   return { to: { kind: 'team' }, eligible: names };
 }
 
+/**
+ * Incident convergence increment 2 — the CLI half of the report contract.
+ *
+ * Increment 1 shipped `meta.blocked_by` and measured zero reports. One reason is mechanical: a CLI
+ * seat could not express the report at all. `--meta` coerces every value to a string, number, or
+ * boolean (`args.ts` `coerce`), so `--meta blocked_by.gate=…` lands as a FLAT key and never becomes
+ * the nested object the daemon clusters on. This flag is that missing path, and it deliberately
+ * spells the whole report — a seat should be able to file one from the line the failing gate printed,
+ * without knowing what envelope meta is.
+ *
+ * The report rides `status_update` (spec §1 — no new act), so a bare `--blocked-by` supplies the act
+ * and any other act is refused rather than silently filed somewhere the clustering never looks.
+ */
+export function blockedByFlags(
+  flags: Record<string, string | boolean>,
+  act: Act | undefined,
+): { act: Act; report: BlockedBy } | null {
+  if (flags['blocked-by'] === undefined) return null;
+  const gate = flagStr(flags, 'blocked-by')?.trim();
+  if (!gate) {
+    throw new CliError(
+      '--blocked-by wants the gate — the exact check name, e.g. --blocked-by "ci:gates/A11y contrast"',
+      2,
+    );
+  }
+  if (act !== undefined && act !== 'status_update') {
+    throw new CliError(
+      `--blocked-by files a shared-blocker report, which rides status_update — not --act ${act}. Drop --act (it is implied) or send the report separately.`,
+      2,
+    );
+  }
+  // Empty --ref/--sig are dropped rather than passed through: the protocol requires min(1) on both,
+  // so a shell variable that expanded to nothing would turn a good report into a rejected envelope.
+  const ref = flagStr(flags, 'ref')?.trim();
+  const sig = flagStr(flags, 'sig')?.trim();
+  return {
+    act: 'status_update',
+    report: { gate, ...(ref ? { ref } : {}), ...(sig ? { sig } : {}) },
+  };
+}
+
 export async function sendCommand(parsed: Parsed): Promise<number> {
   const { team, identity, http } = resolve(parsed.flags);
   const to = flagStr(parsed.flags, 'to') ?? '@team';
-  const act = flagStr(parsed.flags, 'act') as Act | undefined;
+  // A shared-blocker report supplies its own act (status_update, spec §1), so `--blocked-by` alone is
+  // a complete command — which is the whole point: the failing gate prints one line a seat can paste.
+  const blocked = blockedByFlags(parsed.flags, flagStr(parsed.flags, 'act') as Act | undefined);
+  const act = blocked?.act ?? (flagStr(parsed.flags, 'act') as Act | undefined);
   if (!act)
     throw new CliError('usage: musterd send --to <name|a,b|@team> --act <act> <body...>', 2);
-  const body = parsed.positionals.join(' ');
+  // A pasted `--blocked-by` one-liner may carry no prose at all. The envelope allows an empty body,
+  // but a blank status_update reads as noise on every surface that renders one, so the report speaks
+  // for itself when the seat did not.
+  const body =
+    parsed.positionals.join(' ') ||
+    (blocked ? `blocked by ${blocked.report.gate} — parked, not debugging it` : '');
   const replyTo = flagStr(parsed.flags, 'reply-to');
 
   const meta = parseMeta(parsed.metaPairs) ?? {};
+  if (blocked) meta['blocked_by'] = blocked.report;
   if (replyTo) meta['in_reply_to'] = replyTo;
 
   // accept/decline auto-targeting (ADR 067): when answering without an explicit reply target, point at

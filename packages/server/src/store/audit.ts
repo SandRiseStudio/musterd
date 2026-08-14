@@ -121,6 +121,13 @@ export type AuditAction =
   | 'incident.opened'
   | 'incident.report_appended'
   | 'incident.duplicate_replied'
+  // Incident convergence inc 2 (ADR 271): the claim window closing. `incident.routed` — nobody
+  // claimed within the window, so the fallback role got it (actor null: a machine decision, like
+  // `wake_leased`; target = the lane, detail: { role, owner, waited_ms }). `incident.route_unfilled`
+  // — the window closed and NOBODY HOLDS the fallback role, so the incident stayed unowned; written
+  // once per lane, never once per sweeper tick, or it would bury the ledger it exists to inform.
+  | 'incident.routed'
+  | 'incident.route_unfilled'
   // ADR 131: harness residency — the six wake-ledger verbs. `enrolled`/`revoked` are the
   // authorization events (actor = the deciding caller, detail carries `authorized_by`, ADR 127).
   // `wake_leased` is the daemon ordering an actuation (actor null — machine decision); `woke` /

@@ -20,7 +20,7 @@ import {
   GuardianTierSchema,
   type TeamFile,
 } from '@musterd/protocol';
-import { flagStr, type Parsed } from '../args.js';
+import { flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
   excludeCredentialFromGit,
@@ -113,6 +113,56 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   const sweepLoop = onOff(parsed.flags['sweep-loop'], '--sweep-loop');
   if (sweepLoop !== undefined) {
     merged.loops = { ...merged.loops, sweep: sweepLoop };
+    changed = true;
+  }
+  // ADR 268 (incident spec §5): shared-blocker convergence. `--incident off` is an OPT-OUT — unlike
+  // the loops above, clustering ships on, so this flag exists to turn shipped behaviour off. The two
+  // wake knobs are the opt-INs: they spend, and wake accounting cannot yet see what an unreported
+  // lease cost, so no team gets a new wake edge without an admin asking for it by name.
+  const incidentOn = onOff(parsed.flags['incident'], '--incident');
+  if (incidentOn !== undefined) {
+    merged.incident = { ...merged.incident, enabled: incidentOn };
+    changed = true;
+  }
+  const incidentThreshold = flagStr(parsed.flags, 'incident-threshold');
+  if (incidentThreshold !== undefined) {
+    const n = Number(incidentThreshold);
+    if (!Number.isInteger(n) || n < 2) {
+      throw new CliError(
+        'usage: musterd team policy --incident-threshold <n ≥ 2>  (one seat is not a cluster)',
+        2,
+      );
+    }
+    merged.incident = { ...merged.incident, cluster_threshold: n };
+    changed = true;
+  }
+  const claimWindow = flagStr(parsed.flags, 'incident-claim-window');
+  if (claimWindow !== undefined) {
+    merged.incident = {
+      ...merged.incident,
+      claim_window_ms: parseDurationMs(claimWindow, '--incident-claim-window'),
+    };
+    changed = true;
+  }
+  const fallbackRole = flagStr(parsed.flags, 'incident-fallback-role');
+  if (fallbackRole !== undefined) {
+    if (!fallbackRole.trim()) {
+      throw new CliError('usage: musterd team policy --incident-fallback-role <role>', 2);
+    }
+    merged.incident = { ...merged.incident, fallback_role: fallbackRole.trim() };
+    changed = true;
+  }
+  const wakeOnRoute = onOff(parsed.flags['incident-wake-on-route'], '--incident-wake-on-route');
+  if (wakeOnRoute !== undefined) {
+    merged.incident = { ...merged.incident, wake_on_route: wakeOnRoute };
+    changed = true;
+  }
+  const wakeOnResolve = onOff(
+    parsed.flags['incident-wake-on-resolve'],
+    '--incident-wake-on-resolve',
+  );
+  if (wakeOnResolve !== undefined) {
+    merged.incident = { ...merged.incident, wake_on_resolve: wakeOnResolve };
     changed = true;
   }
   // ADR 149: the ask stream's Slack delivery — a webhook URL, or `off` to clear it (delete the key so
@@ -245,6 +295,22 @@ async function teamPolicy(parsed: Parsed): Promise<number> {
   process.stdout.write(
     `  sweep loop: ${current.loops.sweep ? theme.accent('on') : 'off'}${inherited(stored.loops, 'sweep')}\n`,
   );
+  // ADR 268: the incident block reads as one line when it is at its defaults, and expands only where
+  // an admin actually chose something — the knobs below `enabled` are noise on a team running stock.
+  process.stdout.write(
+    `  incident convergence: ${current.incident.enabled ? theme.accent('on') : 'off'}${inherited(stored.incident, 'enabled')}\n`,
+  );
+  if (current.incident.enabled) {
+    process.stdout.write(
+      `    cluster at: ${current.incident.cluster_threshold} distinct reporters${inherited(stored.incident, 'cluster_threshold')}\n`,
+    );
+    process.stdout.write(
+      `    claim window: ${fmtDurationMs(current.incident.claim_window_ms)}, then role ${theme.accent(current.incident.fallback_role)}${inherited(stored.incident, 'claim_window_ms')}\n`,
+    );
+    process.stdout.write(
+      `    wakes: on route ${current.incident.wake_on_route ? theme.accent('on') : 'off'}, on resolve ${current.incident.wake_on_resolve ? theme.accent('on') : 'off'}${inherited(stored.incident, 'wake_on_route')}\n`,
+    );
+  }
   process.stdout.write(
     `  allow pre-issued grants: ${current.allow_pre_issued_grants ? 'on' : 'off'}${inherited(stored, 'allow_pre_issued_grants')}\n`,
   );

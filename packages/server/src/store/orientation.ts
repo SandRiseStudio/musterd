@@ -2,8 +2,9 @@ import { compareGoals, isAwaitingAcceptance, type Lane, type NextBrief } from '@
 import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay, handoffNamesNoLane } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
-import { openIncidents } from './incidents.js';
+import { incidentPolicy, openIncidents } from './incidents.js';
 import { acceptanceEnteredAt, listLanes } from './lanes.js';
+import { getMemberByRole } from './members.js';
 
 /**
  * The orientation brief (ADR 049), computed server-side so CLI + MCP render one projection (ADR 084 —
@@ -217,11 +218,28 @@ export function deriveNext(
 
   // Incident convergence inc 1 (spec §4): open incidents lead the brief for EVERY member — the
   // banner is how a seat starting a session learns a shared red is already owned work.
+  //
+  // ADR 271 adds the claim window to it. "UNCLAIMED" alone tells a seat the lane is free but not
+  // whether taking it is still their decision: in ten minutes it stops being an invitation and
+  // becomes someone's assignment. The countdown is what makes "any seat may claim — context beats
+  // role" actionable rather than merely true.
+  const incPolicy = incidentPolicy(db, teamId);
   const incidents = openIncidents(db, teamId, teamSlug).map((l) => ({
     lane: l.id,
     gate: l.title.replace(/^incident: /, ''),
     owner_seat: l.owner_seat,
     opened_at: l.created_at,
+    // Owned ⇒ no window left to state; disabled ⇒ nothing will ever route it.
+    claim_closes_at:
+      l.owner_seat || !incPolicy.enabled ? null : l.created_at + incPolicy.claim_window_ms,
+    // Null when NOBODY holds the role: this incident will sit unowned, and a seat deciding whether
+    // to take it should know that rather than assume the countdown ends with it handled.
+    fallback_role:
+      l.owner_seat || !incPolicy.enabled
+        ? null
+        : getMemberByRole(db, teamId, incPolicy.fallback_role)
+          ? incPolicy.fallback_role
+          : null,
   }));
 
   return {

@@ -331,7 +331,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'send',
     signature:
-      '--to <name|a,b|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] <body…>',
+      '--to <name|a,b|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] [--blocked-by <gate> [--ref <what>] [--sig <detail>]] <body…>',
     summary: 'send a typed act to a teammate, a few teammates, the team, or everyone',
     group: 'messaging',
     primary: true,
@@ -341,12 +341,17 @@ export const CATALOG: readonly CommandEntry[] = [
       'supersedes prior), challenge (justify-or-reconsider), defer (--meta goal_id=<id> to shelve a ' +
       'Goal). accept/decline auto-target the latest open request ' +
       'unless you pass --reply-to. Name 2-4 seats (--to a,b) when EITHER could answer: each owes a ' +
-      'reply, the first accept/decline stands the rest down, and the team still sees it (message/request_help/challenge only).',
+      'reply, the first accept/decline stands the rest down, and the team still sees it (message/request_help/challenge only). ' +
+      "--blocked-by files a SHARED-BLOCKER report: a red on a check your diff can't touch is not yours to " +
+      'debug — name the gate, park the work, move on. It rides status_update (so --act is implied), and ' +
+      'when a second seat reports the same gate the daemon opens one owned incident lane instead of ' +
+      'letting you each debug it alone.',
     examples: [
       "musterd send --to lin --act request_help 'stuck on the auth redirect'",
       "musterd send --to @team --act status_update 'shipping the lane board'",
       "musterd send --to stanley,izzo --act message 'either of you know why the daemon pinned?'",
       'musterd send --act accept',
+      'musterd send --blocked-by "ci:gates/A11y contrast" --ref pr#840',
     ],
   },
   {
