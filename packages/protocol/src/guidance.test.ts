@@ -91,6 +91,7 @@ describe('version-bump discipline (ADR 085)', () => {
     11: 'a5bf07c7b3b2c44a', // + outcome acceptance close loop (ADR 192): lane_submit + checklist
     12: '30bf29a8c1e89fc9',
     13: '18db5d31ab51fe37', // + the tick installs when the lockfile moved; a failed tick notifies (pinned, not down) // + daemon refresh: the auto-refresher owns the bounce; never prescribe `service refresh`
+    14: '8c1b079d28c39788', // + shared blockers: blocked_by report-and-park + incident convergence (spec 2026-08-14 inc 1)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
