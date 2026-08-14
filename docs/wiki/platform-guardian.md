@@ -8,14 +8,14 @@ A LaunchAgent (`studio.sandrise.musterd-guardian`) running `musterd service guar
 
 ## Classes and default tiers
 
-| Class                       | Meaning                                              | Default tier | Remediation                                                         |
-| --------------------------- | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------- |
-| `publisher_failed`          | fresh /live build failure, daemon healthy            | auto         | `service refresh --live`                                            |
-| `crashloop`                 | daemon down + climbing runs within 30 m of a refresh | auto         | `service refresh --pin <last healthy build> --force`, plus an alert |
-| `daemon_down`               | `/health` unreachable, no refresh to blame           | alert        | —                                                                   |
-| `schema_drift` / `wrong_db` | `/health` schema/db differ from expectations         | alert        | —                                                                   |
-| `error_rate`                | ≥25 5xx/`musterd.errors` lines since boot            | alert        | —                                                                   |
-| `presence_churn`            | reaper storm since boot                              | alert        | —                                                                   |
+| Class | Meaning | Default tier | Remediation |
+| --- | --- | --- | --- |
+| `publisher_failed` | fresh /live build failure, daemon healthy | auto | `service refresh --live` |
+| `crashloop` | daemon down + climbing runs within 30 m of a refresh | auto | `service refresh --pin <last healthy build> --force`, plus an alert |
+| `daemon_down` | `/health` unreachable, no refresh to blame | alert | — |
+| `schema_drift` / `wrong_db` | `/health` schema/db differ from expectations | alert | — |
+| `error_rate` | ≥25 5xx/`musterd.errors` lines since boot | alert | — |
+| `presence_churn` | reaper storm since boot | alert | — |
 
 Flip a tier without a release: `musterd team policy --guardian-tier daemon_down=auto` (or `off` to clear all overrides). Sparse overrides sit over the shipped defaults.
 
