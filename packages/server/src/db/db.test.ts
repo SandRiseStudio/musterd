@@ -359,10 +359,7 @@ describe('v41 — incident convergence (spec 2026-08-14)', () => {
     const db = openDb(':memory:');
     const laneCols = db.prepare("SELECT name FROM pragma_table_info('lanes')").pluck().all();
     expect(laneCols).toContain('kind');
-    const cols = db
-      .prepare("SELECT name FROM pragma_table_info('incident_reports')")
-      .pluck()
-      .all();
+    const cols = db.prepare("SELECT name FROM pragma_table_info('incident_reports')").pluck().all();
     expect(cols).toEqual(
       expect.arrayContaining([
         'team_id',

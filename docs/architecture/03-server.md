@@ -34,6 +34,7 @@ src/
     cursors.ts        // getCursor, setCursor, unreadCount
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
     lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
+    incidents.ts      // incident convergence inc 1 (ADR 266): recordBlockedReport pools blocked_by reports per (team, gate), opens ONE unowned kind:'incident' lane at 2 distinct seats, appends after; openIncidents/incidentReporters feed the team_next banner and the route hook's fan-out
     laneClose.ts      // recordLaneClose: the terminal edge's audit (verified/reason/grade + the ADR 109 merge join), shared by the board PATCH and an acceptor's accept (ADR 169/188/192/202)
     laneSweep.ts      // sweepAbandonedAcceptance: the backstop — closes a lane parked past the 24h grace in awaiting_acceptance as `review_swept`, never verified, since the ADR 217 reasons label a close and never cause one (ADR 229)
     orientation.ts    // deriveNext: the `musterd next` / `team_next` orientation brief over lanes + the latest still-in-play handoff why (ADR 049/084; why uses the #745 `handoffNamedLaneOutOfPlay` predicate — awaiting_acceptance or terminal is not a live instruction)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { BlockedBySchema, blockedByOf } from './incident.js';
 import { EnvelopeSchema, makeEnvelope } from './envelope.js';
+import { BlockedBySchema, blockedByOf } from './incident.js';
 
 const base = {
   id: 'msg-1',

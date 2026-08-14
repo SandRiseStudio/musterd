@@ -45,15 +45,15 @@ describe('fmtNext — incident banner leads (spec 2026-08-14 inc 1)', () => {
     ];
     const out = fmtNext(b);
     const lines = out.split('\n');
-    expect(lines[1]).toContain('⚠ incident: ci:gates/A11y contrast — UNCLAIMED (lane 01LANE, open 2h)');
+    expect(lines[1]).toContain(
+      '⚠ incident: ci:gates/A11y contrast — UNCLAIMED (lane 01LANE, open 2h)',
+    );
     expect(lines[2]).toContain('park behind it');
   });
 
   it('renders the owner when claimed, and nothing without incidents (daemon skew tolerated)', () => {
     const owned = brief(null);
-    owned.incidents = [
-      { lane: '01LANE', gate: 'g', owner_seat: 'miley', opened_at: Date.now() },
-    ];
+    owned.incidents = [{ lane: '01LANE', gate: 'g', owner_seat: 'miley', opened_at: Date.now() }];
     expect(fmtNext(owned)).toContain('owned by miley');
     const skew = brief(null);
     delete (skew as Partial<NextBrief>).incidents;

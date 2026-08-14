@@ -81,7 +81,16 @@ export function recordBlockedReport(
         `INSERT INTO incident_reports (team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(teamId, report.gate, seat, report.sig ?? null, report.ref ?? null, messageId, laneId, now);
+      .run(
+        teamId,
+        report.gate,
+        seat,
+        report.sig ?? null,
+        report.ref ?? null,
+        messageId,
+        laneId,
+        now,
+      );
 
   if (open) {
     insert(open.id);
@@ -108,9 +117,10 @@ export function recordBlockedReport(
   if (pool.length < CLUSTER_THRESHOLD) return { kind: 'recorded' };
 
   const rows = db
-    .prepare<[string, string], { id: number; seat: string; sig: string | null; ref: string | null }>(
-      'SELECT id, seat, sig, ref FROM incident_reports WHERE team_id = ? AND gate = ? AND lane_id IS NULL ORDER BY id',
-    )
+    .prepare<
+      [string, string],
+      { id: number; seat: string; sig: string | null; ref: string | null }
+    >('SELECT id, seat, sig, ref FROM incident_reports WHERE team_id = ? AND gate = ? AND lane_id IS NULL ORDER BY id')
     .all(teamId, report.gate);
   const lane = openLane(
     db,
