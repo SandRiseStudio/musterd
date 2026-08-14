@@ -487,14 +487,23 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       configured: d.configured,
       ...(d.detail !== undefined ? { detail: d.detail } : {}),
     });
-    for (const hookDrift of d.hookDrift ?? []) {
-      // `musterd wire` only registers the MCP server from .musterd/workspace.json — it never calls a
-      // harness's hook installer, so it exited 0 having changed nothing and left this line standing
-      // (observed 2026-08-14). `--refresh-hooks` is the repair that actually runs them, and is the
-      // one ADR 168 sanctions in a live seat's workspace.
-      drift.push(
-        `${h.label}: ${hookDrift} — run \`musterd init --refresh-hooks\` to install the marker-owned hooks.`,
-      );
+    // Hook drift only counts for a harness this folder actually runs musterd through. Unlike
+    // Claude Code's equivalent below — which has always been gated on `claudeConfigured` — this
+    // loop was ungated, so it demanded musterd's Codex hooks from every folder on a machine that
+    // merely has `~/.codex` present. Measured on nick's `cli` seat (2026-08-14): no `.codex/` in
+    // the folder, no `[mcp_servers.musterd]` in the Codex config, and a permanent drift line it
+    // had no way to clear. Drift a folder cannot clear is noise, and noise is how a report stops
+    // being read — the same failure ADR 171 §2 paid down for guidance drift.
+    if (d.configured) {
+      for (const hookDrift of d.hookDrift ?? []) {
+        // `musterd wire` only registers the MCP server from .musterd/workspace.json — it never
+        // calls a harness's hook installer, so it exited 0 having changed nothing and left this
+        // line standing (observed 2026-08-14). `--refresh-hooks` is the repair that actually runs
+        // them, and is the one ADR 168 sanctions in a live seat's workspace.
+        drift.push(
+          `${h.label}: ${hookDrift} — run \`musterd init --refresh-hooks\` to install the marker-owned hooks.`,
+        );
+      }
     }
     // Value-coherence: a legacy baked MUSTERD_CLAIM that disagrees with binding.json pins this
     // harness's team_* tools to a stale seat while the CLI claims the current one (the re-claim drift).
