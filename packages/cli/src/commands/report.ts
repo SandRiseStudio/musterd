@@ -178,6 +178,15 @@ function renderWake(k: NonNullable<Report['wake']>, w: (s: string) => void): voi
       `  ${theme.meta('unpriced')} ${k.unpriced_sessions} wake${k.unpriced_sessions === 1 ? '' : 's'} spawned a session and died unreported — paid, cost unknown\n`,
     );
   }
+  // ADR 273: refused reports. Loud, and phrased as a warning rather than a statistic, because a
+  // non-zero here invalidates every number above it — a refused receipt is spend this report
+  // cannot see, and the ADR 269 case sat unnoticed for ~3 weeks precisely because nothing said it
+  // out loud. Zero prints nothing: silence here is the honest steady state, unlike `unpriced`.
+  if ((k.reports_rejected ?? 0) > 0) {
+    w(
+      `  ${theme.warn('refused')} ${k.reports_rejected} wake report${k.reports_rejected === 1 ? '' : 's'} rejected by this daemon — a host disagrees about the wire shape, and the numbers above are under-counted until it is zero\n`,
+    );
+  }
   // ADR 209/210 Eval split. Printed only when something was actually measured — a cohort of zero
   // must not render as a row of zeros, which reads like a measured result rather than no data. When
   // wakes exist but none reported a delivery, say so plainly: that is the ADR 209 baseline's real

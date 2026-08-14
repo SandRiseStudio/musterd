@@ -368,6 +368,15 @@ export const WakeMetricsSchema = z.object({
    */
   unpriced_sessions: z.number().int().optional(),
   /**
+   * ADR 273. Wake reports the daemon REFUSED — the receipt for a run that already happened and
+   * already cost money, thrown away at validation. Kept out of `failed`: a refused report is not a
+   * failed wake, it is a successful wake whose record was destroyed, and the lease it belonged to
+   * then expires wearing `lease_expired` — which reads as "the host never answered". Non-zero here
+   * means a host and this daemon disagree about the wire shape, and every number above is
+   * under-counted by an unknown amount until it returns to zero. Optional for back-compat.
+   */
+  reports_rejected: z.number().int().optional(),
+  /**
    * ADR 209/210 Eval split. `delivery` counts woken acts by the delivery the host observed;
    * `exact_match` counts the `resume_eligible` cohort by why the exact-match rung resolved as it
    * did. Both carry their own honesty denominator for the same reason `cost_reported` exists: an

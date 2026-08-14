@@ -544,7 +544,8 @@ export function deriveWakeMetrics(
       `SELECT action, target, ts, detail FROM audit
         WHERE team_id = ?
           AND action IN ('residency.woke','residency.wake_failed','residency.wake_deferred',
-                         'residency.wake_exhausted','residency.wake_cost')
+                         'residency.wake_exhausted','residency.wake_cost',
+                         'residency.wake_report_rejected')
           AND ts > ?
         ORDER BY ts ASC`,
     )
@@ -558,6 +559,12 @@ export function deriveWakeMetrics(
       }
       return { action: r.action, target: r.target, ts: r.ts, detail };
     });
+
+  // ADR 273: reports the daemon REFUSED. Not a wake outcome — a wake whose outcome never got
+  // recorded, which is worse, because the lease then expires and reads as "the host never
+  // answered". Counted separately from `failed` for exactly that reason: folding it in would
+  // repeat the ADR 269 mistake of letting a refusal wear a failure's clothes.
+  const reportsRejected = rows.filter((r) => r.action === 'residency.wake_report_rejected').length;
 
   const failed = rows.filter((r) => r.action === 'residency.wake_failed').length;
   const deferred = rows.filter((r) => r.action === 'residency.wake_deferred').length;
@@ -681,6 +688,7 @@ export function deriveWakeMetrics(
     cost_usd_per_wake: costTotal !== null ? costTotal / costs.length : null,
     cost_reported: costs.length,
     unpriced_sessions: unpricedSessions,
+    reports_rejected: reportsRejected,
     by_seat,
   };
 }
