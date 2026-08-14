@@ -1,10 +1,20 @@
 .gs {
-  padding: clamp(40px, 8vh, 96px) var(--gutter);
+  padding: clamp(48px, 9vh, 104px) var(--gutter) clamp(40px, 8vh, 96px);
 }
+
+/* Echoes .hero__eyebrow — same voice, so the page reads as one hand. */
+.gs__eyebrow {
+  margin: 0 0 1.1rem;
+  font-size: 12px;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+}
+
 .gs__title {
+  margin: 0 0 18px;
   font-size: clamp(1.5rem, 4vw, 2.1rem);
   letter-spacing: -0.03em;
-  margin-bottom: 20px;
 }
 .gs__body {
   margin: 0;
@@ -24,25 +34,31 @@
   margin-top: 28px;
   max-width: 640px;
 }
+/* The commands are the point of the section: full-strength ink on a faint mustard paper, while the
+   label stays quiet. No copy button — the page's text must never depend on JS; `user-select: all`
+   makes one click select the whole command instead. */
 .gs__cmd {
   display: flex;
   align-items: baseline;
   gap: 14px;
-  padding: 12px 16px;
+  padding: 13px 16px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
   overflow-x: auto;
 }
 .gs__cmd-label {
   flex: none;
+  min-width: 3.5ch;
   font-size: 11px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--text-faint);
 }
 .gs__cmd-text {
-  font-size: 13px;
+  font-size: 0.85rem;
   white-space: nowrap;
-  color: var(--text-dim);
+  color: var(--text);
   user-select: all;
 }
 
@@ -50,12 +66,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 24px;
+  margin-top: 26px;
 }
 .gs__ref {
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.04em;
-  padding: 4px 11px;
+  padding: 5px 13px;
   border-radius: 999px;
   border: 1px solid var(--hairline);
   color: var(--text-faint);
@@ -64,6 +80,6 @@
     border-color 0.3s var(--ease-out);
 }
 .gs__ref:hover {
-  color: var(--accent);
+  color: var(--accent-ink);
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
