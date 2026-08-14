@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { enumerateClaudeSessions, enumerateCodexSessions, resetSessionScan } from './enumerate.js';
+import {
+  enumerateClaudeSessions,
+  enumerateCodexSessions,
+  enumerateCursorSessions,
+  resetSessionScan,
+} from './enumerate.js';
 
 /**
  * ADR 166. Attribution is by the transcript's RECORDED `cwd` walked up to a workspace — never by
@@ -176,5 +181,93 @@ describe('enumerateCodexSessions (ADR 216)', () => {
   it('keeps a rollout whose session_meta falls outside the probe window unattributed', () => {
     rollout('buried', { cwd: ws, padFirstLine: true });
     expect(enumerateCodexSessions(ws, home)).toEqual([]);
+  });
+});
+
+describe('enumerateCursorSessions (ADR 265)', () => {
+  let home: string;
+  let ws: string;
+
+  const workspace = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'adr265-ws-'));
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(join(dir, '.musterd', 'binding.json'), '{}');
+    return dir;
+  };
+
+  const project = (
+    dirName: string,
+    opts: {
+      workspacePath?: string;
+      sessions?: { id: string; kind: 'jsonl' | 'txt'; ageMin?: number }[];
+    } = {},
+  ): void => {
+    const root = join(home, '.cursor', 'projects', dirName);
+    mkdirSync(join(root, 'agent-transcripts'), { recursive: true });
+    if (opts.workspacePath) {
+      writeFileSync(
+        join(root, '.workspace-trusted'),
+        JSON.stringify({ workspacePath: opts.workspacePath }) + '\n',
+      );
+    }
+    for (const s of opts.sessions ?? []) {
+      const p =
+        s.kind === 'txt'
+          ? join(root, 'agent-transcripts', `${s.id}.txt`)
+          : join(root, 'agent-transcripts', s.id, `${s.id}.jsonl`);
+      mkdirSync(join(p, '..'), { recursive: true });
+      writeFileSync(p, s.kind === 'txt' ? 'user:\nhello\n' : '{"role":"user"}\n');
+      const t = new Date(Date.now() - (s.ageMin ?? 0) * 60_000);
+      utimesSync(p, t, t);
+    }
+  };
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'adr265-home-'));
+    ws = workspace();
+    resetSessionScan();
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true });
+    resetSessionScan();
+  });
+
+  it('returns undefined when the Cursor projects tree is unavailable', () => {
+    expect(enumerateCursorSessions(ws, join(home, 'nope'))).toBeUndefined();
+  });
+
+  it('attributes by .workspace-trusted workspacePath, not the folder name', () => {
+    project('totally-unrelated-name', {
+      workspacePath: ws,
+      sessions: [{ id: 'cli-session', kind: 'txt' }],
+    });
+    expect(enumerateCursorSessions(ws, home)?.map((f) => f.id)).toEqual(['cli-session']);
+  });
+
+  it('sees both a desktop jsonl and a CLI txt in the same project', () => {
+    project('slug-is-not-evidence', {
+      workspacePath: ws,
+      sessions: [
+        { id: 'desktop', kind: 'jsonl', ageMin: 60 },
+        { id: 'cli', kind: 'txt', ageMin: 1 },
+      ],
+    });
+    expect(enumerateCursorSessions(ws, home)?.map((f) => f.id)).toEqual(['cli', 'desktop']);
+  });
+
+  it('leaves a project with no .workspace-trusted unattributed rather than slug-decoding', () => {
+    project('Users-nick-agents-wanderer', {
+      sessions: [{ id: 'orphan', kind: 'txt' }],
+    });
+    expect(enumerateCursorSessions(ws, home)).toEqual([]);
+  });
+
+  it('does not claim a project whose workspacePath belongs elsewhere', () => {
+    const other = workspace();
+    project('theirs', { workspacePath: other, sessions: [{ id: 'theirs', kind: 'txt' }] });
+    project('ours', { workspacePath: ws, sessions: [{ id: 'ours', kind: 'txt' }] });
+    expect(enumerateCursorSessions(ws, home)?.map((f) => f.id)).toEqual(['ours']);
+    rmSync(other, { recursive: true, force: true });
   });
 });

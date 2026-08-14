@@ -428,6 +428,25 @@ describe('musterd session (capture)', () => {
       expect(got).toBe('gpt-5.6-sol');
       expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
     });
+
+    it('a new conversation_id replaces a leftover desktop capture (ADR 265)', async () => {
+      await observeCursorSession({
+        session_id: 'a3fb8a1c-desktop',
+        model_id: 'grok-4.6',
+        cwd: wsA,
+      });
+      const got = await observeCursorSession({
+        session_id: '365e3420-cli',
+        model_id: 'cursor-grok-4.6-high',
+        cwd: wsA,
+      });
+      expect(got).toBe('cursor-grok-4.6-high');
+      expect(readBinding(wsA).session).toMatchObject({
+        harness: 'cursor',
+        id: '365e3420-cli',
+      });
+      expect(readBinding(wsA).model_observed?.model).toBe('cursor-grok-4.6-high');
+    });
   });
 
   /**

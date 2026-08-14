@@ -1,4 +1,4 @@
-import { openSync, readdirSync, readSync, closeSync, statSync } from 'node:fs';
+import { openSync, readdirSync, readFileSync, readSync, closeSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -120,11 +120,13 @@ function scanTree(root: string): ScannedTranscript[] | undefined {
 const MEMO_MS = 1_000;
 let memo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 let codexMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
+let cursorMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 
 /** Drop the scan memo — tests and long-lived processes that need a guaranteed-fresh read. */
 export function resetSessionScan(): void {
   memo = null;
   codexMemo = null;
+  cursorMemo = null;
 }
 
 /**
@@ -253,6 +255,87 @@ export function enumerateCodexSessions(
   if (codexMemo.rows === undefined) return undefined;
   const target = resolve(workspace);
   return codexMemo.rows
+    .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
+    .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+/** Cursor's own recorded workspace path for a `~/.cursor/projects/<id>` folder (ADR 265).
+ *  Never decode the folder name — that is the ADR 166 slug trap. A missing or unparseable
+ *  `.workspace-trusted` leaves the project unattributed. */
+const CursorWorkspaceTrustedSchema = z.object({ workspacePath: z.string().min(1) }).passthrough();
+
+function readCursorWorkspace(projectDir: string): string | null {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(projectDir, '.workspace-trusted'), 'utf8'));
+    const parsed = CursorWorkspaceTrustedSchema.safeParse(raw);
+    return parsed.success ? findWorkspaceDir(parsed.data.workspacePath) : null;
+  } catch {
+    return null;
+  }
+}
+
+function scanCursorTree(root: string): ScannedTranscript[] | undefined {
+  let top: string[];
+  try {
+    top = readdirSync(root);
+  } catch {
+    return undefined;
+  }
+  const out: ScannedTranscript[] = [];
+  const walkTranscripts = (dir: string, workspace: string | null): void => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walkTranscripts(path, workspace);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const jsonl = entry.name.endsWith('.jsonl');
+      const txt = entry.name.endsWith('.txt');
+      if (!jsonl && !txt) continue;
+      try {
+        const stat = statSync(path);
+        const id = entry.name.slice(0, jsonl ? -'.jsonl'.length : -'.txt'.length);
+        if (!id) continue;
+        out.push({ id, path, mtime: stat.mtimeMs, bytes: stat.size, workspace });
+      } catch {
+        // vanished between readdir and stat
+      }
+    }
+  };
+  for (const name of top) {
+    const project = join(root, name);
+    walkTranscripts(join(project, 'agent-transcripts'), readCursorWorkspace(project));
+  }
+  return out;
+}
+
+/**
+ * Read-only Cursor session scan (ADR 265). Attribution is Cursor's `.workspace-trusted`
+ * `workspacePath`, walked up with {@link findWorkspaceDir} — the same rule the hook uses.
+ * Desktop sessions land as `agent-transcripts/<id>/<id>.jsonl`; a `cursor-agent` CLI session
+ * lands as `agent-transcripts/<id>.txt` (measured 2026-08-13 on wanderer). `undefined` means
+ * "cannot tell", never "no sessions".
+ */
+export function enumerateCursorSessions(
+  workspace: string,
+  home = homedir(),
+  now = Date.now(),
+): SessionFile[] | undefined {
+  const root = join(home, '.cursor', 'projects');
+  if (!cursorMemo || cursorMemo.root !== root || now - cursorMemo.at > MEMO_MS) {
+    cursorMemo = { root, at: now, rows: scanCursorTree(root) };
+  }
+  if (cursorMemo.rows === undefined) return undefined;
+  const target = resolve(workspace);
+  return cursorMemo.rows
     .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
     .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
     .sort((a, b) => b.mtime - a.mtime);

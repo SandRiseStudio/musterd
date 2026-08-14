@@ -238,4 +238,37 @@ describe('the flip (ADR 166 increment 2)', () => {
     expect(out.enumerated?.state).toBe('live'); // raw enum still saw warm mtime
     expect(out.slotState).toBe('resumable');
   });
+
+  it('ADR 265: a live CLI transcript via enumeration beats a stale desktop slot', () => {
+    const NOW = Date.now();
+    const p = join(ws, 'desktop.jsonl');
+    writeFileSync(p, '{"role":"user"}\n');
+    const stale = (NOW - LOCAL_SESSION_LIVE_MS - 60_000) / 1000;
+    utimesSync(p, stale, stale);
+    const binding: Binding = {
+      server: 'http://127.0.0.1:1',
+      team: 'dawn',
+      surface: 'cursor',
+      claim: { mode: 'seat', name: 'scout' },
+      agent_key: 'mskey_test',
+      session: {
+        harness: 'cursor',
+        id: 'desktop',
+        transcript_path: p,
+        started_at: NOW - 3_600_000,
+      },
+    };
+    mkdirSync(join(ws, '.musterd'), { recursive: true });
+    writeFileSync(join(ws, '.musterd', 'binding.json'), JSON.stringify(binding) + '\n');
+    const out = localSessionLiveness(
+      ws,
+      NOW,
+      () => [{ id: 'cli', path: '/t/cli.txt', mtime: NOW - 1_000, bytes: 80 }],
+      'cursor',
+    );
+    expect(out.state).toBe('live');
+    expect(out.source).toBe('enumerated');
+    expect(out.enumerated?.id).toBe('cli');
+    expect(out.slotState).toBe('resumable');
+  });
 });
