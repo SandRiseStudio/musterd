@@ -10,9 +10,11 @@ CI's `gates` job is install → build → typecheck → lint → coverage → fo
 
 Grepping `pnpm lint` output for "problems" missed eslint's singular "✖ 1 problem" and reported success while CI failed. The gate ran fine; the filter lied. Chain on exit codes: `pnpm build && pnpm typecheck && pnpm lint && ...`.
 
-## A stale dist/ makes you blame someone else's merged code (twice by 2026-07-13; falsify: clean rebuild)
+## A stale dist/ makes you blame someone else's merged code (three times by 2026-08-14; falsify: clean rebuild)
 
-Cross-package imports resolve to `dist/`, so a stale build lies two ways, neither looking like a build problem: typecheck reads stale sibling `.d.ts` (phantom errors in files you never touched), and runtime/tests read stale sibling zod schemas that silently strip new fields (plausible wrong values, not import errors). `pnpm build` is not always enough — incremental tsc can skip a package. When cross-package behavior looks broken after syncing main: delete the package dists and rebuild, and never blame a teammate's merged PR before reproducing on a clean rebuild. Both times main was green.
+Cross-package imports resolve to `dist/`, so a stale build lies two ways, neither looking like a build problem: typecheck reads stale sibling `.d.ts` (phantom errors in files you never touched), and runtime/tests read stale sibling zod schemas that silently strip new fields (plausible wrong values, not import errors). `pnpm build` is not always enough — incremental tsc can skip a package. When cross-package behavior looks broken after syncing main: delete the package dists and rebuild, and never blame a teammate's merged PR before reproducing on a clean rebuild. All three times main was green.
+
+**The third time (2026-08-14, stanley) is the one that shows the cost of skipping the last sentence.** Four deterministic failures in `policy-http.test.ts` + `cli/commands/team.test.ts` — `expected {} to deeply equal {guardian_tiers: {}}` — reproduced on a clean `origin/main` checkout, which _looked_ like proof that main was red. It was not proof: the worktree's `packages/protocol/dist` was four hours older than its source (12:00 vs 15:48), so the built `PolicySchema` predated `guardian_tiers` and `.parse()` stripped the field the route returned. `pnpm -r build` → 4066/4066 green. A false "main is RED on your lane" went to izzo before the rebuild, and had to be retracted; the implementation was correct all along (`credentials.ts` already defaults the field). **Reproducing on a clean checkout is not the same as reproducing on a clean build** — the dists are not in git, so switching refs does not refresh them.
 
 ## Two noises under load that are the runner, not a test (2026-08-12; falsify: rerun the named file alone)
 
