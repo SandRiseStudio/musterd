@@ -111,6 +111,16 @@ export type AuditAction =
   // to name a lane, the warning is being ignored and the shape needs revisiting.
   | 'handoff.lane_derived'
   | 'handoff.lane_ambiguous'
+  // Incident convergence inc 1 (spec 2026-08-14): the counted trace of shared-blocker clustering.
+  // `incident.opened` — the threshold report turned a pool into a lane (actor = the tripping
+  // reporter, target = the lane, detail: { gate, reporters }). `incident.report_appended` — a
+  // report matched an already-open incident (actor = reporter, target = lane, detail: { gate,
+  // lane }). `incident.duplicate_replied` — the daemon answered that reporter with the
+  // park-behind-it pointer (actor = reporter, target = lane, detail: { gate, lane }). Shapes only,
+  // never sig/body text (ADR 051).
+  | 'incident.opened'
+  | 'incident.report_appended'
+  | 'incident.duplicate_replied'
   // ADR 131: harness residency — the six wake-ledger verbs. `enrolled`/`revoked` are the
   // authorization events (actor = the deciding caller, detail carries `authorized_by`, ADR 127).
   // `wake_leased` is the daemon ordering an actuation (actor null — machine decision); `woke` /
