@@ -16,6 +16,7 @@
     "adr-numbers:check": "node --disable-warning=ExperimentalWarning scripts/check-adr-numbers.ts",
     "migrations:check": "node --disable-warning=ExperimentalWarning scripts/check-migrations.ts",
     "source-nul:check": "node --disable-warning=ExperimentalWarning scripts/check-source-nul.ts",
+    "dist:check": "node --disable-warning=ExperimentalWarning scripts/check-dist-freshness.ts",
     "vocab:check": "node --disable-warning=ExperimentalWarning scripts/check-vocab.ts",
     "tokens:check": "node --disable-warning=ExperimentalWarning scripts/check-css-tokens.ts",
     "wiki:index": "node --disable-warning=ExperimentalWarning scripts/wiki-index.ts",
@@ -41,7 +42,7 @@
     "coverage": "vitest run --coverage",
     "test:scenarios": "vitest run tests/scenarios",
     "test:codex-cli-real": "vitest run tests/codex-cli.acceptance.test.ts",
-    "typecheck": "pnpm -r exec tsc --noEmit",
+    "typecheck": "pnpm dist:check && pnpm -r exec tsc --noEmit",
     "change-adr:check": "node --disable-warning=ExperimentalWarning scripts/check-change-adr.ts"
   },
   "devDependencies": {
