@@ -828,6 +828,32 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // Incident convergence increment 1 (spec 2026-08-14, lane 01M00PNG2Q): lanes grow a nullable
+    // `kind` (null = ordinary lane; 'incident' = daemon-opened shared-blocker lane), and
+    // incident_reports records every blocked_by report so clustering can count distinct seats per
+    // (team, gate) and duplicate reporters can be answered. `lane_id` is stamped once the incident
+    // lane opens; rows with lane_id NULL are the pre-threshold pool.
+    version: 41,
+    up: (db) => {
+      const laneCols = db.prepare("SELECT name FROM pragma_table_info('lanes')").pluck().all();
+      if (!laneCols.includes('kind')) db.exec('ALTER TABLE lanes ADD COLUMN kind TEXT');
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS incident_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          team_id TEXT NOT NULL,
+          gate TEXT NOT NULL,
+          seat TEXT NOT NULL,
+          sig TEXT,
+          ref TEXT,
+          message_id TEXT,
+          lane_id TEXT,
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_incident_reports_team_gate ON incident_reports(team_id, gate);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
