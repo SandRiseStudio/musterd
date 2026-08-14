@@ -595,6 +595,12 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     const inactive = el.closest('[disabled],[aria-disabled="true"],:disabled') !== null;
     let fg = resolve(cs.color);
     if (!fg) return null;
+    /* Ink alpha ≈ 0 is invisible text, not low-contrast text. A colour-transition reveal parked at
+       rgba(...,0) — the asks strip's "see all" between reel cycles — passes every opacity guard
+       (element opacity is 1) and then composites to its own paper: ratio 1.0, filed 2026-08-14 as a
+       cream-on-cream token bug that did not exist (lane 01M00M6BYF). Text nobody can perceive has
+       no contrast to measure; exclude it and report it, like SKIPPED. */
+    if (fg.a < 0.05) return { invisible: true, key, el: id, sample };
     /* A gradient defeats the ancestor walk, but the pixel pass can still rescue this element — so
        carry everything it needs (the resolved ink, the size threshold, the join key) rather than
        reporting a bare name. An unrescued row still prints as SKIPPED, exactly as before.
@@ -614,7 +620,7 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
   };
 
   /* ── live sweep: every rendered text node, deduped by (class, ink, paper) ── */
-  const live = [], skipped = [], seen = new Set();
+  const live = [], skipped = [], invisible = [], seen = new Set();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
@@ -629,7 +635,7 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     seen.add(key);
     const m = measure(el, text.slice(0, 28), key);
     if (!m) continue;
-    if (m.skipped) skipped.push(m); else live.push(m);
+    if (m.invisible) invisible.push(m); else if (m.skipped) skipped.push(m); else live.push(m);
   }
 
   /* ── probe pass: classes that never render in this state ── */
@@ -661,6 +667,7 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     url: location.href,
     live: live.sort((a, b) => a.ratio - b.ratio),
     skipped,
+    invisible,
     probed: probed.sort((a, b) => a.ratio - b.ratio),
     probeHost, probeNote,
   };
@@ -941,6 +948,7 @@ try {
   pixel = new Map();
   const unsettled = [];
   const faded = [];
+  const invisible = [];
   for (const rc of geom.rects) {
     if (movedKeys.has(rc.key)) {
       moved.push(rc.key.split('|')[0] || '?');
@@ -957,6 +965,20 @@ try {
       unsettled.push(rc.key.split('|')[0] || '?');
       continue;
     }
+    /* PARKED AT ~ZERO is a third state, and both guards above miss it. A carousel row between
+       fade-out and fade-in sits at opacity ≈0.005 — not moving (the readings agree), not exactly 0
+       (the walk's `+cs.opacity === 0` check keeps it), so it fell through to measurement with its
+       ink composited at α≈0.005 onto its own paper: ratio 1.0, "ink identical to paper". That is
+       invisible text reported as a CONTRAST failure — three /live asks-strip rows filed as
+       cream-on-cream token bugs on 2026-08-14 until stanley demonstrated the live page renders
+       them at ~13:1 (lane 01M00M6BYF; the 1.01/#faf2e5 run was the compositing signature). Text
+       nobody can see has no contrast to measure: exclude it and SAY so, exactly like `moved` and
+       `unsettled`. Which verdict a cycling row gets — measured legible, or excluded here — depends
+       on where the shutter lands in its cycle; both are honest, and neither is a failure. */
+    if (rc.opacity < 0.05) {
+      invisible.push(rc.key.split('|')[0] || '?');
+      continue;
+    }
     if (rc.opacity < 0.99) faded.push(rc.key.split('|')[0] || '?');
     // Centre of the line box. With glyphs transparent the whole box is background, so the centre is
     // as good as any point and is the least likely to catch a border or a rounded corner.
@@ -971,6 +993,15 @@ try {
     notes.push(
       `page is ${geom.docH}px tall — sampled the viewport only, below-fold text kept its composited estimate`,
     );
+  {
+    const names = [...invisible, ...(out.invisible ?? []).map((r) => r.el)];
+    if (names.length)
+      notes.push(
+        `${names.length} element(s) were INVISIBLE for the whole window (effective opacity or ink` +
+          ` alpha < 0.05) — invisible text has no contrast to measure; excluded, not passed:` +
+          ` ${[...new Set(names)].join(', ')}`,
+      );
+  }
   if (faded.length)
     notes.push(
       `${faded.length} element(s) are permanently translucent — their ink is composited at that` +
