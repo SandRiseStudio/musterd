@@ -4,6 +4,7 @@ import {
   FEATURE_EPOCH,
   parseClaimPolicy,
   SURFACES,
+  SurfaceSchema,
   type ClaimPolicy,
   type Provenance,
   resolveAttestation,
@@ -161,28 +162,46 @@ function warnUnattestedSeat(
   );
 }
 
+function asSurface(value: string | undefined): Surface | undefined {
+  if (value === undefined) return undefined;
+  return SurfaceSchema.safeParse(value).success ? (value as Surface) : undefined;
+}
+
 /**
- * **Surface drift.** The harness a seat *declares* contradicted by the one that actually ran.
+ * Capture in the binding (ADR 275). Session harness is what is running *now*; the observation's
+ * harness is the same class of evidence when no session has been written. Invalid / unknown
+ * harness strings are ignored — occupancy never invents a Surface from an open capture field.
+ */
+function capturedHarness(binding: ReturnType<typeof findBinding>): Surface | undefined {
+  if (!binding) return undefined;
+  return asSurface(binding.session?.harness) ?? asSurface(binding.model_observed?.harness);
+}
+
+/**
+ * Occupancy surface (ADR 275): capture outranks a stale binding/spec declaration, the same way
+ * model observation outranks a declared model. Two declarations still win: `MUSTERD_SURFACE` in
+ * env (explicit override) and native `musterd` (ADR 251 — capture must not clobber it).
+ * Capture-less seats stay on the declaration; absence is not a contradiction.
+ */
+function occupancySurface(opts: {
+  declared: Surface;
+  fromEnv: boolean;
+  binding: ReturnType<typeof findBinding>;
+}): Surface {
+  if (opts.fromEnv || opts.declared === 'musterd') return opts.declared;
+  return capturedHarness(opts.binding) ?? opts.declared;
+}
+
+/**
+ * **Surface drift.** Occupancy follows capture (ADR 275) unless an explicit override still wins.
  *
- * `surface` resolves `env > binding.json > committed workspace.json` and is then simply believed.
- * `model` outgrew that — ADR 158 gave it an observation path that corrects it at the tool boundary —
- * and surface was left on whatever declaration it was born with. It is not cosmetic: it labels every
- * presence row, every audit entry, and the roster, all of which present it as fact.
+ * The 2026-08-03 warning believed the declaration and printed the contradiction. That left the
+ * roster lying. Occupancy now attests `binding.session.harness` (else `model_observed.harness`)
+ * when it is a valid Surface. Warn only when occupancy will *still* attest the stale value:
+ * `MUSTERD_SURFACE` in env, or native `musterd` vs a capture (ADR 251).
  *
- * A capture in the binding is the evidence the declaration lacks. Hooks are harness-specific by
- * construction — the Claude Code capture writes `harness: 'claude-code'`, the Cursor hook writes
- * `'cursor'` — so a capture is proof that harness ran *here*. Measured across eleven seat worktrees
- * on 2026-08-03, exactly one disagreed: a seat declaring `cursor` whose session and model observation
- * were both written by `claude-code`, from a `MUSTERD_SURFACE` baked into a pre-ADR-165
- * `.cursor/mcp.json` — the top of the ladder, where nothing can correct it.
- *
- * This warns; it deliberately does not re-rank. Promoting the observation above `binding` would not
- * even fix the measured seat (its stale value is in `env`, a rung higher), and promoting it above
- * `env` would break the documented manual override. Whatever order you pick, a baked value at the
- * top can still lie — so make the contradiction visible rather than re-rank the liars.
- *
- * Silent unless something was actually captured: a declaration alone is not a contradiction, and
- * Codex has no hook path at all, so warning on absence would fire forever on every Codex seat.
+ * Silent when occupancy follows capture, and silent when nothing has been captured — Codex has
+ * no hook path, so warning on absence would fire forever on every Codex seat.
  *
  * **The prescription is deliberately narrower than the warning.** This warning used to prescribe
  * `musterd wire` (env case) and `musterd agent <seat>` (binding case). Both of those re-provision:
@@ -196,7 +215,7 @@ function warnUnattestedSeat(
  * and none covered what the message told the reader to do.
  *
  * So the fix named here touches only the file that holds the stale value: one `-e` in the harness's
- * own MCP entry, or one field in this worktree's `.musterd/binding.json`. A too-wide write is not
+ * own MCP entry. Native `musterd` is not a stale value to overwrite. A too-wide write is not
  * closed with another too-wide write. `packages/mcp/src/surface-drift.test.ts` binds this — including
  * a guard that fails if a fourth command learns to rewrite the shared entry.
  */
@@ -207,11 +226,16 @@ function warnContestedSurface(
   fromEnv: boolean,
 ): void {
   if (claim.mode !== 'seat' || !binding) return;
-  // Either capture is the same class of evidence — a hook of that harness fired in this workspace.
-  // The session is preferred: it is the harness running *now*, where the observation may predate a
-  // switch. `?? undefined` because a binding read from disk may carry neither.
-  const ran = binding.session?.harness ?? binding.model_observed?.harness;
+  const ran = capturedHarness(binding);
   if (!ran || ran === surface) return;
+  if (surface === 'musterd') {
+    console.error(
+      `[musterd] seat "${claim.name}" reports surface "musterd" (host-declared, ADR 251), but the ` +
+        `session in this workspace was captured by "${ran}". Occupancy stays musterd — capture ` +
+        `must not clobber a native occupancy. The roster, presence and audit will say musterd.`,
+    );
+    return;
+  }
   const source = fromEnv
     ? `MUSTERD_SURFACE=${surface} in this harness's MCP entry (a baked value outranks binding.json and ` +
       `no observation can correct it — delete that one \`-e MUSTERD_SURFACE=\` from the entry)`
@@ -234,10 +258,11 @@ function warnContestedSurface(
  * team (and server) are required to load.
  *
  * Committed launch spec (ADR: committed launch spec): for the **non-secret** fields (server, team,
- * surface, claim) the ladder is `env > binding.json > workspace.json`. The committed `workspace.json`
- * is the lowest-precedence base, so a fresh clone whose only musterd file is that spec (plus an
- * env-supplied `MUSTERD_AGENT_KEY`) still resolves its identity. Secrets (`agent_key`, `grant`) are
- * **never** read from the spec — only env or the gitignored binding.json.
+ * surface, claim) the ladder is `env > binding.json > workspace.json`. Occupancy surface then
+ * follows capture (ADR 275) unless `MUSTERD_SURFACE` or native `musterd`. The committed
+ * `workspace.json` is the lowest-precedence base, so a fresh clone whose only musterd file is that
+ * spec (plus an env-supplied `MUSTERD_AGENT_KEY`) still resolves its identity. Secrets (`agent_key`,
+ * `grant`) are **never** read from the spec — only env or the gitignored binding.json.
  */
 export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   const binding = findBinding(process.cwd(), env);
@@ -254,9 +279,11 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   if (!team) {
     throw new Error('musterd MCP: no team — set MUSTERD_TEAM or provide a .musterd/binding.json');
   }
-  const surface = (SURFACES as readonly string[]).includes(surfaceRaw)
+  const fromEnv = env['MUSTERD_SURFACE'] !== undefined;
+  const declared = (SURFACES as readonly string[]).includes(surfaceRaw)
     ? (surfaceRaw as Surface)
     : 'other';
+  const surface = occupancySurface({ declared, fromEnv, binding });
   // Claim policy: env wins (the ADR 018 ladder), else binding.json, else the committed spec, else chat.
   const claim: ClaimPolicy =
     env['MUSTERD_CLAIM'] !== undefined
@@ -273,7 +300,7 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   // is what makes it true; see there.
   const attestation = attestationFor(binding, env);
   warnUnattestedSeat(claim, attestation.model, binding !== null);
-  warnContestedSurface(claim, surface, binding, env['MUSTERD_SURFACE'] !== undefined);
+  warnContestedSurface(claim, surface, binding, fromEnv);
   // A seat-mode session gets a stable disambiguation code (ADR 087) keyed by what makes it the same
   // seat across relaunches: team + workspace + seat name + surface. Role/chat sessions keep a fresh
   // per-process code (see shortCode). `connId` stays a fresh ulid — it's the transport/hub identity and
@@ -330,8 +357,9 @@ function attestationFor(
 }
 
 /**
- * Re-resolve the attested model from the binding on disk, mutating `config` in place. Returns true
- * when the attested model actually changed.
+ * Re-resolve the attested model **and occupancy surface** from the binding on disk, mutating
+ * `config` in place. Returns true when the attested model actually changed (surface updates are
+ * silent on that flag — the heartbeat always re-sends `config.surface`).
  *
  * The other half of the ADR 158 follow-up. The hook-side refresh corrects `binding.model_observed`
  * mid-session, but the adapter resolved its attestation once, in `main()`, at a moment when the
@@ -340,6 +368,8 @@ function attestationFor(
  * read `claude-opus-5` and the roster read `claude-opus-4-8` at the same instant.
  * ADR 270: the claim/heartbeat caller runs `reconcileCursorCapture` first, so a hookless
  * cursor-agent occupancy has something on disk to re-read.
+ * ADR 275: the same re-read updates `config.surface` from the slot (unless `MUSTERD_SURFACE` or
+ * native `musterd`), so a mid-session heal does not keep sending the claim-time declaration.
  *
  * Rides the 15s heartbeat, which already re-affirms the model precisely so "a mid-occupancy switch
  * or an attestation the claim missed lands without a reconnect" (ADR 101) — that path was correct
@@ -354,6 +384,16 @@ export function refreshAttestation(
 ): boolean {
   try {
     const binding = findBinding(config.bindingDir ?? process.cwd(), env);
+    // Occupancy follows capture even when the model is unchanged (ADR 270 heals harness mid-session).
+    // Native `musterd` stays sticky (ADR 251); env override stays an override.
+    if (config.surface !== 'musterd') {
+      const fromEnv = env['MUSTERD_SURFACE'] !== undefined;
+      const declaredRaw = env['MUSTERD_SURFACE'] ?? binding?.surface ?? config.surface;
+      const declared = (SURFACES as readonly string[]).includes(declaredRaw)
+        ? (declaredRaw as Surface)
+        : config.surface;
+      config.surface = occupancySurface({ declared, fromEnv, binding });
+    }
     const next = attestationFor(binding, env);
     // Never trade a real attestation for `unknown`: a binding that momentarily fails to read must
     // not blank the roster. Same never-erase rule the observation itself follows.

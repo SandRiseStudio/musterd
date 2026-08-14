@@ -343,11 +343,12 @@ src/
                   //   autojoin(): claim+join on launch when a default claim exists (ADR 032);
                   //   when unclaimed: writes a pending marker (ADR 033) + startResolutionWatcher (ADR 034)
   toolNames.ts    // TOOL_NAMES: the registered-tool name list (dependency-free so guidance:check can import it; ADR 085)
-  config.ts       // env > binding.json > workspace.json -> { server, team, agent_key?, grant?, surface, claim, connId, claimCode }; validates; + build (own dist stamp, ADR 135)
+  config.ts       // env > binding.json > workspace.json, then occupancy surface follows capture unless MUSTERD_SURFACE or native musterd (ADR 275); + build (own dist stamp, ADR 135)
   client.ts       // HTTP + background WS client; join()/leave()/close(); `joined`/`claimed`;
                   //   setIdentity() (late claim); addMember() (tokenless mint); buffers live while joined;
                   //   stale-grant refuse → drop grant + one bare retry (ADR 193);
-                  //   claim + heartbeat run reconcileCursorCapture then refreshAttestation (ADR 270)
+                  //   claim + heartbeat run reconcileCursorCapture then refreshAttestation (ADR 270);
+                  //   heartbeat + HTTP x-musterd-surface attest occupancy surface from capture (ADR 275)
   sessionLiveness.ts // the ADR 164 ladder: judges OUR OWN harness session on the heartbeat tick (ppid / successor / ended_at / transcript staleness) so a process that outlived its session stops attesting presence; fails open
   cursorCapture.ts // ADR 270: Cursor .txt enumeration + heartbeat reconcile — heals a mismatched cursor slot and drops leftover model_observed when observe hooks never fire; injected enumerator in tests; never imports CLI session.ts
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)

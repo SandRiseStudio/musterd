@@ -450,6 +450,24 @@ export function reattestModel(
 }
 
 /**
+ * Re-attest the occupancy surface on a live presence (ADR 275): occupancy follows capture the
+ * same way model does, so a mid-session heal must not keep the claim-time declaration. Returns
+ * the previous value when it actually changed; undefined when the row is missing or unchanged
+ * (no write). No audit row — `presence.surface` is the instrument (ADR 275 §4).
+ */
+export function reattestSurface(
+  db: Database,
+  presenceId: string,
+  surface: Surface,
+): { previous: Surface } | undefined {
+  const row = presenceById(db, presenceId);
+  if (!row) return undefined;
+  if (row.surface === surface) return undefined;
+  db.prepare('UPDATE presence SET surface = ? WHERE id = ?').run(surface, presenceId);
+  return { previous: row.surface as Surface };
+}
+
+/**
  * The current attested model to stamp on an act (ADR 101). When the sending occupancy is known
  * (`presenceId`, the WS path) the stamp reads **exactly that occupancy's** attestation — a member
  * fanned out over two sessions on different models never cross-attributes (ADR 042). When it isn't

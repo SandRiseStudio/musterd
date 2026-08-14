@@ -52,6 +52,10 @@ export const HeartbeatFrame = z.object({
   // Absent ⇒ no change (never a clear — attestation only moves forward, `unknown` comes from
   // never attesting, not from omitting the field on one frame).
   model: z.string().max(120).optional(),
+  // Surface re-attestation (ADR 275, additive): occupancy follows capture the same way model
+  // does. A mid-session heal (ADR 270 writes `session.harness=cursor`) must not keep the
+  // claim-time declaration on the presence row. Absent ⇒ no change (never a clear).
+  surface: SurfaceSchema.optional(),
 });
 
 export const WSClientFrame = z.discriminatedUnion('type', [

@@ -34,6 +34,7 @@ import {
   heartbeat,
   presenceById,
   reattestModel,
+  reattestSurface,
   release,
 } from '../store/presence.js';
 import { createRequest } from '../store/requests.js';
@@ -705,6 +706,11 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                     },
                   });
                 }
+              }
+              // ADR 275: occupancy follows capture. Absent ⇒ no change (never a clear). No
+              // audit row — presence.surface is the instrument.
+              if (frame.surface) {
+                reattestSurface(ctx.db, conn.presenceId, frame.surface);
               }
             }
             break;

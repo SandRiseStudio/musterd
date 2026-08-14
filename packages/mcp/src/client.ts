@@ -270,6 +270,10 @@ export class MusterdClient {
             // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
             // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
             ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
+            // Ambient occupancy (ADR 275 / ADR 057): label the one-shot touch with the surface
+            // this adapter attests — capture, not a stale binding declaration. Honored only when
+            // no resident WS session owns liveness (`touchAmbientPresence` is a no-op under one).
+            ...(this.config.surface ? { 'x-musterd-surface': this.config.surface } : {}),
             ...(opts.headers ?? {}),
           },
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -741,6 +745,10 @@ export class MusterdClient {
                 // or an attestation the claim missed lands without a reconnect; the server no-ops
                 // when unchanged.
                 ...(this.config.model ? { model: this.config.model } : {}),
+                // Occupancy follows capture (ADR 275): refreshAttestation just updated
+                // config.surface from the slot; send it so the presence row does not keep the
+                // claim-time declaration. Absent on CLI/web heartbeats ⇒ no change.
+                surface: this.config.surface,
               }),
             );
           }

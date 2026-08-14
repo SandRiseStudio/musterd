@@ -25,6 +25,7 @@ import {
   countLivePresences,
   currentAttestedModel,
   reattestModel,
+  reattestSurface,
   hasActivePresence,
   hasLivePresence,
   listLiveDrivers,
@@ -712,6 +713,17 @@ describe('model attestation (ADR 101)', () => {
     expect(currentAttestedModel(db, ada.row.id)).toBe('claude-opus-4-8');
     // Missing row — undefined, never throws.
     expect(reattestModel(db, 'nope', 'claude-opus-4-8')).toBeUndefined();
+  });
+
+  it('reattestSurface updates on a real change, no-ops on same value / missing row', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const p = attach(db, ada.row.id, 'claude-code', 'c1');
+
+    expect(reattestSurface(db, p.id, 'claude-code')).toBeUndefined();
+    expect(reattestSurface(db, p.id, 'cursor')).toEqual({ previous: 'claude-code' });
+    expect(presenceById(db, p.id)?.surface).toBe('cursor');
+    expect(reattestSurface(db, 'nope', 'codex')).toBeUndefined();
   });
 
   it('currentAttestedModel keyed on a presence id reads that occupancy only (no cross-session bleed)', () => {

@@ -3,30 +3,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadMcpConfig } from './config.js';
+import { loadMcpConfig, refreshAttestation } from './config.js';
 
 /**
- * Surface drift — the declared harness contradicted by the one that actually ran.
+ * Surface drift — occupancy follows capture (ADR 275).
  *
- * `surface` resolves `env > binding.json > committed workspace.json` and is then simply believed.
- * Unlike `model`, it never got an observation path: the ADR 158 work built `observeModel` /
- * `refreshModelObservation` to correct the model at the tool boundary, and left surface on whatever
- * declaration it was born with.
+ * `surface` still resolves `env > binding.json > committed workspace.json` as the *declaration*.
+ * When `binding.session.harness` (else `model_observed.harness`) is a valid Surface, occupancy
+ * attests that value — the same class of evidence ADR 158 already trusts for model. Two
+ * declarations still win: `MUSTERD_SURFACE` in env, and native `musterd` (ADR 251).
  *
- * Measured across the fleet 2026-08-03 — eleven seat worktrees, one disagreement:
+ * The 2026-08-03 warning believed the declaration and printed the contradiction. Measured again
+ * 2026-08-14: a Cursor slot (`session.harness: cursor`) with `binding.surface: claude-code`
+ * occupied as claude-code. A warning that the roster will lie does not stop the roster lying.
  *
- *   miley   declared surface `cursor`   ·   session.harness `claude-code`   ·   observation by `claude-code`
- *
- * Only one side of that has evidence behind it. A hook is harness-specific by construction: the
- * Claude Code capture hook writes `harness: 'claude-code'`, the Cursor hook writes `'cursor'`, so a
- * capture in the binding is proof that harness actually ran here. The declaration is proof of
- * nothing — and in the measured case it came from a `MUSTERD_SURFACE` baked into a pre-ADR-165
- * `.cursor/mcp.json`, sitting at the TOP of the ladder where nothing can correct it.
- *
- * Deliberately NOT changing precedence. Promoting the observation above `binding` would not even fix
- * the measured seat (the stale value is in `env`, one rung higher), and promoting it above `env`
- * would break the documented manual override. Whatever order you pick, a baked value at the top can
- * still lie — so the fix is to make the contradiction visible, not to re-rank the liars.
+ * Warn only when occupancy will still attest the stale value (env override, or native musterd
+ * vs a capture). Silent when occupancy follows capture. Silent when nothing has been captured
+ * — Codex has no hook path, so warning on absence would fire forever.
  */
 
 let dir: string;
@@ -62,41 +55,43 @@ const writeBinding = (over: Record<string, unknown>): void =>
 
 const warning = (): string => errors.join('\n');
 
-describe('a declared surface contradicted by the harness that actually ran', () => {
-  it('is the measured case: cursor declared, claude-code captured', () => {
+describe('occupancy follows capture (ADR 275)', () => {
+  it('is the measured case: cursor declared, claude-code captured — occupancy is claude-code', () => {
     writeBinding({
       surface: 'cursor',
       session: { harness: 'claude-code', id: 's1', started_at: 1 },
     });
-    loadMcpConfig({});
-
-    expect(warning()).toContain('cursor'); // what we tell the team
-    expect(warning()).toContain('claude-code'); // what actually ran
-    expect(warning()).toContain('miley'); // which seat
+    const config = loadMcpConfig({});
+    expect(config.surface).toBe('claude-code');
+    expect(warning()).not.toMatch(/reports surface/);
   });
 
   it('falls back to the model observation when there is no session capture', () => {
-    // `model_observed.harness` is the same class of evidence: the harness that owned the parse.
     writeBinding({
       surface: 'cursor',
       model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 1 },
     });
-    loadMcpConfig({});
-    expect(warning()).toContain('claude-code');
+    const config = loadMcpConfig({});
+    expect(config.surface).toBe('claude-code');
+    expect(warning()).not.toMatch(/reports surface/);
   });
 
-  it('names the env as the culprit when the stale value is baked there — the measured cause', () => {
-    // miley's `.cursor/mcp.json` predates ADR 165 and bakes MUSTERD_SURFACE at the top of the ladder,
-    // where no observation can reach it. Saying "fix your binding" would send the reader to the wrong
-    // file, so the warning has to name where the value it is complaining about actually came from.
+  it('session harness wins over a stale model-observation harness', () => {
     writeBinding({
       surface: 'codex',
-      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+      session: { harness: 'cursor', id: 's1', started_at: 1 },
+      model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 1 },
     });
-    loadMcpConfig({ MUSTERD_SURFACE: 'cursor' });
+    expect(loadMcpConfig({}).surface).toBe('cursor');
+  });
 
-    expect(warning()).toContain('MUSTERD_SURFACE');
-    expect(warning()).toContain('cursor'); // the env value is what won, so it is what we warn about
+  it('ignores a capture harness that is not a Surface — occupancy stays the declaration', () => {
+    writeBinding({
+      surface: 'codex',
+      session: { harness: 'cursor-agent', id: 's1', started_at: 1 },
+    });
+    expect(loadMcpConfig({}).surface).toBe('codex');
+    expect(warning()).not.toMatch(/reports surface/);
   });
 
   it('stays silent when the declaration and the capture agree — every other seat measured', () => {
@@ -106,9 +101,6 @@ describe('a declared surface contradicted by the harness that actually ran', () 
       model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 1 },
     });
     loadMcpConfig({});
-    // Match the contested-surface warning shape — not the bare substring "surface", which also
-    // appears in tmpdir prefixes like `musterd-surface-drift-…` (and used to fail these cases when
-    // ADR 213 false-positived on fixture identities; ADR 218).
     expect(warning()).not.toMatch(/reports surface/);
   });
 
@@ -117,28 +109,79 @@ describe('a declared surface contradicted by the harness that actually ran', () 
     // Codex is permanently in this state (it has no hook path at all), so warning here would fire
     // forever on every Codex seat and teach the reader to ignore it.
     writeBinding({ surface: 'codex' });
-    loadMcpConfig({});
+    const config = loadMcpConfig({});
+    expect(config.surface).toBe('codex');
     expect(warning()).not.toMatch(/reports surface/);
   });
 
-  it('does not change what the seat actually reports — this warns, it does not re-rank', () => {
+  it('refreshAttestation picks up a mid-session harness heal', () => {
+    writeBinding({ surface: 'claude-code' });
+    const config = loadMcpConfig({});
+    expect(config.surface).toBe('claude-code');
+    writeBinding({
+      surface: 'claude-code',
+      session: { harness: 'cursor', id: '28c22bee', started_at: 2 },
+    });
+    refreshAttestation(config, {});
+    expect(config.surface).toBe('cursor');
+  });
+
+  it('refreshAttestation does not clobber a host-declared musterd occupancy', () => {
     writeBinding({
       surface: 'cursor',
       session: { harness: 'claude-code', id: 's1', started_at: 1 },
     });
     const config = loadMcpConfig({});
-    // The declared surface still wins. Promoting the observation is a precedence change this
-    // deliberately does not make (see the file header).
+    config.surface = 'musterd';
+    refreshAttestation(config, {});
+    expect(config.surface).toBe('musterd');
+  });
+});
+
+describe('a declaration occupancy will still lie about', () => {
+  it('names the env as the culprit when the stale value is baked there — the measured cause', () => {
+    // miley's `.cursor/mcp.json` predates ADR 165 and bakes MUSTERD_SURFACE at the top of the ladder,
+    // where no observation can reach it. Occupancy uses the env (ADR 275 §2). Saying "fix your
+    // binding" would send the reader to the wrong file.
+    writeBinding({
+      surface: 'codex',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    });
+    const config = loadMcpConfig({ MUSTERD_SURFACE: 'cursor' });
+
+    expect(config.surface).toBe('cursor'); // env still wins — do not re-rank above env
+    expect(warning()).toContain('MUSTERD_SURFACE');
+    expect(warning()).toContain('cursor'); // the env value is what won, so it is what we warn about
+  });
+
+  it('does not promote capture above MUSTERD_SURFACE — this warns, it does not re-rank env', () => {
+    writeBinding({
+      surface: 'codex',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    });
+    const config = loadMcpConfig({ MUSTERD_SURFACE: 'cursor' });
     expect(config.surface).toBe('cursor');
+  });
+
+  it('warns when native musterd disagrees with capture, and does not clobber occupancy', () => {
+    writeBinding({
+      surface: 'musterd',
+      session: { harness: 'claude-code', id: 's1', started_at: 1 },
+    });
+    const config = loadMcpConfig({});
+    expect(config.surface).toBe('musterd');
+    expect(warning()).toContain('musterd');
+    expect(warning()).toContain('claude-code');
+    expect(warning()).toContain('ADR 251');
   });
 
   it('warns on stderr, never stdout — stdout is the MCP stdio transport', () => {
     writeBinding({
-      surface: 'cursor',
+      surface: 'codex',
       session: { harness: 'claude-code', id: 's1', started_at: 1 },
     });
     const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
-    loadMcpConfig({});
+    loadMcpConfig({ MUSTERD_SURFACE: 'cursor' });
     expect(stdout).not.toHaveBeenCalled();
   });
 });
@@ -153,7 +196,8 @@ describe('a declared surface contradicted by the harness that actually ran', () 
  * gitignored binding rewrote the entry every seat on the machine launches through.
  *
  * These tests bind the narrowed prescription: it may name only the file that actually holds the
- * stale value.
+ * stale value. Binding-vs-capture is no longer a warning (occupancy follows capture); the env
+ * override is.
  */
 describe('the repair it prescribes', () => {
   /** The commands that re-provision, i.e. that rewrite the repo-root-shared MCP entry. Kept honest
@@ -178,26 +222,14 @@ describe('the repair it prescribes', () => {
     expectNoWideWrite();
   });
 
-  it('repairs the binding in place, and says which worktree it means', () => {
+  it('does not tell the reader to overwrite a host-declared musterd occupancy', () => {
     writeBinding({
-      surface: 'cursor',
+      surface: 'musterd',
       session: { harness: 'claude-code', id: 's1', started_at: 1 },
     });
     loadMcpConfig({});
-
-    expect(warning()).toContain('.musterd/binding.json');
-    expect(warning()).toContain('this worktree only'); // per-seat, gitignored — not shared state
+    expect(warning()).not.toMatch(/set it to "claude-code"/);
     expectNoWideWrite();
-  });
-
-  it('names the value to write, so the reader does not have to infer it', () => {
-    writeBinding({
-      surface: 'cursor',
-      session: { harness: 'claude-code', id: 's1', started_at: 1 },
-    });
-    loadMcpConfig({});
-    // The evidence side of the contradiction is the value that should be there.
-    expect(warning()).toMatch(/set it to "claude-code"/);
   });
 
   /**
