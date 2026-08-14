@@ -563,6 +563,16 @@
 /* The rail's own outer margin was for the page slot; inside the office the slot IS the margin. */
 .lc-office__asks .lc-asks {
   margin: 0;
+  /* …and its paper goes OPAQUE here, which is a contrast fix rather than a taste one. The base rail
+     is `--lc-ground-2` at 88%, and over a page that is the intended whisper of translucency. Over the
+     ROOM the remaining 12% is a live WebGL floor, so the paper is whatever tile or character is
+     underneath at the time: `.lc-asks__link` measured 2.58 on #9a9085 against a 4.5 requirement
+     (2026-08-14). On opaque ground-2 the same ink is 7.34 — the 12% bleed is the entire defect, and
+     nothing about the ink was ever wrong.
+     The reason this must be opacity and not a blur: a blurred bright floor is still bright, so a
+     chip that only averages the room keeps the ratio a property of where a character is standing.
+     That is exactly the property this rule exists to remove — see `.lc-office__caption`. */
+  background: var(--lc-ground-2);
 }
 
 /* ─── the room's watermark ────────────────────────────────────────────────
@@ -1960,7 +1970,19 @@
   font-size: 11.5px;
   color: var(--lc-muted);
   letter-spacing: -0.01em;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+  /* The caption carries its OWN paper, because text laid straight onto the scene has no contrast you
+     can state — only one you can measure on the day. This row read 2.85 on #a69785 (2026-08-14), and
+     #a69785 is not a token: it is the floor pixel the office happened to be painting under the words.
+     A darker ink does not fix that. `--lc-text`, the strongest ink available, is 5.56 on this tile —
+     it clears AA against THIS floor and tells you nothing about the midday gradient or a character
+     who walks under the corner, which is the same coin-flip one notch luckier.
+     A text-shadow was the previous defence and it is not one: it thickens the glyph edge without
+     changing the paper, so it moves the perceived reading without moving the measured ratio at all.
+     Opaque chip, `--lc-muted` on `--lc-ground-2` = 7.34, fixed by construction. */
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--lc-ground-2);
+  border: 1px solid var(--lc-border);
 }
 
 /* ─── roster rail (governance surface — ADR 070 capability/account-status) ─ */
@@ -4669,6 +4691,16 @@
   flex-shrink: 1;
   min-width: 0;
   overflow: hidden;
+  /* Shrinking has to CLIP, not WRAP — the missing half of the rule above, and it hid a real defect
+     behind a false one. Squeezed to 48px against 57px of text, "seat approvals →" wrapped to three
+     lines: a 53px-tall box inside a 30px pill, overflowing ~11px past both edges, with `overflow:
+     hidden` cutting the overflow away. So the reader got a clipped sliver of a link, and the
+     contrast gate measured the first line's box where it sat ABOVE the pill — over the room, on a
+     floor tile, 2.66 (2026-08-14). That row was never a colour: the glyphs at that point are clipped
+     out of existence, and the ink is 7.34 on the paper it is actually printed on.
+     One line, ellipsis, exactly what `.lc-asks__review-title` two rules up already does. */
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 /* Off this machine there is no one-click path to offer, so the invitation drops to a ghost rather
    than dressing a credential form up as something it is not. It borrows `.lc-asks__link`, the rail's
