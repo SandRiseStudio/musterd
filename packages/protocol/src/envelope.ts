@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ActSchema, type Act } from './acts.js';
 import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
+import { BlockedBySchema } from './incident.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 /** Recipient of an envelope: a specific member, the whole team, or broadcast. */
@@ -174,6 +175,18 @@ export function actMetaRules(
       issue(`meta.eligible allows at most ${MAX_ELIGIBLE} seats — to reach more, use @team`);
     } else if (new Set(names).size !== names.length) {
       issue('meta.eligible must not name the same seat twice');
+    }
+  }
+  // Incident convergence (spec 2026-08-14 §1): a shared-blocker report rides `status_update` as
+  // `meta.blocked_by` — no new act. Shape only here (clustering and dedup are server-side, in
+  // routeEnvelope's hook); validated whenever the key appears, so acts without one stay unaffected.
+  if (meta['blocked_by'] !== undefined) {
+    if (!BlockedBySchema.safeParse(meta['blocked_by']).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'blocked_by'],
+        message: 'blocked_by must be { gate: string, ref?, sig? } with a non-empty gate',
+      });
     }
   }
   // The no-answer resolution (ADR 147 §4) rides `status_update` rather than a new act: when `meta.ask_outcome`
