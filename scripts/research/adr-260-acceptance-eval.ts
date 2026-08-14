@@ -179,8 +179,23 @@ function wakeVolume(db: DatabaseSync, lo: number, hi: number) {
         .prepare('select count(*) c from audit where action = ? and ts >= ? and ts < ?')
         .get(action, lo, hi) as { c: number }
     ).c;
+  // DISTINCT ACTS, not leases. An act that cannot settle is re-leased, so the lease count is a
+  // churn metric wearing a volume metric's clothes: measured 2026-08-14, one act held 12 leases and
+  // leases-per-act ran 2.7 (baseline) → 5.2 (post-#785). Reporting leases alone is what let this
+  // Eval's item 5 claim a 5x rise that was mostly the same handful of acts failing to settle.
+  const leaseRows = db
+    .prepare("select detail from audit where action = 'residency.wake_leased' and ts >= ? and ts < ?")
+    .all(lo, hi) as { detail: string }[];
+  const actIds = new Set(
+    leaseRows.map((r) => {
+      const j = JSON.parse(r.detail) as { act_id?: string; act?: string };
+      return j.act_id ?? j.act ?? 'unknown';
+    }),
+  );
   return {
     leased: n('residency.wake_leased'),
+    /** The honest volume figure — one per wake DECISION, however many times it was re-leased. */
+    wakeDecisions: actIds.size,
     woke: n('residency.woke'),
     deferred: n('residency.wake_deferred'),
     failed: n('residency.wake_failed'),
@@ -239,6 +254,35 @@ export function windowGuard(
 }
 
 /** Commits touching the files that decide who is asked, within [lo, hi). */
+/**
+ * WHO IS ASKED. These three decide the routing itself: who gets picked, what re-surfaces, which
+ * acts may fan out. This is also the set a freeze would hold still.
+ */
+export const ROUTING_PATHS = [
+  'packages/server/src/store/review.ts',
+  'packages/server/src/store/orientation.ts',
+  'packages/protocol/src/envelope.ts',
+] as const;
+
+/**
+ * WHAT MOVES THE DENOMINATOR. Added 2026-08-14 after stanley's #844 showed the original predicate
+ * was one category too narrow (their message, and verified here before believing it).
+ *
+ * Eval item 5 compares wake volume across the window. #844 touches none of the three paths above
+ * and carries no `policy.change` row, so the old guard would have passed it and let the run read a
+ * genuine lease-rate DROP as a routing result — the drop being re-lease churn disappearing once
+ * refused reports could settle. A guard that watches "did routing change" while the statistic
+ * depends on "did anything move the act/lease volume" is answering a question nobody asked.
+ */
+export const WAKE_PATHS = [
+  'packages/protocol/src/residency.ts',
+  'packages/server/src/store/residency.ts',
+  'packages/cli/src/host',
+] as const;
+
+/** Everything a contaminated window can hide in — what the guard actually watches. */
+export const WINDOW_PATHS = [...ROUTING_PATHS, ...WAKE_PATHS] as const;
+
 export function routingCommitsSince(
   lo: number,
   hi: number,
@@ -251,9 +295,7 @@ export function routingCommitsSince(
     `--until=${Math.floor(hi / 1000)}`,
     '--format=%H%x09%ct%x09%s',
     '--',
-    'packages/server/src/store/review.ts',
-    'packages/server/src/store/orientation.ts',
-    'packages/protocol/src/envelope.ts',
+    ...WINDOW_PATHS,
   ]);
   return out
     .split('\n')
@@ -301,8 +343,10 @@ function main() {
   console.log('\n=== [5] wake volume, before vs after increment 1 ===');
   for (const [label, w] of Object.entries(wakes)) {
     console.log(
-      `  ${label.toUpperCase().padEnd(3)} ${w.hours.toFixed(1)}h  leased=${w.leased} woke=${w.woke} ` +
-        `deferred=${w.deferred} failed=${w.failed} priced=${w.priced}  leases/h=${(w.leased / w.hours).toFixed(2)}`,
+      `  ${label.toUpperCase().padEnd(3)} ${w.hours.toFixed(1)}h  ` +
+        `DECISIONS=${w.wakeDecisions} (${(w.wakeDecisions / w.hours).toFixed(2)}/h)  ` +
+        `leased=${w.leased} (${(w.leased / w.hours).toFixed(2)}/h, churn-inflated)  ` +
+        `woke=${w.woke} deferred=${w.deferred} failed=${w.failed} priced=${w.priced}`,
     );
   }
   console.log('\n=== [3] duplicate verdicts: N/A — increment 2 not built ===');
