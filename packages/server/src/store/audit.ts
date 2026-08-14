@@ -180,6 +180,16 @@ export type AuditAction =
   // the rate/attempt derivations (one actuation must not count twice); the wake metrics dedupe
   // cost by lease_id, preferring this row over the primary's.
   | 'residency.wake_cost'
+  // ADR 273: the daemon REFUSED a wake report. This row exists because its absence was the bug.
+  // A wake report is not a request that can be retried — it is the receipt for a session that has
+  // already spawned and already cost money, and for ~3 weeks (ADR 269) 48 of them were rejected on
+  // a Zod type error while the ledger recorded nothing at all. The leases then expired, so the
+  // ledger said `wake_failed {reason: lease_expired}` — "the host never answered" — about wakes
+  // that answered and paid. Two seats read the write path correctly and both concluded nothing was
+  // lying, because absence of a cost row is indistinguishable from absence of a cost when the
+  // refusal is silent. Detail `{ act?, lease_id?, edge?, fields: [{path, code, expected?,
+  // received?}] }` — field paths and TYPE NAMES only, never the offending value (ADR 128).
+  | 'residency.wake_report_rejected'
   // ADR 209: a recipient read (or was refused) a server-derived portable wake-context index.
   // Allow detail: wake kind, packet version/bytes, fetch categories/count, delivery selection —
   // never Act/memory/source bodies (Observability §). Deny detail: `{ reason:'forbidden',

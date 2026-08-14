@@ -541,6 +541,93 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
     expect(dup.status).toBe(409);
     expect(audits('residency.wake_cost')).toHaveLength(0);
   });
+
+  // ADR 273. The ledger could not say "I refused this", and that silence — not the type error —
+  // is why ADR 269's defect ran ~3 weeks and cost $22.54: 48 refused reports, zero audit rows, so
+  // the gap read as "the host never answered" on rows that said `lease_expired`. Two seats read
+  // the write path correctly and both concluded nothing was lying, because absence of a cost row
+  // is indistinguishable from absence of a cost when the refusal writes nothing.
+  describe('a refused wake report leaves a ledger trace (ADR 273)', () => {
+    it('audits the refusal against the lease, naming the field and not the value', async () => {
+      const leaseId = await freshLease('u9');
+      const bad = await post(
+        '/teams/dawn/residency/wake-report',
+        // Negative age: the one shape ADR 269 still refuses on purpose.
+        { lease_id: leaseId, occupied: true, transcript_age_ms: -1 },
+        agentKey,
+      );
+      expect(bad.status).toBe(400);
+      const rows = audits('residency.wake_report_rejected');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.result).toBe('deny');
+      expect(rows[0]!.target).toBe('Ada');
+      expect(JSON.parse(rows[0]!.detail as string)).toMatchObject({
+        lease_id: leaseId,
+        fields: [{ path: 'transcript_age_ms', code: 'too_small' }],
+      });
+    });
+
+    it('records type NAMES, never the offending value (ADR 128 stays narrow)', async () => {
+      const leaseId = await freshLease('u9');
+      await post(
+        '/teams/dawn/residency/wake-report',
+        { lease_id: leaseId, occupied: true, reason: 12345, transcript_bytes: 'sk-secret-value' },
+        agentKey,
+      );
+      const detail = audits('residency.wake_report_rejected')[0]!.detail as string;
+      expect(detail).not.toContain('sk-secret-value');
+      expect(detail).not.toContain('12345');
+      expect(detail).toContain('transcript_bytes');
+      // The ADR 269 signature has to survive: which field, and which types were involved.
+      expect(JSON.parse(detail).fields).toContainEqual(
+        expect.objectContaining({
+          path: 'transcript_bytes',
+          expected: 'number',
+          received: 'string',
+        }),
+      );
+    });
+
+    it('audits even when the body cannot name its own lease — the refusal is never silent', async () => {
+      await enrollAda();
+      const bad = await post('/teams/dawn/residency/wake-report', { occupied: true }, agentKey);
+      expect(bad.status).toBe(400);
+      const rows = audits('residency.wake_report_rejected');
+      expect(rows).toHaveLength(1);
+      const detail = JSON.parse(rows[0]!.detail as string);
+      expect(detail).not.toHaveProperty('lease_id');
+      expect(detail.fields).toContainEqual(expect.objectContaining({ path: 'lease_id' }));
+    });
+
+    it('a lease id that names nothing is still audited, with no seat invented', async () => {
+      await enrollAda();
+      await post(
+        '/teams/dawn/residency/wake-report',
+        { lease_id: 'nosuchlease', occupied: 'yes' },
+        agentKey,
+      );
+      const rows = audits('residency.wake_report_rejected');
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.target).toBe('?');
+      expect(JSON.parse(rows[0]!.detail as string).lease_id).toBe('nosuchlease');
+    });
+
+    it('a report the schema accepts writes no rejection row', async () => {
+      await reportedLease();
+      expect(audits('residency.wake_report_rejected')).toHaveLength(0);
+    });
+
+    it('the wake report counts refusals so the ledger says it out loud', async () => {
+      const leaseId = await freshLease('u9');
+      await post(
+        '/teams/dawn/residency/wake-report',
+        { lease_id: leaseId, occupied: true, transcript_age_ms: -1 },
+        agentKey,
+      );
+      const report = await get('/teams/dawn/report', nickCred);
+      expect(report.json.wake.reports_rejected).toBe(1);
+    });
+  });
 });
 
 describe('roster resumable_at (ADR 131 inc 5, finding b)', () => {

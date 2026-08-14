@@ -23,6 +23,7 @@ import {
   WakeLeasesBodySchema,
   WakeProgressBodySchema,
   WakeReportBodySchema,
+  type WakeReportBody,
   WakeTurnBodySchema,
   WakeContextRequestSchema,
   WakeContextResponseSchema,
@@ -50,6 +51,7 @@ import {
   type OfflineReason,
   isRailCandidate,
 } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { z } from 'zod';
 import { isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
@@ -437,6 +439,79 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   } catch {
     throw new MusterdError('bad_request', 'invalid JSON body');
   }
+}
+
+/**
+ * ADR 273 — parse a wake report, and if the daemon refuses it, SAY SO on the ledger before throwing.
+ *
+ * Every other rejected request on this server is a retry away from success. A wake report is not:
+ * it is the receipt for a session that has already spawned, already run, and already cost money, so
+ * refusing it silently destroys the only record that the spend happened. ADR 269 is the worked
+ * example — 48 refusals over ~3 weeks, $22.54 discarded, and the ledger meanwhile reporting
+ * `wake_failed {reason: lease_expired}`, which reads as "the host never answered" about wakes that
+ * answered three times.
+ *
+ * Two constraints shape this, and both are easy to get wrong:
+ *
+ * 1. **It must work when the body does not parse.** The row cannot source its fields from the
+ *    parsed body — there isn't one. Only an already-string `lease_id` is salvaged, by hand, and a
+ *    body that cannot name its lease is still audited (without one) rather than dropped.
+ * 2. **It records field paths and TYPE names, never values** (ADR 128). `expected`/`received` are
+ *    zod's type words — `number`, `string`, `integer`, `float` — which is exactly what would have
+ *    named the ADR 269 defect on sight, and carries nothing out of the rejected payload.
+ *
+ * The throw is delegated to {@link parseOrBadRequest} so the 400 the host sees is byte-identical to
+ * what it saw before this ADR: auditing a refusal must not change what a refusal means.
+ */
+function parseWakeReportOrAudit(db: Database, teamId: string, raw: unknown): WakeReportBody {
+  const result = WakeReportBodySchema.safeParse(raw);
+  if (result.success) return result.data;
+
+  const rawLeaseId =
+    typeof raw === 'object' &&
+    raw !== null &&
+    typeof (raw as Record<string, unknown>)['lease_id'] === 'string'
+      ? ((raw as Record<string, unknown>)['lease_id'] as string)
+      : undefined;
+  const lease =
+    rawLeaseId === undefined
+      ? undefined
+      : db
+          .prepare<
+            [string, string],
+            {
+              member_id: string;
+              act_id: string | null;
+              lane_id: string | null;
+              edge: string | null;
+            }
+          >('SELECT member_id, act_id, lane_id, edge FROM wake_leases WHERE team_id = ? AND id = ?')
+          .get(teamId, rawLeaseId);
+
+  appendAudit(db, teamId, {
+    actor: null,
+    action: 'residency.wake_report_rejected',
+    // No seat is invented for a lease id that names nothing — absence stays absence (ADR 236).
+    target: lease ? (getMemberById(db, lease.member_id)?.name ?? '?') : '?',
+    result: 'deny',
+    detail: {
+      ...(lease ? { act: wakeExhaustionKey(lease.act_id, lease.lane_id) } : {}),
+      ...(rawLeaseId !== undefined ? { lease_id: rawLeaseId } : {}),
+      ...(lease?.edge ? { edge: lease.edge } : {}),
+      // Bounded: a pathological body must not write an unbounded row into the ledger the O&E reads.
+      fields: result.error.issues.slice(0, 8).map((issue) => ({
+        path: issue.path.join('.') || '(root)',
+        code: issue.code,
+        ...('expected' in issue && typeof issue.expected === 'string'
+          ? { expected: issue.expected }
+          : {}),
+        ...('received' in issue && typeof issue.received === 'string'
+          ? { received: issue.received }
+          : {}),
+      })),
+    },
+  });
+  return parseOrBadRequest(WakeReportBodySchema, raw);
 }
 
 function bearer(req: IncomingMessage): string {
@@ -2002,7 +2077,7 @@ export async function handleHttp(
 
       if (method === 'POST' && rest === '/residency/wake-report') {
         const team = authAgentKeyOnly(ctx, slug, req);
-        const body = parseOrBadRequest(WakeReportBodySchema, await readJson(req));
+        const body = parseWakeReportOrAudit(ctx.db, team.id, await readJson(req));
         const lease = settleWakeLease(ctx.db, team.id, body.lease_id);
         if (!lease) {
           const settled = ctx.db
