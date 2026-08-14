@@ -194,8 +194,36 @@ const report = ({ code, out }, label, floor = 0) => {
   }
 };
 
+/**
+ * Routes that mount the office scene get their lighting PINNED, and get measured at two of them.
+ *
+ * The scene's lighting follows the real PST sun (`pstNowHours` in office-scene/index.ts), so an
+ * unpinned sweep's verdict is a function of when it runs: at 272d4ad3 the /office-preview caption
+ * measured 5.86:1 in daylight and 2.85:1 under the night veil — same bytes, wall clock the only
+ * variable. That is exactly how main went green at 17:33–18:14 PDT and red at 21:12 PDT on the
+ * same commit (runs 31759967399 / 31760236892), and why re-running a green run after dusk flipped
+ * it. A verdict that changes with the clock cannot gate merges: a fix validated at noon is
+ * validated by nothing.
+ *
+ * `?light=HH` is the scene's own override (a dev aid it already ships). Day and night bracket the
+ * lighting range — dawn/dusk sit between them — so a green here means "readable at both ends",
+ * reproducible at any hour, on any machine. Full hour sweep measured 2026-08-14: caption 5.86 at
+ * 9–18, 5.1 at 6, 2.85 at 20–24. (lane 01KZZ7RYW6K9)
+ */
+const SCENE_LIGHTS = ['12', '21'];
+const sceneRoutes = new Set(['/office-preview']);
+
 for (const route of ROUTES) {
-  report(await sweep(`http://127.0.0.1:${PORT}${route}`), route);
+  if (sceneRoutes.has(route)) {
+    for (const light of SCENE_LIGHTS) {
+      report(
+        await sweep(`http://127.0.0.1:${PORT}${route}?light=${light}`),
+        `${route} (light=${light})`,
+      );
+    }
+  } else {
+    report(await sweep(`http://127.0.0.1:${PORT}${route}`), route);
+  }
 }
 
 server.close();
@@ -242,10 +270,17 @@ if (!process.argv.includes('--static-only')) {
   const base = /(http:\/\/127\.0\.0\.1:\d+)\/board/.exec(up.out)?.[1];
   const team = /team=([\w-]+)/.exec(up.out)?.[1] ?? 'paper';
   try {
-    for (const route of ['/board', '/live']) {
-      // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
-      // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
-      report(await sweep(`${base}${route}?team=${team}`), `${route} (connected)`, 12);
+    // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
+    // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
+    report(await sweep(`${base}/board?team=${team}`), '/board (connected)', 12);
+    // Connected /live mounts the office scene, so its lighting is pinned like the preview's —
+    // same clock-dependence, same two-ended bracket. See SCENE_LIGHTS above.
+    for (const light of SCENE_LIGHTS) {
+      report(
+        await sweep(`${base}/live?team=${team}&light=${light}`),
+        `/live (connected, light=${light})`,
+        12,
+      );
     }
   } finally {
     await sh(['down']);

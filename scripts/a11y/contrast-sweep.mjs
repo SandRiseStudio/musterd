@@ -78,7 +78,7 @@
  * Treat probe output as "worth looking at", and the live sweep as authoritative.
  */
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
@@ -97,7 +97,6 @@ const QUIET = args.includes('--quiet');
 /** Container the probe pass injects into. Must be an opaque, representative surface. */
 const PROBE_HOST = flag('probe-host') ?? '.lc-stream';
 
-const port = 9334;
 const PROFILE_PREFIX = 'contrast-sweep-';
 /** Old enough that no live run's profile can match. A sweep takes ~10s; an hour is 300x that. */
 const PROFILE_TTL_MS = 60 * 60 * 1000;
@@ -140,7 +139,19 @@ const chrome = spawn(
   CHROME,
   [
     '--headless=new',
-    `--remote-debugging-port=${port}`,
+    /* Port 0 = "pick a free one and tell me". NOT a tidiness change: this used to be a hardcoded
+     * 9334, and a hardcoded port is shared state between every sweep on the machine. The second
+     * sweep's Chrome cannot bind it, so the second sweep's `/json/list` answers from the FIRST
+     * sweep's browser and both runs then drive one page. Reproduced by dolly (lane 01KZZ7BQE3):
+     * a sweep pointed at alpha.html filed a GREEN report whose url read beta.html — a pass for a
+     * page nobody looked at, which is the one direction this file's header forbids failing in.
+     * Nineteen worktrees share this laptop, so concurrent sweeps are normal, not exotic.
+     *
+     * The port now comes out of OUR OWN profile directory (`DevToolsActivePort`, written by Chrome
+     * on startup), so it is structurally impossible to reach a browser we did not start. That is
+     * why this fixes the class rather than narrowing the window: there is no shared name left to
+     * collide on. */
+    '--remote-debugging-port=0',
     `--user-data-dir=${profile}`,
     '--no-first-run',
     '--disable-extensions',
@@ -200,24 +211,46 @@ const exit = async (code) => {
   process.exit(code);
 };
 
+/**
+ * The port Chrome actually chose, read from our own profile.
+ *
+ * `DevToolsActivePort` is written into the user-data-dir once the port is listening; line 1 is the
+ * port. Because the file we read is inside the directory we created with `mkdtemp`, the port we
+ * connect to cannot belong to anyone else's browser.
+ */
+let port;
+const readActivePort = () => {
+  try {
+    const first = readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim();
+    const n = Number(first);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  } catch {
+    return null; /* not written yet */
+  }
+};
+
 let targets;
 /* 30s, not 10. On a cold CI runner the first Chrome of a session takes appreciably longer to open
    its debugging port than the third does — the 2026-08-13 gate run failed the first three routes
    and then sailed through the remaining nine on the same machine. A timeout tuned on a warm laptop
    is how a suite acquires a "flaky" reputation it does not deserve. */
 for (let i = 0; i < 150; i++) {
-  try {
-    targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-    if (targets.some((t) => t.type === 'page')) break;
-  } catch {
-    /* not up yet */
+  port ??= readActivePort();
+  if (port) {
+    try {
+      targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+      if (targets.some((t) => t.type === 'page')) break;
+    } catch {
+      /* not up yet */
+    }
   }
   await new Promise((r) => setTimeout(r, 200));
 }
 const page = targets?.find((t) => t.type === 'page');
 if (!page) {
   console.error(
-    `contrast-sweep — Chrome (${CHROME}) never opened its debugging port on :${port} within 30s.` +
+    `contrast-sweep — Chrome (${CHROME}) never opened a debugging port within 30s` +
+      `${port ? ` (read :${port} from ${join(profile, 'DevToolsActivePort')})` : ' (no DevToolsActivePort was ever written)'}.` +
       ' Nothing was measured. This is a harness failure, not a contrast result.',
   );
   await exit(2);
@@ -351,10 +384,108 @@ const KEYS_IN_PAGE = /* js */ `(() => {
   }
   return document.readyState + '\\n' + keys.sort().join('\\n');
 })()`;
+/**
+ * The key set above has a hole, and it is the hole that let a real failure ship green for a day.
+ *
+ * `paperSig` walks CSS backgrounds. Text floating over the office WebGL scene has none — `.lc-office`
+ * is transparent — so for those rows the key is the same string whether the canvas has painted or
+ * not. The settle detector was therefore blind to the one surface it most needed to wait for, and
+ * the failure mode is a false PASS: when the floor has not painted by shutter time, the caption is
+ * measured against its CSS token and sails through. Measured 2026-08-13/14 at 272d4ad3:
+ * `/office-preview` reads 2.83 (#5a4e3f on #a49786) when the floor is there and GREEN when it is
+ * not, on identical bytes — main's own push run went success at 01:19 and failure on re-run at
+ * 04:13, same run id, same commit.
+ *
+ * "Wait for the canvas to go quiet" is the wrong repair — the office choreography animates forever,
+ * so a pixel-stability key just waits out the cap and then measures mid-flight (tried 2026-08-14;
+ * it also let the caption drop out of the key set entirely while the scene evolved). What the
+ * measurement actually requires is not a QUIET canvas but a PAINTED one: paint-vs-not is binary,
+ * converges within seconds, and is exactly the difference between the red runs and the vacuous
+ * green ones.
+ *
+ * So, after the ordinary settle: any canvas that overlaps text must be non-blank — some pixel
+ * variation inside its box, glyphs hidden so ticking text cannot fake it. A canvas still blank past
+ * the cap is a HARNESS failure (exit 2, "nothing was measured"), never a page result. A page with
+ * no canvas under its text skips all of this.
+ */
+const CANVAS_UNDER_TEXT = /* js */ `(() => {
+  const boxes = [...document.querySelectorAll('canvas')]
+    .map((c) => c.getBoundingClientRect())
+    .filter((r) => r.width > 1 && r.height > 1);
+  if (!boxes.length) return null;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent.trim()) continue;
+    const el = node.parentElement;
+    if (!el) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+    const r = el.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) continue;
+    const hit = boxes.find(
+      (c) => r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top,
+    );
+    if (hit)
+      return {
+        x: Math.max(0, Math.floor(hit.left)),
+        y: Math.max(0, Math.floor(hit.top)),
+        width: Math.max(1, Math.ceil(hit.width)),
+        height: Math.max(1, Math.ceil(hit.height)),
+      };
+  }
+  return null;
+})()`;
+
+/** True once the canvas region shows any pixel variation; null when no canvas sits under text. */
+const canvasPainted = async () => {
+  const { result } = await send('Runtime.evaluate', {
+    expression: CANVAS_UNDER_TEXT,
+    returnByValue: true,
+  });
+  const clip = result.value;
+  if (!clip) return null;
+  const GLYPHS_OFF = '__a11y_paint_glyphs_off';
+  await send('Runtime.evaluate', {
+    expression: `(() => {
+      if (document.getElementById('${GLYPHS_OFF}')) return;
+      const s = document.createElement('style');
+      s.id = '${GLYPHS_OFF}';
+      s.textContent = '*,*::before,*::after{color:transparent !important;-webkit-text-fill-color:transparent !important;text-shadow:none !important;}';
+      document.head.appendChild(s);
+    })()`,
+  });
+  try {
+    const shot = await send('Page.captureScreenshot', {
+      format: 'png',
+      clip: { ...clip, scale: 1 },
+    });
+    const img = decodePng(Buffer.from(shot.data, 'base64'));
+    const first = [img.data[0], img.data[1], img.data[2]];
+    const stride = img.channels;
+    for (let o = stride; o < img.data.length; o += stride) {
+      if (
+        Math.abs(img.data[o] - first[0]) > 2 ||
+        Math.abs(img.data[o + 1] - first[1]) > 2 ||
+        Math.abs(img.data[o + 2] - first[2]) > 2
+      )
+        return true;
+    }
+    return false;
+  } catch {
+    return false; /* unreadable is not painted — keep waiting */
+  } finally {
+    await send('Runtime.evaluate', {
+      expression: `document.getElementById('${GLYPHS_OFF}')?.remove()`,
+    }).catch(() => {});
+  }
+};
+
 const settle = await (async () => {
   const t0 = Date.now();
   let prev = null;
   let since = Date.now();
+  let painted = null;
   while (Date.now() - t0 < SETTLE_CAP) {
     const { result } = await send('Runtime.evaluate', {
       expression: KEYS_IN_PAGE,
@@ -368,13 +499,26 @@ const settle = await (async () => {
       now !== null &&
       now.startsWith('complete')
     ) {
-      return { how: 'settled', ms: Date.now() - t0 };
+      painted = await canvasPainted();
+      if (painted !== false) return { how: 'settled', ms: Date.now() - t0, painted };
+      /* Keys are stable but the canvas under the text is still blank — the exact state that
+         produced the vacuous greens. Keep waiting; the cap decides how this ends. */
     }
     prev = now;
     await new Promise((r) => setTimeout(r, SETTLE_STEP));
   }
-  return { how: 'cap', ms: Date.now() - t0 };
+  return { how: 'cap', ms: Date.now() - t0, painted: painted === true };
 })();
+
+if (settle.painted === false) {
+  console.error(
+    `contrast-sweep — a canvas under measurable text never painted within ${SETTLE_CAP}ms.` +
+      ' Any ratio taken now would be against a background the reader never sees, so nothing was' +
+      ' measured. This is a harness failure, not a contrast result. (This exact state is how' +
+      ' /office-preview shipped green while failing AA — see lane 01KZZ7RYW6K9.)',
+  );
+  await exit(2);
+}
 
 /**
  * The whole measurement, run inside the page. Kept as one self-contained function so it can also be
