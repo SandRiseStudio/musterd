@@ -125,3 +125,11 @@ describe('primer is the loop kernel (ADR 085)', () => {
     expect(primer).toContain('.claude/skills/musterd/SKILL.md');
   });
 });
+
+describe('skill body — shared-blocker norm (spec 2026-08-14 inc 1)', () => {
+  it('teaches blocked_by report-and-park in the on-demand skill, not the primer', () => {
+    const body = renderSkillBody({ team: 'revive' });
+    expect(body).toContain('meta.blocked_by');
+    expect(body).toContain('park behind it');
+  });
+});
