@@ -3283,7 +3283,7 @@ export async function handleHttp(
           // 188 grade, and the ADR 109 merge join — lives in `recordLaneClose` because an acceptor's
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
           recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
-          // ADR 270: a resolved incident owes its reporters an answer — they parked work behind it.
+          // ADR 271: a resolved incident owes its reporters an answer — they parked work behind it.
           // Best-effort and after the close: the resolve is already durable and a delivery failure
           // must not undo it. No-op for every ordinary lane.
           try {

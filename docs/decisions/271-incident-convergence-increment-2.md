@@ -1,4 +1,4 @@
-# 270 — Incident convergence increment 2: detection that fires, then routing
+# 271 — Incident convergence increment 2: detection that fires, then routing
 
 - **Status:** accepted 2026-08-14
 - **Relates to:** spec `docs/superpowers/specs/2026-08-14-incident-convergence-design.md` (the
@@ -92,7 +92,7 @@ verdict about who should fix it.**
   nobody is on it. Recorded once per lane, never once per sweeper tick.
 - The sweeper is deliberately **not** behind `loops.sweep`. That switch arms a loop that CLOSES
   other people's lanes; this one only puts a name on a lane already open and visible. `incident.
-  enabled` is its own switch.
+enabled` is its own switch.
 
 ### 4. Wakes are specified, defaulted off, and deferred behind ADR 269
 
@@ -113,7 +113,7 @@ Two consequences, both recorded because the reasoning matters more than the conc
   prices, is not a defensible default. Every other spending switch in this repo is opt-in; `loops`
   is the precedent. An admin writes one knob.
 - **Nothing in incident detection may key on wake-outcome rows.** `wake_failed {reason:
-  lease_expired}` currently describes wakes that succeeded, reported, and cost money. Clustering
+lease_expired}` currently describes wakes that succeeded, reported, and cost money. Clustering
   built on that input would manufacture incidents out of successful wakes — and would fire hardest
   on the seats doing the most work. A detector whose input lies is worse than no detector.
 
@@ -130,12 +130,22 @@ job this spec set out to delete. Wired at **both** close paths (the board's PATC
 acceptor `accept`), because `recordLaneClose` deliberately cannot route envelopes — it is imported
 from the transport and protocol layers both, and routing from it would make that a cycle.
 
-### 6. What this increment deliberately does not do
+### 6. The banner carries the claim window
 
-- **No banner enrichment.** The claim-window countdown and ownership belong in the `team_next`
-  banner, which lives in `orientation.ts` — under a freeze until 2026-08-21 so the ADR 260 Eval
-  re-run has a readable window (izzo's lane). Accepted with no carve-out: a freeze with a hole in
-  the one file this increment would touch is most of the way to no freeze. Revisit after 08-21.
+Increment 1's banner said `UNCLAIMED`, which tells a seat the lane is free but not whether taking it
+is still their decision — in ten minutes it stops being an invitation and becomes someone's
+assignment. `claim_closes_at` and `fallback_role` on `NextBrief.incidents` are what make "any seat
+may claim, context beats role" **actionable** rather than merely true.
+
+`fallback_role` is null when nobody holds it, and the renderer says so outright ("NOBODY holds the
+fallback role, so after that it just sits"). A countdown that reads as "someone gets this in ten
+minutes" when the honest answer is "nobody does, ever" would be worse than no countdown: it would
+convert an unowned incident into a seat's false belief that it is handled.
+
+Both fields are `.optional()`, so a brief from a pre-271 daemon renders exactly as increment 1 did.
+
+### 7. What this increment deliberately does not do
+
 - **No wake edge** (§4), no CI watcher (increment 3), no cross-team incidents, no auto-remediation.
 - "Does anything merge past the red" stays a human ask (spec §6).
 

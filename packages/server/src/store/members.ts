@@ -228,7 +228,7 @@ export function getMemberByName(db: Database, teamId: string, name: string): Mem
 }
 
 /**
- * The seat holding a role (ADR 227) — the fallback owner for an unclaimed incident (ADR 270).
+ * The seat holding a role (ADR 227) — the fallback owner for an unclaimed incident (ADR 271).
  *
  * Two things this does that the inline `WHERE role = ? LIMIT 1` copies in http.ts and ws.ts do not,
  * both of which matter when the answer decides who gets assigned work:

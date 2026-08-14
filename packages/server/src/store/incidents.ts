@@ -12,7 +12,7 @@ import { getMemberByRole } from './members.js';
 import { getPolicy } from './teams.js';
 
 /**
- * Incident convergence (spec 2026-08-14; increment 1 = ADR 266, increment 2 = ADR 270). A
+ * Incident convergence (spec 2026-08-14; increment 1 = ADR 266, increment 2 = ADR 271). A
  * `blocked_by` report on a `status_update` lands here: below the threshold it pools; at the
  * threshold the pool becomes ONE `kind:'incident'` lane (unowned, high stakes, no surface globs —
  * diagnosis localizes the surface later); past it, reports append to the open lane so resolve can

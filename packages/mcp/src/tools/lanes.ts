@@ -463,9 +463,24 @@ export function fmtNext(b: NextBrief): string {
   // motivating episode was seats starting sessions into a shared red they assumed was theirs. Same
   // `?? []` daemon-skew tolerance as owed_reviews below.
   for (const inc of b.incidents ?? []) {
+    // ADR 271: an unclaimed incident carries a countdown. "UNCLAIMED" alone says the lane is free
+    // but not whether taking it is still this seat's decision — the window is what makes "any seat
+    // may claim, context beats role" actionable instead of merely true. Undefined from a pre-271
+    // daemon, which reads exactly as increment 1 did.
+    const left = inc.claim_closes_at == null ? null : inc.claim_closes_at - Date.now();
+    const window =
+      left == null
+        ? ''
+        : left > 0
+          ? inc.fallback_role
+            ? ` — yours to claim for ${waitedFor(left)}, then it falls to ${inc.fallback_role}`
+            : ` — yours to claim for ${waitedFor(left)}; NOBODY holds the fallback role, so after that it just sits`
+          : inc.fallback_role
+            ? ` — claim window closed, routing to ${inc.fallback_role}`
+            : ` — claim window closed and NOBODY holds the fallback role: this will sit unowned until someone takes it`;
     lines.push(
       `⚠ incident: ${inc.gate} — ${inc.owner_seat ? `owned by ${inc.owner_seat}` : 'UNCLAIMED'} ` +
-        `(lane ${inc.lane}, open ${waitedFor(Date.now() - inc.opened_at)}).`,
+        `(lane ${inc.lane}, open ${waitedFor(Date.now() - inc.opened_at)})${window}.`,
       `  If your red matches, it is not yours. Report blocked_by and park behind it.`,
     );
   }

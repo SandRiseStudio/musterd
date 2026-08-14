@@ -8,6 +8,7 @@ import { announceIncidentResolved, announceIncidentRouted } from '../protocol/ro
 import { openIncidents, recordBlockedReport, routeUnclaimedIncidents } from './incidents.js';
 import { openLane } from './lanes.js';
 import { addMember, getMemberByRole } from './members.js';
+import { deriveNext } from './orientation.js';
 import { createTeam, setPolicy, type TeamRow } from './teams.js';
 
 /**
@@ -198,7 +199,7 @@ describe('getMemberByRole (ADR 227)', () => {
   });
 });
 
-describe('the routed announcement (ADR 270)', () => {
+describe('the routed announcement (ADR 271)', () => {
   let db: Database;
   let team: TeamRow;
   const GATE = 'ci:gates/A11y contrast';
@@ -273,7 +274,7 @@ describe('the routed announcement (ADR 270)', () => {
   });
 });
 
-describe('resolve-time reporter fan-out (ADR 270)', () => {
+describe('resolve-time reporter fan-out (ADR 271)', () => {
   let db: Database;
   let team: TeamRow;
   const GATE = 'ci:gates/A11y contrast';
@@ -339,4 +340,64 @@ describe('resolve-time reporter fan-out (ADR 270)', () => {
   function updateOwnerTo(owner: string): void {
     db.prepare('UPDATE lanes SET owner_seat = ? WHERE id = ?').run(owner, incident().id);
   }
+});
+
+describe('the banner carries the claim window (ADR 271)', () => {
+  const GATE = 'ci:gates/A11y contrast';
+  let db: Database;
+  let team: TeamRow;
+
+  function openIncidentAt(at: number): void {
+    recordBlockedReport(db, team.id, 'dawn', 'izzo', { gate: GATE }, 'm1', at);
+    recordBlockedReport(db, team.id, 'dawn', 'dolly', { gate: GATE }, 'm2', at);
+  }
+
+  function banner(now: number) {
+    return deriveNext(db, team.id, 'dawn', 'izzo', 3, 5, { now }).incidents[0];
+  }
+
+  beforeEach(() => {
+    db = openDb(':memory:');
+    team = createTeam(db, { slug: 'dawn' });
+    addMember(db, team, { name: 'izzo', kind: 'agent', role: 'reviewer' });
+    addMember(db, team, { name: 'dolly', kind: 'agent', role: 'reviewer' });
+  });
+
+  it('tells an arriving seat how long the incident is still theirs to claim', () => {
+    addMember(db, team, { name: 'stanley', kind: 'agent', role: 'platform' });
+    openIncidentAt(1_000_000);
+    const b = banner(1_000_000)!;
+    expect(b.owner_seat).toBeNull();
+    expect(b.claim_closes_at).toBe(1_600_000);
+    expect(b.fallback_role).toBe('platform');
+  });
+
+  it('says nobody will catch it when no seat holds the fallback role', () => {
+    // A seat deciding whether to pick this up must not read the countdown as "someone gets this
+    // in ten minutes" when the honest answer is "nobody does, ever".
+    openIncidentAt(1_000_000);
+    const b = banner(1_000_000)!;
+    expect(b.claim_closes_at).toBe(1_600_000);
+    expect(b.fallback_role).toBeNull();
+  });
+
+  it('drops the countdown once the incident is owned — there is nothing left to decide', () => {
+    addMember(db, team, { name: 'stanley', kind: 'agent', role: 'platform' });
+    openIncidentAt(1_000_000);
+    db.prepare(
+      "UPDATE lanes SET owner_seat = 'izzo', state = 'claimed' WHERE kind = 'incident'",
+    ).run();
+    const b = banner(1_000_000)!;
+    expect(b.owner_seat).toBe('izzo');
+    expect(b.claim_closes_at).toBeNull();
+    expect(b.fallback_role).toBeNull();
+  });
+
+  it('states no window when the team disabled convergence — nothing will ever route it', () => {
+    addMember(db, team, { name: 'stanley', kind: 'agent', role: 'platform' });
+    openIncidentAt(1_000_000);
+    setPolicy(db, team.id, { incident: { enabled: false } });
+    const b = banner(1_000_000)!;
+    expect(b.claim_closes_at).toBeNull();
+  });
 });

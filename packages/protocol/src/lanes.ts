@@ -498,6 +498,17 @@ export const NextBriefSchema = z.object({
         owner_seat: z.string().nullable(),
         /** Lane created_at — lets the renderer say how long it has been open. */
         opened_at: z.number().int(),
+        /**
+         * When the claim window shuts and the incident falls to `fallback_role` (ADR 271). Null once
+         * someone owns it, or when the team disabled convergence — in both cases there is no
+         * countdown to state. A seat reading the banner is deciding whether to pick this up, and
+         * "unclaimed" alone does not say whether that decision is still theirs to make.
+         * `.optional()` so a brief from a pre-ADR-271 daemon still parses.
+         */
+        claim_closes_at: z.number().int().nullable().optional(),
+        /** Who it falls to at that moment. Null when nobody holds the role — an incident that will
+         *  stay unowned, which the seat reading this should know before assuming it is handled. */
+        fallback_role: z.string().nullable().optional(),
       }),
     )
     .default([]),

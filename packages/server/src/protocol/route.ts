@@ -523,7 +523,7 @@ function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: En
 }
 
 /**
- * Tell the seat an unclaimed incident was just handed to (ADR 270, spec §3), and tell the reporters
+ * Tell the seat an unclaimed incident was just handed to (ADR 271, spec §3), and tell the reporters
  * their red now has an owner.
  *
  * The voice cannot come from `laneVoice` here: assignment has ALREADY set `owner_seat`, so
@@ -595,7 +595,7 @@ export function announceIncidentRouted(
 }
 
 /**
- * Fan a resolved incident out to exactly the seats who reported it (ADR 270, spec §3).
+ * Fan a resolved incident out to exactly the seats who reported it (ADR 271, spec §3).
  *
  * This is what every appended report was FOR. Increment 1 kept inserting a row per report even past
  * the threshold, on the stated bet that more refs make a better fan-out at resolve — this collects
@@ -794,7 +794,7 @@ function applyAcceptanceVerdict(
 
   if (act === 'accept') {
     recordLaneClose(ctx.db, team.id, decider, before, lane);
-    // ADR 270: the same fan-out the board's PATCH does. An incident closed by an acceptor's `accept`
+    // ADR 271: the same fan-out the board's PATCH does. An incident closed by an acceptor's `accept`
     // owes its reporters exactly the same answer as one closed by a click — neither surface should
     // have to know the other exists. No-op for every ordinary lane.
     announceIncidentResolved(ctx, team, lane, decider.name);

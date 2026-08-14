@@ -144,7 +144,7 @@ export function startReaper(ctx: Ctx): () => void {
       log.info({ msg: 'reap_departed_claims', count: releasedClaims.length });
     }
 
-    // ADR 270 (incident spec §3): close the claim window on any incident nobody picked up, handing
+    // ADR 271 (incident spec §3): close the claim window on any incident nobody picked up, handing
     // it to the fallback role. Deliberately NOT behind `loops.sweep` — that switch arms a loop that
     // CLOSES other people's lanes, and this one only puts a name on a lane already open and visible.
     // Its own `incident.enabled` is the switch, and it defaults on because increment 1 already does.

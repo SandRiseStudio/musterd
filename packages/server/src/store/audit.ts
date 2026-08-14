@@ -121,7 +121,7 @@ export type AuditAction =
   | 'incident.opened'
   | 'incident.report_appended'
   | 'incident.duplicate_replied'
-  // Incident convergence inc 2 (ADR 270): the claim window closing. `incident.routed` — nobody
+  // Incident convergence inc 2 (ADR 271): the claim window closing. `incident.routed` — nobody
   // claimed within the window, so the fallback role got it (actor null: a machine decision, like
   // `wake_leased`; target = the lane, detail: { role, owner, waited_ms }). `incident.route_unfilled`
   // — the window closed and NOBODY HOLDS the fallback role, so the incident stayed unowned; written
