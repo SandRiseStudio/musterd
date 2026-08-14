@@ -1,0 +1,32 @@
+/*
+ * `content/` is shipped source that belonged to no tsconfig, so its types were decoration.
+ *
+ * `pnpm typecheck` runs `pnpm -r exec tsc --noEmit`, which walks the pnpm workspace — and the
+ * workspace is `packages/*`. `content/` is not a package, so nothing ever typechecked it, even
+ * though `roadmap.data.ts` is ~1,700 lines of annotated data that ships in the web bundle.
+ *
+ * Measured 2026-08-14: the file carried exactly one real error, and it had shipped —
+ * `ledger-seats` declared a sentence of increment prose where `plan: PlanStatus` goes, which
+ * `resolveItem` copied into `status`, dropping the item out of every status group on the rendered
+ * roadmap (#845). `tsc` reports it as TS2322 on sight. Nothing was subtle about it; nothing was
+ * looking.
+ *
+ * No emit: the web build compiles this through vite, and the gate scripts read it through Node's
+ * native TypeScript. This config exists to be *checked*, never to produce output — hence
+ * `allowImportingTsExtensions`, which the `./roadmap.data.ts` specifiers require and which is only
+ * legal under `noEmit`.
+ *
+ * Sibling holes, measured the same day and NOT closed here (each wants its own config and its own
+ * lane): `scripts/` 44 files / 19 errors, `tests/` 15 files / 3 errors, `workers/` 5 files /
+ * 5 errors, and every package's own `*.test.ts` — 255 files, excluded by each package tsconfig.
+ */
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["**/*.ts"]
+}
