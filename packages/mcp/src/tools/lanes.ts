@@ -1,5 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { LaneStateSchema, type Lane, type LaneWarning, type NextBrief } from '@musterd/protocol';
+import {
+  incidentBannerLines,
+  LaneStateSchema,
+  type Lane,
+  type LaneWarning,
+  type NextBrief,
+} from '@musterd/protocol';
 import { resolveProject } from '@musterd/protocol/project';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
@@ -462,28 +468,10 @@ export function fmtNext(b: NextBrief): string {
   // Incident banner FIRST, above everything (spec 2026-08-14 §4): most of the measured waste in the
   // motivating episode was seats starting sessions into a shared red they assumed was theirs. Same
   // `?? []` daemon-skew tolerance as owed_reviews below.
-  for (const inc of b.incidents ?? []) {
-    // ADR 271: an unclaimed incident carries a countdown. "UNCLAIMED" alone says the lane is free
-    // but not whether taking it is still this seat's decision — the window is what makes "any seat
-    // may claim, context beats role" actionable instead of merely true. Undefined from a pre-271
-    // daemon, which reads exactly as increment 1 did.
-    const left = inc.claim_closes_at == null ? null : inc.claim_closes_at - Date.now();
-    const window =
-      left == null
-        ? ''
-        : left > 0
-          ? inc.fallback_role
-            ? ` — yours to claim for ${waitedFor(left)}, then it falls to ${inc.fallback_role}`
-            : ` — yours to claim for ${waitedFor(left)}; NOBODY holds the fallback role, so after that it just sits`
-          : inc.fallback_role
-            ? ` — claim window closed, routing to ${inc.fallback_role}`
-            : ` — claim window closed and NOBODY holds the fallback role: this will sit unowned until someone takes it`;
-    lines.push(
-      `⚠ incident: ${inc.gate} — ${inc.owner_seat ? `owned by ${inc.owner_seat}` : 'UNCLAIMED'} ` +
-        `(lane ${inc.lane}, open ${waitedFor(Date.now() - inc.opened_at)})${window}.`,
-      `  If your red matches, it is not yours. Report blocked_by and park behind it.`,
-    );
-  }
+  // The words come from the protocol package, not from here (ADR 084). They used to live inline in
+  // this function only — which is exactly why `musterd next` showed no banner at all for two whole
+  // increments. A shared derivation with a per-surface renderer drifts the moment one copy is edited.
+  for (const inc of b.incidents ?? []) lines.push(...incidentBannerLines(inc));
   // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
   // someone else is blocked on, and it is the one that loses when a seat is busy: half the
   // unverified closes had the named reviewer online for ~40 minutes and still never answering.

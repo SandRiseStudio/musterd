@@ -1,4 +1,4 @@
-import type { Lane, NextBrief } from '@musterd/protocol';
+import { incidentBannerLines, type Lane, type NextBrief } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
@@ -27,6 +27,19 @@ function waitedFor(ms: number): string {
 function render(brief: NextBrief): void {
   const w = process.stdout.write.bind(process.stdout);
   w(`${theme.accent('next')} — as ${theme.memberName(brief.member, 'agent')}\n`);
+
+  // Incident banner FIRST, above everything including owed reviews (spec 2026-08-14 §4). Most of
+  // the measured waste in the motivating episode was seats STARTING SESSIONS into a shared red they
+  // assumed was theirs — so this is the one line that has to land before a seat reads anything else
+  // and decides what it is working on.
+  //
+  // This surface had it missing entirely through increments 1 and 2: the banner was written into the
+  // MCP renderer and never here, so every CLI seat got none of it. Words now come from the protocol
+  // package so a third surface cannot repeat that. `?? []` for the same daemon-skew reason as
+  // owed_reviews below — the brief arrives cast, not parsed.
+  for (const inc of brief.incidents ?? []) {
+    for (const line of incidentBannerLines(inc)) w(`${theme.warn(line)}\n`);
+  }
 
   // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
   // someone else is blocked on, and the one that loses when a seat is busy: half the unverified
