@@ -16,6 +16,9 @@ export type Status = 'shipped' | 'near-term' | 'reserved' | 'out-of-scope';
  */
 export type PlanStatus = 'near-term' | 'reserved' | 'out-of-scope';
 
+/** The same three values at runtime — {@link resolveItem} enforces them; see the check for why. */
+const PLAN_STATUSES: readonly PlanStatus[] = ['near-term', 'reserved', 'out-of-scope'];
+
 /**
  * The proof an item **shipped** — the roadmap dogfooding musterd's own ADR 048/084/111 posture: a
  * declared skeleton with a *derived* status. An item is `shipped` iff it carries this anchor, and
@@ -151,6 +154,20 @@ export function resolveItem(r: RawItem): RoadmapItem {
   if (r.building !== undefined && r.shipped !== undefined) {
     throw new Error(
       `roadmap item "${r.id}" is shipped and also declares \`building\` — a finished item has no remainder`,
+    );
+  }
+  // `plan` becomes the item's `status`, and gen-roadmap.ts groups the status sections by equality —
+  // so an off-union value does not fail, it makes the item VANISH from every status group while
+  // still appearing in the wave-grouped Build sequence. The union alone could not stop that: this
+  // file sits in no tsconfig (`pnpm typecheck` runs `pnpm -r exec tsc` over the workspace packages,
+  // and `content/` is not one), so its types are advisory and the check has to be a runtime one.
+  // Found 2026-08-14: `ledger-seats` carried a sentence of increment prose here — the same text its
+  // `building` already held — and had been missing from Reserved ever since.
+  if (r.plan !== undefined && !PLAN_STATUSES.includes(r.plan)) {
+    throw new Error(
+      `roadmap item "${r.id}" declares plan "${r.plan}" — \`plan\` must be one of ` +
+        `${PLAN_STATUSES.join(' | ')}; it becomes the item's status, and an off-union value drops ` +
+        `it from every status group silently. Remaining increments belong in \`building\`.`,
     );
   }
   const { plan: _plan, ...rest } = r;
@@ -1450,7 +1467,7 @@ const RAW: RawItem[] = [
       'increments 3–5 — remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance. Increments 1–2 landed: kind service + the auto-refresher’s seat, and the warn-only census in doctor/init --check.',
     wave: 8,
     title: 'Ledger seats — every actor on the roster (services as members)',
-    plan: 'increments 1–5: kind service + the auto-refresher’s seat, the census check, remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance',
+    plan: 'reserved',
     category: 'platform',
     blurb:
       'The roster becomes the complete census of actors on a machine — humans, agents, and now services: peer seats can decline and hold lanes; ledger seats (kind: service) carry identity, roles, attribution, and audit for the unattended actors that act most.',
@@ -1559,10 +1576,11 @@ const RAW: RawItem[] = [
   {
     id: 'mcp-tool-surface',
     frozenBy: 144,
-    building: 'increments 5 (scope by role) and 6 (discovery, conditional) — 1–4 landed',
-    wave: 'later',
     title: 'musterd’s MCP server, examined — names, descriptions, schemas, results & discovery',
-    plan: 'reserved',
+    // Increment 1 is the separate `tool-call-telemetry` item (#286), so this anchor names the four
+    // that are this item's own. Increment 6 built nothing by decision — MCP spec 2026-07-28 landed
+    // #2808 as `server/discover`, and ADR 175 carries the adoption — so it anchors no PR here.
+    shipped: { prs: [291, 297, 375, 569] },
     category: 'harness',
     blurb:
       'Treat musterd’s own MCP server as a designed product surface — both what an agent sends and what it reads back. Audit the 18 tools’ names, descriptions, and schemas for clarity and weight, fix the namespace drift, make every result (empty states included) informative and action-naming for an agent, and give a seat a lean surface it can discover instead of a wall of schema on every call.',

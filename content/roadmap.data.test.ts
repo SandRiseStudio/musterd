@@ -50,7 +50,36 @@ describe('resolveItem — the frozenBy/unfrozen anchor invariant (ADR 177)', () 
   });
 });
 
+/**
+ * `plan` is a three-value union, but nothing enforced it at runtime and `content/` sits in no
+ * tsconfig (`pnpm typecheck` runs `pnpm -r exec tsc` over the workspace packages, and this is not
+ * one) — so the union was advisory. `ledger-seats` carried a sentence of increment prose there,
+ * which `resolveItem` faithfully copied into `status`; `gen-roadmap.ts` filters the status sections
+ * by equality, so the item silently vanished from Shipped/Near-term/Reserved/Out-of-scope and
+ * survived only in the wave-grouped Build sequence. Found 2026-08-14, one item of 84.
+ */
+describe('resolveItem — plan must be one of the three declared gradations', () => {
+  it('rejects prose in `plan`, which would otherwise become the item’s status', () => {
+    expect(() =>
+      resolveItem({ ...base, plan: 'increments 1-5: kind service, the census check' as never }),
+    ).toThrowError(/`plan` must be one of/);
+  });
+
+  it('accepts each of the three', () => {
+    for (const plan of ['near-term', 'reserved', 'out-of-scope'] as const) {
+      expect(resolveItem({ ...base, plan }).status).toBe(plan);
+    }
+  });
+});
+
 describe('the roadmap itself', () => {
+  it('gives every item a status the generator can group under', () => {
+    const ungroupable = ROADMAP_RAW.map(resolveItem)
+      .filter((i) => !['shipped', 'near-term', 'reserved', 'out-of-scope'].includes(i.status))
+      .map((i) => i.id);
+    expect(ungroupable).toEqual([]);
+  });
+
   it('declares an anchor on every item — coverage is the point, not a sample', () => {
     const missing = ROADMAP_RAW.filter(
       (i) => (i.frozenBy !== undefined) === (i.unfrozen !== undefined),
