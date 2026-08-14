@@ -89,6 +89,9 @@ session with `musterd session start|end` makes every measurement a write to the 
   `removeMusterdCursorHooks` drops them by the same markers.
 - Codex's declaration-only lane (`01KZ4QH585`) is untouched. Overlap on `session.ts` is the new
   conversation_id test only.
+- 2026-08-14: [ADR 268](268-clear-model-observed-on-session-change.md) is the writer-intent change
+  the residual above named. Omit still preserves; an explicit drop clears `model_observed` when the
+  captured session id changes and there is no new observation.
 
 ## Observability & Evaluation
 

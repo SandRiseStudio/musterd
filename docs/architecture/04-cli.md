@@ -20,7 +20,7 @@ src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
   help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
   args.ts             // argv parser → { command, positionals, flags }
-  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup
+  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed (omit = preserve); capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268)
   machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
   client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; HttpClient forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
@@ -113,7 +113,7 @@ src/
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
-    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198/265) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | show (ADR 131 §5 / ADR 160 / ADR 186). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start)
+    session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198/265/268) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | show (ADR 131 §5 / ADR 160 / ADR 186). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start). ADR 268: a new Cursor conversation_id without a model drops leftover model_observed; observe with no session_id still reconciles from enumeration; refresh heals an unended Cursor slot whose live .txt disagrees
     gate.ts           // musterd gate check --stdin — the PreToolUse enforcement gate (hook-driven): match the tool call vs the team's class table client-side, adjudicate matches via POST /gate; fail-open (ADR 150)
     host.ts           // musterd host [--once]: the resident wake-actuator loop (notify-shaped; ADR 131 inc 3)
     human.ts          // musterd human <name>: the mirror of `agent` — stands a person in the team home (~/musterd/<team>) with their 0600 binding, mints/reuses/re-issues the credential, self-claims, sets current (ADR 176)

@@ -447,6 +447,66 @@ describe('musterd session (capture)', () => {
       });
       expect(readBinding(wsA).model_observed?.model).toBe('cursor-grok-4.6-high');
     });
+
+    it('a new conversation_id with no model_id DROPS the leftover observation (ADR 268)', async () => {
+      // cursor-agent's afterMCPExecution payload often carries conversation_id and omits model_id.
+      // Keeping grok-4.6 from the desktop session is a stopped clock (miley's #826 residual).
+      await observeCursorSession({
+        session_id: 'a3fb8a1c-desktop',
+        model_id: 'grok-4.6',
+        cwd: wsA,
+      });
+      const got = await observeCursorSession({
+        session_id: '365e3420-cli',
+        cwd: wsA,
+      });
+      expect(got).toBeUndefined();
+      expect(readBinding(wsA).session).toMatchObject({
+        harness: 'cursor',
+        id: '365e3420-cli',
+      });
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+
+    it('the same conversation_id without a model KEEPS the observation (never-erase within a session)', async () => {
+      await observeCursorSession({
+        session_id: 'c1',
+        model_id: 'gpt-5.6-sol',
+        cwd: wsA,
+      });
+      await observeCursorSession({ session_id: 'c1', cwd: wsA });
+      expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
+    });
+
+    it('a hook payload with no conversation_id still reconciles from enumeration (ADR 268)', async () => {
+      // cursor-agent's afterMCPExecution often omits conversation_id. Returning before any write
+      // left observed_at unmoved (ADR 265 residual). Enumeration is how we learn the live id.
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          surface: 'cursor',
+          session: {
+            harness: 'cursor',
+            id: 'a3fb8a1c-desktop',
+            transcript_path: join(wsA, 'desktop.jsonl'),
+            started_at: startedAt,
+          },
+          model_observed: {
+            model: 'grok-4.6',
+            harness: 'cursor',
+            observed_at: startedAt,
+          },
+        }),
+      );
+      const livePath = join(wsA, '365e3420.txt');
+      writeFileSync(livePath, 'cursor-agent session\n');
+      await observeCursorSession({ cwd: wsA }, () => [
+        { id: '365e3420-cli', path: livePath, mtime: Date.now(), bytes: 20 },
+      ]);
+      expect(readBinding(wsA).session?.id).toBe('365e3420-cli');
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
   });
 
   /**
@@ -864,6 +924,47 @@ describe('musterd session (capture)', () => {
       );
       expect(refreshModelObservation(wsA)).toBeUndefined();
       expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+
+    it('heals an unended Cursor slot to a live CLI transcript and DROPS the leftover model (ADR 268)', () => {
+      // Measured specimen: slot still names the morning desktop session (no ended_at), roster
+      // attests grok-4.6, while cursor-agent is writing a sibling .txt. Enumeration already
+      // outranks the slot for liveness (ADR 265); the observation must not ride along.
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          surface: 'cursor',
+          session: {
+            harness: 'cursor',
+            id: 'a3fb8a1c-desktop',
+            transcript_path: join(wsA, 'desktop.jsonl'),
+            started_at: startedAt,
+          },
+          model_observed: {
+            model: 'grok-4.6',
+            harness: 'cursor',
+            observed_at: startedAt,
+          },
+        }),
+      );
+      const livePath = join(wsA, '365e3420.txt');
+      writeFileSync(livePath, 'cursor-agent session\n');
+
+      expect(
+        refreshModelObservation(
+          wsA,
+          enumStub([{ id: '365e3420-cli', path: livePath, mtime: Date.now(), bytes: 20 }]),
+        ),
+      ).toBeUndefined();
+
+      const a = readBinding(wsA);
+      expect(a.session).toMatchObject({
+        harness: 'cursor',
+        id: '365e3420-cli',
+        transcript_path: livePath,
+      });
+      expect(a.model_observed).toBeUndefined();
     });
   });
 });
