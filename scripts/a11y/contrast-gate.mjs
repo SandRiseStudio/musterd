@@ -46,6 +46,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SHARED_BLOCKER_GATES, sharedBlockerNotice } from '../lib/shared-blocker-notice.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 const arg = (name, fallback) => {
@@ -231,7 +232,10 @@ if (!process.argv.includes('--static-only')) {
     console.log(
       '\ncontrast-gate FAILED — the fixture daemon did not come up, so the connected board went' +
         ' unmeasured. That is a gate failure, not a skip: passing here would report coverage the' +
-        ' run did not have. Needs `pnpm build` (CLI + web). `--static-only` skips this phase.',
+        ' run did not have. Needs `pnpm build` (CLI + web). `--static-only` skips this phase.' +
+        // A harness that will not start is the archetypal red no one's diff can touch — the most
+        // shared failure this gate has, so it gets the notice too.
+        sharedBlockerNotice(SHARED_BLOCKER_GATES.a11yContrast),
     );
     process.exit(1);
   }
@@ -257,7 +261,8 @@ if (failed.length) {
       ' into the rest.' +
       '\nEach row is `ratio (need N) ink on paper`. Almost always the fix is the -ink variant of the' +
       ' token already in use (--lc-success → --lc-success-ink); packages/web/AGENTS.md has the split.' +
-      '\nRe-measure one page with: pnpm a11y:contrast <url>',
+      '\nRe-measure one page with: pnpm a11y:contrast <url>' +
+      sharedBlockerNotice(SHARED_BLOCKER_GATES.a11yContrast),
   );
   process.exit(1);
 }
