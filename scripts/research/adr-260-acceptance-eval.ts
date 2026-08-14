@@ -238,6 +238,21 @@ export function windowGuard(
   return { clean: reasons.length === 0, reasons };
 }
 
+/**
+ * The files that decide who is asked. THE single source of truth for both directions of the
+ * measurement: the window guard below disqualifies a window when one of these changes, and
+ * `scripts/check-routing-freeze.ts` imports this exact array to decide what the freeze protects.
+ *
+ * They must never be two lists. A team that freezes one set of files while the instrument measures
+ * another gets a clean-looking window over a system that moved — which is precisely the failure
+ * the 2026-08-14 run produced by accident, re-created on purpose.
+ */
+export const ROUTING_PATHS = [
+  'packages/server/src/store/review.ts',
+  'packages/server/src/store/orientation.ts',
+  'packages/protocol/src/envelope.ts',
+] as const;
+
 /** Commits touching the files that decide who is asked, within [lo, hi). */
 export function routingCommitsSince(
   lo: number,
@@ -251,9 +266,7 @@ export function routingCommitsSince(
     `--until=${Math.floor(hi / 1000)}`,
     '--format=%H%x09%ct%x09%s',
     '--',
-    'packages/server/src/store/review.ts',
-    'packages/server/src/store/orientation.ts',
-    'packages/protocol/src/envelope.ts',
+    ...ROUTING_PATHS,
   ]);
   return out
     .split('\n')
