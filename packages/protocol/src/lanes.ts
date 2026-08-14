@@ -143,6 +143,12 @@ export const LaneSchema = z.object({
   title: z.string(),
   detail: z.string().nullable(),
   /**
+   * What sort of lane this is. `null` = ordinary work lane; `'incident'` = daemon-opened
+   * shared-blocker lane (spec 2026-08-14). Immutable after open on purpose — it is deliberately
+   * absent from `UpdateLaneSchema`: an incident that stops being one is resolved, never relabeled.
+   */
+  kind: z.enum(['incident']).nullable().default(null),
+  /**
    * Owning seat name; null = open/unowned. The two are one fact, not two: `state === 'open'` ⟺
    * `owner_seat === null`, enforced on every transition (`updateLane`) — claiming an open lane
    * moves it to `claimed`, and moving one back to `open` releases it. A lane that names an owner
@@ -277,6 +283,8 @@ export const OpenLaneSchema = z.object({
   risk: z.array(z.string()).optional(),
   /** Declared acceptance stakes (ADR 234). Omitted ⇒ `normal`; nothing routes on it yet. */
   stakes: LaneStakesSchema.optional(),
+  /** Lane kind (spec 2026-08-14): only the daemon sets 'incident'; omitted ⇒ ordinary lane. */
+  kind: z.enum(['incident']).optional(),
   claim: z.boolean().optional(),
 });
 export type OpenLane = z.infer<typeof OpenLaneSchema>;

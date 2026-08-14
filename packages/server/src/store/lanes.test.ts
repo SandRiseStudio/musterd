@@ -727,3 +727,21 @@ describe('stale_acceptance warning (value-layer design)', () => {
     expect(w.some((x) => x.kind === 'stale_acceptance')).toBe(true);
   });
 });
+
+describe('lane kind (incident convergence inc 1)', () => {
+  it('kind persists through open and reads back; default is null; updateLane leaves it alone', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'miley', {
+      title: 'incident: ci:gates/A11y contrast',
+      kind: 'incident',
+      stakes: 'high',
+    });
+    expect(lane.kind).toBe('incident');
+    expect(getLane(db, team.id, lane.id, 'bravo')?.kind).toBe('incident');
+    const plain = openLane(db, team.id, 'bravo', 'miley', { title: 'ordinary' });
+    expect(plain.kind).toBeNull();
+    // kind is immutable: a routine patch must not touch it
+    const patched = updateLane(db, team.id, lane.id, 'bravo', { detail: 'more' });
+    expect(patched?.kind).toBe('incident');
+  });
+});
