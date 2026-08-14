@@ -1,6 +1,6 @@
-# 269 — The routing files hold still until 2026-08-21, so the acceptance re-run can be read
+# 269 — The routing files hold still until the acceptance re-run fires, so it can be read
 
-- Status: accepted
+- Status: proposed — built and parked on `izzo/routing-freeze`, DEFERRED by nick 2026-08-14 ("not now, sometime before we remeasure"). Do not treat as in force: nothing is frozen today.
 - Date: 2026-08-14
 - Owner: izzo
 - Relates to: ADR 260 (live pick skips a busy agent, and its 2026-08-14 Eval note), ADR 253 (agents-only live pick), ADR 254 (eligible sets), quiet-set spec increments 1–2, `docs/wiki/acceptance-routing.md`
@@ -11,7 +11,7 @@ The ADR 260 Eval ran on 2026-08-14 (#837) and could not be read **in either dire
 
 #842 gave the scheduled re-run a window guard that detects this condition instead of reporting through it. Its first live run refused, and the refusal is the finding: **11 commits to the routing files and 4 `policy.change` rows in 7 days.**
 
-Detection alone therefore buys nothing. At that rate the 2026-08-21 re-run reports UNREADABLE and the team learns nothing for the second time. On a system this active, a measurement window is **made, not found**.
+Detection alone therefore buys nothing. At that rate the re-run reports UNREADABLE and the team learns nothing for the second time. On a system this active, a measurement window is **made, not found**.
 
 ## Problem
 
@@ -21,7 +21,7 @@ Nobody was careless. The changes were ADRs 253, 254, 255, 257, 258, 264 and more
 
 ## Decision
 
-**Those three files hold still until the re-run fires (2026-08-21 09:07), enforced by `pnpm routing-freeze:check`.**
+**Those three files hold still until the re-run fires (currently 2026-09-11 09:07, `FREEZE_UNTIL`), enforced by `pnpm routing-freeze:check`.**
 
 The freeze is **deliberately weak**:
 
@@ -35,13 +35,15 @@ The frozen list is imported from the Eval's own `ROUTING_PATHS`, so the files th
 
 - **A claim that routing work is less important than the measurement.** It is not. The escape hatch exists because the ordering is the opposite: shipped routing beats a cleaner statistic, and the freeze only insists the trade is made on purpose.
 - **A norm.** ADR 259's own evidence is that a written norm nobody reads does not change behaviour; the wiki knew about the stale-`dist` trap for three days while two seats walked into it. This is a gate for the same reason #836 is a gate.
-- **Permanent.** One week, one measurement, then inert.
+- **Permanent.** One measurement window, then inert.
 
 ## Consequences
 
-The one claimed lane plausibly affected is miley's incident-convergence increment 2 — increment 1 touched `orientation.ts` and `envelope.ts`. **miley was asked before this was built** (`01M014PGVXGH6BCV5D4DDY4D0B`), offered a named carve-out or a flat decline, and told that a decline would be recorded here as a knowingly dirty window rather than argued with. Quiet-set increment 2 is the other lane in range and is already parked by the Eval's verdict, so the freeze costs it nothing.
+**The consent this needs has not been obtained, and must be re-obtained before it lands.** miley was asked on 2026-08-14 (`01M014PGVXGH6BCV5D4DDY4D0B`) because their incident-convergence increment 2 is the one claimed lane plausibly affected — increment 1 touched `orientation.ts` and `envelope.ts`. That ask was **withdrawn unanswered** (`01M014YQRB`) when the freeze was deferred, so no seat has agreed to be constrained by this. Whoever revives this re-asks the owners of routing-adjacent lanes *at that time*; an answer nobody gave must not be inherited from this paragraph.
 
-If the window survives to 08-21, the re-run reports a readable number for the first time — with concentration (top-reviewer share) as the primary metric per the spec's Increments point 3, and the 10-minute rate secondary.
+Quiet-set increment 2 is the other lane in range and is parked by the Eval's verdict, so the freeze costs it nothing whenever it lands.
+
+If the window survives to the run, the re-run reports a readable number for the first time — with concentration (top-reviewer share) as the primary metric per the spec's Increments point 3, and the 10-minute rate secondary.
 
 If it does not survive, the guard says so and the honest outcome is recorded rather than a number quoted. **A void window is a result, not a failure** — it is the measurement telling the truth about a system that is changing faster than it can be observed, which is itself worth knowing before anyone sizes a protocol change on a week of data.
 
@@ -49,7 +51,7 @@ If it does not survive, the guard says so and the honest outcome is recorded rat
 
 **Traces.** None new. The gate is a CI check; the void condition is already detectable by #842's window guard, independently of whether anyone ran this gate.
 
-**Eval.** Did the freeze hold? Two readings on 2026-08-21, both cheap:
+**Eval.** Did the freeze hold? Two readings when the run fires, both cheap:
 
 1. `git log --format=%B <freeze-start>..HEAD -- <ROUTING_PATHS>` — count `[unfreeze:]` markers. Zero means the window is clean and the re-run's verdict stands on its own.
 2. The re-run's own verdict. If it says UNREADABLE while the gate recorded no override, the two disagree and **the guard is right** — something contaminated the window that this gate does not watch (a new seat changing the grade ladder is the known example, and it is invisible to both). That disagreement is the most informative outcome available and should be written up, not reconciled away.

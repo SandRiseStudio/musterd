@@ -1,6 +1,7 @@
 /*
  * The routing freeze: keep the three files that decide WHO IS ASKED still, so the scheduled
- * ADR 260 re-run on 2026-08-21 has a window it can actually read.
+ * ADR 260 re-run has a window it can actually read. The date lives in FREEZE_UNTIL below and is
+ * paired with a LaunchAgent — it has already moved once and will move again.
  *
  *   pnpm routing-freeze:check [--base <ref>]
  *
@@ -34,8 +35,16 @@ import { ROUTING_PATHS } from './research/adr-260-acceptance-eval.ts';
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 
-/** The measurement window closes when the scheduled re-run fires (LaunchAgent, 2026-08-21 09:07). */
-export const FREEZE_UNTIL = Date.parse('2026-08-21T09:07:00-07:00');
+/**
+ * The measurement window closes when the scheduled re-run fires — the LaunchAgent
+ * `studio.sandrise.musterd-adr260-rerun`, currently 2026-09-11 09:07.
+ *
+ * KEEP THESE TWO IN STEP. If the run moves, this moves with it: a FREEZE_UNTIL earlier than the run
+ * means the routing files thaw before the window closes and the run reports UNREADABLE anyway; a
+ * FREEZE_UNTIL later than the run means the team is held still for a measurement that already
+ * happened. Verify with `launchctl print gui/$(id -u)/studio.sandrise.musterd-adr260-rerun`.
+ */
+export const FREEZE_UNTIL = Date.parse('2026-09-11T09:07:00-07:00');
 
 /** `[unfreeze: reason]` anywhere in a commit message on the branch releases the gate. */
 export const UNFREEZE_RE = /\[unfreeze:([^\]]*)\]/i;
@@ -100,12 +109,14 @@ function main(): void {
     process.stdout.write('✓ routing freeze intact — no frozen path in this change.\n');
     return;
   }
+  // Derived, never a literal: the date moved once already, and a hardcoded copy in a message is
+  // how a gate ends up confidently naming a window that no longer exists.
   const until = new Date(FREEZE_UNTIL).toISOString().slice(0, 16).replace('T', ' ');
   if (v.override !== null) {
     process.stdout.write(
       `⚠ routing freeze DELIBERATELY BROKEN — passing on \`[unfreeze: ${v.override}]\`.\n` +
         `  Touched: ${v.violations.join(', ')}\n` +
-        `  The 2026-08-21 measurement window is now void. The re-run will detect this on its own ` +
+        `  The ${until} measurement window is now void. The re-run will detect this on its own ` +
         `and report UNREADABLE; say so in the lane rather than letting someone quote the number.\n`,
     );
     return;
