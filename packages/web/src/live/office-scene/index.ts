@@ -336,6 +336,14 @@ export function mountOffice(
       c.width = Math.round(width * dpr);
       c.height = Math.round(height * dpr);
     }
+    // The backing store above is in DEVICE pixels; the element still needs its CSS size, or it lays
+    // out at the attribute size and renders `dpr`× too large. `/live` never saw this because
+    // `.lc-gl-canvas canvas { width/height: 100% !important }` supplies it there — which is exactly
+    // why the landing hero (host `.hero__canvas`, no such rule) shipped a 2× scene on musterd.io
+    // until 2026-08-13. A scene must size its own canvas correctly for any host, not depend on the
+    // consumer's stylesheet; `/live`'s `!important` rules still win over these, so nothing moves there.
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
     fit = fitFloor(width, height);
   }
 
