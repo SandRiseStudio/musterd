@@ -1093,7 +1093,11 @@
   max-width: 18rem;
   padding: 1.5px 5px 1.5px 6px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--lc-paper) 90%, transparent);
+  /* Opaque for the same reason as the speech bubble directly above it in this file: the last 10% was
+     the live room, so an 8px nameplate pinned to a walking character had its paper decided by the
+     character it was pinned to. The plate is the smallest text on the surface and the least able to
+     afford it. Nothing else about the pill changes — rim, sheen and glow still carry the accent. */
+  background: var(--lc-paper);
   border: 1px solid color-mix(in srgb, var(--lc-accent) 26%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
   font-size: 8px;
@@ -1430,16 +1434,28 @@
   max-width: 260px;
   padding: 7px 11px 8px;
   border-radius: 13px;
-  /* Slightly glassy paper (nick, 2026-07-29: "slightly transparent and visually rich"): the stock
-     drops to ~88% so the room ghosts through a bubble that hovers over it, and each tier of the
-     gradient carries a whisper of the act's tone — the top edge blushes with the tone, the body
-     stays paper. Held well above the nameplates' 84%: a bubble carries five lines of text and
-     cannot afford the wash-out a chip can. */
+  /* Visually rich paper (nick, 2026-07-29: "slightly transparent and visually rich") — the gradient
+     and its tonal blush are kept exactly: the top edge blushes with the act's tone, the body stays
+     paper, the foot drops to paper-2.
+
+     THE TRANSPARENCY IS GONE, and that is a deliberate trade against the original note. Each stop
+     used to mix ~88% toward `transparent` so the room ghosted through a bubble hovering over it.
+     The remaining 12% is not a texture, it is the live WebGL room, so the bubble's paper — and
+     therefore its contrast — was whatever the bubble happened to be floating above. `--lc-paper-ink`
+     is 12.60 on this stock opaque and 10.99 on paper-2; the same ink measured 1.38 over a dark actor
+     (#2c3b40) and 2.11 over a character's body (#724b29), which is the whole failure. Worst at night,
+     when the veil darkens the actors, but never safe: a bubble over a dark actor fails in daylight
+     too (2.68 at light=15).
+
+     A bubble carries five lines of an agent's actual words. It cannot be the one surface whose
+     legibility is decided by who walks under it — the same rule the caption and the asks rail now
+     follow. If the ghosting is wanted back, it belongs in a form that cannot reach the ink: tone the
+     RING or the shadow, not the stock. */
   background: linear-gradient(
     180deg,
-    color-mix(in srgb, color-mix(in srgb, var(--lc-paper) 88%, var(--lc-speech-tone)) 90%, transparent) 0%,
-    color-mix(in srgb, var(--lc-paper) 89%, transparent) 34%,
-    color-mix(in srgb, var(--lc-paper-2) 87%, transparent) 100%
+    color-mix(in srgb, var(--lc-paper) 88%, var(--lc-speech-tone)) 0%,
+    var(--lc-paper) 34%,
+    var(--lc-paper-2) 100%
   );
   /* No backdrop-filter. It was here to buy contrast for a translucent dark bubble; near-opaque paper
      needs none — and this element renders on the /broadcast 1920x1080 30fps capture, where a blur
