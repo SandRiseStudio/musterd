@@ -77,5 +77,13 @@ fails loudly rather than letting the suite silently test stale output again.
   misdiagnoses in the two days before this ADR; the fifth above). Baseline: ~2/day while multiple
   seats shared one machine. Success: zero new _vitest_-side recurrences added to that page; any
   new recurrence must name a resolver other than vitest (tsc, node CLI spawn) or falsify the alias.
+  Post-acceptance, dolly ran the strongest form: recurrence #1's incident tree rebuilt verbatim
+  (`350752e8^` credentials.ts built into dist, src restored, so dist lacks `guardian_tiers`) passes
+  44/44 under the alias — the fix kills the historical failure, not a synthetic one.
 - **Experiment**: n/a — no behavior toggle worth A/B-ing; the negative control (no-alias config
   cannot collect with dist absent) is recorded in Consequences and reproducible in one command.
+- **Known dist reader still inside vitest** (dolly's acceptance correction): "vitest no longer
+  reads dist" is one test too strong — `packages/mcp/src/dist-imports.test.ts` reads dist _by
+  design_ (published-tarball import graph, the 0.4.0 unloadable-release guard). A missing dist
+  fails it honestly, but a **stale** dist passes it silently. That residue belongs to the
+  dist-freshness gate (dolly's lane `01M0122XJ344T7WGQZJZWZG8KD`), alongside typecheck.
