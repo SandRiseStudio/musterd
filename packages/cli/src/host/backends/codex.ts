@@ -256,7 +256,12 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
                 ? { transcript_bytes: liveness.transcriptBytes }
                 : {}),
               ...(liveness.transcriptMtime !== undefined
-                ? { transcript_age_ms: Math.max(0, Date.now() - liveness.transcriptMtime) }
+                ? // Float on APFS — see the sibling note in claudeCode.ts; the schema rounds too.
+                  {
+                    transcript_age_ms: Math.round(
+                      Math.max(0, Date.now() - liveness.transcriptMtime),
+                    ),
+                  }
                 : {}),
             };
       const captured = capturedId(liveness);
