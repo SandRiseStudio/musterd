@@ -36,6 +36,14 @@ The 12.8h window between the web-low arming and ADR 260 going live scores 89% go
 
 Before citing any acceptance window, print the rows and look at who closed them and when. n is small enough here that one seat's evening changes every number on the page.
 
+## Routing changes faster than it can be measured — 11 commits and 4 policy changes in one week (2026-08-14; falsify: `node scripts/research/adr-260-acceptance-eval.ts --rerun --days 7`)
+
+The instrument now refuses to report a before/after when the window is contaminated, and the first thing it did was refuse. A 7-day window to 2026-08-14 contains **4 `policy.change` rows** and **11 commits** to `review.ts` / `orientation.ts` / `envelope.ts` — ADR 253, ADR 254, ADR 255, ADR 257, ADR 258, ADR 264, #785 and more.
+
+The practical consequence: **a clean measurement window for acceptance routing may not exist on this team at the current rate of change.** That is not an argument for measuring anyway. It means any acceptance statistic quoted over a multi-day window here is describing a moving system, and the honest options are a deliberate freeze on routing code for the length of a window, or descriptive-only numbers that nobody cites as a before/after.
+
+The re-run prints its numbers either way — refusing to *compare* is not the same as refusing to *look*. Descriptive read of that same dirty window, for scale: n=56 live-routed, top reviewer 55% (31/56), `cross_family` 68%, good-≤10m 38%. The concentration figure is consistent with the smaller 28h window above, which is the one number here that has now been seen twice.
+
 ## Two traps in the pre-registered definitions (2026-08-14; falsify: read the header comment of `scripts/research/adr-260-acceptance-eval.ts`)
 
 - **A jumped route leaves the numerator, not the denominator.** The rule (`closer != asked reviewer AND closer != owner`) is written as "drop from the confirm numerator". Dropping those rows entirely raised the measured baseline from 23% to 27% — the routed ask still went unanswered, so it is a miss, not an absence.

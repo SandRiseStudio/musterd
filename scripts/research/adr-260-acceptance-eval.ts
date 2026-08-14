@@ -189,6 +189,81 @@ function wakeVolume(db: DatabaseSync, lo: number, hi: number) {
   };
 }
 
+/**
+ * THE WINDOW GUARD — the reason this script exists as more than a query.
+ *
+ * The 2026-08-14 run's entire verdict was "unreadable": the window contained ADR 253 and the
+ * arrival of the team's only cross-family seat, so neither the credit nor the disproof direction
+ * survived. An instrument that cannot notice that condition will make the same mistake again and
+ * report a number with a straight face. This one refuses.
+ *
+ * Two disqualifying classes, both pre-registered by what actually went wrong:
+ *  - a `policy.change` audit row inside the window — arming a stakes default changes the POPULATION
+ *    of lanes that route an ask at all, not merely their speed (spec §Confounds);
+ *  - a commit touching the routing code inside the window — `review.ts` picks the counterpart,
+ *    `orientation.ts` decides what re-surfaces, `envelope.ts` gates which acts may fan out.
+ *
+ * Deliberately NOT disqualifying: a new seat joining, which also moves the grade ladder. That is
+ * the confound that broke the last run and it is invisible in both sources here — it shows up only
+ * as a shift in `cross_family` share, which is why the printed comparison always carries that
+ * column and why concentration is the PRIMARY metric on re-run rather than the 10-minute rate.
+ */
+export interface GuardVerdict {
+  clean: boolean;
+  reasons: string[];
+}
+
+export function windowGuard(
+  policyChanges: number[],
+  routingCommits: { sha: string; ts: number; subject: string }[],
+  lo: number,
+  hi: number,
+): GuardVerdict {
+  const reasons: string[] = [];
+  const inWindow = (t: number) => t >= lo && t < hi;
+  const policies = policyChanges.filter(inWindow);
+  if (policies.length > 0) {
+    reasons.push(
+      `${policies.length} policy.change row(s) inside the window (${policies
+        .map((t) => new Date(t).toISOString().slice(0, 16))
+        .join(', ')}) — arming changes the population, not only its speed`,
+    );
+  }
+  for (const c of routingCommits.filter((c) => inWindow(c.ts))) {
+    reasons.push(
+      `routing code changed inside the window: ${c.sha.slice(0, 8)} ${c.subject} ` +
+        `(${new Date(c.ts).toISOString().slice(0, 16)})`,
+    );
+  }
+  return { clean: reasons.length === 0, reasons };
+}
+
+/** Commits touching the files that decide who is asked, within [lo, hi). */
+export function routingCommitsSince(
+  lo: number,
+  hi: number,
+  run: (args: string[]) => string,
+): { sha: string; ts: number; subject: string }[] {
+  // Argument array, never a shell string — no interpolation, no metacharacters, nothing to quote.
+  const out = run([
+    'log',
+    `--since=${Math.floor(lo / 1000)}`,
+    `--until=${Math.floor(hi / 1000)}`,
+    '--format=%H%x09%ct%x09%s',
+    '--',
+    'packages/server/src/store/review.ts',
+    'packages/server/src/store/orientation.ts',
+    'packages/protocol/src/envelope.ts',
+  ]);
+  return out
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [sha, ct, ...rest] = line.split('\t');
+      return { sha: sha ?? '', ts: Number(ct) * 1000, subject: rest.join('\t') };
+    });
+}
+
 function main() {
   const { db, submits } = load();
   const now = Date.now();
@@ -233,4 +308,116 @@ function main() {
   console.log('\n=== [3] duplicate verdicts: N/A — increment 2 not built ===');
 }
 
-if (process.argv[1]?.endsWith('adr-260-acceptance-eval.ts')) main();
+/**
+ * The scheduled re-run (wanderer's ask, 2026-08-21). Guard FIRST, numbers second — and when the
+ * guard fails, the numbers are not printed as a comparison at all. A run that reports "6%" beside
+ * a routing change nobody noticed is worse than a run that reports nothing, because someone will
+ * cite it.
+ */
+export function rerun(
+  now: number,
+  windowDays: number,
+  db: ReturnType<typeof load>['db'],
+  submits: Submit[],
+  run: (args: string[]) => string,
+): { verdict: string; body: string } {
+  const lo = now - windowDays * 86_400_000;
+  const policyChanges = (
+    db
+      .prepare('select ts from audit where action = ? and ts >= ? and ts < ?')
+      .all('policy.change', lo, now) as { ts: number }[]
+  ).map((r) => r.ts);
+  const guard = windowGuard(policyChanges, routingCommitsSince(lo, now, run), lo, now);
+  const r = evaluate(`re-run, last ${windowDays}d`, submits.filter((s) => s.ts >= lo && s.ts < now));
+  const share = r.liveRouted ? (r.topReviewer?.[1] ?? 0) / r.liveRouted : 0;
+  const head =
+    `ADR 260 re-run, ${windowDays}d to ${new Date(now).toISOString().slice(0, 10)}: ` +
+    `n=${r.liveRouted} live-routed. PRIMARY top-reviewer share ` +
+    `${r.topReviewer?.[0] ?? '-'} ${Math.round(share * 100)}% ` +
+    `(${r.topReviewer?.[1] ?? 0}/${r.liveRouted}), cross_family ${Math.round(r.crossFamilyShare * 100)}%. ` +
+    `SECONDARY good-<=10m ${Math.round(r.goodRate * 100)}% (${r.good}/${r.liveRouted}).`;
+
+  if (!guard.clean) {
+    return {
+      verdict: 'UNREADABLE',
+      body:
+        `${head}\n\nWINDOW IS NOT CLEAN — do not cite these numbers as a before/after, and do not ` +
+        `size increment 2 on them. Disqualifying:\n- ${guard.reasons.join('\n- ')}\n\n` +
+        `This is the same condition that made the 2026-08-14 run unreadable. Re-run over a window ` +
+        `that starts after the last item above, or accept the numbers as descriptive only.`,
+    };
+  }
+  return {
+    verdict: 'CLEAN',
+    body:
+      `${head}\n\nWindow is clean — no policy.change row and no commit to review.ts / ` +
+      `orientation.ts / envelope.ts inside it. Per the quiet-set spec §Increments point 3, ` +
+      `concentration is the primary read: a sustained high top-reviewer share is the live case for ` +
+      `fan-out, and the 10-minute rate is secondary. n is still small; say so when you cite it.`,
+  };
+}
+
+/**
+ * Post as a service seat (ADR 232), composed from the CLI's own exported pieces rather than a
+ * private helper copied out of service.ts — same token file, same envelope, no duplicate auth
+ * policy. Unprovisioned means silent, exactly as the autorefresh announcement behaves: a research
+ * script must never be the reason a machine looks broken.
+ */
+async function post(body: string): Promise<boolean> {
+  const [{ HttpClient }, { loadConfig }, { serviceTokenPath }, { makeEnvelope }, { ulid }] =
+    await Promise.all([
+      import('../../packages/cli/dist/client.js'),
+      import('../../packages/cli/dist/config.js'),
+      import('../../packages/cli/dist/commands/service.js'),
+      import('../../packages/protocol/dist/envelope.js'),
+      import('../../packages/protocol/dist/ulid.js'),
+    ]);
+  const { readFileSync } = await import('node:fs');
+  let token: string;
+  try {
+    token = readFileSync(
+      process.env['MUSTERD_SERVICE_TOKEN_FILE'] ?? serviceTokenPath(),
+      'utf8',
+    ).trim();
+  } catch {
+    return false;
+  }
+  const config = loadConfig();
+  const team = process.env['MUSTERD_SERVICE_TEAM'] ?? config.current;
+  if (!token || !team) return false;
+  const http = new HttpClient({ server: config.server, key: token, surface: 'cli' });
+  await http.send(
+    team,
+    makeEnvelope({
+      id: ulid(),
+      team,
+      from: 'autorefresh',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body,
+    }),
+  );
+  return true;
+}
+
+async function rerunMain() {
+  const { db, submits } = load();
+  const daysArg = process.argv.indexOf('--days');
+  const windowDays = daysArg > -1 ? Number(process.argv[daysArg + 1]) : 7;
+  const { execFileSync } = await import('node:child_process');
+  const run = (args: string[]) =>
+    execFileSync('git', args, { cwd: new URL('../..', import.meta.url).pathname, encoding: 'utf8' });
+  const { verdict, body } = rerun(Date.now(), windowDays, db, submits, run);
+  const text = `[${verdict}] ${body}`;
+  console.log(text);
+  if (process.argv.includes('--post')) {
+    const sent = await post(text).catch(() => false);
+    console.log(sent ? '\nposted to the team as a service seat' : '\nnot posted (unprovisioned)');
+  }
+  // A dirty window is a finding, not a failure: exit 0 so launchd does not retry it as a crash.
+}
+
+if (process.argv[1]?.endsWith('adr-260-acceptance-eval.ts')) {
+  if (process.argv.includes('--rerun')) void rerunMain();
+  else main();
+}
