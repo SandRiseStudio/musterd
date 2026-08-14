@@ -76,6 +76,20 @@ Sensitivity against real, unrehearsed seat facts is **not** established — the 
 written by the same seat that wrote the scorer, which is the weakest possible calibration. The first
 ten real wrap-up runs are the honest sample, and this section should be re-measured against them.
 
+**First real run, 2026-08-13 (ryder's own wrap-up, n=3), and it disagrees with the table above.**
+Three genuinely-learned facts — none on any page — scored 0 HIT, **2 REVIEW**, 1 MISS: a musterd tool
+signature landed at 43% against `office-scene.md`, an eslint rule at 41% against
+`running-the-gates.md`. Both spurious. The rehearsed set produced 1 REVIEW in 8; the first
+unrehearsed set produced 2 in 3.
+
+The direction matters more than the ratio. The REVIEW band's cost is a human glance, and at 2-in-3
+that glance becomes the ritual rather than the exception — seats will start skipping it, which is
+how an instrument goes silent. The tempting fix is to raise `REVIEW_AT` until the noise stops; that
+is fitting the threshold to make the answer comfortable, on n=3, and it trades the false positives
+for exactly the false negatives measure 4 cannot afford. **Do not tune the threshold before the
+ten-run sample exists.** If the rate holds, the honest fix is a better scorer (the misses are
+short facts whose few terms are all corpus-common), not a moved line.
+
 ### The ledger
 
 The message log, per ADR 259's own layering (git for knowledge, the message log for events). A
