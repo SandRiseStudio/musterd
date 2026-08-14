@@ -96,3 +96,10 @@ unrecoverable). Numbers only; junk is ignored.
 An automatic usage emitter (hook/wrapper that reads harness transcripts and attaches `meta.usage`);
 the git-side metrics (wasted-work ratio, dup-rate — lanes territory); a cross-agent distributed trace
 over ADR 011 traceparent propagation.
+
+**Dogfood export leftover (2026-08-14, ADR 275).** The sink LaunchAgent is listening on `:4318`.
+The daemon plist on this machine currently has **no** `OTEL_EXPORTER_OTLP_ENDPOINT`, and
+`~/.musterd/otel-sink.log` is startup lines only. Occupancy in SQLite is the instrument until
+the installer surface restores that env (machine-local; do not bounce the shared daemon for a
+UI/telemetry eyeball). The table above describes the *intended* dogfood posture, not the live
+plist.

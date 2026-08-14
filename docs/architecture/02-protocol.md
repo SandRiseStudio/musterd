@@ -77,7 +77,7 @@ Handshake state machine: `connecting → hello → authenticated → subscribed 
 4. **Live frames:**
    - Client → `send`: `{ "type":"send", "envelope": <Envelope> }` → server validates, persists, routes; replies `{ "type":"ack", "id": <envelope.id> }`.
    - Server → `deliver`: `{ "type":"deliver", "envelope": <Envelope> }` for each message routed to this member's presence — or, for a `team-all` subscriber, every envelope on the team (deduped against recipients + sender, so a normal recipient never gets it twice).
-   - Client → `heartbeat`: `{ "type":"heartbeat" }` every **15s**; server updates `last_seen_at`. (Server may also treat any inbound frame as a heartbeat.)
+   - Client → `heartbeat`: `{ "type":"heartbeat", "model"?, "surface"? }` every **15s**; server updates `last_seen_at`. Optional `model` re-attests (ADR 101); optional `surface` follows capture (ADR 275; absent ⇒ no change). (Server may also treat any inbound frame as a heartbeat.)
    - Server → `presence`: `{ "type":"presence", "member":"Lin", "status":"online", "surface":"codex" }` on roster presence changes.
    - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`. A `superseded` error MAY carry `"same_workspace": true` (ADR 092) — the displacing claim came from the client's own workspace (a reload successor), signalling the replaced adapter to **exit** rather than linger dormant; absent ⇒ a cross-workspace takeover (stay dormant).
 5. **Close:** server removes the presence row (or marks offline) and emits a `presence` offline event to the team.

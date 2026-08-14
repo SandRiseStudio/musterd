@@ -28,7 +28,7 @@ src/
     teams.ts          // createTeam, getTeamBySlug, listMembers, archiveTeam
     members.ts        // addMember (issues token), getMember, authMember(token), leaveMember (releases in-flight claims — ADR 196), reapStaleObservers + reapExcessIdleObservers
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
-    presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale (kind-scoped single-active, ADR 042)
+    presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale, reattestModel (ADR 101), reattestSurface (ADR 275) (kind-scoped single-active, ADR 042)
     activity.ts       // resolveActivity: the two-clocks rule → offline/idle/working (v0.2 M2; ADR 140)
     quiescence.ts     // decision-grade busy/quiet/unknown from newest audited action; /health quietest_busy_ms (2026-08-03 design; split from display activity)
     cursors.ts        // getCursor, setCursor, unreadCount
@@ -118,6 +118,7 @@ export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: Member, env: Enve
 export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101) + { build } (ADR 135)
 export function heartbeat(db, presenceId): void;                          // bumps last_seen_at
 export function reattestModel(db, presenceId, model): {previous}|void;    // ADR 101: mid-occupancy model switch; writes + returns previous only on a real change
+export function reattestSurface(db, presenceId, surface): {previous}|void; // ADR 275: occupancy follows capture; writes only on a real change; no audit row
 export function currentAttestedModel(db, memberId, presenceId?): string|null; // ADR 101: the per-act model stamp source — the sending occupancy's attestation (presenceId), else newest-attested
 export function detach(db, presenceId): void;                             // removes row
 export function listPresence(db, teamId): PresenceSummary[];              // for status/roster (incl. provenance/workspace/driver/model)

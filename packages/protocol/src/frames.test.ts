@@ -117,4 +117,22 @@ describe('WS frames', () => {
     const legacy = WSServerFrame.parse({ type: 'error', code: 'superseded', message: 'x' });
     expect(legacy.type === 'error' && legacy.same_workspace).toBeUndefined();
   });
+
+  it('parses optional model + surface on a heartbeat (ADR 101 / ADR 275)', () => {
+    const bare = WSClientFrame.parse({ type: 'heartbeat' });
+    expect(bare.type === 'heartbeat' && bare.model).toBeUndefined();
+    expect(bare.type === 'heartbeat' && bare.surface).toBeUndefined();
+    const full = WSClientFrame.parse({
+      type: 'heartbeat',
+      model: 'grok-4.6',
+      surface: 'cursor',
+    });
+    expect(full.type === 'heartbeat' && full.model).toBe('grok-4.6');
+    expect(full.type === 'heartbeat' && full.surface).toBe('cursor');
+  });
+
+  it('rejects an unknown surface on a heartbeat', () => {
+    const r = WSClientFrame.safeParse({ type: 'heartbeat', surface: 'pager' });
+    expect(r.success).toBe(false);
+  });
 });
