@@ -70,6 +70,23 @@ describe('serviceCommand', () => {
     };
   }
 
+  /**
+   * The post-bounce verify seams. Every lifecycle verb that bounces the daemon ends in
+   * `verifyDaemonUp` → `awaitDaemon`, and BOTH seams default to production behaviour: an
+   * un-injected `health` is a real `fetch` at the configured server, and an un-injected `sleep` is a
+   * real timer. A unit test that omits them therefore talks to whatever daemon happens to be
+   * listening on this machine and really waits between polls.
+   *
+   * That is not hypothetical (2026-08-13): `awaitDaemon` retries 20x500ms when the baseline health
+   * call SUCCEEDED, and only 4x500ms when it failed. So on a machine with a live daemon, an
+   * autorefresh bounce landing between the baseline and the retries flips a ~20ms test into ~9.5s of
+   * real sleeping and blows vitest's 5s default. Reproduced deterministically with a stub answering
+   * 200 once then 503. Falsify: `MUSTERD_SERVER=http://127.0.0.1:1 vitest run src/commands/service.test.ts`
+   * — any test that jumps to ~1.5s is still reaching the network.
+   */
+  const daemonUp = async () => ({ connections: 0 });
+  const noWait = async () => {};
+
   async function capture(fn: () => Promise<number>): Promise<{ code: number; out: string }> {
     const chunks: string[] = [];
     const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => {
@@ -160,7 +177,12 @@ describe('serviceCommand', () => {
     it('--force overrides the guard', async () => {
       const c = ctx(probeFails(ABI_ERR));
       const { code } = await capture(() =>
-        serviceCommand(parseArgs(['install', '--force']), { platform: 'darwin', ctx: c }),
+        serviceCommand(parseArgs(['install', '--force']), {
+          platform: 'darwin',
+          ctx: c,
+          health: daemonUp,
+          sleep: noWait,
+        }),
       );
       expect(code).toBe(0);
       expect(existsSync(c.plistPath)).toBe(true);
@@ -169,7 +191,12 @@ describe('serviceCommand', () => {
     it('proceeds when the probe fails for any NON-ABI reason (never blocks what it cannot read)', async () => {
       const c = ctx(probeFails("Error: Cannot find module 'better-sqlite3'")); // packaged install, etc.
       const { code } = await capture(() =>
-        serviceCommand(parseArgs(['install']), { platform: 'darwin', ctx: c }),
+        serviceCommand(parseArgs(['install']), {
+          platform: 'darwin',
+          ctx: c,
+          health: daemonUp,
+          sleep: noWait,
+        }),
       );
       expect(code).toBe(0);
       expect(existsSync(c.plistPath)).toBe(true);
@@ -193,7 +220,12 @@ describe('serviceCommand', () => {
   it('install writes the plist, bootstraps, kickstarts, and reports', async () => {
     const c = ctx(recorder());
     const { code, out } = await capture(() =>
-      serviceCommand(parseArgs(['install']), { platform: 'darwin', ctx: c }),
+      serviceCommand(parseArgs(['install']), {
+        platform: 'darwin',
+        ctx: c,
+        health: daemonUp,
+        sleep: noWait,
+      }),
     );
     expect(code).toBe(0);
     expect(existsSync(c.plistPath)).toBe(true);
@@ -323,9 +355,12 @@ describe('serviceCommand', () => {
       serviceCommand(parseArgs(['restart']), {
         platform: 'darwin',
         ctx: c,
+        // Unreachable health is the POINT of this test, so it keeps its throwing stub — but the
+        // retry sleep still has to be injected, or the fail-open path really waits 4x500ms.
         health: async () => {
           throw new Error('ECONNREFUSED');
         },
+        sleep: noWait,
       }),
     );
     expect(code).toBe(0);
