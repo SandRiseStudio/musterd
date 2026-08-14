@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
+import { loadStamp } from '../guardian/damp.js';
 import {
   buildHostPlist,
   buildPlist,
@@ -48,6 +49,26 @@ describe('serviceCommand', () => {
       calls.push({ cmd, args });
       return result;
     };
+
+  /** The guardian LaunchAgent ctx as `resolveGuardianCtx` builds it, pointed at the temp dir. */
+  function guardianCtxFor(logPath: string) {
+    return {
+      uid: 501,
+      label: 'studio.sandrise.musterd-guardian',
+      plistPath: join(dir, 'guardian.plist'),
+      node: '/opt/homebrew/bin/node',
+      binJs: '/repo/packages/cli/dist/bin.js',
+      refreshArgs: ['guardian-tick'],
+      workingDir: '/repo',
+      logPath,
+      errLogPath: logPath,
+      path: '/usr/bin:/bin',
+      intervalSeconds: 120,
+      env: { MUSTERD_SERVICE_TOKEN_FILE: join(dir, 'guardian-seat-token') },
+      run: recorder(),
+      sleep: () => {},
+    };
+  }
 
   async function capture(fn: () => Promise<number>): Promise<{ code: number; out: string }> {
     const chunks: string[] = [];
@@ -415,6 +436,47 @@ describe('serviceCommand', () => {
     expect(plist).toContain('guardian-tick');
     expect(plist).toContain('studio.sandrise.musterd-guardian');
     expect(out).toContain('control probe: alert path fired ✓');
+  });
+
+  // The probe is only load-bearing if its firing is visible LATER (miley, 2026-08-13). Scheduled
+  // ticks persist because the plist redirects stdout to guardian.log; the install-time firing had
+  // only the operator's terminal, so ADR 263 §7's instrument-silence defense was uncitable from the
+  // Eval's own declared dataset ("the guardian log + the message stream + …"). The probe path now
+  // appends to the log itself.
+  it('the install-time control probe leaves a durable trace in the guardian log', async () => {
+    const gCtx = guardianCtxFor(join(dir, 'guardian.log'));
+    const { code } = await capture(() =>
+      serviceCommand(parseArgs(['install', '--guardian']), {
+        platform: 'darwin',
+        ctx: ctx(recorder()),
+        guardianCtx: gCtx,
+      }),
+    );
+    expect(code).toBe(0);
+    // Written where the guardian's own ledger lives — the path scheduled ticks append to, not the
+    // ctx-supplied plist target — so install-time and scheduled firings share one file.
+    const logged = readFileSync(join(dir, 'guardian', 'guardian.log'), 'utf8');
+    expect(logged).toContain('control probe: alert path fired ✓');
+    // The audit line keeps the greppable `guardian.<action> {json}` shape (ADR 263 Traces).
+    expect(logged).toMatch(/guardian\.alerted \{.*"class":"publisher_failed".*\}/);
+  });
+
+  // Re-running the probe must stay safe: it is a dry run, so it may neither burn a damping slot nor
+  // fake an incident. Verified by miley on 2026-08-13; pinned here because the probe path changed.
+  it('the control probe leaves no residue in the damping stamp', async () => {
+    const gCtx = guardianCtxFor(join(dir, 'guardian.log'));
+    await capture(() =>
+      serviceCommand(parseArgs(['install', '--guardian']), {
+        platform: 'darwin',
+        ctx: ctx(recorder()),
+        guardianCtx: gCtx,
+      }),
+    );
+    // `loadStamp` answers `emptyStamp()` for a missing file, so this reads the effective state
+    // whether or not the probe wrote one — no vacuous pass if the stamp simply is not there.
+    const stamp = loadStamp(join(dir, 'guardian', 'stamp.json'));
+    expect(stamp.lastIncident).toBeNull();
+    expect(stamp.lastAttemptAt).toEqual({});
   });
 
   it('service status --guardian names a never-ticked probe', async () => {

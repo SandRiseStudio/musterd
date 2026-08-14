@@ -8,14 +8,14 @@ A LaunchAgent (`studio.sandrise.musterd-guardian`) running `musterd service guar
 
 ## Classes and default tiers
 
-| Class | Meaning | Default tier | Remediation |
-| --- | --- | --- | --- |
-| `publisher_failed` | fresh /live build failure, daemon healthy | auto | `service refresh --live` |
-| `crashloop` | daemon down + climbing runs within 30 m of a refresh | auto | `service refresh --pin <last healthy build> --force`, plus an alert |
-| `daemon_down` | `/health` unreachable, no refresh to blame | alert | — |
-| `schema_drift` / `wrong_db` | `/health` schema/db differ from expectations | alert | — |
-| `error_rate` | ≥25 5xx/`musterd.errors` lines since boot | alert | — |
-| `presence_churn` | reaper storm since boot | alert | — |
+| Class                       | Meaning                                              | Default tier | Remediation                                                         |
+| --------------------------- | ---------------------------------------------------- | ------------ | ------------------------------------------------------------------- |
+| `publisher_failed`          | fresh /live build failure, daemon healthy            | auto         | `service refresh --live`                                            |
+| `crashloop`                 | daemon down + climbing runs within 30 m of a refresh | auto         | `service refresh --pin <last healthy build> --force`, plus an alert |
+| `daemon_down`               | `/health` unreachable, no refresh to blame           | alert        | —                                                                   |
+| `schema_drift` / `wrong_db` | `/health` schema/db differ from expectations         | alert        | —                                                                   |
+| `error_rate`                | ≥25 5xx/`musterd.errors` lines since boot            | alert        | —                                                                   |
+| `presence_churn`            | reaper storm since boot                              | alert        | —                                                                   |
 
 Flip a tier without a release: `musterd team policy --guardian-tier daemon_down=auto` (or `off` to clear all overrides). Sparse overrides sit over the shipped defaults.
 
@@ -30,6 +30,7 @@ Damping is one remediation attempt per class per hour, then forced escalation to
 ## Operating it
 
 - Install/arm: `musterd service --guardian install` (Node 22 PATH — the plist embeds `process.execPath`), then `musterd role assign guardian platform` in the roster home. Install ends with `control probe: alert path fired ✓` (2026-08-13; falsify: run the install and read its last line) — without that line, treat the alert path as untrusted and the probe's future silence as no evidence (see [Instrument silence is not evidence](instrument-silence.md)).
+- The probe's firing is recoverable after the fact: it appends to `guardian.log` like any tick, so the evidence outlives the install terminal (falsify: `grep 'control probe' ~/.musterd/guardian/guardian.log`). ~~Until #826 the probe printed only to the install command's stdout, so its one firing was unrecoverable — the log began 15:55 against a 15:53 install (2026-08-13)~~ FIXED 2026-08-13 by #826. Re-running the probe is also safe at any time (`musterd service guardian-tick --control-probe`): it is a dry run and leaves the stamp untouched, so it neither burns a damping slot nor fakes an incident.
 - Read it: `musterd service status` (guardian line: last tick age, goes loud `STALE` past 10 minutes) or `musterd service status --guardian`.
 - The guardian's own death is detectable: no stamp progress + no daily heartbeat act. A quiet guardian with a fresh stamp is healthy; a quiet guardian with a stale stamp is an incident.
 
