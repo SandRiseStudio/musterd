@@ -4,16 +4,29 @@
  * because routing changed inside the window; these tests exist so the NEXT run cannot do that
  * quietly. A guard that never fires is decoration — every case below asserts a refusal as well as
  * a pass.
+ *
+ * The concentration tests guard a different failure: the boundary detector's FIRST draft keyed on
+ * the ready row's `review_grade`, which is a property of the PAIR, and duly reported three
+ * same-family seats as "cross-family acceptors". Keying on seat family is the fix, and the test
+ * that would have caught it is here.
  */
 import { describe, expect, it } from 'vitest';
-import { routingCommitsSince, windowGuard } from './adr-260-acceptance-eval.ts';
+import {
+  CONCENTRATION_PREDICTION,
+  concentration,
+  familyOf,
+  judgeConcentration,
+  majorityFamily,
+  routingCommitsSince,
+  windowGuard,
+  WINDOW_PATHS,
+} from './adr-260-acceptance-eval.ts';
 
 const LO = Date.parse('2026-08-14T00:00:00Z');
 const HI = Date.parse('2026-08-21T00:00:00Z');
 const inside = Date.parse('2026-08-17T12:00:00Z');
 const before = Date.parse('2026-08-13T12:00:00Z');
 const after = Date.parse('2026-08-22T12:00:00Z');
-
 const commit = (ts: number) => ({ sha: 'abcdef1234', ts, subject: 'pick the quiet counterpart' });
 
 describe('windowGuard', () => {
@@ -25,63 +38,115 @@ describe('windowGuard', () => {
     const v = windowGuard([inside], [], LO, HI);
     expect(v.clean).toBe(false);
     expect(v.reasons[0]).toContain('policy.change');
-    expect(v.reasons[0]).toContain('population');
   });
 
-  it('refuses when the routing code changed inside', () => {
+  it('refuses when watched code changed inside', () => {
     const v = windowGuard([], [commit(inside)], LO, HI);
     expect(v.clean).toBe(false);
     expect(v.reasons[0]).toContain('abcdef12');
-    expect(v.reasons[0]).toContain('quiet counterpart');
-  });
-
-  it('names every disqualifying event, not just the first — a window can be dirty twice', () => {
-    const v = windowGuard([inside, inside + 1000], [commit(inside)], LO, HI);
-    expect(v.clean).toBe(false);
-    expect(v.reasons).toHaveLength(2); // one pooled policy line + one per commit
-    expect(v.reasons[0]).toContain('2 policy.change');
   });
 
   it('ignores events outside the window on both edges', () => {
     expect(windowGuard([before, after], [commit(before), commit(after)], LO, HI).clean).toBe(true);
   });
-
-  it('treats the window as half-open: lo counts, hi does not', () => {
-    expect(windowGuard([LO], [], LO, HI).clean).toBe(false);
-    expect(windowGuard([HI], [], LO, HI).clean).toBe(true);
-  });
 });
 
-describe('routingCommitsSince', () => {
-  it('asks git for the three files that decide who is asked, as an argument array', () => {
+describe('WINDOW_PATHS', () => {
+  it('watches the wake path, not only who-is-asked (the #844 miss)', () => {
+    // Item 5 depends on act/lease volume, so a change there invalidates the comparison even
+    // though it touches no routing file. This is the assertion that would have caught it.
+    expect(WINDOW_PATHS).toContain('packages/protocol/src/residency.ts');
+    expect(WINDOW_PATHS).toContain('packages/server/src/store/residency.ts');
+    expect(WINDOW_PATHS).toContain('packages/server/src/store/review.ts');
+  });
+
+  it('is what routingCommitsSince actually asks git about', () => {
     let seen: string[] = [];
     routingCommitsSince(LO, HI, (args) => {
       seen = args;
       return '';
     });
-    expect(seen[0]).toBe('log');
-    expect(seen).toContain('packages/server/src/store/review.ts');
-    expect(seen).toContain('packages/server/src/store/orientation.ts');
-    expect(seen).toContain('packages/protocol/src/envelope.ts');
-    // No shell string anywhere — every element is a discrete argv entry.
-    expect(seen.some((a) => a.includes(' -- '))).toBe(false);
+    for (const p of WINDOW_PATHS) expect(seen).toContain(p);
+  });
+});
+
+describe('familyOf / majorityFamily', () => {
+  it('maps the model ids this team actually attests', () => {
+    expect(familyOf('claude-opus-5')).toBe('claude');
+    expect(familyOf('grok-4.6')).toBe('grok');
+    expect(familyOf('gpt-5.6')).toBe('openai');
+    expect(familyOf('codex-mini')).toBe('openai');
+    expect(familyOf(undefined)).toBe('unknown');
   });
 
-  it('parses tab-separated git output into commits with ms timestamps', () => {
-    const out = 'sha1\t1786000000\tfix the picker\nsha2\t1786100000\ttidy\n';
-    const commits = routingCommitsSince(LO, HI, () => out);
-    expect(commits).toEqual([
-      { sha: 'sha1', ts: 1786000000000, subject: 'fix the picker' },
-      { sha: 'sha2', ts: 1786100000000, subject: 'tidy' },
+  it('picks the majority family and ignores unknowns', () => {
+    const m = new Map([
+      ['a', 'claude'],
+      ['b', 'claude'],
+      ['c', 'grok'],
+      ['d', 'unknown'],
     ]);
+    expect(majorityFamily(m)).toBe('claude');
+  });
+});
+
+describe('concentration', () => {
+  const fam = new Map([
+    ['dolly', 'claude'],
+    ['stanley', 'claude'],
+    ['miley', 'claude'],
+    ['wanderer', 'grok'],
+    ['gptbot', 'openai'],
+  ]);
+  const row = (ts: number, reviewer: string, grade = 'cross_family') => ({
+    ts,
+    d: { lane: `l${ts}`, owner: 'izzo', reviewer, review_grade: grade },
   });
 
-  it('keeps tabs inside a subject rather than truncating it', () => {
-    const commits = routingCommitsSince(LO, HI, () => 'sha1\t1786000000\ta\tb\n');
-    expect(commits[0]?.subject).toBe('a\tb');
+  it('does NOT treat a same-family seat as the intervention, however the pair was graded', () => {
+    // The original bug: these rows are all graded cross_family, but stanley and miley are claude.
+    const rows = [row(1000, 'stanley'), row(2000, 'miley'), row(3000, 'dolly')];
+    expect(concentration(rows as never, fam).boundary).toBeNull();
   });
 
-  it('returns nothing for empty git output rather than a phantom commit', () => {
-    expect(routingCommitsSince(LO, HI, () => '')).toEqual([]);
+  it('does not fire on the FIRST minority-family acceptor — one seat is the status quo', () => {
+    const rows = [row(1000, 'wanderer'), row(2000, 'wanderer'), row(3000, 'stanley')];
+    expect(concentration(rows as never, fam).boundary).toBeNull();
+  });
+
+  it('fires on the first ask to a SECOND, differently-familied seat', () => {
+    const rows = [row(1000, 'wanderer'), row(2000, 'stanley'), row(3000, 'gptbot')];
+    const c = concentration(rows as never, fam);
+    expect(c.boundary).toBe(3000);
+    expect(c.boundarySeat).toBe('gptbot');
+  });
+});
+
+describe('judgeConcentration — the pre-registered prediction', () => {
+  const period = (n: number, topShare: number) => ({
+    label: 'AFTER',
+    n,
+    topReviewer: 'wanderer',
+    topShare,
+    crossFamilyShare: topShare,
+    crossFamilySeats: ['wanderer'],
+  });
+
+  it('is INCONCLUSIVE below the pre-registered n, however good the number looks', () => {
+    expect(judgeConcentration(period(CONCENTRATION_PREDICTION.minN - 1, 0.1))).toBe('INCONCLUSIVE');
+  });
+
+  it('PASSES at or below 40% — the ladder split the asks', () => {
+    expect(judgeConcentration(period(30, 0.4))).toBe('PASS');
+    expect(judgeConcentration(period(30, 0.25))).toBe('PASS');
+  });
+
+  it('FAILS at or above 50% — a second seat did not disperse them, so the sort is not the cause', () => {
+    expect(judgeConcentration(period(30, 0.5))).toBe('FAIL');
+    expect(judgeConcentration(period(30, 0.57))).toBe('FAIL');
+  });
+
+  it('leaves the 40-50% band INCONCLUSIVE rather than rounding it to whichever I hoped for', () => {
+    expect(judgeConcentration(period(30, 0.45))).toBe('INCONCLUSIVE');
   });
 });

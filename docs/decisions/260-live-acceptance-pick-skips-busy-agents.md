@@ -148,3 +148,42 @@ A team whose every live cross-model agent is mid-turn will wake an offline seat 
   What survives all of it, and is now the only claim in this report I would defend: the asked seat
   answers 15/18 at a 60m median (attention, not supply), and **top-reviewer concentration**, which
   has now reproduced at two different n (50% at n=18, 56% at n=57) and is untouched by the wake path.
+
+- **2026-08-14 (later still) — the measurement moves from latency to concentration, and here is the
+  prediction, pre-registered before the intervention exists** (izzo, lane `01M016DSYJ`, nick's call).
+
+  Every latency reading this Eval produced was unreadable, and the reasons are structural rather
+  than fixable: routing changed 11 times in 7 days, and a defect can sit in both arms for three
+  weeks leaving no ledger row. A freeze was built (parked on `izzo/routing-freeze`, ADR 269
+  proposed) and deliberately **not** landed, because it buys only the contamination you can see.
+
+  Concentration is measured instead, because it reproduced across a filthy window, is a mechanism
+  you can read rather than an effect teased from noise, and is untouched by re-lease churn or
+  refused wake reports — none of those change who was NAMED as reviewer.
+
+  **Baseline, measured now** (`--concentration`, 2026-08-14): the team is claude-majority with
+  exactly one minority-family seat (wanderer, grok). Top-reviewer share **57% over the trailing 7
+  days, n=63**. It is 28% over 14 days and 26% all-time — the concentration regime began 2026-08-12
+  when ADR 253 took humans out of the live pick, so the 7-day arm is the honest BEFORE and the
+  instrument prints all three spans so that choice can be audited rather than trusted.
+
+  **The intervention** is nick's second minority-family seat (codex / gpt-5.6), not yet accepting.
+
+  **THE PREDICTION.** If the LADDER is the mechanism — `cross_family` sorts first, so on a
+  claude team with one such seat "highest grade available" resolves to one name — then a second
+  minority-family acceptor splits those asks:
+
+  | | |
+  | --- | --- |
+  | **PASS** | top-reviewer share **≤ 40%** over **≥ 20** live-routed submits after the boundary |
+  | **FAIL** | **≥ 50%** sustained over that n |
+  | **INCONCLUSIVE** | fewer than 20 submits after the boundary, or the 40–50% band |
+
+  **A FAIL is the informative outcome and must be recorded as a disproof, not explained away.** It
+  would mean the sort is not what concentrates the asks and my mechanism claim above is wrong; the
+  next suspects are the ADR 219 quiescence filter and grading, not the ladder.
+
+  The boundary is **detected from the data** — the first ready row naming a second distinct
+  minority-family seat — never asserted, because an author-chosen changepoint is how a prediction
+  gets fitted after the fact. Falsify any of this by running
+  `node scripts/research/adr-260-acceptance-eval.ts --concentration`.
