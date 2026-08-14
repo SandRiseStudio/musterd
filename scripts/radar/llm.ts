@@ -15,7 +15,7 @@ export interface LlmCompleteArgs {
   messages: LlmMessage[];
   maxTokens?: number;
   apiKey: string;
-  fetchFn?: FetchFn;
+  fetchFn?: FetchFn | undefined;
 }
 
 export interface LlmCompleteResult {
@@ -64,8 +64,8 @@ export async function completeAnthropic(args: LlmCompleteArgs): Promise<LlmCompl
     return {
       text,
       model: data.model ?? args.model,
-      inputTokens: data.usage?.input_tokens,
-      outputTokens: data.usage?.output_tokens,
+      ...(data.usage?.input_tokens !== undefined ? { inputTokens: data.usage.input_tokens } : {}),
+      ...(data.usage?.output_tokens !== undefined ? { outputTokens: data.usage.output_tokens } : {}),
     };
   } finally {
     clearTimeout(timer);

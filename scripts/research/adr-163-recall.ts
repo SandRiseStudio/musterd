@@ -161,7 +161,7 @@ for (const entry of EXECUTED) {
       command: entry.command,
       wrote,
       detected: isWriteShaped({ tool: 'Bash', command: entry.command }),
-      note: entry.note,
+      ...(entry.note !== undefined ? { note: entry.note } : {}),
       ran,
     });
   } finally {

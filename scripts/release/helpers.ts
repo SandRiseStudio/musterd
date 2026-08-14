@@ -61,7 +61,10 @@ export function parseReleaseArgs(argv: string[]): ReleaseArgs {
   if (version !== undefined && !SEMVER.test(version)) {
     throw new Error(`invalid --version ${JSON.stringify(version)} (want X.Y.Z)`);
   }
-  return { dryRun, allowDirty, version };
+  // `version` is optional-and-absent, not optional-and-undefined: under exactOptionalPropertyTypes
+  // those are different types, and the whole point of having no default (above) is that "nobody
+  // said" stays distinguishable from a value.
+  return { dryRun, allowDirty, ...(version !== undefined ? { version } : {}) };
 }
 
 /** The `X.Y.Z` core of a version, prerelease suffix discarded. */

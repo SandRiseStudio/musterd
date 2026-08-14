@@ -1,0 +1,44 @@
+/*
+ * `scripts/` is the second sibling hole named in `content/tsconfig.json` (#847): 44 files that
+ * belonged to no tsconfig, so their types were decoration. `pnpm typecheck` walks the pnpm
+ * workspace (`packages/*`) and `scripts/` is not a package, so nothing ever checked it — including
+ * every gate that decides CI.
+ *
+ * Measured 2026-08-14: 19 errors across 9 files. Eighteen were `exactOptionalPropertyTypes` and
+ * `noUncheckedIndexedAccess` fallout — real, but latent. The nineteenth had shipped and was live:
+ * `scripts/research/adr-260-acceptance-eval.ts` imported `ulid` from
+ * `packages/protocol/dist/ulid.js`, a module that has NEVER existed. The throw was swallowed by a
+ * `.catch(() => false)` at the call site, so the announcement path — scheduled to fire unattended
+ * into a channel nobody watches — would have failed as silence that looks like health (#850).
+ * `tsc` reports it as TS2307 on sight. Nothing was subtle about it; nothing was looking.
+ *
+ * No emit: these run through Node's native TypeScript, never a build. This config exists to be
+ * *checked* — hence `allowImportingTsExtensions`, which the `./foo.ts` specifiers require and which
+ * is only legal under `noEmit`.
+ *
+ * `allowJs` without `checkJs` is deliberate and narrow. `include` names TypeScript files only, so
+ * the 8 `.mjs` scripts here are NOT in the program; `allowJs` only lets the one `.ts` file that
+ * imports one of them (`lib/shared-blocker-notice.test.ts`) read its shape instead of inferring
+ * `any` and silently losing the checking this config exists to add. Turning `checkJs` on would drag
+ * those 8 files into the gate as an unmeasured side effect of a type-inference fix — its own lane.
+ *
+ * Sibling holes still open, measured the same day: `tests/` 15 files / 3 errors, `workers/` 5 files
+ * / 5 errors, and every package's own test files — 255 of them, excluded by each package tsconfig.
+ *
+ * Nothing in this comment may contain a glob with a star-slash in it. A `tsconfig.json` block
+ * comment that closes itself early does not fail loudly: `tsc` parses the wreckage, silently
+ * discards `extends`, and checks everything against compiler defaults instead. That reads as a
+ * flood of errors inside `node_modules` and no errors at all in the files you meant to check.
+ */
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "allowImportingTsExtensions": true,
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": ["**/*.ts"]
+}

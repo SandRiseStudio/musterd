@@ -22,11 +22,11 @@ export interface SweepArgs {
   limit: number;
   triage: boolean;
   /** Injected for tests. */
-  fetchFn?: FetchFn;
+  fetchFn?: FetchFn | undefined;
   seenFile?: string;
   apiKey?: string;
-  completeFn?: CompleteFn;
-  promptBody?: string;
+  completeFn?: CompleteFn | undefined;
+  promptBody?: string | undefined;
 }
 
 export function parseArgs(argv: string[]): SweepArgs {
@@ -112,7 +112,7 @@ export async function runSweep(args: SweepArgs): Promise<SweepReport> {
     truncated,
     new: printed,
     warnings,
-    triage,
+    ...(triage !== undefined ? { triage } : {}),
   };
 }
 

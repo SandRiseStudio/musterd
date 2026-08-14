@@ -130,7 +130,9 @@ if (process.argv[1]?.endsWith('adr-166-slot-sweep.ts')) {
   const outIdx = process.argv.indexOf('--out');
   // Defaults to the canonical series (shared with `musterd report` via one exported constant) so a
   // scheduled run and a hand-run land in the SAME file — two series is how a repeat goes unnoticed.
-  const out = outIdx > -1 ? process.argv[outIdx + 1] : sweepSeriesPath();
+  // `--out` with nothing after it falls back to the default rather than writing to "undefined" —
+  // a bare flag is a typo, and the canonical series is the safer place for the row to land.
+  const out = (outIdx > -1 ? process.argv[outIdx + 1] : undefined) ?? sweepSeriesPath();
   // Read before appending: the last row is the previous run, the other half of the repeat test.
   const previous = readSweepSeries(out).pop();
 
