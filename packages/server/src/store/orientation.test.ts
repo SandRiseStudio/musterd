@@ -1,6 +1,7 @@
 import { makeEnvelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
+import { recordBlockedReport } from './incidents.js';
 import { openLane, updateLane } from './lanes.js';
 import { addMember } from './members.js';
 import { insertMessage } from './messages.js';
@@ -532,5 +533,23 @@ describe('review_debt (value-layer design)', () => {
     const { db, team } = seed();
     openLane(db, team.id, 'revive', 'stanley', { title: 'live', claim: true });
     expect(deriveNext(db, team.id, 'revive', 'nick').review_debt).toBeUndefined();
+  });
+});
+
+describe('incidents lead the brief (spec 2026-08-14 inc 1)', () => {
+  it('an open incident appears for every member; a terminal one does not', () => {
+    const db = openDb(':memory:');
+    const team = createTeam(db, { slug: 'revive' });
+    addMember(db, team, { name: 'miley', kind: 'agent' });
+    recordBlockedReport(db, team.id, 'revive', 'izzo', { gate: 'ci:gates/A11y contrast' }, 'm1');
+    recordBlockedReport(db, team.id, 'revive', 'dolly', { gate: 'ci:gates/A11y contrast' }, 'm2');
+    const brief = deriveNext(db, team.id, 'revive', 'miley');
+    expect(brief.incidents).toHaveLength(1);
+    expect(brief.incidents[0]).toMatchObject({
+      gate: 'ci:gates/A11y contrast',
+      owner_seat: null,
+    });
+    updateLane(db, team.id, brief.incidents[0]!.lane, 'revive', { state: 'abandoned' });
+    expect(deriveNext(db, team.id, 'revive', 'miley').incidents).toHaveLength(0);
   });
 });

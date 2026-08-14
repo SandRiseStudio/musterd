@@ -33,6 +33,8 @@ interface LaneRow {
   project: string;
   title: string;
   detail: string | null;
+  /** Lane kind (spec 2026-08-14); null on pre-v41 rows ⇒ ordinary lane. */
+  kind: string | null;
   owner_seat: string | null;
   role: string | null;
   surface_globs: string;
@@ -63,6 +65,8 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     project: row.project,
     title: row.title,
     detail: row.detail,
+    // Absence reads as "ordinary lane" — same skew posture as stakes below (ADR 148).
+    kind: (row.kind as Lane['kind']) ?? null,
     owner_seat: row.owner_seat,
     role: row.role,
     surface_globs: JSON.parse(row.surface_globs) as string[],
@@ -115,6 +119,7 @@ export function openLane(
     project: input.project ?? 'default',
     title: input.title,
     detail: input.detail ?? null,
+    kind: input.kind ?? null,
     owner_seat: claim ? createdBy : null,
     role: input.role ?? null,
     surface_globs: JSON.stringify(input.surface_globs ?? []),
@@ -139,9 +144,9 @@ export function openLane(
     updated_at: now,
   };
   db.prepare(
-    `INSERT INTO lanes (id, team_id, project, title, detail, owner_seat, role, surface_globs,
+    `INSERT INTO lanes (id, team_id, project, title, detail, kind, owner_seat, role, surface_globs,
                         depends_on, branch, goal_id, risk, stakes, stakes_provenance, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
-     VALUES (@id, @team_id, @project, @title, @detail, @owner_seat, @role, @surface_globs,
+     VALUES (@id, @team_id, @project, @title, @detail, @kind, @owner_seat, @role, @surface_globs,
              @depends_on, @branch, @goal_id, @risk, @stakes, @stakes_provenance, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
   ).run(row);
   return rowToLane(row, teamSlug);

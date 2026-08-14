@@ -91,6 +91,7 @@ describe('version-bump discipline (ADR 085)', () => {
     11: 'a5bf07c7b3b2c44a', // + outcome acceptance close loop (ADR 192): lane_submit + checklist
     12: '30bf29a8c1e89fc9',
     13: '18db5d31ab51fe37', // + the tick installs when the lockfile moved; a failed tick notifies (pinned, not down) // + daemon refresh: the auto-refresher owns the bounce; never prescribe `service refresh`
+    14: '8c1b079d28c39788', // + shared blockers: blocked_by report-and-park + incident convergence (spec 2026-08-14 inc 1)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
@@ -123,5 +124,13 @@ describe('primer is the loop kernel (ADR 085)', () => {
     expect(lines).toBeLessThan(35);
     expect(primer).toContain('musterd skill');
     expect(primer).toContain('.claude/skills/musterd/SKILL.md');
+  });
+});
+
+describe('skill body — shared-blocker norm (spec 2026-08-14 inc 1)', () => {
+  it('teaches blocked_by report-and-park in the on-demand skill, not the primer', () => {
+    const body = renderSkillBody({ team: 'revive' });
+    expect(body).toContain('meta.blocked_by');
+    expect(body).toContain('park behind it');
   });
 });

@@ -143,6 +143,14 @@ export const LaneSchema = z.object({
   title: z.string(),
   detail: z.string().nullable(),
   /**
+   * What sort of lane this is. `null` = ordinary work lane; `'incident'` = daemon-opened
+   * shared-blocker lane (spec 2026-08-14). Immutable after open on purpose — it is deliberately
+   * absent from `UpdateLaneSchema`: an incident that stops being one is resolved, never relabeled.
+   * Optional (not defaulted) so pre-v41 fixtures and older daemons stay assignable — consumers only
+   * ever ask `kind === 'incident'`, and absence answers that correctly.
+   */
+  kind: z.enum(['incident']).nullable().optional(),
+  /**
    * Owning seat name; null = open/unowned. The two are one fact, not two: `state === 'open'` ⟺
    * `owner_seat === null`, enforced on every transition (`updateLane`) — claiming an open lane
    * moves it to `claimed`, and moving one back to `open` releases it. A lane that names an owner
@@ -277,6 +285,8 @@ export const OpenLaneSchema = z.object({
   risk: z.array(z.string()).optional(),
   /** Declared acceptance stakes (ADR 234). Omitted ⇒ `normal`; nothing routes on it yet. */
   stakes: LaneStakesSchema.optional(),
+  /** Lane kind (spec 2026-08-14): only the daemon sets 'incident'; omitted ⇒ ordinary lane. */
+  kind: z.enum(['incident']).optional(),
   claim: z.boolean().optional(),
 });
 export type OpenLane = z.infer<typeof OpenLaneSchema>;
@@ -472,5 +482,24 @@ export const NextBriefSchema = z.object({
       }),
     )
     .optional(),
+  /**
+   * Incident convergence inc 1 (spec 2026-08-14 §4): open `kind:'incident'` lanes, oldest first.
+   * The brief LEADS with these — most of the measured waste was seats starting sessions into a red
+   * they assumed was theirs. `.default([])` keeps a brief from an older daemon parseable.
+   */
+  incidents: z
+    .array(
+      z.object({
+        /** The incident lane id — claim it or park behind it. */
+        lane: z.string(),
+        /** The clustered gate (the lane title minus the derived prefix). */
+        gate: z.string(),
+        /** Who carries it; null = unclaimed, any seat may take it. */
+        owner_seat: z.string().nullable(),
+        /** Lane created_at — lets the renderer say how long it has been open. */
+        opened_at: z.number().int(),
+      }),
+    )
+    .default([]),
 });
 export type NextBrief = z.infer<typeof NextBriefSchema>;

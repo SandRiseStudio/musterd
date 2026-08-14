@@ -459,6 +459,16 @@ function waitedFor(ms: number): string {
 
 export function fmtNext(b: NextBrief): string {
   const lines: string[] = [`next — as ${b.member}`];
+  // Incident banner FIRST, above everything (spec 2026-08-14 §4): most of the measured waste in the
+  // motivating episode was seats starting sessions into a shared red they assumed was theirs. Same
+  // `?? []` daemon-skew tolerance as owed_reviews below.
+  for (const inc of b.incidents ?? []) {
+    lines.push(
+      `⚠ incident: ${inc.gate} — ${inc.owner_seat ? `owned by ${inc.owner_seat}` : 'UNCLAIMED'} ` +
+        `(lane ${inc.lane}, open ${waitedFor(Date.now() - inc.opened_at)}).`,
+      `  If your red matches, it is not yours. Report blocked_by and park behind it.`,
+    );
+  }
   // FIRST, above your own work, on purpose (ADR 233). This is the one item in the brief that
   // someone else is blocked on, and it is the one that loses when a seat is busy: half the
   // unverified closes had the named reviewer online for ~40 minutes and still never answering.

@@ -14,7 +14,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('40');
+    expect(ver?.value).toBe('41');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -244,7 +244,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(40); // runs v18…v40 (… + seeds cursor + wake turns + presence surface + wake_leases edge)
+    expect(runMigrations(db)).toBe(41); // runs v18…v40 (… + seeds cursor + wake turns + presence surface + wake_leases edge)
 
     const scope = (id: string) =>
       db
@@ -308,7 +308,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(40);
+    expect(runMigrations(db)).toBe(41);
 
     const policy = (id: string) =>
       db
@@ -350,6 +350,28 @@ describe('v39 — the presence surface CHECK admits `musterd` (ADR 251 §2)', ()
     expect(() => insert('claude-code')).not.toThrow();
     // The constraint must stay a constraint — widening is not opening.
     expect(() => insert('definitely-not-a-surface')).toThrow();
+    db.close();
+  });
+});
+
+describe('v41 — incident convergence (spec 2026-08-14)', () => {
+  it('adds lanes.kind and the incident_reports table', () => {
+    const db = openDb(':memory:');
+    const laneCols = db.prepare("SELECT name FROM pragma_table_info('lanes')").pluck().all();
+    expect(laneCols).toContain('kind');
+    const cols = db.prepare("SELECT name FROM pragma_table_info('incident_reports')").pluck().all();
+    expect(cols).toEqual(
+      expect.arrayContaining([
+        'team_id',
+        'gate',
+        'seat',
+        'sig',
+        'ref',
+        'message_id',
+        'lane_id',
+        'created_at',
+      ]),
+    );
     db.close();
   });
 });

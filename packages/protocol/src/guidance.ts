@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 13;
+export const GUIDANCE_CONTENT_VERSION = 14;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -221,6 +221,17 @@ export function renderSkillBody(opts: { team: string }): string {
     'Set how reachable you are with `musterd availability <available|away|dnd>` — `away` holds',
     'notifications, `dnd` still passes directed + urgent. `musterd notify` runs a background nudge that',
     'raises an OS notification when a directed act lands while you are away (the human-side loop).',
+    '',
+    '## Shared blockers — report, park, converge (incident convergence)',
+    '',
+    "**A red on a check your diff can't touch is not yours to debug.** Attach a report to the",
+    'status_update you already send — `meta.blocked_by: { gate, ref?, sig? }`, where `gate` is the',
+    'exact check name (the cluster key), `ref` is what you parked behind it, and `sig` is the failure',
+    'detail for the eventual owner — then park the work and move on. When a second seat reports the',
+    'same gate, the daemon opens ONE unowned `kind:incident` lane seeded with every report; later',
+    'reporters get an automatic "park behind it" pointer, and `team_next` leads with the banner. Any',
+    'seat may claim the incident — context beats role. The report is cheaper than the debugging it',
+    'replaces: the measured alternative was four seats independently diagnosing one defect.',
     '',
     '## When something looks wrong',
     '',
