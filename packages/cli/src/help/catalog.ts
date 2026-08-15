@@ -194,7 +194,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'service',
     signature:
-      '<install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--interval <s>] [--timeout <s>] [--follow] [--force]',
+      '<install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--follow] [--force]',
     summary: 'run the daemon (or the /live viewer, or the wake actuator) as a background service',
     group: 'setup',
     primary: true,
@@ -212,9 +212,12 @@ export const CATALOG: readonly CommandEntry[] = [
       'as a LaunchAgent (RunAtLoad + KeepAlive) so enrolled seats stay wakeable across reboots — no ' +
       'terminal left open; `--interval`/`--timeout` (bare seconds) bake the loop’s cadence/watchdog ' +
       'into the plist. NOT `--host`: that flag is the daemon’s bind host. Bouncing `--wake`/`--live` ' +
-      'drops no teammate session, so neither takes the live-session guard.',
+      'drops no teammate session, so neither takes the live-session guard. ' +
+      '`install --otlp-endpoint <url>` persists the standard OTLP endpoint in the daemon plist; ' +
+      'it is daemon-install-only, preserved on reinstall, and an empty value clears it.',
     examples: [
       'musterd service install',
+      'musterd service install --otlp-endpoint http://127.0.0.1:4318',
       'musterd service refresh',
       'musterd service status',
       'musterd service install --live',

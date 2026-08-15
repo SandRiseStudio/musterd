@@ -20,6 +20,10 @@ describe('resolveDaemonEnv', () => {
     <key>PATH</key><string>/old/path</string>
     <key>MUSTERD_ALLOWED_HOSTS</key><string>old.ts.net</string>
   </dict></dict></plist>`;
+  const withOtlp = `<plist><dict><key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/old/path</string>
+    <key>OTEL_EXPORTER_OTLP_ENDPOINT</key><string>http://127.0.0.1:4318</string>
+  </dict></dict></plist>`;
 
   it('PRESERVES an allow-list nobody re-passed — a plain re-install must not break the overlay', () => {
     expect(resolveDaemonEnv(withHosts, undefined)).toEqual({
@@ -44,6 +48,28 @@ describe('resolveDaemonEnv', () => {
   it('is empty for a fresh machine with no installed plist', () => {
     expect(resolveDaemonEnv(null, undefined)).toEqual({});
   });
+
+  it('writes an explicitly configured standard OTLP endpoint', () => {
+    expect(resolveDaemonEnv(null, undefined, 'http://127.0.0.1:4318')).toEqual({
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:4318',
+    });
+  });
+
+  it('preserves an OTLP endpoint nobody re-passed', () => {
+    expect(resolveDaemonEnv(withOtlp, undefined, undefined)).toEqual({
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:4318',
+    });
+  });
+
+  it('replaces the prior OTLP endpoint when the flag is passed again', () => {
+    expect(resolveDaemonEnv(withOtlp, undefined, 'http://127.0.0.1:14318')).toEqual({
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:14318',
+    });
+  });
+
+  it('clears the prior OTLP endpoint when passed an empty value', () => {
+    expect(resolveDaemonEnv(withOtlp, undefined, '')).toEqual({});
+  });
 });
 
 describe('awaitDaemon', () => {
@@ -67,7 +93,7 @@ describe('awaitDaemon', () => {
   });
 });
 
-describe('service install --allowed-hosts (end to end through the command)', () => {
+describe('service install daemon environment (end to end through the command)', () => {
   let dir: string;
   let ctx: ServiceCtx;
   const runner = (): RunResult => ({ status: 0, stdout: '', stderr: '' });
@@ -141,6 +167,22 @@ describe('service install --allowed-hosts (end to end through the command)', () 
     expect(env?.['MUSTERD_ALLOWED_HOSTS']).toBe('a.ts.net,100.64.0.1');
     expect(env?.['PATH']).toBe('/fake/bin'); // merged, not clobbered
     expect(out).toContain('daemon answered /health');
+  });
+
+  it('writes the configured OTLP endpoint into the daemon plist beside PATH', async () => {
+    await run(['install', '--otlp-endpoint', 'http://127.0.0.1:4318'], up);
+    const env = parsePlistEnvironment(readFileSync(ctx.plistPath, 'utf8'));
+    expect(env?.['OTEL_EXPORTER_OTLP_ENDPOINT']).toBe('http://127.0.0.1:4318');
+    expect(env?.['PATH']).toBe('/fake/bin');
+  });
+
+  it('rejects the daemon-only OTLP endpoint before dispatching a retargeted service command', async () => {
+    await expect(
+      serviceCommand(parseArgs(['status', '--live', '--otlp-endpoint', 'http://127.0.0.1:4318']), {
+        platform: 'darwin',
+        ctx,
+      }),
+    ).rejects.toThrow(/--otlp-endpoint.*daemon service install/i);
   });
 
   it('a re-install without the flag KEEPS the allow-list', async () => {

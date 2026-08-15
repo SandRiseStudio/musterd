@@ -169,7 +169,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -507,6 +507,7 @@ async function fetchHealth(): Promise<DaemonHealth> {
 export function resolveDaemonEnv(
   existingPlist: string | null,
   allowedHosts: string | undefined,
+  otlpEndpoint?: string,
 ): Record<string, string> {
   const prior = existingPlist ? parsePlistEnvironment(existingPlist) : null;
   const env: Record<string, string> = {};
@@ -520,6 +521,11 @@ export function resolveDaemonEnv(
       .filter((h) => h !== '');
     if (hosts.length > 0) env['MUSTERD_ALLOWED_HOSTS'] = hosts.join(',');
     else delete env['MUSTERD_ALLOWED_HOSTS'];
+  }
+  if (otlpEndpoint !== undefined) {
+    const endpoint = otlpEndpoint.trim();
+    if (endpoint) env['OTEL_EXPORTER_OTLP_ENDPOINT'] = endpoint;
+    else delete env['OTEL_EXPORTER_OTLP_ENDPOINT'];
   }
   return env;
 }
@@ -842,6 +848,14 @@ export async function serviceCommand(
     );
   }
 
+  const otlpEndpoint = flagStr(parsed.flags, 'otlp-endpoint');
+  const targetsAnotherService = ['live', 'wake', 'auto', 'guardian', 'sweep'].some(
+    (flag) => parsed.flags[flag] === true,
+  );
+  if (otlpEndpoint !== undefined && (sub !== 'install' || targetsAnotherService)) {
+    throw new CliError('--otlp-endpoint is only valid for daemon service install', 2);
+  }
+
   const serveArgs = ['serve'];
   const port = flagStr(parsed.flags, 'port');
   const host = flagStr(parsed.flags, 'host');
@@ -859,6 +873,7 @@ export async function serviceCommand(
     env: resolveDaemonEnv(
       ctx0.readFile?.(ctx0.plistPath) ?? null,
       flagStr(parsed.flags, 'allowed-hosts'),
+      otlpEndpoint,
     ),
   };
   const health = deps.health ?? fetchHealth;
