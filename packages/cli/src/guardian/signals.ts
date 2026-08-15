@@ -90,7 +90,8 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
   const httpErrorRateSinceBoot = errLines.filter(
     (l) => /"status":5\d\d/.test(l) || /musterd\.errors/.test(l),
   ).length;
-  const handover = health === null && d.readHandover ? await d.readHandover().catch(() => null) : null;
+  const handover =
+    health === null && d.readHandover ? await d.readHandover().catch(() => null) : null;
 
   return {
     now,

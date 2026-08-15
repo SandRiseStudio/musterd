@@ -53,7 +53,8 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
   let stamp = loadStamp(d.stampPath);
 
   const signals = await d.collect();
-  const handoverDeferred = signals.health === null && signals.handover !== null && signals.handover !== undefined;
+  const handoverDeferred =
+    signals.health === null && signals.handover !== null && signals.handover !== undefined;
   const incidents = handoverDeferred ? [] : classify(signals);
   if (handoverDeferred) d.log('guardian.handover_deferred');
 
