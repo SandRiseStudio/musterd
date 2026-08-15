@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { loadStamp } from '../guardian/damp.js';
+import { readHandover } from '../service/handover.js';
 import {
   buildHostPlist,
   buildPlist,
@@ -438,6 +439,28 @@ describe('serviceCommand', () => {
     expect(out).toContain('synced');
     expect(out).toContain('rebuilt dist');
     expect(out).toContain('restarted the musterd daemon on bbb222');
+  });
+
+  it('refresh publishes a handover only while it restarts the daemon', async () => {
+    const base = refreshRunner();
+    let sawHandover = false;
+    const c = ctx(((cmd, args) => {
+      if (cmd === 'launchctl') {
+        sawHandover = readHandover(join(dir, 'autorefresh', 'handover.json'), Date.now()) !== null;
+      }
+      return base(cmd, args);
+    }) as Runner);
+
+    await capture(() =>
+      serviceCommand(parseArgs(['refresh']), {
+        platform: 'darwin',
+        ctx: c,
+        health: async () => ({ connections: 0 }),
+      }),
+    );
+
+    expect(sawHandover).toBe(true);
+    expect(readHandover(join(dir, 'autorefresh', 'handover.json'), Date.now())).toBeNull();
   });
 
   // Guardian probe (2026-08-13 spec §1/§6): install writes the guardian-tick plist and ends with

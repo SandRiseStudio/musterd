@@ -57,6 +57,39 @@ describe('collectSignals', () => {
     expect(s.health).toBeNull();
   });
 
+  it('confirms a transient first health miss before classifying the daemon as unavailable', async () => {
+    let attempts = 0;
+    const s = await collectSignals(
+      deps({
+        fetchHealth: async () => {
+          attempts += 1;
+          if (attempts === 1) throw new Error('socket reset');
+          return {
+            ok: true,
+            db: '/Users/nick/.musterd/musterd.db',
+            schema: 39,
+            booted_at: 1_500_000,
+          };
+        },
+      }),
+    );
+    expect(attempts).toBe(2);
+    expect(s.health).not.toBeNull();
+  });
+
+  it('carries a valid refresh handover with a confirmed outage', async () => {
+    const s = await collectSignals(
+      deps({
+        fetchHealth: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        readHandover: async () => ({ startedAt: NOW - 1_000, targetBuild: 'nextsha' }),
+      } as Partial<SignalDeps>),
+    );
+    expect(s.health).toBeNull();
+    expect(s.handover).toEqual({ startedAt: NOW - 1_000, targetBuild: 'nextsha' });
+  });
+
   it('err lines are boot-filtered: readSince is called with booted_at, its count is trusted', async () => {
     let calledWith: number | null = null;
     const s = await collectSignals(
