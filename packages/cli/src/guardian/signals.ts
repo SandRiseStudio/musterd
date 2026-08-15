@@ -22,6 +22,8 @@ export interface SignalDeps {
   now: () => number;
   /** GET /health on the explicitly configured server (#780: name the server you measured). */
   fetchHealth: () => Promise<HealthPayload>;
+  /** Delay between outage-confirmation probes. Injected so tests do not wait. */
+  sleep?: (ms: number) => Promise<void>;
   /** `launchctl print gui/<uid>/<daemon label>` raw output; '' when the call fails. */
   launchctlPrint: () => Promise<string>;
   /** Lines of `path` whose timestamp is at/after `epochMs`. */
@@ -37,6 +39,8 @@ export interface SignalDeps {
   publisherOkStampPath: string;
   /** Newest guardian/autorefresh refresh instant, from the shared stamp; null when none. */
   lastRefreshAt: () => Promise<number | null>;
+  /** ADR 274's explicit, bounded daemon-restart state. Read only after a confirmed health miss. */
+  readHandover?: () => Promise<Exclude<GuardianSignals['handover'], undefined>>;
 }
 
 /** Tolerant parse of `launchctl print` — absent fields are zeros, never a throw. */
@@ -51,17 +55,22 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
 
   let health: GuardianSignals['health'] = null;
   let bootedAt = now; // no reachable daemon / no booted_at → nothing is "since boot"
-  try {
-    const h = await d.fetchHealth();
-    bootedAt = h.booted_at ?? now;
-    health = {
-      ok: h.ok,
-      bootedAt,
-      schemaOk: d.expected.schema === null || h.schema === d.expected.schema,
-      dbPathExpected: h.db === d.expected.dbPath,
-    };
-  } catch {
-    health = null;
+  // One failed request is a transport observation, not an outage. Confirm it inside this tick so
+  // transient handovers do not enter the daemon_down classifier (ADR 274).
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const h = await d.fetchHealth();
+      bootedAt = h.booted_at ?? now;
+      health = {
+        ok: h.ok,
+        bootedAt,
+        schemaOk: d.expected.schema === null || h.schema === d.expected.schema,
+        dbPathExpected: h.db === d.expected.dbPath,
+      };
+      break;
+    } catch {
+      if (attempt < 2) await (d.sleep?.(1_000) ?? Promise.resolve());
+    }
   }
 
   const launchd = parseLaunchctlPrint(await d.launchctlPrint().catch(() => ''));
@@ -81,10 +90,13 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
   const httpErrorRateSinceBoot = errLines.filter(
     (l) => /"status":5\d\d/.test(l) || /musterd\.errors/.test(l),
   ).length;
+  const handover =
+    health === null && d.readHandover ? await d.readHandover().catch(() => null) : null;
 
   return {
     now,
     health,
+    handover,
     launchd,
     publisherLog: { freshFailure },
     errLinesSinceBoot: errLines.length,

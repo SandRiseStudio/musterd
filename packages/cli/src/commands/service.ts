@@ -34,6 +34,7 @@ import {
   type AutoRefreshCtx,
 } from '../service/autorefresh.js';
 import { guardianStatusLine, guardianTick } from '../service/guardian.js';
+import { clearHandover, readHandover, writeHandover } from '../service/handover.js';
 import {
   installWakeHost,
   restartWakeHost,
@@ -346,6 +347,11 @@ function stamp(when: Date = new Date()): string {
  *  /live publisher's `.published-sha`). Cleared once the daemon actually reaches that tip. */
 function autoRefreshStampPath(): string {
   return join(dirname(configPath()), 'autorefresh', '.attempted-sha');
+}
+
+/** ADR 274's explicit daemon-restart state; never reuse the attempted-tip debounce for liveness. */
+function refreshHandoverPath(): string {
+  return join(dirname(configPath()), 'autorefresh', 'handover.json');
 }
 
 /**
@@ -1243,12 +1249,18 @@ async function refreshDaemon(
   ok('rebuilt dist');
 
   announce?.();
+  // This record starts at the only point a refresh becomes a handover: the build has succeeded and
+  // the next operation restarts the daemon. A failed verification intentionally leaves it behind;
+  // the guardian's bounded reader then turns the remaining outage loud after its grace window.
+  const handoverPath = refreshHandoverPath();
+  writeHandover(handoverPath, { startedAt: Date.now(), targetBuild: after });
   const r = restart(ctx);
   if (r.status !== 0) fail('restart', r);
   ok(`restarted the musterd daemon on ${after}`);
   // Confirm it is actually serving before claiming the refresh worked — a rebuilt dist that fails to
   // boot (a bad native module, a bad merge) looks identical to success at the launchctl layer.
   await verifyDaemonUp(ctx, health, 'refresh', ok, sleep, baseline);
+  clearHandover(handoverPath);
   // The rebuild above is checkout-wide, so anything else running from it is now stale too.
   bounceSiblings(ctx, dir, ok);
   return 0;
@@ -1972,6 +1984,7 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
         collectSignals({
           now: () => Date.now(),
           fetchHealth: rawHealth,
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           launchctlPrint: async () => {
             const uid = typeof process.getuid === 'function' ? process.getuid() : '';
             return ctx.run('launchctl', printArgs(uid, SERVICE_LABEL)).stdout;
@@ -1983,6 +1996,7 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
           publisherBuildLogPath: join(home, 'live', 'build.log'),
           publisherOkStampPath: join(gHome, 'publisher.ok'),
           lastRefreshAt: async () => statMtime(join(home, 'autorefresh', '.attempted-sha')),
+          readHandover: async () => readHandover(refreshHandoverPath(), Date.now()),
         });
 
   const auth = serviceSeatAuth();
@@ -1993,9 +2007,9 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
     getTiers: async () => {
       // Scoped member read (ADR 263 follow-up) — the full policy is admin-only, which is exactly
       // why the first armed build fell back to defaults on every tick.
-      if (!auth) return DEFAULT_TIERS;
+      if (!auth) return { tiers: DEFAULT_TIERS, source: 'shipped_default_unprovisioned' };
       const { guardian_tiers } = await auth.http.getGuardianTiers(auth.team);
-      return resolveGuardianTiers(guardian_tiers);
+      return { tiers: resolveGuardianTiers(guardian_tiers), source: 'team_policy' };
     },
     healthBuild: async () => (await rawHealth()).build ?? null,
     act: async (incidents, actStamp, tiers) => {

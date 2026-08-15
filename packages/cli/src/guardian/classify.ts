@@ -19,6 +19,8 @@ export interface GuardianSignals {
   now: number;
   /** null = /health unreachable. */
   health: { ok: boolean; bootedAt: number; schemaOk: boolean; dbPathExpected: boolean } | null;
+  /** A current autorefresh restart. Only suppresses a confirmed unavailable health result. */
+  handover?: { startedAt: number; targetBuild: string } | null;
   launchd: { lastExit: number; runs: number };
   publisherLog: { freshFailure: boolean };
   errLinesSinceBoot: number;

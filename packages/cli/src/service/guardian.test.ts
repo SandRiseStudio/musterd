@@ -27,7 +27,7 @@ function tickDeps(over: Partial<GuardianTickDeps> = {}): {
       reaperStormSinceBoot: false,
       lastRefreshAt: null,
     }),
-    getTiers: async () => DEFAULT_TIERS,
+    getTiers: async () => ({ tiers: DEFAULT_TIERS, source: 'shipped_default_unprovisioned' }),
     healthBuild: async () => 'goodsha',
     act: async (incidents, stamp) => {
       lines.push(`acted:${incidents.map((i) => i.class).join(',') || 'none'}`);
@@ -90,6 +90,43 @@ describe('guardianTick', () => {
     expect(loadStamp(d.stampPath).lastTickAt).toBe(NOW);
   });
 
+  it('records a successful scoped policy read and clears a prior degradation', async () => {
+    const { d } = tickDeps({
+      getTiers: (async () => ({ tiers: DEFAULT_TIERS, source: 'team_policy' })) as never,
+    });
+    saveStamp(d.stampPath, {
+      ...emptyStamp(),
+      policySource: 'shipped_default_degraded',
+      lastPolicyErrorAt: NOW - 60_000,
+    });
+
+    await guardianTick(d);
+
+    const stamp = loadStamp(d.stampPath);
+    expect(stamp.policySource).toBe('team_policy');
+    expect(stamp.lastPolicyReadAt).toBe(NOW);
+    expect(stamp.lastPolicyErrorAt).toBeNull();
+  });
+
+  it('defers a confirmed outage during a current refresh handover', async () => {
+    const { d, lines } = tickDeps({
+      collect: async () => ({
+        now: NOW,
+        health: null,
+        handover: { startedAt: NOW - 1_000, targetBuild: 'nextsha' },
+        launchd: { lastExit: 1, runs: 2 },
+        publisherLog: { freshFailure: false },
+        errLinesSinceBoot: 0,
+        httpErrorRateSinceBoot: 0,
+        reaperStormSinceBoot: false,
+        lastRefreshAt: null,
+      }),
+    });
+    await guardianTick(d);
+    expect(lines).toContain('guardian.handover_deferred');
+    expect(lines.some((line) => line.startsWith('acted:'))).toBe(false);
+  });
+
   it('daily heartbeat fires once and stamps lastHeartbeatAt', async () => {
     const { d, lines } = tickDeps();
     await guardianTick(d);
@@ -118,5 +155,17 @@ describe('guardianStatusLine (instrument-silence: guardian dead ≠ quiet)', () 
     saveStamp(p, { ...emptyStamp(), lastTickAt: NOW - 11 * 60_000 });
     expect(guardianStatusLine(p, NOW)).toContain('STALE');
     expect(guardianStatusLine(join(dir, 'none.json'), NOW)).toContain('never ticked');
+  });
+
+  it('names a degraded policy read and when it first failed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'guardian-status-'));
+    const p = join(dir, 'stamp.json');
+    saveStamp(p, {
+      ...emptyStamp(),
+      lastTickAt: NOW - 40_000,
+      policySource: 'shipped_default_degraded',
+      lastPolicyErrorAt: NOW - 120_000,
+    });
+    expect(guardianStatusLine(p, NOW)).toContain('policy defaults — degraded since');
   });
 });

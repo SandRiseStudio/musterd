@@ -21,9 +21,10 @@ Flip a tier without a release: `musterd team policy --guardian-tier daemon_down=
 
 ## State and logs
 
-- Stamp (damping, last tick, last incident, rollback target): `~/.musterd/guardian/stamp.json`
+- Stamp (damping, last tick, last incident, rollback target, policy source): `~/.musterd/guardian/stamp.json`
 - Log (every action as `guardian.<action> {json}`): `~/.musterd/guardian/guardian.log`
 - Seat token: `~/.musterd/guardian/seat-token` (0600; minted at install, ADR 232)
+- Refresh handover: `~/.musterd/autorefresh/handover.json` exists only from a successful refresh build through verified daemon recovery. The guardian defers a confirmed unavailable daemon for at most 30 seconds; a stale, malformed, or future record never suppresses an alert (ADR 274).
 
 Damping is one remediation attempt per class per hour, then forced escalation to alert — state in the stamp, never the DB, because the DB may be the thing that is down.
 
@@ -31,7 +32,7 @@ Damping is one remediation attempt per class per hour, then forced escalation to
 
 - Install/arm: `musterd service --guardian install` (Node 22 PATH — the plist embeds `process.execPath`), then `musterd role assign guardian platform` in the roster home. Install ends with `control probe: alert path fired ✓` (2026-08-13; falsify: run the install and read its last line) — without that line, treat the alert path as untrusted and the probe's future silence as no evidence (see [Instrument silence is not evidence](instrument-silence.md)).
 - The probe's firing is recoverable after the fact: it appends to `guardian.log` like any tick, so the evidence outlives the install terminal (falsify: `grep 'control probe' ~/.musterd/guardian/guardian.log`). ~~Until #828 the probe printed only to the install command's stdout, so its one firing was unrecoverable — the log began 15:55 against a 15:53 install (2026-08-13)~~ FIXED 2026-08-13 by #828. Re-running the probe is also safe at any time (`musterd service guardian-tick --control-probe`): it is a dry run and leaves the stamp untouched, so it neither burns a damping slot nor fakes an incident.
-- Read it: `musterd service status` (guardian line: last tick age, goes loud `STALE` past 10 minutes) or `musterd service status --guardian`.
+- Read it: `musterd service status` (guardian line: last tick age, policy source, goes loud `STALE` past 10 minutes) or `musterd service status --guardian`. `policy team` is a successful scoped read; `policy defaults (guardian unprovisioned)` is intentional; `policy defaults — degraded since …` means the policy endpoint is unreadable but shipped defaults remain in force.
 - The guardian's own death is detectable: no stamp progress + no daily heartbeat act. A quiet guardian with a fresh stamp is healthy; a quiet guardian with a stale stamp is an incident.
 
 ## Traps

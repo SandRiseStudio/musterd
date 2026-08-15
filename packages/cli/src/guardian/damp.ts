@@ -10,6 +10,11 @@ import type { GuardianClass } from './classify.js';
 export const ATTEMPT_WINDOW_MS = 3_600_000;
 export const HEARTBEAT_INTERVAL_MS = 24 * 3_600_000;
 
+export type GuardianPolicySource =
+  | 'team_policy'
+  | 'shipped_default_unprovisioned'
+  | 'shipped_default_degraded';
+
 export interface GuardianStamp {
   lastAttemptAt: Partial<Record<GuardianClass, number>>;
   lastTickAt: number | null;
@@ -17,6 +22,10 @@ export interface GuardianStamp {
   lastIncident: { class: GuardianClass; at: number } | null;
   /** `/health.build` from the newest HEALTHY tick — the crashloop rollback target (`refresh --pin`). */
   lastGoodBuild: string | null;
+  /** The last successfully observed policy source, never its secret-bearing body. */
+  policySource: GuardianPolicySource;
+  lastPolicyReadAt: number | null;
+  lastPolicyErrorAt: number | null;
 }
 
 export function emptyStamp(): GuardianStamp {
@@ -26,6 +35,9 @@ export function emptyStamp(): GuardianStamp {
     lastHeartbeatAt: null,
     lastIncident: null,
     lastGoodBuild: null,
+    policySource: 'shipped_default_unprovisioned',
+    lastPolicyReadAt: null,
+    lastPolicyErrorAt: null,
   };
 }
 

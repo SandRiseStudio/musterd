@@ -20,6 +20,7 @@ import {
   loadStamp,
   recordTick,
   saveStamp,
+  type GuardianPolicySource,
   type GuardianStamp,
 } from '../guardian/damp.js';
 
@@ -27,8 +28,8 @@ export interface GuardianTickDeps {
   now: () => number;
   stampPath: string;
   collect: () => Promise<GuardianSignals>;
-  /** Tier map in force (policy over defaults); failures fall back to DEFAULT_TIERS. */
-  getTiers: () => Promise<Record<GuardianClass, GuardianTier>>;
+  /** Tier map in force (policy over defaults), with the non-secret source exposed to status. */
+  getTiers: () => Promise<GuardianPolicyRead>;
   /** `/health.build` when reachable — recorded on HEALTHY ticks as the crashloop rollback target. */
   healthBuild: () => Promise<string | null>;
   /** actOn with the real runners bound (commands/service.ts supplies them). */
@@ -42,19 +43,35 @@ export interface GuardianTickDeps {
   log: (line: string) => void;
 }
 
+export interface GuardianPolicyRead {
+  tiers: Record<GuardianClass, GuardianTier>;
+  source: Exclude<GuardianPolicySource, 'shipped_default_degraded'>;
+}
+
 export async function guardianTick(d: GuardianTickDeps): Promise<number> {
   const now = d.now();
   let stamp = loadStamp(d.stampPath);
 
   const signals = await d.collect();
-  const incidents = classify(signals);
+  const handoverDeferred =
+    signals.health === null && signals.handover !== null && signals.handover !== undefined;
+  const incidents = handoverDeferred ? [] : classify(signals);
+  if (handoverDeferred) d.log('guardian.handover_deferred');
 
   let tiers: Record<GuardianClass, GuardianTier>;
   try {
-    tiers = await d.getTiers();
-  } catch (e) {
+    const policy = await d.getTiers();
+    tiers = policy.tiers;
+    stamp = {
+      ...stamp,
+      policySource: policy.source,
+      lastPolicyReadAt: policy.source === 'team_policy' ? now : stamp.lastPolicyReadAt,
+      lastPolicyErrorAt: null,
+    };
+  } catch {
     tiers = DEFAULT_TIERS;
-    d.log(`tiers unreadable (${String(e)}) — shipped defaults in force`);
+    stamp = { ...stamp, policySource: 'shipped_default_degraded', lastPolicyErrorAt: now };
+    d.log('guardian.policy_unreadable {"source":"shipped_default_degraded"}');
   }
 
   if (incidents.length === 0) {
@@ -94,5 +111,11 @@ export function guardianStatusLine(stampPath: string, now: number): string {
     ? `last incident ${s.lastIncident.class} at ${new Date(s.lastIncident.at).toISOString()}`
     : 'no incident';
   const stale = age > GUARDIAN_STALE_MS ? ' — STALE: the guardian itself needs attention' : '';
-  return `guardian: last tick ${ageStr} ago, ${incident}${stale}`;
+  const policy =
+    s.policySource === 'team_policy'
+      ? 'policy team'
+      : s.policySource === 'shipped_default_degraded'
+        ? `policy defaults — degraded since ${new Date(s.lastPolicyErrorAt ?? now).toISOString()}`
+        : 'policy defaults (guardian unprovisioned)';
+  return `guardian: last tick ${ageStr} ago, ${incident}; ${policy}${stale}`;
 }

@@ -81,6 +81,7 @@ src/
     autorefresh.ts    // `service --auto`: the daemon auto-refresher as a StartInterval LaunchAgent — runs `refresh --auto` on a poll (ADR 152)
     sweep.ts          // `service --sweep`: the ADR 166 liveness sweep as a StartInterval LaunchAgent — read-only, every 5 min (≤ the 10-min window a demotion persists for, so it cannot miss one)
     guardian.ts       // `service --guardian`: the pure-code on-call tick (collect → classify → act → stamp, never throws) + the instrument-silence status line (ADR 263)
+    handover.ts       // ADR 274's bounded refresh-handover record: the writer owns lifecycle; the guardian only reads a valid, current record
     logTrim.ts        // pure-ish: size-capped retention for the service logs (ADR 224) — copy-truncate to `<name>.1`, run by the auto-refresh tick; an explicit log list, never a `*.log` glob (the musterd home is a shared temp dir under test isolation)
   onboard/            // the `musterd init` interactive onboarding (@clack/prompts; ADR 005)
     init.ts           // the flow: daemon -> folder-check -> team -> intent -> where-it-runs -> configure -> primer -> wait-to-join
