@@ -33,4 +33,5 @@ export * from './label.js';
 export * from './goals.js';
 export * from './insights.js';
 export * from './lanes.js';
+export * from './autoTarget.js';
 export * from './tool-telemetry.js';

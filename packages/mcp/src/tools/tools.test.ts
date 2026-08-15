@@ -381,6 +381,29 @@ describe('team_send handler', () => {
     expect(text(r)).toContain('reply_to:askA');
   });
 
+  // THE LIVE DEFECT (lane 01M03ANKS4, measured 2026-08-15). The guard used to ask whether the
+  // NEWEST open ask was a lane acceptance — so a plain team-wide `ask` arriving after the
+  // acceptance ask turned the guard off, and the verdict bound to the newcomer. Four accepts landed
+  // on guardian `daemon_down` asks that way; two of them, like this one, had the correct acceptance
+  // ask sitting open and passed it over.
+  it('refuses when a lane ask is open but a PLAIN ask is newer (the guardian mis-binding)', async () => {
+    const { client, sent } = sendClient({
+      fetchInbox: (async () => ({
+        messages: [
+          laneAsk('askA', 1, '01LANEA'),
+          req({ id: 'guardian1', ts: 9, act: 'ask', to: { kind: 'team' } as any }),
+        ],
+        cursor: null,
+      })) as any,
+    });
+    const handler = capture(registerSend, client, config);
+    const r = await handler({ to: 'nick', act: 'accept', body: 'Lane 01LANEA accepted' });
+    expect(sent).toHaveLength(0);
+    // …and the lane ask it should have gone to is offered by id.
+    expect(text(r)).toContain('reply_to:askA');
+    expect(text(r)).toContain('01LANEA');
+  });
+
   it('still auto-targets a lone lane-review ask — one candidate is not a guess', async () => {
     const { client, sent } = sendClient({
       fetchInbox: (async () => ({

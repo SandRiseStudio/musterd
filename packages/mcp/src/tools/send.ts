@@ -6,6 +6,7 @@ import {
   AskTierSchema,
   askContract,
   askContractText,
+  chooseAutoTarget,
   type Envelope,
   makeEnvelope,
   MAX_ELIGIBLE,
@@ -90,13 +91,6 @@ export function normalizeTo(to: string | string[]): {
  *  to-human `ask` (ADR 147 — an admin accepts/declines the latest open ask without naming it). */
 const ANSWERABLE = new Set<Act>(['request_help', 'handoff', 'challenge', 'ask']);
 
-/** Does this envelope carry a lane acceptance ask (ADR 192)? Those are verdicts about a NAMED
- * artifact, which is why they are never auto-targeted (§ {@link openAnswerable}). */
-function isLaneReviewAsk(m: Envelope): boolean {
-  const meta = m.meta as { lane_review?: { lane?: string } } | null | undefined;
-  return typeof meta?.lane_review?.lane === 'string';
-}
-
 /**
  * Still-open request_help/handoff/challenge/ask waiting for `me` — the acts an `accept`/`decline`
  * answers when the caller didn't name one (ADR 067, parity with the CLI's `send`). A `request_help`
@@ -178,32 +172,13 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
         !meta['in_reply_to']
       ) {
         const open = await openAnswerable(client, config.member);
-        const target = open[0];
-        if (!target) {
-          return textResult(
-            `no open request to ${args.act} — pass reply_to with the message id (see team_inbox_check)`,
-          );
-        }
-        // A lane acceptance is a verdict about a NAMED artifact, so "newest open ask" is never a safe
-        // guess: writing a considered verdict takes minutes, and any ask arriving meanwhile silently
-        // steals it. Observed live 2026-07-31 — an accept whose body read "Lane A accepted" bound to
-        // lane B's ask 90s newer, so the thread record says B was accepted by a review of A. Refuse to
-        // guess rather than mis-attribute; plain request_help/handoff keep the ADR 067 convenience,
-        // because answering the wrong one of those is recoverable and answering the wrong lane is not.
-        if (isLaneReviewAsk(target) && open.length > 1) {
-          const lines = open
-            .slice(0, 6)
-            .map((m) => {
-              const lane = (m.meta as { lane_review?: { lane?: string } } | null)?.lane_review
-                ?.lane;
-              return `  reply_to:${m.id}  ${m.act} from ${m.from}${lane ? ` — lane ${lane}` : ''}`;
-            })
-            .join('\n');
-          return textResult(
-            `${open.length} open asks and the newest is a lane acceptance — name the one you are ` +
-              `answering with reply_to, so the verdict lands on the lane you actually reviewed:\n${lines}`,
-          );
-        }
+        // One rule, in `@musterd/protocol`, because this refusal used to be written here and again
+        // in the CLI and tested in neither — and both copies asked whether the GUESS was a lane
+        // acceptance instead of whether the ACT was a verdict. See `chooseAutoTarget` for the
+        // measured failure that distinction cost.
+        const decision = chooseAutoTarget(open, args.act);
+        if (decision.kind !== 'target') return textResult(decision.message);
+        const target = decision.target as Envelope;
         meta['in_reply_to'] = target.id;
         thread ??= target.thread ?? target.id;
       }

@@ -4,6 +4,8 @@ import {
   askContract,
   askContractText,
   AskTierSchema,
+  chooseAutoTarget,
+  CLI_REPLY_TO_STYLE,
   type BlockedBy,
   type Envelope,
   makeEnvelope,
@@ -37,35 +39,6 @@ async function openRequests(http: HttpClient, team: string, me: string): Promise
   } catch {
     return [];
   }
-}
-
-/** Does this envelope carry a lane acceptance ask (ADR 192)? Those are verdicts about a NAMED
- *  artifact, which is why they are never auto-targeted. Parity with the MCP adapter's `send`. */
-function isLaneReviewAsk(m: Envelope): boolean {
-  const meta = m.meta as { lane_review?: { lane?: string } } | null | undefined;
-  return typeof meta?.lane_review?.lane === 'string';
-}
-
-/**
- * The refusal, worded as the adapter words it. A lane acceptance is a verdict about a NAMED
- * artifact, so "newest open ask" is never a safe guess: writing a considered verdict takes minutes,
- * and any ask arriving meanwhile silently steals it. Observed live 2026-07-31 — an accept whose body
- * read "Lane A accepted" bound to lane B's ask 90s newer. Since ADR 202 that also CLOSES lane B.
- * Plain request_help/handoff keep the ADR 067 convenience: answering the wrong one of those is
- * recoverable, and answering the wrong lane is not.
- */
-function chooseOneMessage(act: string, open: Envelope[]): string {
-  const lines = open
-    .slice(0, 6)
-    .map((m) => {
-      const lane = (m.meta as { lane_review?: { lane?: string } } | null)?.lane_review?.lane;
-      return `  --reply-to ${m.id}  ${m.act} from ${m.from}${lane ? ` — lane ${lane}` : ''}`;
-    })
-    .join('\n');
-  return (
-    `${open.length} open asks and the newest is a lane acceptance — name the one you are ` +
-    `answering with --reply-to, so the verdict lands on the lane you actually reviewed:\n${lines}`
-  );
 }
 
 function parseRecipient(to: string): Recipient {
@@ -175,16 +148,11 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
   let thread = flagStr(parsed.flags, 'thread');
   if ((act === 'accept' || act === 'decline') && !replyTo && !meta['in_reply_to']) {
     const open = await openRequests(http, team, identity.name);
-    const target = open[0];
-    if (!target) {
-      throw new CliError(
-        `no open request to ${act} — name one with --reply-to <id> (see musterd inbox --json)`,
-        2,
-      );
-    }
-    if (isLaneReviewAsk(target) && open.length > 1) {
-      throw new CliError(chooseOneMessage(act, open), 2);
-    }
+    // One rule, in `@musterd/protocol`, shared with the MCP adapter — see `chooseAutoTarget` for
+    // why having written it twice is what let it be wrong in both places for so long.
+    const decision = chooseAutoTarget(open, act, CLI_REPLY_TO_STYLE);
+    if (decision.kind !== 'target') throw new CliError(decision.message, 2);
+    const target = decision.target as Envelope;
     meta['in_reply_to'] = target.id;
     thread ??= target.thread ?? target.id;
   }

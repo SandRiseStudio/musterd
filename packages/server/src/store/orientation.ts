@@ -3,7 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { handoffNamedLaneOutOfPlay, handoffNamesNoLane } from './delivery.js';
 import { listGoals, nextGoal } from './goals.js';
 import { incidentPolicy, openIncidents } from './incidents.js';
-import { acceptanceEnteredAt, listLanes } from './lanes.js';
+import { acceptanceEnteredAt, listLanes, readyForReviewHadNoCandidate } from './lanes.js';
 import { getMemberByRole } from './members.js';
 
 /**
@@ -204,17 +204,28 @@ export function deriveNext(
   // A seat's own lane is never its candidate review work: ADR 192 grades a same-seat close as
   // unconfirmed (`verified` requires closer ≠ owner), so serving it here invites the one
   // acceptance the model refuses to count.
-  const review_debt = all
+  const waiting = all
     .filter((l) => isAwaitingAcceptance(l.state) && l.owner_seat !== member)
     .map((l) => ({ lane: l, entered: acceptanceEnteredAt(db, teamId, l) }))
-    .sort((a, b) => a.entered - b.entered)
-    .slice(0, 3)
-    .map(({ lane, entered }) => ({
-      id: lane.id,
-      title: lane.title,
-      owner: lane.owner_seat,
-      waited_ms: Math.max(0, now - entered),
-    }));
+    .sort((a, b) => a.entered - b.entered);
+  const review_debt = waiting.slice(0, 3).map(({ lane, entered }) => ({
+    id: lane.id,
+    title: lane.title,
+    owner: lane.owner_seat,
+    waited_ms: Math.max(0, now - entered),
+    // Whether ANYONE was asked. `pickReviewCounterpart` returns null on a same-model monoculture —
+    // ADR 188/253 refuse `same_model` and ungradeable seats on purpose — and the submit records
+    // `no_candidate: true` and then says nothing more. The lane sits in this list looking exactly
+    // like one whose named reviewer is merely slow, and a seat reading the brief cannot tell the
+    // difference. Measured 2026-08-15: three of five waiting lanes had never been routed to anyone,
+    // all three on an all-claude roster. Reporting it does not change the routing doctrine — it
+    // stops the silence from reading as health.
+    no_candidate: readyForReviewHadNoCandidate(db, teamId, lane.id),
+  }));
+  // The TOTAL, not the shown count. A cap with no total is a queue that looks as deep as its
+  // window: clear the three on offer and the next three appear, with nothing having said they were
+  // there. Same 2026-08-15 session — three cleared, two more surfaced.
+  const review_debt_total = waiting.length;
 
   // Incident convergence inc 1 (spec §4): open incidents lead the brief for EVERY member — the
   // banner is how a seat starting a session learns a shared red is already owned work.
@@ -248,6 +259,7 @@ export function deriveNext(
     shipped,
     up_next,
     owed_reviews,
+    review_debt_total,
     why,
     next_goal,
     goals,

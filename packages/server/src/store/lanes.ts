@@ -500,6 +500,38 @@ export function acceptanceEnteredAt(db: Database, teamId: string, lane: Lane): n
   return row?.ts ?? lane.updated_at;
 }
 
+/**
+ * Was this lane's acceptance stage entered with NOBODY asked to review it?
+ *
+ * `pickReviewCounterpart` returns null when the live roster offers no gradeable counterpart — on a
+ * same-model monoculture, which ADR 188/253 refuse to route, that is every seat. The submit records
+ * `no_candidate: true` on its `lane.ready_for_review` row and the lane then waits exactly like one
+ * whose reviewer is simply slow. Reading it back is what lets the brief say which it is.
+ *
+ * Latest row wins, mirroring {@link acceptanceEnteredAt}: a re-submit re-routes, so an older row's
+ * verdict is stale. Unreadable or absent detail ⇒ false — an old lane predating the field is
+ * reported as routed rather than as a silence nobody can confirm.
+ */
+export function readyForReviewHadNoCandidate(
+  db: Database,
+  teamId: string,
+  laneId: string,
+): boolean {
+  const row = db
+    .prepare<[string, string], { detail: string | null }>(
+      `SELECT detail FROM audit
+        WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+        ORDER BY ts DESC LIMIT 1`,
+    )
+    .get(teamId, laneId);
+  if (!row?.detail) return false;
+  try {
+    return (JSON.parse(row.detail) as { no_candidate?: unknown }).no_candidate === true;
+  } catch {
+    return false;
+  }
+}
+
 /** value-layer design: review debt made visible — a lane waiting on acceptance past the threshold.
  *  Advisory like `no_goal`: owner null, never a directed wake. Entry time = the latest
  *  `lane.ready_for_review` audit row; falls back to `updated_at` for pre-audit lanes. A negative
