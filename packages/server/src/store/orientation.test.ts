@@ -467,6 +467,7 @@ describe('review_debt (value-layer design)', () => {
     teamId: string,
     target: string,
     ts: number,
+    detail: string | null = null,
   ) {
     db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
@@ -479,7 +480,7 @@ describe('review_debt (value-layer design)', () => {
       'lane.ready_for_review',
       target,
       'allow',
-      null,
+      detail,
       ts,
     );
   }
@@ -489,12 +490,54 @@ describe('review_debt (value-layer design)', () => {
     title: string,
     agoMs: number,
     owner = 'stanley',
+    detail: Record<string, unknown> | null = null,
   ) {
     const lane = openLane(db, teamId, 'revive', owner, { title, claim: true });
     const moved = updateLane(db, teamId, lane.id, 'revive', { state: 'awaiting_acceptance' })!;
-    insertReadyAudit(db, teamId, moved.id, Date.now() - agoMs);
+    insertReadyAudit(
+      db,
+      teamId,
+      moved.id,
+      Date.now() - agoMs,
+      detail ? JSON.stringify(detail) : null,
+    );
     return moved;
   }
+
+  // C — the cap lied by omission. Three rows and no total is indistinguishable from three rows and
+  // nothing else, so a seat clears the queue, looks again, and finds more. Measured 2026-08-15:
+  // cleared 3, two more appeared, and only then was the depth knowable.
+  it('reports the TOTAL waiting, not just the three it shows', () => {
+    const { db, team } = seed();
+    for (let i = 0; i < 5; i++) awaiting(db, team.id, `l${i}`, (30 - i) * 3_600_000);
+    const brief = deriveNext(db, team.id, 'revive', 'nick');
+    expect(brief.review_debt).toHaveLength(3);
+    expect(brief.review_debt_total).toBe(5);
+  });
+
+  it('total equals the shown count when the queue is shallow — no phantom depth', () => {
+    const { db, team } = seed();
+    awaiting(db, team.id, 'only', 5 * 3_600_000);
+    const brief = deriveNext(db, team.id, 'revive', 'nick');
+    expect(brief.review_debt_total).toBe(1);
+  });
+
+  // B — a lane nobody was ever asked to review. pickReviewCounterpart returns null on a
+  // same-model monoculture (ADR 188/253 refuse same_model), the submit records
+  // `no_candidate: true`, and then nothing says so: the lane simply waits, looking identical to
+  // one with a named reviewer who is merely slow. Three of five lanes on 2026-08-15.
+  it('marks a lane that no reviewer was ever asked to review', () => {
+    const { db, team } = seed();
+    awaiting(db, team.id, 'nobody-asked', 20 * 3_600_000, 'stanley', {
+      no_candidate: true,
+      family_posture: { state: 'monoculture' },
+    });
+    awaiting(db, team.id, 'routed', 10 * 3_600_000, 'stanley', { reviewer: 'miley' });
+    const brief = deriveNext(db, team.id, 'revive', 'nick');
+    const byTitle = new Map(brief.review_debt!.map((r) => [r.title, r]));
+    expect(byTitle.get('nobody-asked')!.no_candidate).toBe(true);
+    expect(byTitle.get('routed')!.no_candidate).toBe(false);
+  });
 
   it('lists the 3 oldest awaiting-acceptance lanes, oldest first', () => {
     const { db, team } = seed();

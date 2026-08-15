@@ -479,9 +479,25 @@ export const NextBriefSchema = z.object({
         title: z.string(),
         owner: z.string().nullable(),
         waited_ms: z.number().int().nonnegative(),
+        /**
+         * True when the submit found NO eligible reviewer and asked nobody. ADR 188/253 refuse to
+         * route `same_model` and ungradeable seats, so on a same-model monoculture every candidate
+         * is refused and the lane enters the queue unrouted. Without this the entry is
+         * indistinguishable from one whose named reviewer is merely slow — and the two want
+         * opposite responses: chase a person, or notice that no person exists.
+         * `.default(false)` keeps a brief from an older daemon parseable.
+         */
+        no_candidate: z.boolean().default(false),
       }),
     )
     .optional(),
+  /**
+   * How many lanes are waiting on acceptance in total — `review_debt` shows at most the oldest 3.
+   * A window with no total reads as the whole queue: clear the three on offer, look again, and more
+   * appear with nothing having said they were there. `.default(0)` keeps an older daemon's brief
+   * parseable, and 0 with a non-empty `review_debt` means "this daemon does not count".
+   */
+  review_debt_total: z.number().int().nonnegative().default(0),
   /**
    * Incident convergence inc 1 (spec 2026-08-14 §4): open `kind:'incident'` lanes, oldest first.
    * The brief LEADS with these — most of the measured waste was seats starting sessions into a red

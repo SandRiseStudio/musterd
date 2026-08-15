@@ -524,12 +524,19 @@ export function fmtNext(b: NextBrief): string {
   // (owed_reviews above is the directed slice). Same `?? []` daemon-skew tolerance as the rest.
   const debt = b.review_debt ?? [];
   if (debt.length) {
-    lines.push(`\n⧗ review debt — waiting on any seat's acceptance:`);
+    // The total, when the daemon knows more are waiting than it showed. A window that does not say
+    // it is a window reads as the whole queue — a seat clears three, looks again, and finds more.
+    const total = b.review_debt_total ?? 0;
+    const more = total > debt.length ? ` (showing ${debt.length} of ${total})` : '';
+    lines.push(`\n⧗ review debt — waiting on any seat's acceptance${more}:`);
     // Owner stays visible even though the daemon filters the reader's own lanes out: a skewed
     // older daemon won't, and whose work it is decides whether accepting counts (ADR 192).
     for (const r of debt)
       lines.push(
-        `  ${r.id} "${r.title}"${r.owner ? ` — owner=${r.owner}` : ''} — waiting ${Math.floor(r.waited_ms / 3_600_000)}h`,
+        `  ${r.id} "${r.title}"${r.owner ? ` — owner=${r.owner}` : ''} — waiting ${Math.floor(r.waited_ms / 3_600_000)}h` +
+          // Not "nobody has answered" — nobody was ASKED. The distinction is the whole point:
+          // waiting on a slow reviewer and waiting on no reviewer look identical here otherwise.
+          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : ''),
       );
   }
   if (b.up_next.length) {
