@@ -100,6 +100,10 @@ One span per Envelope on the single validate→persist→route path (`musterd.en
 ### Configuration
 
 - **Off by default.** Enabled via standard OTel env vars (`OTEL_EXPORTER_OTLP_ENDPOINT` etc.) — present means on. No musterd-specific telemetry config in v0.x.
+- For a service-managed dogfood daemon, persist the local collector explicitly with
+  `musterd service install --otlp-endpoint http://127.0.0.1:4318`; later installs preserve the
+  plist value, and `--otlp-endpoint ''` clears it. This is operator configuration, not a product
+  default (ADR 082).
 - No vendor SDKs; `@opentelemetry/sdk-node` + OTLP exporter only (dependency-budget note: this touches ADR 002's dependency discipline; the OTel SDK is the one justified addition).
 - **No phone-home, ever.** musterd emits telemetry only to endpoints the operator configures. If product-usage analytics are ever wanted, that is a separate, explicit, opt-in decision with its own ADR.
 
