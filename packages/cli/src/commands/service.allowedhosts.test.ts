@@ -185,6 +185,15 @@ describe('service install daemon environment (end to end through the command)', 
     ).rejects.toThrow(/--otlp-endpoint.*daemon service install/i);
   });
 
+  it('refuses a bare --otlp-endpoint with no value rather than silently ignoring it', async () => {
+    await expect(
+      serviceCommand(parseArgs(['install', '--otlp-endpoint']), {
+        platform: 'darwin',
+        ctx,
+      }),
+    ).rejects.toThrow(/--otlp-endpoint requires a URL \(pass '' to clear\)/i);
+  });
+
   it('a re-install without the flag KEEPS the allow-list', async () => {
     await run(['install', '--allowed-hosts', 'a.ts.net'], up);
     await run(['install'], up);

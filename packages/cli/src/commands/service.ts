@@ -848,6 +848,9 @@ export async function serviceCommand(
     );
   }
 
+  if (parsed.flags['otlp-endpoint'] === true) {
+    throw new CliError("--otlp-endpoint requires a URL (pass '' to clear)", 2);
+  }
   const otlpEndpoint = flagStr(parsed.flags, 'otlp-endpoint');
   const targetsAnotherService = ['live', 'wake', 'auto', 'guardian', 'sweep'].some(
     (flag) => parsed.flags[flag] === true,
