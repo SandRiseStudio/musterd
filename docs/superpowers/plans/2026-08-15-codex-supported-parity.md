@@ -41,7 +41,10 @@ expect(bindingSeat(binding)).toBe('Ada');
 
 - [ ] **Step 2: Add the daemon Presence assertion**
 
-After the first Codex turn and before the unread-inbox read, query the fixture roster as Ada and assert an online `Ada` Member has a Presence whose Surface is `codex`. Use the existing typed response shape; no ambient machine binding reads.
+While the first Codex process remains active, query the fixture roster and assert an online `Ada`
+Member has a Presence whose Surface is `codex`. Use the existing typed response shape; no ambient
+machine binding reads. After the process exits, no live Presence is expected because the adapter
+releases it on shutdown (ADR 277).
 
 - [ ] **Step 3: Verify gate-closed behavior**
 

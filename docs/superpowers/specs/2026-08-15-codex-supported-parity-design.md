@@ -23,14 +23,19 @@ The approved real CLI acceptance run reaches a stale assertion before it can che
 
 The acceptance fixture keeps its isolated daemon, temporary Git workspace, project-local MCP configuration, and two explicit spend gates.
 
-After Codex completes `team_join` and `team_inbox_check`, the test will assert all of the following:
+While the first Codex process remains active after `team_join`, the test will
+observe the fixture roster. Once that process completes, the test will assert
+all of the following:
 
 - the binding parses through `BindingSchema` and has the declared fixed seat claim `{ mode: 'seat', name: 'Ada' }`;
-- the isolated daemon reports an online Presence for Member `Ada` on the `codex` Surface;
+- the isolated daemon reported an online Presence for Member `Ada` on the `codex` Surface during active execution;
 - the directed Act is absent from Ada's unread inbox after the in-session drain;
 - `codex exec resume --json <first-thread-id>` exits successfully and reports the same thread identity.
 
-The server Presence is the join proof. The local claim policy only proves that the test fixture remained bound to the intended Member; it is not used as evidence of occupancy. The test remains owner-gated and creates no production Team, workspace, or credential.
+The server Presence is the join proof. Codex CLI correctly releases that short-lived Presence when
+its MCP process exits, so a post-exit empty roster is not a failure. The local claim policy only
+proves that the test fixture remained bound to the intended Member; it is not used as evidence of
+occupancy. The test remains owner-gated and creates no production Team, workspace, or credential.
 
 ### Desktop parity: prove every supported coordination outcome
 

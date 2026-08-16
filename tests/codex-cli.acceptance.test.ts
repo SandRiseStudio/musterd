@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { makeEnvelope } from '@musterd/protocol';
+import { bindingSeat, BindingSchema, makeEnvelope, MemberSummarySchema } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { resolveCodexBin } from '../packages/cli/src/codexBin.js';
 import { parseCodexThreadLine } from '../packages/cli/src/host/backends/codex.js';
@@ -95,6 +95,28 @@ async function api(
   const text = await response.text();
   expect(response.ok, text).toBe(true);
   return text ? (JSON.parse(text) as Record<string, any>) : {};
+}
+
+async function waitForOnlinePresence(
+  base: string,
+  credential: string,
+  memberName: string,
+  surface: 'codex',
+  timeoutMs = 75_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const roster = await api(base, 'GET', '/teams/codex-real/members', undefined, credential);
+    const member = MemberSummarySchema.array()
+      .parse(roster.members)
+      .find(({ name }) => name === memberName);
+    const presence = member?.presences.find(
+      (candidate) => candidate.surface === surface && candidate.status === 'online',
+    );
+    if (presence) return presence;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
+  throw new Error(`timed out waiting for ${memberName} to be online via ${surface}`);
 }
 
 let server: RunningServer | undefined;
@@ -195,7 +217,7 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
         admin,
       );
 
-      const first = await runCodex(
+      const firstRun = runCodex(
         bin!,
         [
           'exec',
@@ -206,11 +228,16 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
         ],
         workspace,
       );
+      const onlineCodexPresence = await waitForOnlinePresence(base, admin, 'Ada', 'codex');
+      const first = await firstRun;
       expect(first.code, first.stderr).toBe(0);
       expect(first.threadId, first.stdout).toBeTruthy();
-      expect(
-        JSON.parse(readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8')).member,
-      ).toBe('Ada');
+      const binding = BindingSchema.parse(
+        JSON.parse(readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8')),
+      );
+      expect(binding.claim).toEqual({ mode: 'seat', name: 'Ada' });
+      expect(bindingSeat(binding)).toBe('Ada');
+      expect(onlineCodexPresence).toMatchObject({ surface: 'codex', status: 'online' });
       const unread = await api(
         base,
         'GET',
