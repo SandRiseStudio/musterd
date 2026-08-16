@@ -6,6 +6,7 @@ import { PROTOCOL_VERSION } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bind } from './bind.js';
+import { findBinding } from './binding.js';
 import { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
 import { notReadyMessage } from './tools/format.js';
@@ -20,6 +21,21 @@ import {
 let server: RunningServer;
 let base: string;
 let tokens: Record<string, string> = {};
+/**
+ * Where the fixture pretends its seat lives — an EMPTY temp dir, never `process.cwd()`.
+ *
+ * ADR 275 made occupancy follow capture: `refreshAttestation` re-reads `config.bindingDir`'s
+ * binding on every heartbeat and rewrites `config.surface` from `session.harness` (else
+ * `model_observed.harness`). With `bindingDir: process.cwd()` this suite therefore read the
+ * binding of whichever SEAT WORKTREE happened to run it, and the declared `claude-code` below
+ * survived only on a claude-code machine.
+ *
+ * Measured 2026-08-15 at 90af772a: gptbot (codex capture) failed the lifecycle assertion while
+ * dolly (claude-code capture) passed it, on the same commit. Anchoring to a dir with no binding
+ * makes the declaration stand everywhere, which is what these assertions were always about.
+ * Capture-following itself is ADR 275's behaviour and is tested for real in surface-drift.test.ts.
+ */
+let seatDir: string;
 
 async function api(method: string, path: string, body?: unknown, token?: string) {
   const res = await fetch(base + path, {
@@ -65,11 +81,13 @@ beforeEach(async () => {
     tokens['nick'],
   );
   tokens['ada_grant'] = grant.json.token;
+  seatDir = mkdtempSync(join(tmpdir(), 'musterd-mcp-seat-'));
 });
 
 afterEach(async () => {
   await server.close();
   tokens = {};
+  rmSync(seatDir, { recursive: true, force: true });
 });
 
 function adaConfig(): McpConfig {
@@ -84,9 +102,20 @@ function adaConfig(): McpConfig {
     claim: { mode: 'seat', name: 'Ada' },
     connId: 'conn-ada',
     claimCode: 'AD12',
-    bindingDir: process.cwd(),
+    bindingDir: seatDir,
   };
 }
+
+/**
+ * The fixture invariant, asserted rather than trusted: this suite's seat must be anchored somewhere
+ * with NO capture on disk. Re-point `bindingDir` at `process.cwd()` and this fails immediately on
+ * any developer machine — which is the failure mode it exists to stop, because the assertions that
+ * depend on it (roster surface, attested model) would otherwise silently answer a question about
+ * the runner's own worktree instead of about the code.
+ */
+it('anchors its seat where nothing is captured — or these assertions read the runner, not the code', () => {
+  expect(findBinding(adaConfig().bindingDir!, {})).toBeNull();
+});
 
 async function rosterMember(name: string) {
   const roster = await api('GET', '/teams/dawn/members', undefined, tokens['nick']);
