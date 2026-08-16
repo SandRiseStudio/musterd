@@ -83,6 +83,33 @@ export function recordLaneClose(
         ? ('review_unanswered' as const)
         : ('review_cut_short' as const)
       : ('review_timeout' as const);
+  // Which ask the submit actually sent — orthogonal to WHO closed the lane, and the fact
+  // `review_swept` alone could never carry (lane 01M042GWK3).
+  //
+  // The rungs are the seat-closed ladder's own, extracted so the two paths cannot drift again.
+  // Drift is precisely what happened: the ladder below distinguishes "nobody was asked" from
+  // "asked and unanswered" with an ADR behind each rung, and `systemClosed` short-circuited ahead
+  // of all of it — so the ONE close path with no human watching recorded the least. Lane
+  // 01M016D5GA (44 files joining typecheck) was swept at 24h reading exactly like a lane whose
+  // reviewer had been asked and ignored it, when in truth no ask had ever been sent.
+  //
+  // `undefined` abstains, and that is load-bearing: a lane whose ready row predates these fields
+  // gets no verdict invented about it, the same discipline every rung here already follows.
+  const askOutcome:
+    | 'acceptance_exempt'
+    | 'human_review_missed'
+    | 'no_candidate'
+    | 'routed'
+    | undefined =
+    routing.exempt === true
+      ? 'acceptance_exempt'
+      : routing.routed === false
+        ? routing.human_required === true
+          ? 'human_review_missed'
+          : 'no_candidate'
+        : routing.routed === true
+          ? 'routed'
+          : undefined;
   // ADR 172: even a verified close can miss the requirement — an agent counterpart confirming a
   // risky lane is a real review, but not the HUMAN one the risk demanded. `=== true`, never
   // truthiness: an abstaining read must not assert the flag (ADR 173 clause 3 — a consumer that
@@ -126,7 +153,7 @@ export function recordLaneClose(
                   // `human_review_missed` — a requirement with no one to meet it, not a shrug.
                   // `undefined` routing (a lane that entered review before the outcome was recorded)
                   // keeps the old label rather than inventing a verdict about the past.
-                  routing.exempt === true
+                  askOutcome === 'acceptance_exempt'
                   ? // ADR 234 increment 2: nobody was asked BY DESIGN, on the lane's own declared
                     // stakes. Ahead of `no_candidate` because both present as `routed: false` and
                     // only this one is a choice — `no_candidate` is the sanctioned degradation
@@ -140,14 +167,12 @@ export function recordLaneClose(
                     // The whole point of the ladder's discipline is that only a recorded fact earns
                     // a label, and this is the case where the tempting shortcut is a live field.
                     'acceptance_exempt'
-                  : routing.routed === false
+                  : askOutcome === 'human_review_missed' || askOutcome === 'no_candidate'
                     ? // Same discipline one level down: only a RECORDED requirement earns the
                       // `human_review_missed` label. A row that abstains keeps the older, weaker
                       // `no_candidate` — the label it would have carried before the requirement was
                       // ever recorded — rather than a verdict about a past that never wrote one down.
-                      routing.human_required === true
-                      ? 'human_review_missed'
-                      : 'no_candidate'
+                      askOutcome
                     : // ADR 217: an ask WAS sent and the owner closed it themselves — but "timeout" was
                       // asserting an elapsed wait nobody had measured. 11 of the first 18 such closes
                       // happened inside five minutes, the fastest after 8 seconds, while the median
@@ -155,6 +180,11 @@ export function recordLaneClose(
                       // opposite failures this was, and abstains when the promise is unknowable.
                       waitVerdict
                 : 'self_close',
+      // Only on the swept path. Everywhere else `reason` already answers it — the seat-closed
+      // ladder IS this verdict, except in the `routed` case where the reason is the ADR 217 wait
+      // verdict and "an ask was sent" is implied by it. Emitting it twice would put the same fact
+      // in two fields and invite them to disagree.
+      ...(systemClosed && askOutcome !== undefined ? { ask_outcome: askOutcome } : {}),
       // ADR 172: flagged even on a verified close — an agent counterpart's confirm on a risky lane
       // is a real review, but not the human one the risk tag demanded.
       ...(humanReviewMissed ? { human_review_missed: true } : {}),
