@@ -97,12 +97,44 @@ lane fields, because stakes and roster are both editable after submit.
 case is `01M016D5GA`, whose recorded ready row (`no_candidate: true`, `human_required: false`,
 no reviewer) resolves to `ask_outcome: 'no_candidate'` under this decision.
 
-**Eval.** After 30 days, group swept closes by `ask_outcome`. The question it must answer:
-what share of swept lanes were never routed to anyone? **A sustained `no_candidate` share above
-~25% means the sweep is mostly collecting lanes the roster could never review**, which is a
-monoculture problem and not an attention problem — and it would redirect the ADR 254/260 arc, which
-currently treats slow acceptance as the thing to fix. A share near zero means the opposite: asks are
-being sent and ignored, and attention is the right target after all.
+**Eval.** ~~After 30 days,~~ **AMENDED 2026-08-16 — at 25 swept closes, however long that takes**
+(see below), group swept closes by `ask_outcome`. The question it must answer: what share of swept
+lanes were never routed to anyone? A high `no_candidate` share means the sweep is mostly collecting
+lanes the roster could never review — a monoculture problem, not an attention problem — and it would
+redirect the ADR 254/260 arc, which currently treats slow acceptance as the thing to fix. A share
+near zero means the opposite: asks are being sent and ignored, and attention is the right target.
+
+> **Amendment, 2026-08-16 (dolly, prompted by nick asking whether 30 days was too long).**
+>
+> For this ADR it was too **short**, and the threshold I wrote was not supportable. That is my
+> error, and it is the same defect I spent the surrounding session flagging in other people's
+> instruments: a precise-sounding line on a sample that cannot carry it.
+>
+> The sample unit is swept closes, and they are rare: **18 in 30d (~0.6/day)** on the live ledger —
+> and lumpy, 18 in the last 14d but only 2 in the last 7. Thirty days therefore yields about
+> **n=18**. `ask_outcome` also only exists on closes after `03a3ac38`, so the count starts at **1**.
+>
+> At those sizes the original "~25%" line cannot be read (Wilson 95% intervals around p=0.25):
+>
+> | n   | 95% CI        | half-width |
+> | --- | ------------- | ---------- |
+> | 18  | 10.7% – 48.1% | ±18.7pp    |
+> | 25  | 12.2% – 44.5% | ±16.2pp    |
+> | 50  | 15.1% – 38.5% | ±11.7pp    |
+> | 72  | 16.4% – 36.1% | ±9.8pp     |
+>
+> At n=18 the instrument cannot distinguish one-in-ten from half — which is the entire decision the
+> band exists to make. **A confident call on a 25% line needs n≈72, which at 0.6/day is ~120 days.**
+>
+> So the Eval is re-keyed and its claim is downgraded to what the data can support:
+>
+> - **Trigger: 25 swept closes carrying `ask_outcome`** (~42 days at the current rate), and the
+>   report must state n.
+> - **At n=25 the read is DIRECTIONAL ONLY.** Decisive: a share **above ~45%** or **below ~12%** —
+>   the ends the interval excludes. Anything between is genuinely inconclusive and must be reported
+>   as inconclusive, not rounded toward whichever answer is convenient.
+> - A verdict on the 25% line waits for **n≈72**. If that horizon is unacceptable, the honest
+>   response is to change what we measure — not to keep the line and read it early.
 
 **Experiment.** A lane submitted with no eligible counterpart, left to the sweep, closes with a row
 naming the absent ask. Verified failing before this change (the field did not exist) and passing
