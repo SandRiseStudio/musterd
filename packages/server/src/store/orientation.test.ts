@@ -461,6 +461,74 @@ describe('brief leads with goals (goals-front-door design)', () => {
   });
 });
 
+/**
+ * "recently shipped" must not call an unconfirmed close a confirmed one (lane 01M06PR40).
+ *
+ * ADR 169 derives `verified` on every close and the `/lanes` endpoint has annotated done lanes with
+ * it since — which is why the web board has rendered accepted/unconfirmed chips all along
+ * (Board.tsx:409-416). `deriveNext` never applied the same annotation, so the ONE place a seat reads
+ * what just landed showed a swept, unreviewed lane exactly like a peer-accepted one.
+ *
+ * Measured 2026-08-15: lane 01M016D5GA — 44 files joining typecheck, every CI-deciding gate among
+ * them — was swept at 24h with `verified: false` and listed under "recently shipped" unmarked.
+ */
+describe('shipped carries the verified-ness of its close', () => {
+  function closedRow(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    laneId: string,
+    verified: boolean,
+  ) {
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (?, ?, ?, ?, 'lane.closed', ?, 'allow', ?, ?)`,
+    ).run(
+      `closed-${laneId}`,
+      teamId,
+      Date.now(),
+      'musterd',
+      laneId,
+      JSON.stringify({ lane: laneId, state: 'done', verified }),
+      Date.now(),
+    );
+  }
+  function shippedLane(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    title: string,
+    verified: boolean,
+  ) {
+    const lane = openLane(db, teamId, 'revive', 'stanley', { title, claim: true });
+    updateLane(db, teamId, lane.id, 'revive', { state: 'done' });
+    closedRow(db, teamId, lane.id, verified);
+    return lane;
+  }
+
+  it('marks a close nobody confirmed, so the brief stops calling it shipped-and-fine', () => {
+    const { db, team } = seed();
+    shippedLane(db, team.id, 'swept', false);
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.shipped.find((l) => l.title === 'swept')?.verified).toBe(false);
+  });
+
+  it('marks a counterpart-accepted close as verified', () => {
+    const { db, team } = seed();
+    shippedLane(db, team.id, 'accepted', true);
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.shipped.find((l) => l.title === 'accepted')?.verified).toBe(true);
+  });
+
+  it('ABSTAINS on a close that recorded no verdict — pre-ADR-169 lanes invent nothing', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'revive', 'stanley', { title: 'ancient', claim: true });
+    updateLane(db, team.id, lane.id, 'revive', { state: 'done' });
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    // Absent, never defaulted to false: "we do not know" and "nobody confirmed it" are different
+    // claims, and only one of them is true here.
+    expect(brief.shipped.find((l) => l.title === 'ancient')).not.toHaveProperty('verified');
+  });
+});
+
 describe('review_debt (value-layer design)', () => {
   function insertReadyAudit(
     db: ReturnType<typeof seed>['db'],

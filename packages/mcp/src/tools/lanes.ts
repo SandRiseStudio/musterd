@@ -550,7 +550,14 @@ export function fmtNext(b: NextBrief): string {
   if (b.shipped.length) {
     lines.push('\nrecently shipped:');
     for (const l of b.shipped)
-      lines.push(`  ✓ "${l.title}"${l.goal_id ? ` goal=${l.goal_id}` : ''}`);
+      lines.push(
+        `  ✓ "${l.title}"${l.goal_id ? ` goal=${l.goal_id}` : ''}` +
+          // ADR 192's copy, the same the web board's chip has carried since ADR 169: `verified` is
+          // the wire name, "unconfirmed" is what a reader is told. Only on an explicit `false` — an
+          // absent verdict is unknown, not unconfirmed, and saying otherwise would accuse a close
+          // nobody recorded anything about.
+          (l.verified === false ? ' — unconfirmed' : ''),
+      );
   }
   if (b.next_goal) {
     const g = b.next_goal;
