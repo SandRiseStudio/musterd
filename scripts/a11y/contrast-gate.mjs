@@ -188,14 +188,51 @@ const report = ({ code, out }, label, floor = 0) => {
   }
   failed.push(label);
   console.log(`  ✗ ${label} — ${live?.[2] ?? '?'} below AA${tail}${unsettled}`);
-  // The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
-  for (const line of out.split('\n')) {
-    if (/^\s+\d+(\.\d+)? \(need /.test(line)) console.log(`   ${line.trim()}`);
+  /* The failing rows themselves, indented under their route — the ink/paper pair IS the fix.
+     ONLY the failure block: the sweep prints EXEMPT rows (WCAG 1.4.3 logotype carve-out) in the
+     identical `ratio (need N) ink on paper` shape further down, and the old grep-the-whole-output
+     hoovered those up too. An exempt row listed under a ✗ route reads as a third failure — it cost
+     izzo an hour of chasing `lc-office__mark-lockup` on 2026-08-13, a row that never set the exit
+     code. Failure rows start directly under the `live:` line; the block ends at the first line
+     that is not a row. */
+  const lines = out.split('\n');
+  const start = lines.findIndex((l) => /^live: \d+ measured/.test(l));
+  for (let i = start + 1; i > 0 && i < lines.length; i++) {
+    if (!/^\s+\d+(\.\d+)? \(need /.test(lines[i])) break;
+    console.log(`   ${lines[i].trim()}`);
   }
 };
 
+/**
+ * Routes that mount the office scene get their lighting PINNED, and get measured at two of them.
+ *
+ * The scene's lighting follows the real PST sun (`pstNowHours` in office-scene/index.ts), so an
+ * unpinned sweep's verdict is a function of when it runs: at 272d4ad3 the /office-preview caption
+ * measured 5.86:1 in daylight and 2.85:1 under the night veil — same bytes, wall clock the only
+ * variable. That is exactly how main went green at 17:33–18:14 PDT and red at 21:12 PDT on the
+ * same commit (runs 31759967399 / 31760236892), and why re-running a green run after dusk flipped
+ * it. A verdict that changes with the clock cannot gate merges: a fix validated at noon is
+ * validated by nothing.
+ *
+ * `?light=HH` is the scene's own override (a dev aid it already ships). Day and night bracket the
+ * lighting range — dawn/dusk sit between them — so a green here means "readable at both ends",
+ * reproducible at any hour, on any machine. Full hour sweep measured 2026-08-14: caption 5.86 at
+ * 9–18, 5.1 at 6, 2.85 at 20–24. (lane 01KZZ7RYW6K9)
+ */
+const SCENE_LIGHTS = ['12', '21'];
+const sceneRoutes = new Set(['/office-preview']);
+
 for (const route of ROUTES) {
-  report(await sweep(`http://127.0.0.1:${PORT}${route}`), route);
+  if (sceneRoutes.has(route)) {
+    for (const light of SCENE_LIGHTS) {
+      report(
+        await sweep(`http://127.0.0.1:${PORT}${route}?light=${light}`),
+        `${route} (light=${light})`,
+      );
+    }
+  } else {
+    report(await sweep(`http://127.0.0.1:${PORT}${route}`), route);
+  }
 }
 
 server.close();
@@ -242,10 +279,17 @@ if (!process.argv.includes('--static-only')) {
   const base = /(http:\/\/127\.0\.0\.1:\d+)\/board/.exec(up.out)?.[1];
   const team = /team=([\w-]+)/.exec(up.out)?.[1] ?? 'paper';
   try {
-    for (const route of ['/board', '/live']) {
-      // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
-      // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
-      report(await sweep(`${base}${route}?team=${team}`), `${route} (connected)`, 12);
+    // 12 is comfortably under what a connected page renders (25 apiece today) and comfortably
+    // over the 1 a sign-in screen renders, so it separates "connected" from "never got there".
+    report(await sweep(`${base}/board?team=${team}`), '/board (connected)', 12);
+    // Connected /live mounts the office scene, so its lighting is pinned like the preview's —
+    // same clock-dependence, same two-ended bracket. See SCENE_LIGHTS above.
+    for (const light of SCENE_LIGHTS) {
+      report(
+        await sweep(`${base}/live?team=${team}&light=${light}`),
+        `/live (connected, light=${light})`,
+        12,
+      );
     }
   } finally {
     await sh(['down']);
