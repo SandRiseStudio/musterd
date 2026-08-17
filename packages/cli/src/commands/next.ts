@@ -1,4 +1,4 @@
-import { incidentBannerLines, type Lane, type NextBrief } from '@musterd/protocol';
+import { incidentBannerLines, shortDuration, type Lane, type NextBrief } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
@@ -16,14 +16,6 @@ function laneLine(l: Lane): string {
 }
 
 /** Coarse elapsed time — the reader needs "hours, not minutes", never a precise duration. */
-function waitedFor(ms: number): string {
-  const s = Math.round(ms / 1000);
-  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
-  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
-  if (s >= 60) return `${Math.floor(s / 60)}m`;
-  return `${s}s`;
-}
-
 function render(brief: NextBrief): void {
   const w = process.stdout.write.bind(process.stdout);
   w(`${theme.accent('next')} — as ${theme.memberName(brief.member, 'agent')}\n`);
@@ -54,7 +46,7 @@ function render(brief: NextBrief): void {
     w(`\n${theme.accent('owed by you')} — ${owed.length} lane(s) waiting on your verdict:\n`);
     for (const r of owed) {
       w(
-        `  ${theme.meta(r.lane.id)} "${r.lane.title}" — ${theme.memberName(r.from, 'agent')} has waited ${waitedFor(now - r.ts)}\n`,
+        `  ${theme.meta(r.lane.id)} "${r.lane.title}" — ${theme.memberName(r.from, 'agent')} has waited ${shortDuration(now - r.ts)}\n`,
       );
       w(theme.meta(`    answer: \`musterd send --act accept --reply-to ${r.ask_id} "…"\``) + '\n');
     }
