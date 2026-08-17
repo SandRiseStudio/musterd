@@ -35,14 +35,36 @@
  * placed correctly (indistinguishable from a healthy row), or caught by the `moved` guard. What it
  * must never do is get measured while stranded. That is the assertion.
  *
- * ── What this does NOT yet cover, and it matters ────────────────────────────────────────────────
+ * ── The third arm: characterised 2026-08-17, and it FAILS ON PURPOSE ────────────────────────────
  *
- * On 2026-08-14 wanderer measured a REAL failure on /office-preview at light=12 —
- * `lc-speech__text` at 1.8 (need 4.5), ink #2b1f13 on paper #3a4d4d, reported below AA rather than
- * excluded, with two immediate retries green. Neither fixture here reproduces that: across repeated
- * runs both arms stay safe. So a third path into the stranded state exists and is not yet
- * characterised, and this falsifier passing does NOT mean the birth hole is closed. It means the two
- * arms it does model have not regressed.
+ * `request-after-freeze.html` is wanderer's path, and it reproduces 3 runs of 3 with the same
+ * signature they reported: `1.8 (need 4.5)  #2b1f13 on #3a4d4d`, plus the composited-vs-sampled
+ * DISAGREEMENT line that is the tell of a row measured somewhere its own CSS says it is not.
+ *
+ * BIRTH TIME WAS THE WRONG PREDICATE. Both arms above turn on when the element was created; this one
+ * is created at parse time — marked beyond any doubt — and still strands. What decides strandedness
+ * is whether the placement REQUEST preceded the freeze:
+ *
+ *   - present at the mark walk  → `born` is false, so that guard cannot see it;
+ *   - its `requestAnimationFrame` call lands AFTER the no-op → nothing is ever queued, so unlike the
+ *     before-freeze arm there is no already-queued callback to save it;
+ *   - never placed, therefore never moves → the rect pass and the shutter agree, so `moved` is false
+ *     as well.
+ *
+ * Marked, stationary, and measured at (0,0) over whatever dark paint is in the corner. Both guards
+ * are blind to it by construction, which is why no amount of re-running the other two arms was ever
+ * going to find it.
+ *
+ * Why the real scene does it intermittently: any scene that creates an element and places it on a
+ * LATER turn — after a font load, a measurement, a microtask, an observer — has a window between
+ * creation and request. The freeze is one synchronous evaluation dropped in at an arbitrary moment.
+ * Inside that window the request never happens; outside it everything is placed or safely queued.
+ *
+ * THIS ARM IS EXPECTED TO FAIL until the sweep stops keying on birth time. It is reported as a known
+ * open defect and does NOT set the exit code — a red instrument nobody can act on gets muted, and a
+ * muted instrument is how #832 got its "6 of 6" in the first place. If it ever PASSES, that is the
+ * signal to come back here: either the sweep was fixed (retire the expectation and make it a real
+ * arm) or the fixture stopped modelling the defect.
  */
 
 import { spawn } from 'node:child_process';
@@ -121,6 +143,22 @@ for (let i = 1; i <= runs; i++) {
   );
 }
 
+/* The third arm — wanderer's path. Deterministic, and it FAILS: the row is marked (so `born` is
+   false), never placed, and never moves (so `moved` is false), which is exactly the hole. Counted
+   separately from `failed` so a known open defect cannot mask a REGRESSION in the two closed arms.
+   The unexpected outcome here is a PASS. */
+let thirdArmStranded = 0;
+for (let i = 1; i <= runs; i++) {
+  const { out } = await sweep(`${base}/request-after-freeze.html`);
+  const fails = belowAA(out);
+  const stranded = fails !== null && fails > 0;
+  if (stranded) thirdArmStranded++;
+  console.log(
+    `  ${stranded ? '✗ (expected)' : '! UNEXPECTED PASS'} request-after-freeze run ${i}: ${fails} below AA` +
+      `${stranded ? ' — marked, never placed, never moved' : ' — the hole may be closed; see the header'}`,
+  );
+}
+
 server.close();
 
 if (failed) {
@@ -128,8 +166,9 @@ if (failed) {
   process.exit(1);
 }
 console.log(
-  '\nbirth-falsifier — both modelled arms safe.' +
-    '\nNOTE: this does NOT prove the birth hole closed. wanderer measured a real stranded failure on' +
-    '\n/office-preview (lc-speech__text 1.8 on #3a4d4d, light=12) that neither fixture reproduces —' +
-    '\na third path into the stranded state is still uncharacterised.',
+  '\nbirth-falsifier — both CLOSED arms safe.' +
+    `\nTHE HOLE IS OPEN: request-after-freeze stranded ${thirdArmStranded}/${runs} run(s), as expected.` +
+    '\nA row present at the mark walk whose placement is REQUESTED after the freeze is invisible to' +
+    '\nboth guards — `born` keys on birth time, `moved` needs motion, and this row has neither.' +
+    '\nExit code reflects the closed arms only, so this known defect cannot mute a real regression.',
 );
