@@ -98,8 +98,11 @@ case is `01M016D5GA`, whose recorded ready row (`no_candidate: true`, `human_req
 no reviewer) resolves to `ask_outcome: 'no_candidate'` under this decision.
 
 **Eval.** ~~After 30 days,~~ ~~**AMENDED 2026-08-16 — at 25 swept closes, however long that
-takes**~~ — **RETIRED 2026-08-17, answered by `scripts/research/roster-diversity.ts` at 91.7%
-(n=84); see the second amendment below.** The original text stands for the record: group swept
+takes**~~ ~~— **RETIRED 2026-08-17, answered by `scripts/research/roster-diversity.ts` at 91.7%
+(n=84); see the second amendment below.**~~ — **RESTATED 2026-08-17 (third amendment, same day):
+answered for the DEGRADED-ROUTING case only; the unconditional question is explicitly open, and
+this Eval stays retired for a different reason than the second amendment gave.** The original text
+stands for the record: group swept
 closes by `ask_outcome`. The question it must answer: what share of swept
 lanes were never routed to anyone? A high `no_candidate` share means the sweep is mostly collecting
 lanes the roster could never review — a monoculture problem, not an attention problem — and it would
@@ -175,6 +178,55 @@ near zero means the opposite: asks are being sent and ignored, and attention is 
 > actionable half: a roster that is monoculture 90% of the time but clears every few hours is a
 > different problem from one that clears twice a month, and the two want opposite fixes. Recorded
 > here as the open question; not built.
+
+> **Third amendment, 2026-08-17 (dolly, same day — prompted by miley's decline of lanes
+> `01M08AMC4F` and `01M08BEX06`). The second amendment's central figure was a CONDITIONAL rate
+> presented as unconditional, and the retirement is restated on the corrected evidence.**
+>
+> **What was wrong.** The 91.7% came from `family_posture` rows, and until `f032e975` (#873) the
+> daemon wrote that field **only on the degraded routing paths** — no reviewer pickable, wake
+> queued, or breaker tripped. A submit that routed cleanly recorded a `reviewer` and no posture,
+> and was invisible to the instrument. The exclusion was neither small nor random: 161 of 248
+> ready rows carried no posture, and 148 of those had routed to a reviewer. So the second
+> amendment's figure actually reads "among submits where routing had already degraded, ~92% had no
+> cross-family counterpart" — close to true by construction — not "92% of submits", which is what
+> its retirement sentence ("at 91.7% there is nothing left … to establish") took it to say. The
+> same defect propagated into the instrument's own header, which claimed the field was recorded
+> "on EVERY ready row since 2026-07-28". It was not. miley caught both; the code path is
+> `http.ts` (`postureForAudit`), verified before this restatement was written.
+>
+> **The corrected evidence** (#873, re-runnable):
+>
+> ```
+> CONDITIONAL (among submits where routing degraded): 80/87 = 92.0%  (95% CI 84.3% - 96.0%)
+> FLOOR (every posture-less row counted as if cross-family had been possible): 80/248 = 32.3%
+> ```
+>
+> The unconditional rate sits somewhere between 32.3% and 92.0% — a bracket wide enough to change
+> what the number means, and no data on disk today can narrow it, because the missing rows
+> recorded nothing. Since `f032e975` the posture is recorded on every non-exempt ready row, clean
+> routes included, so the unconditional number accrues from here forward.
+>
+> **What this does to the retirement.** The second amendment retired this Eval as *answered*. That
+> claim is downgraded: it is answered **for the degraded-routing case** — when the routing ladder
+> failed, it was almost always a family problem rather than bad luck — and **open for the
+> unconditional question**. The Eval nonetheless STAYS retired, on narrower and honest grounds:
+> the roster instrument now measures the unconditional rate directly on post-fix rows, samples at
+> ~10x the swept-close rate, and asks the roster rather than inferring from wreckage. The
+> swept-close split remains the worse instrument for this question even with the conditioning
+> corrected — but "worse instrument" is the argument, not "question settled", and the difference
+> matters to whoever reads this in six months.
+>
+> **The reopen condition tightens accordingly.** The second amendment reopened below ~50%
+> sustained on the instrument's share. That now applies to the **unconditional share measured on
+> post-`f032e975` rows** — the conditional share cannot trip it, because at a true unconditional
+> rate near the 32.3% floor the swept-close split would already be informative today. Read the
+> instrument's CONDITIONAL and FLOOR lines separately; quoting either alone, without its
+> denominator, is the exact failure this amendment exists to record.
+>
+> The successor question above (how LONG do the gaps last) is unaffected — it was posed on the
+> daily series, which is conditional either way and was never the retirement's load-bearing
+> evidence.
 
 **Experiment.** A lane submitted with no eligible counterpart, left to the sweep, closes with a row
 naming the absent ask. Verified failing before this change (the field did not exist) and passing
