@@ -55,7 +55,13 @@ const arg = (name, fallback) => {
 };
 
 const DIR = arg('dir', join(HERE, '../../packages/web/dist/client'));
-const PORT = Number(arg('port', '4331'));
+// Port 0 = "any free port", assigned by the OS at listen time. The gate serves a throwaway static
+// snapshot to a headless browser on loopback; nothing outside this process ever needs to predict
+// the number, so there is no reason to fight over a fixed one. An EXPLICIT --port keeps
+// first-come-first-served semantics: the caller asked for that port specifically, and silently
+// substituting another would make "--port 4331" mean "4331, probably".
+const EXPLICIT_PORT = arg('port', '');
+const PORT = EXPLICIT_PORT ? Number(EXPLICIT_PORT) : 0;
 
 /**
  * Every route the client prerenders. The preview routes carry the weight — they mount real
@@ -135,15 +141,35 @@ await new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(PORT, '127.0.0.1', resolve);
 }).catch((e) => {
-  // A raw EADDRINUSE stack reads like a broken gate. It is usually a previous run's server that
-  // outlived a Ctrl-C, and the fix is a different port, not a debugging session.
+  // A raw EADDRINUSE stack reads like a broken gate. With port 0 it cannot happen; it is reachable
+  // only when the caller pinned a port, so the message can say so plainly. The refusal used to be
+  // the DEFAULT path — every concurrent or Ctrl-C-orphaned run exited 1 in the same shape as a real
+  // contrast red, and seats debugged phantom failures. Measured 2026-08-17, twice in one session.
   console.error(
     e.code === 'EADDRINUSE'
-      ? `contrast-gate — port ${PORT} is busy (a previous run?). Retry with --port <n>.`
+      ? `contrast-gate — port ${PORT} is busy (a previous run?). Drop --port to auto-pick a free one.`
       : `contrast-gate — could not serve ${DIR}: ${e.message}`,
   );
   process.exit(1);
 });
+// The port actually bound — with `--port` it is that port, otherwise whatever the OS assigned.
+const BOUND = server.address().port;
+
+/**
+ * A currently-free port, for the one consumer that cannot take "port 0" itself: the fixture daemon
+ * is spawned by a shell script that passes an explicit `--port` through. Bind-then-release has a
+ * TOCTOU window, but the loser of that race fails loudly at daemon start — the exact failure this
+ * change demotes from "every concurrent run" to "a genuine collision".
+ */
+const freePort = () =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
 
 const sweep = (url) =>
   new Promise((resolve) => {
@@ -226,12 +252,12 @@ for (const route of ROUTES) {
   if (sceneRoutes.has(route)) {
     for (const light of SCENE_LIGHTS) {
       report(
-        await sweep(`http://127.0.0.1:${PORT}${route}?light=${light}`),
+        await sweep(`http://127.0.0.1:${BOUND}${route}?light=${light}`),
         `${route} (light=${light})`,
       );
     }
   } else {
-    report(await sweep(`http://127.0.0.1:${PORT}${route}`), route);
+    report(await sweep(`http://127.0.0.1:${BOUND}${route}`), route);
   }
 }
 
@@ -247,9 +273,26 @@ server.close();
  * `--static-only` skips it (no CLI build, or you only want the fast pass). It is a narrowing of
  * coverage, so it says so rather than passing quietly. */
 if (!process.argv.includes('--static-only')) {
+  // The fixture script is already isolation-capable — A11Y_FIXTURE_{ROOT,PORT,TEAM} exist exactly
+  // so two stacks cannot collide — but this gate never used them, so two concurrent runs raced to
+  // the same daemon port, DB, and team ("paper" already exists), and the loser exited 1 in the
+  // same shape as a contrast red. Same defect as the static phase's fixed port, one layer down.
+  // Derive per-run values unless the caller pinned their own; the same env goes to `up` and
+  // `down`, so teardown tears down THIS run's stack and nobody else's.
+  const fixtureEnv = {
+    ...process.env,
+    A11Y_FIXTURE_ROOT:
+      process.env['A11Y_FIXTURE_ROOT'] ??
+      join(process.env['TMPDIR'] ?? '/tmp', `musterd-a11y-${process.pid}`),
+    A11Y_FIXTURE_PORT: process.env['A11Y_FIXTURE_PORT'] ?? String(await freePort()),
+    A11Y_FIXTURE_TEAM: process.env['A11Y_FIXTURE_TEAM'] ?? `paper-${process.pid}`,
+  };
   const sh = (args) =>
     new Promise((resolve) => {
-      const c = spawn('bash', [join(HERE, 'fixture-team.sh'), ...args], { stdio: 'pipe' });
+      const c = spawn('bash', [join(HERE, 'fixture-team.sh'), ...args], {
+        stdio: 'pipe',
+        env: fixtureEnv,
+      });
       let out = '';
       c.stdout.on('data', (d) => (out += d));
       c.stderr.on('data', (d) => (out += d));
