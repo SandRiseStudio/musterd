@@ -3060,14 +3060,18 @@ export async function handleHttp(
           // ADR 191: when nobody live is eligible, try a marked-wakeable offline seat — only if the
           // review loop is enabled AND that seat is flow:auto AND the circuit breaker has not tripped.
           const teamPolicy = getPolicy(ctx.db, team.id);
-          // ADR 234 increment 2: an exempt lane has no posture to explain. `family_posture` answers
-          // "why was nobody eligible" — a question an exempt submit never asked. Recording one here
-          // would put an empty-pool diagnosis on a row where the pool was never consulted, and the
-          // ADR 172 remedy list (wake a seat / enrol one) would be advice about a non-problem.
-          const posture =
-            pick || exemption.exempt
-              ? undefined
-              : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
+          // ADR 234 increment 2: an exempt lane has no posture to explain. `family_posture` began
+          // as the answer to "why was nobody eligible" (ADR 172), but recording it ONLY on the
+          // degraded paths conditioned the sample on routing having already failed — miley's
+          // decline of lane 01M08AMC4F showed the roster-diversity instrument reading "92% of
+          // DEGRADED submits were monoculture" as if it were the unconditional rate (floor 32.5%).
+          // So the posture is now computed on every non-exempt submit, clean routes included: the
+          // row answers "what did the roster look like when this review was needed", whether or
+          // not the ladder found someone. Exempt submits still record nothing — the pool was never
+          // consulted, and a diagnosis on that row would still be advice about a non-problem.
+          const posture = exemption.exempt
+            ? undefined
+            : teamFamilyPosture(ctx.db, team.id, ctx.config.presenceTimeoutMs);
           if (!pick && !exemption.exempt && lane.risk.length === 0 && posture) {
             if (reviewLoopBounceCount(ctx.db, team.id, lane.id) >= REVIEW_LOOP_BREAKER_N) {
               breakerTripped = true;
@@ -3102,8 +3106,9 @@ export async function handleHttp(
           // ADR 172: when nobody is eligible, record WHY nobody was — the derived family posture.
           // Without it a run of no_candidate rows says "the pool was empty" but not what the pool
           // looked like, and the remedy (wake an enrolled seat vs. enroll one) is undecidable later.
-          // Keep posture on wake_queued / breaker rows too — the remedy list still matters.
-          const postureForAudit = pick && !wakeQueued && !breakerTripped ? undefined : posture;
+          // Recorded on CLEAN routes too (see the computation above): an instrument that only sees
+          // the degraded rows reports a share of a population it never observed.
+          const postureForAudit = posture;
           // ADR 217: the tier is decided HERE rather than at the ask, so the ready row can record
           // the wait the acceptor was actually promised. Without it the close edge has nothing to
           // compare `time_in_review_ms` against, and an owner closing after 8 seconds is recorded

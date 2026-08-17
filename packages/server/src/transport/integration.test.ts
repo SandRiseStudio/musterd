@@ -3989,6 +3989,11 @@ describe('two-stage close (ADR 169)', () => {
       expect(r0.detail.exempt_sampled).toBe(true);
       expect(r0.detail.stakes).toBe('low');
       expect(r0.detail.ask_tier).toBe('standard');
+      // A CLEAN route records the posture too. When it was written only on the degraded paths,
+      // any instrument reading `family_posture` was silently conditioned on routing having
+      // already failed — the estimand defect miley's decline of lane 01M08AMC4F named.
+      expect(r0.detail.family_posture).toBeDefined();
+      expect(['diverse', 'monoculture', 'unknown']).toContain(r0.detail.family_posture.state);
     });
 
     it('a risk tag outranks the declaration — low + risky still routes to a human', async () => {
