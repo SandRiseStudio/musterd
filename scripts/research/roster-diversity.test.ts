@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { dailySeries, summarise, wilson, type PostureSample } from './roster-diversity.js';
+import {
+  dailySeries,
+  floorOverReadyRows,
+  summarise,
+  wilson,
+  type PostureSample,
+} from './roster-diversity.js';
 
 /**
  * The instrument that asks the ROSTER whether a cross-family review was possible, instead of
  * inferring it from lanes that were already swept.
  *
  * Why it exists: ADR 277's Eval keys on swept closes, which arrive at ~0.6/day — n≈72 for a ±10pp
- * read, about 120 days. `family_posture` is already recorded on every `lane.ready_for_review` row
- * and has been since 2026-07-28, so the same question has n=84 available today. This file guards
- * the two ways that shortcut could go wrong: a denominator that quietly swallows rows which
- * recorded nothing, and a headline that reports `monoculture` alone as if it were the answer.
+ * read, about 120 days. `family_posture` on `lane.ready_for_review` rows asks the same question
+ * directly. But before 2026-08-17 the daemon wrote the posture ONLY on degraded routing paths
+ * (miley's decline of lane 01M08AMC4F), so the sampled share is CONDITIONAL for those rows and
+ * the unconditional rate is bracketed by a floor. This file guards the ways the shortcut goes
+ * wrong: a denominator that quietly swallows rows which recorded nothing, a headline that reports
+ * `monoculture` alone as if it were the answer, and a floor that forgets its denominator.
  */
 const at = (day: number, state: PostureSample['state'], attesting = 2): PostureSample => ({
   ts: Date.UTC(2026, 7, day),
@@ -50,6 +58,30 @@ describe('summarise', () => {
     expect(tight.ci).not.toBeNull();
     // Same point estimate (100%), but the small sample must not claim the same precision.
     expect(tight.ci!.hi - tight.ci!.lo).toBeLessThan(wide.ci!.hi - wide.ci!.lo);
+  });
+});
+
+describe('floorOverReadyRows', () => {
+  // The repair miley's decline asked for: the conditional share cannot stand alone, because the
+  // posture-less rows are overwhelmingly the CLEAN routes. The floor counts every one of them as
+  // if a cross-family review had been possible — the most instrument-hostile assumption — so the
+  // truth is bracketed instead of flattered.
+  it('folds excluded rows into the denominator, never the numerator', () => {
+    const s = summarise([at(1, 'monoculture'), at(2, 'monoculture'), at(3, 'diverse')]);
+    const fl = floorOverReadyRows(s, 7);
+    expect(fl.noCrossFamily).toBe(2);
+    expect(fl.readyRows).toBe(10);
+    expect(fl.share).toBeCloseTo(0.2, 6);
+  });
+
+  it('equals the conditional share when nothing was excluded', () => {
+    const s = summarise([at(1, 'monoculture'), at(2, 'diverse')]);
+    const fl = floorOverReadyRows(s, 0);
+    expect(fl.share).toBeCloseTo(s.noCrossFamilyShare!, 6);
+  });
+
+  it('abstains on an empty ledger rather than reporting 0%', () => {
+    expect(floorOverReadyRows(summarise([]), 0).share).toBeNull();
   });
 });
 
