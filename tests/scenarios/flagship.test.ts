@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MusterdClient, type McpConfig } from '@musterd/mcp';
@@ -15,6 +18,30 @@ let server: RunningServer;
 let base: string;
 let tok: Record<string, string> = {};
 let clients: MusterdClient[] = [];
+/**
+ * Where each fixture seat pretends to live — a fresh EMPTY temp dir per client, never the ambient
+ * `process.cwd()` this file used to inherit by omitting `bindingDir` entirely.
+ *
+ * ADR 275 made occupancy follow capture: `refreshAttestation` re-reads `config.bindingDir ??
+ * process.cwd()` on every heartbeat and rewrites `config.surface` from the binding's observed
+ * harness. So this scenario read the binding of whichever SEAT WORKTREE ran it, and Lin's declared
+ * `codex` below survived only on a machine captured as codex.
+ *
+ * Measured 2026-08-17 on landed main (`aaff54df`) from a claude-code worktree: line 145 failed with
+ * `expected [ 'claude-code' ] to include 'codex'` — the roster was answering what harness the runner
+ * was captured under, not what the scenario declared. Second instance of the class dolly fixed in
+ * `packages/mcp/src/mcp.test.ts` (#863); that one named `process.cwd()` outright, this one reached it
+ * through the default.
+ *
+ * A dir PER client, not one shared: `claim.ts` writes the binding it mints to `config.bindingDir`,
+ * and Ada and Lin sharing an anchor would clobber each other's — the sibling-clobber this same field
+ * exists to prevent.
+ *
+ * ADR 275 is not touched. Capture-following is correct and keeps its real coverage in
+ * `surface-drift.test.ts`; this scenario is about three surfaces coordinating, and it should never
+ * have been answering a capture question.
+ */
+let seatDirs: string[] = [];
 
 async function api(method: string, path: string, body?: unknown, token?: string) {
   const res = await fetch(base + path, {
@@ -61,9 +88,33 @@ afterEach(async () => {
   clients = [];
   await server.close();
   tok = {};
+  for (const d of seatDirs) rmSync(d, { recursive: true, force: true });
+  seatDirs = [];
 });
 
 let connSeq = 0;
+
+/** A fresh anchor with no capture in it or above it. Tracked so `afterEach` can remove it. */
+function newSeatDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'musterd-flagship-seat-'));
+  seatDirs.push(dir);
+  return dir;
+}
+
+/**
+ * `findBinding` walks UP from its start dir, so an anchor is only clean if no ancestor carries a
+ * capture either. Mirrors `walkUpForBinding` rather than importing it — `findBinding` is internal to
+ * `@musterd/mcp` and this scenario only consumes the package's public surface.
+ */
+function capturedAnywhereAbove(startDir: string): string | null {
+  for (let dir = startDir; ; ) {
+    if (existsSync(join(dir, '.musterd', 'binding.json'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 function cfg(member: string, surface: McpConfig['surface']): McpConfig {
   return {
     server: base,
@@ -71,6 +122,7 @@ function cfg(member: string, surface: McpConfig['surface']): McpConfig {
     agent_key: tok['agent_key']!,
     grant: tok[`${member}_grant`]!,
     surface,
+    bindingDir: newSeatDir(),
     claim: { mode: 'seat', name: member },
     provenance: 'session',
     workspace: 'repo',
@@ -111,6 +163,21 @@ async function agentSend(
 }
 
 describe('Scenario C — flagship 3-pane', () => {
+  // The fixture precondition, asserted rather than trusted. Drop `bindingDir` from `cfg()` and this
+  // fails on any developer machine whose worktree is captured — which is the whole failure mode:
+  // without it, the surface assertions below silently stop asking about the code and start asking
+  // what harness the runner happened to be running under.
+  it('anchors each seat where nothing is captured — or the surface assertions read the runner', () => {
+    // Read the anchor off the real fixture, not a fresh temp dir — otherwise this passes even when
+    // `cfg()` has stopped setting `bindingDir` at all, which is the exact state being repaired.
+    const anchor = cfg('Ada', 'claude-code').bindingDir;
+    expect(anchor).toBeDefined();
+    expect(capturedAnywhereAbove(anchor!)).toBeNull();
+    // Deliberately NOT asserted here: that `process.cwd()` is dirty. It is on a seat worktree and is
+    // not on a CI runner, and an assertion that flips with the machine is the defect being fixed.
+    // The control for that direction was run by hand — see the PR.
+  });
+
   it('coordinates across three surfaces end to end', async () => {
     // Ada (claude-code) and Lin (codex) explicitly join via the MCP adapter (M3: dormant until join).
     const ada = client('Ada', 'claude-code');
