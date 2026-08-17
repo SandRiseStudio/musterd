@@ -60,11 +60,10 @@
  * creation and request. The freeze is one synchronous evaluation dropped in at an arbitrary moment.
  * Inside that window the request never happens; outside it everything is placed or safely queued.
  *
- * THIS ARM IS EXPECTED TO FAIL until the sweep stops keying on birth time. It is reported as a known
- * open defect and does NOT set the exit code — a red instrument nobody can act on gets muted, and a
- * muted instrument is how #832 got its "6 of 6" in the first place. If it ever PASSES, that is the
- * signal to come back here: either the sweep was fixed (retire the expectation and make it a real
- * arm) or the fixture stopped modelling the defect.
+ * CLOSED 2026-08-17, and this arm now decides the exit code like the other two. The sweep no longer
+ * kills the scheduler: it services rAF callbacks with a PINNED timestamp, so the placement still
+ * happens and the clock still does not advance. The freeze always wanted motion to stop rather than
+ * layout work to stop; the no-op conflated the two, and this arm is what that conflation cost.
  */
 
 import { spawn } from 'node:child_process';
@@ -143,19 +142,17 @@ for (let i = 1; i <= runs; i++) {
   );
 }
 
-/* The third arm — wanderer's path. Deterministic, and it FAILS: the row is marked (so `born` is
-   false), never placed, and never moves (so `moved` is false), which is exactly the hole. Counted
-   separately from `failed` so a known open defect cannot mask a REGRESSION in the two closed arms.
-   The unexpected outcome here is a PASS. */
-let thirdArmStranded = 0;
+/* The third arm — wanderer's path, and the one both guards were blind to. Deterministic in BOTH
+   directions: it failed 3 of 3 against the no-op freeze and passes against the serviced one, so a
+   regression here is a real regression and not weather. */
 for (let i = 1; i <= runs; i++) {
   const { out } = await sweep(`${base}/request-after-freeze.html`);
   const fails = belowAA(out);
-  const stranded = fails !== null && fails > 0;
-  if (stranded) thirdArmStranded++;
+  const ok = fails === 0;
+  if (!ok) failed++;
   console.log(
-    `  ${stranded ? '✗ (expected)' : '! UNEXPECTED PASS'} request-after-freeze run ${i}: ${fails} below AA` +
-      `${stranded ? ' — marked, never placed, never moved' : ' — the hole may be closed; see the header'}`,
+    `  ${ok ? '✓' : '✗'} request-after-freeze run ${i}: ${fails} below AA` +
+      `${ok ? ' — placed by the serviced callback' : ' — MARKED, never placed, never moved: the hole is back'}`,
   );
 }
 
@@ -166,9 +163,11 @@ if (failed) {
   process.exit(1);
 }
 console.log(
-  '\nbirth-falsifier — both CLOSED arms safe.' +
-    `\nTHE HOLE IS OPEN: request-after-freeze stranded ${thirdArmStranded}/${runs} run(s), as expected.` +
-    '\nA row present at the mark walk whose placement is REQUESTED after the freeze is invisible to' +
-    '\nboth guards — `born` keys on birth time, `moved` needs motion, and this row has neither.' +
-    '\nExit code reflects the closed arms only, so this known defect cannot mute a real regression.',
+  '\nbirth-falsifier — all three arms safe.' +
+    '\nThe third arm was the open hole until 2026-08-17: a row present at the mark walk whose' +
+    '\nplacement is REQUESTED after the freeze is invisible to both guards — `born` keys on birth' +
+    '\ntime, `moved` needs motion, and that row has neither. The freeze now services callbacks with a' +
+    '\npinned timestamp instead of dropping them, so the placement happens and the clock does not.' +
+    '\nWhat is still NOT modelled here: an rAF loop that advances by frame COUNT rather than by' +
+    '\nelapsed time can still move under a pinned clock. The budget bounds it and `moved` catches it.',
 );

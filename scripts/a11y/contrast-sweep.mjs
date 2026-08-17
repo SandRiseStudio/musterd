@@ -897,10 +897,50 @@ try {
      the final frame BEFORE the freeze is marked yet may also have missed its first positioning tick.
      That window is one frame wide; the mark and the override land in the same evaluation to keep it
      that narrow.) */
+
+  /* ── FREEZE TIME, NOT THE SCHEDULER ───────────────────────────────────────────────────────────
+   *
+   * The old freeze was `requestAnimationFrame = () => 0`, and it dropped every request that arrived
+   * after this line ran. Nothing schedules such an element, so it is never placed — and being never
+   * placed it never moves, so `moved` is blind; being present at the mark walk, `born` is blind too.
+   * That is wanderer's /office-preview failure (`lc-speech__text` 1.8 on #3a4d4d at light=12, two
+   * immediate retries green), modelled by `fixtures/request-after-freeze.html` and reproduced live
+   * on this build before this change.
+   *
+   * Draining pending frames BEFORE freezing was built first and removed: it services work already in
+   * flight, and a request that has not been made yet is not in flight. It changed no arm of the
+   * falsifier and no count on the live route, so it was mechanism without evidence.
+   *
+   * The freeze wants motion to stop. It does not want LAYOUT WORK to stop, and killing the scheduler
+   * conflated the two. So callbacks are still serviced — the element gets placed — but they are
+   * serviced with a PINNED timestamp, so anything computing position from the clock sees no time
+   * pass and holds still. That is the actual intent, stated directly.
+   *
+   * Two bounds, because servicing is not free:
+   *
+   *   - A BUDGET. Loops that reschedule unconditionally (`office-scene/index.ts:926`) would otherwise
+   *     run forever. After the budget the override goes silent — the old behaviour, reached as a
+   *     backstop rather than as the default.
+   *   - A pinned `t0`. An animation that advances by ELAPSED time cannot move. One that advances by
+   *     frame COUNT still can, which is what the budget and the surviving `moved` guard are for.
+   *
+   * Callbacks run on a macrotask, not synchronously: a synchronous call would re-enter the page's
+   * own loop inside the assignment expression, and the rect pass that follows must see the result of
+   * placement rather than the middle of it. */
   await evalIn(`(() => {
     window.__a11y_atFreeze = new WeakSet();
     for (const el of document.querySelectorAll('*')) window.__a11y_atFreeze.add(el);
-    window.requestAnimationFrame = () => 0;
+    const t0 = performance.now();
+    let budget = 240;
+    window.__a11y_serviced = 0;
+    window.requestAnimationFrame = (cb) => {
+      if (budget-- <= 0) return 0;
+      setTimeout(() => {
+        window.__a11y_serviced++;
+        try { cb(t0); } catch { /* a page callback that throws is the page's problem, not the sweep's */ }
+      }, 0);
+      return 0;
+    };
     return true;
   })()`);
   const geom = await evalIn(RECTS_IN_PAGE);
