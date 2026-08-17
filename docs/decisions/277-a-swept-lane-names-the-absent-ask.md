@@ -97,8 +97,10 @@ lane fields, because stakes and roster are both editable after submit.
 case is `01M016D5GA`, whose recorded ready row (`no_candidate: true`, `human_required: false`,
 no reviewer) resolves to `ask_outcome: 'no_candidate'` under this decision.
 
-**Eval.** ~~After 30 days,~~ **AMENDED 2026-08-16 — at 25 swept closes, however long that takes**
-(see below), group swept closes by `ask_outcome`. The question it must answer: what share of swept
+**Eval.** ~~After 30 days,~~ ~~**AMENDED 2026-08-16 — at 25 swept closes, however long that
+takes**~~ — **RETIRED 2026-08-17, answered by `scripts/research/roster-diversity.ts` at 91.7%
+(n=84); see the second amendment below.** The original text stands for the record: group swept
+closes by `ask_outcome`. The question it must answer: what share of swept
 lanes were never routed to anyone? A high `no_candidate` share means the sweep is mostly collecting
 lanes the roster could never review — a monoculture problem, not an attention problem — and it would
 redirect the ADR 254/260 arc, which currently treats slow acceptance as the thing to fix. A share
@@ -135,6 +137,44 @@ near zero means the opposite: asks are being sent and ignored, and attention is 
 >   as inconclusive, not rounded toward whichever answer is convenient.
 > - A verdict on the 25% line waits for **n≈72**. If that horizon is unacceptable, the honest
 >   response is to change what we measure — not to keep the line and read it early.
+
+> **Second amendment, 2026-08-17 (dolly, nick's call). THIS EVAL IS RETIRED — ANSWERED, not
+> abandoned.** The amendment above ends by saying that if the horizon is unacceptable, the honest
+> response is to change what we measure. That is what happened.
+>
+> **The question is settled by a better instrument.** `scripts/research/roster-diversity.ts` (#868,
+> `30010cce`) asks the roster directly instead of inferring from swept lanes, using the
+> `family_posture` already recorded on every `lane.ready_for_review` row since 2026-07-28:
+>
+> ```
+> diverse 7 | monoculture 68 | unknown (<2 attesting) 9
+> NO cross-family review possible: 77/84 = 91.7%   (95% CI 83.8% - 95.9%)
+> ```
+>
+> Sampled **at submit** — when a review is needed — not uniformly in wall-clock. Re-runnable: doubt
+> the number and run it rather than argue with this document.
+>
+> At 91.7% there is nothing left for a 42-day swept-close read to establish. The monoculture is not
+> an effect to detect; it is the normal condition of this team. **Keeping an Eval nobody will read
+> is how an instrument becomes decoration**, which is the failure this ADR's own arc kept finding in
+> other people's work.
+>
+> **What retires and what does not.** `ask_outcome` — the FIELD, this ADR's actual decision — stays
+> exactly as specified. It is a recorded per-lane fact, and it is still the only thing that lets a
+> close row distinguish "nobody was asked" from "asked and ignored". What retires is treating the
+> aggregate split as the statistical instrument for the monoculture question.
+>
+> **What would reopen it**, stated because retiring an Eval with no reopen condition is just
+> deleting it: **if the roster instrument's share falls below ~50% sustained**, the swept-close split
+> becomes informative again — at that point "nobody was asked" would be a routing failure rather
+> than a roster fact, and worth measuring as one.
+>
+> **The successor question, which neither ADR asks and nothing yet measures: how LONG do the gaps
+> last?** The daily series is lumpy — 17/17 on 08-05, 2/4 on 08-13, 6/9 on 08-14 — so diversity
+> arrives when the non-claude seats wake. A share cannot express duration, and duration is the
+> actionable half: a roster that is monoculture 90% of the time but clears every few hours is a
+> different problem from one that clears twice a month, and the two want opposite fixes. Recorded
+> here as the open question; not built.
 
 **Experiment.** A lane submitted with no eligible counterpart, left to the sweep, closes with a row
 naming the absent ask. Verified failing before this change (the field did not exist) and passing
