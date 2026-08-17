@@ -328,6 +328,42 @@ const PAPER_SIG = /* js */ `
   };
   const rowKey = (el, cs) =>
     (el.className.toString() || el.tagName).slice(0, 48) + '|' + cs.color + '|' + paperSig(el);
+
+  /*
+   * MEASURE EVERY ROW; collapse only in the REPORT.
+   *
+   * rowKey decides which rows are "the same situation", and every version of it has been wrong in
+   * the same direction. It was class|ink, and four .lc-card__avatar rows on discs painted by
+   * different functions collapsed to one — three avatars lost their initials in #781/#789 on a 3.42
+   * that was never about them. paperSig closed that by carrying the CSS background.
+   *
+   * It cannot close the OVERLAP case, and no ancestor-walking signature can: paperSig reads the
+   * ancestor chain, so paint a row merely SITS ON TOP OF — a sibling underneath — is invisible to
+   * it. Two rows with identical class, ink and ancestors, one on white and one over a dark panel,
+   * produce the same key. The walkers kept the first and skipped the rest, so DOCUMENT ORDER decided
+   * which one was measured, and a genuinely below-AA row was reported as a clean page whenever a
+   * healthy sibling happened to come first (fixtures/dedupe-hides-a-failure.html: same file, same
+   * CSS, swap two elements, and the verdict flips between 0 and 1 below AA).
+   *
+   * The dedupe was there so N identical rows are not measured N times. But the measuring pass is
+   * exactly where collapsing is unsafe — it is the pass whose answer can be WRONG rather than merely
+   * repetitive. So each row now gets its own key (…#0, …#1) and every one is measured; identical
+   * results are folded together when they are printed, which is where repetition was ever the
+   * problem. Occurrence order is stable across the three walkers because all three walk the same
+   * tree with the same filter, which is what lets their rows still join.
+   *
+   * Settle detection (KEYS_IN_PAGE) deliberately keeps the plain rowKey: it asks whether the
+   * page has stopped changing, not whether every row was covered.
+   */
+  const occKeyer = () => {
+    const seenCount = new Map();
+    return (el, cs) => {
+      const k = rowKey(el, cs);
+      const i = seenCount.get(k) ?? 0;
+      seenCount.set(k, i + 1);
+      return k + '#' + i;
+    };
+  };
 `;
 
 /* ── wait for the page to STOP CHANGING, rather than for a number of seconds ─────────────────────
@@ -620,7 +656,8 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
   };
 
   /* ── live sweep: every rendered text node, deduped by (class, ink, paper) ── */
-  const live = [], skipped = [], invisible = [], seen = new Set();
+  const live = [], skipped = [], invisible = [], rowNodes = [];
+  const occKey = occKeyer();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
@@ -630,9 +667,16 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     if (!el) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = rowKey(el, cs);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const key = occKey(el, cs);
+    /* ONE IDENTITY SOURCE FOR EVERY PASS. This walk runs BEFORE the freeze; the rect, opacity and
+       shutter passes run after, and the page keeps mutating in between — /live's asks strip
+       re-renders on a 1s setInterval, which no rAF freeze can stop because it is not on rAF.
+       Re-walking the tree in each pass and pairing rows by key assumes the Nth row of a key is still
+       the same row; with per-occurrence keys that breaks the moment a row is added, removed or
+       replaced, and ink from one row joins the pixel under another. That is how avatar rows carrying
+       their own disc colour came out white-on-cream at 1.15.
+       So the NODES are the identity. Later passes iterate this list instead of re-walking. */
+    rowNodes.push({ node, el, key });
     const m = measure(el, text.slice(0, 28), key);
     if (!m) continue;
     if (m.invisible) invisible.push(m); else if (m.skipped) skipped.push(m); else live.push(m);
@@ -663,6 +707,7 @@ const IN_PAGE = /* js */ `(({ probe, probeHost }) => {
     }
   }
 
+  window.__a11y_rows = rowNodes;
   return {
     url: location.href,
     live: live.sort((a, b) => a.ratio - b.ratio),
@@ -795,19 +840,16 @@ const RECTS_IN_PAGE = /* js */ `(() => {
     while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; }
     return o;
   };
-  const rects = [], clipped = [], seen = new Set();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    const text = node.textContent.trim();
-    if (!text) continue;
-    const el = node.parentElement;
-    if (!el) continue;
+  const rects = [], clipped = [], covered = [], gone = [];
+  /* The rows the live walk measured, in its order, as the very same nodes — see __a11y_rows there.
+     Re-walking here would re-derive identity from tree position, which is exactly what a page that
+     re-renders between passes invalidates. */
+  for (const { node, el, key } of window.__a11y_rows ?? []) {
+    /* Replaced or removed since the live walk: React swapped the node out, so whatever is at its
+       old coordinate now belongs to something else. No ink of ours is there to measure. */
+    if (!node.isConnected) { gone.push(key); continue; }
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = rowKey(el, cs);
-    if (seen.has(key)) continue;
-    seen.add(key);
     /* The TEXT's own box, not the element's: an element's bounding rect can include padding that
        sits on different paint than the glyphs do. */
     const range = document.createRange();
@@ -840,6 +882,24 @@ const RECTS_IN_PAGE = /* js */ `(() => {
       clipped.push(key);
       continue;
     }
+    /* NO PAINT OF ITS OWN AT ITS CENTRE — clipped by a container edge or behind a panel. The row is
+       inside the captured page (the bound above) and still has no pixel that belongs to it: the one
+       there belongs to whatever covers it, and reading that as this row's paper invents a failure
+       for text the reader cannot see either.
+
+       Measured on connected /live: lc-chip__avatar reported 1.15 white-on-cream while the composited
+       estimate said 4.9 on its own inline disc — a 3.75 disagreement, the largest on the page. The
+       disc is real; its paint does not reach that point.
+
+       The test is the TOPMOST element rather than mere presence in the hit stack: a row under a
+       translucent wash is still read through it and its pixel legitimately includes the wash, but a
+       row whose own element is not what paints at its centre has nothing of its own to measure.
+       Invisible while the dedupe kept one row per key — that row was the one in the clear. */
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    if (hit && hit !== el && !el.contains(hit) && !hit.contains(el)) {
+      covered.push(key);
+      continue;
+    }
     rects.push({
       key,
       x: r.x + window.scrollX, y: r.y + window.scrollY, w: r.width, h: r.height,
@@ -853,6 +913,8 @@ const RECTS_IN_PAGE = /* js */ `(() => {
   return {
     rects,
     clipped,
+    covered,
+    gone,
     dpr: window.devicePixelRatio || 1,
     docW: Math.ceil(document.documentElement.scrollWidth),
     docH: Math.ceil(document.documentElement.scrollHeight),
@@ -873,17 +935,12 @@ const evalIn = async (expression) => {
 const OPACITY_IN_PAGE = /* js */ `(() => {
   ${PAPER_SIG}
   const eff =(el) => { let o = 1, n = el; while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return o; };
-  const outv = {}, seen = new Set();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (!node.textContent.trim()) continue;
-    const el = node.parentElement; if (!el) continue;
+  const outv = {};
+  /* Same identity source as the rect pass — see __a11y_rows in the live walk. */
+  for (const { node, el, key } of window.__a11y_rows ?? []) {
+    if (!node.isConnected) continue;
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
-    const key = rowKey(el, cs);
-    if (seen.has(key)) continue;
-    seen.add(key);
     outv[key] = eff(el);
   }
   return outv;
@@ -1080,6 +1137,20 @@ try {
     if (rc.opacity < 0.99) faded.push(rc.key.split('|')[0] || '?');
     // Centre of the line box. With glyphs transparent the whole box is background, so the centre is
     // as good as any point and is the least likely to catch a border or a rounded corner.
+    console.log(
+      'DBG',
+      JSON.stringify({
+        key: rc.key,
+        x: rc.x,
+        y: rc.y,
+        w: rc.w,
+        h: rc.h,
+        docW: geom.docW,
+        docH: geom.docH,
+        scale,
+        tall,
+      }),
+    );
     const p = at(rc.x + rc.w / 2, rc.y + rc.h / 2);
     // Carry the settled opacity: the glyphs are faded by it too, so the INK has to be composited at
     // that alpha over what was sampled. Fading text is one of the commonest ways contrast dies, and
@@ -1090,6 +1161,13 @@ try {
   if (tall)
     notes.push(
       `page is ${geom.docH}px tall — sampled the viewport only, below-fold text kept its composited estimate`,
+    );
+  if (geom.covered?.length)
+    notes.push(
+      `${geom.covered.length} row(s) have no paint of their own at their centre — clipped by a` +
+        ` container edge or behind a panel, so the pixel there belongs to whatever covers them.` +
+        ` Excluded, not measured` +
+        ` (${[...new Set(geom.covered.map((k) => k.split('|')[0] || '?'))].slice(0, 6).join(', ')})`,
     );
   if (geom.clipped?.length)
     notes.push(
