@@ -47,6 +47,61 @@ export const IncidentPolicySchema = z.object({
 });
 export type IncidentPolicy = z.infer<typeof IncidentPolicySchema>;
 
+/** One entry of `NextBrief.incidents`, as both renderers receive it. */
+export interface IncidentBannerItem {
+  lane: string;
+  gate: string;
+  owner_seat: string | null;
+  opened_at: number;
+  claim_closes_at?: number | null | undefined;
+  fallback_role?: string | null | undefined;
+}
+
+function shortFor(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m`;
+  return `${s}s`;
+}
+
+/**
+ * The incident banner, as words — shared by every surface that shows one (ADR 084).
+ *
+ * This lives in the protocol package because the alternative was already measured and it failed
+ * quietly: increments 1 and 2 put the banner only in the MCP renderer, so every CLI seat running
+ * `musterd next` got NO banner at all — on the surface that most needs orientation, for the feature
+ * ADR 266 calls "the cheapest, highest-leverage piece" precisely because the measured waste was
+ * seats STARTING SESSIONS into a shared red they assumed was theirs.
+ *
+ * Note the shape of that failure, because ADR 084 is usually read as being about derivation: the
+ * derivation WAS correctly shared (`deriveNext`, server-side). What drifted was the RENDERER — a
+ * second copy that silently lacked a section. So the words move here too, and the next surface gets
+ * them by importing rather than by remembering.
+ *
+ * Returns plain lines, no colour: callers own their own theming.
+ */
+export function incidentBannerLines(inc: IncidentBannerItem, now: number = Date.now()): string[] {
+  const who = inc.owner_seat ? `owned by ${inc.owner_seat}` : 'UNCLAIMED';
+  // Absent (pre-271 daemon) and null (owned, or convergence disabled) both mean "no countdown to
+  // state" — and must read as nothing at all, never as missing data.
+  const left = inc.claim_closes_at == null ? null : inc.claim_closes_at - now;
+  const role = inc.fallback_role ?? null;
+  const window =
+    left == null
+      ? ''
+      : left > 0
+        ? role
+          ? ` — yours to claim for ${shortFor(left)}, then it falls to ${role}`
+          : ` — yours to claim for ${shortFor(left)}; NOBODY holds the fallback role, so after that it just sits`
+        : role
+          ? ` — claim window closed, routing to ${role}`
+          : ` — claim window closed and NOBODY holds the fallback role: this will sit unowned until someone takes it`;
+  return [
+    `⚠ incident: ${inc.gate} — ${who} (lane ${inc.lane}, open ${shortFor(now - inc.opened_at)})${window}.`,
+    `  If your red matches, it is not yours. Report blocked_by and park behind it.`,
+  ];
+}
+
 /** Typed accessor over loose envelope meta (same posture as `eligibleOf`). */
 export function blockedByOf(meta: Record<string, unknown> | null | undefined): BlockedBy | null {
   if (!meta || meta['blocked_by'] === undefined) return null;

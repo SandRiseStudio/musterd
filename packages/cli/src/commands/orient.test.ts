@@ -5,10 +5,11 @@ import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
-import { loadConfig } from '../config.js';
+import { loadConfig, rememberIdentity, saveConfig } from '../config.js';
 import { doneCommand } from './done.js';
 import { laneCommand, lanesCommand } from './lane.js';
 import { nextCommand } from './next.js';
+import { sendCommand } from './send.js';
 import { teamCommand } from './team.js';
 
 /** Covers the orientation pair: `musterd next` (the brief) and `musterd done` (close + chain). */
@@ -54,6 +55,39 @@ describe('next / done commands', () => {
     const { lanes } = JSON.parse(board.out) as { lanes: { id: string }[] };
     return lanes[lanes.length - 1]!.id;
   }
+
+  /**
+   * The banner reached NO CLI seat through increments 1 and 2 — it was written into the MCP renderer
+   * and never here, on the surface that most needs orientation. ADR 266 calls it "the cheapest,
+   * highest-leverage piece" precisely because the measured waste was seats STARTING SESSIONS into a
+   * shared red they assumed was theirs, and `musterd next` is where a CLI session starts.
+   */
+  it("next leads with an open incident, above the seat's own work", async () => {
+    await capture(() =>
+      sendCommand(parseArgs(['--as', 'nick', '--blocked-by', 'ci:gates/A11y contrast'])),
+    );
+    await capture(() => teamCommand(parseArgs(['add', 'izzo', '--kind', 'agent'])));
+    const cfg = loadConfig();
+    rememberIdentity(cfg, {
+      team: 'dawn',
+      name: 'izzo',
+      key: cfg.agentKeys['dawn'] as string,
+      surface: 'cli',
+    });
+    saveConfig(cfg);
+    await capture(() =>
+      sendCommand(parseArgs(['--as', 'izzo', '--blocked-by', 'ci:gates/A11y contrast'])),
+    );
+
+    const res = await capture(() => nextCommand(parseArgs([])));
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('incident: ci:gates/A11y contrast');
+    expect(res.out).toMatch(/not yours/);
+    // Above everything: it must come before the seat's own work, or they decide what they are
+    // doing before learning the red is shared. (The incident lane ALSO shows under `up next` — it
+    // is unowned and any seat may claim it, which is the design, so that is the anchor here.)
+    expect(res.out.indexOf('incident:')).toBeLessThan(res.out.indexOf('up next'));
+  });
 
   it('next renders the empty-brief hint when nothing is in flight', async () => {
     const res = await capture(() => nextCommand(parseArgs([])));
