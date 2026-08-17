@@ -57,7 +57,13 @@ function render(brief: NextBrief): void {
   if (brief.shipped.length > 0) {
     w(`\n${theme.meta('recently shipped:')}\n`);
     for (const l of brief.shipped)
-      w(`  ${theme.ok('✓')} "${l.title}"${l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : ''}\n`);
+      w(
+        `  ${theme.ok('✓')} "${l.title}"${l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : ''}` +
+          // ADR 192's copy, matching the web board's chip (ADR 169). Only on an explicit `false`:
+          // an absent verdict is unknown, not unconfirmed.
+          (l.verified === false ? theme.meta(' — unconfirmed') : '') +
+          '\n',
+      );
   }
   if (brief.next_goal) {
     const g = brief.next_goal;
