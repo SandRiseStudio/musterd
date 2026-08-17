@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { shortDuration } from './duration.js';
 
 /**
  * Incident convergence (spec 2026-08-14, increment 1). A seat that hits a red it cannot explain
@@ -57,13 +58,6 @@ export interface IncidentBannerItem {
   fallback_role?: string | null | undefined;
 }
 
-function shortFor(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
-  if (s >= 60) return `${Math.floor(s / 60)}m`;
-  return `${s}s`;
-}
-
 /**
  * The incident banner, as words — shared by every surface that shows one (ADR 084).
  *
@@ -91,13 +85,13 @@ export function incidentBannerLines(inc: IncidentBannerItem, now: number = Date.
       ? ''
       : left > 0
         ? role
-          ? ` — yours to claim for ${shortFor(left)}, then it falls to ${role}`
-          : ` — yours to claim for ${shortFor(left)}; NOBODY holds the fallback role, so after that it just sits`
+          ? ` — yours to claim for ${shortDuration(left)}, then it falls to ${role}`
+          : ` — yours to claim for ${shortDuration(left)}; NOBODY holds the fallback role, so after that it just sits`
         : role
           ? ` — claim window closed, routing to ${role}`
           : ` — claim window closed and NOBODY holds the fallback role: this will sit unowned until someone takes it`;
   return [
-    `⚠ incident: ${inc.gate} — ${who} (lane ${inc.lane}, open ${shortFor(now - inc.opened_at)})${window}.`,
+    `⚠ incident: ${inc.gate} — ${who} (lane ${inc.lane}, open ${shortDuration(now - inc.opened_at)})${window}.`,
     `  If your red matches, it is not yours. Report blocked_by and park behind it.`,
   ];
 }

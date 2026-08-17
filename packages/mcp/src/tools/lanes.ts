@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import {
   incidentBannerLines,
   LaneStateSchema,
+  shortDuration,
   type Lane,
   type LaneWarning,
   type NextBrief,
@@ -455,14 +456,6 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
 }
 
 /** Coarse elapsed time — the reader needs "hours, not minutes", never a precise duration. */
-function waitedFor(ms: number): string {
-  const s = Math.round(ms / 1000);
-  if (s >= 86400) return `${Math.floor(s / 86400)}d`;
-  if (s >= 3600) return `${Math.floor(s / 3600)}h`;
-  if (s >= 60) return `${Math.floor(s / 60)}m`;
-  return `${s}s`;
-}
-
 export function fmtNext(b: NextBrief): string {
   const lines: string[] = [`next — as ${b.member}`];
   // Incident banner FIRST, above everything (spec 2026-08-14 §4): most of the measured waste in the
@@ -497,7 +490,7 @@ export function fmtNext(b: NextBrief): string {
     lines.push(`\n⧗ owed by you — ${owed.length} lane(s) waiting on your verdict:`);
     for (const r of owed) {
       lines.push(
-        `  ${r.lane.id} "${r.lane.title}" — ${r.from} has waited ${waitedFor(now - r.ts)}`,
+        `  ${r.lane.id} "${r.lane.title}" — ${r.from} has waited ${shortDuration(now - r.ts)}`,
       );
       lines.push(
         `    answer: team_send {act:'accept', to:'${r.from}', reply_to:'${r.ask_id}', body:'…'}`,
@@ -558,7 +551,7 @@ export function fmtNext(b: NextBrief): string {
     // took 15 days the last time, and 38 for the copy 19 other seats were reading.
     lines.push(
       `\nwhy — handoff from ${b.why.from}${b.why.goal_id ? ` goal=${b.why.goal_id}` : ''}` +
-        ` (${waitedFor(Math.max(0, Date.now() - b.why.ts))} ago):`,
+        ` (${shortDuration(Math.max(0, Date.now() - b.why.ts))} ago):`,
     );
     lines.push('  ' + b.why.body);
   }
