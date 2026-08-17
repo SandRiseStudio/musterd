@@ -795,7 +795,7 @@ const RECTS_IN_PAGE = /* js */ `(() => {
     while (n && n.nodeType === 1) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; }
     return o;
   };
-  const rects = [], seen = new Set();
+  const rects = [], clipped = [], seen = new Set();
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
@@ -815,6 +815,31 @@ const RECTS_IN_PAGE = /* js */ `(() => {
     const r = [...range.getClientRects()].find((x) => x.width > 0 && x.height > 0);
     range.detach?.();
     if (!r) continue;
+    /* OUTSIDE THE CAPTURED PAGE — no pixel exists for this row, so refuse it rather than sample a
+       coordinate it never occupied.
+
+       window.scrollX/Y turns a viewport rect into a PAGE rect, and that conversion only holds for
+       rows the WINDOW scrolls. /live's stream is a scrolling container inside a fixed-height app:
+       its off-screen rows sit at viewport y of -5600 and below while window.scrollY is 0, so the
+       page coordinate lands somewhere the element never was and the pixel pass reads whatever paints
+       there. Measured on the connected /live fixture: avatar rows carrying their proper disc colour
+       inline, reported as white-on-cream at 1.15.
+
+       The bound is the CAPTURED PAGE, not the viewport. The shutter clips to the whole document, so
+       below-the-fold rows are captured and must still be measured — testing against the viewport
+       cost 11 legitimate rows on / in the first version of this check.
+
+       Today the dedupe usually hides this: only the FIRST row of each key is measured and it tends
+       to be the one in view. That makes this cheap now and load-bearing the moment coverage widens.
+       Counted and named, never silently dropped. */
+    const px = r.x + window.scrollX;
+    const py = r.y + window.scrollY;
+    const pageW = document.documentElement.scrollWidth;
+    const pageH = document.documentElement.scrollHeight;
+    if (px + r.width <= 0 || py + r.height <= 0 || px >= pageW || py >= pageH) {
+      clipped.push(key);
+      continue;
+    }
     rects.push({
       key,
       x: r.x + window.scrollX, y: r.y + window.scrollY, w: r.width, h: r.height,
@@ -827,6 +852,7 @@ const RECTS_IN_PAGE = /* js */ `(() => {
   }
   return {
     rects,
+    clipped,
     dpr: window.devicePixelRatio || 1,
     docW: Math.ceil(document.documentElement.scrollWidth),
     docH: Math.ceil(document.documentElement.scrollHeight),
@@ -1064,6 +1090,13 @@ try {
   if (tall)
     notes.push(
       `page is ${geom.docH}px tall — sampled the viewport only, below-fold text kept its composited estimate`,
+    );
+  if (geom.clipped?.length)
+    notes.push(
+      `${geom.clipped.length} row(s) sit OUTSIDE THE CAPTURED PAGE — a scroll container holds them` +
+        ` where no pixel exists, so sampling one would read whatever paints at a coordinate they` +
+        ` never occupied. Excluded, not measured` +
+        ` (${[...new Set(geom.clipped.map((k) => k.split('|')[0] || '?'))].slice(0, 6).join(', ')})`,
     );
   {
     const names = [...invisible, ...(out.invisible ?? []).map((r) => r.el)];
