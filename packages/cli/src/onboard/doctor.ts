@@ -450,8 +450,12 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ...(d.detail !== undefined ? { detail: d.detail } : {}),
     });
     for (const hookDrift of d.hookDrift ?? []) {
+      // `musterd wire` only registers the MCP server from .musterd/workspace.json — it never calls a
+      // harness's hook installer, so it exited 0 having changed nothing and left this line standing
+      // (observed 2026-08-14). `--refresh-hooks` is the repair that actually runs them, and is the
+      // one ADR 168 sanctions in a live seat's workspace.
       drift.push(
-        `${h.label}: ${hookDrift} — run \`musterd wire\` to install the marker-owned hooks.`,
+        `${h.label}: ${hookDrift} — run \`musterd init --refresh-hooks\` to install the marker-owned hooks.`,
       );
     }
     // Value-coherence: a legacy baked MUSTERD_CLAIM that disagrees with binding.json pins this
