@@ -34,6 +34,7 @@
     "steward:notify": "node --disable-warning=ExperimentalWarning scripts/steward/notify.ts",
     "radar:sweep": "node --disable-warning=ExperimentalWarning scripts/radar/sweep.ts",
     "liveness:sweep": "node --disable-warning=ExperimentalWarning scripts/research/adr-166-slot-sweep.ts",
+    "corpus:snapshot": "node --disable-warning=ExperimentalWarning scripts/corpus/snapshot.ts",
     "release": "node --disable-warning=ExperimentalWarning scripts/release.ts",
     "bump-brew-formula": "node --disable-warning=ExperimentalWarning scripts/bump-brew-formula.ts",
     "arch-trees:check": "node --disable-warning=ExperimentalWarning scripts/check-arch-trees.ts --check",
