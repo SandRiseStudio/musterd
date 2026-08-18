@@ -110,6 +110,33 @@ function pstNowHours(): number {
   return (hh % 24) + mm / 60;
 }
 
+/**
+ * `?still` — MEASUREMENT MODE: the room keeps what it is showing instead of moving on.
+ *
+ * A speech bubble dismisses itself after `SPEECH_HOLD_MS + 22ms/char` (capped at 6–9s). That is
+ * right for a reader and fatal for a measurement: the a11y contrast sweep settles, freezes rAF and
+ * shoots one screenshot, and that window straddles the dismiss countdown — so the same commit
+ * measures a different room run to run, and a bubble caught mid-fade is sampled over whatever scene
+ * paint is behind it rather than over its own paper. Measured 2026-08-17: /office-preview flipped
+ * red about 1 run in 3, always an `lc-speech__text` row, on #3b5854 / #2d4245 / #724b29 — three
+ * different bits of furniture, one bubble.
+ *
+ * Six exclusion guards were added to the sweep one incident at a time to infer this from outside.
+ * They stay as backstops, but the page is the thing that knows a bubble is transient, so the page
+ * says so.
+ *
+ * Held bubbles are the ONLY change: nothing is hidden, nothing is repositioned, and the room still
+ * paints exactly what it would otherwise paint — so the sweep measures the real component in its
+ * real state, just one that stops. Inert unless explicitly present, like `?light=HH` above.
+ */
+function stillMode(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).has('still');
+  } catch {
+    return false; /* no window/search available (SSR, tests) — the room behaves normally */
+  }
+}
+
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
  * it's superseded (a newer act from the same member) or the office is disposed. */
 interface Speech {
@@ -165,6 +192,9 @@ export function mountOffice(
   options: OfficeOptions = {},
 ): OfficeHandle {
   const broadcast = options.broadcast === true;
+  /* Read once at mount: the flag cannot change under a running room, and re-parsing per bubble would
+     put a URLSearchParams allocation on the speech path. */
+  const STILL = stillMode();
   const captureFps =
     typeof options.captureFps === 'number' && options.captureFps > 0
       ? options.captureFps
@@ -787,6 +817,7 @@ export function mountOffice(
     let counting = false; // true once the typewriter has finished and the fade timer is live
     const begin = () => {
       counting = true;
+      if (STILL) return; // measurement mode: the bubble stays up, so the sweep measures a room that stops
       hold = setTimeout(() => {
         outer.classList.remove('is-in');
         outer.classList.add('is-out');
