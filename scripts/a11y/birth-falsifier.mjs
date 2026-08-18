@@ -156,6 +156,38 @@ for (let i = 1; i <= runs; i++) {
   );
 }
 
+/* ── The dedupe arm ──────────────────────────────────────────────────────────────────────────────
+ *
+ * Not a freeze race at all — no rAF, no birth, no motion. Two rows with the same class and ink, one
+ * on white and one over a dark sibling patch. `paperSig` walks the ANCESTOR chain, so paint a row
+ * merely sits on top of is invisible to it: both rows produced the same key, the walkers kept the
+ * first, and DOCUMENT ORDER decided which one was measured.
+ *
+ * Measured on 62d09463, the two files differing only in the order of two elements:
+ *     healthy first → 1 measured, 0 below AA   ← a real failure reported as a clean page
+ *     failing first → 1 measured, 1 below AA
+ *
+ * Both must now report it. Asserting BOTH orders is the point: one order passing proves nothing,
+ * because the broken build passed one order too. */
+for (const [name, order] of [
+  ['dedupe-hides-a-failure.html', 'healthy first'],
+  ['dedupe-order-swapped.html', 'failing first'],
+]) {
+  for (let i = 1; i <= runs; i++) {
+    const { out } = await sweep(`${base}/${name}`);
+    const fails = belowAA(out);
+    const measured = /live: (\d+) measured/.exec(out);
+    // Exactly one row is genuinely below AA, and BOTH rows must be measured — a run that reports the
+    // failure but only measures one row has collapsed something else.
+    const ok = fails === 1 && measured?.[1] === '2';
+    if (!ok) failed++;
+    console.log(
+      `  ${ok ? '✓' : '✗'} dedupe (${order}) run ${i}: ${measured?.[1] ?? '?'} measured, ${fails} below AA` +
+        `${ok ? '' : ' — the collapse is back: a real failure is hiding behind its sibling'}`,
+    );
+  }
+}
+
 server.close();
 
 if (failed) {
