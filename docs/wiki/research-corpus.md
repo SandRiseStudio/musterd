@@ -1,0 +1,117 @@
+# Research corpus — what we have measured, and where it lives
+
+Every number in findings 001–008 comes from two directories on one laptop, none of it committed; this page is the map of what exists, what produces it, and what is designed but not built.
+
+The split this page assumes is ADR 056's: **produce** (our own dogfood data — this page) versus
+**ingest** (outside literature — the research radar, `docs/design/research-foundation.md`). A fact
+we measured is a finding; a fact we read is foundation. They do not share storage.
+
+## The live stores (measured 2026-08-18; falsify: `pnpm corpus:snapshot --dry-run`)
+
+Nothing here is in git. `git ls-files` returns no `.db`, `.jsonl`, `.ndjson` or `.parquet` in this
+repo — the only committed structured data are `docs/perf/budgets.json`,
+`docs/perf/context-budgets.json`, and an empty `docs/research/radar/seen.json`.
+
+| Store                                          | Size                 | Holds                                                                                                       |
+| ---------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `~/.musterd/musterd.db`                        | 16 MB, schema v41    | messages/acts, audit, lanes, seat_memory, residency, wake_leases, wake_turns, tool_call_stats, footprint    |
+| `~/.musterd/research/adr-166-slot-sweep.jsonl` | 48 MB, 4,714 samples | [ADR 166](../decisions/166-session-liveness-by-enumeration.md) fleet liveness, every 5 min since 2026-07-27 |
+| `~/.musterd/otel-sink.log` + `.log.1`          | 12.6 MB              | the OTLP capture behind findings 002 and 005                                                                |
+| `~/.musterd/daemon.log` + `.log.1`             | 13.1 MB              | structured `http_request` log (ADR 082 slice 2)                                                             |
+| `~/cookoff-run/*.db`                           | 3.8 MB, 19 files     | per-cell cookoff daemons — the raw results behind findings 006/007                                          |
+| `~/cookoff-run/cell-*/`                        | 4.2 GB, 28 clones    | **reproducible** from `SandRiseStudio/cookoff-scenario`; not evidence                                       |
+| `~/Library/LaunchAgents/studio.sandrise.*`     | 7 plists             | the measurement _schedule_ — which instrument ran, how often                                                |
+
+Row counts in `musterd.db` at 2026-08-18: messages 5,518 · audit 11,028 · lanes 541 ·
+tool_call_stats 3,440 · wake_leases 310 · seat_memory 8 · members 26. The audit table carries
+**2,256 `occupancy.model_attested` rows** — the [ADR 101](../decisions/101-model-as-a-variable.md)
+record of which model actually occupied which seat, and the reason this corpus is unusual rather
+than merely large.
+
+**The corpus is 94 MB, not 4.3 GB** (2026-08-18; falsify: re-run the dry-run). The headline size is
+git clones. Everything irreplaceable gzips to **5.7 MB in 2.7 seconds**, because the sweep series is
+4,714 near-identical snapshots and compresses 79×. That number is why
+[ADR 280](../decisions/280-the-evidence-base-lives-on-one-laptop.md) keeps every snapshot forever
+instead of writing a retention policy — and it is a property of _this_ corpus, not a general law.
+
+## Preservation status (2026-08-18; falsify: `ls ~/.musterd/corpus-snapshots/`)
+
+`pnpm corpus:snapshot` captures all of the above into a dated, checksummed directory, using
+`VACUUM INTO` for live SQLite so the daemon keeps running. Restore drilled the same day: integrity
+`ok`, every table's row count identical, schema v41 preserved, sweep series 4,714 lines intact.
+
+~~No backup newer than 2026-06-29 (2026-08-17)~~ FIXED 2026-08-18 by ADR 280 — but the snapshot is
+**still on the same disk as its source**. Off-machine destination is nick's decision and is not yet
+made, so the exposure today is "one disk, current" rather than "one disk, two months stale."
+
+The [sibling corpus](#the-sibling-corpus-exploring-next) has the same disease and no rail at all.
+
+## The findings register — what has actually been concluded
+
+Full writeups in [`docs/research/`](../research/). Each is prose over data that mostly lives outside
+the repo, which is what makes the preservation rail load-bearing rather than tidy.
+
+| #   | Finding                              | The number it produced                                                        |
+| --- | ------------------------------------ | ----------------------------------------------------------------------------- |
+| 001 | Telemetry gaps in the P3 dogfood     | ~37% wasted work, reconstructed forensically → caused ADR 082                 |
+| 002 | Broadcast-journal traffic caught     | 84% `status_update`, 85% broadcast, one ~70 h hung directed loop              |
+| 003 | Guardrail floor on a tiny model      | `qwen3:4b` pass matrix; gaps G1 (attestation nulls) and G2                    |
+| 004 | Cross-family diversity flag, live    | first grok/gpt cross-family coordination data                                 |
+| 005 | Multi-model parallel work            | 34/34 attestation; 32% directed exchange vs revive's 8%                       |
+| 006 | **Enforcement induces coordination** | 8/8 lanes claimed vs 0/8; **1.9% vs 72.2% waste at equal correctness (~38×)** |
+| 007 | Compliance under deny                | Gate A n=4, 13 lane-block denies, zero forced; Gate B confounded              |
+| 008 | Subagent-write detector recall       | 67.7% recall, 0 false positives on 15 reads                                   |
+
+Finding 006 is the one the pitch rests on, and it comes with a standing rule recorded in
+[cookoff.md](cookoff.md): **compare D to uncoordinated N, never to solo** — solo wins on both cost
+and wall-clock, so solo is the honest denominator and the cost objection is real.
+
+## The recurring instruments
+
+| Instrument              | Cadence                   | Writes                        | Status                                                                                                                   |
+| ----------------------- | ------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| ADR 166 slot sweep      | every 5 min (launchd)     | `~/.musterd/research/*.jsonl` | live since 2026-07-27; series **never yet read** — that is lane `01KYJXFXEM5EGAVC4HETG15SZJ`, blocked on data it now has |
+| OTel sink               | continuous                | `~/.musterd/otel-sink.log`    | live; 13 instruments (see `docs/design/observability.md`)                                                                |
+| Roster-diversity        | on demand                 | stdout only                   | `scripts/research/roster-diversity.ts` — conditional 92.0%, unconditional floor 32.3%                                    |
+| ADR 260 acceptance eval | on demand, windows pinned | stdout only                   | pre-registered, re-runnable                                                                                              |
+| ADR 259 memory reads    | scheduled one-shots       | prose                         | T+5 fired 2026-08-18; **the 30-day evaluation fires 2026-09-12**                                                         |
+
+Three of these print to stdout and persist nothing, which is fine for a re-runnable instrument over
+a preserved corpus and fatal for one over a corpus that moves. It is a second reason the rail comes
+first.
+
+## What is designed and not built (2026-08-18; falsify: grep the ADRs named)
+
+- **The dataset itself.** ADR 184 decided the gate (structural fields only, no agent prose); the
+  export does not exist (2026-08-18; falsify: `ls scripts/dataset/`). Roadmap item
+  `coordination-dataset`.
+- **ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR
+  184 all build on has never been accepted.
+- **Per-model leaderboard**, blocked by finding 005's named cause: the coordination gauges carry no
+  team/model dimension, so per-model cost and latency must be reconstructed from spans.
+- **Frontier cadence manifest** — protocol written, zero runs recorded.
+- **Cookoff cells A/B/C2/C3, D-res, cell E** — defined in the frozen manifest, spend not authorised.
+- **ADR 250's weekly reads** (asks-to-founder per merged PR; repeat wakes with unchanged reason;
+  capability-miss count) — prose instructions, no instrument, no schedule.
+- **Radar M4/M5** — sweep and triage built, but `seen.json` is empty and no digest has ever been
+  emitted. That is the ingest side; see the goal `research-radar`.
+
+## The sibling corpus: Exploring Next
+
+`/Users/nick/sandrise` runs a second, independent measured corpus that this repo's research
+programme can draw on (surveyed 2026-08-17; falsify: query `exploring_next` at the Supabase project
+in that repo's config):
+
+- **883 human-curated AI sources** (2025-10-02 → 2026-08-17), facet-tagged against a closed
+  vocabulary — ~421 `agents`, ~34 `agent-observability`. A hand-labelled relevance set, and the
+  calibration data the radar's LLM triage does not otherwise have.
+- **876 episodes / 806 scripts**, each carrying ~76 keys of generation metadata: script model from a
+  ~20-model rotation, TTS vendor and fallback reason, search provider, latency. Model-as-a-variable
+  in content production, where musterd's corpus is model-as-a-variable in coordination.
+- **A versioned weekly landscape brief** (`exploring_landscape_brief`, evolve-don't-reset, dated
+  markers, source URLs retained) — feedstock for [positioning](positioning.md) work, though it is
+  framing rather than citable specifics: verify at the original source and cite that.
+
+Durability there is worse, not better: all of it plus 4.99 GB of audio sits in one Supabase project
+with no export script (goal `exploring-next-ops`). Its audio will not compress, so this page's
+5.7 MB economics do not transfer.
