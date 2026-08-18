@@ -316,7 +316,33 @@ function OfficePreviewPage() {
             ? new URLSearchParams(window.location.search)
             : new URLSearchParams();
         const quiet = search.has('quiet');
-        if (!quiet) {
+        /*
+         * `?still` — the MEASUREMENT mode: the same script, played ONCE and immediately, with no
+         * loop behind it. The room fills and then stops.
+         *
+         * This exists because the a11y contrast gate was measuring a moving room and losing. The
+         * sweep freezes rAF, samples a screenshot and pairs each text row with the pixel beneath it,
+         * and every part of that is a race against choreography: bubbles are born on timers, walks
+         * reposition them, and `LOOP` restarts the whole script every cycle. Six exclusion guards
+         * (moved, born, unsettled, invisible, clipped, covered) were added to contrast-sweep.mjs one
+         * incident at a time, and /office-preview still flipped red about 1 run in 3 — always
+         * `lc-speech__text`, over whatever scene paint happened to be under a bubble at shutter time.
+         *
+         * `?quiet` cannot be that mode: it skips the choreography entirely, so there are no bubbles
+         * to measure, and the speech rows are exactly where the real failures have been found
+         * (wanderer's below-AA report on this route was an lc-speech__text row). A gate that goes
+         * green by removing its subject is worse than a flaky one.
+         *
+         * So: keep the subject, remove the motion. Every event fires at mount, the scene animates to
+         * its end state once, and the sweep's settle detector — which already waits for the page to
+         * STOP CHANGING rather than for a number of seconds — then has something that actually stops.
+         *
+         * Same shape as `?light=HH` above: a dev aid, inert unless explicitly present.
+         */
+        const still = search.has('still');
+        if (still) {
+          for (const step of SCRIPT) handleRef.current?.emit(step.ev);
+        } else if (!quiet) {
           const run = () => {
             for (const step of SCRIPT)
               timers.push(setTimeout(() => handleRef.current?.emit(step.ev), step.at));

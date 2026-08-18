@@ -405,6 +405,44 @@ const SETTLE_MIN = Number(process.env.A11Y_SETTLE_MIN ?? 4000);
 const SETTLE_STEP = Number(process.env.A11Y_SETTLE_STEP ?? 400);
 const SETTLE_WINDOW = Number(process.env.A11Y_SETTLE_WINDOW ?? 2500);
 const SETTLE_CAP = Number(process.env.A11Y_SETTLE_CAP ?? 20000);
+/** The beat between the two stillness snapshots — long enough for a walk step to show, short enough
+    to be worth paying twice per run. */
+const GEOM_STEP = Number(process.env.A11Y_GEOM_STEP ?? 250);
+/**
+ * WHERE every row is — the stillness check the key set above cannot make.
+ *
+ * `KEYS_IN_PAGE` is class|ink|paper and nothing else, so it cannot see MOTION at all: a character
+ * walking across the office carries its label and its bubble with it while every key stays
+ * identical, and the sweep concludes the page has settled and shoots mid-walk. That blind spot sits
+ * underneath most of this gate's flakes — the freeze, the pixel pass and the `moved` guard are all
+ * downstream of a precondition that was never actually checked.
+ *
+ * This is deliberately NOT folded into the polled key set. Measured 2026-08-17: sampling geometry
+ * every SETTLE_STEP forced a layout on each poll and starved the office scene's rAF loop badly
+ * enough that its canvas never finished painting inside the 20s cap — the sweep then refused the
+ * whole route, turning a stillness check into a harness failure. Raising the cap to 60s let it
+ * through, which is the proof it was starvation rather than breakage.
+ *
+ * So geometry is the VERIFICATION, not the signal: the cheap key set settles first, and only then
+ * are two snapshots compared. Element boxes rather than text Ranges, for the same cost reason —
+ * motion does not need the glyphs' own box, and an element that moved moved.
+ */
+const GEOM_IN_PAGE = /* js */ `(() => {
+  const out = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent.trim()) continue;
+    const el = node.parentElement;
+    if (!el) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
+    const r = el.getBoundingClientRect();
+    out.push(Math.round(r.x) + ',' + Math.round(r.y));
+  }
+  return out.sort().join('|');
+})()`;
+
 const KEYS_IN_PAGE = /* js */ `(() => {
   ${PAPER_SIG}
   const keys = [];
@@ -536,7 +574,20 @@ const settle = await (async () => {
       now.startsWith('complete')
     ) {
       painted = await canvasPainted();
-      if (painted !== false) return { how: 'settled', ms: Date.now() - t0, painted };
+      if (painted !== false) {
+        /* Keys are stable and the canvas has painted — now check the thing the keys cannot see.
+           Two geometry snapshots a beat apart: if any row moved, the page was mid-animation with a
+           steady key set, so keep waiting rather than shoot. This costs two layouts per run, not one
+           per poll, which is what makes it affordable (see GEOM_IN_PAGE). */
+        const geom = async () =>
+          (await send('Runtime.evaluate', { expression: GEOM_IN_PAGE, returnByValue: true })).result
+            .value;
+        const g1 = await geom();
+        await new Promise((r) => setTimeout(r, GEOM_STEP));
+        const g2 = await geom();
+        if (g1 === g2) return { how: 'settled', ms: Date.now() - t0, painted };
+        since = Date.now(); // something moved — the page is not still, whatever the key set says
+      }
       /* Keys are stable but the canvas under the text is still blank — the exact state that
          produced the vacuous greens. Keep waiting; the cap decides how this ends. */
     }
