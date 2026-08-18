@@ -247,12 +247,29 @@ const report = ({ code, out }, label, floor = 0) => {
  */
 const SCENE_LIGHTS = ['12', '21'];
 const sceneRoutes = new Set(['/office-preview']);
+/*
+ * `&still` pins the CHOREOGRAPHY the way `?light=` pins the clock, and for the same reason one layer
+ * up: a verdict that changes with what the room happened to be doing cannot gate merges.
+ *
+ * Pinning the sun fixed the lighting variable and left the motion one. The scene's script loops
+ * every cycle, bubbles are born on timers and walks reposition them, so the sweep — which freezes
+ * rAF, shoots one screenshot and pairs each row with the pixel beneath it — was racing the room.
+ * Six exclusion guards went into contrast-sweep.mjs one incident at a time (moved, born, unsettled,
+ * invisible, clipped, covered) and this route still flipped red about 1 run in 3, always an
+ * `lc-speech__text` row over whatever scene paint sat under a bubble at shutter time.
+ *
+ * `?still` plays the same script ONCE at mount with no loop behind it: the room fills, animates to
+ * its end state, and stops. The subject is kept and the motion is removed — deliberately NOT
+ * `?quiet`, which skips the choreography and would leave the speech rows unmeasured, and those rows
+ * are where the real failures on this route have been found.
+ */
+const SCENE_STILL = '&still';
 
 for (const route of ROUTES) {
   if (sceneRoutes.has(route)) {
     for (const light of SCENE_LIGHTS) {
       report(
-        await sweep(`http://127.0.0.1:${BOUND}${route}?light=${light}`),
+        await sweep(`http://127.0.0.1:${BOUND}${route}?light=${light}${SCENE_STILL}`),
         `${route} (light=${light})`,
       );
     }
