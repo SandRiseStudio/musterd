@@ -9,7 +9,12 @@ import {
   type UnprovisionPlan,
 } from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
-import { inspectCodexHookDrift, installCodexHooks, removeCodexHooks } from './codexHooks.js';
+import {
+  codexHooksPath,
+  inspectCodexHookDrift,
+  installCodexHooks,
+  removeCodexHooks,
+} from './codexHooks.js';
 import {
   hasServer,
   readServerEnv,
@@ -30,8 +35,8 @@ import {
  * the project-local file ourselves is the deterministic, correct-scope choice — and needs no TOML
  * dependency (hard rule #6). See ADR 031.
  */
-function projectConfigPath(): string {
-  return join(process.cwd(), '.codex', 'config.toml');
+function projectConfigPath(dir: string = process.cwd()): string {
+  return join(dir, '.codex', 'config.toml');
 }
 
 /**
@@ -86,7 +91,12 @@ export const codex: Harness = {
     const globalToml = inProject ? '' : readToml(globalConfigPath());
     const inGlobal = !inProject && hasServer(globalToml, 'musterd');
     const configured = inProject || inGlobal;
-    const hookDrift = inspectCodexHookDrift(process.cwd());
+    // Scoped to folders Codex is actually wired into. Hook drift is a claim about provisioning
+    // musterd DID, and `installCodexHooks` runs only from `configure`, so an unconfigured folder has
+    // no drift to have — it has an absence that is correct. Ungated, this reported a hard ✗ naming
+    // `.codex/hooks.json` in every Claude-Code-only folder, contradicting the "no musterd server"
+    // line printed directly above it, and with no safe repair to offer (ADR 168).
+    const hookDrift = configured ? inspectCodexHookDrift(process.cwd()) : [];
     return {
       installed,
       configured,
@@ -110,6 +120,29 @@ export const codex: Harness = {
         : {}),
       ...(hookDrift.length > 0 ? { hookDrift } : {}),
     };
+  },
+
+  /**
+   * The ADR 168 safe repair for this harness's hooks — the sibling Codex never declared, which is
+   * why `musterd init --refresh-hooks` skipped it and the doctor was left pointing at `musterd
+   * wire` (which only registers the MCP server and never installs a hook). Without this the only
+   * path that reached `installCodexHooks` was the full `musterd init`, barred from a live seat's
+   * workspace by ADR 161 — a detected drift with no runnable repair.
+   *
+   * `applies` follows the contract's line between refresh and first install: the project config is
+   * the file `configure` writes, so its presence is what "musterd provisioned Codex here" means.
+   */
+  refreshHooks: {
+    applies: (dir) => existsSync(projectConfigPath(dir)) || existsSync(codexHooksPath(dir)),
+    run: (dir) => {
+      const files = installCodexHooks(dir);
+      // A malformed file is left untouched by design (it may be hand-authored), and returns no
+      // files — so without this the driver would print "✓ Codex hooks refreshed" over a repair that
+      // never happened. Reuse the inspector's own wording rather than inventing a second phrasing.
+      const warnings =
+        files.length === 0 ? inspectCodexHookDrift(dir).filter((d) => d.includes('malformed')) : [];
+      return { files, warnings };
+    },
   },
 
   async configure(entry: McpServerEntry) {

@@ -18,9 +18,12 @@ const REQUIRED = [
   ['PostToolUse', 'post-tool-use'],
 ] as const;
 
-function pathFor(root: string): string {
+/** Where this harness's project-local hooks live — exported so callers never re-derive the path. */
+export function codexHooksPath(root: string): string {
   return join(root, '.codex', 'hooks.json');
 }
+
+const pathFor = codexHooksPath;
 
 function read(path: string): HooksFile | undefined {
   try {
