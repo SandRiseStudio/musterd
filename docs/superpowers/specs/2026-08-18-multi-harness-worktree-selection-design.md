@@ -1,7 +1,7 @@
 # Multi-harness worktree selection — configure once, switch by launching
 
 - Date: 2026-08-18
-- Status: design approved in session (nick); spec awaiting review
+- Status: approved 2026-08-18 (nick)
 - Decision: [ADR 281](../../decisions/281-multi-harness-worktree-selection.md)
 - Builds on: ADR 018 (workspace binding), ADR 038 (harness adapters), ADR 080 (provisioning
   manifest), ADR 143 (folder-scoped Codex configuration), ADR 165 (universal MCP entry), ADR 213

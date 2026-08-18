@@ -99,7 +99,7 @@ require more special cases instead of one lifecycle contract.
 
 ## Observability & Evaluation
 
-**Traces.** Reconciliation emits one existing provisioning-operation span per harness with harness
+**Traces.** Reconciliation emits one provisioning-operation span per harness with harness
 id, scope, desired/available/observed state, planned action, result, and duration. It never records
 paths, config fragments, credentials, or receipt bodies. `musterd harness status` is the durable
 operator read: per harness it reports desired state, availability, scope, observed state, ownership,
