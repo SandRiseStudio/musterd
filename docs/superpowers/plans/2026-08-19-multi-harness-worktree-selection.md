@@ -403,6 +403,11 @@ fragment-scoped TOML adapters. No new runtime dependency.
   `reconcileHarnesses(ctx, desired, { legacyRepair }): Promise<ReconcileReport>`.
 - `inspectHarnesses` is read-only. Only confirmed configure passes `legacyRepair: true`; `wire` and
   all other callers pass `false`.
+- Emits one `musterd.provisioning.operation` span per inspected or reconciled fragment. Its
+  allowlisted attributes are harness id, scope, desired/availability/observation classifications,
+  planned action, journal recovery outcome, result, marker generation, and lock-recovery outcome;
+  duration is the span duration. It must never attach paths, container/resource keys, configuration
+  bodies, credentials, or owner roots.
 
 - [ ] **Step 1: Encode the complete action matrix as failing table tests.**
 
@@ -433,7 +438,10 @@ fragment-scoped TOML adapters. No new runtime dependency.
   Registry-sort harnesses and fragment keys. Save no files and acquire no mutation lease from
   `inspectHarnesses`. In reconciliation, load the saved desired set and machine ledger, derive one
   action per fragment, and stop that fragment on busy, drift, unmanaged conflict, invalid container,
-  or unrecoverable journal state.
+  or unrecoverable journal state. Start an operation span around each inspection/planned mutation
+  through the existing CLI tracer; populate only the allowlisted structural attributes above, set an
+  error status for failed/conflict/busy results, and always end it. Emit the same span for read-only
+  `harness status` inspection so its durable diagnosis and trace evidence agree.
 
 - [ ] **Step 3: Write stop-injection recovery tests.**
 
@@ -441,6 +449,9 @@ fragment-scoped TOML adapters. No new runtime dependency.
   contribution write, and journal removal. On retry assert old fingerprint retries the mutation,
   intended fingerprint finalizes ownership, neither fingerprint preserves the journal and returns
   conflict, and owner-only operations converge to `intendedOwners` despite equal old/intended hashes.
+  Install the existing in-memory OpenTelemetry exporter and assert one finished operation span per
+  fragment has the action, recovery, result, marker-generation, and lock-recovery attributes but no
+  path, resource key, owner root, config text, or credential.
 
 - [ ] **Step 4: Implement the write-ahead operation sequence.**
 
@@ -524,7 +535,10 @@ fragment-scoped TOML adapters. No new runtime dependency.
 
   Keep the existing minimal TOML parser/writer, but expose the musterd MCP table, approvals, hooks,
   and guidance as distinct fragments. Assert unrelated TOML sections and bytes remain unchanged,
-  including comments and ordering. Run:
+  including comments and ordering. Define a strict adapter-owned Codex container representation for
+  the musterd tables/entries, parse the complete intended representation through it before every
+  scoped replacement, and refuse an invalid env/table shape before opening the write path. Add a
+  fixture whose invalid intended container leaves the prior TOML bytes unchanged. Run:
 
   `pnpm --filter @musterd/cli test -- codex.test.ts codexHooks.test.ts codexToml.test.ts`
 
@@ -598,7 +612,9 @@ fragment-scoped TOML adapters. No new runtime dependency.
   Use only `inspectHarnesses`. Human output reports per harness: desired, availability, scope,
   observed state, ownership, pending journal/lock state, and next repair action. JSON exposes the
   same stable fields. Exit 0 only when every desired fragment is usable and every undesired owned
-  contribution is released; otherwise exit 1.
+  contribution is released; otherwise exit 1. Preserve the engine's per-fragment operation spans;
+  attach only aggregate count/exit-code attributes to the existing `musterd.cli.command` span, never
+  a resource key, path, fragment text, credential, or owner root.
 
 - [ ] **Step 4: Convert `init` to initial multi-selection.**
 
@@ -622,6 +638,11 @@ fragment-scoped TOML adapters. No new runtime dependency.
     autojoin: boolean;
   }
   ```
+
+  Preserve the reconciler's per-fragment operation spans and record only desired-count,
+  result-count, and exit-code aggregates on the existing command span. Test configure, status, and
+  wire together with an in-memory exporter so the planned action, journal recovery, result, marker
+  generation, and lock-recovery attributes remain present through each command path.
 
 - [ ] **Step 6: Make uninstall reconcile to empty before cleanup.**
 
