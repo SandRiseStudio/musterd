@@ -1419,16 +1419,16 @@ const RAW: RawItem[] = [
   },
   {
     id: 'role-routing-profiles',
-    unfrozen: 'ADR 272 is proposed; implementation awaits acceptance',
+    unfrozen: 'ADR 272 is proposed (revised 2026-08-19); only the profiles migration is authorized now',
     wave: 8,
-    title: 'Role routing & workspace profiles — responsibility without harness lock-in',
+    title: 'Roles vs profiles — responsibility without harness lock-in, routing behind its gate',
     plan: 'near-term',
     category: 'platform',
     blurb:
-      'Make a role a team-owned responsibility with explicit primary/alternate routing, while moving harness setup into separate local workspace profiles.',
+      'Keep roles as team-owned responsibilities and move harness setup into separate local workspace profiles; role routing stays deferred behind measured demand.',
     detail:
-      'ADR 272 records the re-evaluation: a role is harness-independent charter, narrow-only capability defaults, approved holders, and routing policy; a profile is optional local setup for a workspace and Surface. Built-in roles are usable immediately; personal drafts become team/project roles only after human-admin approval; every durable assignment and policy change needs human-admin approval. The daemon owns live distributed routing and audit, while Git remains a reviewable declaration/export. A role route resolves primary (when active and available), then active alternates, then authenticated wakeable alternates, otherwise a durable no-eligible-holder result — always recording the selected named seat and reason. No model/harness gate, task requirement, or free-tag resolver is added until dogfood demonstrates an actual environment-mismatch failure. This replaces the ambiguous old “role template” boundary without changing the separate own-harness ambition.',
-    refs: [adr(272, 'ADR 272'), adr(227, 'ADR 227'), adr(26, 'ADRs 026–030')],
+      'ADR 272 (revised 2026-08-19 after the second ADR 227 measurement — zero role-discovery usage ever, so the pre-registered reopening trigger for role-addressed sends had vacuously never fired; the original registry/resolver scope was conceded as unevidenced): the seat is the only required entity; a role is an optional team-side responsibility (charter, narrow-only capability defaults, approved holders — ADR 227 unchanged); a workspace provisioning profile is optional local setup that neither grants nor removes a role and never carries team authority. The one authorized build is migrating the ADR 026–030 templates to the profile vocabulary and boundary. The four-level registry, Git reconciliation, role-addressed sends, and ordered routing resolver are deferred behind ADR 227’s restored measured trigger or demonstrated multi-holder contention — and when role sends do proceed, the first increment resolves holders onto the shipped ADR 254 eligible-set rail (named seats, any one discharges) rather than a new resolver. Named-seat accountability and human-admin authority over durable assignments (ADR 145) survive as constraints on any future routing build.',
+    refs: [adr(272, 'ADR 272'), adr(227, 'ADR 227'), adr(254, 'ADR 254'), adr(26, 'ADRs 026–030')],
     dependsOn: ['roles-and-stewardship', 'harness-residency'],
   },
   {
