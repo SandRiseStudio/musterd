@@ -2,8 +2,9 @@
 
 - Date: 2026-08-18; revised 2026-08-19 after independent review
 - Status: approved 2026-08-19 (nick)
-- Decisions: [ADR 281](../../decisions/281-multi-harness-worktree-selection.md) and
-  [ADR 282](../../decisions/282-crash-safe-multi-harness-reconciliation.md)
+- Decisions: [ADR 281](../../decisions/281-multi-harness-worktree-selection.md),
+  [ADR 282](../../decisions/282-crash-safe-multi-harness-reconciliation.md), and
+  [ADR 286](../../decisions/286-launcher-surface-convergence.md)
 - Builds on: ADR 018 (workspace binding), ADR 026 (harness tool environment), ADR 027
   (non-invasive coexistence), ADR 030 (provisioning manifest), ADR 080 (committed launch spec), ADR
   116 (agent harness selection), ADR 143 (workspace-anchored identity), ADR 165 (universal MCP
@@ -28,8 +29,9 @@ The design separates three facts:
 No field serves two rows. In particular, desired harnesses never determine Presence Surface, and a
 launch never changes desired harness state.
 
-This is a clean local-schema break. There is no dual read, automatic migration, legacy output, or
-fallback to a previously declared Surface.
+This is a clean runtime and local-schema break. There is no dual read, automatic migration, legacy
+runtime output, or fallback to a previously declared Surface. A confirmed `harness configure` repair
+is the single explicit conversion path for recognized local identity and registration state.
 
 ## Invariants
 
@@ -66,6 +68,11 @@ unrecognized version, unknown field, malformed value, or invalid JSON is `invali
 Ordinary CLI commands and MCP startup reject both with a specific repair message. Only
 `musterd harness configure` can convert `legacy`, and only after the human confirms the complete
 desired set.
+
+Every local-state writer validates its complete intended object through the matching strict current
+schema before canonical serialization, fsync, and atomic publish. A failed validation leaves the
+previous file and prepared journal unchanged. The same boundary applies to adapter-owned container
+representations before a scoped external replacement.
 
 ## 2. Worktree provisioning manifest
 
@@ -152,13 +159,20 @@ type ReconcileJournal = {
 };
 ```
 
+`HarnessLocks` is a cross-process recoverable lease keyed by `containerKey`, not an in-memory
+mutex. Its record has an opaque holder id, PID, process-start identity, acquisition/renewal times,
+and an expiry. The holder renews before expiry; a successor may reclaim an expired lease only after
+confirming the recorded PID and process-start identity are no longer live. Where available, the
+lease also holds a crash-releasing advisory file lock. A live unexpired holder reports `busy`; a
+crashed holder cannot strand recovery.
+
 One fragment mutation is one journaled operation. A harness that owns several fragments converges
 one fragment at a time; a stop may leave a partially configured harness, but every completed
 fragment remains attributable and the next run deterministically finishes the set.
 
 The operation order is:
 
-1. acquire the lock keyed by `containerKey`;
+1. acquire or safely reclaim the recoverable lock keyed by `containerKey`;
 2. recover any earlier journal for that container;
 3. parse the latest containing config and observe the fragment;
 4. compute the intended fragment and ownership delta;
@@ -324,7 +338,7 @@ their brand glossary meanings.
 
 Runtime resolution is explicit:
 
-1. `MUSTERD_SURFACE`, when deliberately supplied for headless/testing use;
+1. `MUSTERD_TEST_SURFACE`, when deliberately supplied for headless/testing use;
 2. the command-owned intrinsic Surface (`cli` for ordinary CLI acts, `musterd` for native host);
 3. `MUSTERD_LAUNCH_SURFACE` injected by an external harness registration.
 
@@ -332,6 +346,13 @@ Each execution path permits only its applicable intrinsic or launch source. Conf
 without an explicit override fail instead of guessing. Every value is parsed through
 `SurfaceSchema`. A manually started MCP adapter without a launch marker or override refuses to
 join and explains the launcher contract.
+
+`MUSTERD_SURFACE` is a retired registration marker and never a runtime input. `harness status`
+classifies an external registration that carries it as `legacy-launch-marker` and directs the human
+to `harness configure`. Only a human-confirmed configure repair can replace that recognized marker
+with `MUSTERD_LAUNCH_SURFACE`, through the same fragment-scoped journal as every other external
+change. Ordinary `wire` never silently converts it. This is not a compatibility fallback: the old
+registration cannot attach a Presence until repaired.
 
 `binding.session.harness` and `model_observed.harness` remain capture evidence for resumability and
 model provenance, not Presence Surface inputs. Workspace and binding contain no persisted Surface.
@@ -360,6 +381,12 @@ ownership, journal state, or managed fragment fingerprints.
 - Sibling worktree disappears: its owner remains visible; garbage collection is follow-on work.
 - Last-owner removal fails: retain final ownership and contribution evidence.
 - No runtime Surface: refuse Presence attachment rather than use historical configuration.
+- Retired `MUSTERD_SURFACE` marker: report `legacy-launch-marker`; only confirmed configure repair
+  may replace it with `MUSTERD_LAUNCH_SURFACE`.
+- Live container lease: report `busy` and mutate nothing; a stopped lease holder is reclaimed before
+  journal recovery.
+- Invalid intended local write: retain the previous valid file and prepared journal; report schema
+  issues before publication.
 
 No repair path silently changes the desired set, adopts contents, or discards ownership evidence.
 
@@ -370,6 +397,7 @@ No repair path silently changes the desired set, adopts contents, or discards ow
 - strict workspace, binding, manifest, ledger, and journal schemas;
 - unknown fields and versions rejected;
 - every ordinary reader distinguishes missing, legacy, and invalid;
+- every local-state writer validates the strict complete schema before atomic publication;
 - only confirmed `harness configure` converts a legacy fixture;
 - protocol validates uniqueness while CLI tests registry-order serialization.
 
@@ -380,6 +408,7 @@ No repair path silently changes the desired set, adopts contents, or discards ow
 - unmanaged conflict and owned drift preserve exact bytes;
 - one harness with several fragments converges incrementally;
 - a stop injected after every journal step recovers idempotently;
+- a crashed lock holder is reclaimed, while a live holder reports `busy` without mutation;
 - uninstall failure at every external and local cleanup step retains retry evidence;
 - unrelated config entries survive every configure/remove/recovery path.
 
@@ -405,6 +434,11 @@ Before and after every launch:
   identical;
 - no journal or config write occurs;
 - binding differences contain only the explicit runtime-field allowlist.
+
+The same acceptance begins with one fixture registration per external adapter carrying the retired
+`MUSTERD_SURFACE` marker. It must not attach a Presence; status must name the repair; confirmed
+configure must replace it with exactly one `MUSTERD_LAUNCH_SURFACE`; and the subsequent launch must
+attach the adapter's Surface.
 
 No launch invokes or requires `wire`.
 
