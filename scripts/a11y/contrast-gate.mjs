@@ -68,12 +68,16 @@ const PORT = EXPLICIT_PORT ? Number(EXPLICIT_PORT) : 0;
  * components against fixtures, so their sweep is representative. The rest are listed anyway: a
  * pre-connect state is still a state a stranger sees, and `/` is the marketing page nobody
  * re-measures.
+ *
+ * `/approval-preview` was retired 2026-08-19 (lane 01M092TRQ6): a synthetic page kept alive only
+ * for this list. Its ApprovalCard states are UNMEASURED until `/approvals` becomes a signin
+ * surface (ADR 222 limits those to board/live today) and the fixture team leaves a request
+ * pending — `/approvals` below reaches its sign-in screen only. See docs/a11y/contrast.md.
  */
 const ROUTES = arg('routes', '')
   ? arg('routes', '').split(',')
   : [
       '/',
-      '/approval-preview',
       '/office-preview',
       '/character-sheet',
       '/board',

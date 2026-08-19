@@ -43,6 +43,13 @@ SKIPPED, counted per route in the summary); elements caught mid-fade, which keep
 estimate rather than a frame nobody stays on; and any surface the fixture team does not seed. A
 surface nobody seeds is a surface nobody measures.
 
+**The approval card is currently in that category** (2026-08-19, lane 01M092TRQ6). `/approval-preview`
+— a synthetic route that existed only to be swept — was retired rather than kept alive as its own
+justification. The static sweep of `/approvals` reaches its sign-in screen only, and the card's
+states come back into measurement when `/approvals` becomes a signin surface (ADR 222 limits those
+to board/live) and the fixture team leaves one request pending. Until then the card's nine 2026-08-12
+failures stay fixed in the tokens, but nothing re-measures them.
+
 **The gradient blind spot is closed** (2026-08-13). It used to be the largest hole in the gate —
 13–21 elements a route, and seeding the office made it _worse_, because a loud asks rail meant more
 text painted over a gradient. Sampling the painted pixel measures all of it. `SKIPPED` is now
