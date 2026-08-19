@@ -215,29 +215,35 @@ type HarnessContext = {
   clock: HarnessClock;
 };
 
+type HarnessContainer = {
+  containerKey: string; // stable lock key; hashed for journal/lock filenames
+  scope: 'folder' | 'repo-shared' | 'machine';
+  handle: unknown; // adapter-private (a path, a CLI target, …)
+};
+
+type HarnessTarget = { containers: HarnessContainer[] };
+
 type HarnessAdapter = {
   id: HarnessId;
   surface: Surface;
   adapterVersion: number;
-  scope: 'folder' | 'repo-shared' | 'machine' | 'in-process';
-  availability(ctx: HarnessContext): Promise<Availability>;
-  target(ctx: HarnessContext): Promise<HarnessTarget | null>;
-  desiredFragments(ctx: HarnessContext): Promise<readonly FragmentIntent[]>;
-  observe(ctx: HarnessContext, target: HarnessTarget): Promise<ObservedContainer>;
-  apply(
-    ctx: HarnessContext,
-    target: HarnessTarget,
-    patch: FragmentPatch,
-    expectedContainerFingerprint: string,
-  ): Promise<ApplyResult>;
+  availability(ctx: HarnessContext): Promise<HarnessAvailability>;
+  target(ctx: HarnessContext): Promise<HarnessTarget>;
+  desiredFragments(ctx: HarnessContext, target: HarnessTarget): Promise<FragmentIntent[]>;
+  observe(ctx: HarnessContext, intent: FragmentIntent): Promise<ObservedFragment>;
+  apply(ctx: HarnessContext, mutation: FragmentMutation): Promise<void>;
 };
 ```
 
-`target` supplies a stable `containerKey`; the adapter keeps platform-specific paths and command
-details behind its boundary. `desiredFragments` is pure with respect to external configuration.
-`observe` returns a parsed container fingerprint plus canonical fragment observations. `apply`
-performs one scoped patch against the latest parse and refuses a changed expected container instead
-of writing from a stale snapshot.
+`target` enumerates the physical containers this adapter manages fragments in — PLURAL, and each
+fragment carries its own scope and container key: one adapter can touch multiple independently
+locked containers (Claude Code's repo-shared MCP registration beside its folder-scoped hooks,
+permissions, and guidance), matching ADR 282's frozen per-fragment ownership decision. There is no
+adapter-level scope. The adapter keeps platform-specific paths and command details behind the
+opaque container `handle`. `desiredFragments` is pure with respect to external configuration.
+`observe` reads ONE fragment back as a canonical fingerprint (or absent / legacy-launch-marker /
+invalid-container). `apply` performs one scoped, journaled fragment mutation against the latest
+parse and refuses a changed expected container instead of writing from a stale snapshot.
 
 The context makes roots and side effects explicit. Adapters do not call ambient `cwd`, homedir,
 global process environment, time, or locks behind the reconciler's back. Tests can therefore build
@@ -245,8 +251,9 @@ two complete machine directory trees rather than pointing two cases at different
 one shared tree.
 
 The adapter registry contains Claude Code, Codex, Cursor, and musterd. The reconciler contains no
-conditional on those ids. The musterd adapter is `in-process`: it is selectable and visible in
-status, returns no target/fragments, and supplies Surface directly when the native host launches.
+conditional on those ids. The musterd adapter is in-process: it is selectable and visible in
+status, returns an empty container set and no fragments, and supplies Surface directly when the
+native host launches.
 
 Harness ids are extensible strings. Adapter `surface` remains the closed protocol `Surface` union.
 A fixture future adapter uses `other`; introducing a distinct Surface requires a separate protocol
