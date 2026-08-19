@@ -40,7 +40,9 @@ export function actToEvent(env: Envelope): OfficeEvent | null {
         ? { kind: 'walk-handoff', from, to: to.name, label: env.body.slice(0, 24) }
         : { kind: 'megaphone', from };
     case 'accept':
-      return { kind: 'accept', who: from };
+      // Directed accepts carry the celebrant: the RECIPIENT is whose work was just accepted, and
+      // the celebration (confetti, neighbor glances) belongs over their desk, not the acceptor's.
+      return { kind: 'accept', who: from, of: to.kind === 'member' ? to.name : null };
     case 'decline':
       return { kind: 'decline', who: from };
     case 'wait':

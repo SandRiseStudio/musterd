@@ -52,7 +52,18 @@ describe('actToEvent', () => {
   });
 
   it('maps accept/decline/wait/resolve to sender-anchored cues', () => {
-    expect(actToEvent(env('accept', { meta: { in_reply_to: 'x' } }))).toEqual({ kind: 'accept', who: 'ada' });
+    // A directed accept also carries the celebrant — the recipient whose work was accepted.
+    expect(actToEvent(env('accept', { meta: { in_reply_to: 'x' } }))).toEqual({
+      kind: 'accept',
+      who: 'ada',
+      of: 'ben',
+    });
+    // Team-addressed: nobody in particular was accepted, so there is no celebrant.
+    expect(actToEvent(env('accept', { to: { kind: 'team' }, meta: { in_reply_to: 'x' } }))).toEqual({
+      kind: 'accept',
+      who: 'ada',
+      of: null,
+    });
     expect(actToEvent(env('decline', { meta: { in_reply_to: 'x' } }))).toEqual({ kind: 'decline', who: 'ada' });
     expect(actToEvent(env('wait'))).toEqual({ kind: 'wait', who: 'ada' });
     expect(actToEvent(env('resolve', { thread: 't1' }))).toEqual({ kind: 'resolve', who: 'ada' });

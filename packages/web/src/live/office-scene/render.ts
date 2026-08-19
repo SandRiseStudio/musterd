@@ -4033,8 +4033,9 @@ export function coffeeAnchor(fit: Fit): Pt {
   return { x: s.x, y: s.y - (LOUNGE.counter.h + MACHINE_H + 2) * fit.scale };
 }
 
-/** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), or a glow
- * at the entrance when someone comes or goes (`door`). */
+/** A transient act cue: a tinted ring + optional glyph (`ring`), a broadcast sweep (`wave`), a glow
+ * at the entrance when someone comes or goes (`door`), or a celebration burst over an accepted
+ * member's head (`confetti`). */
 export interface Cue {
   at: Pt;
   to?: Pt;
@@ -4043,7 +4044,27 @@ export interface Cue {
   glyph: '' | '?' | '!' | '📣' | '✓' | '↦' | '↪';
   t: number;
   urgent: boolean;
-  kind?: 'ring' | 'wave' | 'door' | 'thread';
+  kind?: 'ring' | 'wave' | 'door' | 'thread' | 'confetti';
+}
+
+/** The celebration palette — the cue-family literals the scene already speaks (accept green, the
+ * accent mustard, handoff violet, danger coral), cycled per particle. */
+const CONFETTI_COLORS = ['#5cd49a', '#f4cf52', '#c6a3ff', '#f3776a'] as const;
+const CONFETTI_COUNT = 18;
+
+/**
+ * One confetti particle's whole flight, derived from its index alone — deterministic, so a cue
+ * draws identically for a given `t` (no per-frame randomness to make tests flaky or frames shear).
+ * A ballistic puff: up and out from the head, gravity pulling the tail down, spinning as it goes.
+ */
+function confettiParticle(i: number, t: number, scale: number, at: Pt) {
+  // Golden-angle fan: spreads the launch directions without two particles ever sharing one.
+  const angle = -Math.PI / 2 + Math.sin(i * 2.399963) * 1.1;
+  const speed = (34 + ((i * 7919) % 23)) * scale;
+  const x = at.x + Math.cos(angle) * speed * t * 1.6;
+  const y = at.y + Math.sin(angle) * speed * t * 1.9 + 52 * scale * t * t; // gravity
+  const spin = t * (4 + (i % 5)) + i;
+  return { x, y, spin, color: CONFETTI_COLORS[i % CONFETTI_COLORS.length]! };
 }
 
 export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number): void {
@@ -4068,6 +4089,26 @@ export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number):
     ctx.quadraticCurveTo(control.x, control.y, cue.to.x, cue.to.y);
     ctx.stroke();
     ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+    return;
+  }
+
+  if (cue.kind === 'confetti') {
+    // The acceptance celebration: a one-shot ballistic puff of paper over the celebrant's head.
+    // Fully derived from `t` — nothing stored per frame, nothing re-arms, so it costs exactly one
+    // cue lifetime and holds still under ?still like every other event cue.
+    ctx.globalAlpha = Math.max(0, 1 - t * t * 1.15);
+    for (let i = 0; i < CONFETTI_COUNT; i++) {
+      const p = confettiParticle(i, t, scale, at);
+      ctx.save();
+      ctx.translate(p.x, p.y - 26 * scale);
+      ctx.rotate(p.spin);
+      ctx.fillStyle = p.color;
+      // Fleck size is stream-tested: 4.8×2.8 read as noise at room zoom (2026-08-19 eyeball),
+      // and the 720p encode eats another third — these proportions are the floor, not a taste call.
+      ctx.fillRect(-3.6 * scale, -2.1 * scale, 7.2 * scale, 4.2 * scale);
+      ctx.restore();
+    }
     ctx.globalAlpha = 1;
     return;
   }

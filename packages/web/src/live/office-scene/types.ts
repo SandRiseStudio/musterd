@@ -124,7 +124,9 @@ export type OfficeEvent =
   | { kind: 'walk-help'; from: string; to: string; tier: Tier }
   | { kind: 'walk-handoff'; from: string; to: string; label: string }
   | { kind: 'megaphone'; from: string }
-  | { kind: 'accept'; who: string }
+  /** `of`: whose work was accepted (the act's recipient) — the celebration lands on THEM, not the
+   *  acceptor. Null/absent for team-addressed accepts, where there is no single celebrant. */
+  | { kind: 'accept'; who: string; of?: string | null }
   | { kind: 'decline'; who: string }
   | { kind: 'wait'; who: string }
   | { kind: 'resolve'; who: string }

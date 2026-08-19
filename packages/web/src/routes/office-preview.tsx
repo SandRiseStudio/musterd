@@ -100,6 +100,9 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
     ev: { kind: 'speech', who: 'Hana', text: 'profiling the render loop', tone: 'status' },
   },
   { at: 3000, ev: { kind: 'walk-handoff', from: 'Bo', to: 'Ivy', label: 'render.ts' } },
+  // The acceptance celebration (liveliness inc 1): Eli's work accepted by Ada — confetti over Eli,
+  // a green thread from Ada, the desk neighbors glancing over. Directed, so `of` carries the celebrant.
+  { at: 3400, ev: { kind: 'accept', who: 'Ada', of: 'Eli' } },
   { at: 3600, ev: { kind: 'resolve', who: 'Fen' } },
   {
     at: 3700,
