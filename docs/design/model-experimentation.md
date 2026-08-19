@@ -83,38 +83,37 @@ stamps `unknown`, while the adapter reports the missing declaration with its har
 replace a stale static pin; until then the adapter must never infer a model from a client name,
 client version, prompt, or tool arguments. See [ADR 120](../decisions/120-harness-model-attestation-seam.md).
 
-## Track B — own the models end-to-end (the tiny-model fixture)
+## Track B — four different jobs that shared one name
 
-> **Re-evaluated 2026-07-08 — ADR 110.** The stages were split and decided independently: Stage 1 is
-> green-lit as a revive of the existing `musterd-lab` scaffold, pointed at the shipped ADR 101
-> attestation substrate; Stage 2 stays gated until the coordination-traces dataset ships. The model
-> ids named below are historical — per ADR 110 the exact model is a pinned experiment-manifest term
-> (ADR 194), not doctrine here.
+> **Re-evaluated 2026-07-08 — [ADR 110](../decisions/110-track-b-tiny-model-lab-re-evaluation.md).**
+> Implementation of anything that trains or runs a tiny model lives in `musterd-lab`, never this
+> repo. Exact model ids are experiment-manifest pins (ADR 194), not doctrine — Stage 1's executed
+> pin is `qwen3:4b`; the older `qwen2.5:3b` / `llama3.2:3b` names below are historical.
 
-Two staged goals, on Apple Silicon, kept in a separate lab repo (`musterd-lab`), never the product repos —
-it's a fixture + a research asset, not a shipped dependency.
+"Local model," "train from scratch," and "the judge" are not one sequence. Mixing them is what made
+Stage 2 look like the next coding task after the Ollama probe.
 
-- **Stage 1 — run a tiny local model as a dogfood agent.** A small instruct model (Ollama,
-  `qwen2.5:3b-instruct` / `llama3.2:3b-instruct`) in a thin harness that reads the `AGENTS.md` primer,
-  claims a seat (honest join), runs a work loop, and streams coordination telemetry. A _weak_ agent
-  stresses the guardrails (primer comprehension, identity binding, `superseded` revocation halting
-  mid-task) in ways a frontier model papers over — the sharpest test that the primer + protocol work for
-  non-frontier agents.
-- **Stage 2 — train our own model from scratch.** A tiny GPT (MLX / `mlx-lm`, ~10–30M params,
-  TinyStories/Shakespeare) to learn the internals, then taught the musterd command grammar so it can
-  drive the Stage 1 harness. The far end of this track meets the **research ladder's final rung** (ADR
-  056): a **fine-tuned coordination-judge model** trained on our own coordination-traces dataset — a model
-  that scores coordination quality, which is both a research artifact and (if ever built) a batond eval
-  component — not a dependency of the research practice itself ([ADR 194](../decisions/194-flywheel-practice-not-batond.md)).
+| Name | What it is | Where it lives | Status |
+| --- | --- | --- | --- |
+| **Stage 1 — local instruct probe** | A *weak* off-the-shelf model (Ollama) reads the `AGENTS.md` primer, claims a seat, and coordinates. Guardrail-floor test. **Not training.** | `musterd-lab` | **Done.** [Finding 003](../research/003-guardrail-floor-tiny-model.md). |
+| **Learning GPT** | Train a tiny GPT from scratch (MLX / `mlx-lm`, ~10–30M, TinyStories/Shakespeare) to own the internals; optionally teach it the musterd command grammar so it can drive the Stage 1 harness. | `musterd-lab` | **Ungated.** Personal learning track — not a product deliverable, not research-spine, no ADR, no dataset required (ADR 110 §2 last bullet). |
+| **Coordination-traces dataset v1** | Public, structural-only export of *this team's* act log ([ADR 184](../decisions/184-dataset-consent-and-redaction.md)). Seat names, models, act types, timings — **no message bodies**. Not a model. | **This repo** (`scripts/dataset/` — unbuilt). Private raw snapshot is a different artifact (`pnpm corpus:snapshot`). | **The product next step.** Open lane `01M091J5CW02QTKJGBJG9705GV`. Corpus preservation already shipped. |
+| **Coordination-judge** | Fine-tune on *our* traces to score coordination quality. Last rung of the produce ladder (ADR 056: dataset → benchmark → paper → **judge**). A research artifact, and if ever built a batond eval component — not a dependency of the research practice ([ADR 194](../decisions/194-flywheel-practice-not-batond.md)). | `musterd-lab` when it happens | **Gated.** This is what ADR 110 calls Stage 2 NO-GO. Re-open when the dataset ships with honest N and the ADR 184 DoD holds. |
 
-## How the two tracks connect
+Not Track B, and not a substitute for any row above:
 
-Track A tells us _how the best available models coordinate_; Track B gives us _models we fully control_ to
-probe the floor (weak agents) and eventually to **build the judge** that scores everyone. Both write into
-the same lab notebook and the same dataset ladder, and both are measured on the coordination telemetry
-that already ships by default (ADR 082). Neither is a near-term build item — they're the research spine
-the roadmap's _Later_ observability items (`eval-experiment-engine` as parked batond,
-`coordination-dataset`, `research-radar`) hang from.
+- **Frontier non-Claude seats** (section above) — strong models supplying *diversity* data.
+- **Native harness phase 4** — a second `AgentLoopEngine` so `musterd host` can *run* a local model. That is a harness engine, not a training run.
+
+## How these connect
+
+Track A measures frontier models on coordination. Stage 1 probed the floor with a weak local model
+we did not train. The learning GPT is how we come to *own* a model's internals. The dataset is the
+public artifact this team's coordination log becomes. The judge is trained on that dataset — so it
+cannot start before the export exists.
+
+The next step **in this repo** is the dataset, not a training run. A from-scratch GPT, if you want
+one this week, is `musterd-lab` and does not wait on the dataset.
 
 ## Related
 
