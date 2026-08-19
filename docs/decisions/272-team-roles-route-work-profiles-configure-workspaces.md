@@ -1,11 +1,16 @@
 # 272 — Team roles route work; profiles configure workspaces
 
-- **Status:** proposed
-- **Date:** 2026-08-14
-- **Owner:** gptbot (decision session with nick)
+- **Status:** proposed — **revised 2026-08-19**, narrowed before acceptance (see the revision
+  record at the end of Context). The original 2026-08-14 scope is in git history at PR #851.
+- **Date:** 2026-08-14; revised 2026-08-19
+- **Owner:** gptbot (decision session with nick); revision: stanley (challenge answered by the
+  owner, endorsed by nick in session)
 - **Supersedes / relates to:** ADR 026–030 (the existing provisioning-template
   seam), ADR 101 (model observation), ADR 131 (residency), ADR 145 (human-only
-  admin), ADR 227 (roles as aptitude), ADR 254 (eligible sets)
+  admin), ADR 227 (roles as aptitude — whose measured reopening gate this revision restores),
+  ADR 254 (eligible sets — the rail role sends ride if they ever proceed), ADR 261 (role
+  permission profiles — the naming collision reconciled in §3), ADR 093 (seat memory — why the
+  seat, not the role, carries continuity)
 
 ## Context
 
@@ -16,141 +21,139 @@ Separately, the CLI's JSON *role templates* provision harness-local MCP entries,
 permissions, and guidance. The latter still records that it needs a
 model-aware re-freeze against ADR 101.
 
-That ambiguity is tolerable in one repository on one machine, but does not
-describe a team at the intended scale: one person may belong to several teams;
-one team may span people and agents, projects, machines, and networks. A
-checkout-local provisioning file cannot be the authority that decides who is
-responsible for an incoming act. Conversely, a team's responsibility must not
-become an attribute of a particular harness or model.
+That ambiguity is real and worth fixing: a team duty was tangled up with one
+machine's local setup. A checkout-local provisioning file must never be the
+authority that decides who is responsible for an incoming act, and a team's
+responsibility must not become an attribute of a particular harness or model.
 
-The role-design session for ADR 227 intentionally deferred role-addressed sends
-until dogfood showed the repeated query-then-send pattern. The broader
-re-evaluation now supplies that direction: route to an explicit, accountable
-role policy, while preserving the concrete seat selected at every hop.
+**Revision record, 2026-08-19.** The original ADR went further: it reopened ADR
+227's deliberately deferred role-addressed sends and specified a four-level role
+registry, Git reconciliation, and an ordered routing resolver. ADR 227 had
+pre-registered a *measured* reopening trigger for exactly that deferral (the
+role-filtered-discovery→directed-send join, "firing repeatedly"), and the
+original text reopened it citing the re-evaluation session, not the
+measurement. The second ADR 227 measurement (2026-08-19, PR #912) then showed
+the trigger had vacuously never fired — zero `roster.role_query` rows have ever
+been written — and stanley's challenge asked the owner for evidence or a
+revision; the owner conceded the full scope was unevidenced and supported the
+narrowed shape below, which nick endorsed in session. This revision is that
+narrowed shape. The lesson stands on its own: a pre-registered gate is either
+run or explicitly overridden — it is not cited as having fired when it has not.
 
 ## Problem
 
 1. What is a role's canonical, harness-independent identity and scope?
-2. How do built-in, personal, team, and project roles become usable without
-   silently granting team authority?
-3. Where does live routing authority live when a team is distributed?
-4. How does routing preserve the named-seat accountability that ADR 227
-   deliberately retained?
+2. Where do permissions, tool access, and placement each live, and which of the
+   concepts — agent, role, profile — is required as opposed to optional?
+3. Under what evidence does role routing (and the machinery it needs) get built?
 
 ## Decision
 
-### 1. A role is a team responsibility; a profile is local setup
+### 1. One required entity, two optional attachments — not a hierarchy
 
-A **role** is a harness-independent responsibility: its charter,
-narrow-only capability defaults, approved holders, and routing policy. A role
-does not mean "the Codex role" or "the Claude role." `platform`, for example,
-means the same responsibility regardless of the holder's Surface.
+The **seat** (the agent: a durable, addressable identity per the ontology doc)
+is the only required entity. Everything load-bearing already attaches to it:
+attribution, model attestation, audit, memory (ADR 093 — the seat, never the
+occupant, and never a role: role-shaped knowledge is the charter and the wiki,
+per ADR 259), capabilities, lane ownership.
 
-A **workspace provisioning profile** is separate. It renders optional,
-project/workspace-local setup — harness entries, permission defaults, guidance,
-and tools — for a particular Surface. A role may recommend a profile, but a
-profile neither grants nor removes a role, and routing never depends on it.
-The existing JSON role-template implementation migrates to this vocabulary and
-boundary; ADR 026's additive, reversible, non-obligating provisioning rules
-remain unchanged.
+A **role** is an optional team-side attachment: a harness-independent
+responsibility — charter, one-line summary, narrow-only capability defaults,
+approved holders (all per ADR 227, which remains the durable role layer). A
+role does not mean "the Codex role" or "the Claude role"; `platform` means the
+same responsibility regardless of the holder's harness or model. Role identity
+is team-scoped; a project role is scoped to one named project.
 
-Role identity is team-scoped by default. A project role is scoped to one named
-project within that team; it is routable only in that project context. Names
-are therefore not global identity or authority.
+A **workspace provisioning profile** is an optional workspace-side attachment:
+it renders local setup — harness entries, permission defaults, guidance, tools
+— for a particular checkout and Surface. A profile is configuration, not an
+identity-adjacent entity: it **neither grants nor removes a role**, carries no
+team authority, and nothing routes on it. A role may recommend a profile.
 
-### 2. The role library has four promotion levels
+Neither attachment sits "above" or "below" the other; they live in different
+domains (team governance vs local workspace), and nothing local ever creates a
+team fact.
 
-- **Built-in roles** ship in the musterd registry and are usable immediately,
-  without an adoption ceremony. They provide supported definitions and may be
-  selected for local provisioning, but do not acquire holders or a live routing
-  policy merely by existing.
-- **Personal roles** are private drafts. Their author may use their local
-  profile, but they are not visible as team responsibility and cannot receive
-  role-routed acts.
-- **Team and project roles** are durable shared revisions. Publishing a
-  personal draft creates a proposal containing the whole revision: charter,
-  scope, capability defaults, routing policy, and any linked profiles. A human
-  admin must approve that proposal before it becomes shared or routable.
-- **Every durable team-role assignment and routing-policy change requires a
-  human admin.** A member cannot self-assign an accountable team role.
+### 2. The three access questions live in three places
 
-Built-in revisions are pinned when a team uses them. A musterd upgrade may make
-a newer built-in definition available, but cannot silently change a live
-team's charter, policy, capabilities, or routing; a human admin explicitly
-accepts the reviewed revision.
+- **What a seat MAY do** is a governance fact: seat-attached capability grants,
+  enforced by the daemon, with roles supplying narrow-only defaults (ADR
+  069/070/227 — all shipped; nothing new here).
+- **What a session CAN do here** (installed MCP servers, available tools) is a
+  workspace fact: rendered by a profile, observed as health, never authority.
+- **WHERE a seat can run** is residency (ADR 131) — observed occupancy and
+  authenticated wake paths. A role declaration alone never asserts
+  reachability.
 
-### 3. The daemon is authoritative for live team routing
+### 3. Vocabulary: "profile" reconciled with ADR 261
 
-The daemon owns the reconciled, current team role registry, approved
-assignments, routing policies, live availability, wakeability, and the audit
-trail. Git remains the portable, reviewable declaration/export, not a
-checkout-local source of truth for a live distributed decision. Reconciliation
-must make disagreement visible rather than silently choosing one machine's
-copy.
+Unqualified, **profile** means the workspace provisioning profile of §1. ADR
+261's *role permission profiles* are a different thing — team-side permission
+bounds (floor/ceiling) that provisioning *compiles into* local enforcement.
+The source of truth for those bounds is the team layer; the local rendering is
+one output of a provisioning profile. Where prose must distinguish them, say
+"permission bounds (ADR 261)" vs "provisioning profile."
 
-### 4. Role routes resolve by explicit ordered policy
+### 4. The buildable increment: migrate templates to profiles
 
-A routed act names a team or project role. The daemon resolves it in this
-order:
+The existing JSON role-template implementation (ADR 026–030) migrates to the
+profile vocabulary and boundary: same additive, reversible, non-obligating
+provisioning rules, renamed and re-documented so no template reads as a role.
+This replaces the earlier, unspecific call to make a template model-aware.
+This is the only implementation this ADR authorizes now.
 
-1. the configured primary, when active and available;
-2. ordered alternates that are active and available;
-3. ordered alternates that are wakeable through a current, authenticated
-   residency/actuator path;
-4. a durable `no eligible holder` result.
+### 5. Deferred, behind restored gates: registry, reconciliation, routing
 
-The final act always records the selected named seat and the selection reason.
-A wake is recorded as a routing action. The no-holder result names the role and
-why every candidate was ineligible. A remote seat is wakeable only when that
-specific seat has a current authenticated wake path; a role declaration alone
-never asserts cross-network reachability.
+The four-level role registry (built-in/personal/team/project promotion), Git
+reconciliation of live role state, role-addressed sends, and the ordered
+routing resolver are **deferred, not decided against**. They reopen when either
+named trigger fires:
 
-This is role routing, not anonymous delegation. A named seat can still accept,
-decline, or hand off the work.
+- **ADR 227's measured trigger, restored as the gate:** the role-filtered
+  discovery→directed-send join firing repeatedly on real seats — the pair a
+  role-addressed send would collapse to one.
+- **Multi-holder demand:** a role with more than one live holder where the
+  holder-pick is repeatedly contested or re-derived by hand (the same
+  build-on-evidence pattern, at the routing layer).
 
-### 5. Do not add profile-qualified routing yet
-
-Model and harness observation remain useful roster facts, and profiles remain
-health-checked local setup. They do not gate assignment or routing. Likewise,
-do not add task requirements, arbitrary capability tags, or a separate
-"compatible holder" resolver in this increment. The first dogfood route should
-answer the ordinary question — who is responsible and reachable? — before
-adding machinery for a demonstrated environment mismatch.
+When role sends do proceed, the first increment resolves the role to its
+current holders and delivers on the **ADR 254 eligible-set rail** — named
+seats, any one discharges, accountability preserved — rather than building a
+parallel resolver. Ordered primary/alternate policy, wake-integrated routing,
+and registry machinery come only after that increment shows a demonstrated
+need. Two commitments from the original text survive as constraints on any
+future routing build: the final act always records the selected named seat and
+reason, and durable team-role assignment and policy changes require a human
+admin (ADR 145).
 
 ## Consequences
 
-- ADR 227's role model remains the durable responsibility layer, but its
-  deferred role-addressed-send trigger is now intentionally reopened by this
-  ADR's explicit policy design.
-- ADR 026–030's template format and manifest remain the migration substrate,
-  but no longer define what a role *is*. Their runtime artifacts become
-  workspace provisioning profiles.
-- This requires protocol/server work for role addresses, approved role
-  revisions, routing outcomes, and audit; CLI/MCP work for administration and
-  ordinary use; and a migration that preserves current local templates.
-- Built-in roles add no privileged musterd agents. They are definitions only;
-  named holders remain ordinary team seats.
-- Project scope, multi-team membership, and remote wake behavior are designed
-  at the team boundary now, rather than patched around a local checkout later.
+- ADR 227 remains the durable role layer, and its measured reopening trigger is
+  back in force — the original ADR 272's session-fiat reopening is withdrawn.
+- The profiles migration (§4) proceeds as the goal's one open implementation
+  lane. The registry, routes, and route-ledger dogfood lanes opened against the
+  original scope are closed as premature; their content is recoverable from
+  this ADR's history if a trigger fires.
+- The `role-routing-profiles` roadmap item narrows to match: profiles migration
+  now, routing deferred behind the named triggers.
+- ADR 261's permission bounds keep their own arc; only the word "profile" is
+  disambiguated here.
 
 ## Observability & Evaluation
 
-**Traces.** Record each role-route attempt with the requested role, policy
-revision, candidate sequence, selected seat or no-holder reason, and whether a
-wake was attempted and settled. Record approval, assignment, policy, and
-profile reconciliation revisions separately, so local setup never reads as a
-team-authority change.
+**Traces.** Nothing new. The signals that decide the deferral are ADR 227's:
+`roster.role_query` audit rows and the discovery→send join, plus ordinary
+directed-send telemetry for the multi-holder condition. Profile application
+remains local provisioning health, never a team-authority event.
 
-**Eval.** Dataset: the routed-act ledger, approval/audit rows, and residency
-ledger for the first distributed-team dogfood window. Baseline: the present
-query-then-send pattern for an equivalent responsibility. Compare direct
-primary delivery, alternate delivery, wake success, no-holder rate, holder
-decline/handoff, and time-to-accepted outcome. Re-evaluate profile-qualified
-routing only when the data shows a repeated route to an accountable, reachable
-holder that fails for a known, machine-readable workspace constraint.
+**Eval.** Success for §4 is a completed migration with zero behavior change:
+every existing template renders identically as a profile, and no roster or
+routing read depends on any profile. The reopening decision reads the ADR 227
+join (falsifier: the SQL recorded in ADR 227's eval section) and the
+holder-pick evidence; either firing reopens §5 with its own go/no-go.
 
-**Experiment.** Run ordinary work through the role route across different
-machines and harnesses. The decision holds only when every result remains
-attributable to a named seat; it fails if a route hides its selected holder,
-treats a stale remote declaration as wakeability, or lets a local profile
-silently confer team authority.
+**Experiment.** None for §4 beyond the migration's own round-trip (a template
+rendered before and after must produce the same workspace). The routing
+experiment from the original text — ordinary work through a role route across
+machines and harnesses, every result attributable to a named seat — is
+deferred with the feature it would validate.
