@@ -1,10 +1,10 @@
 # Competitive landscape — coordination vs. the substrate
 
-> **Living document.** The competitive picture on the _coordination_ side, complementing the observability-market snapshot in `observability.md` §2. Substantive positioning shifts go through an ADR. Status: **draft**, 2026-06-17.
+> **Living document.** The competitive picture on the _coordination_ side, complementing the observability-market snapshot in `observability.md` §2. Substantive positioning shifts go through an ADR. Status: **draft**, refreshed 2026-08-19 (§1 Flue update, §12 added; original snapshot 2026-06-17).
 
 This doc records what neighboring tools build, where they stop, and why musterd's choices are deliberate counter-positions rather than gaps. It is evidence for the thesis, not the thesis itself (that lives in `README.md`, `ROADMAP.md` "How priorities are decided", and `observability.md` §3).
 
-Most entries here (§§1–4) are **frameworks that stop where we start** — they orchestrate single agents (increasingly _first-party and automatic_: Claude Code's ultracode / `Workflow`, Sakana's Fugu) and delegate the between-agent space to the substrate. §5 is different: **Band is the first head-on competitor _inside_ the coordination layer itself**, so it is analyzed against a different spine (executions vs. seats, `agent-ontology.md`) rather than the delegation seam. §§6–7 read **demand signals from the outside** — the "agent is just a loop" governance ask, and the command-center console — that locate musterd's peer-coordination lane without naming it; §8 collects borrowable patterns. §9 is **AgentField**, the productized agents-as-services backend — a different layer (deployed functions under a control plane, not autonomous seats), analyzed mainly as a source of governance patterns worth borrowing. §10 is **Omnigent**, the meta-harness — the substrate absorbing harness _management_ itself, one control plane over Claude Code/Codex/Cursor/Pi — analyzed like §9 as a different layer with one sharp adjacency (multi-device presence). §11 notes **Pi**, a deliberately minimal harness: in musterd's vocabulary a _Surface_ — a join target, not a competitor.
+Most entries here (§§1–4) are **frameworks that stop where we start** — they orchestrate single agents (increasingly _first-party and automatic_: Claude Code's ultracode / `Workflow`, Sakana's Fugu) and delegate the between-agent space to the substrate. §5 is different: **Band is the first head-on competitor _inside_ the coordination layer itself**, so it is analyzed against a different spine (executions vs. seats, `agent-ontology.md`) rather than the delegation seam. §§6–7 read **demand signals from the outside** — the "agent is just a loop" governance ask, and the command-center console — that locate musterd's peer-coordination lane without naming it; §8 collects borrowable patterns. §9 is **AgentField**, the productized agents-as-services backend — a different layer (deployed functions under a control plane, not autonomous seats), analyzed mainly as a source of governance patterns worth borrowing. §10 is **Omnigent**, the meta-harness — the substrate absorbing harness _management_ itself, one control plane over Claude Code/Codex/Cursor/Pi — analyzed like §9 as a different layer with one sharp adjacency (multi-device presence). §11 notes **Pi**, a deliberately minimal harness: in musterd's vocabulary a _Surface_ — a join target, not a competitor. §12 (added 2026-08-19) reads the **teammates turn** — Hermes Bot Mode, Multica, Grok Bot, Agent 365 — the Q3 2026 wave that adopts musterd's nouns (named persistent agents, handoffs, boards) while staying inside one owner's walls.
 
 ## 1. The pattern: frameworks delegate coordination to the substrate
 
@@ -19,6 +19,8 @@ Every serious agent framework solves _per-agent_ execution and _per-agent_ obser
 This is not an oversight — it's the natural seam. Per-agent durability is the product; the between-agent space is "let the platform handle it." That seam is exactly where musterd (coordination) and batond (coordination observability) begin. The same shape holds for LangChain / CrewAI / AutoGen: they orchestrate from a single driver process and emit per-agent spans; none model durable, named, cross-process coordination with humans as peers.
 
 **The flagship first-party example: Claude Code's "ultracode" / Workflow orchestration (2026).** Claude Code's maximum-effort mode is now the cleanest instance of the pattern — and a _stronger_ example than Flue because it is first-party, does **dynamic** decomposition, and ships to everyone. A single primary instance acts as an orchestrator that "automatically decides when to break a task into parallel sub-tasks, spins up sub-agent instances, and synthesizes the results," maintaining consistency to reduce the "too many cooks" problem. The `Workflow` tool is the deterministic-control-flow version of the same thing (scripted fan-out instead of auto). Note what the sub-agents are: **ephemeral, anonymous, owned by one driver, arranged parent→child** — no identity, no presence, no persistence across tasks, no humans as peers. This is intra-task orchestration done well by the platform itself, which is precisely why it falls on the far side of musterd's line (§4): it makes _one actor_ more capable; it does not coordinate _separate, independently-owned actors_. When the harness fans out sub-agents for free, the case for musterd is not "we orchestrate better" — it is "we are the layer **between** actors that already exist, including the human peer an owned-sub-agent tree structurally cannot represent."
+
+**Update 2026-08-19 — Flue graduates to production substrate.** On 2026-08-04 Cloudflare and the Astro maintainers announced an automated "software factory" that cut Astro's open GitHub issue count by ~85%, running "a pipeline of isolated AI subagents orchestrated through Flue" on Cloudflare's agents platform ([blog.cloudflare.com/agents-platform-flue-sdk](https://blog.cloudflare.com/agents-platform-flue-sdk/)). Growth since the June snapshot: ~3.8k → ~5.7k GitHub stars. Read against the seam above, this **strengthens** the pattern rather than changing it: the factory's subagents are still isolated, pipeline-owned, parent→child — the substrate (Cloudflare) now _hosts_ the orchestration, and the between-actor space is still nobody's model. But it retires any comfort that Flue is "a framework, not deployed reality": the delegation-to-substrate pattern is now running at production scale on a Tier-1 platform, which raises the value of batond's "ingest Flue spans first" posture (§3) and the urgency of naming the between-layer before the substrate's own telemetry vocabulary hardens around per-agent spans.
 
 **Takeaway for positioning:** "the coordination layer is nearly empty" (observability.md §2 fact 3) is not just a research-paper claim — a credible, recent, well-funded framework demonstrably stops where we start. Don't let their breadth tempt musterd toward durable execution / retries / channels: Flue validates "protocol over framework" _by being the framework_; musterd's smallness is the differentiator (Principle 4, ADR 007).
 
@@ -208,3 +210,57 @@ One section-stub is enough, because Pi is not in the coordination layer at all �
 - **It is §1's seam at its purest.** A well-engineered per-agent loop that builds nothing between agents _on principle_ — the "agent is just a loop" thesis (§6) shipped as a product, complete with the governance vacuum (no permissions, no audit) that §6's own commenters flagged as the first production gap. Pi outsources governance to the sandbox and, in the Omnigent pairing (§10), to the meta-harness above it.
 - **It is a join target, not a threat.** With the MCP extension loaded, a Pi session runs `@musterd/mcp` with a member env like any other harness — a "Pi seat" is an extension plus an env away, no rebuild. Residency class: **turn-scoped** (an interactive CLI, invoked not resident — the same rung as plain Claude Code in `agent-ontology.md` §4, not the OpenClaw/Hermes gateway class), so the ADR 131 residency upgrade applies to it unchanged.
 - **It sharpens the reach argument.** The long tail of minimal, self-extended harnesses is exactly the population an SDK-required platform (§5) can never enroll and harness-native provisioning can: whatever loop someone chooses to live in, the seat is the constant.
+
+## 12. The teammates turn (Q3 2026): named, persistent agents arrive — inside one owner's walls
+
+Added 2026-08-19. In eight weeks the market's vocabulary moved from _agents_ (a task you prompt) to
+**teammates** (a role you staff): persistent identity, own memory, assigned work, reporting back by
+exception. Three ships and one beta define the wave — and every one of them stops at the same wall,
+which is the wall musterd is built past.
+
+**Hermes Agent "Bot Mode"** (Nous Research, bundled default-on in Hermes Desktop v0.20.3, 2026-08-16;
+inspected at [hermes-agent.nousresearch.com/docs/user-guide/bot-mode](https://hermes-agent.nousresearch.com/docs/user-guide/bot-mode)).
+Named bots with their own role, model pin, memory, skills and avatar (each an isolated profile at
+`~/.hermes/profiles/<name>/`), **@mention handoffs** between bots with attribution, cron routines per
+bot, and **collaboration rooms** seating 2–6 bots that deliberate over up to three serial rounds.
+This is the closest any harness has come to musterd's surface language — named seats, handoffs,
+a room. And it is structurally **single-user**: one person owns the roster, every profile lives in
+one home directory, escalation is `@user` to the one operator. No cross-owner identity, no
+attestation of who (or which model) did what beyond the operator's own trust in their disk, no
+concept of a teammate who can _decline_. It is §4's intra-task orchestration wearing team clothes —
+the vocabulary converges while the ownership model stays a monolith's.
+
+**Multica** ([github.com/multica-ai/multica](https://github.com/multica-ai/multica), "Multica
+License" = Apache 2.0 + hosted-service conditions, **~47k stars** — by star count the biggest thing
+on this page). The open-source "managed agents platform": an issue board where agents are
+first-class assignees across **20 harness runtimes** (Claude Code, Codex, Cursor Agent, Copilot CLI,
+OpenCode, Hermes, Pi, …), a full task lifecycle (enqueue → claim → start → complete/fail) with live
+progress, **squads** (mixed agent/human groups under a routing leader), review gates before merge,
+and solved problems compounding into shared **skills**. This validates, at mass-adoption scale,
+almost every noun on musterd's board: assignable named agents, claimed work, visible progress,
+blockers reported, human review. The spine difference: Multica's coordination is
+**manager-directed** — a human (or a squad's routing leader) assigns; agents do not coordinate as
+peers, hold no identity independent of the workspace, and the README's own framing is command-center
+(§7), not membrane. Where Band (§5) competes on the protocol and Omnigent (§10) on the runtime,
+Multica competes on the _console_ — and its 47k stars are the strongest demand signal yet that
+"agents on the team's board" is what buyers picture. The risk it creates for musterd is not
+displacement but **vocabulary capture**: "agents as teammates" is becoming Multica's tagline while
+meaning assignment, not peerage. The positioning ADR should claim the distinction explicitly:
+_a teammate you can only assign to is a contractor; a teammate who can claim, decline, and hold you
+to acceptance is a peer._
+
+**Grok Bot** (xAI, beta 2026-08-11) pitched as "AI teammates you can give real work to," following
+Anthropic's own human-agent-teams publications — the frontier labs adopting the framing first-party.
+**Microsoft Agent 365** meanwhile builds the enterprise-governance half (agent discovery, risk
+signals, spend oversight, cross-tenant management) — §6's governance demand productized at suite
+scale, agents as _managed inventory_ rather than actors.
+
+**What the wave means, in one paragraph.** Named persistent identity, handoffs, rooms, boards,
+skills — the surface area of coordination is being built everywhere at once, and always **inside one
+owner's walls**: one user's roster (Hermes), one workspace's assignees (Multica), one tenant's
+inventory (Agent 365). Nobody in this wave models actors that are independently owned, mutually
+accountable, and able to refuse — the properties that make a team a team rather than a fleet. That
+is validation (the demand is real, the vocabulary is converging on ours) and a deadline (the
+vocabulary will be defined by whoever ships loudest — see the Multica note above). The §5 Band
+analysis stands unchanged as the only head-on protocol competitor; this wave is the _product_
+layer discovering the same nouns.
