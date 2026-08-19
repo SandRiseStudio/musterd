@@ -30,6 +30,9 @@ const LAMP_THRESHOLD = 0.42;
 const FLOOR_LIGHT = 0.08;
 const NATURAL_GAIN = 0.9;
 const OVERHEAD_FILL = 0.52;
+/** Occupied outside the team's declared hours: the ceiling bank stays off and this small spill is all the
+ * fixed light — a late worker reads as a lamp pool in a dark office, while bodies stay legible. */
+const AFTER_HOURS_SPILL = 0.16;
 /** How opaque the darkest possible night veil gets — kept under 1 so a dark room still reads. */
 const VEIL_MAX = 0.82;
 
@@ -44,10 +47,14 @@ export interface LightEnv {
   daylight: number;
   /** Overall interior light level 0..1 (natural + overhead + floor). Drives the night veil. */
   ambient: number;
-  /** Overhead ceiling lights — on whenever the office is occupied. */
+  /** Overhead ceiling lights — on when the office is occupied *during declared working hours* (a late
+   * worker doesn't flip the whole ceiling bank; they work by lamp under `AFTER_HOURS_SPILL`). */
   overheadOn: boolean;
   /** Desk lamps want to be on (dark enough outside). Still gated per-desk on occupancy in render. */
   lampsOn: boolean;
+  /** The team declared working hours and this instant is outside them (presence spec §5.5). False when
+   * no schedule exists — the off-shift flavor never appears without one. */
+  afterHours: boolean;
   /** Alpha of the night veil painted over the interior — `(1 - ambient)`, capped. */
   veilAlpha: number;
   /** The veil colour (cool near-black). */
@@ -77,11 +84,13 @@ const SKY_COOL: [number, number, number] = [206, 226, 244]; // bright blue-white
 const SKY_WARM: [number, number, number] = [255, 178, 96]; // amber golden-hour
 
 /**
- * Compute the office lighting for a given PST time-of-day and occupancy.
+ * Compute the office lighting for a given PST time-of-day, occupancy, and shift state.
  * @param pstHours  hour-of-day in America/Los_Angeles, 0..24 (e.g. 13.5 = 1:30pm).
  * @param occupied  is anyone currently in the office? (drives the overhead lights)
+ * @param inShift   is this instant inside the team's declared working hours? `null` (the default)
+ *                  means no schedule is declared, which lights exactly like being in shift.
  */
-export function computeLightEnv(pstHours: number, occupied: boolean): LightEnv {
+export function computeLightEnv(pstHours: number, occupied: boolean, inShift: boolean | null = null): LightEnv {
   const h = ((pstHours % 24) + 24) % 24;
   // Daylight: 0 before dawn, ramps to 1 across the dawn window, holds at midday, ramps back down at dusk.
   const rise = smooth(DAWN_START, DAWN_END, h);
@@ -92,9 +101,10 @@ export function computeLightEnv(pstHours: number, occupied: boolean): LightEnv {
   const warmth = Math.max(0, Math.min(1, daylight * (1 - daylight) * 4));
   const [r, g, b] = mix(SKY_COOL, SKY_WARM, warmth);
 
-  const overheadOn = occupied;
+  const afterHours = inShift === false;
+  const overheadOn = occupied && !afterHours;
   const natural = daylight * NATURAL_GAIN;
-  const overhead = overheadOn ? OVERHEAD_FILL : 0;
+  const overhead = overheadOn ? OVERHEAD_FILL : occupied ? AFTER_HOURS_SPILL : 0;
   const ambient = Math.min(1, FLOOR_LIGHT + natural + overhead);
 
   return {
@@ -102,6 +112,7 @@ export function computeLightEnv(pstHours: number, occupied: boolean): LightEnv {
     daylight,
     ambient,
     overheadOn,
+    afterHours,
     lampsOn: daylight < LAMP_THRESHOLD,
     veilAlpha: (1 - ambient) * VEIL_MAX,
     veilColor: VEIL_COLOR,

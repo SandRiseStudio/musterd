@@ -74,4 +74,44 @@ describe('computeLightEnv', () => {
     expect(computeLightEnv(36, true).hours).toBe(12);
     expect(computeLightEnv(-2, true).hours).toBe(22);
   });
+
+  /** Off-shift lighting (presence spec §5.5): outside the team's declared working hours the ceiling
+   * bank is off, leaving only a small after-hours spill — a late worker reads as a lamp pool in a
+   * dark office, not a fully lit floor. No declared hours → the flavor never appears. */
+  describe('off shift', () => {
+    it('an occupied office off shift at night goes darker than in shift, but not as dark as empty', () => {
+      const inShift = computeLightEnv(23, true, true);
+      const offShift = computeLightEnv(23, true, false);
+      const empty = computeLightEnv(23, false, false);
+      expect(offShift.veilAlpha).toBeGreaterThan(inShift.veilAlpha);
+      expect(offShift.veilAlpha).toBeLessThan(empty.veilAlpha); // the after-hours spill keeps bodies readable
+    });
+
+    it('turns the ceiling bank off outside working hours even when occupied', () => {
+      expect(computeLightEnv(23, true, false).overheadOn).toBe(false);
+      expect(computeLightEnv(23, true, true).overheadOn).toBe(true);
+    });
+
+    it('keeps desk lamps available off shift — the late worker works by lamp', () => {
+      expect(computeLightEnv(23, true, false).lampsOn).toBe(true);
+    });
+
+    it('flags afterHours only when a schedule says so', () => {
+      expect(computeLightEnv(23, true, false).afterHours).toBe(true);
+      expect(computeLightEnv(23, true, true).afterHours).toBe(false);
+      expect(computeLightEnv(23, true, null).afterHours).toBe(false);
+      expect(computeLightEnv(23, true).afterHours).toBe(false);
+    });
+
+    it('no declared hours (null) behaves exactly as before', () => {
+      const legacy = computeLightEnv(23, true);
+      const nullShift = computeLightEnv(23, true, null);
+      expect(nullShift).toEqual(legacy);
+      expect(nullShift.overheadOn).toBe(true);
+    });
+
+    it('daylight still carries an off-shift office — the sun ignores the schedule', () => {
+      expect(computeLightEnv(12, true, false).veilAlpha).toBeLessThan(0.15);
+    });
+  });
 });
