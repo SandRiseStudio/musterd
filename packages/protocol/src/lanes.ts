@@ -108,6 +108,78 @@ export const LaneStateSchema = z.enum([
 ]);
 export type LaneState = z.infer<typeof LaneStateSchema>;
 
+/**
+ * Why a lane's close landed the way it did (ADR 283) — the vocabulary the `lane.closed` audit row
+ * has recorded since ADR 217/229/234, lifted onto the wire so a reader can act on it.
+ *
+ * The order is the ladder `laneClose.ts` walks, and the grouping is the one that matters to a
+ * reader: the first two are settled outcomes, the middle three mean NOBODY WAS ASKED, and the last
+ * three mean SOMEBODY WAS ASKED AND DID NOT ANSWER. Any new member must be added deliberately —
+ * an unrecognised value is dropped by the projection rather than passed through, so a future
+ * daemon's vocabulary degrades to "unknown" instead of leaking a string this build cannot explain.
+ */
+export const CloseReasonSchema = z.enum([
+  /** A counterpart accepted it. The only reason that means `verified: true`. */
+  'counterpart_confirm',
+  /** The owner closed their own lane, no acceptance stage involved. */
+  'self_close',
+  /** Never entered acceptance: declared `low` stakes and not drawn into the sample (ADR 234). */
+  'acceptance_exempt',
+  /** The picker found no eligible counterpart — the sanctioned degradation (ADR 172). */
+  'no_candidate',
+  /** A risk tag REQUIRED a human and none was live — a requirement with no one to meet it. */
+  'human_review_missed',
+  /** Asked, and the wait ran past the promise (ADR 217). */
+  'review_timeout',
+  /** Asked, and the owner closed it themselves before the promise elapsed (ADR 217). */
+  'review_cut_short',
+  /** Asked, and the promise itself was never knowable — abstains on the elapsed claim (ADR 217). */
+  'review_unanswered',
+  /** The ADR 229 24h sweep closed it. The clock, not a seat — see `ask_outcome` on the audit row. */
+  'review_swept',
+  /** Abandoned rather than shipped. */
+  'abandoned',
+]);
+export type CloseReason = z.infer<typeof CloseReasonSchema>;
+
+/**
+ * What to TELL a reader about an unaccepted close (ADR 283), or `null` where the reason adds
+ * nothing to the word already on screen.
+ *
+ * Copy lives here, once, for the same reason the derivation does (ADR 084): the board, the brief,
+ * and the CLI drifted apart on `verified` for two ADRs, and the fix was one projection rather than
+ * three renderers agreeing by luck. Each phrase is written to imply its OWN next move — the
+ * distinction is only worth a wire field if a reader can act differently on each half, so "chase a
+ * person" and "look at the roster" have to be legible from the sentence alone.
+ *
+ * `counterpart_confirm` and `abandoned` return `null`: the first is what `accepted` already says,
+ * and the second is already the whole story. Repeating them would make the annotation noise on the
+ * majority of lanes and train readers to skip it on the minority where it carries the news.
+ */
+export function closeReasonCopy(reason: CloseReason): string | null {
+  switch (reason) {
+    case 'counterpart_confirm':
+    case 'abandoned':
+      return null;
+    case 'self_close':
+      return 'closed by its own owner';
+    case 'acceptance_exempt':
+      return 'no ask sent, by design — declared low stakes';
+    case 'no_candidate':
+      return 'nobody was asked — no eligible counterpart';
+    case 'human_review_missed':
+      return 'nobody was asked — the required human was never live';
+    case 'review_timeout':
+      return 'asked, and the wait ran out';
+    case 'review_cut_short':
+      return 'asked, then closed before the wait elapsed';
+    case 'review_unanswered':
+      return 'asked, and never answered';
+    case 'review_swept':
+      return 'swept by the 24h clock, not by a seat';
+  }
+}
+
 /** True when the lane is in the post-merge outcome-acceptance stage (ADR 192), either spelling. */
 export function isAwaitingAcceptance(state: string): boolean {
   return state === 'awaiting_acceptance' || state === 'ready_for_review';
@@ -232,6 +304,23 @@ export const LaneSchema = z.object({
    * absent means "unknown", and the UI says nothing rather than guessing.
    */
   verified: z.boolean().optional(),
+  /**
+   * Board-projection annotation (ADR 283), never stored: for a `done` lane, WHY it closed the way
+   * it did — read from the same `lane.closed` audit row `verified` is derived from.
+   *
+   * `verified: false` is two opposite situations wearing one word, and the response to each is the
+   * response the other one would waste. `review_timeout` / `review_unanswered` / `review_cut_short`
+   * mean a counterpart was asked and did not answer — go find a person. `no_candidate` /
+   * `human_review_missed` mean no ask was ever sent because the roster held nobody eligible — a
+   * degradation nobody is at fault for, answered by looking at who is on the team. Measured
+   * 2026-08-19 over 344 closes, both halves are populous (40 + 9 against 23 + 16 + 2) and neither
+   * reached a reader.
+   *
+   * Absent means unknown, exactly as `verified` does: a close predating the reason, a lane that
+   * never closed, an older daemon, or a value this build does not recognise. A consumer that
+   * defaults the absent case to any particular reason re-creates the defect this field fixes.
+   */
+  close_reason: CloseReasonSchema.optional(),
   created_by: z.string(),
   created_at: z.number().int(),
   claimed_at: z.number().int().nullable(),

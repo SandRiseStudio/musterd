@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import {
+  closeReasonCopy,
   incidentBannerLines,
   LaneStateSchema,
   shortDuration,
@@ -537,7 +538,12 @@ export function fmtNext(b: NextBrief): string {
           // the wire name, "unconfirmed" is what a reader is told. Only on an explicit `false` — an
           // absent verdict is unknown, not unconfirmed, and saying otherwise would accuse a close
           // nobody recorded anything about.
-          (l.verified === false ? ' — unconfirmed' : ''),
+          (l.verified === false ? ' — unconfirmed' : '') +
+          // ADR 283: and WHY. `unconfirmed` alone sends every reader the same way; these two halves
+          // send them opposite ways, so the reason rides wherever the word does.
+          (l.close_reason !== undefined && closeReasonCopy(l.close_reason) !== null
+            ? ` (${closeReasonCopy(l.close_reason)!})`
+            : ''),
       );
   }
   if (b.next_goal) {

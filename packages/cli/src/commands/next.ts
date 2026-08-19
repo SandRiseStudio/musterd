@@ -1,4 +1,10 @@
-import { incidentBannerLines, shortDuration, type Lane, type NextBrief } from '@musterd/protocol';
+import {
+  closeReasonCopy,
+  incidentBannerLines,
+  shortDuration,
+  type Lane,
+  type NextBrief,
+} from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { theme } from '../render/theme.js';
 import { resolve } from './helpers.js';
@@ -67,6 +73,10 @@ function render(brief: NextBrief): void {
           // ADR 192's copy, matching the web board's chip (ADR 169). Only on an explicit `false`:
           // an absent verdict is unknown, not unconfirmed.
           (l.verified === false ? theme.meta(' — unconfirmed') : '') +
+          // ADR 283: and WHY — "chase a person" and "look at the roster" are different next moves.
+          (l.close_reason !== undefined && closeReasonCopy(l.close_reason) !== null
+            ? theme.meta(` (${closeReasonCopy(l.close_reason)!})`)
+            : '') +
           '\n',
       );
   }

@@ -175,7 +175,8 @@ import {
   REVIEW_LOOP_BREAKER_N,
   reviewLoopBounceCount,
   teamFamilyPosture,
-  verifiedCloses,
+  annotateClose,
+  closeVerdicts,
 } from '../store/review.js';
 import { listRoles } from '../store/roles.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
@@ -2687,9 +2688,9 @@ export async function handleHttp(
         ];
         // ADR 169: annotate done lanes with the derived verified-ness of their close — read from the
         // lane.closed audit rows, never stored on the lane. Absent = unknown (pre-169 closes).
-        const verdicts = verifiedCloses(ctx.db, team.id);
+        const verdicts = closeVerdicts(ctx.db, team.id);
         const annotated = lanes.map((l) =>
-          l.state === 'done' && verdicts.has(l.id) ? { ...l, verified: verdicts.get(l.id)! } : l,
+          l.state === 'done' ? annotateClose(l, verdicts.get(l.id)) : l,
         );
         return sendJson(res, 200, { lanes: annotated, warnings });
       }
