@@ -116,13 +116,30 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   // mark it read. Guarantee: if the oldest row in a bounded window is itself unread, there may be more
   // unread older than the window — refetch every unread and show those instead, so nothing is elided
   // and then consumed.
+  // The daemon bounds a read that named no `limit` (it was the last unbounded one on the request
+  // path), so "all unread are always shown" is only still true if we walk the pages. The bound is a
+  // PREFIX, so paging forward on the last row's ts reaches every message in order and never steps
+  // over one — the property the cursor rule above depends on.
+  const drain = async (first: Awaited<ReturnType<typeof http.inbox>>) => {
+    const out = [...first.messages];
+    let page = first;
+    while (page.truncated && page.messages.length > 0) {
+      page = await http.inbox(team, {
+        unread: true,
+        since: page.messages[page.messages.length - 1]!.ts,
+      });
+      out.push(...page.messages);
+    }
+    return out;
+  };
+
   const bounded = window > 0 && !unread && !filtering;
   const res = await http.inbox(team, unread ? { unread: true } : bounded ? { limit: window } : {});
   const cursorTs = res.cursor.last_read_ts;
   const total = res.total ?? res.messages.length;
-  let rows = res.messages;
+  let rows = await drain(res);
   if (bounded && rows.length > 0 && rows[0]!.ts > cursorTs) {
-    rows = (await http.inbox(team, { unread: true })).messages;
+    rows = await drain(await http.inbox(team, { unread: true }));
   }
   const messages = rows.filter((m) => matchesFilter(m, filter));
 

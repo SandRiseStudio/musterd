@@ -126,6 +126,7 @@ import {
 import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
 import {
   countInbox,
+  countUnread,
   latestStatusUpdate,
   listInbox,
   listTeamMessages,
@@ -237,6 +238,12 @@ const JSON_COMPRESS_MIN_BYTES = 1400;
  * the pre-ADR-211 behaviour, which is a degradation rather than a wrong answer.
  */
 const DEFERRAL_SCAN_LIMIT = 2000;
+/**
+ * The bound on an `/inbox` read that named no `?limit=`. Big enough that an ordinary check returns
+ * everything waiting and never sees a `truncated` flag; small enough that a seat 24k acts behind its
+ * cursor cannot hold the loop while its whole history is marshalled and serialised.
+ */
+const INBOX_DEFAULT_LIMIT = 200;
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -3481,12 +3488,31 @@ export async function handleHttp(
         const limitRaw = Number(url.searchParams.get('limit') ?? '');
         const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
         const cursor = getCursor(ctx.db, member.id);
+        // A caller that named no limit still gets a bounded response: this read was the last
+        // unbounded one on the request path, and a seat returning after time away pulled its whole
+        // unread history in a single reply. The bound is a PREFIX (`headLimit`), never the newest
+        // tail — see InboxOpts: truncating to the tail and letting the reader advance its cursor to
+        // the newest row it received would step over everything cut, which is ADR 287's loss
+        // reintroduced by a latency fix. `truncated` tells the caller to come back for the rest.
         const rows = listInbox(ctx.db, member, {
           unreadOnly: unread,
           cursorTs: cursor.last_read_ts,
           ...(since ? { since: Number(since) } : {}),
-          ...(limit ? { limit } : {}),
+          ...(limit ? { limit } : { headLimit: INBOX_DEFAULT_LIMIT }),
         });
+        // How much this reply could NOT carry. A caller that advances a read cursor needs this and
+        // cannot derive it: a full-looking page may sit on top of thousands the bound cut off, and
+        // ADR 287's rule — the cursor never passes what you did not see — has to hold across the
+        // fetch boundary, not just inside a client's own slicing.
+        const unreadRemaining =
+          rows.length > 0 && (limit !== undefined || rows.length === INBOX_DEFAULT_LIMIT)
+            ? Math.max(
+                0,
+                countUnread(ctx.db, member, cursor.last_read_ts) -
+                  rows.filter((r) => r.ts > cursor.last_read_ts).length,
+              )
+            : 0;
+        const truncated = limit === undefined && rows.length === INBOX_DEFAULT_LIMIT;
         const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
 
         // ADR 211 §3: pendingness is unread-by-cursor OR deferred-and-raised. The cursor is a single
@@ -3581,6 +3607,8 @@ export async function handleHttp(
           deferred,
           answered,
           discharged,
+          ...(truncated ? { truncated: true } : {}),
+          ...(unreadRemaining > 0 ? { unread_remaining: unreadRemaining } : {}),
         });
       }
 

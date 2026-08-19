@@ -50,11 +50,21 @@ export interface InboxCheckPlan {
  * mode becomes seeing something twice, which costs a moment, instead of never seeing it, which
  * costs the work. The caller names `limit` as the way out, so a backlog still drains in one call.
  */
-export function planInboxCheck(ordered: Envelope[], limit: number): InboxCheckPlan {
+export function planInboxCheck(
+  ordered: Envelope[],
+  limit: number,
+  /**
+   * Unread the FETCH itself could not carry, as counted by the daemon. `ordered` stopped being proof
+   * of how much is waiting once `GET /inbox` grew a default bound — a complete-looking slice can sit
+   * on top of thousands the request never returned, and deriving elision from the slice alone would
+   * advance the watermark past every one of them. Same rule as below, one layer further out.
+   */
+  unreachable = 0,
+): InboxCheckPlan {
   // Keep the NEWEST `limit` (an inbox is read most-recent-first), not the OLDEST N that a bare
   // `.sort().slice(0, limit)` would keep once the inbox exceeds the cap.
   const shown = ordered.slice(Math.max(0, ordered.length - limit));
-  const elided = ordered.length - shown.length;
+  const elided = ordered.length - shown.length + unreachable;
   return {
     shown,
     elided,
@@ -81,11 +91,11 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
       try {
         // Combine buffered live deliveries with the authoritative inbox fetch, dedup by id.
         const buffered = client.drainBuffer();
-        const fetched = await client.fetchInbox(args.unread_only ?? true);
+        const fetched = await client.fetchInbox(args.unread_only ?? true, args.limit ?? 50);
         const byId = new Map<string, Envelope>();
         for (const e of [...buffered, ...fetched.messages]) byId.set(e.id, e);
         const ordered = [...byId.values()].sort((a, b) => a.ts - b.ts);
-        const plan = planInboxCheck(ordered, args.limit ?? 50);
+        const plan = planInboxCheck(ordered, args.limit ?? 50, fetched.unread_remaining ?? 0);
         const messages = plan.shown;
 
         if (messages.length === 0) {

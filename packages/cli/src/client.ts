@@ -291,7 +291,7 @@ export class HttpClient {
   }
   inbox(
     slug: string,
-    opts: { unread?: boolean; limit?: number } = {},
+    opts: { unread?: boolean; limit?: number; since?: number } = {},
   ): Promise<{
     messages: Envelope[];
     cursor: { last_read_ts: number };
@@ -306,10 +306,15 @@ export class HttpClient {
      *  Server-computed and underivable here: the discharging reply is a DM to the asker, so a second
      *  eligible seat is not a party to it. Absent from an older daemon ⇒ the act shows as still owed. */
     discharged?: { id: string; by: string }[];
+    /** More was waiting than this reply carried: a caller that named no `limit` gets a bounded
+     *  PREFIX, so page on with `since` = the last message's ts until this is absent. Absent from an
+     *  older daemon ⇒ the reply was complete, the prior behaviour. */
+    truncated?: boolean;
   }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');
     if (opts.limit) q.set('limit', String(opts.limit));
+    if (opts.since !== undefined) q.set('since', String(opts.since));
     const qs = q.toString();
     return this.request('GET', `/teams/${slug}/inbox${qs ? `?${qs}` : ''}`);
   }
