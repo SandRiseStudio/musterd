@@ -97,7 +97,7 @@ Stage 2 look like the next coding task after the Ollama probe.
 | --- | --- | --- | --- |
 | **Stage 1 — local instruct probe** | A *weak* off-the-shelf model (Ollama) reads the `AGENTS.md` primer, claims a seat, and coordinates. Guardrail-floor test. **Not training.** | `musterd-lab` | **Done.** [Finding 003](../research/003-guardrail-floor-tiny-model.md). |
 | **Learning GPT** | Train a tiny GPT from scratch (MLX / `mlx-lm`, ~10–30M, TinyStories/Shakespeare) to own the internals; optionally teach it the musterd command grammar so it can drive the Stage 1 harness. | `musterd-lab` | **Ungated.** Personal learning track — not a product deliverable, not research-spine, no ADR, no dataset required (ADR 110 §2 last bullet). |
-| **Coordination-traces dataset v1** | Public, structural-only export of *this team's* act log ([ADR 184](../decisions/184-dataset-consent-and-redaction.md)). Seat names, models, act types, timings — **no message bodies**. Not a model. | **This repo** (`scripts/dataset/` — unbuilt). Private raw snapshot is a different artifact (`pnpm corpus:snapshot`). | **The product next step.** Open lane `01M091J5CW02QTKJGBJG9705GV`. Corpus preservation already shipped. |
+| **Coordination-traces dataset v1** | Public, structural-only export of *this team's* act log ([ADR 184](../decisions/184-dataset-consent-and-redaction.md)). Seat names, models, act types, timings — **no message bodies**. Not a model. | **This repo** (`pnpm dataset:export` / `scripts/dataset/`). Private raw snapshot is a different artifact (`pnpm corpus:snapshot`) and must not upload. | **Export path shipped** 2026-08-19 (lane `01M091J5CW02QTKJGBJG9705GV`). A HuggingFace upload is a per-release `--authorized-by`, not this script. |
 | **Coordination-judge** | Fine-tune on *our* traces to score coordination quality. Last rung of the produce ladder (ADR 056: dataset → benchmark → paper → **judge**). A research artifact, and if ever built a batond eval component — not a dependency of the research practice ([ADR 194](../decisions/194-flywheel-practice-not-batond.md)). | `musterd-lab` when it happens | **Gated.** This is what ADR 110 calls Stage 2 NO-GO. Re-open when the dataset ships with honest N and the ADR 184 DoD holds. |
 
 Not Track B, and not a substitute for any row above:
@@ -112,8 +112,8 @@ we did not train. The learning GPT is how we come to *own* a model's internals. 
 public artifact this team's coordination log becomes. The judge is trained on that dataset — so it
 cannot start before the export exists.
 
-The next step **in this repo** is the dataset, not a training run. A from-scratch GPT, if you want
-one this week, is `musterd-lab` and does not wait on the dataset.
+The export path **in this repo** is `pnpm dataset:export`. A from-scratch GPT, if you want one this
+week, is `musterd-lab` and does not wait on the dataset.
 
 ## Related
 

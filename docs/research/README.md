@@ -21,7 +21,8 @@ Operationalize MAST's multi-agent failure taxonomy ([arXiv 2503.13657](https://a
 OTel/Langfuse-shaped layout is fine; prose omitted in v1). Release is **gated on the consent +
 redaction posture of [ADR 184](../decisions/184-dataset-consent-and-redaction.md)** (accepted
 2026-07-31: structural-only; agent prose not publishable on operator consent alone) — four checkable
-DoD conditions. Flywheel product boundary is [ADR 194](../decisions/194-flywheel-practice-not-batond.md);
+DoD conditions. The export path is `pnpm dataset:export` (reads a corpus snapshot, never uploads;
+`--authorized-by` required). Flywheel product boundary is [ADR 194](../decisions/194-flywheel-practice-not-batond.md);
 do not cite superseded ADR 051 for the dataset gate.
 
 ## How to add a finding

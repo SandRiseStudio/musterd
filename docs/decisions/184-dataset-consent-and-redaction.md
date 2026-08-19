@@ -188,6 +188,13 @@ deployment rather than of the posture.
   forecloses nothing for a later consented-prose release.
 - A withdrawal cannot un-publish. Stated in the ADR so no consent flow implies otherwise.
 - The flywheel strategy ADR no longer owns this seam; cite this ADR for publication posture.
+- **2026-08-19 — export path shipped.** `pnpm dataset:export` (`scripts/dataset/export.ts`) is the
+  DoD-1 path: structural JSONL, per-release HMAC seat names, prose omitted, pinned
+  `scripts/dataset/manifest.v1.json`, `--authorized-by` required. It reads a corpus snapshot, not
+  the live daemon db (ADR 280). A HuggingFace upload of a live release is still a per-release human
+  act; this ADR did not become an upload rail. Eval of a *candidate* export is the canary suite in
+  `scripts/dataset/export.test.ts` (planted prose and real seat names must not appear); a live-corpus
+  candidate still wants an independent reader, as §Observability already required.
 
 ## Observability & Evaluation
 
