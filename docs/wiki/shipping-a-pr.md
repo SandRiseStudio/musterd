@@ -28,9 +28,13 @@ Git's only guard is narrow: it refuses to delete a branch **currently checked ou
 
 Prune by name, never by sweep: delete only branches you own and have verified landed — PR state `MERGED`, or `git cherry origin/main <branch>` marking every commit `-`. A neighbour's unmerged branch with no remote looks identical to your own dead one.
 
-## Never `pnpm format` (glob misalignment verified still present 2026-08-13; falsify: compare `format` vs `format:check` globs in package.json)
+## ~~Never `pnpm format`~~ FIXED 2026-08-19 by #890 — the writer's scope now equals the checker's
 
-`pnpm format` writes `**/*.{ts,js,mjs,json,md}` but `format:check` only checks `packages/**/*.ts`, `tests/**/*.ts`, `*.{ts,json}` — the committed markdown/json was never prettier-conformant, so `pnpm format` reflows ~100 unrelated docs, burying the real change and breaking `roadmap:check`. Format only your own files: `pnpm exec prettier --write <files>`, then `pnpm format:check`.
+~~`pnpm format` writes `**/*.{ts,js,mjs,json,md}` but `format:check` only checks `packages/**/*.ts`, `tests/**/*.ts`, `*.{ts,json}` — the committed markdown/json was never prettier-conformant, so `pnpm format` reflows ~100 unrelated docs, burying the real change and breaking `roadmap:check` (glob misalignment verified still present 2026-08-13).~~
+
+ADR 284 removed the asymmetry rather than documenting around it: both modes are now `node scripts/format.ts`, reading one scope list from `scripts/format-scope.ts`, with `.prettierignore` backstopping `docs/` and `scripts/` joining the checked set. `pnpm format` on a clean tree changes 0 files (2026-08-19; falsify: from a clean `origin/main`, `pnpm format && git status --porcelain` — any output revives the struck claim above).
+
+The old workaround — `pnpm exec prettier --write <files>` on your own files only — is no longer necessary, and stays safe if you prefer it.
 
 ## Ordering landmine
 
