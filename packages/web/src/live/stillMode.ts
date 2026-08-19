@@ -6,7 +6,7 @@
  * it would otherwise paint. What stops is the page's habit of advancing to the NEXT thing on a timer
  * of its own.
  *
- * ── Why a page-side flag at all (ADR 283) ───────────────────────────────────────────────────────
+ * ── Why a page-side flag at all (ADR 285) ───────────────────────────────────────────────────────
  *
  * The a11y contrast sweep settles, freezes rAF, screenshots once, and pairs every text row with the
  * pixel beneath it. Every part of that races anything the page does on a timer. contrast-sweep.mjs

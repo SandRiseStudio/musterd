@@ -342,7 +342,7 @@ function OfficePreviewPage() {
          */
         /* Via the shared reader, so this route and the three components that also honour the flag
            (the scene's ambient scheduler, the overlay reel, the asks-strip) cannot drift apart on
-           what `?still` means — ADR 283. `search` above still serves `?quiet` and `?light`. */
+           what `?still` means — ADR 285. `search` above still serves `?quiet` and `?light`. */
         const still = isStill(window.location.search);
         if (still) {
           /* Every event at mount, as #880 wrote it. TESTED AND KEPT, 2026-08-19: the alternative —
