@@ -12,6 +12,7 @@ import {
   BOOK_COLORS,
   CLOCK_NUMERALS,
   coffeeAnchor,
+  drawCue,
   drawDog,
   glassColor,
   MACHINE_H,
@@ -107,6 +108,28 @@ function parseableColor(c: string): boolean {
   if (/^hsla?\(\s*[-\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(,\s*[\d.]+\s*)?\)$/.test(c)) return true;
   return /^[a-z]+$/i.test(c); // a named colour (transparent, white, …)
 }
+
+/** The acceptance confetti cue: deterministic per `t` (no per-frame randomness — a given moment
+ * always draws the same burst), and every particle colour parseable across its whole lifetime. */
+describe('drawCue confetti', () => {
+  it('paints only parseable colours across the burst lifetime', () => {
+    for (const t of [0, 0.25, 0.5, 0.75, 0.99]) {
+      const paints: string[] = [];
+      drawCue(mockCtx(paints), { at: { x: 300, y: 200 }, color: '#5cd49a', glyph: '', t, urgent: false, kind: 'confetti' }, 1);
+      expect(paints.length).toBeGreaterThan(0);
+      for (const c of paints) expect(parseableColor(c), c).toBe(true);
+    }
+  });
+
+  it('is a pure function of t — the same moment draws the same colours in the same order', () => {
+    const a: string[] = [];
+    const b: string[] = [];
+    const cue = { at: { x: 300, y: 200 }, color: '#5cd49a', glyph: '' as const, t: 0.4, urgent: false, kind: 'confetti' as const };
+    drawCue(mockCtx(a), cue, 1);
+    drawCue(mockCtx(b), cue, 1);
+    expect(a).toEqual(b);
+  });
+});
 
 /** The fan/coffee overlay anchors (Tier-A animated props). The key behaviour: a fan only spins and a mug
  * only steams at an *occupied* desk — an unattended running fan or a steaming fresh mug reads as wrong. */

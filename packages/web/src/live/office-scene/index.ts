@@ -1228,6 +1228,27 @@ export function mountOffice(
     cues.push({ at: { x: at.x, y: at.y + 20 }, color, glyph, t: 0, urgent });
   }
 
+  /** The acceptance celebration burst — a one-shot confetti puff over a member's head. */
+  function pushConfetti(name: string) {
+    const at = heads.get(name);
+    if (!at) return;
+    cues.push({ at: { x: at.x, y: at.y }, color: '#5cd49a', glyph: '', t: 0, urgent: false, kind: 'confetti' });
+  }
+
+  /** The `count` nearest drawn members to `name` (excluding them) within one pod's reach — the desk
+   * neighbors who plausibly noticed. Head positions are already screen-space, so plain distance works. */
+  function nearestNeighbors(name: string, count: number): string[] {
+    const at = heads.get(name);
+    if (!at) return [];
+    return [...heads.entries()]
+      .filter(([n]) => n !== name)
+      .map(([n, p]) => ({ n, d: Math.hypot(p.x - at.x, p.y - at.y) }))
+      .filter((e) => e.d < 190 * fit.scale)
+      .sort((a, b) => a.d - b.d)
+      .slice(0, count)
+      .map((e) => e.n);
+  }
+
   /** A broadcast sweep rolling out from the announcer. */
   function pushWave(name: string, color: string) {
     const at = heads.get(name);
@@ -1302,6 +1323,18 @@ export function mountOffice(
         break;
       case 'accept':
         pushCue(ev.who, '#5cd49a', '✓');
+        // The celebration (liveliness ladder inc 1, nick 2026-08-19): a directed accept lands on the
+        // CELEBRANT — whose work was accepted — as confetti over their head, a green thread from the
+        // acceptor, and the nearest desk neighbors turning for a beat. Event choreography only:
+        // one cue lifetime, no re-arming, nothing for ?still to hold.
+        if (ev.of && ev.of !== ev.who && heads.has(ev.of)) {
+          pushThread(ev.who, ev.of, '#5cd49a');
+          pushCue(ev.of, '#5cd49a', '✓');
+          pushConfetti(ev.of);
+          for (const name of nearestNeighbors(ev.of, 2)) {
+            if (name !== ev.who) actors.gestureBeat(name, GESTURE.glance);
+          }
+        }
         break;
       case 'decline':
         pushCue(ev.who, '#f3776a', '');
