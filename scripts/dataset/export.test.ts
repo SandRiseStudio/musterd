@@ -7,15 +7,18 @@
  * would undo the HMAC. `--map` is allowed only outside `--out`.
  */
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MANIFEST_PATH,
+  PUBLIC_MANIFEST_NAME,
   bucketProject,
   exportDataset,
+  fillCard,
+  histogramLines,
   parseExportArgs,
   projectMeta,
   pseudonym,
@@ -137,6 +140,10 @@ function jsonl<T>(out: string, file: string): T[] {
     .split('\n')
     .filter((l) => l.length > 0)
     .map((l) => JSON.parse(l) as T);
+}
+
+function publicFiles(out: string): string[] {
+  return readdirSync(out).sort();
 }
 
 describe('pseudonym', () => {
@@ -271,7 +278,7 @@ describe('exportDataset', () => {
       adr: number;
       authorized_by: string;
       salt_sha256: string;
-      experiment_manifest: { sha256: string };
+      experiment_manifest: { path: string; sha256: string };
       counts: { acts: number; members: number; lanes: number };
     };
     expect(release.adr).toBe(184);
@@ -279,6 +286,57 @@ describe('exportDataset', () => {
     expect(release.salt_sha256).toBe(createHash('sha256').update(SALT_A).digest('hex'));
     expect(release.counts).toEqual({ acts: 1, members: 2, lanes: 2 });
     expect(release.experiment_manifest.sha256).toHaveLength(64);
+    expect(release.experiment_manifest.path).toBe(PUBLIC_MANIFEST_NAME);
+  });
+
+  it('writes a filled README.md and in-dir manifest so the folder is self-describing', () => {
+    const dir = tmp();
+    const out = join(dir, 'public');
+    const manifest = writeManifest(dir);
+    exportDataset({
+      dbPath: fixtureDb(dir),
+      outDir: out,
+      manifestPath: manifest,
+      authorizedBy: 'nick',
+      salt: SALT_A,
+    });
+    expect(publicFiles(out)).toEqual([
+      'README.md',
+      'RELEASE.json',
+      'acts.jsonl',
+      'lanes.jsonl',
+      'manifest.v1.json',
+      'members.jsonl',
+    ]);
+    expect(existsSync(join(out, PUBLIC_MANIFEST_NAME))).toBe(true);
+    const readme = readFileSync(join(out, 'README.md'), 'utf8');
+    expect(readme).toContain('structural-only');
+    expect(readme).toContain('not a chat dump');
+    for (const act of [
+      'message',
+      'status_update',
+      'request_help',
+      'handoff',
+      'accept',
+      'decline',
+      'wait',
+      'resolve',
+      'steer',
+      'challenge',
+      'defer',
+      'ask',
+    ]) {
+      expect(readme).toContain(`\`${act}\``);
+    }
+    expect(readme).not.toContain('{{');
+    expect(readme).toContain('**1** acts');
+    expect(readme).toContain('**2** members');
+    expect(readme).toContain('**2** lanes');
+    expect(readme).toContain('1970-01-01');
+    expect(readme).toContain('- `handoff`: 1');
+    expect(readme).not.toContain(CANARY);
+    expect(readme).not.toMatch(/"nick"/);
+    expect(readme).not.toMatch(/"Ada"/);
   });
 
   it('refuses to write a pseudonym map inside the public dir', () => {
@@ -402,6 +460,20 @@ describe('parseExportArgs', () => {
       '--from-live',
     ]);
     expect(ok.dbPath).toBe(live);
+  });
+});
+
+describe('fillCard', () => {
+  it('replaces every placeholder and refuses leftovers', () => {
+    expect(fillCard('n={{acts}}', { acts: '3' })).toBe('n=3');
+    expect(() => fillCard('{{acts}} {{nope}}', { acts: '1' })).toThrow(/unfilled card placeholder/);
+  });
+});
+
+describe('histogramLines', () => {
+  it('sorts by count desc then name, and names an empty tally', () => {
+    expect(histogramLines({ b: 1, a: 3, c: 3 })).toBe('- `a`: 3\n- `c`: 3\n- `b`: 1');
+    expect(histogramLines({})).toBe('_none_');
   });
 });
 

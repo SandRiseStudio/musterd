@@ -200,6 +200,10 @@ deployment rather than of the posture.
   111/564 rows re-identified. v1 now **omits `lanes.branch`** and HMAC-replaces seat-name tokens in
   `project`. Repro that must stay red: plant `Ada/leaky-topic` + `agents-Ada` and grep the public
   JSONL.
+- **2026-08-19 — public dir includes a dataset card.** `pnpm dataset:export` writes `README.md` from
+  `scripts/dataset/card.md` (aggregates only: counts, date range, act/kind/`to.kind` histograms) and
+  copies `manifest.v1.json` into `--out` so the folder is self-describing without the git repo.
+  HuggingFace upload remains a later human act; writing the card does not grant a data license.
 
 ## Observability & Evaluation
 

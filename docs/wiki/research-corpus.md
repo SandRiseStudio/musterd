@@ -84,6 +84,7 @@ first.
 
 - **The dataset itself.** ADR 184 decided the gate (structural fields only, no agent prose). The
   export path shipped 2026-08-19 (`pnpm dataset:export`; falsify: `ls scripts/dataset/export.ts`).
+  Each public dir now includes a filled `README.md` card (falsify: `ls scripts/dataset/card.md`).
   A HuggingFace upload of a live release has not been cut (2026-08-19; falsify: a dataset card
   under the Sandrise org on HF). Roadmap item `coordination-dataset`.
 - **ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR
