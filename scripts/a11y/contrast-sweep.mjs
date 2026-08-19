@@ -149,18 +149,18 @@ let chromeErr = '';
 
 const CHROME_ARGS = [
   '--headless=new',
-    /* Port 0 = "pick a free one and tell me". NOT a tidiness change: this used to be a hardcoded
-     * 9334, and a hardcoded port is shared state between every sweep on the machine. The second
-     * sweep's Chrome cannot bind it, so the second sweep's `/json/list` answers from the FIRST
-     * sweep's browser and both runs then drive one page. Reproduced by dolly (lane 01KZZ7BQE3):
-     * a sweep pointed at alpha.html filed a GREEN report whose url read beta.html — a pass for a
-     * page nobody looked at, which is the one direction this file's header forbids failing in.
-     * Nineteen worktrees share this laptop, so concurrent sweeps are normal, not exotic.
-     *
-     * The port now comes out of OUR OWN profile directory (`DevToolsActivePort`, written by Chrome
-     * on startup), so it is structurally impossible to reach a browser we did not start. That is
-     * why this fixes the class rather than narrowing the window: there is no shared name left to
-     * collide on. */
+  /* Port 0 = "pick a free one and tell me". NOT a tidiness change: this used to be a hardcoded
+   * 9334, and a hardcoded port is shared state between every sweep on the machine. The second
+   * sweep's Chrome cannot bind it, so the second sweep's `/json/list` answers from the FIRST
+   * sweep's browser and both runs then drive one page. Reproduced by dolly (lane 01KZZ7BQE3):
+   * a sweep pointed at alpha.html filed a GREEN report whose url read beta.html — a pass for a
+   * page nobody looked at, which is the one direction this file's header forbids failing in.
+   * Nineteen worktrees share this laptop, so concurrent sweeps are normal, not exotic.
+   *
+   * The port now comes out of OUR OWN profile directory (`DevToolsActivePort`, written by Chrome
+   * on startup), so it is structurally impossible to reach a browser we did not start. That is
+   * why this fixes the class rather than narrowing the window: there is no shared name left to
+   * collide on. */
   '--remote-debugging-port=0',
   '--no-first-run',
   '--disable-extensions',
