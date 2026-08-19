@@ -1375,3 +1375,63 @@ describe('claimWakeLeases — spend breaker + still-true (ADR 262)', () => {
     expect(orders.some((o) => o.act_id === 'h1')).toBe(true);
   });
 });
+
+/**
+ * The wake poll runs on the daemon's request path, in one transaction, every 30s per enrolled seat.
+ * Its cost must therefore be a function of what is DUE, never of how long the team has been talking
+ * — otherwise the poll grows without bound against an append-only log and starves the event loop for
+ * every other request (measured on the revive team: 840ms at idle, 8000+ member lookups per poll,
+ * `/health` timing out behind the queue and tripping guardian `daemon_down` false alarms).
+ *
+ * The deferral fold is where that bound was lost: `deferrals` reads only the seat's OWN `wait` acts,
+ * but the scan hydrated every row in the window into a full Envelope — two member lookups each —
+ * before throwing all of them away. This pins the property rather than the fix: a seat that has
+ * deferred nothing must not pay for the timeline.
+ */
+describe('claimWakeLeases — cost is bounded by what is due, not by the timeline (burst starvation)', () => {
+  /** Counts executions of the per-row member hydration the deferral scan used to drive. */
+  function countMemberLookups(db: Database, run: () => void): number {
+    let n = 0;
+    const orig = db.prepare.bind(db);
+    (db as any).prepare = (sql: string) => {
+      const stmt = orig(sql);
+      if (/FROM members WHERE id = \?/.test(sql)) {
+        const get = stmt.get.bind(stmt);
+        (stmt as any).get = (...args: unknown[]) => {
+          n++;
+          return get(...args);
+        };
+      }
+      return stmt;
+    };
+    try {
+      run();
+    } finally {
+      (db as any).prepare = orig;
+    }
+    return n;
+  }
+
+  it('does not hydrate the team timeline for a seat that has deferred nothing', () => {
+    const { db, team, nick, ada, bob } = seed();
+    enroll(db, team, ada);
+    // A long-running team: chatter Ada is a party to, none of it deferred by her.
+    for (let i = 0; i < 400; i++) {
+      msg(db, team, nick, bob, 'message', `c${i}`, 1_000 + i);
+      msg(db, team, bob, null, 'status_update', `s${i}`, 1_400 + i);
+    }
+    // One genuine reason to wake her.
+    msg(db, team, nick, ada, 'message', 'u1', 900_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+
+    let orders: unknown[] = [];
+    const lookups = countMemberLookups(db, () => {
+      orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    });
+
+    expect(orders).toHaveLength(1);
+    // The seat, its sender, and the lease bookkeeping — a handful. NOT one per timeline row.
+    expect(lookups).toBeLessThan(50);
+  });
+});
