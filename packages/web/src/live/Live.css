@@ -1170,6 +1170,23 @@
   font-weight: 700;
   line-height: 1;
 }
+/* A service seat's mark — sits in the provider icon's slot (ADR 232: pure code, no model to
+   attest, so a provider chip would be the unknown-"?" and read as a broken attestation). Mono,
+   lowercase, quiet: it is a classification, not an identity. */
+.lc-gl-label__service {
+  flex: none;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--lc-paper-ink) 26%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 7.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: lowercase;
+  color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
+}
 /* ── the expand, animated ───────────────────────────────────────────────────────────────────────
    The detail used to be a `display: none` -> `inline-flex` swap, which is a jump cut: there is no
    in-between state to animate, so the plate teleported to its wide size.

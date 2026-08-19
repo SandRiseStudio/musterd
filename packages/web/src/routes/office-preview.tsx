@@ -28,6 +28,8 @@ type Kind = 'agent' | 'human';
 type Mock = {
   name: string;
   kind: Kind;
+  /** A `kind: 'service'` ledger seat (ADR 232) — drawn as an agent, nameplated as a service. */
+  service?: true;
   activity: OfficeData['nodes'][number]['activity'];
   state: string | null;
 };
@@ -42,6 +44,9 @@ const POOL: Mock[] = [
   { name: 'Gus', kind: 'human', activity: 'idle', state: null },
   { name: 'Hana', kind: 'agent', activity: 'working', state: 'profiling the render loop' },
   { name: 'Ivy', kind: 'human', activity: 'working', state: 'designing the character rig' },
+  // The service seat — the nameplate's "service" tag can only be eyeballed (and contrast-measured)
+  // here if the fixture actually seats one (same argument as the varied FIXTURE_IDENTITY above).
+  { name: 'Jib', kind: 'agent', service: true, activity: 'idle', state: null },
 ];
 
 /**
@@ -59,6 +64,9 @@ const FIXTURE_IDENTITY: Record<string, { surface: string; model: string | null; 
   Gus: { surface: 'slack', model: 'llama-4-maverick' },
   Hana: { surface: 'claude-code', model: 'deepseek-v4-pro' },
   Ivy: { surface: 'cursor', model: 'mistral-large-3', role: 'design' },
+  // The service seat: no model BY KIND (pure code, nothing to attest) — distinct from Dev's
+  // null-model agent, which is a seat that merely has nothing to report.
+  Jib: { surface: 'cli', model: null, role: 'platform' },
 };
 
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
@@ -263,6 +271,7 @@ function OfficePreviewPage() {
         return {
           name: m.name,
           kind: m.kind,
+          service: m.service === true,
           presence: isAway ? 'away' : 'online',
           activity,
           // The fixture has no availability axis, so posture composes straight off presence + activity —

@@ -39,6 +39,7 @@ function buildData(): OfficeData {
     nodes: POOL.map((m) => ({
       name: m.name,
       kind: m.kind,
+      service: false,
       presence: 'online' as const,
       activity: m.activity,
       posture: m.activity === 'working' ? ('working' as const) : ('idle' as const),

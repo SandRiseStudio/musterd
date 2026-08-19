@@ -1562,6 +1562,7 @@ const RECEPTIONIST_LOOK: Appearance = {
 const RECEPTIONIST_NODE: OfficeNode = {
   name: 'receptionist',
   kind: 'human',
+  service: false,
   presence: 'online',
   activity: 'working',
   posture: 'working',
