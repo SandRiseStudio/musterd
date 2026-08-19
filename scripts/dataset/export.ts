@@ -17,8 +17,8 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_MANIFEST_PATH = 'scripts/dataset/manifest.v1.json';
 
