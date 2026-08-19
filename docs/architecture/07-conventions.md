@@ -96,10 +96,13 @@ decision is the record of what was decided, not a place to record what happened 
 - **Put follow-up notes in `## Consequences`, never in `## Decision`.** A dated "completed / scope
   limit / superseded by" note belongs there — it constrains how the Decision is read without
   rewriting it.
-- **Never run Prettier on `docs/`.** `format:check` covers `packages/**/*.ts`, `tests/**` and the
-  root only, so `docs/` is deliberately not format-gated — and `prettier --write` on an ADR will
-  happily restyle a frozen section (`*x*` → `_x_`) and fail the gate on a change nobody meant to
-  make. Format the files your change actually touches, and leave ADR prose alone.
+- **Prettier cannot reach `docs/`, and you no longer have to remember that** (ADR 284). `pnpm format`
+  and `pnpm format:check` both read one list — `FORMAT_GLOBS` in `scripts/format-scope.ts` — so the
+  writer's scope and the gate's scope are equal by construction; `.prettierignore` carries `docs/`
+  as a backstop for invocations that list cannot see (a bare `npx prettier --write .`, format-on-save).
+  Until 2026-08-19 this was discipline only, and `pnpm format` rewrote **214 files** no gate checked.
+  The reason the exclusion stands: `prettier --write` on an ADR will restyle a frozen section
+  (`*x*` → `_x_`), and a reflow rewrites `git blame` for arguments nobody was editing.
 
 Template:
 

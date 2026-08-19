@@ -66,7 +66,6 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-const isMain =
-  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]!).href;
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]!).href;
 
 if (isMain) process.exit(await main(process.argv.slice(2)));

@@ -49,9 +49,7 @@ function findAdrs(): { file: string; num: number }[] {
 /** Body of the `## Observability & Evaluation` section (heading may carry a trailing `# comment`). */
 function sectionBody(text: string): string | null {
   const lines = text.split('\n');
-  const start = lines.findIndex(
-    (l) => /^#{1,6}\s+/.test(l) && l.includes(SECTION_HEADING),
-  );
+  const start = lines.findIndex((l) => /^#{1,6}\s+/.test(l) && l.includes(SECTION_HEADING));
   if (start === -1) return null;
   const body: string[] = [];
   for (const line of lines.slice(start + 1)) {

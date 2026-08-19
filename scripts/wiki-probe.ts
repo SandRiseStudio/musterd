@@ -163,10 +163,7 @@ export function probe(fact: string, pages: Map<string, string>): Probe {
   };
 }
 
-export function render(
-  probes: Probe[],
-  opts: { ref?: string; pages?: number } = {},
-): string {
+export function render(probes: Probe[], opts: { ref?: string; pages?: number } = {}): string {
   const mark = { hit: 'HIT   ', review: 'REVIEW', miss: 'MISS  ' } as const;
   const lines = probes.map((p) => {
     const where = p.best ? `${p.best.page} ${(p.best.score * 100).toFixed(0)}%` : '—';
