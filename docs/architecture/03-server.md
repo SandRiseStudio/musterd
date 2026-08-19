@@ -32,6 +32,8 @@ src/
     activity.ts       // resolveActivity: the two-clocks rule → offline/idle/working (v0.2 M2; ADR 140)
     quiescence.ts     // decision-grade busy/quiet/unknown from newest audited action; /health quietest_busy_ms (2026-08-03 design; split from display activity)
     cursors.ts        // getCursor, setCursor, unreadCount
+    hydrate.ts        // rowsToEnvelopes: message rows -> Envelopes, one member lookup per DISTINCT member (#903 follow-on: the per-row shape cost 800 statements to learn 31 names)
+    deferralFold.ts   // deferralFold: held + raised + the seat's own sends, hydrating the 2000-row window ONLY when a deferral is actually held (ADR 211 §3)
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
     lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
     incidents.ts      // incident convergence inc 1 (ADR 266): recordBlockedReport pools blocked_by reports per (team, gate), opens ONE unowned kind:'incident' lane at 2 distinct seats, appends after; openIncidents/incidentReporters feed the team_next banner and the route hook's fan-out

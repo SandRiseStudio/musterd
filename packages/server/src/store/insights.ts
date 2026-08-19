@@ -13,10 +13,11 @@ import type {
 import type { Database } from 'better-sqlite3';
 import { actAnswered, openDirectedLedger } from './delivery.js';
 import { listGoals } from './goals.js';
+import { rowsToEnvelopes } from './hydrate.js';
 import { listLanes } from './lanes.js';
 import { deriveMast } from './mast.js';
-import { getMemberById, getMemberByName } from './members.js';
-import { listTeamMessages, longDeferred, rowToEnvelope } from './messages.js';
+import { getMemberByName } from './members.js';
+import { listTeamMessages, longDeferred } from './messages.js';
 import { effectiveWakePolicy, getResidency } from './residency.js';
 import { teamFamilyPosture } from './review.js';
 import type { MessageRow } from './rows.js';
@@ -707,11 +708,7 @@ function deriveLongDeferred(
   now: number,
 ): LongDeferred[] {
   const rows = listTeamMessages(db, teamId, { limit: DEFERRAL_SCAN_LIMIT });
-  const envelopes = rows.map((r) => {
-    const from = getMemberById(db, r.from_member);
-    const to = r.to_member ? getMemberById(db, r.to_member) : null;
-    return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
-  });
+  const envelopes = rowsToEnvelopes(db, teamSlug, rows);
   const seats = new Set(envelopes.filter((e) => e.act === 'wait').map((e) => e.from));
   const out: LongDeferred[] = [];
   for (const seat of seats) {
