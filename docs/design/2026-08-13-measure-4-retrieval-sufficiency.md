@@ -45,6 +45,12 @@ already carried at the time the seat started.** Three clauses, each doing work:
     pnpm wiki:probe "a conflicted PR gets zero check-runs so auto-merge waits forever"
     HIT     shipping-a-pr.md 100%  a conflicted PR gets zero check-runs so auto-merge waits forever
 
+Bound it to the corpus the session started with — `--at <sha>`, or `--since <when>` for a seat that
+knows the clock but not the SHA:
+
+    pnpm wiki:probe --at 79c73320 "..."      # the commit this session started at
+    pnpm wiki:probe --since 09:00 "..."      # resolved to the last origin/main commit before then
+
 Scoring is **idf-weighted term coverage**, not tf-idf cosine. The question is asymmetric — "does
 this page contain what the fact is about" — so a 6 KB page covering a one-line fact must score high,
 which a length-normalised cosine buries. idf is what keeps `worktree` (3 pages) worth more than
@@ -89,6 +95,38 @@ is fitting the threshold to make the answer comfortable, on n=3, and it trades t
 for exactly the false negatives measure 4 cannot afford. **Do not tune the threshold before the
 ten-run sample exists.** If the rate holds, the honest fix is a better scorer (the misses are
 short facts whose few terms are all corpus-common), not a moved line.
+
+### 2026-08-19: the session-start boundary, which the first cut did not implement
+
+The operational definition's third clause — _at the time the seat started_ — was prose only until
+now. `wiki-probe.ts` read the working tree with `readdirSync` and took no ref, so a page a teammate
+committed mid-session could score a HIT for a fact the seat had no way to find. gptbot declined the
+lane on 2026-08-14 for exactly this, and was right to: the error is one-directional. It can only push
+measure 4 **up**, toward "build a retrieval index", which is the one direction this design is
+supposed to be hardest to move in.
+
+`--at` / `--since` load the corpus from git at that commit — blobs, not just the file list, so a
+_section_ appended to a page the seat already had is excluded on the same grounds as a whole new
+page. Regression fixture is real history, not a mock: `bugbot sometimes fails to register its
+check-run` scores 72% HIT on `shipping-a-pr.md` against the tree today, and MISS at `2b968ead`
+(#783, the wiki's first commit) because that page arrived a day later in #787.
+
+Two refusals go with it, both of the same family as the defect itself — a number that looks like a
+reading but is an artifact:
+
+- A bound that was **asked for and could not be resolved** does not fall back to the working tree.
+  Falling back would silently unbound the measure with nothing in the output to show it.
+- A ref that resolves but **carries no pages** (anything before #783) says the run measured nothing,
+  rather than letting an empty corpus report `0 measure-4 events` as if the wiki had been consulted.
+
+Unbounded runs still work — this is a wrap-up convenience, not a gate — but their count line now
+says the HITs are an upper bound. **Every reading before this date was taken unbounded**, so the
+ledger's one HIT needed re-checking rather than grandfathering. Re-probed 2026-08-19 against
+`--since 2026-08-14T00:00:00` (`272d4ad3`, the corpus as dolly's session opened), dolly's `pnpm
+format` / `format:check` glob fact still scores 94% HIT on `shipping-a-pr.md`, which landed
+2026-08-12 in #787 — two days before the session that re-derived it. **The event stands as a genuine
+measure-4 event.** It was true unbounded and it is true bounded; what changed is that the second
+sentence can now be said at all.
 
 ### The ledger
 
