@@ -31,11 +31,11 @@ import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
 import {
   GENERALIST,
   isBuiltin,
-  listRoleNames,
-  loadRole,
+  listProfileNames,
+  loadProfile,
   resolveRoleLabel,
-  type RoleTemplate,
-} from './role.js';
+  type Profile,
+} from './profile.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -637,11 +637,11 @@ export async function runInit(): Promise<number> {
       }),
     ).trim() || 'Ada';
 
-  // The role template is chosen *before* the member is minted, so the roster/primer role label is
+  // The profile is chosen *before* the member is minted, so the roster/primer role label is
   // derived from it — the label you see matches the tools the agent gets (ADR 038). A non-generalist
-  // pick offers an explicit override; generalist/no-template falls back to a free-text label as
-  // before. Provisioning the template's tools happens later (§5a), once the harness is wired.
-  const template = await selectRole(name);
+  // pick offers an explicit override; generalist/no-profile falls back to a free-text label as
+  // before. Provisioning the profile's tools happens later (§5a), once the harness is wired.
+  const template = await selectProfile(name);
   const role = resolveRoleLabel({ template, freeText: await askRoleLabel(template) });
 
   // 4b) Cross-folder name-reuse guard (ADR 020) -----------------------------
@@ -764,12 +764,12 @@ export async function runInit(): Promise<number> {
     return 1;
   }
 
-  // 5a) Provision the chosen role's tools (ADR 026 Universe-2; additive/reversible/local per ADR 027)
-  // The template was picked in §4 (and already drove the roster label); now that the musterd server
+  // 5a) Provision the chosen profile's tools (ADR 026 Universe-2; additive/reversible/local, ADR 027)
+  // The profile was picked in §4 (and already drove the roster label); now that the musterd server
   // is wired, provision its MCP servers into this harness and pull its charter into the primer.
-  // `generalist`/no template provisions nothing extra — only the musterd server + the standard
+  // `generalist`/no profile provisions nothing extra — only the musterd server + the standard
   // playbook (ADR 028). This is Universe-2 only; identity (the role label) was set at mint.
-  const charter = await provisionRoleTools(chosen, template);
+  const charter = await provisionProfileTools(chosen, template);
 
   // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
   // The prompt is honest about what writing does *at the decision point*: against an existing,
@@ -814,7 +814,7 @@ export async function runInit(): Promise<number> {
       );
       try {
         writeProvisionManifest(process.cwd(), {
-          role,
+          profile: role,
           harness: chosen.id,
           mcpServers: [],
           guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -937,17 +937,18 @@ async function waitForPresence(
 }
 
 /**
- * Step 4 — pick the role template *before* the member is minted (ADR 038). Lists the built-in seed
- * library plus any `.musterd/roles/*.json`; `generalist` is the default and means "no template"
- * (returns undefined). For a richer pick the template is loaded and returned so its `role` can drive
- * the roster/primer label (via {@link resolveRoleLabel}) and its tools can be provisioned later
- * (§5a). A load failure degrades to no-template (warn, return undefined) so init never wedges here.
+ * Step 4 — pick the workspace profile *before* the member is minted (ADR 038). Lists the built-in
+ * seed library plus any user profiles (`.musterd/profiles/*.json`, legacy `.musterd/roles/*.json`);
+ * `generalist` is the default and means "no profile" (returns undefined). For a richer pick the
+ * profile is loaded and returned so its name can drive the roster/primer label (via
+ * {@link resolveRoleLabel}) and its tools can be provisioned later (§5a). A load failure degrades
+ * to no-profile (warn, return undefined) so init never wedges here.
  */
-async function selectRole(member: string): Promise<RoleTemplate | undefined> {
-  const names = listRoleNames(process.cwd());
+async function selectProfile(member: string): Promise<Profile | undefined> {
+  const names = listProfileNames(process.cwd());
   const pick = guard(
     await p.select({
-      message: `Provision a role for ${pc.cyan(member)}? ${pc.dim('(adds tools + a charter; generalist adds nothing extra)')}`,
+      message: `Provision a profile for ${pc.cyan(member)}? ${pc.dim('(adds tools + a charter; generalist adds nothing extra)')}`,
       options: names.map((n) => ({
         value: n,
         label: n,
@@ -955,28 +956,30 @@ async function selectRole(member: string): Promise<RoleTemplate | undefined> {
           n === GENERALIST
             ? 'nothing extra — just the musterd tools'
             : isBuiltin(n)
-              ? 'built-in role'
-              : 'from .musterd/roles/',
+              ? 'built-in profile'
+              : 'user profile',
       })),
     }),
   );
   if (pick === GENERALIST) return undefined;
   try {
-    return loadRole(process.cwd(), pick);
+    return loadProfile(process.cwd(), pick);
   } catch (err) {
-    p.log.warn(`Couldn't load role "${pick}" (${(err as Error).message}) — skipping provisioning.`);
+    p.log.warn(
+      `Couldn't load profile "${pick}" (${(err as Error).message}) — skipping provisioning.`,
+    );
     return undefined;
   }
 }
 
 /**
- * The free-text side of the role label (ADR 038, Decision #2). With **no template** (generalist /
- * unloadable) it's the same optional free-text prompt as before. With a **template** the label is
- * already settled to `template.role`, so we only offer an explicit *override gate* (default: keep);
- * accepting it opens the free-text prompt. Returns the raw free text (or undefined when the template
- * label is kept) — {@link resolveRoleLabel} applies the precedence.
+ * The free-text side of the role label (ADR 038, Decision #2). With **no profile** (generalist /
+ * unloadable) it's the same optional free-text prompt as before. With a **profile** the label is
+ * already settled to the profile's name, so we only offer an explicit *override gate* (default:
+ * keep); accepting it opens the free-text prompt. Returns the raw free text (or undefined when the
+ * profile-derived label is kept) — {@link resolveRoleLabel} applies the precedence.
  */
-async function askRoleLabel(template: RoleTemplate | undefined): Promise<string | undefined> {
+async function askRoleLabel(template: Profile | undefined): Promise<string | undefined> {
   if (!template) {
     return guard(
       await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
@@ -984,47 +987,47 @@ async function askRoleLabel(template: RoleTemplate | undefined): Promise<string 
   }
   const override = guard(
     await p.confirm({
-      message: `Override the role label ${pc.bold(template.role)}? ${pc.dim('(it matches the tools you chose — default keeps it)')}`,
+      message: `Override the role label ${pc.bold(template.profile)}? ${pc.dim('(it matches the tools you chose — default keeps it)')}`,
       initialValue: false,
     }),
   );
   if (!override) return undefined;
   return guard(
-    await p.text({ message: 'Role label', placeholder: template.role, defaultValue: '' }),
+    await p.text({ message: 'Role label', placeholder: template.profile, defaultValue: '' }),
   ).trim();
 }
 
 /**
- * Step 5a — provision the already-chosen template's tools (ADR 026 §3, provisioning-recipe.md).
+ * Step 5a — provision the already-chosen profile's tools (ADR 026 §3, provisioning-recipe.md).
  * Provisions its MCP servers into the chosen harness (additive/local — ADR 027), records what was
- * added in the uninstall manifest (ADR 030), and returns the role's charter so the primer step can
- * inject it. No template → nothing to do. A harness without a provision renderer degrades to
+ * added in the uninstall manifest (ADR 030), and returns the profile's charter so the primer step
+ * can inject it. No profile → nothing to do. A harness without a provision renderer degrades to
  * charter-only. Best-effort: a provisioning hiccup never fails init. Returns the charter, if any.
  */
 function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): boolean {
   return p.allow.length + p.ask.length + p.deny.length > 0;
 }
 
-async function provisionRoleTools(
+async function provisionProfileTools(
   harness: Harness,
-  role: RoleTemplate | undefined,
+  profile: Profile | undefined,
 ): Promise<string | undefined> {
-  if (!role) return undefined;
+  if (!profile) return undefined;
 
-  const { mcp_servers: servers, permissions } = role.tools;
+  const { mcp_servers: servers, permissions } = profile.tools;
   if (servers.length === 0 && !hasPermissions(permissions)) {
-    p.log.info(pc.dim(`${role.role} adds no tools — applying its charter only.`));
-    return role.charter;
+    p.log.info(pc.dim(`${profile.profile} adds no tools — applying its charter only.`));
+    return profile.charter;
   }
   if (!harness.provision) {
     p.log.warn(
-      `Tool provisioning isn't supported for ${harness.label} yet — applying ${role.role}'s charter only.`,
+      `Tool provisioning isn't supported for ${harness.label} yet — applying ${profile.profile}'s charter only.`,
     );
-    return role.charter;
+    return profile.charter;
   }
 
   const sp = p.spinner();
-  sp.start(`Provisioning ${role.role} tools into ${harness.label}`);
+  sp.start(`Provisioning ${profile.profile} tools into ${harness.label}`);
   try {
     const result = await harness.provision({ servers, permissions }, 'local');
     const permCount =
@@ -1039,7 +1042,7 @@ async function provisionRoleTools(
     );
     try {
       writeProvisionManifest(process.cwd(), {
-        role: role.role,
+        profile: profile.profile,
         harness: harness.id,
         mcpServers: result.servers,
         permissions: result.permissions,
@@ -1053,9 +1056,9 @@ async function provisionRoleTools(
       ),
     );
   } catch (err) {
-    sp.stop(pc.yellow(`Couldn't provision ${role.role} tools: ${(err as Error).message}`));
+    sp.stop(pc.yellow(`Couldn't provision ${profile.profile} tools: ${(err as Error).message}`));
   }
-  return role.charter;
+  return profile.charter;
 }
 
 /**

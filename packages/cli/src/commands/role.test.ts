@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
-import { userRolesDir } from '../onboard/role.js';
+import { legacyUserRolesDir, userProfilesDir } from '../onboard/profile.js';
 import { roleCommand } from './role.js';
 
 let cwd: string;
@@ -47,7 +47,7 @@ describe('role list/show roster-first (ADR 227 close-out)', () => {
   it('role list renders the team library first when a roster is reachable', async () => {
     expect(await roleCommand(parsed(['list']), { fetchRoster: async () => roster })).toBe(0);
     expect(out.indexOf('team roles')).toBeGreaterThanOrEqual(0);
-    expect(out.indexOf('team roles')).toBeLessThan(out.indexOf('provisioning templates'));
+    expect(out.indexOf('team roles')).toBeLessThan(out.indexOf('workspace profiles'));
     expect(out).toContain('platform');
     expect(out).toContain('izzo');
     expect(out).toContain('(unheld)'); // observer has no holder
@@ -237,14 +237,14 @@ describe('role list', () => {
     expect(out).toContain('built-in');
   });
 
-  it('marks a user file as user, and a same-named file as an override', async () => {
-    mkdirSync(userRolesDir(cwd), { recursive: true });
+  it('marks a user file as user, and a same-named file as an override — legacy role-keyed files in .musterd/roles/ included', async () => {
+    mkdirSync(legacyUserRolesDir(cwd), { recursive: true });
     writeFileSync(
-      join(userRolesDir(cwd), 'data.json'),
+      join(legacyUserRolesDir(cwd), 'data.json'),
       JSON.stringify({ role: 'data', charter: 'c' }),
     );
     writeFileSync(
-      join(userRolesDir(cwd), 'backend.json'),
+      join(legacyUserRolesDir(cwd), 'backend.json'),
       JSON.stringify({ role: 'backend', charter: 'mine' }),
     );
     await roleCommand(parsed(['list'], { json: true }));
@@ -267,7 +267,7 @@ describe('role show', () => {
   it('emits the parsed object with --json', async () => {
     await roleCommand(parsed(['show', 'reviewer'], { json: true }));
     const role = JSON.parse(out);
-    expect(role.role).toBe('reviewer');
+    expect(role.profile).toBe('reviewer');
     expect(role.tools).toBeTruthy();
   });
 
@@ -281,18 +281,18 @@ describe('role show', () => {
 });
 
 describe('role create', () => {
-  it('scaffolds a minimal skeleton at .musterd/roles/<name>.json', async () => {
+  it('scaffolds a minimal skeleton at .musterd/profiles/<name>.json', async () => {
     expect(await roleCommand(parsed(['create', 'qa']))).toBe(0);
-    const written = JSON.parse(readFileSync(join(userRolesDir(cwd), 'qa.json'), 'utf8'));
-    expect(written.role).toBe('qa');
+    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8'));
+    expect(written.profile).toBe('qa');
     expect(written.charter).toContain('TODO');
     expect(written.tools.mcp_servers).toEqual([]);
   });
 
   it('round-trips a built-in with --from, renamed to the new name', async () => {
     expect(await roleCommand(parsed(['create', 'mybackend'], { from: 'backend' }))).toBe(0);
-    const written = JSON.parse(readFileSync(join(userRolesDir(cwd), 'mybackend.json'), 'utf8'));
-    expect(written.role).toBe('mybackend'); // renamed
+    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'mybackend.json'), 'utf8'));
+    expect(written.profile).toBe('mybackend'); // renamed
     expect(written.tools.mcp_servers[0].name).toBe('supabase'); // copied from backend
   });
 
@@ -300,7 +300,7 @@ describe('role create', () => {
     await roleCommand(parsed(['create', 'qa']));
     await expect(roleCommand(parsed(['create', 'qa']))).rejects.toMatchObject({ exitCode: 1 });
     expect(await roleCommand(parsed(['create', 'qa'], { force: true, from: 'docs' }))).toBe(0);
-    const written = JSON.parse(readFileSync(join(userRolesDir(cwd), 'qa.json'), 'utf8'));
+    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8'));
     expect(written.tools.resource_scopes).toContain('docs/**'); // overwritten from docs
   });
 

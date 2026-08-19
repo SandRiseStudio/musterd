@@ -96,8 +96,8 @@ src/
     pending.ts        // client-side pending-presence markers (ADR 033)
     permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact
     primer.ts         // renderPrimer + idempotent upsertPrimer → AGENTS.md agent primer (ADR 012)
-    role.ts           // Role = harness-agnostic provisioning template; resolve/apply (ADR 026/029/038)
-    roles/builtins.ts // the shipped built-in role template seed library
+    profile.ts        // Profile = harness-agnostic provisioning template ("role template" pre-ADR-272); resolve/apply (ADR 026/029/038)
+    profiles/builtins.ts // the shipped built-in profile seed library
     harnesses/
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
@@ -380,7 +380,7 @@ The **localhost notification down-payment** (ADR 035) — an opt-in, headless, c
 
 ### `musterd role <list|show|create> [<name>] [--from <builtin>] [--force]`
 
-Manage role **provisioning templates** (ADR 026/029/038; `docs/design/provisioning-recipe.md` §3) — a pure local-file + built-in-library command that **never touches the daemon or the server roster** (Universe-2 only; identity unchanged). `role list` shows the shipped built-ins plus any user templates in `.musterd/roles/*.json`; `role show <name>` prints a fully-resolved template (built-in or user, with `inspect with: musterd role show <name>`); `role create <name> [--from <builtin>]` scaffolds an editable user template under `.musterd/roles/` (refuses to overwrite without `--force`). A Role projects into two places at use-time — the identity half (role label) and the harness-provisioning half (MCP servers + permissions `init` writes) — so editing a template changes what the next `init` provisions.
+Manage **workspace profiles** — the ADR 026/029/038 provisioning templates, renamed by ADR 272 (`docs/design/provisioning-recipe.md` §3) — a pure local-file + built-in-library command that **never touches the daemon or the server roster** (Universe-2 only; identity unchanged; `role assign` is the separate roster-editing subcommand). `role list` shows the shipped built-ins plus any user profiles in `.musterd/profiles/*.json` (legacy `.musterd/roles/*.json` files are still read, never written); `role show <name>` prints a fully-resolved profile (built-in or user); `role create <name> [--from <builtin>]` scaffolds an editable user profile under `.musterd/profiles/` (refuses to overwrite without `--force`). A profile projects into two places at use-time — the identity half (role label, until increment 2 of the ADR 272 migration decouples it) and the harness-provisioning half (MCP servers + permissions `init` writes) — so editing a profile changes what the next `init` provisions. A profile carries no authority (ADR 272).
 
 ### `musterd uninstall [--force|--yes]`
 

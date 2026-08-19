@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { RoleTemplate } from './role.js';
+import type { Profile } from './profile.js';
 
 /**
  * ADR 261 — the standard floor and the seat-dir permission installer.
@@ -93,7 +93,7 @@ interface SeatSettings {
 const LISTS: (keyof PermissionLists)[] = ['allow', 'ask', 'deny'];
 
 /**
- * Merge the standard floor — plus a role's permission profile, when the seat has one — into
+ * Merge the standard floor — plus a profile's permission lists, when the seat has one — into
  * `<dir>/.claude/settings.local.json`. Dir-aware because `musterd agent` provisions a worktree
  * that is never `process.cwd()`.
  *
@@ -106,7 +106,7 @@ const LISTS: (keyof PermissionLists)[] = ['allow', 'ask', 'deny'];
  * Returns only the entries NEWLY added per list, so the ADR 030 manifest can record an exact
  * reversal — and so idempotence is observable: a second run returns empty lists.
  */
-export function installSeatPermissions(dir: string, role?: RoleTemplate): PermissionLists {
+export function installSeatPermissions(dir: string, profile?: Profile): PermissionLists {
   const path = join(dir, '.claude', 'settings.local.json');
   let settings: SeatSettings = {};
   if (existsSync(path)) {
@@ -118,10 +118,10 @@ export function installSeatPermissions(dir: string, role?: RoleTemplate): Permis
       return { allow: [], ask: [], deny: [] };
     }
   }
-  const profile: PermissionLists = {
-    allow: [...STANDARD_FLOOR.allow, ...(role?.tools.permissions.allow ?? [])],
-    ask: [...(role?.tools.permissions.ask ?? [])],
-    deny: [...(role?.tools.permissions.deny ?? [])],
+  const wanted: PermissionLists = {
+    allow: [...STANDARD_FLOOR.allow, ...(profile?.tools.permissions.allow ?? [])],
+    ask: [...(profile?.tools.permissions.ask ?? [])],
+    deny: [...(profile?.tools.permissions.deny ?? [])],
   };
   settings.permissions ??= {};
   const added: PermissionLists = { allow: [], ask: [], deny: [] };
@@ -133,7 +133,7 @@ export function installSeatPermissions(dir: string, role?: RoleTemplate): Permis
     // later diff of this file into noise. Same equivalence the inspector uses — install and check
     // must agree on what "present" means, or a silent check follows a non-empty install forever.
     const have = new Set(existing.map(canonicalRuleForm));
-    for (const entry of profile[list]) {
+    for (const entry of wanted[list]) {
       if (!have.has(canonicalRuleForm(entry))) {
         existing.push(entry);
         have.add(canonicalRuleForm(entry));
