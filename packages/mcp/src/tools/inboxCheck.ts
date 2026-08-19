@@ -11,9 +11,57 @@ import {
   textResult,
 } from './format.js';
 
+// Length is gated (`pnpm context:check`, standing-context budgets): this string is in every turn's
+// tool list, so the elision contract is stated in the fewest bytes that still state it. The full
+// reasoning lives in ADR 287; the runtime notice carries the detail at the moment it matters.
 const DESCRIPTION =
-  'Check unread messages addressed to you or the team, marking them read. Call at task start, ' +
-  'task end, and after heads-down work — directed asks and replies only surface when you check.';
+  'Check unread addressed to you or the team, marking them read. Call at task start, ' +
+  'task end, and after heads-down work. Past `limit` nothing is marked read; the reply ' +
+  'says how many remain.';
+
+/** What one `team_inbox_check` should display, and how far the read cursor may move (ADR 287). */
+export interface InboxCheckPlan {
+  /** The messages to render — the newest `limit`, so relevance is unchanged. */
+  shown: Envelope[];
+  /** Unread this call could not show. Non-zero means the cursor must not move. */
+  elided: number;
+  /** Message id to advance the read cursor to, or `null` to leave the cursor exactly where it is. */
+  advanceTo: string | null;
+}
+
+/**
+ * Decide what to show and whether the read cursor may advance.
+ *
+ * **The cursor never advances past an unread this call did not render.** That is not a new rule:
+ * the CLI has held it since the bounded-window change and states it at `cli/src/commands/inbox.ts:20`.
+ * This surface simply never had it, and this surface is the one every agent seat uses.
+ *
+ * What went wrong without it: the caller kept the newest `limit` of the unread set and then marked
+ * the NEWEST message read. The cursor is a single `last_read_ts` watermark (`store/cursors.ts`), so
+ * one call moved it past every older unread the slice had just discarded. Those messages were never
+ * displayed and could never be unread again — the reader's only remaining route to them was the
+ * audit log. Measured 2026-08-19: in its busiest 4-hour window every seat on this team could see
+ * 163-186 messages against a default limit of 50.
+ *
+ * Newest-first is deliberately preserved — a seat that checks once a turn must not be handed the
+ * stalest 50 and told the urgent ask is behind them. So the trade is made in the other direction:
+ * when the view cannot be complete, the cursor holds and the reader is told the count. The failure
+ * mode becomes seeing something twice, which costs a moment, instead of never seeing it, which
+ * costs the work. The caller names `limit` as the way out, so a backlog still drains in one call.
+ */
+export function planInboxCheck(ordered: Envelope[], limit: number): InboxCheckPlan {
+  // Keep the NEWEST `limit` (an inbox is read most-recent-first), not the OLDEST N that a bare
+  // `.sort().slice(0, limit)` would keep once the inbox exceeds the cap.
+  const shown = ordered.slice(Math.max(0, ordered.length - limit));
+  const elided = ordered.length - shown.length;
+  return {
+    shown,
+    elided,
+    // `null` on an elision AND on an empty inbox — there is no id to advance to in either case, and
+    // inventing one is exactly how a watermark passes something nobody read.
+    advanceTo: elided > 0 || shown.length === 0 ? null : shown[shown.length - 1]!.id,
+  };
+}
 
 export function registerInboxCheck(server: McpServer, client: MusterdClient): void {
   server.registerTool(
@@ -35,10 +83,9 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const fetched = await client.fetchInbox(args.unread_only ?? true);
         const byId = new Map<string, Envelope>();
         for (const e of [...buffered, ...fetched.messages]) byId.set(e.id, e);
-        // Keep the NEWEST `limit` (an inbox is read most-recent-first), then present ascending — not
-        // the OLDEST N a bare `.sort().slice(0, limit)` would keep once the inbox exceeds the cap.
         const ordered = [...byId.values()].sort((a, b) => a.ts - b.ts);
-        const messages = ordered.slice(Math.max(0, ordered.length - (args.limit ?? 50)));
+        const plan = planInboxCheck(ordered, args.limit ?? 50);
+        const messages = plan.shown;
 
         if (messages.length === 0) {
           // ADR 135: inbox-check is every agent's minute-0 call (the SessionStart hook routes here),
@@ -50,9 +97,12 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         }
         // Link any sender trace context (meta.otel) to our trace as causality (ADR 011 receiver).
         linkReceived(messages);
-        // Advance the cursor to the newest message read.
-        const newest = messages[messages.length - 1]!;
-        await client.markRead(newest.id).catch(() => undefined);
+        // Advance the cursor only over what this call actually rendered (ADR 287). On an elision
+        // `advanceTo` is null and the watermark stays put, so the unread behind the limit are still
+        // unread on the next call rather than consumed by a look that never showed them.
+        if (plan.advanceTo !== null) {
+          await client.markRead(plan.advanceTo).catch(() => undefined);
+        }
 
         // ADR 254: the stand-down trace. An eligible-set act someone else already answered is no
         // longer this seat's to answer — but it still appears in the inbox, so saying nothing would
@@ -65,10 +115,22 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
           return formatMessage(m) + (by ? `\n  ↳ answered by ${by} — you no longer owe this` : '');
         };
 
-        const text = messages.map(line).join('\n') + (await buildSkewWarning(client));
+        // Say it, and say it FIRST. An elision the reader is not told about is the same defect as
+        // the silent cursor advance, one layer up: the view looks complete, so nothing prompts the
+        // second call. Leading the output rather than trailing it because a seat that stops reading
+        // after the last message is exactly the seat this line exists for.
+        const notice =
+          plan.elided > 0
+            ? `⚠ ${plan.elided} older unread not shown (limit ${args.limit ?? 50}). Nothing was ` +
+              `marked read — they are still waiting. Call again with limit: ${ordered.length} to ` +
+              `see all ${ordered.length}.\n\n`
+            : '';
+        const text = notice + messages.map(line).join('\n') + (await buildSkewWarning(client));
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {
+            // Structured readers get the elision as data, not only as prose in `text`.
+            elided_unread: plan.elided,
             messages: messages.map((m) => ({
               id: m.id,
               from: m.from,
