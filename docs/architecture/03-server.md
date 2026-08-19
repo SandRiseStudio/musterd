@@ -33,6 +33,7 @@ src/
     quiescence.ts     // decision-grade busy/quiet/unknown from newest audited action; /health quietest_busy_ms (2026-08-03 design; split from display activity)
     cursors.ts        // getCursor, setCursor, unreadCount
     hydrate.ts        // rowsToEnvelopes: message rows -> Envelopes, one member lookup per DISTINCT member (#903 follow-on: the per-row shape cost 800 statements to learn 31 names)
+    interruptCandidates.ts // listInterruptCandidates: the unread rows pendingInterrupts can actually use (urgent/steer/obligation + resolve/accept/decline/eligible) — keep in step with the fold (ADR 088/225/254)
     deferralFold.ts   // deferralFold: held + raised + the seat's own sends, hydrating the 2000-row window ONLY when a deferral is actually held (ADR 211 §3)
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
     lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
