@@ -130,4 +130,23 @@ describe('goal command', () => {
     );
     await expect(goalCommand(parseArgs(['bogus']))).rejects.toThrow(/usage/);
   });
+
+  it('retracts a goal, list hides it by default, --all shows it (goal-retract design)', async () => {
+    await capture(() => goalCommand(parseArgs(['declare', 'Scratch', '--goal-id', 'scratch'])));
+    const res = await capture(() => goalCommand(parseArgs(['retract', 'scratch'])));
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('goal retracted');
+    const list = await capture(() => goalCommand(parseArgs(['list'])));
+    expect(list.out).not.toContain('Scratch');
+    expect(list.out).toContain('1 retracted');
+    const all = await capture(() => goalCommand(parseArgs(['list', '--all'])));
+    expect(all.out).toContain('Scratch');
+    expect(all.out).toContain('retracted');
+  });
+
+  it('retracting an undeclared goal says the signal is queued', async () => {
+    const res = await capture(() => goalCommand(parseArgs(['retract', 'ghost'])));
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('not yet declared');
+  });
 });

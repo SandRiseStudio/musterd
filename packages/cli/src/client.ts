@@ -524,6 +524,16 @@ export class HttpClient {
     return parsed.data;
   }
 
+  /** Retract a Goal (goal-retract design). `null` = goal not yet declared (signal queued). */
+  async goalRetract(slug: string, body: { goal_id: string }): Promise<Goal | null> {
+    const json = await this.request('POST', `/teams/${slug}/goals/retract`, body);
+    const raw = (json as { goal: unknown }).goal;
+    if (raw === null) return null;
+    const parsed = GoalSchema.safeParse(raw);
+    if (!parsed.success) throw new CliError('goal response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
   async goals(slug: string): Promise<GoalList> {
     const json = await this.request('GET', `/teams/${slug}/goals`);
     const parsed = GoalListSchema.safeParse(json);

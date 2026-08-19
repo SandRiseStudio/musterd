@@ -61,6 +61,18 @@ export type GoalOutcome = z.infer<typeof GoalOutcomeSchema>;
 export const GoalOutcomeMetaSchema = z.object({ goal_outcome: GoalOutcomeSchema });
 export type GoalOutcomeMeta = z.infer<typeof GoalOutcomeMetaSchema>;
 
+/** A goal retraction: this Goal is withdrawn from the board. A signal folded on read, never a row
+ *  deletion — the declaration and the retraction both stay in the append-only log (ADR 048's bet).
+ *  Latest signal by ts wins, so a later re-declaration un-retracts. */
+export const GoalRetractSchema = z.object({
+  goal_id: z.string().min(1),
+});
+export type GoalRetract = z.infer<typeof GoalRetractSchema>;
+
+/** `meta.goal_retract` on a team-visible `message` act — replayed by listGoals beside outcomes. */
+export const GoalRetractMetaSchema = z.object({ goal_retract: GoalRetractSchema });
+export type GoalRetractMeta = z.infer<typeof GoalRetractMetaSchema>;
+
 /** A declared Goal with its derived status attached (ADR 048 as amended by 084) — the read projection. */
 export const GoalSchema = z.object({
   id: z.string(),
@@ -76,6 +88,10 @@ export const GoalSchema = z.object({
   /** Latest outcome note (value-layer design): what changed for a user. Derived from the newest
    *  `meta.goal_outcome` signal — provenance free, survives skeleton re-declaration, anyone amends. */
   outcome: z.object({ text: z.string(), by: z.string(), at: z.number().int() }).optional(),
+  /** Withdrawn from the board (goal-retract design): the newest `meta.goal_retract` beats the newest
+   *  declaration by ts. Present = retracted (with provenance); a later re-declaration clears it.
+   *  Default surfaces hide retracted Goals; nothing is deleted from the log. */
+  retracted: z.object({ by: z.string(), at: z.number().int() }).optional(),
   /**
    * The Goal's **plan epoch** (ADR 111, ADR 088 increment 3) — a monotonic count of the direction-
    * changing acts that have landed on this Goal: every `defer` naming it (a re-sequence) and every
@@ -133,3 +149,6 @@ export function compareGoals(
 
 /** Body for `POST /teams/:slug/goals/outcome` — thin sugar over a `message` act to `@team`. */
 export const PostGoalOutcomeSchema = GoalOutcomeSchema;
+
+/** Body for `POST /teams/:slug/goals/retract` — thin sugar over a `message` act to `@team`. */
+export const PostGoalRetractSchema = GoalRetractSchema;

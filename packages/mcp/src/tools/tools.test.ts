@@ -1454,6 +1454,54 @@ describe('value layer: goal outcome + review debt + claim-time linking', () => {
     expect(out).toContain('queued');
   });
 
+  it('team_goal_retract round-trips and renders the withdrawal', async () => {
+    const goalRetract = vi.fn(async () => ({
+      goal: {
+        id: 'g1',
+        title: 'G1',
+        wave: null,
+        depends_on: [],
+        declared_by: 'nick',
+        declared_at: 0,
+        status: 'planned',
+        epoch: 0,
+        retracted: { by: 'dolly', at: 5 },
+      },
+    }));
+    const { registerGoals } = await import('./goals.js');
+    const handlers = captureAll(registerGoals, { goalRetract } as Partial<MusterdClient>);
+    const out = text(await handlers['team_goal_retract']!({ goal_id: 'g1' }));
+    expect(goalRetract).toHaveBeenCalledWith({ goal_id: 'g1' });
+    expect(out).toContain('goal retracted');
+    expect(out).toContain('retracted by dolly');
+  });
+
+  it('team_goals hides retracted goals by default and counts them', async () => {
+    const base = {
+      title: 'T',
+      wave: null,
+      depends_on: [],
+      declared_by: 'nick',
+      declared_at: 0,
+      status: 'planned',
+      epoch: 0,
+    };
+    const goals = vi.fn(async () => ({
+      goals: [
+        { ...base, id: 'live' },
+        { ...base, id: 'gone', retracted: { by: 'dolly', at: 5 } },
+      ],
+    }));
+    const { registerGoals } = await import('./goals.js');
+    const handlers = captureAll(registerGoals, { goals } as Partial<MusterdClient>);
+    const out = text(await handlers['team_goals']!({}));
+    expect(out).toContain('live');
+    expect(out).not.toContain('gone [');
+    expect(out).toContain('1 retracted');
+    const all = text(await handlers['team_goals']!({ include_retracted: true }));
+    expect(all).toContain('gone');
+  });
+
   it('lane_claim passes goal_id through to updateLane in the same call', async () => {
     const updateLane = vi.fn(async () => ({ lane: vlLane({ goal_id: 'g1' }), warnings: [] }));
     const handlers = captureAll(registerLanes, {
