@@ -24,6 +24,7 @@ import { createReceptionist, stepReceptionist } from './receptionist';
 import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
+import { isWithinWorkingHours } from './workingHours';
 import { assignSeats, type Placement } from './seating';
 import {
   animatedDeskAnchors,
@@ -88,18 +89,26 @@ const AMBIENT_FRAME_MS = 50;
 const LIGHT_TICK_MS = 60000;
 
 /**
- * Current hour-of-day (0..24) in America/Los_Angeles — the office clock the lighting follows. A
- * `?light=HH` / `?light=HH:MM` query param overrides it, a dev aid for previewing dawn/dusk/night without
- * waiting for the wall clock (harmless in prod — it only applies when explicitly present).
+ * The `?light=HH` / `?light=HH:MM` dev override, if present — a dev aid for previewing dawn/dusk/night
+ * without waiting for the wall clock (harmless in prod — it only applies when explicitly present). The
+ * shift check rides the same override (keeping the real weekday), so `?light=23` also previews the
+ * after-hours office.
  */
-function pstNowHours(): number {
+function lightOverrideHours(): number | null {
   try {
     const q = new URLSearchParams(window.location.search).get('light');
     const m = q && /^(\d{1,2})(?::(\d{2}))?$/.exec(q.trim());
     if (m) return (Number(m[1]) % 24) + (m[2] ? Number(m[2]) / 60 : 0);
   } catch {
-    /* no window/search available — fall through to the real clock */
+    /* no window/search available — the real clock rules */
   }
+  return null;
+}
+
+/** Current hour-of-day (0..24) in America/Los_Angeles — the office clock the lighting follows. */
+function pstNowHours(): number {
+  const override = lightOverrideHours();
+  if (override !== null) return override;
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Los_Angeles',
     hour: 'numeric',
@@ -393,12 +402,16 @@ export function mountOffice(
     };
   }
 
-  /** Recompute the office lighting from the PST clock + occupancy, and push the natural-light wash (tint +
-   * strength) to the CSS overlay. Returns whether the *canvas* light (night veil / desk lamps) crossed a
-   * step and so needs a rebake — the caller decides whether to act on it. */
+  /** Recompute the office lighting from the PST clock + occupancy + the team's declared shift, and push
+   * the natural-light wash (tint + strength) to the CSS overlay. Returns whether the *canvas* light
+   * (night veil / desk lamps) crossed a step and so needs a rebake — the caller decides whether to act
+   * on it. */
   function refreshLightEnv(): boolean {
     const prev = lightEnv;
-    lightEnv = computeLightEnv(pstNowHours(), occupied);
+    const inShift = teamWorkingHours
+      ? isWithinWorkingHours(teamWorkingHours, new Date(), lightOverrideHours() ?? undefined)
+      : null;
+    lightEnv = computeLightEnv(pstNowHours(), occupied, inShift);
     if (!reduced) {
       // natural light enters as the soft-light wash — colour + strength straight off the clock
       ambientHost.style.setProperty('--lc-amb-strength', lightEnv.skyStrength.toFixed(3));
