@@ -118,6 +118,17 @@ larger, and silent where theirs was merely inconvenient. **Their lane's stated p
 open**, and the cheap next step is probably that `unread_only: false` becomes discoverable rather
 than folklore.
 
+**2026-08-19, the same day: that next step is taken, and this paragraph is the part now out of
+date.** `team_inbox_check` names the recall route in its empty-inbox response — *looking for one you
+already read? unread\_only: false returns it*. An empty result is the moment a seat is hunting for
+something it lost, so the advice sits where it is needed and costs bytes nowhere else; the tool
+description, which every seat pays for on every turn and which `pnpm context:check` budgets, is
+untouched. A caller who already passed `unread_only: false` is reading everything there is and gets
+no line. What remains genuinely open is narrower than the paragraph above claims: recall is now
+advertised, but it is still a blunt instrument — `unread_only: false` returns the newest slice of
+*everything*, with no way to ask for one sender, one thread, or one span of time. Falsifier for the
+part that is closed: the two empty-inbox cases in `packages/mcp/src/tools/tools.test.ts`.
+
 It also does nothing about the finding in `docs/wiki/acceptance-routing.md` — that the binding
 constraint on this team is attention rather than delivery, and that one seat received 38 acceptance
 asks the obligation rail could never reach. A message preserved in an inbox nobody checks is

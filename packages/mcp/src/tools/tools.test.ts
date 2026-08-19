@@ -643,12 +643,27 @@ describe('team_inbox_check handler', () => {
     });
   });
 
-  it('reports no new messages when empty', async () => {
+  it('reports no new messages when empty, and names the way back to what was already read', async () => {
     const handler = capture(
       registerInboxCheck,
       inboxClient({ fetchInbox: (async () => ({ messages: [], cursor: null })) as any }),
     );
     const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).toBe(
+      'no new messages — nothing waiting on you; check again at your next task boundary' +
+        '\nlooking for one you already read? unread_only: false returns it',
+    );
+  });
+
+  // The recall route is advice for a seat looking at the unread slice. A caller who ALREADY passed
+  // unread_only: false is looking at everything there is — telling them to do what they just did
+  // would be the noise this line is trying to avoid being.
+  it('omits the recall route when the caller is already reading everything', async () => {
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({ fetchInbox: (async () => ({ messages: [], cursor: null })) as any }),
+    );
+    const r = await handler({ unread_only: false, limit: 50 });
     expect(text(r)).toBe(
       'no new messages — nothing waiting on you; check again at your next task boundary',
     );
