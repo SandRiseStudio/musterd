@@ -89,6 +89,7 @@ import {
 } from '../store/grants.js';
 import { rowsToEnvelopes } from '../store/hydrate.js';
 import { deriveReport } from '../store/insights.js';
+import { listInterruptCandidates } from '../store/interruptCandidates.js';
 import { recordLaneClose } from '../store/laneClose.js';
 import {
   boardWarnings,
@@ -3438,7 +3439,10 @@ export async function handleHttp(
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);
         const cursor = getCursor(ctx.db, member.id);
-        const rows = listInbox(ctx.db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
+        // Only the shapes the fold can use (see `listInterruptCandidates`): this route runs at every
+        // tool boundary of every live agent, so it must not carry the seat's whole unread window back
+        // into V8 to discover that nothing is raised.
+        const rows = listInterruptCandidates(ctx.db, member, { cursorTs: cursor.last_read_ts });
         const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
         // obligations: true — this is the live rail (ADR 225). A routed acceptance belongs on it and
         // costs nothing here; the wake rail keeps its ADR 191 policy gate by NOT passing this.

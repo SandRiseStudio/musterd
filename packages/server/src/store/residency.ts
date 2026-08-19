@@ -22,12 +22,12 @@ import { MusterdError } from '../errors.js';
 import { appendAudit } from './audit.js';
 import { getCursor } from './cursors.js';
 import { openDirectedLedger } from './delivery.js';
+import { listInterruptCandidates } from './interruptCandidates.js';
 import { getLane, listLanes } from './lanes.js';
 import { getMemberById } from './members.js';
 import { memoryEnvelope } from './memory.js';
 import {
   deferrals,
-  listInbox,
   listTeamMessages,
   pendingInterrupts,
   raisedDeferrals,
@@ -803,7 +803,9 @@ function dueCandidates(
 
   if (lanes.immediate || lanes.batched) {
     const cursor = getCursor(db, member.id);
-    const rows = listInbox(db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
+    // Only the shapes `pendingInterrupts` can use — the seat's unread depth is not this poll's
+    // business, and it is the last term that still grew with it.
+    const rows = listInterruptCandidates(db, member, { cursorTs: cursor.last_read_ts });
     const envelopes = rows.map((r) =>
       rowToEnvelope(
         r,
