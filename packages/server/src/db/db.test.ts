@@ -1,3 +1,6 @@
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { createTeam, getTeamBySlug } from '../store/teams.js';
@@ -373,5 +376,29 @@ describe('v41 — incident convergence (spec 2026-08-14)', () => {
       ]),
     );
     db.close();
+  });
+
+  it('an on-disk db and its WAL/SHM siblings are owner-only (0600), including pre-existing 644 files', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-db-mode-'));
+    const path = join(dir, 'musterd.db');
+    try {
+      // First open creates all three; each must come out 600.
+      let db = openDb(path);
+      db.prepare('CREATE TABLE IF NOT EXISTS t (x)').run();
+      db.close();
+      const mode = (p: string) => statSync(p).mode & 0o777;
+      expect(mode(path)).toBe(0o600);
+      // Simulate an existing install created before the fix: loosen, reopen, expect repair.
+      for (const suffix of ['', '-wal', '-shm']) {
+        if (existsSync(path + suffix)) chmodSync(path + suffix, 0o644);
+      }
+      db = openDb(path);
+      for (const suffix of ['', '-wal', '-shm']) {
+        if (existsSync(path + suffix)) expect(mode(path + suffix)).toBe(0o600);
+      }
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
