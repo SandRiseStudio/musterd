@@ -6893,6 +6893,27 @@ describe('goal outcome + ship nudge (value-layer design)', () => {
     expect(goals.json.goals[0].outcome.text).toBe('users can now X');
   });
 
+  it('POST /goals/retract withdraws the goal and a re-declaration revives it', async () => {
+    const nickTok = await setup();
+    await post('/teams/valyr/goals', { id: 'gr1', title: 'Scratch' }, nickTok);
+    const res = await post('/teams/valyr/goals/retract', { goal_id: 'gr1' }, nickTok);
+    expect(res.status).toBe(201);
+    expect(res.json.goal.retracted.by).toBe('nick');
+    const goals = await get('/teams/valyr/goals', nickTok);
+    expect(goals.json.goals[0].retracted.by).toBe('nick');
+    // Re-declaring the same id un-retracts — the signal fold, not a delete.
+    await post('/teams/valyr/goals', { id: 'gr1', title: 'Back on' }, nickTok);
+    const after = await get('/teams/valyr/goals', nickTok);
+    expect(after.json.goals[0].retracted).toBeUndefined();
+  });
+
+  it('POST /goals/retract for an undeclared goal returns goal: null (queued, not lost)', async () => {
+    const nickTok = await setup();
+    const res = await post('/teams/valyr/goals/retract', { goal_id: 'ghost' }, nickTok);
+    expect(res.status).toBe(201);
+    expect(res.json.goal).toBeNull();
+  });
+
   it('closing the last lane on a goal appends the ship nudge to the closer result only', async () => {
     const nickTok = await setup();
     await post('/teams/valyr/goals', { id: 'g2', title: 'G2' }, nickTok);

@@ -16,7 +16,8 @@ const USAGE =
   'usage:\n' +
   '  musterd goal declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>[,<id>…]]\n' +
   '  musterd goal outcome <id> "<what changed for a user>"\n' +
-  '  musterd goal list [--json]';
+  '  musterd goal retract <id>\n' +
+  '  musterd goal list [--json] [--all]';
 
 function renderGoal(g: Goal): string {
   const status =
@@ -34,7 +35,9 @@ function renderGoal(g: Goal): string {
   const deps = g.depends_on.length ? theme.meta(` deps:${g.depends_on.length}`) : '';
   // The plan epoch (ADR 111) — shown only once direction has changed, so a steady Goal stays quiet.
   const epoch = g.epoch > 0 ? theme.warn(` epoch:${g.epoch}`) : '';
-  return `${theme.meta(sym.goal)} ${theme.meta(g.id)} ${status} "${g.title}"${story}${wave}${deps}${epoch} ${theme.meta(`— declared by ${g.declared_by}`)}${outcome}`;
+  // goal-retract design: a withdrawn Goal renders only under --all, flagged with provenance.
+  const retracted = g.retracted ? theme.warn(` retracted by ${g.retracted.by}`) : '';
+  return `${theme.meta(sym.goal)} ${theme.meta(g.id)} ${status} "${g.title}"${story}${wave}${deps}${epoch}${retracted} ${theme.meta(`— declared by ${g.declared_by}`)}${outcome}`;
 }
 
 export async function goalCommand(parsed: Parsed): Promise<number> {
@@ -98,22 +101,49 @@ export async function goalCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
 
+  if (sub === 'retract') {
+    const id = parsed.positionals[1];
+    if (!id) throw new CliError(USAGE, 2);
+    const goal = await http.goalRetract(team, { goal_id: id });
+    process.stdout.write(
+      goal
+        ? success('goal retracted') + '\n' + renderGoal(goal) + '\n'
+        : success('goal retracted') +
+            '\n' +
+            theme.meta('goal not yet declared — the signal is queued until it is') +
+            '\n',
+    );
+    return 0;
+  }
+
   if (sub === 'list') {
-    const { goals } = await http.goals(team);
+    const { goals: allGoals } = await http.goals(team);
+    // goal-retract design: withdrawn Goals hide by default; --all shows them, and the footer
+    // counts them so a hidden Goal is never silently gone (the ADR 257 silent-delete scar).
+    const showAll = Boolean(parsed.flags['all']);
+    const retractedCount = allGoals.filter((g) => g.retracted !== undefined).length;
+    const goals = showAll ? allGoals : allGoals.filter((g) => g.retracted === undefined);
     if (parsed.flags['json']) {
       process.stdout.write(JSON.stringify(goals) + '\n');
       return 0;
     }
     if (goals.length === 0) {
       process.stdout.write(
-        theme.meta(
-          'no declared goals yet — the board is clear. `musterd goal declare "<title>" --goal-id <id>`',
-        ) + '\n',
+        retractedCount > 0
+          ? theme.meta(`no live goals — (${retractedCount} retracted — \`--all\` shows them)`) +
+              '\n'
+          : theme.meta(
+              'no declared goals yet — the board is clear. `musterd goal declare "<title>" --goal-id <id>`',
+            ) + '\n',
       );
       return 0;
     }
     process.stdout.write(heading('goals') + '\n');
     for (const g of goals) process.stdout.write(renderGoal(g) + '\n');
+    if (!showAll && retractedCount > 0)
+      process.stdout.write(
+        theme.meta(`(${retractedCount} retracted — \`--all\` shows them)`) + '\n',
+      );
     return 0;
   }
 

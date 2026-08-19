@@ -36,6 +36,7 @@ export const TOOL_NAMES = [
   'team_next',
   'team_goal_declare',
   'team_goal_outcome',
+  'team_goal_retract',
   'team_goals',
   'team_report',
 ] as const;

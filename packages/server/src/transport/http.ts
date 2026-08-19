@@ -32,6 +32,7 @@ import {
   UpdateLaneSchema,
   DeclareGoalSchema,
   PostGoalOutcomeSchema,
+  PostGoalRetractSchema,
   ActorAttestationSchema,
   GateCheckRequestSchema,
   AskTierSchema,
@@ -2821,6 +2822,27 @@ export async function handleHttp(
         });
         routeEnvelope(ctx, team, member, env);
         // Pre-declaration notes are queued by the replay, not lost — `goal: null` says so honestly.
+        const goal = listGoals(ctx.db, team.id, team.slug).find((g) => g.id === body.goal_id);
+        return sendJson(res, 201, { goal: goal ?? null });
+      }
+
+      // goal-retract design: withdraw a Goal from the board — an ordinary `message` act carrying
+      // `meta.goal_retract`, folded on read. Never a row deletion (ADR 048's bet): declaration and
+      // retraction both stay in the append-only log, and a later re-declaration un-retracts.
+      if (method === 'POST' && rest === '/goals/retract') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(PostGoalRetractSchema, await readJson(req));
+        const env = makeEnvelope({
+          id: ulid(),
+          team: team.slug,
+          from: member.name,
+          to: { kind: 'team' },
+          act: 'message',
+          body: `[goal] retracted — ${body.goal_id}`,
+          meta: { goal_retract: { goal_id: body.goal_id } },
+        });
+        routeEnvelope(ctx, team, member, env);
+        // Pre-declaration retractions queue in the replay, not lost — `goal: null` says so honestly.
         const goal = listGoals(ctx.db, team.id, team.slug).find((g) => g.id === body.goal_id);
         return sendJson(res, 201, { goal: goal ?? null });
       }

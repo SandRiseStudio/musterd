@@ -315,3 +315,30 @@ describe('goalFilter', () => {
     expect(goalFilter(lanes, 'g1').map((l) => l.id)).toEqual(['a']);
   });
 });
+
+describe('buildGoalGrid — retracted goals (goal-retract design)', () => {
+  it('a retracted goal renders no card and no shipped-shelf entry', () => {
+    const goals = [
+      goal({ id: 'live', title: 'Live goal' }),
+      goal({ id: 'gone', title: 'Withdrawn goal', retracted: { by: 'dolly', at: 5 } }),
+      goal({
+        id: 'gone-shipped',
+        title: 'Withdrawn shipped',
+        status: 'shipped',
+        retracted: { by: 'dolly', at: 6 },
+      }),
+    ];
+    const model = buildGoalGrid([], goals, NOW);
+    expect(model.cards.map((c) => c.title)).toEqual(['Live goal']);
+    expect(model.shippedShelf).toEqual([]);
+  });
+
+  it('lanes on a retracted goal do not vanish — they fall to the undeclared-goal card', () => {
+    const goals = [goal({ id: 'gone', title: 'Withdrawn', retracted: { by: 'dolly', at: 5 } })];
+    const lanes = [lane({ id: 'L9', goal_id: 'gone', state: 'active' })];
+    const model = buildGoalGrid(lanes, goals, NOW);
+    expect(model.cards).toHaveLength(1);
+    expect(model.cards[0]!.id).toBe('gone');
+    expect(model.cards[0]!.declared).toBe(false);
+  });
+});

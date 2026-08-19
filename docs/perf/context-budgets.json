@@ -2,12 +2,12 @@
   "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context — tools/list render, primer, hook nudges, including the due-gated label nudge — measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
   "items": {
     "toolsListDefaultBytes": {
-      "budget": 15852,
-      "justification": "2026-08-12 (15097 B, +team_goal_outcome tool + claim-time goal_id on lane_claim — value layer ADR 258, epoch 11) + 5% headroom"
+      "budget": 16646,
+      "justification": "2026-08-19 (15853 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 281) + 5% headroom"
     },
     "toolsListMutedBytes": {
-      "budget": 4694,
-      "justification": "baseline 2026-08-03 (4470 B) + 5% headroom"
+      "budget": 5531,
+      "justification": "2026-08-19 (5268 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 281; the goals tools render in the muted surface too) + 5% headroom"
     },
     "primerBytes": {
       "budget": 2665,
@@ -30,8 +30,8 @@
       "justification": "2026-08-12 (15287 B, +team_goal_outcome tool + claim-time goal_id on lane_claim — value layer ADR 258) + 5% headroom"
     },
     "perSessionTotalBytes": {
-      "budget": 18522,
-      "justification": "2026-08-12 (17640 B, +ADR 254 eligible sets: `to` accepts an array, which costs an anyOf branch in the team_send schema — structural — plus one clause teaching it) + 5% headroom. The sibling toolsList/perTurn items were re-baselined by ADR 256 in the same window and already had room; this one did not and was the only raise eligible sets needed."
+      "budget": 20064,
+      "justification": "2026-08-19 (19109 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 281) + 5% headroom. perTurnTotalBytes still fit under its 2026-08-12 budget (8 B headroom) and per the minimal-raise precedent (ADR 254 note) was not raised."
     }
   }
 }

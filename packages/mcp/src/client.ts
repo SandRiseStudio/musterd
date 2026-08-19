@@ -456,6 +456,11 @@ export class MusterdClient {
     return this.request('POST', `/teams/${this.config.team}/goals/outcome`, body);
   }
 
+  /** Retract a Goal (goal-retract design). `goal: null` = not yet declared (signal queued). */
+  goalRetract(body: { goal_id: string }): Promise<{ goal: Goal | null }> {
+    return this.request('POST', `/teams/${this.config.team}/goals/retract`, body);
+  }
+
   /** The insight report (ADR 050/084) — one server-side projection. */
   report(): Promise<Report> {
     return this.request('GET', `/teams/${this.config.team}/report`);

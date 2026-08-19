@@ -236,6 +236,10 @@ export function buildGoalGrid(
   for (const w of warnings) {
     if (w.kind === 'stale_acceptance' && !stale.has(w.subject)) stale.set(w.subject, w.detail);
   }
+  // goal-retract design: a withdrawn Goal renders no card and no shelf entry. Its lanes are NOT
+  // dropped — with the id gone from declaredIds they fall to the undeclared-goal card, so work
+  // attached to a retracted goal stays visible (the ADR 257 silent-delete scar).
+  const visibleGoals = goals.filter((g) => g.retracted === undefined);
   const active = lanes.filter((l) => l.state !== 'abandoned');
   const doneLanes = active.filter((l) => l.state === 'done' && l.resolved_at !== null);
   const latest = doneLanes.reduce<Lane | null>(
@@ -244,7 +248,8 @@ export function buildGoalGrid(
   );
   const pulse = latest ? { title: latest.title, at: latest.resolved_at! } : null;
 
-  // No declared goals: the grid has nothing to lead with — the route falls back to columns.
+  // No declared goals AT ALL: the grid has nothing to lead with — the route falls back to columns.
+  // (All-retracted is different: the grid still builds, so lanes on retracted goals stay visible.)
   if (goals.length === 0) return { cards: [], shippedShelf: [], pulse };
 
   const byGoal = new Map<string | null, Lane[]>();
@@ -257,7 +262,7 @@ export function buildGoalGrid(
 
   const cards: GoalCardModel[] = [];
   const shippedShelf: ShippedGoal[] = [];
-  for (const g of [...goals].sort(compareGoals)) {
+  for (const g of [...visibleGoals].sort(compareGoals)) {
     const owned = byGoal.get(g.id) ?? [];
     byGoal.delete(g.id);
     if (g.status === 'shipped') {
@@ -266,7 +271,7 @@ export function buildGoalGrid(
     }
     cards.push(buildCard(g.id, g.title, true, g, owned, now, stale));
   }
-  const declaredIds = new Set(goals.map((g) => g.id));
+  const declaredIds = new Set(visibleGoals.map((g) => g.id));
   for (const [id, orphans] of byGoal) {
     if (id === null || declaredIds.has(id)) continue;
     cards.push(buildCard(id, id, false, null, orphans, now, stale));
