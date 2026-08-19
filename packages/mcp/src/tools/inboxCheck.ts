@@ -39,9 +39,10 @@ export interface InboxCheckPlan {
  * What went wrong without it: the caller kept the newest `limit` of the unread set and then marked
  * the NEWEST message read. The cursor is a single `last_read_ts` watermark (`store/cursors.ts`), so
  * one call moved it past every older unread the slice had just discarded. Those messages were never
- * displayed and could never be unread again — the reader's only remaining route to them was the
- * audit log. Measured 2026-08-19: in its busiest 4-hour window every seat on this team could see
- * 163-186 messages against a default limit of 50.
+ * displayed and were never unread again. They are not destroyed — `unread_only: false` still
+ * returns them — but a seat cannot go looking for a message whose existence it has no reason to
+ * suspect, and `unread_only` defaults to true. Measured 2026-08-19: in its busiest 4-hour window
+ * every seat on this team could see 163-186 messages against a default limit of 50.
  *
  * Newest-first is deliberately preserved — a seat that checks once a turn must not be handed the
  * stalest 50 and told the urgent ask is behind them. So the trade is made in the other direction:

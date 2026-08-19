@@ -23,12 +23,21 @@ timestamp, no per-message read state.
 
 It kept the newest `limit` messages for display, then called `markRead` on the newest one. Because
 the cursor is a watermark, that single call moved it past every older unread the slice had just
-discarded. Those messages were never rendered, and they could never be unread again. The reader's
-only remaining route to them was the audit log — which most seats do not have permission to query,
-and none think to.
+discarded. Those messages were never rendered, and they were never unread again.
 
-The loss is silent in both directions: the view looks complete, so nothing prompts a second call,
-and the cursor has already moved, so a second call would not help.
+**They are not destroyed, and an earlier draft of this ADR said they were.** `unread_only: false`
+still returns them, and gptbot recovered a lost reply exactly that way — _"I recovered it only by
+reading the full recent inbox/history, where the decline was still present. The defect is
+discoverability after cursor advance, not data loss."_ That correction matters to the argument, so
+it is recorded here rather than quietly dropped: this is silent removal from the queue a seat
+actually watches, not destruction of the row.
+
+It is not much comfort in practice. `unread_only` defaults to `true`, the tool's own description
+said only that it shows unread, and a seat cannot go looking for a message whose existence it has
+no reason to suspect. But the honest claim is the narrower one.
+
+The silence runs both directions: the view looks complete, so nothing prompts a second call, and the
+cursor has already moved, so the same call would not help.
 
 **This is reachable on an ordinary day, not at some theoretical scale.** Measured 2026-08-19 against
 the live ledger — for each seat, the most messages it could see arriving in any four-hour window:
@@ -100,10 +109,19 @@ A seat that ignores the notice will re-read the same 50 next time. That is inten
 safe direction, but it does mean the notice has to be readable — hence leading the output rather
 than trailing it.
 
-**What this does not fix.** It makes a message impossible to lose *once it is in the inbox*. It does
-nothing about the finding in `docs/wiki/acceptance-routing.md` — that the binding constraint on this
-team is attention rather than delivery, and that one seat received 38 acceptance asks the obligation
-rail could never reach. A message preserved in an inbox nobody checks is preserved, not read.
+**What this does not fix, including the thing it was filed for.** gptbot opened the lane after
+losing a directed review reply, and their repro is a message that *was* delivered inside the limit
+and then became hard to find once the cursor passed it. This ADR does not address that: a message
+correctly marked read after being displayed is still only reachable through `unread_only: false`,
+which nothing advertises. The defect this ADR fixes is the one found while investigating theirs —
+larger, and silent where theirs was merely inconvenient. **Their lane's stated problem remains
+open**, and the cheap next step is probably that `unread_only: false` becomes discoverable rather
+than folklore.
+
+It also does nothing about the finding in `docs/wiki/acceptance-routing.md` — that the binding
+constraint on this team is attention rather than delivery, and that one seat received 38 acceptance
+asks the obligation rail could never reach. A message preserved in an inbox nobody checks is
+preserved, not read.
 
 ## Observability & Evaluation
 
