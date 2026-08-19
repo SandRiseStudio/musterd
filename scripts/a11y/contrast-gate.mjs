@@ -295,6 +295,15 @@ const sceneRoutes = new Set(['/office-preview']);
  * its end state, and stops. The subject is kept and the motion is removed — deliberately NOT
  * `?quiet`, which skips the choreography and would leave the speech rows unmeasured, and those rows
  * are where the real failures on this route have been found.
+ *
+ * CONNECTED /live carries it too (ADR 285). That route was not obviously broken — it reports no
+ * MEASURED MID-FLIGHT and measures 228 rows — but it passes on luck rather than on stillness.
+ * Measured 2026-08-19: its longest quiet window across a 40s probe was 1029ms, because two 1Hz
+ * tickers never stop (the office Clock's digits, which re-mount per glyph, and the asks-strip
+ * countdown). It settles today only because the sweep's key set is class|ink|paper and therefore
+ * TEXT-BLIND, and because its two geometry snapshots 250ms apart usually fall between ticks. A
+ * verdict that depends on which 250ms the sampler chose is the same latent flake /office-preview
+ * had, one layer quieter — so it gets the same treatment before it starts costing merges.
  */
 const SCENE_STILL = '&still';
 
@@ -379,7 +388,7 @@ if (!process.argv.includes('--static-only')) {
     // same clock-dependence, same two-ended bracket. See SCENE_LIGHTS above.
     for (const light of SCENE_LIGHTS) {
       report(
-        await sweep(`${base}/live?team=${team}&light=${light}`),
+        await sweep(`${base}/live?team=${team}&light=${light}${SCENE_STILL}`),
         `/live (connected, light=${light})`,
         12,
       );
