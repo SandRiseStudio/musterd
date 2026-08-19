@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { workspaceSrcAliases } from './tests/setup/workspace-src-aliases.ts';
+import { TEST_TIMEOUT_MS } from './vitest.shared.ts';
 
 export default defineConfig({
   // Workspace imports resolve to src, never to gitignored dist/ — a stale dist must not be able to
@@ -23,21 +24,9 @@ export default defineConfig({
     ],
     environment: 'node',
     pool: 'forks',
-    // Vitest's 5s default assumes unit tests. Much of this suite is not: it boots real daemons over
-    // real sockets, builds real git repos, and spawns real CLIs. With `pool: 'forks'` those run one
-    // worker per CPU, so on a memory-constrained machine they starve each other — measured on the
-    // dogfood box (8 CPUs, 8 GB, swap 87% full): tests needing 341–562ms idle blew the 5s ceiling at
-    // 5.1–6.1s, roughly a 10x slowdown, and the suite reported 302s of "collect" inside a 157s wall
-    // time. Four different tests failed across two runs, never the same one twice, and two seats each
-    // spent time proving the red suite was not theirs.
-    //
-    // A timeout exists to catch a HANG. None of these hang — they are starved, so the 5s ceiling was
-    // firing on contention and calling it failure. 30s keeps that catch (a real hang still surfaces
-    // inside one suite run) while absorbing the measured starvation with room over it. This is NOT a
-    // licence to paper over a slow test: if something genuinely needs more than a second of real work,
-    // that is worth knowing. The sibling fix in #482 went the other way for exactly that reason — a
-    // fixed 80ms sleep there was a real clock-vs-condition race, and raising it would have been wrong.
-    testTimeout: 30_000,
+    // The timeout and its measured rationale live in vitest.shared.ts, so every package config
+    // gets the same number — a value tuned only here reached `pnpm test` and nothing else.
+    testTimeout: TEST_TIMEOUT_MS,
     // NO_COLOR pins picocolors OFF in tests so render assertions (plain `▌`/lengths) are deterministic
     // regardless of the runner — CI sets `CI=1`, which otherwise makes picocolors emit ANSI and breaks
     // the row/clip render tests. Production color is unaffected (test-env only). See ADR 106.
