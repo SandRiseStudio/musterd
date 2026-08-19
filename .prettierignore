@@ -7,3 +7,14 @@ docs/assets
 # packages/web carries its own toolchain (TanStack Start + Vite) and is excluded from the
 # root Node config — see eslint.config.js / vitest.config.ts. Same rationale for prettier.
 packages/web
+
+# Prose is not Prettier's (ADR 284). docs/ is the decision spine — ADRs freeze on acceptance and
+# wiki claims carry dates and falsifiers, so a reflow rewrites blame for arguments nobody edited.
+# scripts/format-scope.ts is the contract; these lines are the backstop, governing the invocations
+# it cannot see: a bare `npx prettier --write .`, an editor's format-on-save, a future script.
+docs/
+README.md
+ROADMAP.md
+npm-reserve/
+packaging/
+.cursor/

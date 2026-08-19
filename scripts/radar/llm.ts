@@ -65,7 +65,9 @@ export async function completeAnthropic(args: LlmCompleteArgs): Promise<LlmCompl
       text,
       model: data.model ?? args.model,
       ...(data.usage?.input_tokens !== undefined ? { inputTokens: data.usage.input_tokens } : {}),
-      ...(data.usage?.output_tokens !== undefined ? { outputTokens: data.usage.output_tokens } : {}),
+      ...(data.usage?.output_tokens !== undefined
+        ? { outputTokens: data.usage.output_tokens }
+        : {}),
     };
   } finally {
     clearTimeout(timer);

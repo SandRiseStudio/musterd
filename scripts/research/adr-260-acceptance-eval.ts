@@ -65,9 +65,10 @@ interface Submit {
 function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 'musterd.db')) {
   const db = new DatabaseSync(dbPath, { readOnly: true });
   const rows = (action: string) =>
-    db
-      .prepare('select ts, detail from audit where action = ? order by ts')
-      .all(action) as { ts: number; detail: string }[];
+    db.prepare('select ts, detail from audit where action = ? order by ts').all(action) as {
+      ts: number;
+      detail: string;
+    }[];
   const closes = new Map<string, { ts: number; d: ClosedDetail }[]>();
   for (const r of rows('lane.closed')) {
     const d = JSON.parse(r.detail) as ClosedDetail;
@@ -76,7 +77,9 @@ function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 
   }
   const seatFamily = new Map<string, string>();
   for (const r of db
-    .prepare("select actor, detail from audit where action = 'occupancy.model_attested' order by ts")
+    .prepare(
+      "select actor, detail from audit where action = 'occupancy.model_attested' order by ts",
+    )
     .all() as { actor: string; detail: string }[]) {
     const j = JSON.parse(r.detail) as { new?: string };
     if (r.actor && j.new) seatFamily.set(r.actor, familyOf(j.new));
@@ -152,9 +155,7 @@ export function evaluate(name: string, rs: Submit[]): WindowResult {
   for (const r of lr) reviewers.set(r.d.reviewer!, (reviewers.get(r.d.reviewer!) ?? 0) + 1);
   const top = [...reviewers.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
 
-  const spanDays = rs.length
-    ? Math.max((rs[rs.length - 1]!.ts - rs[0]!.ts) / 86_400_000, 1e-9)
-    : 1;
+  const spanDays = rs.length ? Math.max((rs[rs.length - 1]!.ts - rs[0]!.ts) / 86_400_000, 1e-9) : 1;
 
   return {
     name,
@@ -191,7 +192,9 @@ function wakeVolume(db: DatabaseSync, lo: number, hi: number) {
   // leases-per-act ran 2.7 (baseline) → 5.2 (post-#785). Reporting leases alone is what let this
   // Eval's item 5 claim a 5x rise that was mostly the same handful of acts failing to settle.
   const leaseRows = db
-    .prepare("select detail from audit where action = 'residency.wake_leased' and ts >= ? and ts < ?")
+    .prepare(
+      "select detail from audit where action = 'residency.wake_leased' and ts >= ? and ts < ?",
+    )
     .all(lo, hi) as { detail: string }[];
   const actIds = new Set(
     leaseRows.map((r) => {
@@ -434,9 +437,14 @@ export function concentration(
       boundarySeat,
       periods: [
         describe('all history (context only)', rows),
-        describe('trailing 14d (context only — straddles the 08-12 regime change)',
-          rows.filter((r) => r.ts >= now - 14 * 86_400_000)),
-        describe('trailing 7d — THE BEFORE ARM', rows.filter((r) => r.ts >= now - LOOKBACK_MS)),
+        describe(
+          'trailing 14d (context only — straddles the 08-12 regime change)',
+          rows.filter((r) => r.ts >= now - 14 * 86_400_000),
+        ),
+        describe(
+          'trailing 7d — THE BEFORE ARM',
+          rows.filter((r) => r.ts >= now - LOOKBACK_MS),
+        ),
       ],
     };
   }
@@ -448,7 +456,10 @@ export function concentration(
         'BEFORE (7d up to the boundary)',
         rows.filter((r) => r.ts < boundary! && r.ts >= boundary! - LOOKBACK_MS),
       ),
-      describe('AFTER', rows.filter((r) => r.ts >= boundary!)),
+      describe(
+        'AFTER',
+        rows.filter((r) => r.ts >= boundary!),
+      ),
     ],
   };
 }
@@ -467,7 +478,11 @@ export function concentration(
  *       the sort. A FAIL is the informative outcome and must be recorded as a disproof.
  * INCONCLUSIVE: fewer than 20 submits after the boundary, or the second seat never accepts.
  */
-export const CONCENTRATION_PREDICTION = { passAtOrBelow: 0.4, failAtOrAbove: 0.5, minN: 20 } as const;
+export const CONCENTRATION_PREDICTION = {
+  passAtOrBelow: 0.4,
+  failAtOrAbove: 0.5,
+  minN: 20,
+} as const;
 
 export function judgeConcentration(after: ConcentrationPeriod): 'PASS' | 'FAIL' | 'INCONCLUSIVE' {
   if (after.n < CONCENTRATION_PREDICTION.minN) return 'INCONCLUSIVE';
@@ -571,7 +586,10 @@ export function rerun(
       .all('policy.change', lo, now) as { ts: number }[]
   ).map((r) => r.ts);
   const guard = windowGuard(policyChanges, routingCommitsSince(lo, now, run), lo, now);
-  const r = evaluate(`re-run, last ${windowDays}d`, submits.filter((s) => s.ts >= lo && s.ts < now));
+  const r = evaluate(
+    `re-run, last ${windowDays}d`,
+    submits.filter((s) => s.ts >= lo && s.ts < now),
+  );
   const share = r.liveRouted ? (r.topReviewer?.[1] ?? 0) / r.liveRouted : 0;
   const head =
     `ADR 260 re-run, ${windowDays}d to ${new Date(now).toISOString().slice(0, 10)}: ` +
@@ -652,7 +670,10 @@ async function rerunMain() {
   const windowDays = daysArg > -1 ? Number(process.argv[daysArg + 1]) : 7;
   const { execFileSync } = await import('node:child_process');
   const run = (args: string[]) =>
-    execFileSync('git', args, { cwd: new URL('../..', import.meta.url).pathname, encoding: 'utf8' });
+    execFileSync('git', args, {
+      cwd: new URL('../..', import.meta.url).pathname,
+      encoding: 'utf8',
+    });
   const { verdict, body } = rerun(Date.now(), windowDays, db, submits, run);
   const text = `[${verdict}] ${body}`;
   console.log(text);
