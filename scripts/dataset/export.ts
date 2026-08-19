@@ -11,18 +11,22 @@
  * (seat/`topic` refs re-identify the HMAC; merged pr/sha already ride allowlisted meta). `project`
  * tokens that match a seat name are HMAC'd. It uploads nothing. It refuses the live
  * `~/.musterd/musterd.db` unless `--from-live` (ADR 280: do not export from the only copy). A private
- * pseudonym map is written only under `--map`, and never inside `--out`.
+ * pseudonym map is written only under `--map`, and never inside `--out`. It writes `README.md` from
+ * `card.md` (aggregates only) and copies the pinned manifest into `--out` so the folder is
+ * self-describing without the git repo.
  *
  *   pnpm dataset:export -- --db <snapshot.db> --out <dir> --authorized-by <human> \
  *                          [--manifest scripts/dataset/manifest.v1.json] [--map <private.json>]
  */
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_MANIFEST_PATH = 'scripts/dataset/manifest.v1.json';
+export const PUBLIC_MANIFEST_NAME = 'manifest.v1.json';
+export const DEFAULT_CARD_PATH = resolve(dirname(fileURLToPath(import.meta.url)), 'card.md');
 
 const STRUCTURAL_META_KEYS = new Set([
   'model',
@@ -161,6 +165,37 @@ function writeJsonl(path: string, rows: unknown[]): void {
   writeFileSync(path, rows.length > 0 ? `${body}\n` : '');
 }
 
+function tally(values: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const v of values) {
+    out[v] = (out[v] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** Markdown bullet list, highest count first. Aggregates only — never interpolate seat names. */
+export function histogramLines(counts: Record<string, number>): string {
+  const rows = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  if (rows.length === 0) return '_none_';
+  return rows.map(([k, n]) => `- \`${k}\`: ${n}`).join('\n');
+}
+
+export function utcDay(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+export function fillCard(template: string, vars: Record<string, string>): string {
+  let out = template;
+  for (const [key, value] of Object.entries(vars)) {
+    out = out.replaceAll(`{{${key}}}`, value);
+  }
+  const leftover = out.match(/\{\{[a-z_]+\}\}/g);
+  if (leftover !== null) {
+    throw new Error(`unfilled card placeholder: ${leftover.join(', ')}`);
+  }
+  return out;
+}
+
 export function exportDataset(opts: ExportOptions): ExportResult {
   if (opts.authorizedBy.trim().length === 0) {
     throw new Error(
@@ -260,7 +295,29 @@ export function exportDataset(opts: ExportOptions): ExportResult {
   writeJsonl(resolve(opts.outDir, 'members.jsonl'), memberRecords);
   writeJsonl(resolve(opts.outDir, 'lanes.jsonl'), laneRecords);
 
-  const manifestSha = createHash('sha256').update(readFileSync(opts.manifestPath)).digest('hex');
+  const publicManifest = resolve(opts.outDir, PUBLIC_MANIFEST_NAME);
+  if (resolve(opts.manifestPath) !== publicManifest) {
+    copyFileSync(opts.manifestPath, publicManifest);
+  }
+  const manifestSha = createHash('sha256').update(readFileSync(publicManifest)).digest('hex');
+
+  const timestamps = actRecords.map((a) => a.ts);
+  const tsStart = timestamps.length > 0 ? utcDay(Math.min(...timestamps)) : 'n/a';
+  const tsEnd = timestamps.length > 0 ? utcDay(Math.max(...timestamps)) : 'n/a';
+  writeFileSync(
+    resolve(opts.outDir, 'README.md'),
+    fillCard(readFileSync(DEFAULT_CARD_PATH, 'utf8'), {
+      acts: String(actRecords.length),
+      members: String(memberRecords.length),
+      lanes: String(laneRecords.length),
+      ts_start: tsStart,
+      ts_end: tsEnd,
+      act_counts: histogramLines(tally(actRecords.map((a) => a.act))),
+      kind_counts: histogramLines(tally(memberRecords.map((m) => m.kind))),
+      to_kind_counts: histogramLines(tally(actRecords.map((a) => a.to.kind))),
+    }),
+  );
+
   writeFileSync(
     resolve(opts.outDir, 'RELEASE.json'),
     `${JSON.stringify(
@@ -271,7 +328,7 @@ export function exportDataset(opts: ExportOptions): ExportResult {
         authorized_by: opts.authorizedBy,
         authorized_at: new Date().toISOString(),
         salt_sha256: createHash('sha256').update(opts.salt).digest('hex'),
-        experiment_manifest: { path: opts.manifestPath, sha256: manifestSha },
+        experiment_manifest: { path: PUBLIC_MANIFEST_NAME, sha256: manifestSha },
         counts: {
           acts: actRecords.length,
           members: memberRecords.length,
