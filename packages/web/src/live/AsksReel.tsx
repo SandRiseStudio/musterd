@@ -82,13 +82,21 @@ export function AsksReel({
       className={`bc-reel${loud.length > 0 ? ' bc-reel--loud' : ''}`}
       aria-label="asks and approvals"
     >
-      {/* The eyebrow row — the same shape as the floor card's "ON THE FLOOR" head: mono label,
-          counts pushed right, the amber hairline underneath. The card announces WHAT it is here so
-          the ask line below can be nothing but the ask. */}
-      <header className="bc-reel__head">
+      {/* One line, /live's rail shape (nick, 2026-08-19: the eyebrow-header version spent two rows
+          of stage on what /live says in one). The bell is the announcement, the rotating slot is the
+          content, and the counts + rotation dots hold the right edge — nothing stacks. */}
+      <div className="bc-reel__line">
         <BellIcon />
-        <span className="bc-reel__label">Asks &amp; approvals</span>
-        <span className="bc-reel__spacer" />
+        {shown === null ? (
+          <div className="bc-reel__row bc-reel__row--quiet">
+            <b>asks &amp; approvals</b>
+            <span className="bc-reel__verb">nothing waiting</span>
+          </div>
+        ) : shown.kind === 'ask' ? (
+          <ShownAsk shown={shown.ask!} idx={idx} now={now} />
+        ) : (
+          <ShownReview shown={shown.review!} idx={idx} />
+        )}
         {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
         {reviews.length > 0 && <span className="bc-reel__meta">{reviews.length} in review</span>}
         {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
@@ -101,14 +109,7 @@ export function AsksReel({
             })}
           </span>
         )}
-      </header>
-      {shown === null ? (
-        <div className="bc-reel__row bc-reel__row--quiet">nothing waiting</div>
-      ) : shown.kind === 'ask' ? (
-        <ShownAsk shown={shown.ask!} idx={idx} now={now} />
-      ) : (
-        <ShownReview shown={shown.review!} idx={idx} />
-      )}
+      </div>
       {capacity.degraded && (
         <div className="bc-reel__ladder">
           No live acceptor

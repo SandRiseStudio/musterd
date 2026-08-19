@@ -57,10 +57,11 @@
 /* ─── the asks reel (ADR 228) ─────────────────────────────────────────────
    The floor card's sibling, not a page banner. First version shipped as a full-bleed washed-out
    bar and nick called it on the live stream — the fix is structural: the reel inherits the
-   scene-chrome paper set and the workstack frame (gradient, rim, sheen, drop), announces itself
-   with the same mono eyebrow the floor card uses, and caps its width instead of spanning the
-   stage. Type runs ~1.5× /live's rail so it survives the 720p encode (the reason this is not
-   simply .lc-asks reused). */
+   scene-chrome paper set and the workstack frame (gradient, rim, sheen, drop). The second cut grew
+   a mono eyebrow header over the ask line and nick called that too (2026-08-19: two rows of stage
+   for what /live says in one) — so the reel is now a single line, /live's rail shape: bell, the
+   rotating ask, counts and rotation dots on the right edge. Type still runs ~1.5× /live's rail so
+   it survives the 720p encode (the reason this is not simply .lc-asks reused). */
 
 /* The slot spans the room, inset by one gutter each side — the same edge the floor card sits on,
    so the two read as opposite corners of one frame rather than two floating objects. The first cut
@@ -83,7 +84,7 @@
   --lc-paper-sheen: rgba(255, 252, 245, 0.55);
   display: flex;
   flex-direction: column;
-  padding: 10px 14px 12px;
+  padding: 8px 14px;
   border-radius: 14px;
   color: var(--lc-paper-ink);
   background: linear-gradient(
@@ -117,14 +118,12 @@
   }
 }
 
-/* Eyebrow row — the floor card's head, at stream scale. */
-.bc-reel__head {
+/* The line — everything on one row: bell, the rotating slot (grows), counts + dots (pinned). */
+.bc-reel__line {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 2px 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--lc-accent) 22%, transparent);
-  margin-bottom: 9px;
+  gap: 12px;
+  min-width: 0;
   white-space: nowrap;
 }
 .bc-reel__bell {
@@ -141,14 +140,6 @@
   animation: lc-asks-ring 2.4s ease-in-out infinite;
   transform-origin: 50% 22%;
 }
-.bc-reel__label {
-  font-family: var(--font-mono, monospace);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #8a6508;
-}
 .bc-reel__meta {
   flex: none;
   font-family: var(--font-mono, monospace);
@@ -157,9 +148,6 @@
 }
 .bc-reel__meta--dim {
   opacity: 0.6;
-}
-.bc-reel__spacer {
-  flex: 1;
 }
 .bc-reel__dots {
   display: flex;
@@ -177,8 +165,10 @@
   background: var(--lc-accent);
 }
 
-/* The ask line — one strict line, everything nowrap, only the gist gives ground. */
+/* The rotating slot — one strict line, everything nowrap, only the gist gives ground. It grows;
+   the counts and dots to its right are flex: none, so the right edge never moves on rotation. */
 .bc-reel__row {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 11px;
@@ -193,6 +183,9 @@
 .bc-reel__row--quiet {
   color: var(--lc-paper-dim);
   font-size: 16px;
+}
+.bc-reel__row--quiet b {
+  font-weight: 680;
 }
 .bc-reel__who {
   width: 27px;
