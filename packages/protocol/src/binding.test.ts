@@ -1,51 +1,120 @@
 import { describe, expect, it } from 'vitest';
 import { BindingSchema, WorkspaceSpecSchema } from './binding.js';
 
-describe('WorkspaceSpec / Binding schemas', () => {
+describe('WorkspaceSpec / Binding schemas (strict version 2, ADR 281)', () => {
   const spec = {
+    version: 2 as const,
     server: 'http://localhost:4849',
     team: 'bravo',
-    surface: 'claude-code' as const,
     claim: { mode: 'seat' as const, name: 'Sonnet' },
   };
 
-  it('WorkspaceSpec accepts the secret-free launch fields', () => {
-    const parsed = WorkspaceSpecSchema.parse(spec);
-    expect(parsed.team).toBe('bravo');
-    expect(parsed.claim).toEqual({ mode: 'seat', name: 'Sonnet' });
-  });
-
-  it('WorkspaceSpec strips any secret fields — the file can never carry a key/grant', () => {
-    // zod object schemas drop unknown keys, so a spec object built from a Binding is secret-free.
-    const parsed = WorkspaceSpecSchema.parse({
-      ...spec,
-      agent_key: 'mskey_should_be_dropped',
-      grant: 'msgr_should_be_dropped',
-    }) as Record<string, unknown>;
-    expect(parsed['agent_key']).toBeUndefined();
-    expect(parsed['grant']).toBeUndefined();
-  });
-
-  it('Binding is the spec plus the optional secrets, and still parses a keyless spec', () => {
-    const full = BindingSchema.parse({ ...spec, agent_key: 'mskey_x', grant: 'msgr_y' });
-    expect(full.agent_key).toBe('mskey_x');
-    expect(full.grant).toBe('msgr_y');
-    // A binding with no secrets (e.g. the committed spec loaded as a Binding) is valid.
-    expect(BindingSchema.parse(spec).agent_key).toBeUndefined();
-  });
-
-  it('the captured session round-trips on Binding and is STRIPPED from WorkspaceSpec (never committed)', () => {
-    const session = {
+  const binding = {
+    ...spec,
+    agent_key: 'mskey_x',
+    grant: 'msgr_y',
+    model: 'claude-opus-4-8',
+    capabilities: {
+      is_admin: false,
+      can_flag_urgent: false,
+      can_observe: true,
+      can_message: 'team' as const,
+      visibility_level: 'team' as const,
+      tool_allowlist: [],
+      declared_resource_scopes: [],
+    },
+    session: {
       harness: 'claude-code',
       id: 'sid-1',
       transcript_path: '/w/.claude/t.jsonl',
       started_at: 1,
+    },
+    model_observed: {
+      model: 'claude-opus-4-8',
+      harness: 'claude-code',
+      observed_at: 1784911286433,
+    },
+    autojoin: true,
+    driver: 'nick',
+  };
+
+  it('WorkspaceSpec parses the exact version-2 fixture', () => {
+    const parsed = WorkspaceSpecSchema.parse(spec);
+    expect(parsed.version).toBe(2);
+    expect(parsed.team).toBe('bravo');
+    expect(parsed.claim).toEqual({ mode: 'seat', name: 'Sonnet' });
+  });
+
+  it('Binding parses the exact version-2 fixture with every runtime field', () => {
+    const parsed = BindingSchema.parse(binding);
+    expect(parsed.agent_key).toBe('mskey_x');
+    expect(parsed.grant).toBe('msgr_y');
+    expect(parsed.model).toBe('claude-opus-4-8');
+    expect(parsed.capabilities?.can_message).toBe('team');
+    expect(parsed.session?.id).toBe('sid-1');
+    expect(parsed.model_observed?.observed_at).toBe(1784911286433);
+    expect(parsed.autojoin).toBe(true);
+    expect(parsed.driver).toBe('nick');
+    // A binding with no secrets (e.g. a chat/human folder) is still valid.
+    expect(BindingSchema.parse(spec).agent_key).toBeUndefined();
+  });
+
+  it('rejects the version-1 shape — no version field at all', () => {
+    const v1 = {
+      server: 'http://localhost:4849',
+      team: 'bravo',
+      surface: 'claude-code',
+      claim: { mode: 'seat', name: 'Sonnet' },
     };
-    const full = BindingSchema.parse({ ...spec, session });
-    expect(full.session).toEqual(session);
-    // The committable workspace.json can structurally never carry a session id or transcript path.
-    const committed = WorkspaceSpecSchema.parse({ ...spec, session }) as Record<string, unknown>;
-    expect(committed['session']).toBeUndefined();
+    expect(WorkspaceSpecSchema.safeParse(v1).success).toBe(false);
+    expect(BindingSchema.safeParse(v1).success).toBe(false);
+  });
+
+  it('rejects an explicit version: 1', () => {
+    expect(WorkspaceSpecSchema.safeParse({ ...spec, version: 1 }).success).toBe(false);
+    expect(BindingSchema.safeParse({ ...binding, version: 1 }).success).toBe(false);
+  });
+
+  it('rejects `surface` — identity no longer carries a Surface (ADR 281)', () => {
+    expect(WorkspaceSpecSchema.safeParse({ ...spec, surface: 'claude-code' }).success).toBe(false);
+    expect(BindingSchema.safeParse({ ...binding, surface: 'claude-code' }).success).toBe(false);
+  });
+
+  it('rejects unknown keys instead of silently stripping them', () => {
+    expect(WorkspaceSpecSchema.safeParse({ ...spec, extra: true }).success).toBe(false);
+    expect(BindingSchema.safeParse({ ...binding, extra: true }).success).toBe(false);
+    // The old strip-to-commit path is gone: a spec built from a Binding must be constructed
+    // field-by-field, never by parsing the binding through the spec schema.
+    expect(WorkspaceSpecSchema.safeParse({ ...spec, agent_key: 'mskey_leak' }).success).toBe(false);
+    expect(WorkspaceSpecSchema.safeParse({ ...spec, session: binding.session }).success).toBe(false);
+  });
+
+  it('rejects malformed runtime fields', () => {
+    expect(
+      BindingSchema.safeParse({ ...binding, session: { ...binding.session, started_at: 'now' } })
+        .success,
+    ).toBe(false);
+    expect(BindingSchema.safeParse({ ...binding, model: 'x'.repeat(121) }).success).toBe(false);
+    expect(BindingSchema.safeParse({ ...binding, driver: '' }).success).toBe(false);
+    expect(
+      BindingSchema.safeParse({
+        ...binding,
+        model_observed: { model: 'm', harness: '', observed_at: 1 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects fractional integer fields — the #508 unreadable-binding class', () => {
+    expect(
+      BindingSchema.safeParse({ ...binding, session: { ...binding.session, started_at: 1.5 } })
+        .success,
+    ).toBe(false);
+    expect(
+      BindingSchema.safeParse({
+        ...binding,
+        model_observed: { ...binding.model_observed, observed_at: 1784911286433.7 },
+      }).success,
+    ).toBe(false);
   });
 
   describe('model_observed', () => {
@@ -60,7 +129,7 @@ describe('WorkspaceSpec / Binding schemas', () => {
       expect(full.model_observed).toEqual(observation);
     });
 
-    it('is optional — an existing binding without it still parses', () => {
+    it('is optional — a binding without it still parses', () => {
       expect(BindingSchema.parse(spec).model_observed).toBeUndefined();
     });
 
@@ -74,12 +143,10 @@ describe('WorkspaceSpec / Binding schemas', () => {
       expect(full.model_observed?.model).toBe('claude-opus-4-8');
     });
 
-    it('is STRIPPED from WorkspaceSpec — an observation is per-machine, never committed', () => {
-      const committed = WorkspaceSpecSchema.parse({
-        ...spec,
-        model_observed: observation,
-      }) as Record<string, unknown>;
-      expect(committed['model_observed']).toBeUndefined();
+    it('is REJECTED by WorkspaceSpec — an observation is per-machine, never committed', () => {
+      expect(WorkspaceSpecSchema.safeParse({ ...spec, model_observed: observation }).success).toBe(
+        false,
+      );
     });
   });
 });

@@ -3,6 +3,7 @@ export * from './feature-epoch.js';
 export * from './acts.js';
 export * from './ask.js';
 export * from './binding.js';
+export * from './provisioning.js';
 export * from './codexHooks.js';
 export * from './continuity.js';
 export * from './capabilities.js';
