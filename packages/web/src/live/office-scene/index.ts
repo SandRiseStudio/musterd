@@ -9,6 +9,7 @@ import {
   shortLaneState,
   shortWorkTitle,
 } from '../presenceLabel';
+import { stillMode } from '../stillMode';
 import { createActors, type Actors } from './actors';
 import {
   ambientFrameBudgetMs,
@@ -111,31 +112,31 @@ function pstNowHours(): number {
 }
 
 /**
- * `?still` — MEASUREMENT MODE: the room keeps what it is showing instead of moving on.
+ * `?still` — MEASUREMENT MODE. Two things in this file answer to it, and they are different sizes.
  *
- * A speech bubble dismisses itself after `SPEECH_HOLD_MS + 22ms/char` (capped at 6–9s). That is
- * right for a reader and fatal for a measurement: the a11y contrast sweep settles, freezes rAF and
- * shoots one screenshot, and that window straddles the dismiss countdown — so the same commit
- * measures a different room run to run, and a bubble caught mid-fade is sampled over whatever scene
- * paint is behind it rather than over its own paper. Measured 2026-08-17: /office-preview flipped
- * red about 1 run in 3, always an `lc-speech__text` row, on #3b5854 / #2d4245 / #724b29 — three
- * different bits of furniture, one bubble.
+ * THE BUBBLE HOLD. A speech bubble dismisses itself after `SPEECH_HOLD_MS + 22ms/char` (capped at
+ * 6–9s). That is right for a reader and fatal for a measurement: the a11y contrast sweep settles,
+ * freezes rAF and shoots one screenshot, and that window straddles the dismiss countdown — so the
+ * same commit measures a different room run to run, and a bubble caught mid-fade is sampled over
+ * whatever scene paint is behind it rather than over its own paper. Measured 2026-08-17:
+ * /office-preview flipped red about 1 run in 3, always an `lc-speech__text` row, on #3b5854 /
+ * #2d4245 / #724b29 — three different bits of furniture, one bubble.
  *
- * Six exclusion guards were added to the sweep one incident at a time to infer this from outside.
- * They stay as backstops, but the page is the thing that knows a bubble is transient, so the page
- * says so.
+ * THE AMBIENT HOLD (added 2026-08-19, ADR 283). The idle-beat scheduler injects a stroll or a
+ * micro-gesture every 30–70s, forever. It already stands down under reduced motion — but
+ * /office-preview mounts this scene with `reduced: false` hardcoded, so on the route the contrast
+ * gate leans on hardest it keeps running: an identity-keeping motion probe watched a room sit
+ * perfectly still for 115 seconds and then start walking again at 137s. One re-arming timer is
+ * enough to make a page that never settles, and the sweep then reports MEASURED MID-FLIGHT on every
+ * run — a true signal that decays into noise precisely because it is always on.
  *
- * Held bubbles are the ONLY change: nothing is hidden, nothing is repositioned, and the room still
- * paints exactly what it would otherwise paint — so the sweep measures the real component in its
- * real state, just one that stops. Inert unless explicitly present, like `?light=HH` above.
+ * The room still paints what it would otherwise paint: nothing is hidden, nothing is repositioned,
+ * and the script's own walks are untouched (they drain in ~22s, and they are the subject). What
+ * stops is the room MOVING ON of its own accord. Inert unless explicitly present, like `?light=HH`.
+ *
+ * The flag itself is read by `../stillMode`, shared with the overlay reel and the asks-strip so the
+ * four consumers cannot drift apart on what `?still` means.
  */
-function stillMode(): boolean {
-  try {
-    return new URLSearchParams(window.location.search).has('still');
-  } catch {
-    return false; /* no window/search available (SSR, tests) — the room behaves normally */
-  }
-}
 
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
  * it's superseded (a newer act from the same member) or the office is disposed. */
@@ -1118,7 +1119,11 @@ export function mountOffice(
     return !actors.active() && cues.length === 0 && !(lastActive > 0 && performance.now() - lastActive < AFTERGLOW_MS);
   }
   function scheduleAmbient() {
-    if (reduced || disposed) return;
+    /* `STILL` sits beside `reduced` rather than inside `fireAmbient`: the point is that no timer is
+       left ARMED, not merely that the beat is skipped when it lands. A scheduler that keeps
+       re-arming and declining still re-enters the page's timer set, and the next reader wonders why
+       a "held" room has a pending callback. Same reason `disposed` is checked here. */
+    if (reduced || disposed || STILL) return;
     if (ambientTimer) clearTimeout(ambientTimer);
     const delay = AMBIENT_MIN_MS + Math.random() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS);
     ambientTimer = setTimeout(fireAmbient, delay);

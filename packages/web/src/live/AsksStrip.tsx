@@ -14,6 +14,7 @@ import {
   type AudienceContext,
 } from './asks';
 import { sendAct, type LiveConfig } from './client';
+import { stillMode } from './stillMode';
 import { initial, memberAvatar, kindOf } from './format';
 import { scrollToMessage } from './Stream';
 
@@ -105,12 +106,19 @@ export function AsksStrip({
 
   // A 1s tick while any clock is running, so the countdowns are honest. Stops when nothing is loud —
   // idle cost is paid by every viewer, forever (packages/web/AGENTS.md).
+  //
+  // Held under `?still` (ADR 283). A countdown is the purest case the flag exists for: the text
+  // "4m 12s" is a row the contrast sweep measures, and re-rendering it every second re-widens the
+  // row and moves whatever sits after it — so the page never settles, and the number the gate
+  // reports is a frame. The card keeps whatever value it had at mount, which is exactly what a
+  // reader sees at any instant; it simply stops counting down while being photographed.
+  const still = stillMode();
   const [, setTick] = useState(0);
   useEffect(() => {
-    if (loud.length === 0) return;
+    if (loud.length === 0 || still) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [loud.length]);
+  }, [loud.length, still]);
 
   // Waiting-on-YOU count in the tab title — loud even when the tab isn't front. Counts only asks
   // this browser's identity could answer (yours + team-pool): titling the tab "(10 asks)" for ten

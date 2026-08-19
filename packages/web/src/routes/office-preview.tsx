@@ -5,6 +5,7 @@ import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { memberColor } from '../live/format';
 import { OfficeOverlay } from '../live/OfficeOverlay';
+import { isStill } from '../live/stillMode';
 import type { RoomEntry } from '../live/workingOn';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../live/office-scene';
 
@@ -339,8 +340,17 @@ function OfficePreviewPage() {
          *
          * Same shape as `?light=HH` above: a dev aid, inert unless explicitly present.
          */
-        const still = search.has('still');
+        /* Via the shared reader, so this route and the three components that also honour the flag
+           (the scene's ambient scheduler, the overlay reel, the asks-strip) cannot drift apart on
+           what `?still` means — ADR 283. `search` above still serves `?quiet` and `?light`. */
+        const still = isStill(window.location.search);
         if (still) {
+          /* Every event at mount, as #880 wrote it. TESTED AND KEPT, 2026-08-19: the alternative —
+             the script's own 6.7s timeline, played once with no loop — was measured on the theory
+             that seven simultaneous walks contend for the floor and take longer to drain. They do
+             not. Quiescence was 21.6s bursting and 22.5s staggered, i.e. the room takes ~22s to
+             finish its choreography either way and the burst is not what makes it long. Recorded so
+             the next person does not re-run the experiment. */
           for (const step of SCRIPT) handleRef.current?.emit(step.ev);
         } else if (!quiet) {
           const run = () => {

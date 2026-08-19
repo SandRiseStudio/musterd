@@ -520,7 +520,22 @@ const PAPER_SIG = /* js */ `
 const SETTLE_MIN = Number(process.env.A11Y_SETTLE_MIN ?? 4000);
 const SETTLE_STEP = Number(process.env.A11Y_SETTLE_STEP ?? 400);
 const SETTLE_WINDOW = Number(process.env.A11Y_SETTLE_WINDOW ?? 2500);
-const SETTLE_CAP = Number(process.env.A11Y_SETTLE_CAP ?? 20000);
+/**
+ * How long to wait for the page to stop changing before measuring it anyway and saying so.
+ *
+ * 30s, not 20s (2026-08-19, ADR 283). The cap has to exceed the longest CHOREOGRAPHY on any route
+ * being measured, or the sweep gives up on a page that was about to settle and reports MEASURED
+ * MID-FLIGHT about a room that does in fact stop. /office-preview under `?still` reaches quiescence
+ * at ~22s — measured with an identity-keeping motion probe, and unchanged whether the script is
+ * emitted as one burst at mount or staggered over its own 6.7s timeline, so it is the choreography's
+ * length and not the emit shape. At 20s the gate missed it by under two seconds and lit the marker
+ * on every single run.
+ *
+ * Raising it is close to free, which is the part worth knowing: a page that settles returns the
+ * instant it settles, so this number is only ever PAID by a page that never settles at all. The cost
+ * is 10 extra seconds on a route that was going to be reported mid-flight anyway.
+ */
+const SETTLE_CAP = Number(process.env.A11Y_SETTLE_CAP ?? 30000);
 /** The beat between the two stillness snapshots — long enough for a walk step to show, short enough
     to be worth paying twice per run. */
 const GEOM_STEP = Number(process.env.A11Y_GEOM_STEP ?? 250);
