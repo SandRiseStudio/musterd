@@ -78,6 +78,10 @@ replacement.
   repaired, and never a silent fallback.
 - A one-time confirmed local repair brings a selected existing harness onto the new launcher
   contract; subsequent `wire` and launches remain non-interactive.
+- **Rollout.** When this runtime break ships, every existing external registration using the retired
+  marker refuses Presence attachment until its worktree's human runs `musterd harness configure` and
+  confirms the selected harnesses. Roll out after that explicit per-worktree repair is available;
+  do not rely on musterd messaging from an already affected registration to coordinate it.
 - A process crash during reconciliation leaves a reclaimable lock and a recoverable journal rather
   than a permanent local deadlock.
 - Local writer defects fail before publication, so strict readers receive either the prior valid
