@@ -56,6 +56,7 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
   return {
     name,
     kind: 'agent',
+    service: false,
     presence: 'online',
     activity,
     posture: activity === 'working' ? 'working' : 'idle',

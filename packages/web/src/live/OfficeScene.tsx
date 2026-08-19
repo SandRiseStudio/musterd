@@ -38,6 +38,7 @@ function computeData(
       return {
         name: m.name,
         kind,
+        service: m.kind === 'service',
         presence: m.presence,
         activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle'),
         posture: memberPosture(m),

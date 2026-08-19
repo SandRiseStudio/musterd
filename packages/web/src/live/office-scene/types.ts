@@ -12,6 +12,13 @@ export type Dir = 'S' | 'E' | 'N' | 'W';
 export interface OfficeNode {
   name: string;
   kind: 'agent' | 'human';
+  /**
+   * A `kind: 'service'` roster seat (ADR 232 — autorefresh, guardian). Pure code: no model, no
+   * harness attestation. The BODY stays an agent (`kind` above is the drawing decision), but the
+   * nameplate must say "service" rather than render the unknown-provider "?" — a ledger seat with
+   * a question mark reads as a broken attestation, not as what it is.
+   */
+  service: boolean;
   presence: 'online' | 'away' | 'offline';
   activity: 'offline' | 'idle' | 'working';
   /**

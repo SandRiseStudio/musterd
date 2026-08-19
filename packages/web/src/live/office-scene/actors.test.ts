@@ -9,6 +9,7 @@ function node(name: string, presence: OfficeNode['presence'] = 'online'): Office
   return {
     name,
     kind: 'human',
+    service: false,
     presence,
     activity: 'working',
     posture: presence === 'online' ? 'working' : presence,

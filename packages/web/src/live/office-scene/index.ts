@@ -542,13 +542,23 @@ export function mountOffice(
         plateRule.setAttribute('aria-hidden', 'true');
         plate.appendChild(plateRule);
 
-        const provider = modelProvider(node.model);
-        const icon = document.createElement('span');
-        icon.className = 'lc-gl-label__provider';
-        icon.style.borderColor = provider.border;
-        icon.style.background = provider.fill;
-        icon.innerHTML = providerIconHtml(provider);
-        plate.appendChild(icon);
+        if (node.service) {
+          // A service seat has no model to attest (ADR 232 — it is pure code), so the provider
+          // slot would render the unknown-"?" mark and read as a broken attestation. Say what it
+          // is instead: a small mono "service" tag where the icon would sit.
+          const tag = document.createElement('span');
+          tag.className = 'lc-gl-label__service';
+          tag.textContent = 'service';
+          plate.appendChild(tag);
+        } else {
+          const provider = modelProvider(node.model);
+          const icon = document.createElement('span');
+          icon.className = 'lc-gl-label__provider';
+          icon.style.borderColor = provider.border;
+          icon.style.background = provider.fill;
+          icon.innerHTML = providerIconHtml(provider);
+          plate.appendChild(icon);
+        }
 
         // The detail is a two-part nest on purpose: the outer element is the animating *track* (a
         // 0fr→1fr grid column, which is the only way to slide open to a width nobody knows in
@@ -557,13 +567,17 @@ export function mountOffice(
         detail.className = 'lc-gl-label__detail';
         const detailIn = document.createElement('span');
         detailIn.className = 'lc-gl-label__detailin';
+        // Services carry no model: the tag above already says what they are, so the expanded
+        // detail is harness · role only, and broadcast (model crumb only) shows nothing extra.
         const detailParts = interactiveLabels
           ? plateDetailParts({
               surface: node.surface,
-              model: node.model,
+              model: node.service ? null : node.model,
               role: node.role,
             })
-          : plateDetailParts({ model: node.model }).filter((p) => p.kind === 'model');
+          : plateDetailParts({ model: node.service ? null : node.model }).filter(
+              (p) => p.kind === 'model',
+            );
         for (const [i, part] of detailParts.entries()) {
           if (i > 0) {
             const divider = document.createElement('span');

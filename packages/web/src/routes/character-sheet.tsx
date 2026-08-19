@@ -95,6 +95,7 @@ function CharacterSheet() {
             const node = {
               name,
               kind,
+              service: false,
               presence: 'online' as const,
               activity: 'working' as const,
               posture: 'working' as const,
