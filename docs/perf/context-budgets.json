@@ -3,11 +3,11 @@
   "items": {
     "toolsListDefaultBytes": {
       "budget": 16646,
-      "justification": "2026-08-19 (15853 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 281) + 5% headroom"
+      "justification": "2026-08-19 (15853 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 288) + 5% headroom"
     },
     "toolsListMutedBytes": {
       "budget": 5531,
-      "justification": "2026-08-19 (5268 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 281; the goals tools render in the muted surface too) + 5% headroom"
+      "justification": "2026-08-19 (5268 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 288; the goals tools render in the muted surface too) + 5% headroom"
     },
     "primerBytes": {
       "budget": 2665,
@@ -31,7 +31,7 @@
     },
     "perSessionTotalBytes": {
       "budget": 20064,
-      "justification": "2026-08-19 (19109 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 281) + 5% headroom. perTurnTotalBytes still fit under its 2026-08-12 budget (8 B headroom) and per the minimal-raise precedent (ADR 254 note) was not raised."
+      "justification": "2026-08-19 (19109 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 288) + 5% headroom. perTurnTotalBytes still fit under its 2026-08-12 budget (8 B headroom) and per the minimal-raise precedent (ADR 254 note) was not raised."
     }
   }
 }
