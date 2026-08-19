@@ -114,10 +114,12 @@ export function localSessionLiveness(
 ): LocalSessionLiveness {
   const slot = slotLiveness(workspace, now);
   // The host names a harness from the enrollment registry, which beats an old capture whose
-  // harness is stale. CLI readers that have no registry retain the binding's surface/capture as
-  // the selection evidence. Unknown harnesses preserve the historical Claude fallback rather than
-  // treating an unavailable scanner as proof that a workspace is idle.
-  const selectedHarness = harness ?? slot.session?.harness ?? findBinding(workspace, {})?.surface;
+  // harness is stale. CLI readers that have no registry retain the capture as the selection
+  // evidence — the binding's captured session, since identity declares no surface (ADR 281).
+  // Unknown harnesses preserve the historical Claude fallback rather than treating an
+  // unavailable scanner as proof that a workspace is idle.
+  const selectedHarness =
+    harness ?? slot.session?.harness ?? findBinding(workspace, {})?.session?.harness;
   const selected =
     enumerate ??
     (selectedHarness === 'codex'

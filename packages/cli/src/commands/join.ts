@@ -65,10 +65,10 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
   saveConfig(config);
   // Auto-bind the joining folder so it's immediately *active* here (ADR 036).
   const binding: Binding = {
+    version: 2,
     server,
     team: slug,
     agent_key: key,
-    surface: surface as Binding['surface'],
     claim: { mode: 'seat', name: seat },
     ...(grant !== undefined ? { grant } : {}),
   };

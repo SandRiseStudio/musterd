@@ -687,10 +687,10 @@ export async function runInit(): Promise<number> {
   const driver = config.current ? config.identities[config.current]?.name?.trim() : undefined;
 
   const binding = {
+    version: 2 as const,
     server,
     team,
     agent_key: agentKey,
-    surface: chosen.surface,
     claim: { mode: 'seat' as const, name },
     ...(model !== undefined ? { model } : {}),
     ...(autojoin ? { autojoin: true } : {}),
@@ -714,9 +714,9 @@ export async function runInit(): Promise<number> {
   // stays out of it; the machine supplies it.
   try {
     saveWorkspaceSpec(process.cwd(), {
+      version: 2,
       server,
       team,
-      surface: chosen.surface,
       claim: { mode: 'seat', name },
     });
     p.log.info(

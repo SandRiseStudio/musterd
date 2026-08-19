@@ -1,6 +1,7 @@
 import { type Binding, bindingSeat, type ClaimPolicy } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { findBinding, findWorkspaceSpec, loadConfig, saveBinding } from '../config.js';
+import { readProvisionManifest } from '../onboard/manifest.js';
 import { CliError } from '../errors.js';
 import type { Harness } from '../onboard/harness.js';
 import { claudeCode } from '../onboard/harnesses/claudeCode.js';
@@ -38,22 +39,24 @@ import { theme } from '../render/theme.js';
  * Every harness already implements the idempotent, promptless `configure` this needs; nothing but the
  * hard-coded list stood between them and a working repair.
  *
- * The folder's *declared* surface decides, not what happens to be installed on the machine: wire
+ * The folder's *provisioned* harness decides, not what happens to be installed on the machine: wire
  * repairs the entry this folder was provisioned with, and never conjures a first install for a
  * harness the folder never picked (that is `init`'s job — the same line `refreshHooks.applies`
- * draws). `surface` is a Presence surface rather than a harness id, so legitimate values (`cli`,
- * `other`, or none at all in a spec written before the field existed) name no adapter; those degrade
- * to Claude Code, which is what wire did for every folder before this.
+ * draws). Since ADR 281 the identity files declare no surface; the provisioning manifest's harness
+ * id is the record of the choice. Undefined (a folder wired before manifests, or a Presence-only
+ * value) degrades to Claude Code, which is what wire did for every folder before this.
+ * INTERIM (Task 6 replaces this): the v2 desired SET will drive reconciliation; until then wire
+ * keeps its single-harness shape fed from the v1 manifest.
  */
-export function harnessWiredFor(surface: string | undefined): Harness {
-  // An undeclared surface must never *match* — `find` on an undefined needle would otherwise pair it
+export function harnessWiredFor(declared: string | undefined): Harness {
+  // An undeclared harness must never *match* — `find` on an undefined needle would otherwise pair it
   // with the first harness that happens to have no surface, which is a coincidence, not a decision.
-  return (surface ? HARNESSES.find((h) => h.surface === surface) : undefined) ?? claudeCode;
+  return (declared ? HARNESSES.find((h) => h.surface === declared) : undefined) ?? claudeCode;
 }
 
-/** Will `wire`, run in a folder declaring `surface`, rewrite this harness's entry? */
-export function wireConfigures(harnessId: string, surface: string | undefined): boolean {
-  return harnessWiredFor(surface).id === harnessId;
+/** Will `wire`, run in a folder that provisioned `declared`, rewrite this harness's entry? */
+export function wireConfigures(harnessId: string, declared: string | undefined): boolean {
+  return harnessWiredFor(declared).id === harnessId;
 }
 
 export async function wireCommand(parsed: Parsed): Promise<number> {
@@ -82,7 +85,6 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
   const agentBinding = {
     server,
     team,
-    surface: spec.surface,
     claim,
     ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
     ...(grant !== undefined ? { grant } : {}),
@@ -91,7 +93,7 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
   // state and goes into binding.json below, never into the repo-root-shared slot.
   const entry = buildEntry(agentBinding);
 
-  const harness = harnessWiredFor(spec.surface);
+  const harness = harnessWiredFor(readProvisionManifest(process.cwd())?.harness);
   let mcpError: string | null = null;
   try {
     // Every adapter writes for the CURRENT folder — `claude mcp add -s local` keys off cwd, and the
@@ -112,9 +114,9 @@ export async function wireCommand(parsed: Parsed): Promise<number> {
   // state like model — carry it forward the same way (ADR 165 inc 2).
   const bindingAutojoin = autojoin || prior?.autojoin === true;
   const binding: Binding = {
+    version: 2,
     server,
     team,
-    surface: spec.surface,
     claim,
     ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
     ...(grant !== undefined ? { grant } : {}),

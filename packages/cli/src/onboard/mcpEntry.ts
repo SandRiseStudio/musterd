@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type ClaimPolicy, type Surface } from '@musterd/protocol';
+import { type ClaimPolicy } from '@musterd/protocol';
 import { primaryCheckoutFor } from './entryGuard.js';
 
 /** A stdio MCP server entry: how a harness should launch the musterd adapter. */
@@ -18,7 +18,6 @@ export interface AgentBinding {
    *  Optional: a keyless folder (a chat/human folder, or a `wire`d clone whose machine has no key
    *  yet) omits it — the tools are still registered; claiming then needs a key or admin approval. */
   agent_key?: string;
-  surface: Surface;
   /** The seat/role this folder claims on launch. Persisted to `.musterd/binding.json` (the source of
    *  truth the adapter reads) — deliberately NOT emitted as `MUSTERD_CLAIM`; see {@link buildMcpEnv}. */
   claim: ClaimPolicy;

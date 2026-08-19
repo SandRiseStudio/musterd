@@ -12,7 +12,7 @@ import {
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
-import { findBinding, findWorkspaceSpec, loadConfig } from '../config.js';
+import { findBinding, loadConfig } from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -397,10 +397,10 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   // may still carry a baked `MUSTERD_CLAIM` that outranks it — the value-coherence check below.
   const binding = findBinding(cwd);
   const boundClaim = binding?.claim ? formatClaimPolicy(binding.claim) : undefined;
-  // Which harness `wire` would reach here follows the folder's DECLARED surface — the committed spec
-  // first (what wire itself reads), then the gitignored binding for a folder wired before the spec
-  // existed. Undefined degrades to the default, exactly as wire does.
-  const declaredSurface = findWorkspaceSpec(cwd)?.surface ?? binding?.surface;
+  // Which harness `wire` would reach here follows the folder's PROVISIONED harness — identity no
+  // longer declares a surface (ADR 281); the provisioning manifest is what records the choice.
+  // Undefined degrades to the default, exactly as wire does.
+  const declaredSurface = readProvisionManifest(cwd)?.harness;
   const drift: string[] = [];
   // Entry drift: the shared harness entry disagrees with this folder's binding.json. Tracked
   // separately from `drift` so `--fix` can route it to `musterd wire` (headless, whole-family)
@@ -608,22 +608,9 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
         `in the harness MCP entry, which provisioning no longer writes).`,
     );
   }
-  // The same tripwire, one field over. `surface` never got the observation path `model` did (ADR 158),
-  // so it is believed on the strength of a declaration alone — while labelling every presence row,
-  // audit entry and roster line as fact. A capture is the evidence the declaration lacks: hooks are
-  // harness-specific by construction, so a `claude-code` capture is proof Claude Code ran here.
-  // Measured across eleven seat worktrees 2026-08-03 — one disagreed, declaring `cursor` while both
-  // its session and its model observation were written by `claude-code`.
-  const ranHarness = binding?.session?.harness ?? binding?.model_observed?.harness;
-  if (ranHarness && binding?.surface && binding.surface !== ranHarness) {
-    drift.push(
-      `this workspace declares surface "${binding.surface}" but its session here was captured by ` +
-        `"${ranHarness}" — a ${ranHarness} hook only fires under ${ranHarness}, so the declaration is ` +
-        `the stale one, and it is what the roster, presence and audit report this seat is running. ` +
-        `Correct it in .musterd/binding.json (and check for a baked MUSTERD_SURFACE in the harness ` +
-        `MCP entry, which outranks the binding and which no observation can reach).`,
-    );
-  }
+  // The declared-surface-vs-captured-harness tripwire that used to live here is gone with the
+  // declaration itself: v2 identity carries no `surface` (ADR 281), so there is nothing left to
+  // contradict a capture. Runtime Surface now comes only from the launcher (ADR 286).
 
   const installed = harnesses.filter((h) => h.installed);
   const anyConfigured = installed.some((h) => h.configured);

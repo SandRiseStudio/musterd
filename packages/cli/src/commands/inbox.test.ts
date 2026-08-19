@@ -164,9 +164,9 @@ describe('inbox command', () => {
     writeFileSync(
       join(dir, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: serverUrl,
         team: 'dawn',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ada' },
         model: 'claude-declared-1',
         session: {

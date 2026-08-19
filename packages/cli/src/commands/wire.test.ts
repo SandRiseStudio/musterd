@@ -88,6 +88,23 @@ function writeConfig(agentKeys: Record<string, string>) {
 function readBinding() {
   return JSON.parse(readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8'));
 }
+/** Record which harness this folder was provisioned for (the v1 manifest wire dispatches on —
+ *  identity declares no surface since ADR 281; Task 6 moves wire onto the v2 desired set). */
+function writeManifest(harness: string) {
+  mkdirSync(join(cwd, BINDING_DIR), { recursive: true });
+  writeFileSync(
+    join(cwd, BINDING_DIR, 'provisioned.json'),
+    JSON.stringify({
+      version: 1,
+      role: '',
+      harness,
+      mcpServers: ['musterd'],
+      permissions: { allow: [], ask: [], deny: [] },
+      provisionedAt: '2026-08-01T00:00:00.000Z',
+    }),
+    'utf8',
+  );
+}
 async function run(argv: string[]) {
   const out: string[] = [];
   const errs: string[] = [];
@@ -98,9 +115,9 @@ async function run(argv: string[]) {
 }
 
 const SPEC = {
+  version: 2,
   server: 'http://localhost:4849',
   team: 'bravo',
-  surface: 'claude-code',
   claim: { mode: 'seat', name: 'Sonnet' },
 };
 
@@ -197,8 +214,9 @@ describe('musterd wire', () => {
   // therefore told a Codex seat with a baked MUSTERD_SURFACE to edit its config by hand, and the
   // drift re-flagged on every --check forever — a permanently-red check nobody can clear teaches
   // everyone to skim the ✗ block. The prescription is now derived from these same functions.
-  it('configures the harness this folder declares — a Codex folder gets Codex, not Claude Code', async () => {
-    writeSpec({ ...SPEC, surface: 'codex' });
+  it('configures the harness this folder provisioned — a Codex folder gets Codex, not Claude Code', async () => {
+    writeSpec(SPEC);
+    writeManifest('codex');
     writeConfig({ bravo: 'mskey_x' });
     const { code } = await run([]);
     expect(code).toBe(0);
@@ -209,17 +227,19 @@ describe('musterd wire', () => {
   });
 
   it('configures Cursor for a Cursor folder', async () => {
-    writeSpec({ ...SPEC, surface: 'cursor' });
+    writeSpec(SPEC);
+    writeManifest('cursor');
     writeConfig({ bravo: 'mskey_x' });
     await run([]);
     expect(h.configureCursor).toHaveBeenCalledTimes(1);
     expect(h.configure).not.toHaveBeenCalled();
   });
 
-  it('falls back to Claude Code when the declared surface names no harness (cli, other)', async () => {
-    // `surface` is a Presence surface, not a harness id: `cli` and `other` are legitimate values that
-    // no adapter answers to. Wire still has a job there — register the tools — so the default stands.
-    writeSpec({ ...SPEC, surface: 'cli' });
+  it('falls back to Claude Code when the provisioned harness names no adapter (cli, other)', async () => {
+    // Old manifests can carry Presence-surface-ish values no adapter answers to. Wire still has a
+    // job there — register the tools — so the default stands.
+    writeSpec(SPEC);
+    writeManifest('cli');
     writeConfig({ bravo: 'mskey_x' });
     await run([]);
     expect(h.configure).toHaveBeenCalledTimes(1);

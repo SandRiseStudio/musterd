@@ -85,7 +85,8 @@ function gather(flags: Record<string, string | boolean>) {
       identity: {
         name: boundSeat,
         key: binding.agent_key,
-        surface: binding.surface,
+        // A CLI act is intrinsically `cli` (ADR 286) — identity files no longer declare a surface.
+        surface: 'cli',
         ...(binding.grant !== undefined ? { grant: binding.grant } : {}),
       },
       source: 'binding',

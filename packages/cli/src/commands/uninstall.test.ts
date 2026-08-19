@@ -74,11 +74,11 @@ describe('uninstallCommand', () => {
     writeFileSync(
       join(cwd, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:4849',
         team: 'dawn',
-        member: 'Ada',
-        token: 'mskd_x',
-        surface: 'cursor',
+        agent_key: 'mskey_x',
+        claim: { mode: 'seat', name: 'Ada' },
       }),
     );
     writeFileSync(
@@ -101,8 +101,9 @@ describe('uninstallCommand', () => {
     expect(existsSync(join(cwd, '.musterd', 'binding.json'))).toBe(false);
   });
 
-  it('resolves the harness by the binding surface when there is no manifest', async () => {
-    // a configure-only folder (no role provisioned): just the musterd server + a binding
+  it('resolves the harness by the captured session when there is no manifest', async () => {
+    // a configure-only folder (no role provisioned): just the musterd server + a binding whose
+    // hook-captured session names the harness (identity declares no surface since ADR 281)
     mkdirSync(join(cwd, '.cursor'), { recursive: true });
     writeFileSync(
       join(cwd, '.cursor', 'mcp.json'),
@@ -112,11 +113,12 @@ describe('uninstallCommand', () => {
     writeFileSync(
       join(cwd, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:4849',
         team: 'dawn',
-        member: 'Ada',
-        token: 'mskd_x',
-        surface: 'cursor',
+        agent_key: 'mskey_x',
+        claim: { mode: 'seat', name: 'Ada' },
+        session: { harness: 'cursor', id: 'sid-1', started_at: 1 },
       }),
     );
 

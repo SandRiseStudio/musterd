@@ -93,7 +93,10 @@ src/
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp; buildMcpEnv returns {} — the repo-root-shared entry carries NO per-seat state, everything resolves from binding.json/workspace.json (ADR 158/165)
     entryGuard.ts     // foreignAdapterNote + siblingWorkspaces + isInside — inspection-path checks for an adapter launched from another seat's checkout (assertEntryIdentity removed by ADR 165: no secrets in the entry, nothing to compare)
-    manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
+    manifest.ts       // provision manifest read/write (ADR 030); loadProvisioning/saveProvisioning classify + publish the strict v2 desired-set manifest (ADR 281)
+    reconcile/context.ts // HarnessContext — explicit worktree/machine roots + injected fs/process/clock seams (ADR 282); memoryFs is the scenario-suite double
+    reconcile/store.ts   // canonical validated stores (ADR 282/286): LocalLoad classification, canonical JSON, atomic 0600+fsync+rename publish; ledger/journal/lock paths hash the containerKey
+    reconcile/lock.ts    // createHarnessLocks — 30s cross-process recoverable lease per containerKey; reclaim needs expiry + provably-dead PID/process-start identity, unknown liveness stays busy (ADR 282/286)
     guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
     pending.ts        // client-side pending-presence markers (ADR 033)
     permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact

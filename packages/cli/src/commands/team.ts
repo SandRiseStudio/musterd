@@ -559,10 +559,10 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   // while every other unbound folder stays read-only (ADR 036). The binding carries the folder's
   // claim secret (here the creator's credential) so resolveIdentity yields the admin here.
   const binding: Binding = {
+    version: 2,
     server,
     team: slug,
     agent_key: credential,
-    surface: 'cli',
     claim: { mode: 'seat', name },
   };
   saveBinding(process.cwd(), binding);

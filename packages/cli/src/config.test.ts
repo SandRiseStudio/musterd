@@ -11,7 +11,11 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   excludeCredentialFromGit,
+  findBinding,
+  findWorkspaceSpec,
+  loadBinding,
   loadConfig,
+  loadWorkspace,
   rememberIdentity,
   removeBinding,
   saveBinding,
@@ -32,10 +36,10 @@ describe('binding registry (ADR 020)', () => {
   });
 
   const binding = {
+    version: 2 as const,
     server: 'http://localhost:4849',
     team: 'dawn',
     agent_key: 'mskey_secret',
-    surface: 'claude-code' as const,
     claim: { mode: 'seat' as const, name: 'Ada' },
   };
 
@@ -43,7 +47,7 @@ describe('binding registry (ADR 020)', () => {
     saveBinding(dir, binding);
     const cfg = loadConfig();
     const ref = cfg.bindings[resolve(dir)];
-    expect(ref).toEqual({ team: 'dawn', seat: 'Ada', surface: 'claude-code' });
+    expect(ref).toEqual({ team: 'dawn', seat: 'Ada' });
     // The registry must never carry the agent key — secrets live only in the 0600 binding file.
     expect(JSON.stringify(cfg.bindings)).not.toContain('mskey_secret');
   });
@@ -238,9 +242,9 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
   afterEach(() => delete process.env['MUSTERD_CONFIG']);
 
   const base = {
+    version: 2 as const,
     server: 'http://s1',
     team: 'dawn',
-    surface: 'claude-code' as const,
     claim: { mode: 'seat' as const, name: 'scout' },
     agent_key: 'mskey_1',
   };
@@ -436,5 +440,121 @@ describe('excludeCredentialFromGit — a team home is never committable with its
     } finally {
       chmodSync(readonly, 0o700);
     }
+  });
+});
+
+/**
+ * The discriminated identity loaders (ADR 282): parse failures never collapse to `null` again.
+ * `legacy` is exactly the recognized version-1 shape (otherwise-valid, carrying `surface`, no
+ * `version`); everything else unparseable is `invalid`. The compat wrappers (`findBinding`,
+ * `findWorkspaceSpec`) keep mapping `missing` → null but THROW a repair diagnostic on both
+ * `legacy` and `invalid` — a broken or pre-281 workspace must say so, not go quiet (#508).
+ */
+describe('classified identity loads (ADR 281/282)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-load-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+  });
+  afterEach(() => delete process.env['MUSTERD_CONFIG']);
+
+  const v2spec = {
+    version: 2,
+    server: 'http://localhost:4849',
+    team: 'dawn',
+    claim: { mode: 'seat', name: 'Ada' },
+  };
+  const v1spec = {
+    server: 'http://localhost:4849',
+    team: 'dawn',
+    surface: 'claude-code',
+    claim: { mode: 'seat', name: 'Ada' },
+  };
+  const writeSpec = (value: unknown) => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'workspace.json'),
+      typeof value === 'string' ? value : JSON.stringify(value),
+    );
+  };
+  const writeBindingFile = (value: unknown) => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      typeof value === 'string' ? value : JSON.stringify(value),
+    );
+  };
+
+  it('absent → missing', () => {
+    expect(loadWorkspace(dir).kind).toBe('missing');
+    expect(loadBinding(dir).kind).toBe('missing');
+  });
+
+  it('current valid version → valid', () => {
+    writeSpec(v2spec);
+    writeBindingFile({ ...v2spec, agent_key: 'mskey_x' });
+    const spec = loadWorkspace(dir);
+    expect(spec.kind).toBe('valid');
+    const binding = loadBinding(dir);
+    expect(binding.kind).toBe('valid');
+    if (binding.kind === 'valid') expect(binding.value.agent_key).toBe('mskey_x');
+  });
+
+  it('the recognized version-1 shape → legacy', () => {
+    writeSpec(v1spec);
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x', model: 'claude-opus-4-8' });
+    expect(loadWorkspace(dir).kind).toBe('legacy');
+    expect(loadBinding(dir).kind).toBe('legacy');
+  });
+
+  it('unknown versions, invalid JSON, malformed values, unknown keys → invalid, never legacy', () => {
+    writeSpec({ ...v2spec, version: 3 });
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    writeSpec('{ not json');
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    writeSpec({ ...v2spec, team: 42 });
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    writeSpec({ ...v2spec, extra: true });
+    expect(loadWorkspace(dir).kind).toBe('invalid');
+    // v1-with-junk is NOT a recognized legacy shape when its values are malformed.
+    writeBindingFile({ ...v1spec, claim: { mode: 'nope' } });
+    expect(loadBinding(dir).kind).toBe('invalid');
+  });
+
+  it('invalid issues carry paths and messages, never contents or secrets', () => {
+    writeBindingFile({ ...v2spec, agent_key: 'mskey_super_secret', session: { harness: '', id: '', started_at: 1.5 } });
+    const got = loadBinding(dir);
+    expect(got.kind).toBe('invalid');
+    if (got.kind === 'invalid') {
+      expect(JSON.stringify(got.issues)).not.toContain('mskey_super_secret');
+    }
+  });
+
+  it('findBinding: missing → null; legacy and invalid → thrown repair diagnostic', () => {
+    expect(findBinding(dir, {})).toBeNull();
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    expect(() => findBinding(dir, {})).toThrow(/musterd harness configure/);
+    writeBindingFile('{ not json');
+    expect(() => findBinding(dir, {})).toThrow(/binding/);
+    try {
+      findBinding(dir, {});
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).not.toContain('mskey_x');
+    }
+  });
+
+  it('findWorkspaceSpec: missing → null; legacy → thrown repair naming configure', () => {
+    expect(findWorkspaceSpec(dir)).toBeNull();
+    writeSpec(v1spec);
+    expect(() => findWorkspaceSpec(dir)).toThrow(/musterd harness configure/);
+  });
+
+  it('saveBinding refuses to write the version-1 shape at all', () => {
+    expect(() =>
+      saveBinding(dir, { ...v1spec, agent_key: 'mskey_x' } as unknown as Parameters<
+        typeof saveBinding
+      >[1]),
+    ).toThrow();
   });
 });

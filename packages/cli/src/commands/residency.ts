@@ -265,7 +265,9 @@ async function onCommand(parsed: Parsed): Promise<number> {
   const { team, http } = resolve(parsed.flags);
   const seat = resolveSeat(parsed);
   const binding = findBinding();
-  const harness = flagStr(parsed.flags, 'harness') ?? binding?.surface;
+  // Identity declares no surface since ADR 281; the captured session's harness is the evidence-backed
+  // default (a claude-code hook only fires under claude-code). `--harness` stays the explicit choice.
+  const harness = flagStr(parsed.flags, 'harness') ?? binding?.session?.harness;
   if (!harness) {
     throw new CliError('no harness — pass --harness <class> (e.g. claude-code)', 2);
   }

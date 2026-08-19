@@ -650,7 +650,8 @@ describe('runInit — configures the harness that was chosen, not only Claude Co
       { env: Record<string, string> },
       { surface?: string },
     ];
-    expect(binding.surface).toBe('cursor');
+    // v2 identity carries no surface (ADR 281): the launcher provides it at runtime (ADR 286).
+    expect(binding.surface).toBeUndefined();
     // And it re-provisions FROM binding.json rather than re-baking the drift the doctor flagged —
     // otherwise "re-provision" would hand back the same MUSTERD_* snapshot it was meant to clear,
     // and the doctor would be prescribing a repair that reinstates the thing it complained about.

@@ -484,10 +484,10 @@ describe('resolve() identity alignment with the MCP adapter (ADR 018)', () => {
     );
     // But this workspace is bound to Ui — the CLI must resolve to Ui, not the global Api.
     const bindingPath = saveBinding(dir, {
+      version: 2,
       server: process.env['MUSTERD_SERVER']!,
       team: 'lab',
       agent_key: 'mskd_ui',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ui' },
     });
     process.env['MUSTERD_BINDING'] = bindingPath;
@@ -500,10 +500,10 @@ describe('resolve() identity alignment with the MCP adapter (ADR 018)', () => {
 
   it('MUSTERD_* env overrides the binding (same precedence as the MCP adapter)', () => {
     const bindingPath = saveBinding(dir, {
+      version: 2,
       server: process.env['MUSTERD_SERVER']!,
       team: 'lab',
       agent_key: 'mskd_ui',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ui' },
     });
     process.env['MUSTERD_BINDING'] = bindingPath;
@@ -774,9 +774,9 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
     const ws = mkdtempSync(join(tmpdir(), 'musterd-e2e-ws-'));
     try {
       saveBinding(ws, {
+        version: 2,
         server: process.env['MUSTERD_SERVER']!,
         team: 'dawn',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'scout' },
         agent_key: agentKey,
       });
@@ -832,9 +832,9 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
     const ws = mkdtempSync(join(tmpdir(), 'musterd-e2e-ws-'));
     try {
       saveBinding(ws, {
+        version: 2,
         server: process.env['MUSTERD_SERVER']!,
         team: 'dusk',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'rook' },
         agent_key: agentKey,
       });

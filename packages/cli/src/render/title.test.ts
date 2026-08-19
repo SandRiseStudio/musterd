@@ -26,9 +26,9 @@ function makeWorkspace(files: { binding?: object; spec?: object }): string {
 }
 
 const seatBinding = (name: string) => ({
+  version: 2,
   server: 'http://127.0.0.1:4849',
   team: 'revive',
-  surface: 'claude-code',
   claim: { mode: 'seat', name },
 });
 

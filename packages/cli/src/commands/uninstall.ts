@@ -34,10 +34,11 @@ export async function uninstallCommand(parsed: Parsed): Promise<number> {
   const localState = existsSync(bindingPath) || existsSync(manifestPath);
   const hasPrimer = classifyPrimerTarget(dir) === 'managed';
 
-  // Identify the harness whose config we'll unwind: prefer the manifest's record, then the binding's
-  // surface. Only fall back to the (slow) detect probe when there's evidence something is installed —
-  // a clean folder shouldn't pay for shelling out to every harness CLI.
-  let harness = harnessByIdOrSurface(manifest?.harness, binding?.surface);
+  // Identify the harness whose config we'll unwind: prefer the manifest's record, then the captured
+  // session's harness (identity declares no surface since ADR 281). Only fall back to the (slow)
+  // detect probe when there's evidence something is installed — a clean folder shouldn't pay for
+  // shelling out to every harness CLI.
+  let harness = harnessByIdOrSurface(manifest?.harness, binding?.session?.harness);
   if (!harness && (localState || hasPrimer)) harness = await firstConfigured();
 
   if (!harness && !localState && !hasPrimer) {

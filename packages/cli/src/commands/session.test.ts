@@ -31,9 +31,9 @@ describe('musterd session (capture)', () => {
   const savedBindingEnv = process.env['MUSTERD_BINDING'];
 
   const bindingOf = (over: Partial<Binding> = {}): Binding => ({
+    version: 2,
     server: 'http://127.0.0.1:1', // nothing listens — the attestation push must fail silently
     team: 'dawn',
-    surface: 'claude-code',
     claim: { mode: 'seat', name: 'scout' },
     agent_key: 'mskey_test',
     grant: 'msgr_standing',
@@ -383,7 +383,7 @@ describe('musterd session (capture)', () => {
 
   describe('observeCursorSession (ADR 198)', () => {
     it('stamps harness:cursor and observes model_id without a transcript', async () => {
-      writeBinding(wsA, bindingOf({ model: 'grok-4.5', surface: 'cursor' }));
+      writeBinding(wsA, bindingOf({ model: 'grok-4.5' }));
       const got = await observeCursorSession({
         session_id: 'conv-1',
         model_id: 'claude-opus-4-7',
@@ -485,7 +485,6 @@ describe('musterd session (capture)', () => {
       writeBinding(
         wsA,
         bindingOf({
-          surface: 'cursor',
           session: {
             harness: 'cursor',
             id: 'a3fb8a1c-desktop',
@@ -934,7 +933,6 @@ describe('musterd session (capture)', () => {
       writeBinding(
         wsA,
         bindingOf({
-          surface: 'cursor',
           session: {
             harness: 'cursor',
             id: 'a3fb8a1c-desktop',
@@ -983,9 +981,9 @@ describe('musterd session resolve-labels (ADR 160)', () => {
   const dirs: string[] = [];
 
   const spec = (name: string) => ({
+    version: 2,
     server: 'http://127.0.0.1:1',
     team: 'dawn',
-    surface: 'claude-code',
     claim: { mode: 'seat', name },
   });
 
@@ -1169,9 +1167,9 @@ describe('musterd session label-nudge (evidence-based due)', () => {
     writeFileSync(
       join(seatWs, '.musterd', 'workspace.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://127.0.0.1:1',
         team: 'dawn',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'miley' },
       }),
     );

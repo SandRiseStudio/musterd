@@ -144,10 +144,10 @@ export async function agentCommand(
   });
 
   const binding: Binding = {
+    version: 2,
     server: config.server,
     team,
     agent_key: agentKey,
-    surface: harness.surface,
     claim: { mode: 'seat', name },
     ...(grant !== undefined ? { grant } : {}),
     ...(model !== undefined ? { model } : {}),
@@ -173,9 +173,9 @@ export async function agentCommand(
   // Also write the secret-free committed launch spec (ADR: committed launch spec) so this worktree
   // self-wires via `musterd wire` on a fresh clone/machine — the key stays out of the committed file.
   saveWorkspaceSpec(ws.dir, {
+    version: 2,
     server: config.server,
     team,
-    surface: harness.surface,
     claim: { mode: 'seat', name },
   });
 
@@ -200,7 +200,6 @@ export async function agentCommand(
     server: config.server,
     team,
     agent_key: agentKey,
-    surface: harness.surface,
     claim: { mode: 'seat', name } as const,
     ...(grant !== undefined ? { grant } : {}),
   };

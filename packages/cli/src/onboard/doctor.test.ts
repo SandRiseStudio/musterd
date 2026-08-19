@@ -208,49 +208,15 @@ describe('inspectProvisioning', () => {
     expect(r.drift).toEqual([]);
   });
 
-  // The same tripwire one field over: `surface` never got `model`'s observation path, so it is
-  // believed on a declaration alone while labelling presence, audit and the roster as fact.
-  it('flags a declared surface contradicted by the harness that captured the session', async () => {
+  // The declared-surface tripwire is gone with the declaration itself (ADR 281): v2 identity
+  // carries no `surface`, so a capture has nothing left to contradict.
+  it('raises no surface drift — there is no declared surface left to contradict a capture', async () => {
     h.primer = 'managed';
     h.binding = {
       claim: { mode: 'seat', name: 'Miley' },
-      surface: 'cursor',
       session: { harness: 'claude-code', id: 's1', started_at: 1 },
     };
     h.harnesses = [harness('Claude Code', true, true)];
-    const r = await inspectProvisioning('/x');
-    const line = r.drift.find((d) => d.includes('surface'));
-    expect(line).toBeDefined();
-    expect(line).toContain('cursor'); // the stale declaration
-    expect(line).toContain('claude-code'); // what actually ran
-    expect(line).toContain('MUSTERD_SURFACE'); // the rung above the binding, where it can also hide
-  });
-
-  it('falls back to the model observation when no session was captured', async () => {
-    h.primer = 'managed';
-    h.binding = {
-      claim: { mode: 'seat', name: 'Miley' },
-      surface: 'cursor',
-      model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 1 },
-    };
-    h.harnesses = [harness('Claude Code', true, true)];
-    const r = await inspectProvisioning('/x');
-    expect(r.drift.find((d) => d.includes('surface'))).toBeDefined();
-  });
-
-  it('is quiet about surface when the capture agrees, or when nothing was ever captured', async () => {
-    h.primer = 'managed';
-    h.binding = {
-      claim: { mode: 'seat', name: 'Miley' },
-      surface: 'claude-code',
-      session: { harness: 'claude-code', id: 's1', started_at: 1 },
-    };
-    h.harnesses = [harness('Claude Code', true, true)];
-    expect((await inspectProvisioning('/x')).drift).toEqual([]);
-
-    // A declaration with no capture is not a contradiction. Codex has no hook path at all, so it
-    // lives here permanently — warning would fire forever on every Codex seat.
-    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'codex' };
     expect((await inspectProvisioning('/x')).drift).toEqual([]);
   });
 
@@ -413,6 +379,14 @@ describe('inspectProvisioning', () => {
       expect(r.repair).not.toBe('wire');
     });
 
+    // The folder's provisioning manifest is what records the harness choice now — v2 identity
+    // declares no surface (ADR 281), so wire (and the doctor's prescription) dispatch on it.
+    const codexFolder = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'musterd-doctor-codex-'));
+      writeProvisionManifest(dir, { role: '', harness: 'codex', mcpServers: [] });
+      return dir;
+    };
+
     // The lane this block was reopened for: a Codex seat whose `.codex/config.toml` baked
     // MUSTERD_SURFACE — a snapshot that outranks binding.json and that no observation can correct —
     // could only be told to hand-edit the file, because the prescription came off a hard-coded
@@ -420,10 +394,9 @@ describe('inspectProvisioning', () => {
     // detector finally has a repair with a safe form (ADR 168).
     it('prescribes wire for the Codex entry in a folder provisioned for Codex', async () => {
       h.primer = 'managed';
-      h.spec = { surface: 'codex' };
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
       h.harnesses = [harnessWithEntry('Codex', { registeredSurface: 'codex' }, 'folder', 'codex')];
-      const r = await inspectProvisioning('/x');
+      const r = await inspectProvisioning(codexFolder());
       const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'));
       expect(line).toMatch(/Run `musterd wire`/);
       expect(line).not.toContain('by hand');
@@ -433,7 +406,6 @@ describe('inspectProvisioning', () => {
 
     it('names the harness the folder is provisioned for when it cannot prescribe wire', async () => {
       h.primer = 'managed';
-      h.spec = { surface: 'codex' };
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
       // A stray Claude Code entry in a folder that declares Codex: wire will not touch it here, and
       // the correction has to say which entry wire *does* rewrite, or the reader has no next step.
@@ -441,7 +413,7 @@ describe('inspectProvisioning', () => {
         harnessWithEntry('Codex', {}, 'folder', 'codex'),
         harnessWithEntry('Claude Code', { registeredAgentKey: 'mskey_x' }, 'repo-shared'),
       ];
-      const r = await inspectProvisioning('/x');
+      const r = await inspectProvisioning(codexFolder());
       const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
       expect(line).toContain('does not rewrite');
       expect(line).toContain('provisioned for Codex');
@@ -456,7 +428,6 @@ describe('inspectProvisioning', () => {
     // held an agent key, a grant, autojoin and a model.
     it('never prescribes wire for an entry that lives outside the file configure writes', async () => {
       h.primer = 'managed';
-      h.spec = { surface: 'codex' };
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
       h.harnesses = [
         {
@@ -470,7 +441,7 @@ describe('inspectProvisioning', () => {
           }),
         },
       ];
-      const r = await inspectProvisioning('/x');
+      const r = await inspectProvisioning(codexFolder());
       const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
       expect(line).toBeDefined();
       expect(line).not.toMatch(/Run `musterd wire`/);
