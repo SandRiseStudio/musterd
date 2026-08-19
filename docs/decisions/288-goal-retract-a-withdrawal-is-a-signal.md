@@ -1,4 +1,4 @@
-# 281 — Goal retract: a withdrawal is a signal, never a deletion
+# 288 — Goal retract: a withdrawal is a signal, never a deletion
 
 - Status: accepted
 - Date: 2026-08-19
