@@ -1,4 +1,6 @@
 import {
+  type CloseReason,
+  CloseReasonSchema,
   modelFamily,
   MODEL_UNKNOWN,
   wakeabilityFromFacts,
@@ -240,29 +242,67 @@ export function teamFamilyPosture(
   };
 }
 
+/** What the projection could derive from a lane's latest `lane.closed` row. Either half may abstain. */
+export interface CloseVerdict {
+  /** ADR 169: was the close a counterpart *acceptance*? */
+  verified?: boolean;
+  /** ADR 283: WHY it closed that way — the half that tells "nobody asked" from "asked and ignored". */
+  reason?: CloseReason;
+}
+
 /**
- * The board's verified annotation (ADR 169): lane id → whether its latest `lane.closed` audit row
- * derived `verified: true`. One indexed query per board read; lanes with no close row (pre-169
- * history, non-terminal lanes) are simply absent — the projection says nothing rather than guessing.
+ * The board's close annotation (ADR 169 + ADR 283): lane id → what its latest `lane.closed` audit
+ * row recorded. One indexed query per board read; lanes with no close row (pre-169 history,
+ * non-terminal lanes) are simply absent — the projection says nothing rather than guessing.
+ *
+ * The two halves abstain INDEPENDENTLY, and that is the point rather than an accident. A close
+ * from before ADR 217 named the reason a way this vocabulary does not cover; a close from before
+ * ADR 169 recorded no verified-ness at all. Deriving either from the other would manufacture a
+ * claim the ledger never made — and it is precisely the "unconfirmed" word with nothing behind it
+ * that ADR 283 exists to take apart.
  */
-export function verifiedCloses(db: Database, teamId: string): Map<string, boolean> {
+export function closeVerdicts(db: Database, teamId: string): Map<string, CloseVerdict> {
   const rows = db
     .prepare<
       [string],
       { target: string | null; detail: string | null }
     >("SELECT target, detail FROM audit WHERE team_id = ? AND action = 'lane.closed' ORDER BY ts")
     .all(teamId);
-  const out = new Map<string, boolean>();
+  const out = new Map<string, CloseVerdict>();
   for (const r of rows) {
     if (!r.target || !r.detail) continue;
     try {
-      const d = JSON.parse(r.detail) as { verified?: boolean };
-      if (typeof d.verified === 'boolean') out.set(r.target, d.verified); // newest row wins
+      const d = JSON.parse(r.detail) as { verified?: unknown; reason?: unknown };
+      const verdict: CloseVerdict = {};
+      if (typeof d.verified === 'boolean') verdict.verified = d.verified;
+      // Parsed, never cast: a reason this build does not know is dropped, so a newer daemon's
+      // vocabulary reaches a reader as "unknown" rather than as a string nothing can render.
+      const reason = CloseReasonSchema.safeParse(d.reason);
+      if (reason.success) verdict.reason = reason.data;
+      // A row that recorded neither annotates nothing — it must not erase a better earlier row.
+      if (verdict.verified !== undefined || verdict.reason !== undefined) {
+        out.set(r.target, verdict); // newest row wins
+      }
     } catch {
       /* a malformed detail annotates nothing */
     }
   }
   return out;
+}
+
+/**
+ * Apply a close verdict to a lane for the wire (ADR 169 + ADR 283), spreading only the halves that
+ * actually derived. One helper so `/lanes` and the orientation brief cannot drift apart — they did
+ * once already, which is why the web board showed accepted/unconfirmed chips for two ADRs while
+ * the brief a seat reads said only `✓`.
+ */
+export function annotateClose(lane: Lane, verdict: CloseVerdict | undefined): Lane {
+  if (verdict === undefined) return lane;
+  return {
+    ...lane,
+    ...(verdict.verified !== undefined ? { verified: verdict.verified } : {}),
+    ...(verdict.reason !== undefined ? { close_reason: verdict.reason } : {}),
+  };
 }
 
 /**

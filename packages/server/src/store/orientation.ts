@@ -5,7 +5,7 @@ import { listGoals, nextGoal } from './goals.js';
 import { incidentPolicy, openIncidents } from './incidents.js';
 import { acceptanceEnteredAt, listLanes, readyForReviewHadNoCandidate } from './lanes.js';
 import { getMemberByRole } from './members.js';
-import { verifiedCloses } from './review.js';
+import { annotateClose, closeVerdicts } from './review.js';
 
 /**
  * The orientation brief (ADR 049), computed server-side so CLI + MCP render one projection (ADR 084 —
@@ -105,12 +105,17 @@ export function deriveNext(
   //
   // Absent stays absent: a close that recorded no verdict (pre-ADR-169) is left un-annotated rather
   // than defaulted to `false`. "We do not know" and "nobody confirmed it" are different claims.
-  const verdicts = verifiedCloses(db, teamId);
+  //
+  // ADR 283 adds the other half of that sentence — WHY an unaccepted close was unaccepted. The two
+  // readings of `unconfirmed` send a seat in opposite directions: `review_timeout` means go chase
+  // the person who was asked, `no_candidate` means nobody was ever asked and the roster is the
+  // thing to look at. Same audit row, same abstain-by-absence rule, one more field.
+  const verdicts = closeVerdicts(db, teamId);
   const shipped = mine
     .filter((l) => l.state === 'done')
     .sort((a, b) => (b.resolved_at ?? b.updated_at) - (a.resolved_at ?? a.updated_at))
     .slice(0, shippedLimit)
-    .map((l) => (verdicts.has(l.id) ? { ...l, verified: verdicts.get(l.id)! } : l));
+    .map((l) => annotateClose(l, verdicts.get(l.id)));
   const up_next: Lane[] = all
     .filter((l) => l.state === 'open')
     .sort((a, b) => a.created_at - b.created_at)
