@@ -89,10 +89,24 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const messages = plan.shown;
 
         if (messages.length === 0) {
+          // ADR 287 stopped the cursor consuming what a call never rendered. A message it DID
+          // render is the other case: the cursor passes it legitimately, and the only way back is
+          // `unread_only: false` — a flag whose existence nothing advertised, so a seat could not
+          // go looking for what it had no reason to think was reachable. An empty inbox is exactly
+          // when a seat is hunting for something it lost, so the route is named here and only
+          // here: the tool description is read every turn by every seat and is budgeted
+          // (`pnpm context:check`), while this line costs bytes only when there is nothing else to
+          // say. Omitted for a caller already reading everything — it would be advice to repeat
+          // the call they just made.
+          const recall =
+            (args.unread_only ?? true)
+              ? '\nlooking for one you already read? unread_only: false returns it'
+              : '';
           // ADR 135: inbox-check is every agent's minute-0 call (the SessionStart hook routes here),
           // so a stale adapter learns about itself immediately — even on an empty inbox.
           return textResult(
             'no new messages — nothing waiting on you; check again at your next task boundary' +
+              recall +
               (await buildSkewWarning(client)),
           );
         }
