@@ -1,0 +1,20 @@
+{
+  "id": "coordination-traces-v1",
+  "adr": 184,
+  "version": "v1",
+  "kind": "structural-only",
+  "includes": [
+    "acts (id, team slug, act, thread, ts, allowlisted meta, HMAC seat ids)",
+    "members (HMAC id, kind, role — never the seat name)",
+    "lanes (id, state, times, HMAC owner/creator, goal_id, depends_on, project, branch — never title/detail)"
+  ],
+  "omits": [
+    "messages.body",
+    "seat_memory",
+    "lanes.title",
+    "lanes.detail",
+    "meta keys not on the structural allowlist (urgent_reason, risk, chosen_approach, and any unknown key)"
+  ],
+  "pseudonym": "HMAC-SHA256(member_id, per-release salt), seat_<12 hex>. Mapping is never written into the public directory. Unlinkable across releases.",
+  "note": "This is the PUBLIC artifact. pnpm corpus:snapshot is the PRIVATE raw corpus and must not upload."
+}

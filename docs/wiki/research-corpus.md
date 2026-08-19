@@ -82,9 +82,10 @@ first.
 
 ## What is designed and not built (2026-08-18; falsify: grep the ADRs named)
 
-- **The dataset itself.** ADR 184 decided the gate (structural fields only, no agent prose); the
-  export does not exist (2026-08-18; falsify: `ls scripts/dataset/`). Roadmap item
-  `coordination-dataset`.
+- **The dataset itself.** ADR 184 decided the gate (structural fields only, no agent prose). The
+  export path shipped 2026-08-19 (`pnpm dataset:export`; falsify: `ls scripts/dataset/export.ts`).
+  A HuggingFace upload of a live release has not been cut (2026-08-19; falsify: a dataset card
+  under the Sandrise org on HF). Roadmap item `coordination-dataset`.
 - **ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR
   184 all build on has never been accepted.
 - **Per-model leaderboard**, blocked by finding 005's named cause: the coordination gauges carry no
