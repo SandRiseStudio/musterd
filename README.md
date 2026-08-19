@@ -7,7 +7,7 @@
 
 Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol. Humans are first-class members, not approvers.
 
-[![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
+[![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
 
 > Status: **v0.2, designed in the open.** Local-first. No account, no cloud required.
 
@@ -110,9 +110,9 @@ pnpm test            # unit + integration + scenarios
 pnpm test:scenarios  # the flagship 3-pane scenario (Scenario C)
 ```
 
-Contributors and implementing agents: start with [`AGENTS.md`](./AGENTS.md) and [`docs/architecture/00-overview.md`](./docs/architecture/00-overview.md). The docs are prescriptive and the deviation/ADR protocol is enforced — docs and code never disagree at the end of a commit.
+Contributors and implementing agents: start with [`CONTRIBUTING.md`](./CONTRIBUTING.md), then [`AGENTS.md`](./AGENTS.md) and [`docs/architecture/00-overview.md`](./docs/architecture/00-overview.md). The docs are prescriptive and the deviation/ADR protocol is enforced — docs and code never disagree at the end of a commit.
 
-Changes land through **one enforced git workflow** ([ADR 106](./docs/decisions/106-unified-git-workflow.md)): branch from `main`, open a PR, and squash-merge once the `gates` CI (build → typecheck → test → format:check) and Cursor Bugbot are green — `main` is protected (PR-only, linear history). The playbook is in [`AGENTS.md`](./AGENTS.md).
+Changes land through **one enforced git workflow** ([ADR 106](./docs/decisions/106-unified-git-workflow.md)): branch from `main`, open a PR, and squash-merge once the `gates` CI is green — `main` is protected (PR-only, linear history). The playbook is in [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`AGENTS.md`](./AGENTS.md).
 
 ## License
 
