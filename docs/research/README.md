@@ -11,7 +11,7 @@ Compare → promote → observe for musterd R&D lives here — not in a batond p
 
 - **Produce** — dataset-first. The HuggingFace artifact ladder, in order: **dataset → benchmark + leaderboard → paper (arXiv → HF Papers) → fine-tuned coordination-judge model**.
 - **Ingest** — the research radar feeds `../design/research-foundation.md`; findings that change a decision graduate to an ADR. M1–M3 live: scaffold under `./radar/` + `pnpm radar:sweep` (+ `--triage` for tier-1/tier-2). Digest emit / schedule = M4–M5. Plan: `../design/research-radar-plan.md`.
-- **Model as a variable** — early to each frontier model (run the manifest as one lands) + own models end-to-end (the tiny-model fixture → a fine-tuned coordination-judge): `../design/model-experimentation.md`.
+- **Model as a variable** — Track A: frontier cadence (run the manifest as one lands). Track B is four jobs, not one ladder: Stage 1 local-instruct probe is **done** (finding 003); training a tiny GPT from scratch is a `musterd-lab` learning track (ungated, not research-spine); the produce ladder's last rung is a coordination-judge, **gated on the dataset below**. Names and gates: `../design/model-experimentation.md`.
 
 ## First thesis — MAST in the wild
 
