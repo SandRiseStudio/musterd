@@ -75,6 +75,7 @@ import {
   standingAcceptance,
 } from '../store/audit.js';
 import { getCursor, setCursor } from '../store/cursors.js';
+import { deferralFold } from '../store/deferralFold.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { latestFootprint } from '../store/footprint.js';
 import { listGoals } from '../store/goals.js';
@@ -86,6 +87,7 @@ import {
   revokeGrant,
   validateGrant,
 } from '../store/grants.js';
+import { rowsToEnvelopes } from '../store/hydrate.js';
 import { deriveReport } from '../store/insights.js';
 import { recordLaneClose } from '../store/laneClose.js';
 import {
@@ -124,9 +126,7 @@ import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/mem
 import {
   countInbox,
   latestStatusUpdate,
-  deferrals,
   listInbox,
-  raisedDeferrals,
   listTeamMessages,
   pendingInterrupts,
   rowToEnvelope,
@@ -3439,11 +3439,7 @@ export async function handleHttp(
         assertSeatCanRead(member);
         const cursor = getCursor(ctx.db, member.id);
         const rows = listInbox(ctx.db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
-        const messages = rows.map((r) => {
-          const from = getMemberById(ctx.db, r.from_member);
-          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
-          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
-        });
+        const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
         // obligations: true — this is the live rail (ADR 225). A routed acceptance belongs on it and
         // costs nothing here; the wake rail keeps its ADR 191 policy gate by NOT passing this.
         const pending = pendingInterrupts(messages, member.name, { obligations: true });
@@ -3487,12 +3483,7 @@ export async function handleHttp(
           ...(since ? { since: Number(since) } : {}),
           ...(limit ? { limit } : {}),
         });
-        const toEnvelope = (r: (typeof rows)[number]) => {
-          const from = getMemberById(ctx.db, r.from_member);
-          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
-          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
-        };
-        const messages = rows.map(toEnvelope);
+        const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
 
         // ADR 211 §3: pendingness is unread-by-cursor OR deferred-and-raised. The cursor is a single
         // monotonic ts and is NOT touched here — a raised act is re-included after the query, so an
@@ -3503,17 +3494,13 @@ export async function handleHttp(
         // so folding over the inbox would find no deferrals at all. The scan is bounded — a deferral
         // older than this many messages stops being tracked, which degrades to today's behaviour
         // (the act is simply unread) rather than to a wrong answer.
-        const scan = listTeamMessages(ctx.db, team.id, {
-          forMemberId: member.id,
-          limit: DEFERRAL_SCAN_LIMIT,
-        }).map(toEnvelope);
-        const held = deferrals(scan, member.name);
-        const raised = raisedDeferrals(scan, member.name);
+        const { held, raised, own } = deferralFold(ctx.db, team.slug, member, DEFERRAL_SCAN_LIMIT);
         if (raised.size > 0) {
           const shown = new Set(messages.map((m) => m.id));
-          for (const r of listInbox(ctx.db, member, {})) {
-            if (raised.has(r.id) && !shown.has(r.id)) messages.push(toEnvelope(r));
-          }
+          const back = listInbox(ctx.db, member, {}).filter(
+            (r) => raised.has(r.id) && !shown.has(r.id),
+          );
+          messages.push(...rowsToEnvelopes(ctx.db, team.slug, back));
           messages.sort((a, b) => a.ts - b.ts || (a.id < b.id ? -1 : 1));
         }
         const deferred = [...held.values()].map((d) => ({
@@ -3536,8 +3523,7 @@ export async function handleHttp(
         // closes an ask this way (web/src/live/asks.ts); this is that rule where the inbox can see it.
         const answered = [
           ...new Set(
-            scan
-              .filter((m) => m.from === member.name)
+            own
               .map((m) => (m.meta as { in_reply_to?: unknown } | null)?.in_reply_to)
               .filter((id): id is string => typeof id === 'string'),
           ),
@@ -3615,11 +3601,7 @@ export async function handleHttp(
           ...(limit ? { limit: Math.min(Math.max(Number(limit), 1), 1000) } : {}),
           ...(scoped ? { forMemberId: member.id } : {}),
         });
-        const messages = rows.map((r) => {
-          const from = getMemberById(ctx.db, r.from_member);
-          const to = r.to_member ? getMemberById(ctx.db, r.to_member) : null;
-          return rowToEnvelope(r, team.slug, from?.name ?? '?', to?.name ?? null);
-        });
+        const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
         return sendJson(res, 200, { messages });
       }
 
