@@ -6,7 +6,26 @@ import { promisify } from 'node:util';
 import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
+import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
+import { loadProvisioning } from '../manifest.js';
+import {
+  launchEntryEnv,
+  markerGenerationOfEnv,
+  resolveMcpLaunch,
+  RETIRED_SURFACE_ENV,
+} from '../mcpEntry.js';
+import { primaryCheckoutFor } from '../entryGuard.js';
+import { STANDARD_FLOOR } from '../permissions.js';
+import { BUILTIN_ROLES, parseRole, userRolesDir, type RoleTemplate } from '../role.js';
+import { nodeExec, type FsSeam, type HarnessContext } from '../reconcile/context.js';
+import {
+  canonicalFingerprint,
+  folderResourceKey,
+  machineResourceKey,
+  repoSharedResourceKey,
+  type HarnessAdapter,
+} from '../reconcile/fragments.js';
 
 const exec = promisify(execFile);
 
@@ -819,3 +838,398 @@ function activationHint(): string {
   const lead = inEditor ? `${ext}; or ${term}` : `${term}; or ${ext}`;
   return `${lead} — then verify the musterd tools are present with /mcp inside the session`;
 }
+
+// ── The fragment adapter (ADR 281/282/286, Task 5) ───────────────────────────────────────────────
+// Claude Code as MANAGED FRAGMENTS: the repo-shared `claude mcp` registration, the folder-scoped
+// local hooks, the machine-scoped global hooks, the folder permission entries, and the folder
+// guidance files — each independently fingerprinted, locked, journaled, and patched by the
+// reconciler. All filesystem access rides the injected FsSeam; the `claude` CLI rides the exec
+// seam. The lifecycle `claudeCode` Harness above keeps serving the pre-282 command paths until
+// they are retired onto the reconciler.
+
+/** Parse `claude mcp get musterd` output into the entry it registers, or null when unreadable. */
+export function parseClaudeMcpGet(
+  out: string,
+): { command: string; args: string[]; env: Record<string, string> } | null {
+  const commandMatch = /^\s*Command:\s*(.+)$/m.exec(out);
+  if (!commandMatch) return null;
+  const argsMatch = /^\s*Args:\s*(.+)$/m.exec(out);
+  const env: Record<string, string> = {};
+  for (const m of out.matchAll(/^\s*(MUSTERD_[A-Z_]+)=(\S+)\s*$/gm)) {
+    env[m[1]!] = m[2]!;
+  }
+  return {
+    command: commandMatch[1]!.trim(),
+    args: argsMatch?.[1] ? argsMatch[1].trim().split(/\s+/) : [],
+    env,
+  };
+}
+
+/** The desired hook payloads, from the same one table the installer and doctor share (ADR 168). */
+function localHooksPayload(): { event: string; matcher?: string; command: string }[] {
+  return LOCAL_HOOKS.map((spec) => ({
+    event: spec.event,
+    ...(spec.matcher !== undefined ? { matcher: spec.matcher } : {}),
+    command: spec.command(),
+  }));
+}
+
+function globalHooksPayload(): { event: string; command: string }[] {
+  return [
+    { event: 'SessionStart', command: sessionStartHookCommand() },
+    { event: 'UserPromptSubmit', command: promptSubmitHookCommand() },
+  ];
+}
+
+/** Every musterd-marked hook command in a settings object, keyed by event — the observation. */
+function observedMusterdHooks(settings: ClaudeSettings): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [event, matchers] of Object.entries(settings.hooks ?? {})) {
+    const ours = matchers
+      .flatMap((m) => m.hooks.map((h) => h.command))
+      .filter((c) => /#\s*musterd-[a-z-]+/.test(c));
+    if (ours.length > 0) out[event] = ours;
+  }
+  return out;
+}
+
+function readSettingsSeam(fs: FsSeam, path: string): ClaudeSettings | null {
+  const raw = fs.readFile(path);
+  if (raw === null) return {};
+  try {
+    return JSON.parse(raw) as ClaudeSettings;
+  } catch {
+    return null;
+  }
+}
+
+function writeSettingsSeam(fs: FsSeam, path: string, settings: ClaudeSettings): void {
+  fs.mkdirp(dirname(path));
+  fs.writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, 0o644);
+}
+
+/** Upsert/drop the musterd hook entries for a payload in a settings object, preserving every other
+ *  hook and key. Marker-scoped exactly like the lifecycle installer above. */
+function patchHooks(
+  settings: ClaudeSettings,
+  payload: { event: string; matcher?: string; command: string }[],
+  kind: 'write' | 'remove',
+): ClaudeSettings {
+  const next: ClaudeSettings = { ...settings, hooks: { ...(settings.hooks ?? {}) } };
+  const events = new Set(payload.map((p) => p.event));
+  for (const event of events) {
+    const keep = (next.hooks![event] ?? []).filter(
+      (m) => !m.hooks.some((h) => /#\s*musterd-[a-z-]+/.test(h.command)),
+    );
+    const added =
+      kind === 'write'
+        ? payload
+            .filter((p) => p.event === event)
+            .map((p) => ({
+              ...(p.matcher !== undefined ? { matcher: p.matcher } : {}),
+              hooks: [{ type: 'command' as const, command: p.command }],
+            }))
+        : [];
+    const merged = [...keep, ...added];
+    if (merged.length > 0) next.hooks![event] = merged;
+    else delete next.hooks![event];
+  }
+  if (next.hooks && Object.keys(next.hooks).length === 0) delete next.hooks;
+  return next;
+}
+
+/** The desired permission entries: the ADR 261 floor plus the provisioned role's profile. */
+function permissionsPayload(ctx: HarnessContext): ProvisionPermissions {
+  let role: RoleTemplate | undefined;
+  const provisioning = loadProvisioning(ctx.worktreeRoot, ctx.fs);
+  const roleName = provisioning.kind === 'valid' ? provisioning.value.role : '';
+  if (roleName !== '') {
+    const rolePath = join(userRolesDir(ctx.worktreeRoot), `${roleName}.json`);
+    const raw = ctx.fs.readFile(rolePath);
+    if (raw !== null) {
+      try {
+        role = parseRole(JSON.parse(raw));
+      } catch {
+        role = undefined; // an unreadable role never blocks the floor
+      }
+    }
+    role ??= BUILTIN_ROLES[roleName];
+  }
+  return {
+    allow: [...new Set([...STANDARD_FLOOR.allow, ...(role?.tools.permissions.allow ?? [])])].sort(),
+    ask: [...new Set([...STANDARD_FLOOR.ask, ...(role?.tools.permissions.ask ?? [])])].sort(),
+    deny: [...new Set([...STANDARD_FLOOR.deny, ...(role?.tools.permissions.deny ?? [])])].sort(),
+  };
+}
+
+const CLAUDE_SURFACE = 'claude-code';
+
+function localSettingsRel(): string {
+  return join('.claude', 'settings.local.json');
+}
+
+function globalSettingsPathFor(env: NodeJS.ProcessEnv): string {
+  const base = env['CLAUDE_CONFIG_DIR'] || join(homedir(), '.claude');
+  return join(base, 'settings.json');
+}
+
+export const claudeCodeAdapter: HarnessAdapter = {
+  id: 'claude-code',
+  surface: 'claude-code',
+  adapterVersion: 2,
+
+  async availability(ctx) {
+    const exec = ctx.exec ?? nodeExec;
+    const bin = (await resolveClaudeBin()) ?? 'claude';
+    const ver = await exec.run(bin, ['--version']);
+    return ver.ok
+      ? { available: true, detail: `claude ${ver.out.trim().split(' ')[0] ?? ''}`.trim() }
+      : { available: false, detail: 'claude CLI not found on PATH or common install locations' };
+  },
+
+  async target(ctx) {
+    const repoRoot = primaryCheckoutFor(ctx.worktreeRoot) ?? ctx.worktreeRoot;
+    return {
+      containers: [
+        // Claude Code keys local-scope MCP config by repo ROOT — one registration for every
+        // sibling worktree (ADR 143); each worktree contributes ownership, none owns it alone.
+        { containerKey: `repo-shared ${repoRoot} claude-mcp-local`, scope: 'repo-shared', handle: repoRoot },
+        { containerKey: `folder ${ctx.worktreeRoot} ${localSettingsRel()}`, scope: 'folder', handle: localSettingsRel() },
+        { containerKey: `machine claude-code global-settings`, scope: 'machine', handle: globalSettingsPathFor(ctx.env) },
+      ],
+    };
+  },
+
+  async desiredFragments(ctx) {
+    const repoRoot = primaryCheckoutFor(ctx.worktreeRoot) ?? ctx.worktreeRoot;
+    const launch = resolveMcpLaunch();
+    const mcpPayload = {
+      command: launch.command,
+      args: launch.args,
+      env: launchEntryEnv(CLAUDE_SURFACE),
+    };
+    const hooks = localHooksPayload();
+    const globals = globalHooksPayload();
+    const permissions = permissionsPayload(ctx);
+    const guidancePayload = guidanceFileMap(claudeCode.guidance!, ctx.team ?? '');
+    const localContainer = `folder ${ctx.worktreeRoot} ${localSettingsRel()}`;
+    return [
+      {
+        harness: 'claude-code',
+        resourceKey: repoSharedResourceKey(repoRoot, 'musterd', 'claude-code', 'mcp.musterd'),
+        containerKey: `repo-shared ${repoRoot} claude-mcp-local`,
+        fragmentKey: 'mcp.musterd',
+        scope: 'repo-shared',
+        fingerprint: canonicalFingerprint(mcpPayload),
+        payload: mcpPayload,
+      },
+      {
+        harness: 'claude-code',
+        resourceKey: folderResourceKey(ctx.worktreeRoot, 'claude-code', 'hooks.local'),
+        containerKey: localContainer,
+        fragmentKey: 'hooks.local',
+        scope: 'folder',
+        fingerprint: canonicalFingerprint(hooks),
+        payload: hooks,
+      },
+      {
+        harness: 'claude-code',
+        resourceKey: machineResourceKey('claude-code', 'hooks.global'),
+        containerKey: 'machine claude-code global-settings',
+        fragmentKey: 'hooks.global',
+        scope: 'machine',
+        fingerprint: canonicalFingerprint(globals),
+        payload: globals,
+      },
+      {
+        harness: 'claude-code',
+        resourceKey: folderResourceKey(ctx.worktreeRoot, 'claude-code', 'permissions'),
+        containerKey: localContainer,
+        fragmentKey: 'permissions',
+        scope: 'folder',
+        fingerprint: canonicalFingerprint(permissions),
+        payload: permissions,
+      },
+      {
+        harness: 'claude-code',
+        resourceKey: folderResourceKey(ctx.worktreeRoot, 'claude-code', 'guidance'),
+        containerKey: `folder ${ctx.worktreeRoot} claude-guidance`,
+        fragmentKey: 'guidance',
+        scope: 'folder',
+        fingerprint: canonicalFingerprint(guidancePayload),
+        payload: guidancePayload,
+      },
+    ];
+  },
+
+  async observe(ctx, intent) {
+    switch (intent.fragmentKey) {
+      case 'mcp.musterd': {
+        const exec = ctx.exec ?? nodeExec;
+        const bin = (await resolveClaudeBin()) ?? 'claude';
+        const got = await exec.run(bin, ['mcp', 'get', 'musterd']);
+        if (!got.ok) return { state: 'absent' };
+        const entry = parseClaudeMcpGet(got.out);
+        if (!entry) {
+          return {
+            state: 'invalid-container',
+            issues: [{ path: '<claude mcp get>', message: 'unparseable registration' }],
+          };
+        }
+        const fingerprint = canonicalFingerprint(entry);
+        return markerGenerationOfEnv(entry.env) === 'legacy'
+          ? { state: 'legacy-launch-marker', fingerprint }
+          : { state: 'present', fingerprint };
+      }
+      case 'hooks.local':
+      case 'hooks.global': {
+        const path =
+          intent.fragmentKey === 'hooks.local'
+            ? join(ctx.worktreeRoot, localSettingsRel())
+            : globalSettingsPathFor(ctx.env);
+        const settings = readSettingsSeam(ctx.fs, path);
+        if (settings === null) {
+          return {
+            state: 'invalid-container',
+            issues: [{ path: '<settings>', message: 'not valid JSON' }],
+          };
+        }
+        const desired = intent.payload as { event: string; matcher?: string; command: string }[];
+        const desiredEvents = new Set(desired.map((p) => p.event));
+        const observed = Object.fromEntries(
+          Object.entries(observedMusterdHooks(settings)).filter(([event]) =>
+            desiredEvents.has(event),
+          ),
+        );
+        if (Object.keys(observed).length === 0) return { state: 'absent' };
+        const expected: Record<string, string[]> = {};
+        for (const p of desired) (expected[p.event] ??= []).push(p.command);
+        const equal = canonicalFingerprint(observed) === canonicalFingerprint(expected);
+        return {
+          state: 'present',
+          fingerprint: equal ? intent.fingerprint : canonicalFingerprint(observed),
+        };
+      }
+      case 'permissions': {
+        const settings = readSettingsSeam(ctx.fs, join(ctx.worktreeRoot, localSettingsRel()));
+        if (settings === null) {
+          return {
+            state: 'invalid-container',
+            issues: [{ path: '<settings>', message: 'not valid JSON' }],
+          };
+        }
+        const desired = intent.payload as ProvisionPermissions;
+        const present: ProvisionPermissions = { allow: [], ask: [], deny: [] };
+        let any = false;
+        for (const list of PERM_LISTS) {
+          const have = new Set(settings.permissions?.[list] ?? []);
+          present[list] = desired[list].filter((e) => have.has(e));
+          if (present[list].length > 0) any = true;
+        }
+        if (!any) return { state: 'absent' };
+        const complete = PERM_LISTS.every((l) => present[l].length === desired[l].length);
+        return {
+          state: 'present',
+          fingerprint: complete ? intent.fingerprint : canonicalFingerprint(present),
+        };
+      }
+      case 'guidance':
+        return observeFileMap(ctx.fs, ctx.worktreeRoot, intent.payload as Record<string, string>);
+      default:
+        return { state: 'absent' };
+    }
+  },
+
+  async apply(ctx, mutation) {
+    const { intent } = mutation;
+    switch (intent.fragmentKey) {
+      case 'mcp.musterd': {
+        const exec = ctx.exec ?? nodeExec;
+        const bin = (await resolveClaudeBin()) ?? 'claude';
+        if (mutation.kind === 'remove') {
+          await exec.run(bin, ['mcp', 'remove', 'musterd', '-s', 'local']);
+          return;
+        }
+        let entry = intent.payload as { command: string; args: string[]; env: Record<string, string> };
+        if (mutation.kind === 'repair-launch-marker') {
+          // Replace ONLY the retired marker; preserve the observed command/args and unrelated env.
+          const got = await exec.run(bin, ['mcp', 'get', 'musterd']);
+          const observed = got.ok ? parseClaudeMcpGet(got.out) : null;
+          if (observed) {
+            const { [RETIRED_SURFACE_ENV]: _retired, ...rest } = observed.env;
+            entry = {
+              command: observed.command,
+              args: observed.args,
+              env: { ...rest, ...launchEntryEnv(CLAUDE_SURFACE) },
+            };
+          }
+        }
+        const envArgs = Object.entries(entry.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+        await exec.run(bin, ['mcp', 'remove', 'musterd', '-s', 'local']);
+        const added = await exec.run(bin, [
+          'mcp',
+          'add',
+          'musterd',
+          '-s',
+          'local',
+          ...envArgs,
+          '--',
+          entry.command,
+          ...entry.args,
+        ]);
+        if (!added.ok) throw new Error('claude mcp add failed');
+        return;
+      }
+      case 'hooks.local':
+      case 'hooks.global': {
+        const path =
+          intent.fragmentKey === 'hooks.local'
+            ? join(ctx.worktreeRoot, localSettingsRel())
+            : globalSettingsPathFor(ctx.env);
+        const settings = readSettingsSeam(ctx.fs, path);
+        if (settings === null) throw new Error('settings container invalid at apply time');
+        const payload = intent.payload as { event: string; matcher?: string; command: string }[];
+        writeSettingsSeam(
+          ctx.fs,
+          path,
+          patchHooks(settings, payload, mutation.kind === 'remove' ? 'remove' : 'write'),
+        );
+        return;
+      }
+      case 'permissions': {
+        const path = join(ctx.worktreeRoot, localSettingsRel());
+        const settings = readSettingsSeam(ctx.fs, path);
+        if (settings === null) throw new Error('settings container invalid at apply time');
+        const desired = intent.payload as ProvisionPermissions;
+        const next: ClaudeSettings = { ...settings, permissions: { ...(settings.permissions ?? {}) } };
+        for (const list of PERM_LISTS) {
+          const have = next.permissions![list] ?? [];
+          if (mutation.kind === 'remove') {
+            const drop = new Set(desired[list]);
+            const kept = have.filter((e) => !drop.has(e));
+            if (kept.length > 0) next.permissions![list] = kept;
+            else delete next.permissions![list];
+          } else {
+            const set = new Set(have);
+            for (const e of desired[list]) set.add(e);
+            if (set.size > 0) next.permissions![list] = [...set];
+          }
+        }
+        if (next.permissions && Object.keys(next.permissions).length === 0)
+          delete next.permissions;
+        writeSettingsSeam(ctx.fs, path, next);
+        return;
+      }
+      case 'guidance':
+        applyFileMap(
+          ctx.fs,
+          ctx.worktreeRoot,
+          intent.payload as Record<string, string>,
+          mutation.kind === 'remove' ? 'remove' : 'write',
+        );
+        return;
+      default:
+        throw new Error(`unknown claude-code fragment ${intent.fragmentKey}`);
+    }
+  },
+};

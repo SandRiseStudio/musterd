@@ -69,6 +69,30 @@ export function buildMcpEnv(_b: AgentBinding): Record<string, string> {
 }
 
 /**
+ * The env an ADR 286 fragment-managed MCP registration carries: EXACTLY the launch Surface marker.
+ * Not per-seat state (every sibling worktree launching through this harness gets the same value),
+ * so it does not violate the ADR 165 shared-slot rule above — it is the launcher declaring what it
+ * IS, which no stored identity file may do any more (ADR 281). The retired `MUSTERD_SURFACE` and
+ * the test-only `MUSTERD_TEST_SURFACE` are never written by any adapter.
+ */
+export const LAUNCH_SURFACE_ENV = 'MUSTERD_LAUNCH_SURFACE';
+export const RETIRED_SURFACE_ENV = 'MUSTERD_SURFACE';
+export const TEST_SURFACE_ENV = 'MUSTERD_TEST_SURFACE';
+
+export function launchEntryEnv(surface: string): Record<string, string> {
+  return { [LAUNCH_SURFACE_ENV]: surface };
+}
+
+/** Classify a registered entry's env by its Surface marker generation (ADR 286 §1). */
+export function markerGenerationOfEnv(
+  env: Record<string, string | undefined> | undefined,
+): 'launch' | 'legacy' | 'none' {
+  if (env?.[RETIRED_SURFACE_ENV]) return 'legacy';
+  if (env?.[LAUNCH_SURFACE_ENV]) return 'launch';
+  return 'none';
+}
+
+/**
  * Resolve how to launch the @musterd/mcp adapter on this machine.
  * Prefers the installed package's entry (works for both `pnpm add -g musterd`
  * and the monorepo); falls back to a sibling-package path in dev.

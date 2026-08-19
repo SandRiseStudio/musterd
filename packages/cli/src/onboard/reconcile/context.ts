@@ -49,6 +49,15 @@ export interface ClockSeam {
   now(): number;
 }
 
+/** Child-process seam — for adapters whose container is a CLI (Claude Code's `claude mcp`). */
+export interface ExecSeam {
+  run(
+    cmd: string,
+    args: string[],
+    opts?: { timeoutMs?: number },
+  ): Promise<{ ok: boolean; out: string }>;
+}
+
 /**
  * The explicit roots and seams a reconcile pass runs against. `worktreeRoot` is the normalized
  * REAL path of the worktree (symlinks resolved) — it doubles as this worktree's ledger owner id.
@@ -62,6 +71,10 @@ export interface HarnessContext {
   fs: FsSeam;
   proc: ProcessSeam;
   clock: ClockSeam;
+  /** Child-process seam; adapters fall back to {@link nodeExec} when absent. */
+  exec?: ExecSeam;
+  /** The workspace's team slug (from the valid v2 spec), for guidance rendering. */
+  team?: string;
 }
 
 /** The real filesystem seam. */
@@ -150,6 +163,23 @@ export const nodeClock: ClockSeam = {
   now: () => Date.now(),
 };
 
+/** The real child-process seam: execFile, no shell, bounded, never throws. */
+export const nodeExec: ExecSeam = {
+  async run(cmd, args, opts) {
+    const { execFile } = await import('node:child_process');
+    const { promisify } = await import('node:util');
+    try {
+      const { stdout } = await promisify(execFile)(cmd, args, {
+        timeout: opts?.timeoutMs ?? 10_000,
+      });
+      return { ok: true, out: stdout };
+    } catch (err) {
+      const out = (err as { stdout?: string }).stdout ?? '';
+      return { ok: false, out };
+    }
+  },
+};
+
 /**
  * Build the real HarnessContext for a worktree. Resolves the worktree to its normalized REAL path
  * (the ledger owner id) and derives the machine config root from the config path seam.
@@ -157,6 +187,7 @@ export const nodeClock: ClockSeam = {
 export function defaultHarnessContext(
   worktreeDir: string,
   env: NodeJS.ProcessEnv = process.env,
+  opts?: { team?: string },
 ): HarnessContext {
   let worktreeRoot: string;
   try {
@@ -171,6 +202,8 @@ export function defaultHarnessContext(
     fs: nodeFs,
     proc: nodeProc,
     clock: nodeClock,
+    exec: nodeExec,
+    ...(opts?.team !== undefined ? { team: opts.team } : {}),
   };
 }
 
