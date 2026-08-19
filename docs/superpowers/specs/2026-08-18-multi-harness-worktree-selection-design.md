@@ -1,310 +1,431 @@
 # Multi-harness worktree selection — configure once, switch by launching
 
-- Date: 2026-08-18
-- Status: approved 2026-08-18 (nick)
-- Decision: [ADR 281](../../decisions/281-multi-harness-worktree-selection.md)
-- Builds on: ADR 018 (workspace binding), ADR 038 (harness adapters), ADR 080 (provisioning
-  manifest), ADR 143 (folder-scoped Codex configuration), ADR 165 (universal MCP entry), ADR 213
-  (cross-worktree launch guard), ADR 251 (native harness), ADR 275 (machine-local provisioning)
+- Date: 2026-08-18; revised 2026-08-19 after independent review
+- Status: approved 2026-08-19 (nick)
+- Decisions: [ADR 281](../../decisions/281-multi-harness-worktree-selection.md) and
+  [ADR 282](../../decisions/282-crash-safe-multi-harness-reconciliation.md)
+- Builds on: ADR 018 (workspace binding), ADR 026 (harness tool environment), ADR 027
+  (non-invasive coexistence), ADR 030 (provisioning manifest), ADR 080 (committed launch spec), ADR
+  116 (agent harness selection), ADR 143 (workspace-anchored identity), ADR 165 (universal MCP
+  entry), ADR 213 (cross-worktree launch guard), ADR 251 (native harness), ADR 275
+  (capture-attested Surface)
 - Lane: `01M0B1DP6Z4GD249S026VB0368`
 
 ## Purpose
 
-A user chooses the harnesses they want available in a worktree once, then opens that worktree in
-Claude Code, Codex, Cursor, or musterd without changing configuration between sessions. Harness
-selection is local to that worktree on that machine. Team identity remains shared; runtime Surface
-identity comes from the launcher.
+A human chooses the harnesses that should be available in a worktree on one machine, then opens that
+worktree through Claude Code, Codex, Cursor, or musterd without changing configuration between
+launches. Another human or machine may choose a different set for another checkout of the same Team.
 
-This design replaces the current one-workspace/one-`surface` model. It deliberately provides no
-backward-compatible read path.
-
-## 1. The three facts are separate
+The design separates three facts:
 
 | fact | lifetime | source of truth |
 |---|---|---|
-| Team and Member binding | worktree | `.musterd/workspace.json` + `.musterd/binding.json` |
-| desired harnesses and ownership receipts | worktree × machine | ignored `.musterd/provisioned.json` plus the machine ownership index |
-| current Surface | Presence | explicit runtime launch identity |
+| Team and Member binding | worktree | `.musterd/workspace.json` and `.musterd/binding.json` |
+| desired harnesses and managed fragments | worktree × machine | `.musterd/provisioned.json` plus the machine fragment ledger |
+| current Surface | Presence | explicit launcher identity |
 
-The first fact answers _who and where_. The second answers _what this machine should keep ready_.
-The third answers _where this Member is attached now_. No file or field serves two rows.
+No field serves two rows. In particular, desired harnesses never determine Presence Surface, and a
+launch never changes desired harness state.
 
-The worktree and binding schemas advance to a new local version and remove `surface`. Their
-remaining Team, server, claim, credential, driver, and model responsibilities do not change. The
-schema version is local provisioning metadata; this change does not alter `SPEC.md`'s wire envelope
-or protocol version.
+This is a clean local-schema break. There is no dual read, automatic migration, legacy output, or
+fallback to a previously declared Surface.
 
-## 2. Local state
+## Invariants
 
-### Worktree provisioning manifest
+1. A worktree may desire zero, one, or several harnesses.
+2. Selection is machine-local and never synchronized through Team state or committed files.
+3. The same physical registration may have several worktree contributors on one machine.
+4. Ownership exists only when musterd has durable fragment evidence; equivalent contents do not
+   confer ownership.
+5. Musterd never overwrites or removes an unowned or externally changed fragment.
+6. Every external mutation is recoverable after a stop between external and local writes.
+7. Runtime Surface comes from the launcher, not identity or provisioning files.
+8. A future adapter is pluggable, but a new wire-level Surface still requires a protocol ADR.
 
-The existing ignored `.musterd/provisioned.json` becomes the sole worktree-local source for desired
-harness state:
+## 1. Strict identity and local-state loading
+
+`WorkspaceSpecSchema` and `BindingSchema` become explicit strict version-2 objects and remove
+`surface`. `WorkspaceSpecSchema` is `{ version: 2, server, team, claim? }`.
+`BindingSchema` retains local credentials, driver/autojoin policy, session capture, model declaration
+and observation, and cached capabilities. The schema change is local; wire frames and `SPEC.md`'s
+protocol version do not change.
+
+Every loader returns a discriminated result instead of collapsing parse failures to absence:
 
 ```ts
-type HarnessId = string; // parsed against the installed adapter registry
+type LocalLoad<T> =
+  | { kind: 'missing' }
+  | { kind: 'legacy'; value: unknown }
+  | { kind: 'valid'; value: T }
+  | { kind: 'invalid'; issues: readonly LocalStateIssue[] };
+```
 
-type HarnessProvisioning = {
+A recognized legacy identity is the previous otherwise-valid shape containing `surface`. An
+unrecognized version, unknown field, malformed value, or invalid JSON is `invalid`, never `legacy`.
+Ordinary CLI commands and MCP startup reject both with a specific repair message. Only
+`musterd harness configure` can convert `legacy`, and only after the human confirms the complete
+desired set.
+
+## 2. Worktree provisioning manifest
+
+The ignored `.musterd/provisioned.json` advances to a strict new version:
+
+```ts
+type HarnessId = string; // non-empty bounded id; resolved against the installed CLI registry
+
+type WorktreeProvisioning = {
   version: 2;
-  desired: HarnessId[]; // unique, stable registry order on write
-  receipts: Record<HarnessId, HarnessReceipt>;
+  role: string; // existing role-template projection; empty means generalist
+  desired: HarnessId[]; // unique; serialized in CLI registry order
+  contributions: Record<HarnessId, string[]>; // fragment resource keys owned by this worktree
+  provisionedAt: string;
 };
 ```
 
-Each receipt contains the adapter version, registration scope, stable resource key, exact owned
-fragments or identifiers needed for safe removal, last successful action, and last observed state.
-It contains no team agent key, grant, credential, or other secret. Receipt schemas are strict;
-unknown harness ids or malformed receipts stop reconciliation with a repair message rather than
-being discarded.
+The protocol schema enforces uniqueness and shape only. It does not import the installed adapter
+registry or sort `desired`; canonical registry ordering belongs to CLI serialization.
 
-The desired set is not copied into `workspace.json`, committed configuration, server state, or Team
-acts. A clone on another machine starts with no desired set and obtains one through `musterd init`
-or `musterd harness configure`.
+`contributions` is evidence that the worktree participates in machine-ledger ownership. It is not a
+complete physical receipt and cannot authorize removal on its own. It stores no Team agent key,
+grant, credential, config body, or environment value.
 
-### Machine ownership index
+The explicit converter retains the version-1 `role` value. Version-1 `harness`, `mcpServers`,
+`permissions`, and `guidance` lists do not become version-2 ownership evidence: their name-only
+records cannot prove current contents. Existing physical fragments are re-observed as unmanaged
+unless another valid ownership source exists.
 
-Resources with `repo-shared` or `machine` scope use a chmod-600 index under the machine's musterd
-config root:
+Saving a new desired set happens before reconciliation. A stop immediately afterward leaves honest
+intent plus incomplete work; the next `wire` resumes it. Reconciliation never rewrites desire as a
+repair.
+
+## 3. Machine fragment ledger
+
+A chmod-600 ledger under the machine musterd config root owns cross-worktree coordination:
 
 ```ts
-type HarnessOwnershipIndex = {
+type FragmentLedger = {
   version: 1;
-  resources: Record<ResourceKey, {
+  fragments: Record<string, {
     harness: HarnessId;
-    owners: string[]; // normalized real worktree roots, sorted and unique
-    receipt: SharedResourceReceipt;
+    scope: 'folder' | 'repo-shared' | 'machine';
+    containerKey: string;
+    fragmentKey: string;
+    fingerprint: string;
+    owners: string[]; // normalized real worktree roots; sorted and unique
+    adapterVersion: number;
   }>;
 };
 ```
 
-The set of owner paths is canonical state; no stored numeric reference count can drift away from
-it. Tests substitute independent config roots to model separate machines. Nothing in this index is
-Team-synchronized.
+The map key is the stable fragment resource key. `containerKey` identifies the physical config
+container for locking; `fragmentKey` identifies the independently managed subtree or marked block.
+Examples include the `musterd` MCP entry, one permission item, one hook, or one generated guidance
+file/block. Canonical fingerprints are adapter-defined SHA-256 hashes of the fragment representation,
+not whole containing files.
 
-## 3. Harness adapter contract
+Folder fragments include the normalized worktree root in their resource key. Repository-shared
+fragments include the resolved repository root and registration identity. Machine fragments omit a
+worktree/repository discriminator. The native in-process harness has no fragment ledger entries.
 
-The onboarding layer discovers behavior through one registry:
+Owner paths are local coordination identifiers, not Team identity. Two machines have independent
+ledger roots and independent owner sets even when their repository remotes are identical.
+
+## 4. Write-ahead journal
+
+The same machine config root contains strict per-operation journal records:
 
 ```ts
-type HarnessAdapter = {
-  id: HarnessId;
-  surface: Surface;
-  registrationScope: 'folder' | 'repo-shared' | 'machine' | 'in-process';
-  availability(ctx): Promise<Availability>;
-  resourceKey(ctx): Promise<string | null>;
-  observe(ctx): Promise<ObservedRegistration>;
-  configure(ctx): Promise<HarnessReceipt>;
-  remove(ctx, receipt): Promise<RemovalResult>;
+type ReconcileJournal = {
+  version: 1;
+  operationId: string;
+  action: 'create' | 'remove' | 'add-owner' | 'release-owner';
+  harness: HarnessId;
+  containerKey: string;
+  resourceKey: string;
+  oldFingerprint: string | null;
+  intendedFingerprint: string | null;
+  oldOwners: string[];
+  intendedOwners: string[];
+  worktreeRoot: string;
+  phase: 'prepared';
 };
 ```
 
-`availability` distinguishes available from unavailable-with-reason. Unavailability is not an
-error when the harness is selected: it produces `pending`, retains desire, and can become
-configured on a later `wire` after installation.
+One fragment mutation is one journaled operation. A harness that owns several fragments converges
+one fragment at a time; a stop may leave a partially configured harness, but every completed
+fragment remains attributable and the next run deterministically finishes the set.
 
-`resourceKey` identifies the physical registration independently of a worktree. Folder-scoped
-resources include the normalized worktree root. Repository-shared resources identify the resolved
-repository root and harness registration name. In-process resources return no physical key and
-perform no external write.
+The operation order is:
 
-`configure` and `remove` are idempotent. `remove` receives the successful receipt and may remove
-only the fragments named there. Observation alone never grants deletion authority. The adapter
-registry holds Claude Code, Codex, Cursor, and musterd entries; the reconciler contains no switch on
-those names.
+1. acquire the lock keyed by `containerKey`;
+2. recover any earlier journal for that container;
+3. parse the latest containing config and observe the fragment;
+4. compute the intended fragment and ownership delta;
+5. write, fsync, and atomically publish the `prepared` journal;
+6. re-read the containing config and apply the fragment patch to that latest valid parse;
+7. atomically write the containing config;
+8. persist the machine ledger and worktree contribution result;
+9. remove the journal and release the lock.
 
-## 4. Reconciliation
+Recovery observes the fragment and compares fingerprints:
 
-`musterd wire` reads the saved desired set, registry, worktree receipts, machine ownership index,
-and observed registrations. It produces and applies a stable plan in registry order.
+| observation | recovery |
+|---|---|
+| equals `oldFingerprint` | retry the external mutation |
+| equals `intendedFingerprint` | finalize ledger/contribution state |
+| equals neither | report conflict; preserve journal and mutate nothing |
 
-For each adapter:
+For `add-owner` and `release-owner`, old and intended fragment fingerprints are intentionally equal.
+Recovery ignores that tie and idempotently writes `intendedOwners` plus the matching worktree
+contribution state before clearing the journal.
 
-| desired | available | observed/owned | result |
-|---|---:|---|---|
-| yes | yes | correct | `unchanged` |
-| yes | yes | absent or drifted | configure, then `configured` |
-| yes | no | any | retain desire, `pending` |
-| no | any | receipted folder resource | remove exact owned fragments, then `removed` |
-| no | any | shared resource with other owners | release this owner, preserve resource, `released` |
-| no | any | last-owned shared resource | remove exact resource, then release final receipt |
-| no | any | unreceipted registration | preserve it, report `unmanaged` |
+The journal contains hashes and ownership metadata, not config bodies or secrets. Atomic JSON
+replacement protects the journal and ledger from partial bytes; the journal closes the larger gap
+between an external harness write and ownership persistence.
 
-State commits follow the external side effect:
+## 5. Adapter contract
 
-- A configure receipt and shared owner are recorded only after configuration succeeds.
-- A folder receipt is deleted only after removal succeeds.
-- Releasing a non-final shared owner updates the machine index atomically, then drops the local
-  receipt.
-- For a final shared owner, physical removal succeeds before the final owner and receipts are
-  deleted.
-- Any failure leaves the old receipt/ownership evidence retryable and exits nonzero.
+The CLI owns one adapter registry:
 
-Manifest and ownership-index writes use temp-file-plus-rename in their containing directory.
-Concurrent index updates take the existing machine-local provisioning lock. A reconciler crash
-therefore produces either the old valid state or the new valid state, never a partial JSON file.
+```ts
+type HarnessContext = {
+  worktreeRoot: string;
+  repoRoot?: string;
+  machineConfigRoot: string;
+  workspace?: WorkspaceSpec;
+  binding?: Binding;
+  fs: HarnessFileSystem;
+  process: HarnessProcess;
+  locks: HarnessLocks;
+  clock: HarnessClock;
+};
 
-The plan is conservative when state is inconsistent. It can recreate a selected registration from
-known desired state, but it never adopts an existing registration as owned merely because it looks
-equivalent. `harness status` explains the ambiguity; a future explicit adoption operation would
-require its own decision.
+type HarnessAdapter = {
+  id: HarnessId;
+  surface: Surface;
+  adapterVersion: number;
+  scope: 'folder' | 'repo-shared' | 'machine' | 'in-process';
+  availability(ctx: HarnessContext): Promise<Availability>;
+  target(ctx: HarnessContext): Promise<HarnessTarget | null>;
+  desiredFragments(ctx: HarnessContext): Promise<readonly FragmentIntent[]>;
+  observe(ctx: HarnessContext, target: HarnessTarget): Promise<ObservedContainer>;
+  apply(
+    ctx: HarnessContext,
+    target: HarnessTarget,
+    patch: FragmentPatch,
+    expectedContainerFingerprint: string,
+  ): Promise<ApplyResult>;
+};
+```
 
-## 5. Commands and interaction
+`target` supplies a stable `containerKey`; the adapter keeps platform-specific paths and command
+details behind its boundary. `desiredFragments` is pure with respect to external configuration.
+`observe` returns a parsed container fingerprint plus canonical fragment observations. `apply`
+performs one scoped patch against the latest parse and refuses a changed expected container instead
+of writing from a stale snapshot.
+
+The context makes roots and side effects explicit. Adapters do not call ambient `cwd`, homedir,
+global process environment, time, or locks behind the reconciler's back. Tests can therefore build
+two complete machine directory trees rather than pointing two cases at different config files in
+one shared tree.
+
+The adapter registry contains Claude Code, Codex, Cursor, and musterd. The reconciler contains no
+conditional on those ids. The musterd adapter is `in-process`: it is selectable and visible in
+status, returns no target/fragments, and supplies Surface directly when the native host launches.
+
+Harness ids are extensible strings. Adapter `surface` remains the closed protocol `Surface` union.
+A fixture future adapter uses `other`; introducing a distinct Surface requires a separate protocol
+ADR and version decision.
+
+## 6. Observation and reconciliation states
+
+Each desired fragment is classified independently:
+
+| state | definition |
+|---|---|
+| `absent` | no fragment occupies the key |
+| `owned-exact` | ledger ownership exists and the fingerprint matches |
+| `owned-drifted` | ledger ownership exists but current contents differ |
+| `unmanaged-equivalent` | intended contents exist without ownership evidence |
+| `unmanaged-conflict` | the key exists with different contents and no ownership evidence |
+
+The stable action matrix is:
+
+| desired | state/ownership | action/result |
+|---|---|---|
+| yes | unavailable harness | retain desire; `pending` |
+| yes | `absent` | journal create; `configured` |
+| yes | `owned-exact` and this worktree owns | `unchanged` |
+| yes | `owned-exact` but worktree is not an owner | journal owner addition; `contributed` |
+| yes | `unmanaged-equivalent` | no mutation; `satisfied-unmanaged` |
+| yes | `owned-drifted` or `unmanaged-conflict` | no mutation; `conflict` |
+| no | this worktree is not an owner | `unchanged` |
+| no | non-final owner | journal owner release; preserve fragment; `released` |
+| no | final owner and `owned-exact` | journal removal; `removed` |
+| no | final owner and `owned-drifted` | retain evidence; `release-blocked` |
+
+Adding an owner to an `owned-exact` shared fragment changes only ledger and worktree contribution
+state, but it is journaled because a stop between those two local stores must still recover.
+
+The reconciler never adopts an unmanaged equivalent fragment. It is immediately usable because the
+harness already has the intended configuration, but later deselection leaves it untouched. Explicit
+adoption or force repair is outside this decision.
+
+## 7. Commands
 
 ### `musterd init`
 
-After Team and Member setup, init shows one multi-select containing every registered harness:
-
-- detected available harnesses are preselected;
-- supported unavailable harnesses remain selectable and display their reason;
-- the confirmed set is written locally and reconciled;
-- unavailable selections finish as pending and do not make init fail.
-
-The set can be empty. That is useful for a CLI-only human worktree and is not rewritten to a
-default behind the user's back.
+After Team and Member setup, init presents every registered harness as a multi-select. Detected
+available harnesses are preselected. Supported unavailable harnesses remain selectable with a
+reason and reconcile to `pending`. An empty set is valid. Confirmation saves desire and runs the
+same reconciler as `wire`; cancellation writes nothing.
 
 ### `musterd harness configure`
 
-This is the only interactive editor for the desired set. Existing selections are preselected.
-Confirmation saves the new desired set and runs the same reconciler as `wire`; cancellation writes
-nothing.
-
-It is also the only old-schema conversion entry point. When it sees a legacy workspace or binding
-with `surface`, it explains the clean break, removes that field while advancing the local schema,
-and preselects the corresponding harness when one exists. The user confirms the whole set before
-any write. There is no automatic conversion in init, status, join, wire, MCP startup, or another
-ordinary command.
-
-All other commands reject legacy local files with:
-
-```text
-this worktree uses the retired single-Surface configuration
-run `musterd harness configure` to choose its harnesses
-```
-
-### `musterd harness status`
-
-This command is read-only. One row per registry entry reports desired, availability, scope,
-observed registration, ownership, and a concise repair. It exits nonzero only when state cannot be
-parsed or a selected available harness is failed/drifted; pending unavailable selections are
-healthy intent and exit zero.
+This is the only desired-set editor. Existing selections are preselected. It is also the only
+legacy converter: it parses the recognized old workspace/binding shape, removes `surface`, advances
+the local schemas, and uses the corresponding adapter as a suggested selection only when one
+exists. `cli`, `web`, or another non-harness Surface produces no guessed harness. The human confirms
+the complete set before any conversion write.
 
 ### `musterd wire`
 
-Wire is non-interactive. It requires a valid new-schema worktree and saved desired set, prints the
-stable reconciliation plan/results, exits zero for configured/unchanged/pending states, and exits
-nonzero if an attempted configure or removal fails. It never changes the desired set.
+Wire is deterministic and non-interactive. It requires valid new identity and provisioning state,
+recovers journals, then reconciles every registry entry in registry order. `pending`, `unchanged`,
+`contributed`, `released`, and `satisfied-unmanaged` are successful outcomes. Configuration,
+removal, parse, drift, or journal conflicts return nonzero. Wire never edits desire.
 
-CLI wording and ANSI treatment are added to the terminal brief before implementation snapshots are
-accepted. `Team`, `Member`, `Presence`, `Surface`, and `Act` retain their brand glossary meanings;
-the UI calls these choices _harnesses_, never Surfaces.
+A fresh clone with committed workspace identity but no local provisioning manifest cannot infer a
+harness and directs the human to `musterd harness configure`. This replaces ADR 080's one-Surface
+self-wire and Claude Code fallback.
 
-## 6. Runtime Surface resolution
+### `musterd harness status`
 
-External registrations created by an adapter include a non-secret launch marker:
+Status is read-only. It reports desired state, availability, scope, observed classification,
+ownership/contribution state, pending journal recovery, and one next repair action for every
+adapter. Pending unavailability exits zero. Invalid local state, conflicts, or a selected available
+harness that is incomplete exit nonzero.
 
-```text
-MUSTERD_LAUNCH_SURFACE=claude-code | codex | cursor | ...
-```
+### `musterd uninstall`
 
-The marker says which harness owns the process launch. It does not contain Team, Member, or
-credential identity. The native musterd harness supplies its Surface directly to the in-process
-adapter and writes no launcher configuration.
+Uninstall saves an empty desired set and reconciles all contributions before removing identity or
+provisioning files. A non-final shared owner is released without touching the physical fragment.
+The final owner removes only `owned-exact` contents. If a fragment is drifted, an external removal
+fails, or local cleanup fails, uninstall returns nonzero and retains the manifest, ledger, and
+journal evidence required to retry. Only complete release permits final binding/workspace/local-file
+cleanup.
 
-Runtime resolution is strict and ordered:
+Exact command text and ANSI treatment are added to the terminal brief before CLI snapshots change.
+The choices are called harnesses, never Surfaces; Team, Member, Presence, Surface, and Act retain
+their brand glossary meanings.
 
-1. an explicit operator `MUSTERD_SURFACE` override, for deliberate headless/testing use;
-2. the harness-owned `MUSTERD_LAUNCH_SURFACE` marker;
-3. a Surface supplied directly by an in-process harness.
+## 8. Runtime Surface
 
-The first present source wins, so a deliberate operator override remains possible. Launch-marker
-and in-process sources are mutually exclusive; finding both without an override fails with a
-diagnostic instead of guessing. Workspace and binding `surface` fields do not exist and are never
-fallback inputs. Passive process-name or environment sniffing may support adapter availability
-detection, but it cannot establish Presence Surface.
+Runtime resolution is explicit:
 
-Once resolved, Surface is attached to the runtime Presence using the existing wire protocol. A
-Member may therefore close one harness and later attach through another without any provisioning
-write. Launching does not update desired state, receipts, ownership, workspace, or binding files.
+1. `MUSTERD_SURFACE`, when deliberately supplied for headless/testing use;
+2. the command-owned intrinsic Surface (`cli` for ordinary CLI acts, `musterd` for native host);
+3. `MUSTERD_LAUNCH_SURFACE` injected by an external harness registration.
 
-## 7. Failure and repair behavior
+Each execution path permits only its applicable intrinsic or launch source. Conflicting sources
+without an explicit override fail instead of guessing. Every value is parsed through
+`SurfaceSchema`. A manually started MCP adapter without a launch marker or override refuses to
+join and explains the launcher contract.
 
-- **Selected harness not installed:** status `pending`, exit zero, desire retained.
-- **Selected harness install appears later:** next `wire` configures it without another prompt.
-- **External config drift:** selected/owned entries are repaired idempotently; unowned entries are
-  reported and preserved.
-- **Removal fails:** exit nonzero; receipt and final shared owner remain so retry has authority.
-- **Sibling worktree disappears:** its shared owner remains visible as stale; reconciliation does
-  not silently delete another worktree's ownership. Explicit garbage collection is follow-on work.
-- **Registry no longer knows a selected id:** parsing/reconciliation fails loudly. There is no
-  compatibility alias or silent pruning.
-- **Legacy workspace or binding:** only `harness configure` can convert it; all other paths stop.
-- **No runtime Surface identity:** MCP startup refuses to join and names the missing launcher
-  contract. It never substitutes a configured or previously used harness.
+`binding.session.harness` and `model_observed.harness` remain capture evidence for resumability and
+model provenance, not Presence Surface inputs. Workspace and binding contain no persisted Surface.
+This supersedes the Surface-ranking portion of ADR 275 while preserving ADR 143's rule that Member
+identity resolves from the current worktree.
 
-No failure mode rewrites the desired set as a repair.
+Launching may update allowed binding runtime fields: session capture, observed model, claim/grant,
+driver/autojoin state when explicitly changed by their commands, and cached capabilities learned at
+claim. It may not change workspace identity, desired harnesses, worktree contributions, machine
+ownership, journal state, or managed fragment fingerprints.
 
-## 8. Extensibility
+## 9. Failure behavior
 
-The native musterd harness proves the `in-process` scope: it participates in selection and status
-while configure/remove are no-ops and runtime Surface is supplied directly. A fixture adapter with
-a novel id and scope proves the reconciler and command rendering depend on the registry contract,
-not a closed union of current product names.
+- Selected harness unavailable: retain desire and report `pending`.
+- Harness becomes available: the next `wire` configures it without another prompt.
+- Worktree identity missing: commands that require identity report `missing`, not legacy.
+- Legacy identity: only `harness configure` may convert it.
+- Malformed or unknown-version local state: fail as `invalid`; never treat it as absent.
+- Desired harness id absent from the installed registry: retain desire and fail with an unknown-id
+  repair message; never prune or alias it.
+- Unmanaged equivalent: leave it usable and unowned.
+- Unmanaged conflict or owned drift: preserve all contents and report the exact fragment key.
+- Stop before external write: journal recovery retries.
+- Stop after external write: journal recovery finalizes ownership.
+- Ambiguous post-stop contents: preserve journal and stop.
+- Sibling worktree disappears: its owner remains visible; garbage collection is follow-on work.
+- Last-owner removal fails: retain final ownership and contribution evidence.
+- No runtime Surface: refuse Presence attachment rather than use historical configuration.
 
-A future external harness chooses the narrowest true registration scope, supplies a stable resource
-key and owned receipt, and injects its own launch marker. It does not add a workspace field or a new
-Surface inference fallback.
-
-## 9. Implementation surfaces
-
-The implementation changes, in build order:
-
-1. `@musterd/protocol`: versioned strict local workspace, binding, provisioning, ownership, and
-   adapter-facing schemas; removal of local `surface` fields under ADR 281. Wire schemas unchanged.
-2. CLI onboarding: registry contract, current harness adapters, ownership index, planner/executor,
-   `init` multi-select, `harness configure`, `harness status`, and deterministic `wire`.
-3. MCP adapter: strict launch-Surface resolution and registration marker propagation.
-4. Native harness: registry entry and direct in-process Surface declaration.
-5. Architecture and terminal design docs: current file/state lifecycle and exact CLI frames.
-
-Implementation increments obey the repository build order and keep docs current in each commit.
+No repair path silently changes the desired set, adopts contents, or discards ownership evidence.
 
 ## 10. Verification
 
-### Unit contract
+### Schema and loader contract
 
-- every row in the reconciliation table, including retry after each side-effect failure;
-- strict local schema versions, unknown ids/fields, and legacy rejection;
-- deterministic plan and manifest serialization;
-- receipt-bounded removal that preserves unrelated config;
-- Surface source success, absence, and conflict;
-- pending availability as exit zero and failed action as exit nonzero.
+- strict workspace, binding, manifest, ledger, and journal schemas;
+- unknown fields and versions rejected;
+- every ordinary reader distinguishes missing, legacy, and invalid;
+- only confirmed `harness configure` converts a legacy fixture;
+- protocol validates uniqueness while CLI tests registry-order serialization.
+
+### Reconciliation matrix
+
+- every desired/availability/observed row above;
+- unmanaged equivalent is usable but never owned or removed;
+- unmanaged conflict and owned drift preserve exact bytes;
+- one harness with several fragments converges incrementally;
+- a stop injected after every journal step recovers idempotently;
+- uninstall failure at every external and local cleanup step retains retry evidence;
+- unrelated config entries survive every configure/remove/recovery path.
 
 ### Ownership integration
 
-Using temporary machine config roots:
-
-1. two sibling worktrees select one repository-shared harness;
-2. one physical registration and two normalized owners exist;
-3. the first deselection preserves the registration;
-4. the final deselection removes only the receipted registration;
-5. the same worktrees under a second machine root have independent selections and ownership.
+Build two independent temporary machine directory trees. In machine A, two sibling worktrees select
+one repository-shared Claude Code registration: one physical fragment gains two owners, the first
+deselection preserves it, and the final deselection removes it only when its fingerprint matches.
+Machine B has its own checkout paths, config root, selection, ledger, locks, and journal and never
+observes machine A's choices.
 
 ### Sequential-switch acceptance
 
-In one worktree, select Claude Code, Codex, Cursor, and musterd and reconcile once. Start and close
-the same Member sequentially through each harness. Assert Presence Surfaces `claude-code`, `codex`,
-`cursor`, and `musterd`, and byte-compare the workspace, binding, provisioning manifest, ownership
-index, and harness config files before and after the four launches. No launch may invoke or require
-wire.
+In one worktree, select Claude Code, Codex, Cursor, and musterd and reconcile once. Launch and close
+the same Member sequentially through all four. Assert Presence Surfaces `claude-code`, `codex`,
+`cursor`, and `musterd`.
 
-### Extensibility and clean break
+Before and after every launch:
 
-- a fixture future harness passes configure/status/remove without reconciler name changes;
-- the native in-process harness is selectable without creating external config;
-- old workspace and binding fixtures fail on every ordinary entry point with the prescribed
-  command, then convert only through an explicitly confirmed `harness configure` session;
-- no test asserts dual-read, automatic migration, inference fallback, or legacy output.
+- `workspace.json` is byte-identical;
+- desired selections are byte-identical;
+- worktree contributions, machine owner sets, and managed fragment fingerprints are semantically
+  identical;
+- no journal or config write occurs;
+- binding differences contain only the explicit runtime-field allowlist.
 
-The milestone gates remain those in the execution contract: package tests during their increments,
-Scenario B for external MCP harnesses, Scenario C for cross-Surface behavior, then the full build,
-lint, and test definition of done.
+No launch invokes or requires `wire`.
+
+### Extensibility and acceptance gates
+
+- a fixture adapter with a novel harness id and Surface `other` passes configure/status/remove
+  without reconciler name changes;
+- the native adapter remains selectable without an external target;
+- Scenario B passes for Claude Code and Codex against the same Team;
+- Scenario C passes across CLI and MCP Surfaces;
+- package build, typecheck, lint, formatting, unit, integration, and coverage gates remain green.
+
+## 11. Documentation impact
+
+Implementation updates the current architecture docs in the same commits as behavior:
+
+- `02-protocol.md`: strict local schemas and the distinction from wire protocol;
+- `04-cli.md`: state files, adapter/reconciler boundaries, commands, and removal lifecycle;
+- `05-mcp.md`: launcher Surface contract and binding runtime writes;
+- terminal brief: multi-select, status, conflict, recovery, and legacy-conversion frames.
+
+Historical accepted Decisions remain frozen. ADR 281 receives only a Consequences note pointing to
+ADR 282. Existing current-architecture prose that calls ADR 038 the harness-registry decision is
+corrected to the actual lineage in ADR 026 and ADR 116.

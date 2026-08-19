@@ -2,10 +2,12 @@
 
 - **Status:** accepted 2026-08-18
 - **Deciders:** nick, gptbot
-- **Relates to:** ADR 018 (workspace binding), ADR 038 (harness adapters), ADR 080 (local
-  provisioning manifest), ADR 143 (folder-scoped Codex configuration), ADR 165 (one universal MCP
-  entry), ADR 213 (cross-worktree launch guard), ADR 251 (native musterd harness), ADR 275
-  (machine-local provisioning)
+- **Relates to:** ADR 018 (workspace binding), ADR 026 (harness tool environment), ADR 030
+  (provisioning manifest), ADR 080 (committed launch spec), ADR 116 (agent harness selection), ADR
+  143 (workspace-anchored identity), ADR 165 (one universal MCP entry), ADR 213 (cross-worktree
+  launch guard), ADR 251 (native musterd harness), ADR 275 (capture-attested Surface)
+- **Superseded in part by:** ADR 282 (fragment ownership, crash recovery, and exact command/Surface
+  boundaries)
 - **Lane:** `01M0B1DP6Z4GD249S026VB0368`
 - **Detailed design:**
   [multi-harness worktree selection](../superpowers/specs/2026-08-18-multi-harness-worktree-selection-design.md)
@@ -83,6 +85,14 @@ require more special cases instead of one lifecycle contract.
    workspace configuration.
 
 ## Consequences
+
+- **2026-08-19 — ownership and recovery superseded by ADR 282.** Independent pre-implementation
+  review showed that one receipt per harness cannot represent several worktree contributions to a
+  repository-shared registration, and atomic JSON replacement cannot recover a crash between an
+  external configuration write and receipt persistence. ADR 282 replaces Decisions 3 and 5 with a
+  fragment ledger and write-ahead journal, and narrows Decisions 4 and 6 to the existing protocol
+  Surface vocabulary and explicit launcher identity. The clean schema break and machine-local
+  multi-selection remain in force.
 
 - A user configures any subset once and can then move between Claude Code, Codex, Cursor, and the
   native musterd harness without running `wire` between sessions.
