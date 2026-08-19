@@ -122,7 +122,7 @@ function pstNowHours(): number {
  * /office-preview flipped red about 1 run in 3, always an `lc-speech__text` row, on #3b5854 /
  * #2d4245 / #724b29 — three different bits of furniture, one bubble.
  *
- * THE AMBIENT HOLD (added 2026-08-19, ADR 283). The idle-beat scheduler injects a stroll or a
+ * THE AMBIENT HOLD (added 2026-08-19, ADR 285). The idle-beat scheduler injects a stroll or a
  * micro-gesture every 30–70s, forever. It already stands down under reduced motion — but
  * /office-preview mounts this scene with `reduced: false` hardcoded, so on the route the contrast
  * gate leans on hardest it keeps running: an identity-keeping motion probe watched a room sit

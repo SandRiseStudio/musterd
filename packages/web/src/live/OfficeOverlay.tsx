@@ -85,7 +85,7 @@ export function OfficeOverlay({
   // Auto-advance. Off while the viewer is steering or hovering, and off on a hidden tab — a
   // background dashboard costs a viewer nothing, per the packages/web perf contract.
   //
-  // Also off under `?still` (ADR 283). This reel was the single largest reason /office-preview never
+  // Also off under `?still` (ADR 285). This reel was the single largest reason /office-preview never
   // settled for the contrast gate: past the 30s mark of a 150s probe, 144 of the 214 remaining DOM
   // events were this component advancing on a flat 6s period, forever. Holding it hides nothing —
   // the card that is up stays up and is measured exactly as a reader sees it; what stops is the reel

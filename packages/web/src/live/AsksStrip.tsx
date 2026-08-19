@@ -107,7 +107,7 @@ export function AsksStrip({
   // A 1s tick while any clock is running, so the countdowns are honest. Stops when nothing is loud —
   // idle cost is paid by every viewer, forever (packages/web/AGENTS.md).
   //
-  // Held under `?still` (ADR 283). A countdown is the purest case the flag exists for: the text
+  // Held under `?still` (ADR 285). A countdown is the purest case the flag exists for: the text
   // "4m 12s" is a row the contrast sweep measures, and re-rendering it every second re-widens the
   // row and moves whatever sits after it — so the page never settles, and the number the gate
   // reports is a frame. The card keeps whatever value it had at mount, which is exactly what a

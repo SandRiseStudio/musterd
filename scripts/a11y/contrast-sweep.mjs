@@ -523,7 +523,7 @@ const SETTLE_WINDOW = Number(process.env.A11Y_SETTLE_WINDOW ?? 2500);
 /**
  * How long to wait for the page to stop changing before measuring it anyway and saying so.
  *
- * 30s, not 20s (2026-08-19, ADR 283). The cap has to exceed the longest CHOREOGRAPHY on any route
+ * 30s, not 20s (2026-08-19, ADR 285). The cap has to exceed the longest CHOREOGRAPHY on any route
  * being measured, or the sweep gives up on a page that was about to settle and reports MEASURED
  * MID-FLIGHT about a room that does in fact stop. /office-preview under `?still` reaches quiescence
  * at ~22s — measured with an identity-keeping motion probe, and unchanged whether the script is
