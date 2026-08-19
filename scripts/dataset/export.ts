@@ -7,9 +7,11 @@
  * specific release. It is not a HuggingFace upload and it is not `pnpm corpus:snapshot`.
  *
  * WHAT IT DOES NOT DO. It never reads `messages.body`, `seat_memory`, or `lanes.title`/`detail`.
- * Unknown meta keys are dropped (fail closed — omission, not a scrubber). It uploads nothing. It
- * refuses the live `~/.musterd/musterd.db` unless `--from-live` (ADR 280: do not export from the
- * only copy). A private pseudonym map is written only under `--map`, and never inside `--out`.
+ * Unknown meta keys are dropped (fail closed — omission, not a scrubber). Lane `branch` is omitted
+ * (seat/`topic` refs re-identify the HMAC; merged pr/sha already ride allowlisted meta). `project`
+ * tokens that match a seat name are HMAC'd. It uploads nothing. It refuses the live
+ * `~/.musterd/musterd.db` unless `--from-live` (ADR 280: do not export from the only copy). A private
+ * pseudonym map is written only under `--map`, and never inside `--out`.
  *
  *   pnpm dataset:export -- --db <snapshot.db> --out <dir> --authorized-by <human> \
  *                          [--manifest scripts/dataset/manifest.v1.json] [--map <private.json>]
@@ -51,6 +53,20 @@ function isInside(child: string, parent: string): boolean {
 
 export function isLiveDaemonDb(p: string): boolean {
   return resolve(p).replace(/\\/g, '/').endsWith('/.musterd/musterd.db');
+}
+
+export function bucketProject(
+  project: string,
+  names: Map<string, string>,
+  ids: Map<string, string>,
+): string {
+  const byLower = new Map<string, string>();
+  for (const [name, id] of names) byLower.set(name.toLowerCase(), id);
+  return project.replace(/[A-Za-z0-9]+/g, (token) => {
+    const id = byLower.get(token.toLowerCase());
+    if (id === undefined) return token;
+    return ids.get(id) ?? token;
+  });
 }
 
 export function projectMeta(
@@ -133,7 +149,6 @@ interface LaneRow {
   created_by: string;
   state: string;
   depends_on: string;
-  branch: string | null;
   goal_id: string | null;
   created_at: number;
   claimed_at: number | null;
@@ -176,7 +191,7 @@ export function exportDataset(opts: ExportOptions): ExportResult {
   const lanesRaw = db
     .prepare(
       `SELECT l.id, t.slug AS team_slug, l.project, l.owner_seat, l.created_by, l.state,
-              l.depends_on, l.branch, l.goal_id, l.created_at, l.claimed_at, l.resolved_at, l.updated_at
+              l.depends_on, l.goal_id, l.created_at, l.claimed_at, l.resolved_at, l.updated_at
          FROM lanes l JOIN teams t ON t.id = l.team_id`,
     )
     .all() as unknown as LaneRow[];
@@ -227,13 +242,12 @@ export function exportDataset(opts: ExportOptions): ExportResult {
     return {
       id: row.id,
       team: row.team_slug,
-      project: row.project,
+      project: bucketProject(row.project, names, ids),
       state: row.state,
       owner: seatOfSalted(row.owner_seat, names, ids, opts.salt),
       created_by: seatOfSalted(row.created_by, names, ids, opts.salt),
       goal_id: row.goal_id,
       depends_on: dependsOn,
-      branch: row.branch,
       created_at: row.created_at,
       claimed_at: row.claimed_at,
       resolved_at: row.resolved_at,

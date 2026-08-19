@@ -14,6 +14,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_MANIFEST_PATH,
+  bucketProject,
   exportDataset,
   parseExportArgs,
   projectMeta,
@@ -102,6 +103,13 @@ function fixtureDb(dir: string): string {
         created_at, claimed_at, resolved_at, updated_at)
      VALUES (?, 't1', 'agents', ?, ?, 'Ada', 'nick', 'active', '[]', 'feat/x', 'g1', 1, 2, NULL, 3)`,
   ).run('lane1', `Lane title ${CANARY}`, `Lane detail ${CANARY}`);
+  // miley's #908 reject: `<seat>/<topic>` branches and `agents-<seat>` projects carry plaintext names.
+  db.prepare(
+    `INSERT INTO lanes
+       (id, team_id, project, title, detail, owner_seat, created_by, state, depends_on, branch, goal_id,
+        created_at, claimed_at, resolved_at, updated_at)
+     VALUES ('lane2', 't1', 'agents-Ada', 'x', 'y', 'Ada', 'nick', 'active', '[]', 'Ada/leaky-topic', NULL, 1, 2, NULL, 3)`,
+  ).run();
   db.prepare(
     `INSERT INTO seat_memory (member_id, headline, body, saved_at) VALUES (?, ?, ?, 1)`,
   ).run('m-ada', `headline ${CANARY}`, `memory ${CANARY}`);
@@ -202,6 +210,9 @@ describe('exportDataset', () => {
     expect(text).not.toContain('please take this');
     expect(text).not.toContain('Lane title');
     expect(text).not.toContain('headline');
+    expect(text).not.toContain('agents-Ada');
+    expect(text).not.toContain('Ada/');
+    expect(text).not.toContain('leaky-topic');
   });
 
   it('emits structural act / member / lane rows with HMAC seat ids', () => {
@@ -234,7 +245,8 @@ describe('exportDataset', () => {
     expect(members.every((m) => m['kind'] === 'human' || m['kind'] === 'agent')).toBe(true);
 
     const lanes = jsonl<Record<string, unknown>>(out, 'lanes.jsonl');
-    expect(lanes[0]).toMatchObject({
+    const lane1 = lanes.find((l) => l['id'] === 'lane1');
+    expect(lane1).toMatchObject({
       id: 'lane1',
       state: 'active',
       owner: ada,
@@ -242,8 +254,18 @@ describe('exportDataset', () => {
       goal_id: 'g1',
       project: 'agents',
     });
-    expect(lanes[0]).not.toHaveProperty('title');
-    expect(lanes[0]).not.toHaveProperty('detail');
+    expect(lane1).not.toHaveProperty('title');
+    expect(lane1).not.toHaveProperty('detail');
+    expect(lane1).not.toHaveProperty('branch');
+
+    const lane2 = lanes.find((l) => l['id'] === 'lane2');
+    expect(lane2).toMatchObject({
+      id: 'lane2',
+      project: `agents-${ada}`,
+      owner: ada,
+    });
+    expect(lane2).not.toHaveProperty('branch');
+    expect(JSON.stringify(lane2)).not.toContain('Ada');
 
     const release = JSON.parse(readFileSync(join(out, 'RELEASE.json'), 'utf8')) as {
       adr: number;
@@ -255,7 +277,7 @@ describe('exportDataset', () => {
     expect(release.adr).toBe(184);
     expect(release.authorized_by).toBe('nick');
     expect(release.salt_sha256).toBe(createHash('sha256').update(SALT_A).digest('hex'));
-    expect(release.counts).toEqual({ acts: 1, members: 2, lanes: 1 });
+    expect(release.counts).toEqual({ acts: 1, members: 2, lanes: 2 });
     expect(release.experiment_manifest.sha256).toHaveLength(64);
   });
 
@@ -302,6 +324,34 @@ describe('exportDataset', () => {
         salt: SALT_A,
       }),
     ).toThrow(/authorized_by/);
+  });
+});
+
+describe('bucketProject', () => {
+  const names = new Map([
+    ['nick', 'm-nick'],
+    ['Ada', 'm-ada'],
+    ['izzo', 'm-izzo'],
+  ]);
+  const ids = new Map([
+    ['m-nick', pseudonym('m-nick', SALT_A)],
+    ['m-ada', pseudonym('m-ada', SALT_A)],
+    ['m-izzo', pseudonym('m-izzo', SALT_A)],
+  ]);
+
+  it('leaves a project with no seat token alone', () => {
+    expect(bucketProject('agents', names, ids)).toBe('agents');
+    expect(bucketProject('default', names, ids)).toBe('default');
+  });
+
+  it('replaces a seat token in agents-<seat> and is case-insensitive', () => {
+    expect(bucketProject('agents-Ada', names, ids)).toBe(`agents-${ids.get('m-ada')}`);
+    expect(bucketProject('agents-ada', names, ids)).toBe(`agents-${ids.get('m-ada')}`);
+    expect(bucketProject('agents-izzo', names, ids)).toBe(`agents-${ids.get('m-izzo')}`);
+  });
+
+  it('does not rewrite a token that merely contains a seat name as a substring', () => {
+    expect(bucketProject('nickel', names, ids)).toBe('nickel');
   });
 });
 

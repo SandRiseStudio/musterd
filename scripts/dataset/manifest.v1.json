@@ -6,13 +6,14 @@
   "includes": [
     "acts (id, team slug, act, thread, ts, allowlisted meta, HMAC seat ids)",
     "members (HMAC id, kind, role — never the seat name)",
-    "lanes (id, state, times, HMAC owner/creator, goal_id, depends_on, project, branch — never title/detail)"
+    "lanes (id, state, times, HMAC owner/creator, goal_id, depends_on, project with seat tokens HMAC'd — never title/detail/branch)"
   ],
   "omits": [
     "messages.body",
     "seat_memory",
     "lanes.title",
     "lanes.detail",
+    "lanes.branch (seat/topic refs re-identify the HMAC; merged pr/sha already ride allowlisted meta)",
     "meta keys not on the structural allowlist (urgent_reason, risk, chosen_approach, and any unknown key)"
   ],
   "pseudonym": "HMAC-SHA256(member_id, per-release salt), seat_<12 hex>. Mapping is never written into the public directory. Unlinkable across releases.",
