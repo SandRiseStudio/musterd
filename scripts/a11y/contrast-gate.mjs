@@ -188,6 +188,8 @@ const sweep = (url) =>
 
 console.log(`contrast-gate — ${ROUTES.length} routes over ${DIR}\n`);
 const failed = [];
+/** Routes that went UNMEASURED (sweep exit 2) — a subset of `failed`, reported apart from it. */
+const unmeasured = [];
 /**
  * @param floor minimum text nodes this route must have measured for the pass to mean anything.
  *   A connected route that measures ZERO is not clean, it is a page that never finished connecting
@@ -214,6 +216,33 @@ const report = ({ code, out }, label, floor = 0) => {
   }
   if (code === 0) {
     console.log(`  ✓ ${label} — ${live?.[1] ?? '?'} measured${tail}${unsettled}`);
+    return;
+  }
+  /*
+   * EXIT 2 IS NOT A CONTRAST VERDICT. The sweep exits 2 when it could not measure at all — no
+   * browser, no debugging port, a canvas that never painted — and it says so on stderr in those
+   * words. This branch used to render that as `✗ <route> — ? below AA`: a contrast red whose count
+   * is a question mark, because there was no `live:` line to parse. The `!` marker the footer has
+   * always promised ("routes marked `!` did not measure at all") existed in the message and NOWHERE
+   * IN THE CODE.
+   *
+   * The cost is not cosmetic. On 2026-08-19 izzo hit exactly this, read `✗ / — ? below AA`, and
+   * concluded from the question mark that it could not be the Chrome-port harness flake — while the
+   * harness-failure line sat three seconds above it in the same log. A careful reader was sent to
+   * debug a contrast defect on a route that had never been measured. An instrument that dresses its
+   * own failure as a verdict about the subject is the one failure mode this gate's whole design is
+   * organised against.
+   *
+   * It still FAILS the run: a route that went unmeasured is not green, and the count is absent
+   * rather than zero. It just says which kind of wrong it is.
+   */
+  if (code === 2) {
+    failed.push(label);
+    unmeasured.push(label);
+    console.log(
+      `  ! ${label} — DID NOT MEASURE (harness failure, not a contrast result; see the` +
+        ' contrast-sweep line above). No verdict was taken on this route.',
+    );
     return;
   }
   failed.push(label);
@@ -365,6 +394,13 @@ if (!process.argv.includes('--static-only')) {
 if (failed.length) {
   console.log(
     `\ncontrast-gate FAILED on ${failed.length} route(s): ${failed.join(', ')}` +
+      (unmeasured.length
+        ? `\n\n  ${unmeasured.length} of those DID NOT MEASURE — ${unmeasured.join(', ')} — and are` +
+          ' marked `!` above. That is a HARNESS failure, not a contrast defect: nothing on those' +
+          ' routes was looked at, so there is no colour to fix there and reading a contrast bug into' +
+          ' them will cost you the afternoon. Fix the harness (or re-run) first; the ✗ routes below,' +
+          ' if any, are the real verdicts.'
+        : '') +
       '\nRoutes marked `!` did not measure at all — fix the harness there before reading anything' +
       ' into the rest.' +
       '\nEach row is `ratio (need N) ink on paper`. Almost always the fix is the -ink variant of the' +

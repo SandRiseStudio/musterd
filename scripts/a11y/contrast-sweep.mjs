@@ -134,33 +134,82 @@ const sweepStaleProfiles = (dir = tmpdir(), ttlMs = PROFILE_TTL_MS, now = Date.n
 };
 sweepStaleProfiles();
 
-const profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
-const chrome = spawn(
-  CHROME,
-  [
-    '--headless=new',
-    /* Port 0 = "pick a free one and tell me". NOT a tidiness change: this used to be a hardcoded
-     * 9334, and a hardcoded port is shared state between every sweep on the machine. The second
-     * sweep's Chrome cannot bind it, so the second sweep's `/json/list` answers from the FIRST
-     * sweep's browser and both runs then drive one page. Reproduced by dolly (lane 01KZZ7BQE3):
-     * a sweep pointed at alpha.html filed a GREEN report whose url read beta.html — a pass for a
-     * page nobody looked at, which is the one direction this file's header forbids failing in.
-     * Nineteen worktrees share this laptop, so concurrent sweeps are normal, not exotic.
-     *
-     * The port now comes out of OUR OWN profile directory (`DevToolsActivePort`, written by Chrome
-     * on startup), so it is structurally impossible to reach a browser we did not start. That is
-     * why this fixes the class rather than narrowing the window: there is no shared name left to
-     * collide on. */
-    '--remote-debugging-port=0',
-    `--user-data-dir=${profile}`,
-    '--no-first-run',
-    '--disable-extensions',
-    '--window-size=1440,900',
-    'about:blank',
-  ],
-  { stdio: 'ignore' },
-);
-const chromeGone = new Promise((res) => chrome.once('exit', res));
+/**
+ * Chrome, its profile, and the evidence it leaves if it fails to start.
+ *
+ * `let`, not `const`, because a launch is RETRYABLE (see `bringUpChrome`) and a retry gets a fresh
+ * profile — reusing the directory of a Chrome that just died is how a bad first start poisons the
+ * second one. `shutdown`/`cleanup` below always act on whichever attempt is current.
+ */
+let profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
+let chrome;
+let chromeGone;
+/** Chrome's own stderr, capped. The ONLY artifact that says why a start failed — see `launch`. */
+let chromeErr = '';
+
+const CHROME_ARGS = [
+  '--headless=new',
+  /* Port 0 = "pick a free one and tell me". NOT a tidiness change: this used to be a hardcoded
+   * 9334, and a hardcoded port is shared state between every sweep on the machine. The second
+   * sweep's Chrome cannot bind it, so the second sweep's `/json/list` answers from the FIRST
+   * sweep's browser and both runs then drive one page. Reproduced by dolly (lane 01KZZ7BQE3):
+   * a sweep pointed at alpha.html filed a GREEN report whose url read beta.html — a pass for a
+   * page nobody looked at, which is the one direction this file's header forbids failing in.
+   * Nineteen worktrees share this laptop, so concurrent sweeps are normal, not exotic.
+   *
+   * The port now comes out of OUR OWN profile directory (`DevToolsActivePort`, written by Chrome
+   * on startup), so it is structurally impossible to reach a browser we did not start. That is
+   * why this fixes the class rather than narrowing the window: there is no shared name left to
+   * collide on. */
+  '--remote-debugging-port=0',
+  '--no-first-run',
+  '--disable-extensions',
+  '--window-size=1440,900',
+  'about:blank',
+];
+
+/**
+ * Start one Chrome against the current `profile`, and KEEP ITS STDERR.
+ *
+ * It used to be spawned with `stdio: 'ignore'`, which threw away the only artifact that could
+ * explain a failed start. Every occurrence of "never opened a debugging port" was therefore
+ * re-run rather than diagnosed — including CI run 32295496057 (2026-08-19), where the operator got
+ * a timeout message and nothing to act on. Capped at 4 KB because a Chrome that is merely CHATTY
+ * must not turn a harness failure into an unreadable one.
+ */
+const launch = () => {
+  chromeErr = '';
+  chrome = spawn(CHROME, [...CHROME_ARGS, `--user-data-dir=${profile}`], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  chrome.stderr?.on('data', (d) => {
+    if (chromeErr.length < 4096) chromeErr += String(d);
+  });
+  /* A spawn that never starts emits 'error', and an unhandled 'error' on a ChildProcess THROWS.
+     Without this, pointing CHROME_BIN at a missing binary killed the sweep with a raw Node stack
+     instead of the refusal directly below — the same harness failure, reported in the one form that
+     tells the reader nothing about which gate refused or why. */
+  chrome.on('error', (e) => {
+    chromeErr += `${e.message}\n`;
+    chrome.exited = true;
+    chrome.exitInfo = e.code ? `spawn ${e.code}` : 'spawn failed';
+  });
+  /* `exited` is a FLAG as well as a promise: the wait loop below needs to ask "is it already gone?"
+     synchronously on every tick, which a promise alone cannot answer. */
+  chrome.exited = false;
+  chromeGone = new Promise((res) => {
+    chrome.once('exit', (code, signal) => {
+      chrome.exited = true;
+      chrome.exitInfo = signal ? `signal ${signal}` : `code ${code}`;
+      res();
+    });
+    /* 'error' as well as 'exit', or `shutdown()` awaits a process that was never born: a spawn
+       failure (ENOENT, EACCES) emits 'error' and may emit no 'exit' at all, and the refusal path
+       below awaits this promise before exiting. It hung there instead of refusing. */
+    chrome.once('error', res);
+  });
+};
+launch();
 
 /**
  * Shut Chrome down and take its profile with it.
@@ -175,21 +224,27 @@ const chromeGone = new Promise((res) => chrome.once('exit', res));
  * because a Chrome wedged mid-screenshot must not hold the gate open. `process.on('exit')` keeps a
  * synchronous best-effort copy for the paths that never get to await anything.
  */
-const shutdown = async () => {
-  chrome.kill();
+const shutdown = async (proc = chrome, dir = profile, gone = chromeGone) => {
+  /* The process/profile are captured as ARGUMENTS, not read from the module bindings inside the
+     timer. Those bindings are reassigned by a launch retry (`bringUpChrome`), and the 3s SIGKILL
+     below outlives the call that armed it — so reading `chrome` at fire time killed the retry's
+     healthy browser 3.0s after it had come up, with `DevTools listening on ...` already in its
+     stderr. Caught 2026-08-19 by the retry's own test; a fixed-delay killer that names a mutable is
+     a bug waiting for a second caller. */
+  proc.kill();
   await Promise.race([
-    chromeGone,
+    gone,
     new Promise((res) => setTimeout(res, 3000)).then(() => {
       try {
-        chrome.kill('SIGKILL');
+        proc.kill('SIGKILL');
       } catch {
         /* already gone */
       }
-      return chromeGone;
+      return gone;
     }),
   ]);
   try {
-    rmSync(profile, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
   } catch {
     /* best-effort: a profile on a busy volume can outlive one attempt */
   }
@@ -229,32 +284,93 @@ const readActivePort = () => {
   }
 };
 
-let targets;
 /* 30s, not 10. On a cold CI runner the first Chrome of a session takes appreciably longer to open
    its debugging port than the third does — the 2026-08-13 gate run failed the first three routes
    and then sailed through the remaining nine on the same machine. A timeout tuned on a warm laptop
    is how a suite acquires a "flaky" reputation it does not deserve. */
-for (let i = 0; i < 150; i++) {
-  port ??= readActivePort();
-  if (port) {
-    try {
-      targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-      if (targets.some((t) => t.type === 'page')) break;
-    } catch {
-      /* not up yet */
+const START_TIMEOUT_MS = Number(process.env.A11Y_CHROME_TIMEOUT ?? 30000);
+/** Launch attempts before the sweep refuses. Two, not more — see `bringUpChrome`. */
+const START_ATTEMPTS = Number(process.env.A11Y_CHROME_ATTEMPTS ?? 2);
+
+/**
+ * Get a Chrome with a live debugging port, or refuse — RETRYING a failed start.
+ *
+ * The refusal at the bottom is correct and stays: a sweep that could not drive a browser has
+ * measured nothing, and reporting a contrast verdict it never took is the one direction this file's
+ * header forbids failing in. What was wrong is that a TRANSIENT start failure became a hard job
+ * failure. Observed 2026-08-19 on CI run 32295496057 and again on izzo's #888, both on the FIRST
+ * route of the run (`/`), with the remaining eight routes — connected /live included — measuring
+ * fine on the same runner seconds later. Both were re-run by hand.
+ *
+ * TWO attempts, not five. The failure this fixes is a cold first start; a second attempt either
+ * works or is telling you something real. A long retry ladder would convert a genuinely broken
+ * Chrome — no binary, a missing shared library, a sandbox the runner forbids — from a 30-second red
+ * into a multi-minute one, which is a worse gate rather than a safer one.
+ *
+ * Waiting is bounded by the process being ALIVE as well as by the clock. `chromeGone` already
+ * existed here and was never consulted, so a Chrome that died in its first 200ms still burned the
+ * full 30s before anyone was told. An exited process will not write `DevToolsActivePort` however
+ * long it is given.
+ */
+const bringUpChrome = async () => {
+  const failures = [];
+  for (let attempt = 1; attempt <= START_ATTEMPTS; attempt++) {
+    const startedAt = Date.now();
+    const deadline = startedAt + START_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      port ??= readActivePort();
+      if (port) {
+        try {
+          const targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+          const found = targets?.find((t) => t.type === 'page');
+          if (found) return found;
+        } catch {
+          /* port file written, socket not accepting connections yet */
+        }
+      }
+      if (chrome.exited) break; // dead: stop waiting for a file it can no longer write
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    const waited = ((Date.now() - startedAt) / 1000).toFixed(1);
+    failures.push(
+      `attempt ${attempt}: ${
+        chrome.exited
+          ? `Chrome exited (${chrome.exitInfo}) after ${waited}s`
+          : port
+            ? `port :${port} was written but never accepted a connection (${waited}s)`
+            : `no DevToolsActivePort was written (${waited}s)`
+      }`,
+    );
+
+    if (attempt < START_ATTEMPTS) {
+      /* A FRESH profile for the retry. Reusing the directory of a Chrome that just failed is how one
+         bad start poisons the next: a half-written profile is exactly the state Chrome recovers from
+         by showing first-run UI or by declining to open the port at all. */
+      await shutdown(chrome, profile, chromeGone); // this attempt's process, explicitly
+      profile = mkdtempSync(join(tmpdir(), PROFILE_PREFIX));
+      port = undefined;
+      console.error(
+        `contrast-sweep — Chrome did not come up (${failures[failures.length - 1]});` +
+          ' retrying once with a fresh profile.',
+      );
+      launch();
     }
   }
-  await new Promise((r) => setTimeout(r, 200));
-}
-const page = targets?.find((t) => t.type === 'page');
-if (!page) {
+
+  /* Chrome's own words, last. Without this the operator gets a timeout and nothing to act on, which
+     is why every previous occurrence was re-run rather than diagnosed. */
+  const stderrTail = chromeErr.trim().split('\n').slice(-6).join('\n    ');
   console.error(
-    `contrast-sweep — Chrome (${CHROME}) never opened a debugging port within 30s` +
-      `${port ? ` (read :${port} from ${join(profile, 'DevToolsActivePort')})` : ' (no DevToolsActivePort was ever written)'}.` +
-      ' Nothing was measured. This is a harness failure, not a contrast result.',
+    `contrast-sweep — Chrome (${CHROME}) never opened a debugging port in ${START_ATTEMPTS} attempt(s).` +
+      ' Nothing was measured. This is a harness failure, not a contrast result.\n  ' +
+      failures.join('\n  ') +
+      (stderrTail ? `\n  Chrome said:\n    ${stderrTail}` : '\n  Chrome wrote nothing to stderr.'),
   );
   await exit(2);
-}
+};
+
+const page = await bringUpChrome();
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((res, rej) => {
