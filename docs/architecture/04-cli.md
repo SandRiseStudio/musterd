@@ -98,6 +98,7 @@ src/
     reconcile/store.ts   // canonical validated stores (ADR 282/286): LocalLoad classification, canonical JSON, atomic 0600+fsync+rename publish; ledger/journal/lock paths hash the containerKey
     reconcile/lock.ts    // createHarnessLocks — 30s cross-process recoverable lease per containerKey; reclaim needs expiry + provably-dead PID/process-start identity, unknown liveness stays busy (ADR 282/286)
     reconcile/fragments.ts // the fragment adapter contract (ADR 281/282): HarnessAdapter/FragmentIntent types, canonical SHA-256 fingerprints, scope-discriminated resource keys, registry order
+    reconcile/engine.ts  // inspectHarnesses (read-only) + reconcileHarnesses: the frozen action matrix, write-ahead journal sequence, fingerprint-compared recovery, one allowlisted musterd.provisioning.operation span per fragment (ADR 282/286)
     harnesses/musterd.ts // the native musterd adapter (always available, Surface musterd, zero external fragments) + the internal musterd-core guidance fragment producer
     guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
     pending.ts        // client-side pending-presence markers (ADR 033)
