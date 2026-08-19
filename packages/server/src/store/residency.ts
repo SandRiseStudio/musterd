@@ -1,4 +1,5 @@
 import type {
+  Envelope,
   LoopEdge,
   Residency,
   ResidencyPolicy,
@@ -790,14 +791,27 @@ function dueCandidates(
   const batched: WakeCandidate[] = [];
   const seen = new Set<string>();
 
+  // A team has tens of members and a window has thousands of rows, so the per-row `getMemberById`
+  // asked the same few questions over and over — 800 statements to learn 31 names. Memoised for the
+  // life of this derivation only: membership cannot change inside the poll's transaction, and the
+  // map dies with the call, so there is no cache to invalidate.
+  const names = new Map<string, string | undefined>();
+  const nameOf = (id: string): string | undefined => {
+    if (!names.has(id)) names.set(id, getMemberById(db, id)?.name);
+    return names.get(id);
+  };
+
   if (lanes.immediate || lanes.batched) {
     const cursor = getCursor(db, member.id);
     const rows = listInbox(db, member, { unreadOnly: true, cursorTs: cursor.last_read_ts });
-    const envelopes = rows.map((r) => {
-      const from = getMemberById(db, r.from_member);
-      const to = r.to_member ? getMemberById(db, r.to_member) : null;
-      return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
-    });
+    const envelopes = rows.map((r) =>
+      rowToEnvelope(
+        r,
+        teamSlug,
+        nameOf(r.from_member) ?? '?',
+        r.to_member ? (nameOf(r.to_member) ?? null) : null,
+      ),
+    );
     for (const env of pendingInterrupts(envelopes, member.name)) {
       if (seen.has(env.id)) continue;
       seen.add(env.id);
@@ -844,16 +858,34 @@ function dueCandidates(
   // The fold reads the party-scoped team timeline, not the inbox: `listInbox` excludes the member's
   // own sends and a deferring `wait` IS the member's own send.
   const due = [...immediate, ...batched];
-  const scan = listTeamMessages(db, member.team_id, {
+  const window = listTeamMessages(db, member.team_id, {
     forMemberId: member.id,
     limit: DEFERRAL_SCAN_LIMIT,
-  }).map((r) => {
-    const from = getMemberById(db, r.from_member);
-    const to = r.to_member ? getMemberById(db, r.to_member) : null;
-    return rowToEnvelope(r, teamSlug, from?.name ?? '?', to?.name ?? null);
   });
-  const held = deferrals(scan, member.name);
+  // Hydration costs two member lookups a row, so it is spent per row only where a name is actually
+  // read. This poll runs in one transaction on the request path every 30s per enrolled seat: a cost
+  // that scales with the window rather than with what is due starves the event loop for every other
+  // request as the log grows (measured: 840ms and 8000+ lookups at idle, `/health` timing out behind
+  // it). Same window, same limit, same order — only the hydration is narrowed.
+  const hydrate = (rows: MessageRow[]): Envelope[] =>
+    rows.map((r) =>
+      rowToEnvelope(
+        r,
+        teamSlug,
+        nameOf(r.from_member) ?? '?',
+        r.to_member ? (nameOf(r.to_member) ?? null) : null,
+      ),
+    );
+  // `deferrals` reads exactly one shape — the seat's OWN `wait` acts — so the rest of the window is
+  // hydrated for nothing on the overwhelmingly common path where the seat has deferred nothing.
+  const held = deferrals(
+    hydrate(window.filter((r) => r.act === 'wait' && r.from_member === member.id)),
+    member.name,
+  );
   if (held.size === 0) return due;
+  // A deferral IS held: `raisedDeferrals` reads the whole window (it needs every act on the deferred
+  // subjects, and their threads), so the full hydration is paid here — where it is load-bearing.
+  const scan = hydrate(window);
 
   // ADR 214 (ADR 211 inc 2): once a deferral's condition fires the act is pending again, and
   // `raised_deferral_wakes`
