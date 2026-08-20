@@ -124,7 +124,19 @@ export interface InboxOpts {
   since?: number;
   unreadOnly?: boolean;
   cursorTs?: number;
+  /** The newest `limit` — the recent tail, for a caller that asked to see the latest few. */
   limit?: number;
+  /**
+   * The OLDEST `headLimit` — a PREFIX of the unbounded read, for bounding a response the caller did
+   * not ask to have bounded.
+   *
+   * The distinction is load-bearing, which is why this is a separate option and not a flag on
+   * `limit`. Truncating to the newest n and then letting the reader advance its cursor to the newest
+   * row it received steps over everything that was cut — ADR 287's loss, arrived at from the other
+   * direction. A prefix cannot do that: advancing to the last row seen leaves the remainder unread,
+   * and catching up takes several reads and reaches every message in order.
+   */
+  headLimit?: number;
 }
 
 /**
@@ -141,8 +153,12 @@ export function listInbox(
        AND (to_member = ? OR to_kind IN ('team','broadcast'))
        AND from_member != ?`;
   if (opts.unreadOnly) {
+    // Both floors apply when both are given: `cursorTs` is what the seat has already read, `since` is
+    // how far a paging caller has walked. Taking the LATER of the two is what makes a bounded unread
+    // read pageable — honouring only the cursor would hand back page one forever, and honouring only
+    // `since` would page back over messages the seat has already read.
     where += ' AND ts > ?';
-    params.push(opts.cursorTs ?? 0);
+    params.push(Math.max(opts.cursorTs ?? 0, opts.since ?? 0));
   } else if (typeof opts.since === 'number') {
     where += ' AND ts > ?';
     params.push(opts.since);
@@ -159,6 +175,16 @@ export function listInbox(
       >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`)
       .all(...params);
   }
+  // The prefix read: same order as the unbounded query, simply stopped early.
+  if (opts.headLimit) {
+    params.push(opts.headLimit);
+    return db
+      .prepare<
+        unknown[],
+        MessageRow
+      >(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC LIMIT ?`)
+      .all(...params);
+  }
   return db
     .prepare<unknown[], MessageRow>(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC`)
     .all(...params);
@@ -169,6 +195,25 @@ export function listInbox(
  * the denominator behind the CLI's "showing N of TOTAL" footer, so a bounded default can honestly say
  * how much history it elided. Cheap COUNT; unread is derived client-side from the cursor.
  */
+/** Unread count by the caller-supplied cursor — what a bounded read needs in order to say how much
+ *  it could not carry. Counting is not marshalling: this stays cheap on a deep backlog. */
+export function countUnread(
+  db: Database,
+  member: { id: string; team_id: string },
+  cursorTs: number,
+): number {
+  const row = db
+    .prepare<[string, string, string, number], { n: number }>(
+      `SELECT COUNT(*) AS n FROM messages
+        WHERE team_id = ?
+          AND (to_member = ? OR to_kind IN ('team','broadcast'))
+          AND from_member != ?
+          AND ts > ?`,
+    )
+    .get(member.team_id, member.id, member.id, cursorTs);
+  return row?.n ?? 0;
+}
+
 export function countInbox(db: Database, member: { id: string; team_id: string }): number {
   const row = db
     .prepare<[string, string, string], { n: number }>(

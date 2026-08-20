@@ -357,7 +357,13 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/members${q}`);
   }
 
-  async fetchInbox(unreadOnly = true): Promise<{
+  async fetchInbox(
+    unreadOnly = true,
+    /** The newest N — the slice this surface actually renders. Naming it keeps `GET /inbox`'s
+     *  default PREFIX bound out of the way: an agent checking once a turn must be handed the newest
+     *  acts, not the stalest (ADR 287). What the bound cuts comes back as `unread_remaining`. */
+    limit?: number,
+  ): Promise<{
     messages: Envelope[];
     cursor: { last_read_ts: number };
     /** Ids of asks this seat has already replied to (by `meta.in_reply_to`). Server-computed
@@ -370,9 +376,15 @@ export class MusterdClient {
      *  to the asker, so a second eligible seat is not a party to it and cannot see it at any price.
      *  Absent from an older daemon; callers degrade to showing the act as still owed. */
     discharged?: { id: string; by: string }[];
+    /** Unread this reply could not carry. Non-zero means the read cursor must not move past what
+     *  was rendered — see `planInboxCheck`. Absent from an older daemon ⇒ nothing was cut. */
+    unread_remaining?: number;
   }> {
-    const q = unreadOnly ? '?unread=1' : '';
-    return this.request('GET', `/teams/${this.config.team}/inbox${q}`);
+    const p = new URLSearchParams();
+    if (unreadOnly) p.set('unread', '1');
+    if (limit !== undefined) p.set('limit', String(limit));
+    const q = p.toString();
+    return this.request('GET', `/teams/${this.config.team}/inbox${q ? `?${q}` : ''}`);
   }
 
   markRead(messageId: string) {

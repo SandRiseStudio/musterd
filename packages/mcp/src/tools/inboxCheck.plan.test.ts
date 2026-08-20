@@ -72,4 +72,21 @@ describe('planInboxCheck — no unread is consumed unseen (ADR 287)', () => {
     expect(plan.elided).toBe(0);
     expect(plan.advanceTo).toBe('m119');
   });
+
+  it('holds the cursor for unread the FETCH could not carry, not only for what the slice cut', () => {
+    // The daemon now bounds an unbounded inbox read, so `ordered` is no longer proof of how much is
+    // waiting: a complete-looking slice can sit on top of thousands the fetch never returned. If the
+    // count the server reports were ignored here, this call would advance the watermark past every
+    // one of them — ADR 287's loss, reached through the fetch instead of through the slice.
+    const plan = planInboxCheck(ordered(50), 50, 4_800);
+    expect(plan.shown).toHaveLength(50);
+    expect(plan.elided).toBe(4_800);
+    expect(plan.advanceTo).toBeNull();
+  });
+
+  it('still advances when the fetch carried everything', () => {
+    const plan = planInboxCheck(ordered(10), 50, 0);
+    expect(plan.elided).toBe(0);
+    expect(plan.advanceTo).not.toBeNull();
+  });
 });

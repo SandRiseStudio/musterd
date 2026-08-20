@@ -421,6 +421,84 @@ describe('HTTP API', () => {
    * has to learn the question was taken, and by whom, so it can drop the work or disagree with what
    * landed. A stand-down that says nothing is the same defect as an instrument going quiet.
    */
+  describe('GET /inbox is bounded even when the caller names no limit', () => {
+    /**
+     * This was the last unbounded read on the request path: a seat returning after time away pulled
+     * its entire unread history in one reply. The bound has to be a PREFIX, not the newest tail —
+     * a reader that advances its cursor to the newest row it received after a tail-truncated read
+     * steps over everything that was cut, which is ADR 287's loss reintroduced as a latency fix.
+     */
+    const teamWithBacklog = async (n: number) => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      const nickTok = team.json.human_credential;
+      const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+      for (let i = 0; i < n; i++) {
+        await post(
+          '/teams/dawn/messages',
+          {
+            envelope: {
+              id: `b${String(i).padStart(4, '0')}`,
+              v: PROTOCOL_VERSION,
+              team: 'dawn',
+              from: 'nick',
+              to: { kind: 'member', name: 'bo' },
+              act: 'message',
+              body: 'x',
+              ts: Date.now() + i,
+            },
+          },
+          nickTok,
+        );
+      }
+      return { boTok: bo.json.human_credential as unknown };
+    };
+
+    it('caps an unbounded read at the default and says it truncated', async () => {
+      const { boTok } = await teamWithBacklog(220);
+      const r = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      expect(r.json.messages).toHaveLength(200);
+      expect(r.json.truncated).toBe(true);
+      expect(r.json.total).toBe(220);
+    });
+
+    it('returns the OLDEST messages, so advancing to the last one seen skips nothing', async () => {
+      const { boTok } = await teamWithBacklog(220);
+      const r = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids[0]).toBe('b0000');
+      expect(ids[199]).toBe('b0199');
+
+      // A reader does the only safe thing after a truncated read: advance to the last row it saw.
+      await post('/teams/dawn/inbox/cursor', { last_read_message_id: 'b0199' }, boTok);
+      const rest = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      const restIds = (rest.json.messages as { id: string }[]).map((m) => m.id);
+      // The remainder is still there, contiguous with what was already read — nothing stepped over.
+      expect(restIds).toHaveLength(20);
+      expect(restIds[0]).toBe('b0200');
+      expect(rest.json.truncated).toBeUndefined();
+    });
+
+    it('says nothing about truncation when everything waiting fits', async () => {
+      const { boTok } = await teamWithBacklog(3);
+      const r = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      expect(r.json.messages).toHaveLength(3);
+      expect(r.json.truncated).toBeUndefined();
+    });
+
+    it('leaves an explicit ?limit= alone — that caller asked for the recent tail', async () => {
+      const { boTok } = await teamWithBacklog(220);
+      const r = await get('/teams/dawn/inbox?unread=1&limit=5', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toEqual(['b0215', 'b0216', 'b0217', 'b0218', 'b0219']);
+      expect(r.json.truncated).toBeUndefined();
+    });
+  });
+
   describe('meta.eligible stand-down trace on GET /inbox', () => {
     /** nick (sender) + bo, cy (eligible) + dee (not eligible), each with its own credential. */
     const teamOfFour = async () => {
