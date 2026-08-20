@@ -157,14 +157,20 @@ export function loadBinding(dir: string): LocalLoad<Binding> {
   });
 }
 
-/** The thrown repair diagnostic for a `legacy`/`invalid` local identity file — kind and schema
- *  issues only, never file contents or secrets (ADR 282). */
-function identityRepairError(kind: 'legacy' | 'invalid', path: string, fileKind: string): Error {
+/** The repair diagnostic for a `legacy`/`invalid` local identity file — kind and schema issues
+ *  only, never file contents or secrets (ADR 282). Exported so the strict identity consumers
+ *  ({@link requireUsableBinding}, claim) refuse with the same words the advisory warning uses. */
+export function identityRepairError(
+  kind: 'legacy' | 'invalid',
+  path: string,
+  fileKind: string,
+): Error {
   if (kind === 'legacy') {
     return new Error(
       `${path} is a version-1 ${fileKind} (pre-ADR-281, it still carries "surface") — this ` +
         'workspace has no usable identity until it is converted. Run `musterd harness configure` ' +
-        'here to confirm the desired harness set and convert it.',
+        'here to confirm the desired harness set and convert it (headless: `musterd harness ' +
+        'configure --select <ids> --yes`).',
     );
   }
   return new Error(
@@ -174,14 +180,46 @@ function identityRepairError(kind: 'legacy' | 'invalid', path: string, fileKind:
   );
 }
 
+/** Paths already warned about, so a legacy/unreadable binding announces itself once rather than on
+ *  every advisory read (several ride hooks and 60s supervisor ticks). */
+const warnedUnusable = new Set<string>();
+
 /**
  * `null` here has always meant two very different things — "no binding" and "a binding I could not
- * parse" — and the second one is why #508 was silent for a full session: the seat kept working over
- * MCP while every CLI identity path quietly resolved to nothing. Post-ADR-282 the compat wrapper
- * keeps `missing` → null but THROWS the repair diagnostic for `legacy` and `invalid`: a broken or
- * pre-281 workspace fails loudly with its repair, instead of behaving as if it were unbound.
+ * use" — and the second one is why #508 was silent for a full session. The ADR 282 landing swung
+ * to the other extreme: the compat wrapper THREW on `legacy`/`invalid`, which took down every verb
+ * that touched a binding it did not need — the ADR 293 streamwatch supervisor died every 60s on
+ * `stream ensure`, whose binding read (`serverProvenance`'s disagreement diagnostic) is purely
+ * advisory. So the split is by CONSUMER, not by file state: this advisory wrapper warns ONCE per
+ * path on stderr (the full repair text) and returns null, while the identity consumers — the ones
+ * that would act AS the binding — refuse hard via {@link requireUsableBinding}, so a broken
+ * workspace never silently degrades to some other identity source.
  */
 function readBinding(path: string): Binding | null {
+  const got = readLocalFile(nodeFs, path, BindingSchema, { legacy: isLegacyIdentity });
+  if (got.kind === 'missing') return null;
+  if (got.kind === 'valid') return got.value;
+  if (!warnedUnusable.has(path)) {
+    warnedUnusable.add(path);
+    console.error(`[musterd] ${identityRepairError(got.kind, path, 'workspace binding').message}`);
+  }
+  return null;
+}
+
+/**
+ * The STRICT identity read (ADR 281/282): the binding this workspace would act as. `missing` → null
+ * (a genuinely unbound folder), but `legacy`/`invalid` THROWS the repair — falling through to some
+ * other identity source (env default, the global config vault) would have the workspace silently
+ * act as a different member, which is worse than failing. Walks up from `startDir` like
+ * {@link findBinding}; honours `MUSTERD_BINDING`.
+ */
+export function requireUsableBinding(
+  startDir: string = process.cwd(),
+  env: NodeJS.ProcessEnv = process.env,
+): Binding | null {
+  const explicit = env['MUSTERD_BINDING'];
+  const path = explicit ?? findBindingPath(startDir);
+  if (path === null) return null;
   const got = readLocalFile(nodeFs, path, BindingSchema, { legacy: isLegacyIdentity });
   if (got.kind === 'missing') return null;
   if (got.kind === 'valid') return got.value;
@@ -190,6 +228,18 @@ function readBinding(path: string): Binding | null {
     err.message += ` (${got.issues.map((i) => `${i.path}: ${i.message}`).join('; ')})`;
   }
   throw err;
+}
+
+/** The binding file an upward walk from `startDir` would read, or null when none exists. */
+function findBindingPath(startDir: string): string | null {
+  let dir = startDir;
+  for (;;) {
+    const p = join(dir, BINDING_DIR, BINDING_FILE);
+    if (existsSync(p)) return p;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
 }
 
 /** Non-throwing classification of the exact binding file — for writers that replace rather than
@@ -306,8 +356,8 @@ export function saveWorkspaceSpec(dir: string, spec: WorkspaceSpec): string {
 /**
  * Locate + parse the committed workspace spec — the same `.musterd/workspace.json` the MCP adapter
  * falls back to, so the two surfaces can't drift. Walks up from `startDir` like {@link findBinding};
- * `missing` → null, but a `legacy` or `invalid` file THROWS its repair diagnostic (ADR 282) — a
- * pre-281 spec must direct the human to `musterd harness configure`, not read as unbound.
+ * `missing` → null; a `legacy`/`invalid` file warns once on stderr (the configure repair) and reads
+ * as null — this is an ADVISORY read, and the strict consumers classify via {@link loadWorkspace}.
  */
 export function findWorkspaceSpec(startDir: string = process.cwd()): WorkspaceSpec | null {
   let dir = startDir;
@@ -317,11 +367,13 @@ export function findWorkspaceSpec(startDir: string = process.cwd()): WorkspaceSp
       const got = readLocalFile(nodeFs, p, WorkspaceSpecSchema, { legacy: isLegacyIdentity });
       if (got.kind === 'missing') return null;
       if (got.kind === 'valid') return got.value;
-      const err = identityRepairError(got.kind, p, 'workspace spec');
-      if (got.kind === 'invalid') {
-        err.message += ` (${got.issues.map((i) => `${i.path}: ${i.message}`).join('; ')})`;
+      // Advisory like readBinding: warn once with the repair, never kill the caller — the strict
+      // consumers (wire, harness) classify via loadWorkspace themselves.
+      if (!warnedUnusable.has(p)) {
+        warnedUnusable.add(p);
+        console.error(`[musterd] ${identityRepairError(got.kind, p, 'workspace spec').message}`);
       }
-      throw err;
+      return null;
     }
     const parent = dirname(dir);
     if (parent === dir) return null;

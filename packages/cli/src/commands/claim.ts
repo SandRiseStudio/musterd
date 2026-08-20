@@ -2,7 +2,7 @@ import { resolveWorkspace } from '@musterd/mcp';
 import { bindingSeat, type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
-import { findBinding, loadConfig, saveBinding, wsBase } from '../config.js';
+import { loadConfig, requireUsableBinding, saveBinding, wsBase } from '../config.js';
 import { CliError } from '../errors.js';
 import { liveBindingClobber } from '../onboard/guard.js';
 import {
@@ -36,7 +36,9 @@ export type ClaimSeatTarget = { seat: string } | { role: string };
 export async function claimCommand(parsed: Parsed): Promise<number> {
   const flags = parsed.flags;
   const config = loadConfig();
-  const binding = findBinding();
+  // Strict read (ADR 281/282): claim consumes the binding AS identity (key, grant, claim target),
+  // so a legacy/invalid one refuses with the configure repair instead of claiming as someone else.
+  const binding = requireUsableBinding();
   const server =
     flagStr(flags, 'server') ?? process.env['MUSTERD_SERVER'] ?? binding?.server ?? config.server;
   const team =

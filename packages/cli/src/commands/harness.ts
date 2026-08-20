@@ -243,26 +243,43 @@ async function configureCommand(parsed: Parsed, deps?: HarnessDeps): Promise<num
       : // Legacy manifest: preselect ONLY the corresponding former harness as a suggestion.
         legacySuggestion(ctx);
 
+  // The headless form (`--select a,b --yes`): a human naming the complete set on the command line
+  // IS the ADR 286 confirmation — it exists so service agents and fleet scripts have a
+  // non-interactive conversion (`harness configure` is otherwise interactive-only, which left the
+  // ADR 293 streamwatch supervisor unable to self-heal a pre-281 worktree). `--select` alone still
+  // asks the conversion question interactively; `--select ''` is the explicit empty set.
+  const selectFlag = flagStr(parsed.flags, 'select');
   const selected =
     deps?.select ??
-    flagStr(parsed.flags, 'select')
-      ?.split(',')
-      .map((s) => s.trim())
-      .filter(Boolean) ??
-    (await promptSelection(registry, availability, current));
+    (selectFlag !== undefined
+      ? selectFlag
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : await promptSelection(registry, availability, current));
   if (selected === null) {
     out(pc.dim('no changes made'));
     return 0;
+  }
+  const unknown = selected.filter((id) => !registry.some((a) => a.id === id));
+  if (unknown.length > 0) {
+    throw new CliError(
+      `unknown harness id(s): ${unknown.join(', ')} — this build's registry is ` +
+        `${registry.map((a) => a.id).join(', ')}`,
+      2,
+    );
   }
   const desired = registry.map((a) => a.id).filter((id) => selected.includes(id));
 
   if (converting) {
     const confirmed =
       deps?.confirm ??
-      (await confirmPrompt(
-        `Convert this pre-ADR-281 worktree and set its complete harness set to ` +
-          `${desired.length > 0 ? desired.join(', ') : '(none)'}?`,
-      ));
+      (parsed.flags['yes'] === true
+        ? true
+        : await confirmPrompt(
+            `Convert this pre-ADR-281 worktree and set its complete harness set to ` +
+              `${desired.length > 0 ? desired.join(', ') : '(none)'}?`,
+          ));
     if (!confirmed) {
       out(pc.dim('no changes made'));
       return 0;

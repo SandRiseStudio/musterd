@@ -11,7 +11,14 @@ import {
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { findBinding, identityFromEnv, loadConfig, type Config, type Identity } from '../config.js';
+import {
+  findBinding,
+  identityFromEnv,
+  loadConfig,
+  requireUsableBinding,
+  type Config,
+  type Identity,
+} from '../config.js';
 import { CliError } from '../errors.js';
 import { openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
 import { theme } from '../render/theme.js';
@@ -66,7 +73,10 @@ export interface ResolvedRead {
 function gather(flags: Record<string, string | boolean>) {
   const config = loadConfig();
   const env = process.env;
-  const binding = findBinding();
+  // The STRICT read (ADR 281/282): this binding would BE the acting identity, so a legacy/invalid
+  // one throws the configure repair here rather than letting resolution fall through to the global
+  // config vault — a broken workspace must never silently act as a different member.
+  const binding = requireUsableBinding();
   const envId = identityFromEnv(env);
 
   const server =

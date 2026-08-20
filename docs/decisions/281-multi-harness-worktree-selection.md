@@ -138,3 +138,13 @@ its implementation) renamed the local provisioning concept to *profile*, and a b
 schema mints the field under its final name rather than requiring a v2→v2 field migration. The
 recorded value is the provisioned profile name — never the roster label, which ADR 272 increment 2
 made independent.
+
+The refusal is scoped to CONSUMERS, not to file reads (first field day, 2026-08-20): the initial
+landing threw from every binding read, which killed verbs that need no workspace identity — the
+ADR 293 streamwatch supervisor died every 60 seconds on `stream ensure`, whose binding read is a
+purely advisory diagnostic. Advisory reads now warn once on stderr (the full configure repair) and
+read as absent; the hard refusal stands exactly where the binding would BE the acting identity
+(identity resolution, claim), so a broken workspace still never acts as a different member. And
+because service agents cannot answer an interactive prompt, `musterd harness configure --select
+<ids> --yes` is the headless conversion: naming the complete set on the command line is the
+human confirmation this ADR requires.

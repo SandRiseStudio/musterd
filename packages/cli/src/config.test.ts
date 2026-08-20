@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   excludeCredentialFromGit,
   findBinding,
@@ -18,6 +18,7 @@ import {
   loadWorkspace,
   rememberIdentity,
   removeBinding,
+  requireUsableBinding,
   saveBinding,
   saveConfig,
   type Config,
@@ -534,24 +535,54 @@ describe('classified identity loads (ADR 281/282)', () => {
     }
   });
 
-  it('findBinding: missing → null; legacy and invalid → thrown repair diagnostic', () => {
-    expect(findBinding(dir, {})).toBeNull();
-    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
-    expect(() => findBinding(dir, {})).toThrow(/musterd harness configure/);
-    writeBindingFile('{ not json');
-    expect(() => findBinding(dir, {})).toThrow(/binding/);
+  it('findBinding is ADVISORY: missing → null; legacy/invalid → warn once + null, never a throw', () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      errors.push(a.join(' '));
+    });
     try {
-      findBinding(dir, {});
+      expect(findBinding(dir, {})).toBeNull();
+      writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+      // The streamwatch class (#928 fallout): a verb that only touches the binding advisorily —
+      // `stream ensure` via serverProvenance — must keep working in an unconverted worktree.
+      expect(findBinding(dir, {})).toBeNull();
+      expect(findBinding(dir, {})).toBeNull(); // and again — the warning fires ONCE per path
+      const joined = errors.join('\n');
+      expect(joined).toContain('musterd harness configure');
+      expect(joined).not.toContain('mskey_x'); // never file contents or secrets
+      expect(errors.filter((e) => e.includes('harness configure'))).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('requireUsableBinding is STRICT: legacy/invalid → thrown repair; missing → null', () => {
+    expect(requireUsableBinding(dir, {})).toBeNull();
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    expect(() => requireUsableBinding(dir, {})).toThrow(/musterd harness configure/);
+    writeBindingFile('{ not json');
+    expect(() => requireUsableBinding(dir, {})).toThrow(/binding/);
+    try {
+      requireUsableBinding(dir, {});
       expect.unreachable();
     } catch (err) {
       expect((err as Error).message).not.toContain('mskey_x');
     }
+    // The valid case resolves exactly like findBinding.
+    writeBindingFile({ ...v2spec, agent_key: 'mskey_x' });
+    expect(requireUsableBinding(dir, {})?.agent_key).toBe('mskey_x');
   });
 
-  it('findWorkspaceSpec: missing → null; legacy → thrown repair naming configure', () => {
-    expect(findWorkspaceSpec(dir)).toBeNull();
-    writeSpec(v1spec);
-    expect(() => findWorkspaceSpec(dir)).toThrow(/musterd harness configure/);
+  it('findWorkspaceSpec is ADVISORY: missing → null; legacy → warn + null', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(findWorkspaceSpec(dir)).toBeNull();
+      writeSpec(v1spec);
+      expect(findWorkspaceSpec(dir)).toBeNull();
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('saveBinding refuses to write the version-1 shape at all', () => {

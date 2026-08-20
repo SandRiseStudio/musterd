@@ -353,3 +353,44 @@ describe('musterd harness status', () => {
     });
   });
 });
+
+describe('musterd harness configure --select --yes (the headless form)', () => {
+  it('converts a pre-ADR-281 worktree non-interactively — the flags ARE the confirmation', async () => {
+    writeV1Identity();
+    const a = fakeAdapter('fake-a');
+    const { code, out } = await run(['configure', '--select', 'fake-a', '--yes'], {
+      ctx: ctxOf(),
+      registry: [a],
+      // No deps.select / deps.confirm: the parsed flags drive it, as a service agent would.
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('converted the version-1 identity/manifest to version 2');
+    expect(JSON.parse(readFileSync(join(cwd, '.musterd', 'workspace.json'), 'utf8')).version).toBe(
+      2,
+    );
+    expect(a.state.applied[0]?.kind).toBe('write');
+  });
+
+  it('--select without --yes still asks the conversion question (interactive stays the default)', async () => {
+    writeV1Identity();
+    const a = fakeAdapter('fake-a');
+    const { code, out } = await run(['configure', '--select', 'fake-a'], {
+      ctx: ctxOf(),
+      registry: [a],
+      confirm: false, // the (stubbed) interactive answer
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('no changes made');
+    expect(a.state.applied).toEqual([]);
+  });
+
+  it('refuses an unknown harness id with the registry named', async () => {
+    writeV2Identity();
+    await expect(
+      run(['configure', '--select', 'emacs', '--yes'], {
+        ctx: ctxOf(),
+        registry: [fakeAdapter('fake-a')],
+      }),
+    ).rejects.toThrow(/unknown harness id.*fake-a/s);
+  });
+});
