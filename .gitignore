@@ -61,3 +61,8 @@ coverage/
 scripts/broadcast/.image-digest
 .superpowers/
 workers/*/.wrangler/
+
+# Nested git worktrees (Cursor and friends create them under .worktrees/). One inside the daemon's
+# checkout made it read dirty forever, and the auto-refresher — which rightly refuses to touch a
+# dirty tree — silently skipped every deploy from 18:42 on 2026-08-19 until a human read the log.
+.worktrees/
