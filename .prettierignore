@@ -14,6 +14,7 @@ packages/web
 # it cannot see: a bare `npx prettier --write .`, an editor's format-on-save, a future script.
 docs/
 README.md
+PRIVACY.md
 ROADMAP.md
 npm-reserve/
 packaging/

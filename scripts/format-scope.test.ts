@@ -48,7 +48,14 @@ describe('the format scripts share one scope (ADR 284)', () => {
     // A bare `npx prettier --write .` or an editor's format-on-save never reads FORMAT_GLOBS.
     const ignore = readFileSync(new URL('../.prettierignore', import.meta.url), 'utf8');
     const lines = ignore.split('\n').map((l) => l.trim());
-    for (const entry of ['docs/', 'README.md', 'ROADMAP.md', 'npm-reserve/', 'packaging/']) {
+    for (const entry of [
+      'docs/',
+      'README.md',
+      'PRIVACY.md',
+      'ROADMAP.md',
+      'npm-reserve/',
+      'packaging/',
+    ]) {
       expect(lines).toContain(entry);
     }
   });
