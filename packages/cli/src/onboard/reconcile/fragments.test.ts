@@ -112,14 +112,19 @@ describe('resource keys distinguish scope (ADR 282 §3)', () => {
   });
 });
 
-describe('shim adapters (until Task 5 converts the externals)', () => {
-  it('external shims expose availability and empty fragment sets without touching ambient state', async () => {
+describe('the converted external adapters', () => {
+  it('every external adapter emits fingerprinted fragments through the injected seams', async () => {
     const c = ctx();
     for (const adapter of harnessAdapters()) {
       if (adapter.id === 'musterd') continue;
       const target = await adapter.target(c);
-      expect(target.containers).toEqual([]);
-      expect(await adapter.desiredFragments(c, target)).toEqual([]);
+      expect(target.containers.length).toBeGreaterThan(0);
+      const intents = await adapter.desiredFragments(c, target);
+      expect(intents.length).toBeGreaterThan(0);
+      for (const intent of intents) {
+        expect(intent.harness).toBe(adapter.id);
+        expect(intent.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+      }
     }
   });
 });

@@ -9,6 +9,7 @@ import type {
 } from '@musterd/protocol';
 import { loadProvisioning, saveProvisioning } from '../manifest.js';
 import { harnessAdapters } from '../harnesses/index.js';
+import { musterdCoreAdapter } from '../harnesses/musterd.js';
 import type { HarnessContext } from './context.js';
 import {
   registryOrder,
@@ -112,6 +113,12 @@ export interface HarnessInspection {
 export interface EngineOptions {
   /** Adapter registry override (tests, fixtures). Defaults to the shipped registry. */
   registry?: HarnessAdapter[];
+  /**
+   * Internal, non-selectable fragment producers, desired whenever the selection is nonempty
+   * (ADR 281: the canonical musterd-core skill/primer remains while ANY harness is desired).
+   * Defaults to musterd-core — except under a `registry` override, where fixtures opt in.
+   */
+  producers?: HarnessAdapter[];
   tracer?: Tracer;
 }
 
@@ -124,6 +131,23 @@ const OP_SPAN = 'musterd.provisioning.operation';
 
 function tracerOf(opts?: EngineOptions): Tracer {
   return opts?.tracer ?? trace.getTracer('musterd-cli');
+}
+
+/** The selectable registry plus the internal producers, each tagged with its desire rule. */
+function enginePlan(
+  desired: readonly string[],
+  opts?: EngineOptions,
+): { adapter: HarnessAdapter; desired: boolean; selectable: boolean }[] {
+  const registry = registryOrder(opts?.registry ?? harnessAdapters());
+  const producers = opts?.producers ?? (opts?.registry ? [] : [musterdCoreAdapter]);
+  return [
+    ...registry.map((adapter) => ({
+      adapter,
+      desired: desired.includes(adapter.id),
+      selectable: true,
+    })),
+    ...producers.map((adapter) => ({ adapter, desired: desired.length > 0, selectable: false })),
+  ];
 }
 
 /** The fingerprint an observation carries, or null for absent. */
@@ -288,10 +312,8 @@ export async function inspectHarnesses(
   opts?: EngineOptions,
 ): Promise<HarnessInspection[]> {
   const tracer = tracerOf(opts);
-  const registry = registryOrder(opts?.registry ?? harnessAdapters());
   const inspections: HarnessInspection[] = [];
-  for (const adapter of registry) {
-    const isDesired = desired.includes(adapter.id);
+  for (const { adapter, desired: isDesired } of enginePlan(desired, opts)) {
     const availability = await adapter.availability(ctx);
     const fragments: FragmentInspection[] = [];
     for (const { intent, desired: fragmentDesired } of await fragmentsFor(
@@ -507,7 +529,6 @@ export async function reconcileHarnesses(
   opts: ReconcileOptions,
 ): Promise<ReconcileReport> {
   const tracer = tracerOf(opts);
-  const registry = registryOrder(opts.registry ?? harnessAdapters());
   const locks = createHarnessLocks({
     fs: ctx.fs,
     proc: ctx.proc,
@@ -516,8 +537,7 @@ export async function reconcileHarnesses(
   });
   const results: ReconcileResult[] = [];
 
-  for (const adapter of registry) {
-    const isDesired = desired.includes(adapter.id);
+  for (const { adapter, desired: isDesired } of enginePlan(desired, opts)) {
     const availability = await adapter.availability(ctx);
     if (isDesired && !availability.available) {
       // Selected but not installed: pending, not an error — selection survives (ADR 281).
