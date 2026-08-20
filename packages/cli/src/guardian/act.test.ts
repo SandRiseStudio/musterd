@@ -97,3 +97,28 @@ describe('actOn (spec §4–§5)', () => {
     expect(got.notify.length).toBe(1);
   });
 });
+
+/**
+ * The last link. Evidence that classify gathered is worthless if the raise body drops it — which is
+ * the whole failure being fixed: 22 raises, one distinct body, nothing to adjudicate.
+ */
+describe('the raise carries the incident evidence', () => {
+  it('appends evidence to the alert body', async () => {
+    const { d, got } = deps(emptyStamp());
+    await actOn(
+      [{ class: 'daemon_down', evidence: '/health did not answer in 3 attempts (timed out)' }],
+      d,
+    );
+    const body = got.asks.join('\n');
+    expect(body).toContain('daemon_down');
+    expect(body).toContain('3 attempts');
+    expect(body).toContain('timed out');
+  });
+
+  it('an incident with no evidence still reads exactly as before — no dangling separator', async () => {
+    const { d, got } = deps(emptyStamp());
+    await actOn([{ class: 'presence_churn' }], d);
+    expect(got.asks.join('\n')).toContain('guardian: presence_churn — needs a human');
+    expect(got.asks.join('\n')).not.toContain('—  ');
+  });
+});

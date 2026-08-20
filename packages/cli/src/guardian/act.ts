@@ -53,9 +53,13 @@ export async function actOn(incidents: Incident[], d: ActDeps): Promise<Guardian
     }
   };
 
-  const alert = async (cls: GuardianClass, why: string): Promise<void> => {
+  /** `evidence` is what the classifier actually saw. It rides the ask body because that is the
+   *  surface a seat adjudicates from — a raise that omits it forces hand-written SQL to answer
+   *  "was this real?", which is how 22 identical daemon_down raises went unexamined. The OS
+   *  notification stays short; the ask carries the detail. */
+  const alert = async (cls: GuardianClass, why: string, evidence?: string): Promise<void> => {
     d.osNotify({ id: `guardian-${cls}-${d.now()}`, title: `musterd guardian: ${cls}`, body: why });
-    await d.sendAsk(`guardian: ${cls} — ${why}`);
+    await d.sendAsk(`guardian: ${cls} — ${why}${evidence !== undefined ? `\n\n${evidence}` : ''}`);
   };
 
   for (const inc of incidents) {
@@ -88,7 +92,11 @@ export async function actOn(incidents: Incident[], d: ActDeps): Promise<Guardian
     }
 
     // Alert tier, or an auto class with no usable remedy (crashloop without a known-good build).
-    await alert(cls, tier === 'auto' ? 'auto tier but no rollback target known' : 'needs a human');
+    await alert(
+      cls,
+      tier === 'auto' ? 'auto tier but no rollback target known' : 'needs a human',
+      inc.evidence,
+    );
     await audit('guardian.alerted', { class: cls });
     acted.push({ class: cls, action: 'alerted' });
   }

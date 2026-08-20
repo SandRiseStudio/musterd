@@ -159,3 +159,35 @@ describe('parseLaunchctlPrint', () => {
     });
   });
 });
+
+/**
+ * The bare `catch {}` in the probe loop threw away all three attempts' errors, so 22 identical
+ * `daemon_down` raises carried no reason and none could be adjudicated after the fact — the same
+ * shape as Chrome's stderr discarded by `stdio: 'ignore'` in #894. The retry was never the missing
+ * piece (it has existed since ADR 274); the EVIDENCE was.
+ */
+describe('the health probe keeps why it failed', () => {
+  it('records each attempt error and the attempt count when /health never answers', async () => {
+    const s = await collectSignals(
+      deps({
+        fetchHealth: () => Promise.reject(new Error('connect ECONNREFUSED 127.0.0.1:4849')),
+      }),
+    );
+    expect(s.health).toBeNull();
+    expect(s.healthProbe?.attempts).toBe(3);
+    expect(s.healthProbe?.lastError).toContain('ECONNREFUSED');
+  });
+
+  it('distinguishes a timeout from a refusal — the two that must not read alike', async () => {
+    const s = await collectSignals(
+      deps({ fetchHealth: () => Promise.reject(new Error('The operation timed out')) }),
+    );
+    expect(s.healthProbe?.lastError).toContain('timed out');
+  });
+
+  it('leaves no probe record when /health answers', async () => {
+    const s = await collectSignals(deps({}));
+    expect(s.health).not.toBeNull();
+    expect(s.healthProbe).toBeUndefined();
+  });
+});
