@@ -35,7 +35,7 @@ function ctxOf(fs: MemoryFs, worktreeRoot = '/w/a', machineConfigRoot = MACHINE)
 function seedProvisioning(fs: MemoryFs, root: string, desired: string[]) {
   const provisioning: WorktreeProvisioning = {
     version: 2,
-    role: '',
+    profile: '',
     desired,
     contributions: {},
     provisionedAt: '2026-08-19T00:00:00.000Z',

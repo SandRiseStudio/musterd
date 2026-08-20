@@ -131,7 +131,7 @@ export function writeProvisionManifest(
 /**
  * Classify `.musterd/provisioned.json` as the strict version-2 {@link WorktreeProvisioning}
  * (ADR 281). A well-formed version-1 {@link ProvisionManifestSchema} manifest is `legacy` — only a
- * confirmed `musterd harness configure` converts it, retaining `role` and nothing else: the v1
+ * confirmed `musterd harness configure` converts it, retaining the v1 `role` value (as v2 `profile`) and nothing else: the v1
  * name-only records cannot prove current contents, so they never become v2 ownership evidence.
  */
 export function loadProvisioning(dir: string, fs: FsSeam = nodeFs): LocalLoad<WorktreeProvisioning> {

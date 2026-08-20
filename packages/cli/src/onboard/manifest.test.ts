@@ -118,7 +118,7 @@ describe('loadProvisioning — classified v2 loads (ADR 281/282)', () => {
 
   const v2 = {
     version: 2,
-    role: 'backend',
+    profile: 'backend',
     desired: ['claude-code', 'musterd'],
     contributions: { 'claude-code': ['folder:/w#hooks'] },
     provisionedAt: '2026-08-19T12:00:00.000Z',

@@ -77,7 +77,7 @@ const CONTAINER = `folder ${ROOT} fake settings`;
 function seedProvisioning(fs: MemoryFs, desired: string[], contributions: Record<string, string[]> = {}) {
   const provisioning: WorktreeProvisioning = {
     version: 2,
-    role: '',
+    profile: '',
     desired,
     contributions,
     provisionedAt: '2026-08-19T00:00:00.000Z',

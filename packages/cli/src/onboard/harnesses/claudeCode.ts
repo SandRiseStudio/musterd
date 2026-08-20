@@ -942,7 +942,7 @@ function patchHooks(
 function permissionsPayload(ctx: HarnessContext): ProvisionPermissions {
   let role: RoleTemplate | undefined;
   const provisioning = loadProvisioning(ctx.worktreeRoot, ctx.fs);
-  const roleName = provisioning.kind === 'valid' ? provisioning.value.role : '';
+  const roleName = provisioning.kind === 'valid' ? provisioning.value.profile : '';
   if (roleName !== '') {
     const rolePath = join(userRolesDir(ctx.worktreeRoot), `${roleName}.json`);
     const raw = ctx.fs.readFile(rolePath);

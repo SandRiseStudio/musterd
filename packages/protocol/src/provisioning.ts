@@ -60,8 +60,10 @@ const uniqueStrings = (values: string[]): boolean => new Set(values).size === va
 export const WorktreeProvisioningSchema = z
   .object({
     version: z.literal(2),
-    /** Existing role-template projection; empty string means generalist. */
-    role: z.string(),
+    /** The provisioned workspace profile (né role-template projection — the ADR 272 revision
+     *  renames the local concept to "profile"; v2 mints the field under its final name so the
+     *  strict schema never needs a field migration). Empty string means generalist. */
+    profile: z.string(),
     desired: z.array(HarnessIdSchema).refine(uniqueStrings, { message: 'desired ids must be unique' }),
     /** Fragment resource keys this worktree contributes to, per harness. */
     contributions: z.record(HarnessIdSchema, z.array(z.string())),

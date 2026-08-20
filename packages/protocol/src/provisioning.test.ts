@@ -28,7 +28,7 @@ describe('HarnessIdSchema', () => {
 describe('WorktreeProvisioningSchema (version 2)', () => {
   const provisioning = {
     version: 2 as const,
-    role: 'backend',
+    profile: 'backend',
     desired: ['claude-code', 'musterd'],
     contributions: {
       'claude-code': ['folder:/w/a:hooks', 'repo:/r:musterd-mcp'],
@@ -42,7 +42,7 @@ describe('WorktreeProvisioningSchema (version 2)', () => {
       'claude-code',
       'musterd',
     ]);
-    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, role: '' }).success).toBe(true);
+    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, profile: '' }).success).toBe(true);
     expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, desired: [] }).success).toBe(
       true,
     );
