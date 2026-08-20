@@ -50,6 +50,7 @@ import {
   kickstartArgs,
   LIVE_LABEL,
   LIVE_SYNC_LABEL,
+  STREAMWATCH_LABEL,
   SWEEP_LABEL,
   GUARDIAN_LABEL,
   printArgs,
@@ -84,6 +85,13 @@ import {
   type Runner,
   type ServiceCtx,
 } from '../service/manage.js';
+import {
+  DEFAULT_STREAMWATCH_INTERVAL,
+  installStreamwatch,
+  statusStreamwatch,
+  uninstallStreamwatch,
+  type StreamwatchCtx,
+} from '../service/streamwatch.js';
 import {
   DEFAULT_SWEEP_INTERVAL,
   installSweep,
@@ -169,7 +177,7 @@ export function resolveCtx(serveArgs: string[]): ServiceCtx {
 }
 
 const USAGE =
-  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
+  'usage: musterd service <install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake | --auto | --sweep | --guardian | --stream] [--port <n>] [--host <h>] [--allowed-hosts <a,b>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--mode <idle|notice>] [--settle <s>] [--pin <ref>] [--follow] [--force]';
 
 /** The daemon's static-serve root (ADR 062/132): the service-owned dir the `--live` build-publisher
  * publishes the built bundle into, and the daemon serves `/live` from. Under `~/.musterd/live/web`. */
@@ -361,6 +369,36 @@ function refreshHandoverPath(): string {
  * `packages/cli/dist`: running anywhere else would measure with an artifact production is not
  * using. `--interval` (bare seconds) is baked at install, like the other interval agents.
  */
+/**
+ * Resolve the ADR 293 stream supervisor from the running process: the plist runs `node bin.js
+ * stream ensure` on an interval. PATH carries the homebrew dirs — the reconcile shells `fly` and
+ * `tailscale`, and launchd's default PATH has neither.
+ */
+function resolveStreamwatchCtx(run: Runner, parsed: Parsed): StreamwatchCtx {
+  const binJs = resolvePath(process.argv[1] ?? '');
+  const home = dirname(configPath()); // ~/.musterd
+  const interval = flagStr(parsed.flags, 'interval');
+  return {
+    uid: typeof process.getuid === 'function' ? process.getuid() : '',
+    label: STREAMWATCH_LABEL,
+    plistPath: join(homedir(), 'Library', 'LaunchAgents', `${STREAMWATCH_LABEL}.plist`),
+    node: agentNode(),
+    binJs,
+    workingDir: dirname(binJs),
+    logPath: join(home, 'stream', 'ensure.log'),
+    errLogPath: join(home, 'stream', 'ensure.log'),
+    path: [
+      dirname(process.execPath),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+    ].join(':'),
+    intervalSeconds: interval ? Number(interval) : DEFAULT_STREAMWATCH_INTERVAL,
+    run,
+  };
+}
+
 function resolveSweepCtx(run: Runner, parsed: Parsed): SweepCtx {
   const binJs = resolvePath(process.argv[1] ?? '');
   const home = dirname(configPath()); // ~/.musterd
@@ -814,6 +852,7 @@ export async function serviceCommand(
     autoRefreshCtx?: AutoRefreshCtx;
     guardianCtx?: AutoRefreshCtx;
     sweepCtx?: SweepCtx;
+    streamwatchCtx?: StreamwatchCtx;
     health?: () => Promise<DaemonHealth>;
     /** Probe whether the daemon serves /live (injected so tests skip the network). */
     probeViewer?: (url: string) => Promise<boolean>;
@@ -976,6 +1015,13 @@ export async function serviceCommand(
   if (parsed.flags['sweep'] === true) {
     const sweepCtx = deps.sweepCtx ?? resolveSweepCtx(ctx.run, parsed);
     return sweepServiceCommand(sub, sweepCtx, parsed, ok, fail);
+  }
+
+  // `--stream` targets the ADR 293 stream supervisor. Same posture as `--sweep`: no server touched,
+  // no teammate session dropped, so no live-session guard and no ABI guard.
+  if (parsed.flags['stream'] === true) {
+    const swCtx = deps.streamwatchCtx ?? resolveStreamwatchCtx(ctx.run, parsed);
+    return streamwatchServiceCommand(sub, swCtx, ok, fail);
   }
 
   // The warn-only infra-touch gate (ADR 227 inc 2), on the daemon-targeted verbs only — the
@@ -2198,6 +2244,93 @@ async function autoRefreshServiceCommand(
  * `demoted` after increment 2's flip, so leaving it unscheduled left the guardrail unobserved.
  * Read-only and bounce-safe: nothing long-lived is stopped, no seat or lane is touched.
  */
+/** The `--stream` lifecycle (ADR 293): install/uninstall/status for the supervisor LaunchAgent,
+ * plus minting the `streamwatch` service seat whose token carries the stand-down ask. */
+async function streamwatchServiceCommand(
+  sub: string,
+  ctx: StreamwatchCtx,
+  ok: (s: string) => void,
+  fail: (step: string, r: RunResult) => never,
+): Promise<number> {
+  const meta = (s: string) => process.stdout.write(theme.meta(s) + '\n');
+  switch (sub) {
+    case 'install': {
+      const res = installStreamwatch(ctx);
+      if (res.status !== 0) fail('stream supervisor (bootstrap)', res);
+      ok(`installed + started the stream supervisor (${theme.accent(ctx.label)})`);
+      await provisionStreamwatchToken(ok, meta);
+      meta(`  runs:    musterd stream ensure every ${ctx.intervalSeconds}s`);
+      meta(`  policy:  crash → restart, 3/30min → stand down + ask; \`stream stop\` always wins`);
+      meta(`  logs:    ${ctx.logPath} (findings only — a healthy tick is silent)`);
+      return 0;
+    }
+    case 'uninstall': {
+      const res = uninstallStreamwatch(ctx);
+      ok(
+        res.removedPlist
+          ? 'stopped + removed the stream supervisor (the desired-state file is kept)'
+          : 'stream supervisor was not installed — nothing to remove',
+      );
+      return 0;
+    }
+    case 'status': {
+      const st = statusStreamwatch(ctx);
+      ok(
+        `stream supervisor: ${
+          st.loaded ? theme.ok(intervalAgentLabel(st) ?? 'loaded') : theme.warn('not installed')
+        }`,
+      );
+      const dead = agentFailureNote(st, agentProgramExists(ctx.plistPath));
+      if (dead) process.stdout.write(`  ${theme.err('✗')} ${dead}\n`);
+      meta(`  runs:  musterd stream ensure every ${ctx.intervalSeconds}s`);
+      meta(`  logs:  ${ctx.logPath}`);
+      return 0;
+    }
+    default:
+      throw new CliError(
+        'usage: musterd service <install|uninstall|status> --stream [--interval <s>]',
+        2,
+      );
+  }
+}
+
+/** Mint the `streamwatch` service seat (the guardian pattern): its token authenticates the
+ * supervisor's stand-down ask, so the alarm arrives attributed instead of not at all. */
+async function provisionStreamwatchToken(
+  ok: (s: string) => void,
+  meta: (s: string) => void,
+): Promise<void> {
+  const config = loadConfig();
+  const team = config.current;
+  const identity = team ? config.identities[team] : undefined;
+  if (!team || !identity) {
+    meta(
+      '  seat:    no current team identity — skipped the streamwatch service seat token; ' +
+        'join your team, then rerun `musterd service install --stream`',
+    );
+    return;
+  }
+  try {
+    const http = new HttpClient({ server: config.server, key: identity.key, surface: 'cli' });
+    const res = (await http.addMember(team, {
+      name: 'streamwatch',
+      kind: 'service',
+      role: 'platform',
+    })) as { token?: string };
+    if (!res.token) throw new Error('daemon returned no token');
+    const p = join(dirname(configPath()), 'stream', 'seat-token');
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, res.token + '\n', { encoding: 'utf8', mode: 0o600 });
+    ok(`minted the streamwatch service seat token → ${theme.accent(p)} (0600)`);
+  } catch (err) {
+    meta(
+      `  seat:    could not provision the streamwatch service seat (${(err as Error).message}) — ` +
+        `a stand-down will be logged but not asked. For a file-backed roster, write ` +
+        `seats/streamwatch.toml (kind = "service", roles = ["platform"]) and rerun install.`,
+    );
+  }
+}
+
 async function sweepServiceCommand(
   sub: string,
   ctx: SweepCtx,
