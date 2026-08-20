@@ -30,4 +30,6 @@ A package-local vitest config inherits **nothing** from the root. The root raise
 
 Measured 2026-08-19 on landed main `a036d75c`, 20 full `pnpm -r test` runs: **2 failed, 5 distinct tests, 10 × `Test timed out in 5000ms`, and zero assertion failures.** The same file passed 200/200 in isolation. That is the whole shape of the "flake": never the same test twice, never reproducible on demand, and nothing wrong with any of the tests.
 
+A third trap, about this page's own earlier claim: it carried a date AND a falsifier (`rerun the named file alone`) and was still wrong for seven days, because a file passing alone is what harmless noise looks like *and* what a load-only defect looks like. See rule 3 in [the wiki README](README.md) — a falsifier must be able to fail.
+
 Two traps worth keeping. **A synchronous test does hit this ceiling** — three of the five were sync (`session.test.ts:851`, `:873`, `:897`), which is worth knowing because "vitest cannot interrupt a sync test" is a plausible-sounding reason to rule the timeout out, and it is wrong. And **a fix applied only at the root reaches only `pnpm test`** — the number is now single-sourced in `vitest.shared.ts` and `tests/vitest-config-parity.test.ts` fails if any config drifts off it.
