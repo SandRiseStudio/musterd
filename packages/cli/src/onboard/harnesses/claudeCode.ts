@@ -18,7 +18,7 @@ import {
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { STANDARD_FLOOR } from '../permissions.js';
 import { BUILTIN_ROLES, parseRole, userRolesDir, type RoleTemplate } from '../role.js';
-import { nodeExec, type FsSeam, type HarnessContext } from '../reconcile/context.js';
+import { nodeExec, type ExecSeam, type FsSeam, type HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
@@ -973,6 +973,13 @@ function globalSettingsPathFor(env: NodeJS.ProcessEnv): string {
   return join(base, 'settings.json');
 }
 
+/** Resolve the real `claude` binary only for the REAL exec seam — a scripted seam names its own
+ *  target, and the PATH probe is real subprocess work a hermetic test must never pay for. */
+async function claudeBinFor(exec: ExecSeam): Promise<string> {
+  if (exec !== nodeExec) return 'claude';
+  return (await resolveClaudeBin()) ?? 'claude';
+}
+
 export const claudeCodeAdapter: HarnessAdapter = {
   id: 'claude-code',
   surface: 'claude-code',
@@ -980,7 +987,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
 
   async availability(ctx) {
     const exec = ctx.exec ?? nodeExec;
-    const bin = (await resolveClaudeBin()) ?? 'claude';
+    const bin = await claudeBinFor(exec);
     const ver = await exec.run(bin, ['--version']);
     return ver.ok
       ? { available: true, detail: `claude ${ver.out.trim().split(' ')[0] ?? ''}`.trim() }
@@ -1066,7 +1073,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
     switch (intent.fragmentKey) {
       case 'mcp.musterd': {
         const exec = ctx.exec ?? nodeExec;
-        const bin = (await resolveClaudeBin()) ?? 'claude';
+        const bin = await claudeBinFor(exec);
         const got = await exec.run(bin, ['mcp', 'get', 'musterd']);
         if (!got.ok) return { state: 'absent' };
         const entry = parseClaudeMcpGet(got.out);
@@ -1145,7 +1152,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
     switch (intent.fragmentKey) {
       case 'mcp.musterd': {
         const exec = ctx.exec ?? nodeExec;
-        const bin = (await resolveClaudeBin()) ?? 'claude';
+        const bin = await claudeBinFor(exec);
         if (mutation.kind === 'remove') {
           await exec.run(bin, ['mcp', 'remove', 'musterd', '-s', 'local']);
           return;

@@ -27,6 +27,9 @@ vi.mock('./harnesses/index.js', () => ({
 vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
 vi.mock('../config.js', () => ({
   findBinding: () => h.binding,
+  // The classified read (ADR 282): a mocked plain-object binding is 'valid'; null is 'missing'.
+  loadBinding: () =>
+    h.binding === null ? { kind: 'missing' } : { kind: 'valid', value: h.binding },
   // The committed launch spec decides which harness `musterd wire` reaches in this folder, and so
   // which repair the doctor may prescribe for an entry. Null ⇒ fall back to the binding's surface.
   findWorkspaceSpec: () => h.spec,
@@ -383,7 +386,17 @@ describe('inspectProvisioning', () => {
     // declares no surface (ADR 281), so wire (and the doctor's prescription) dispatch on it.
     const codexFolder = () => {
       const dir = mkdtempSync(join(tmpdir(), 'musterd-doctor-codex-'));
-      writeProvisionManifest(dir, { role: '', harness: 'codex', mcpServers: [] });
+      mkdirSync(join(dir, '.musterd'), { recursive: true });
+      writeFileSync(
+        join(dir, '.musterd', 'provisioned.json'),
+        JSON.stringify({
+          version: 2,
+          profile: '',
+          desired: ['codex'],
+          contributions: {},
+          provisionedAt: '2026-08-19T00:00:00.000Z',
+        }),
+      );
       return dir;
     };
 
@@ -731,7 +744,9 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
       guidance: { files: g.files, contentVersion: g.contentVersion },
     });
     const r = await inspectProvisioning(dir);
-    expect(r.drift).toEqual([]);
+    // The v1 manifest itself now draws the ADR 281 configure line by design; the GUIDANCE surface
+    // must stay quiet.
+    expect(r.drift.filter((d) => !d.includes('version 1'))).toEqual([]);
     expect(r.notes).toEqual([]);
   });
 
@@ -792,7 +807,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const abs = join(dir, CANONICAL_SKILL_PATH);
     writeFileSync(abs, readFileSync(abs, 'utf8').replace('Using musterd', 'MY EDIT'));
     const r = await inspectProvisioning(dir);
-    expect(r.drift).toEqual([]);
+    expect(r.drift.filter((d) => !d.includes('version 1'))).toEqual([]);
     expect(r.notes.some((n) => n.includes('local edits'))).toBe(true);
   });
 });

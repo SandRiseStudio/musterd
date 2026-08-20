@@ -127,3 +127,140 @@ describe('uninstallCommand', () => {
     expect(cursorCfg.mcpServers.musterd).toBeUndefined();
   });
 });
+
+describe('uninstallCommand — v2 reconcile-to-empty (ADR 282)', () => {
+  const writeV2 = (desired: string[], contributions: Record<string, string[]> = {}) => {
+    mkdirSync(join(cwd, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.musterd', 'workspace.json'),
+      JSON.stringify({ version: 2, server: 'http://localhost:4849', team: 'dawn' }),
+    );
+    writeFileSync(
+      join(cwd, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: 'http://localhost:4849',
+        team: 'dawn',
+        agent_key: 'mskey_x',
+        claim: { mode: 'seat', name: 'Ada' },
+      }),
+    );
+    writeFileSync(
+      join(cwd, '.musterd', 'provisioned.json'),
+      JSON.stringify({
+        version: 2,
+        profile: '',
+        desired,
+        contributions,
+        provisionedAt: '2026-08-19T00:00:00.000Z',
+      }),
+    );
+  };
+
+  it('reconciles to an empty set, then deletes workspace, binding, and manifest', async () => {
+    const machineRoot = mkdtempSync(join(tmpdir(), 'musterd-uninstall-machine-'));
+    const { nodeFs } = await import('../onboard/reconcile/context.js');
+    const { canonicalFingerprint, folderResourceKey } = await import(
+      '../onboard/reconcile/fragments.js'
+    );
+    const { reconcileHarnesses } = await import('../onboard/reconcile/engine.js');
+    const payload = { entry: 'fake-a' };
+    let observed: { state: 'absent' } | { state: 'present'; fingerprint: string } = {
+      state: 'absent',
+    };
+    const adapter = {
+      id: 'fake-a',
+      surface: 'other' as const,
+      adapterVersion: 1,
+      availability: async () => ({ available: true }),
+      target: async () => ({
+        containers: [{ containerKey: `folder ${cwd} fake-a`, scope: 'folder' as const, handle: null }],
+      }),
+      desiredFragments: async () => [
+        {
+          harness: 'fake-a',
+          resourceKey: folderResourceKey(cwd, 'fake-a', 'entry'),
+          containerKey: `folder ${cwd} fake-a`,
+          fragmentKey: 'entry',
+          scope: 'folder' as const,
+          fingerprint: canonicalFingerprint(payload),
+          payload,
+        },
+      ],
+      observe: async () => observed,
+      apply: async (_ctx: unknown, mutation: { kind: string; intent: { fingerprint: string } }) => {
+        observed =
+          mutation.kind === 'remove'
+            ? { state: 'absent' }
+            : { state: 'present', fingerprint: mutation.intent.fingerprint };
+      },
+    };
+    const ctx = {
+      worktreeRoot: cwd,
+      machineConfigRoot: machineRoot,
+      env: {},
+      fs: nodeFs,
+      proc: { pid: process.pid, startedAt: () => 's-test', liveness: () => false },
+      clock: { now: () => Date.now() },
+    };
+    writeV2(['fake-a']);
+    // Configure the fragment into place first, so uninstall has something owned to release.
+    await reconcileHarnesses(ctx, ['fake-a'], { legacyRepair: false, registry: [adapter] });
+    expect(observed.state).toBe('present');
+
+    expect(await uninstallCommand(parsed({ force: true }), { ctx, registry: [adapter] })).toBe(0);
+    expect(observed.state).toBe('absent'); // the owned fragment was removed
+    expect(existsSync(join(cwd, '.musterd', 'workspace.json'))).toBe(false);
+    expect(existsSync(join(cwd, '.musterd', 'binding.json'))).toBe(false);
+    expect(existsSync(join(cwd, '.musterd', 'provisioned.json'))).toBe(false);
+  });
+
+  it('a blocked release returns nonzero and retains identity + manifest + evidence', async () => {
+    const machineRoot = mkdtempSync(join(tmpdir(), 'musterd-uninstall-machine2-'));
+    const { nodeFs } = await import('../onboard/reconcile/context.js');
+    const { canonicalFingerprint, folderResourceKey } = await import(
+      '../onboard/reconcile/fragments.js'
+    );
+    const { saveLedger } = await import('../onboard/reconcile/store.js');
+    const resource = folderResourceKey(cwd, 'fake-a', 'entry');
+    const ctx = {
+      worktreeRoot: cwd,
+      machineConfigRoot: machineRoot,
+      env: {},
+      fs: nodeFs,
+      proc: { pid: process.pid, startedAt: () => 's-test', liveness: () => false },
+      clock: { now: () => Date.now() },
+    };
+    // Owned in the ledger, but physically DRIFTED — release must block.
+    saveLedger(nodeFs, machineRoot, {
+      version: 1,
+      fragments: {
+        [resource]: {
+          harness: 'fake-a',
+          scope: 'folder',
+          containerKey: `folder ${cwd} fake-a`,
+          fragmentKey: 'entry',
+          fingerprint: canonicalFingerprint({ entry: 'fake-a' }),
+          owners: [cwd],
+          adapterVersion: 1,
+        },
+      },
+    });
+    const adapter = {
+      id: 'fake-a',
+      surface: 'other' as const,
+      adapterVersion: 1,
+      availability: async () => ({ available: true }),
+      target: async () => ({ containers: [] }),
+      desiredFragments: async () => [],
+      observe: async () => ({ state: 'present' as const, fingerprint: 'd'.repeat(64) }),
+      apply: async () => {},
+    };
+    writeV2([], { 'fake-a': [resource] });
+
+    expect(await uninstallCommand(parsed({ force: true }), { ctx, registry: [adapter] })).toBe(1);
+    expect(existsSync(join(cwd, '.musterd', 'workspace.json'))).toBe(true);
+    expect(existsSync(join(cwd, '.musterd', 'binding.json'))).toBe(true);
+    expect(existsSync(join(cwd, '.musterd', 'provisioned.json'))).toBe(true);
+  });
+});

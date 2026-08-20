@@ -12,7 +12,7 @@ import {
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
-import { findBinding, loadConfig } from '../config.js';
+import { findBinding, loadBinding, loadConfig } from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -23,7 +23,7 @@ import { contentHash, establishedHarnesses, guidanceTargets, strippedBody } from
 import type { Harness } from './harness.js';
 import { inspectClaudeHookDrift } from './harnesses/claudeCode.js';
 import { HARNESSES } from './harnesses/index.js';
-import { readProvisionManifest } from './manifest.js';
+import { loadProvisioning, readProvisionManifest } from './manifest.js';
 import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
 
@@ -393,15 +393,46 @@ function harnessLabelWireConfigures(surface: string | undefined): string {
 
 export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
-  // The folder's single source of truth for which seat it claims (ADR 018). A legacy MCP registration
-  // may still carry a baked `MUSTERD_CLAIM` that outranks it — the value-coherence check below.
-  const binding = findBinding(cwd);
+  const drift: string[] = [];
+  // The folder's single source of truth for which seat it claims (ADR 018). Read-only diagnosis
+  // must CLASSIFY rather than throw (ADR 282): a pre-281 or unreadable identity is drift with the
+  // configure prescription, never a crash — the doctor is exactly where the human learns this.
+  const bindingLoad = loadBinding(cwd);
+  const binding = bindingLoad.kind === 'valid' ? bindingLoad.value : null;
+  if (bindingLoad.kind === 'legacy') {
+    drift.push(
+      'this worktree is pre-ADR-281 (its .musterd/binding.json still carries `surface` and no ' +
+        '`version`) — its identity no longer loads anywhere. Run `musterd harness configure` here ' +
+        'to confirm the desired harness set and convert it.',
+    );
+  } else if (bindingLoad.kind === 'invalid') {
+    drift.push(
+      '.musterd/binding.json exists but is not a readable v2 binding — this workspace has no ' +
+        'usable identity until it is repaired or re-provisioned (`musterd init`).',
+    );
+  }
+  // Selection drift (ADR 281): the v2 manifest is the record of the desired harness set.
+  const provisioning = loadProvisioning(cwd);
+  if (provisioning.kind === 'legacy') {
+    drift.push(
+      'this folder\'s provisioning manifest is version 1 (single-harness era) — run `musterd ' +
+        'harness configure` to choose and convert the harness set; until then `musterd wire` exits 6.',
+    );
+  } else if (provisioning.kind === 'invalid') {
+    drift.push(
+      '.musterd/provisioned.json exists but is unreadable — re-run `musterd harness configure` to ' +
+        'rewrite the selection.',
+    );
+  }
   const boundClaim = binding?.claim ? formatClaimPolicy(binding.claim) : undefined;
   // Which harness `wire` would reach here follows the folder's PROVISIONED harness — identity no
-  // longer declares a surface (ADR 281); the provisioning manifest is what records the choice.
-  // Undefined degrades to the default, exactly as wire does.
-  const declaredSurface = readProvisionManifest(cwd)?.harness;
-  const drift: string[] = [];
+  // longer declares a surface (ADR 281); the v1 manifest's harness (pre-conversion) or the first
+  // selected external (v2) records the choice. Undefined degrades to the default, exactly as wire
+  // did historically.
+  const declaredSurface =
+    provisioning.kind === 'valid'
+      ? provisioning.value.desired.find((id) => id !== 'musterd')
+      : readProvisionManifest(cwd)?.harness;
   // Entry drift: the shared harness entry disagrees with this folder's binding.json. Tracked
   // separately from `drift` so `--fix` can route it to `musterd wire` (headless, whole-family)
   // instead of `musterd init` (mints a member, trips the bound guard, steals the shared slot).

@@ -118,7 +118,8 @@ src/
     git.ts            // RepoFacts extractor over git plumbing; actor identity = ADR 109 attribution
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
-    wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
+    wire.ts           // musterd wire: headless, desire-preserving fragment reconcile from the committed spec + saved v2 selection; exit 6 without one, never converts legacy (ADR 080/282)
+    harness.ts        // musterd harness configure|status: the ONE desired-set editor/legacy converter + the read-only fragment inspection (ADR 281/282/286)
     codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249)
     agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
