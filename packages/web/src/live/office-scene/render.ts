@@ -3537,6 +3537,24 @@ function deskFan(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number
   ellipse(ctx, { x: g.x, y: cy }, 2.4 * fit.scale, 1.8 * fit.scale, '#5a646e'); // hub
 }
 
+/** A desk lamp: base + slim pole + a shade that glows warm when lit. Re-introduced from #304's removal
+ * under that PR's own objection: the fixture draws ONLY at an occupied desk now (the sitter brought it,
+ * the sitter takes it), so an unattended lamp can never float over an empty desk again — and it lights
+ * only when it's dark enough out to want it (`LightEnv.lampsOn`), with its floor pool cast in
+ * `drawInteriorLight`. */
+function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: number, up: number, lit: boolean): void {
+  box(ctx, fit, ix, iy, 10, 10, 3, '#3d4650', up); // base
+  box(ctx, fit, ix, iy, 3, 3, 22, '#4a545f', up + 3); // pole
+  const g = project(ix, iy, fit);
+  const ty = g.y - (up + 26) * fit.scale;
+  ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, lit ? '#e9c46a' : '#aab0b8');
+  if (lit) ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
+}
+
+/** Where the lamp stands on an occupied desk (desk-relative along/across — the old #222 prop spot). */
+const LAMP_ALONG = 8;
+const LAMP_ACROSS = 42;
+
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
  * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
@@ -3552,6 +3570,8 @@ function drawWorkstation(
   t = 0,
   /** Props to skip this frame — a prop currently "in the owner's hand" (sip mug) isn't on the desk. */
   hide?: Set<PropKind>,
+  /** Is it dark enough out for desk lamps to be on? (`LightEnv.lampsOn`, threaded from the scene.) */
+  lampsLit = false,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -3600,6 +3620,9 @@ function drawWorkstation(
   at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t));
   at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
+  // The desk lamp is work gear, not a hashed personality prop: every OCCUPIED desk has one (the
+  // sitter brought it), no empty desk ever does — see deskLamp for the #304 story. Lit only after dark.
+  if (node) at(LAMP_ALONG, LAMP_ACROSS, (ix, iy) => deskLamp(ctx, fit, ix, iy, up, lampsLit));
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
@@ -3716,6 +3739,15 @@ function drawInteriorLight(
   // to actually read against the veil (a first pass was too faint to see) while staying a warm accent.
   for (const b of magicAnchors(fit).bulbs) {
     warmPool(ctx, { x: b.x, y: b.y + 24 * fit.scale }, 52 * fit.scale, 0.95, '255, 200, 120', 0.2 * night);
+  }
+
+  // Desk lamps emit — a warm pool cast from each occupied desk's lamp (the fixture drawWorkstation adds
+  // for every sitter) onto the desk corner and floor beside it. Desk-anchored where the personal glow
+  // below is body-anchored: together they read as "a person working in their own pool of lamplight".
+  for (const slot of DESK_SLOTS) {
+    if (!slotMember.has(slot.id)) continue;
+    const [ix, iy] = deskPoint(slot, LAMP_ALONG, LAMP_ACROSS);
+    warmPool(ctx, project(ix, iy, fit), 78 * fit.scale, 0.62, '255, 200, 120', 0.28 * night);
   }
 
   // A personal glow travelling with each present (online) member, in two layers: a wide soft halo that
@@ -3901,7 +3933,7 @@ export function renderScene(
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
       items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t) });
     } else {
-      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide) });
+      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide, env.lampsOn) });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
