@@ -406,6 +406,11 @@ export class MusterdClient {
     warnings: LaneWarning[];
     /** value-layer design: advisory lines for THIS caller only (e.g. the ship nudge) — never a wake. */
     notices?: string[];
+    /** ADR 283: present when THIS patch closed the lane — what the close recorded. Absent from an
+     *  older daemon and from every non-terminal patch; absence means "no verdict to report", so a
+     *  reader must fall back rather than invent one. `verified: false` alone cannot separate the
+     *  by-design exemption from the ADR 172 degradation — that is what `reason` is for. */
+    closed?: { verified: boolean; reason: string };
     /** ADR 169: present when the patch entered ready_for_review — the review routing. */
     review?: {
       reviewer?: string;

@@ -133,3 +133,67 @@ describe('a relayed human authorization is recorded, never promoted (ADR 192 / 2
     expect(close?.detail['authorization_claimed']).toBe('nick');
   });
 });
+
+/**
+ * The close verdict is RETURNED, not only written (ADR 283).
+ *
+ * `verified` and `reason` were already derived here and written to `lane.closed`; nothing could
+ * read them back without re-querying the audit. So the MCP resolve hint branched on ownership
+ * instead and told an `acceptance_exempt` close it had "recorded an unconfirmed close" — the
+ * conflation ADR 283 exists to end, and a direct contradiction of what `lane_submit` had said one
+ * call earlier. These pin the return against the row so the two can never disagree.
+ */
+describe('recordLaneClose hands back the verdict it recorded', () => {
+  /** izzo's own lane, parked in review with `acceptance_exempt` on the ready row, self-closed. */
+  function exemptClose(db: ReturnType<typeof openDb>, teamId: string) {
+    const lane = openLane(db, teamId, 'revive', 'izzo', {
+      title: 'a low-stakes lane',
+      claim: true,
+    });
+    updateLane(db, teamId, lane.id, 'revive', { state: 'awaiting_acceptance' });
+    // The ready row is what the reason is keyed on — never `lane.stakes`, which stays editable.
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+       VALUES (?, ?, ?, 'izzo', 'lane.ready_for_review', ?, 'allow', ?, ?)`,
+    ).run(
+      `ready-${lane.id}`,
+      teamId,
+      Date.now(),
+      lane.id,
+      JSON.stringify({ lane: lane.id, acceptance_exempt: true }),
+      Date.now(),
+    );
+    const before = { ...lane, state: 'awaiting_acceptance' as const };
+    const done = { ...before, state: 'done' as const };
+    return {
+      lane,
+      verdict: recordLaneClose(db, teamId, { name: 'izzo', kind: 'agent' }, before, done),
+    };
+  }
+
+  it('returns acceptance_exempt for a by-design self-close, matching the row it wrote', () => {
+    const { db, team } = seed();
+    const { lane, verdict } = exemptClose(db, team.id);
+
+    expect(verdict).toEqual({ verified: false, reason: 'acceptance_exempt' });
+    // The returned verdict and the ledger row are the same derivation, not two.
+    const [close] = auditRows(db, 'lane.closed', lane.id);
+    expect(close?.detail['reason']).toBe(verdict.reason);
+    expect(close?.detail['verified']).toBe(verdict.verified);
+  });
+
+  it('returns counterpart_confirm when another seat closed it', () => {
+    const { db, team } = seed();
+    addMember(db, team, { name: 'ryder', kind: 'agent' });
+    const lane = openLane(db, team.id, 'revive', 'izzo', { title: 'a lane', claim: true });
+    updateLane(db, team.id, lane.id, 'revive', { state: 'awaiting_acceptance' });
+    const before = { ...lane, state: 'awaiting_acceptance' as const };
+
+    const verdict = recordLaneClose(db, team.id, { name: 'ryder', kind: 'agent' }, before, {
+      ...before,
+      state: 'done' as const,
+    });
+
+    expect(verdict).toEqual({ verified: true, reason: 'counterpart_confirm' });
+  });
+});

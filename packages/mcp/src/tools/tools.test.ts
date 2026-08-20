@@ -1411,6 +1411,80 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
     await handlers['lane_resolve']!({ id: 'lane1' });
     expect(updateLane).toHaveBeenCalledWith('lane1', { state: 'done' });
   });
+
+  /**
+   * The close nudge reports the RECORDED reason (ADR 283), not ownership.
+   *
+   * `lane_submit` already refuses to conflate the by-design exemption with the ADR 172
+   * degradation — "no ask by DESIGN ... and the wording must not conflate them". The resolve side
+   * fired on `owner_seat === member` alone, so an exempt lane was told "unconfirmed close
+   * recorded — prefer lane_submit" moments after submit told it "none is owed: lane_resolve when
+   * ready". Two calls, opposite instructions, over a close the ledger had already labelled
+   * `acceptance_exempt` — and it defeated the reason `close_records` is sent at submit at all:
+   * so the ledger label is never a surprise found afterwards.
+   */
+  it('names the exemption instead of calling a by-design close unconfirmed (ADR 234/283)', async () => {
+    const updateLane = vi.fn(async () => ({
+      lane: lane({ owner_seat: 'Ada' }),
+      warnings: [],
+      closed: { verified: false, reason: 'acceptance_exempt' as const },
+    }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('acceptance_exempt');
+    expect(out).toContain('no acceptance was owed');
+    // The degradation vocabulary must not appear: this close degraded nothing.
+    expect(out).not.toContain('unconfirmed');
+    expect(out).not.toContain('prefer lane_submit');
+  });
+
+  it('still nudges the owner on a self-close that WAS owed an acceptance', async () => {
+    const updateLane = vi.fn(async () => ({
+      lane: lane({ owner_seat: 'Ada' }),
+      warnings: [],
+      closed: { verified: false, reason: 'review_timeout' as const },
+    }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('unconfirmed close recorded');
+    expect(out).toContain('prefer lane_submit');
+  });
+
+  /**
+   * An older daemon sends no `closed` block. Abstaining would drop the ADR 192 nudge for every
+   * seat on a lagging daemon, so absence keeps the pre-existing ownership-based advice — the
+   * same "the fallback is the safe one" discipline the backstop field documents.
+   */
+  it('falls back to the ownership nudge when the daemon reports no close reason', async () => {
+    const updateLane = vi.fn(async () => ({ lane: lane({ owner_seat: 'Ada' }), warnings: [] }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).toContain('unconfirmed close recorded');
+  });
+
+  it('says nothing about acceptance when a counterpart closed the lane', async () => {
+    const updateLane = vi.fn(async () => ({
+      lane: lane({ owner_seat: 'Bo' }),
+      warnings: [],
+      closed: { verified: true, reason: 'counterpart_confirm' as const },
+    }));
+    const handlers = captureAll(registerLanes, {
+      updateLane,
+      member: 'Ada',
+    } as Partial<MusterdClient>);
+    const out = text(await handlers['lane_resolve']!({ id: 'lane1' }));
+    expect(out).not.toContain('unconfirmed');
+    expect(out).not.toContain('no acceptance was owed');
+  });
 });
 
 describe('value layer: goal outcome + review debt + claim-time linking', () => {

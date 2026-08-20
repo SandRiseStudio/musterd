@@ -395,7 +395,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
         'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
         'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone. ' +
-        'Prefer lane_submit first (ADR 192): resolving your own lane records an unconfirmed close.',
+        'Prefer lane_submit first (ADR 192): resolving your own lane records an unconfirmed close — unless the lane was acceptance-exempt (ADR 234), where self-close is the designed path and records `acceptance_exempt`.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // `pr` is the PR *number*. Callers reached for `pr:"local"` to mean "merged without a PR";
@@ -417,16 +417,30 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           ...(args.sha !== undefined ? { sha: args.sha } : {}),
           ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
         };
-        const { lane, warnings, notices } = await client.updateLane(args.id, {
+        const { lane, warnings, notices, closed } = await client.updateLane(args.id, {
           state: 'done',
           ...(Object.keys(merged).length ? { merged } : {}),
         });
         // ADR 192 advisory nudge: closing your own lane is an unconfirmed close — legal, honest,
         // and worth one line. A counterpart closing someone else's lane accepts it; no nudge.
+        //
+        // ADR 283/234: but only when an acceptance was actually OWED. This branched on ownership
+        // alone, so a lane the daemon had just exempted was told it recorded an "unconfirmed close"
+        // and should have preferred `lane_submit` — the opposite of what `lane_submit` told it one
+        // call earlier ("none is owed: lane_resolve when ready"), and a surprise about its ledger
+        // label of exactly the kind `close_records` is sent at submit to prevent. The recorded
+        // reason is read here rather than re-derived from `lane.stakes`: stakes are editable after
+        // open, so re-deriving would let an edit rewrite what the submit did.
+        //
+        // Absence abstains INTO the old nudge, not out of it: an older daemon sends no `closed`,
+        // and dropping the ADR 192 line for every seat on a lagging daemon is the worse failure.
         const nudge =
-          client.member && lane.owner_seat === client.member
-            ? '\n\nunconfirmed close recorded — prefer lane_submit when an acceptor is live (ADR 192).'
-            : '';
+          closed?.reason === 'acceptance_exempt'
+            ? '\n\nno acceptance was owed — declared low stakes (ADR 234); the ledger records ' +
+              'this close as `acceptance_exempt`, not as a missing review.'
+            : client.member && lane.owner_seat === client.member
+              ? '\n\nunconfirmed close recorded — prefer lane_submit when an acceptor is live (ADR 192).'
+              : '';
         // value-layer design: the daemon's advisory notices (e.g. the ship nudge) reach the closer.
         const noticeText = notices?.length ? '\n\n' + notices.join('\n') : '';
         const hint = noticeText + nudge + branchCleanupHint(lane);

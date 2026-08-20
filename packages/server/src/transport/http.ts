@@ -90,7 +90,7 @@ import {
 import { rowsToEnvelopes } from '../store/hydrate.js';
 import { deriveReport } from '../store/insights.js';
 import { listInterruptCandidates } from '../store/interruptCandidates.js';
-import { recordLaneClose } from '../store/laneClose.js';
+import { type LaneCloseVerdict, recordLaneClose } from '../store/laneClose.js';
 import {
   boardWarnings,
   deriveGoalStatus,
@@ -3385,6 +3385,9 @@ export async function handleHttp(
         }
         // A resolve/abandon is a board-shape change — worth a team-visible note, same as an open.
         const notices: string[] = [];
+        // ADR 283: what the close actually recorded, carried back to the closer. Undefined on every
+        // non-terminal patch — absence means "this patch closed nothing", never a default verdict.
+        let closed: LaneCloseVerdict | undefined;
         if (LANE_TERMINAL_STATES.has(lane.state) && !LANE_TERMINAL_STATES.has(before.state)) {
           const verb = lane.state === 'abandoned' ? 'abandoned' : 'resolved';
           deliverLaneTeamAct(ctx, team, member, `[lane] ${verb} "${lane.title}"`, {
@@ -3393,7 +3396,7 @@ export async function handleHttp(
           // The close's whole audit — verified-ness, reason, the ADR 172/173 abstentions, the ADR
           // 188 grade, and the ADR 109 merge join — lives in `recordLaneClose` because an acceptor's
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
-          recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
+          closed = recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
           // ADR 271: a resolved incident owes its reporters an answer — they parked work behind it.
           // Best-effort and after the close: the resolve is already durable and a delivery failure
           // must not undo it. No-op for every ordinary lane.
@@ -3433,6 +3436,10 @@ export async function handleHttp(
           lane,
           warnings,
           ...(review ? { review: { ...review, ...backstop } } : {}),
+          // ADR 283: the recorded close verdict, so the closer's surface can name the label the
+          // ledger holds instead of inferring one. Same discipline as `close_records` on the submit
+          // side (ADR 234) — the ledger label is never a surprise found afterwards.
+          ...(closed ? { closed } : {}),
           ...(notices.length ? { notices } : {}),
         });
       }
