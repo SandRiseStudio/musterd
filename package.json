@@ -73,6 +73,7 @@
       "esbuild"
     ],
     "overrides": {
+      "@opentelemetry/propagator-jaeger@<2.9.0": ">=2.9.0",
       "esbuild@<0.28.1": ">=0.28.1",
       "vite@<6.4.3": "^6.4.3"
     }
