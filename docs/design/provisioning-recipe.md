@@ -4,7 +4,11 @@
 > **workspace profile** — `.musterd/profiles/*.json`, `ProfileSchema`, `--profile` — because the
 > roster **role** (a team fact, ADR 227) and the local provisioning template are different domains
 > and one name kept coupling them. Legacy `.musterd/roles/*.json` files (and their `role:` name key)
-> are still read, never written. The body below keeps its original wording where it is historical.
+> are still read, never written. Increment 2 of the migration (2026-08-19) removed the two
+> remaining couplings this document built: ADR 038's label-from-template derivation (the roster
+> label is now free text, independent of the profile pick) and the profile-charter injection (the
+> primer's charter now comes from the team role library, ADR 227; a profile's `charter` field is
+> legacy-descriptive). The body below keeps its original wording where it is historical.
 
 > **Status: Phase 1 + Phase 2 + the governed half all shipped.** Phase 1 = "roles provision tools" (the Role JSON template, built-in seed library, Claude Code/Cursor/Codex MCP-server provisioning, uninstall manifest, charter injection, init wiring; ADRs 029–031). Phase 2 = the local claim-on-first-use half of §5–§6 — the folder claim policy (`MUSTERD_CLAIM`), the overloaded `team_join`, `musterd claim`, client-side pending presence (ADRs 032–033). **The governed half is now shipped, not future:** the team **agent key** + admin-issued **grants** + the **request/approval lane** + the A.3 `claim` handshake landed in the P3 hard cutover (ADR 077, 2026-06-30) — `hello`/`mskd_` removed, `claim`/`requests decide` live. And the **committed launch spec** (ADR 080) closed the last onboarding gap: a fresh clone self-wires with `musterd wire` from a committed, secret-free `.musterd/workspace.json` — no interactive `init` required. The design is under **ADR 026** (two universes), governed by **ADR 027**/**028**; the wire-level handshake is `SPEC.md` Appendix A.3; the governance/auth model is `membership-model.md`. **This doc owns** the _provisioning recipe_ (Role templates) and the _local onboarding/claim experience_ (`init`/`wire`, claim-on-first-use).
 

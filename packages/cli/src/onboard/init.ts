@@ -28,14 +28,7 @@ import { writeProvisionManifest } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { installSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
-import {
-  GENERALIST,
-  isBuiltin,
-  listProfileNames,
-  loadProfile,
-  resolveRoleLabel,
-  type Profile,
-} from './profile.js';
+import { GENERALIST, isBuiltin, listProfileNames, loadProfile, type Profile } from './profile.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -637,12 +630,12 @@ export async function runInit(): Promise<number> {
       }),
     ).trim() || 'Ada';
 
-  // The profile is chosen *before* the member is minted, so the roster/primer role label is
-  // derived from it — the label you see matches the tools the agent gets (ADR 038). A non-generalist
-  // pick offers an explicit override; generalist/no-profile falls back to a free-text label as
-  // before. Provisioning the profile's tools happens later (§5a), once the harness is wired.
+  // The profile pick and the role label are independent (ADR 272 inc 2, superseding ADR 038's
+  // label-from-template derivation): a profile is workspace configuration and mints no team fact,
+  // so the roster label comes only from the free-text prompt. Provisioning the profile's tools
+  // happens later (§5a), once the harness is wired.
   const template = await selectProfile(name);
-  const role = resolveRoleLabel({ template, freeText: await askRoleLabel(template) });
+  const role = await askRoleLabel();
 
   // 4b) Cross-folder name-reuse guard (ADR 020) -----------------------------
   // The name is known now, so this is where the registry check belongs (the early folder guard
@@ -765,11 +758,16 @@ export async function runInit(): Promise<number> {
   }
 
   // 5a) Provision the chosen profile's tools (ADR 026 Universe-2; additive/reversible/local, ADR 027)
-  // The profile was picked in §4 (and already drove the roster label); now that the musterd server
-  // is wired, provision its MCP servers into this harness and pull its charter into the primer.
-  // `generalist`/no profile provisions nothing extra — only the musterd server + the standard
-  // playbook (ADR 028). This is Universe-2 only; identity (the role label) was set at mint.
-  const charter = await provisionProfileTools(chosen, template);
+  // The profile was picked in §4; now that the musterd server is wired, provision its MCP servers
+  // into this harness. `generalist`/no profile provisions nothing extra — only the musterd server +
+  // the standard playbook (ADR 028). This is Universe-2 only — nothing here touches the roster.
+  await provisionProfileTools(chosen, template);
+
+  // The primer's charter is the ROLE layer's (ADR 272 inc 2): when the label names a role in the
+  // team's durable library, its charter rides into the primer. A profile's own charter field is
+  // legacy-descriptive and never injected. Best-effort — an older daemon (no roles on the wire) or
+  // an unreachable roster degrades to no charter.
+  const charter = await teamRoleCharter(http, team, role);
 
   // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
   // The prompt is honest about what writing does *at the decision point*: against an existing,
@@ -814,7 +812,7 @@ export async function runInit(): Promise<number> {
       );
       try {
         writeProvisionManifest(process.cwd(), {
-          profile: role,
+          profile: template?.profile ?? '',
           harness: chosen.id,
           mcpServers: [],
           guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -973,36 +971,45 @@ async function selectProfile(member: string): Promise<Profile | undefined> {
 }
 
 /**
- * The free-text side of the role label (ADR 038, Decision #2). With **no profile** (generalist /
- * unloadable) it's the same optional free-text prompt as before. With a **profile** the label is
- * already settled to the profile's name, so we only offer an explicit *override gate* (default:
- * keep); accepting it opens the free-text prompt. Returns the raw free text (or undefined when the
- * profile-derived label is kept) — {@link resolveRoleLabel} applies the precedence.
+ * The role label is a free-text team fact, independent of the profile pick (ADR 272 inc 2 —
+ * ADR 038's label-from-template derivation and its override gate are removed with the coupling
+ * they existed for). Labelling stays opt-in (the ADR 028 default-nothing posture): empty = no role.
  */
-async function askRoleLabel(template: Profile | undefined): Promise<string | undefined> {
-  if (!template) {
-    return guard(
-      await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
-    ).trim();
-  }
-  const override = guard(
-    await p.confirm({
-      message: `Override the role label ${pc.bold(template.profile)}? ${pc.dim('(it matches the tools you chose — default keeps it)')}`,
-      initialValue: false,
-    }),
-  );
-  if (!override) return undefined;
+async function askRoleLabel(): Promise<string> {
   return guard(
-    await p.text({ message: 'Role label', placeholder: template.profile, defaultValue: '' }),
+    await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
   ).trim();
 }
 
 /**
+ * The charter for `label`, read from the team's durable role library off the daemon roster
+ * (ADR 227; ADR 272 inc 2 made this the primer's only charter source). Best-effort: no label, an
+ * older daemon without roles on the wire, an unknown label, or an unreachable roster all return
+ * undefined — init never wedges on a charter.
+ */
+async function teamRoleCharter(
+  http: {
+    roster(slug: string): Promise<{ roles?: Array<{ name: string; charter?: string | null }> }>;
+  },
+  team: string,
+  label: string,
+): Promise<string | undefined> {
+  if (!label) return undefined;
+  try {
+    const { roles } = await http.roster(team);
+    const charter = roles?.find((r) => r.name === label)?.charter?.trim();
+    return charter || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Step 5a — provision the already-chosen profile's tools (ADR 026 §3, provisioning-recipe.md).
- * Provisions its MCP servers into the chosen harness (additive/local — ADR 027), records what was
- * added in the uninstall manifest (ADR 030), and returns the profile's charter so the primer step
- * can inject it. No profile → nothing to do. A harness without a provision renderer degrades to
- * charter-only. Best-effort: a provisioning hiccup never fails init. Returns the charter, if any.
+ * Provisions its MCP servers into the chosen harness (additive/local — ADR 027) and records what
+ * was added in the uninstall manifest (ADR 030). No profile, or a profile with nothing to render,
+ * → nothing to do. Best-effort: a provisioning hiccup never fails init. The profile's charter
+ * field is NOT applied here — charter is the role layer's (ADR 272 inc 2).
  */
 function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): boolean {
   return p.allow.length + p.ask.length + p.deny.length > 0;
@@ -1011,19 +1018,19 @@ function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): 
 async function provisionProfileTools(
   harness: Harness,
   profile: Profile | undefined,
-): Promise<string | undefined> {
-  if (!profile) return undefined;
+): Promise<void> {
+  if (!profile) return;
 
   const { mcp_servers: servers, permissions } = profile.tools;
   if (servers.length === 0 && !hasPermissions(permissions)) {
-    p.log.info(pc.dim(`${profile.profile} adds no tools — applying its charter only.`));
-    return profile.charter;
+    p.log.info(pc.dim(`${profile.profile} adds no tools — nothing to provision.`));
+    return;
   }
   if (!harness.provision) {
     p.log.warn(
-      `Tool provisioning isn't supported for ${harness.label} yet — applying ${profile.profile}'s charter only.`,
+      `Tool provisioning isn't supported for ${harness.label} yet — skipping ${profile.profile}.`,
     );
-    return profile.charter;
+    return;
   }
 
   const sp = p.spinner();
@@ -1058,7 +1065,6 @@ async function provisionProfileTools(
   } catch (err) {
     sp.stop(pc.yellow(`Couldn't provision ${profile.profile} tools: ${(err as Error).message}`));
   }
-  return profile.charter;
 }
 
 /**

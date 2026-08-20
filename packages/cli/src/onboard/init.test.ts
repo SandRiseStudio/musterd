@@ -719,40 +719,56 @@ describe('runInit — add-agent happy path', () => {
     expect(await runInit()).toBe(0);
   });
 
-  it('provisioning a richer role calls provision and derives the label from the template', async () => {
-    h.textQueue.push('dawn', 'nick', '', 'Ada'); // slug, you, your-role, name (no free-text role)
-    h.selectQueue.push('new', 'claude-code', 'backend'); // intent, harness, role-template = backend
-    h.confirmQueue.push(false, true, true, true); // override-label NO, autojoin, connect, primer
+  it('provisioning a richer profile provisions its tools; the label comes only from the free-text prompt (ADR 272 inc 2)', async () => {
+    h.textQueue.push('dawn', 'nick', '', 'Ada', ''); // slug, you, your-role, name, role label (blank)
+    h.selectQueue.push('new', 'claude-code', 'backend'); // intent, harness, profile = backend
+    h.confirmQueue.push(true, true, true); // autojoin, connect, primer — no override gate anymore
     expect(await runInit()).toBe(0);
-    // roster/primer label is derived from the chosen template, not a free-text prompt (ADR 038)
+    // The profile pick does NOT derive the roster label — a profile is configuration, not identity.
     expect(h.http.addMember).toHaveBeenCalledWith('dawn', {
       name: 'Ada',
       kind: 'agent',
-      role: 'backend',
+      role: '',
     });
     expect(h.harness.provision).toHaveBeenCalled();
     const plan = h.harness.provision.mock.calls[0]![0] as { servers: { name: string }[] };
     expect(plan.servers.map((s) => s.name)).toContain('supabase');
-    // manifest records what was provisioned
+    // manifest records the provisioned PROFILE (not the roster label)
     const manifest = JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'));
     expect(manifest.mcpServers).toContain('supabase');
-    expect(manifest.role).toBe('backend');
-    // the role's charter lands in the managed primer block, labelled with the derived role
-    expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toContain('## Your charter');
+    expect(manifest.profile).toBe('backend');
+    // and the profile's charter no longer lands in the primer — charter is the role layer's (ADR 272)
+    expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).not.toContain('## Your charter');
   });
 
-  it('an explicit free-text override wins over the template-derived label', async () => {
-    h.textQueue.push('dawn', 'nick', '', 'Ada', 'platform'); // …name, then the override label
-    h.selectQueue.push('new', 'claude-code', 'backend'); // role-template = backend
-    h.confirmQueue.push(true, true, true, true); // override-label YES, autojoin, connect, primer
+  it('a free-text label rides alongside an independent profile pick', async () => {
+    h.textQueue.push('dawn', 'nick', '', 'Ada', 'platform'); // …name, then the label
+    h.selectQueue.push('new', 'claude-code', 'backend'); // profile = backend
+    h.confirmQueue.push(true, true, true); // autojoin, connect, primer
     expect(await runInit()).toBe(0);
     expect(h.http.addMember).toHaveBeenCalledWith('dawn', {
       name: 'Ada',
       kind: 'agent',
       role: 'platform',
     });
-    // the tools still come from the chosen template, regardless of the label override
+    // the tools come from the chosen profile, independent of the label
     expect(h.harness.provision).toHaveBeenCalled();
+  });
+
+  it("the primer's charter comes from the team role library, not the profile (ADR 272 inc 2)", async () => {
+    h.http.roster.mockResolvedValue({
+      members: [{ name: 'Ada', presence: 'online' }],
+      roles: [{ name: 'platform', summary: 'infra toucher', charter: 'You touch infra.' }],
+    } as never);
+    h.textQueue.push('dawn', 'nick', '', 'Ada', 'platform'); // label names a library role
+    h.selectQueue.push('new', 'claude-code', 'backend'); // profile = backend (has its own charter)
+    h.confirmQueue.push(true, true, true); // autojoin, connect, primer
+    expect(await runInit()).toBe(0);
+    const agents = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain('## Your charter (platform)');
+    expect(agents).toContain('You touch infra.');
+    // the backend PROFILE's charter must not be the source
+    expect(agents).not.toContain('Own the server + data layer');
   });
 
   it('appends to an existing unmarked AGENTS.md (primer target = unmarked)', async () => {
