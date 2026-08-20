@@ -1,0 +1,38 @@
+# Dependency submission — we post the pnpm graph ourselves, and every run proves the graph is on.
+#
+# Discovered 2026-08-20: the Dependency graph feature had been switched off (0 manifests via
+# GraphQL, SBOM 404s) some time after 2026-08-12, so Dependabot alerts could neither fire nor
+# auto-resolve — every one of the 21 alerts ever raised was closed by hand, and the outage was
+# silent. The toggle is back on; this workflow keeps it honest:
+# scripts/submit-dependency-snapshot.ts reads pnpm-lock.yaml and POSTs every resolved package as a
+# purl (Dependabot matches advisories against submitted snapshots the same as a native graph), and
+# the POST 404s the moment the feature is disabled — a red run instead of a silent gap.
+#
+# No pnpm install on purpose: the script is dependency-free (node 22 runs TS directly), so the
+# graph gets reported from a bare checkout before any install could execute third-party code.
+name: dependency-submission
+
+on:
+  push:
+    branches: [main]
+    paths: [pnpm-lock.yaml, scripts/submit-dependency-snapshot.ts]
+  workflow_dispatch:
+
+permissions:
+  contents: write # the dependency-submission API writes repository data
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Submit pnpm-lock.yaml snapshot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node --disable-warning=ExperimentalWarning scripts/submit-dependency-snapshot.ts
