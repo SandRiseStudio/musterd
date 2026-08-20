@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { HarnessId, LocalStateIssue, Surface } from '@musterd/protocol';
-import { SURFACES, type FragmentScope } from '@musterd/protocol';
+import type { FragmentScope, HarnessId, LocalStateIssue, Surface } from '@musterd/protocol';
+import { SURFACES } from '@musterd/protocol';
 import type { HarnessContext } from './context.js';
 
 /**

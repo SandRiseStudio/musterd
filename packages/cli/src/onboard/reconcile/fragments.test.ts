@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { harnessAdapters } from '../harnesses/index.js';
 import { memoryFs, nodeClock, nodeProc, type HarnessContext } from './context.js';
 import {
   canonicalFingerprint,
@@ -10,7 +11,6 @@ import {
   surfaceForAdapter,
   type HarnessAdapter,
 } from './fragments.js';
-import { harnessAdapters } from '../harnesses/index.js';
 
 function ctx(worktreeRoot = '/w/a'): HarnessContext {
   return {

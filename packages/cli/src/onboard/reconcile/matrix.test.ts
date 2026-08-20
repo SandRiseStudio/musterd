@@ -1,17 +1,16 @@
-import { beforeEach, describe, expect, it } from 'vitest';
 import type { FragmentLedger, WorktreeProvisioning } from '@musterd/protocol';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { saveProvisioning, loadProvisioning } from '../manifest.js';
 import { memoryFs, type HarnessContext, type MemoryFs } from './context.js';
+import { reconcileHarnesses } from './engine.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
-  type FragmentIntent,
   type FragmentMutation,
   type HarnessAdapter,
   type ObservedFragment,
 } from './fragments.js';
 import { loadJournal, loadLedger, saveLedger } from './store.js';
-import { saveProvisioning, loadProvisioning } from '../manifest.js';
-import { reconcileHarnesses } from './engine.js';
 
 const ROOT = '/w/a';
 const MACHINE = '/machine/.musterd';

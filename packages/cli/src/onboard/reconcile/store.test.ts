@@ -1,8 +1,9 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
 import type { FragmentLedger, ReconcileJournal } from '@musterd/protocol';
+import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { memoryFs, nodeFs } from './context.js';
 import {
   canonicalJson,
@@ -12,13 +13,11 @@ import {
   loadLedger,
   loadLockRecord,
   lockPath,
-  publishLocalFile,
   readLocalFile,
   removeJournal,
   saveJournal,
   saveLedger,
 } from './store.js';
-import { z } from 'zod';
 
 const root = '/machine/.musterd';
 

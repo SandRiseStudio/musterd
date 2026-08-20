@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { memoryFs, type HarnessContext, type MemoryFs } from '../reconcile/context.js';
-import type { CodexServer } from './codexToml.js';
 import { codexAdapter } from './codex.js';
+import type { CodexServer } from './codexToml.js';
 
 const ROOT = '/w/a';
 const TOML = '/w/a/.codex/config.toml';

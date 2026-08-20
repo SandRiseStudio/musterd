@@ -9,6 +9,13 @@ import {
   type UnprovisionPlan,
 } from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
+import { launchEntryEnv, markerGenerationOfEnv, resolveMcpLaunch } from '../mcpEntry.js';
+import type { FsSeam } from '../reconcile/context.js';
+import {
+  canonicalFingerprint,
+  folderResourceKey,
+  type HarnessAdapter,
+} from '../reconcile/fragments.js';
 import {
   CODEX_HOOK_MARKER,
   codexHookCommands,
@@ -25,13 +32,6 @@ import {
   upsertServer,
   type CodexServer,
 } from './codexToml.js';
-import { launchEntryEnv, markerGenerationOfEnv, resolveMcpLaunch } from '../mcpEntry.js';
-import type { FsSeam } from '../reconcile/context.js';
-import {
-  canonicalFingerprint,
-  folderResourceKey,
-  type HarnessAdapter,
-} from '../reconcile/fragments.js';
 
 /**
  * Codex (OpenAI Codex CLI). Codex reads MCP servers from `[mcp_servers.<name>]` tables in a TOML

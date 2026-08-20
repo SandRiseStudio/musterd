@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
+import { primaryCheckoutFor } from '../entryGuard.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
 import { loadProvisioning } from '../manifest.js';
@@ -15,7 +16,6 @@ import {
   resolveMcpLaunch,
   RETIRED_SURFACE_ENV,
 } from '../mcpEntry.js';
-import { primaryCheckoutFor } from '../entryGuard.js';
 import { STANDARD_FLOOR } from '../permissions.js';
 import {
   BUILTIN_PROFILES,

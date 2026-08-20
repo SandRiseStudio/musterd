@@ -1,3 +1,4 @@
+import { applyFileMap, canonicalGuidanceMap, observeFileMap } from '../guidance.js';
 import type { HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
@@ -5,7 +6,6 @@ import {
   type FragmentIntent,
   type HarnessAdapter,
 } from '../reconcile/fragments.js';
-import { applyFileMap, canonicalGuidanceMap, observeFileMap } from '../guidance.js';
 
 /**
  * The native musterd adapter (ADR 281): the selectable harness that is the `musterd host` agent

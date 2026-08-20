@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import {
   registeredFromEnv,
   type Harness,
@@ -13,7 +14,6 @@ import {
   resolveMcpLaunch,
   type McpServerEntry,
 } from '../mcpEntry.js';
-import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import type { FsSeam } from '../reconcile/context.js';
 import {
   canonicalFingerprint,

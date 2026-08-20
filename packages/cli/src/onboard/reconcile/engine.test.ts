@@ -1,11 +1,11 @@
-import { trace } from '@opentelemetry/api';
+import type { WorktreeProvisioning } from '@musterd/protocol';
+import {} from '@opentelemetry/api';
 import {
   BasicTracerProvider,
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from '@opentelemetry/sdk-trace-base';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { WorktreeProvisioning } from '@musterd/protocol';
 import { loadProvisioning, saveProvisioning } from '../manifest.js';
 import { memoryFs, type HarnessContext, type MemoryFs } from './context.js';
 import { reconcileHarnesses, inspectHarnesses } from './engine.js';
@@ -13,7 +13,6 @@ import {
   canonicalFingerprint,
   folderResourceKey,
   repoSharedResourceKey,
-  type FragmentIntent,
   type HarnessAdapter,
 } from './fragments.js';
 import { loadJournal, loadLedger, saveJournal } from './store.js';

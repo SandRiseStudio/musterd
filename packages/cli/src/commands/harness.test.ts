@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
+import { loadProvisioning } from '../onboard/manifest.js';
 import { nodeFs, type HarnessContext } from '../onboard/reconcile/context.js';
 import {
   canonicalFingerprint,
@@ -11,7 +12,6 @@ import {
   type HarnessAdapter,
   type ObservedFragment,
 } from '../onboard/reconcile/fragments.js';
-import { loadProvisioning } from '../onboard/manifest.js';
 import { harnessCommand } from './harness.js';
 
 let cwd: string;

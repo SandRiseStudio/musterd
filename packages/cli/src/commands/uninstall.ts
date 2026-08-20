@@ -13,10 +13,10 @@ import {
   readProvisionManifest,
   saveProvisioning,
 } from '../onboard/manifest.js';
+import { classifyPrimerTarget, removePrimer } from '../onboard/primer.js';
 import { defaultHarnessContext, type HarnessContext } from '../onboard/reconcile/context.js';
 import { reconcileHarnesses } from '../onboard/reconcile/engine.js';
 import type { HarnessAdapter } from '../onboard/reconcile/fragments.js';
-import { classifyPrimerTarget, removePrimer } from '../onboard/primer.js';
 import { theme } from '../render/theme.js';
 import { hint, success, sym } from '../render/ui.js';
 

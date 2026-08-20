@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 import type {
   FragmentLedger,
   HarnessId,
@@ -7,9 +6,10 @@ import type {
   ReconcileJournal,
   Surface,
 } from '@musterd/protocol';
-import { loadProvisioning, saveProvisioning } from '../manifest.js';
+import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 import { harnessAdapters } from '../harnesses/index.js';
 import { musterdCoreAdapter } from '../harnesses/musterd.js';
+import { loadProvisioning, saveProvisioning } from '../manifest.js';
 import type { HarnessContext } from './context.js';
 import {
   registryOrder,

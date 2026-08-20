@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { memoryFs, type ClockSeam, type ProcessSeam } from './context.js';
-import { loadLockRecord, lockPath } from './store.js';
 import { createHarnessLocks, LEASE_MS, RENEW_MS } from './lock.js';
+import { loadLockRecord, lockPath } from './store.js';
 
 const root = '/machine/.musterd';
 const KEY = 'folder:/w/a:.claude/settings.json';

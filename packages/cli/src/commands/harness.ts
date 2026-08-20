@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import * as p from '@clack/prompts';
 import {
   BINDING_DIR,
@@ -9,7 +10,6 @@ import {
   type WorkspaceSpec,
   type WorktreeProvisioning,
 } from '@musterd/protocol';
-import { join } from 'node:path';
 import pc from 'picocolors';
 import { flagStr, type Parsed } from '../args.js';
 import { loadBinding, loadWorkspace } from '../config.js';

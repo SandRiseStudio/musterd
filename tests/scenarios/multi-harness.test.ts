@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMcpConfig } from '@musterd/mcp';
-import { harnessCommand } from '../../packages/cli/src/commands/harness.js';
 import { parseArgs } from '../../packages/cli/src/args.js';
+import { harnessCommand } from '../../packages/cli/src/commands/harness.js';
+import { nativeMcpConfig } from '../../packages/cli/src/host/backends/nativeBridge.js';
 import { codexAdapter } from '../../packages/cli/src/onboard/harnesses/codex.js';
 import { cursorAdapter } from '../../packages/cli/src/onboard/harnesses/cursor.js';
 import { musterdAdapter } from '../../packages/cli/src/onboard/harnesses/musterd.js';
@@ -15,7 +16,6 @@ import {
 } from '../../packages/cli/src/onboard/reconcile/context.js';
 import type { HarnessAdapter } from '../../packages/cli/src/onboard/reconcile/fragments.js';
 import { loadLedger } from '../../packages/cli/src/onboard/reconcile/store.js';
-import { nativeMcpConfig } from '../../packages/cli/src/host/backends/nativeBridge.js';
 
 /**
  * The live falsifier from the approved spec (ADR 281/282/286), as automated acceptance: one human

@@ -8,9 +8,9 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
+  realpathSync,
 } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
-import { realpathSync } from 'node:fs';
 import { machineConfigRoot } from '../../machinePaths.js';
 
 /**
