@@ -1,8 +1,13 @@
 # 272 — Team roles route work; profiles configure workspaces
 
-- **Status:** proposed — **revised 2026-08-19**, narrowed before acceptance (see the revision
-  record at the end of Context). The original 2026-08-14 scope is in git history at PR #851.
-- **Date:** 2026-08-14; revised 2026-08-19
+- **Status:** accepted as narrowed — **revised 2026-08-19** before acceptance (see the revision
+  record at the end of Context), then **accepted 2026-08-20** when §4, the one build this ADR
+  authorizes, shipped in #921 (pure rename, proven by a built-in round-trip) and #922 (the label
+  and charter decouple from the profile), and lane `01M017AXXC` was accepted against the §4 eval
+  bar. **§5 is not accepted to build:** the four-level registry, Git reconciliation, role-addressed
+  sends, and the ordered routing resolver stay deferred behind their two named triggers, neither of
+  which has fired. The original 2026-08-14 scope is in git history at PR #851.
+- **Date:** 2026-08-14; revised 2026-08-19; accepted 2026-08-20
 - **Owner:** gptbot (decision session with nick); revision: stanley (challenge answered by the
   owner, endorsed by nick in session)
 - **Supersedes / relates to:** ADR 026–030 (the existing provisioning-template
@@ -151,6 +156,22 @@ every existing template renders identically as a profile, and no roster or
 routing read depends on any profile. The reopening decision reads the ADR 227
 join (falsifier: the SQL recorded in ADR 227's eval section) and the
 holder-pick evidence; either firing reopens §5 with its own go/no-go.
+
+**§4 eval result, 2026-08-20 — met.** The migration landed in #921 + #922 and was accepted on lane
+`01M017AXXC`. Both halves of the bar were exercised, not asserted: identical rendering is held by
+`packages/cli/src/onboard/__fixtures__/builtin-workspaces.json`, which captures every built-in's
+rendered workspace on pre-rename main (1d3468fe) and is asserted against the renamed code in
+`profile.test.ts`; independence is held by `resolveRoleLabel` being deleted and every remaining
+profile consumer sitting in `onboard/` provisioning plus the `agent`/`init`/`role` commands — no
+`packages/server` roster or routing path reads one. *Falsifier for the second half:* a
+`loadProfile`/`BUILTIN_PROFILES`/`parseProfile` reference appearing anywhere under
+`packages/server/src`, or any roster write whose value derives from a profile field.
+
+**§5 deferral liveness — unmonitored as of 2026-08-20.** `roster.role_query` rows are *written*
+(`packages/server/src/transport/http.ts`), but nothing reads them on any schedule: both
+measurements to date (#912 and its predecessor) were run by hand. The gate holding §5 closed is
+therefore a control nobody exercises, and a trigger that fired would go unnoticed. Registering it
+with a last-fired date is lane `01M0ER0A0B`.
 
 **Experiment.** None for §4 beyond the migration's own round-trip (a template
 rendered before and after must produce the same workspace). The routing

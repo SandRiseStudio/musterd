@@ -1419,7 +1419,9 @@ const RAW: RawItem[] = [
   },
   {
     id: 'role-routing-profiles',
-    unfrozen: 'ADR 272 is proposed (revised 2026-08-19); only the profiles migration is authorized now',
+    frozenBy: 272,
+    building:
+      'nothing is in flight — the profiles migration (ADR 272 §4), the only build the ADR authorizes, shipped in #921 (pure rename, built-in round-trip) and #922 (label and charter decouple from the profile). What remains is §5 — the four-level registry, Git reconciliation, role-addressed sends, and the ordered routing resolver — DEFERRED, not building: it reopens only when ADR 227’s restored measured trigger fires (the role-filtered discovery→directed-send join, vacuously never fired: zero `roster.role_query` rows have ever been written) or a multi-holder pick is repeatedly contested by hand. If role sends do proceed, increment 1 rides the shipped ADR 254 eligible-set rail rather than a new resolver.',
     wave: 8,
     title: 'Roles vs profiles — responsibility without harness lock-in, routing behind its gate',
     plan: 'near-term',
