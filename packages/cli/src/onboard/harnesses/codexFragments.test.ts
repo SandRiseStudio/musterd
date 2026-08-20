@@ -118,6 +118,31 @@ describe('codexAdapter — managed fragments', () => {
     expect(after).toContain('[mcp_servers.figma]');
   });
 
+  it('a marker-less musterd table (the ADR 165 shape) is pre-ADR-286 — legacy, marker-only repair', async () => {
+    const fs = memoryFs();
+    fs.writeFile(
+      TOML,
+      [
+        THEIR_TOML.trimEnd(),
+        '',
+        '[mcp_servers.musterd]',
+        'command = "/their/node"',
+        'args = ["/their/adapter.js"]',
+        '',
+      ].join('\n'),
+      0o600,
+    );
+    const ctx = ctxOf(fs);
+    const intents = await intentsOf(ctx);
+    const mcp = intents.find((i) => i.fragmentKey === 'mcp.musterd')!;
+    expect((await codexAdapter.observe(ctx, mcp)).state).toBe('legacy-launch-marker');
+    await codexAdapter.apply(ctx, { kind: 'repair-launch-marker', intent: mcp });
+    const after = fs.readFile(TOML)!;
+    expect(after).toContain('MUSTERD_LAUNCH_SURFACE = "codex"');
+    expect(after).toContain('command = "/their/node"'); // repaired, not adopted
+    expect(after).toContain('[mcp_servers.figma]');
+  });
+
   it('hook fragments add and remove only marker-owned handlers', async () => {
     const fs = memoryFs();
     fs.writeFile(

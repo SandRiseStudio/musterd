@@ -307,7 +307,10 @@ export const codexAdapter: HarnessAdapter = {
         const entry = readServer(toml, 'musterd');
         if (!entry) return { state: 'absent' };
         const fingerprint = canonicalFingerprint(entry);
-        return markerGenerationOfEnv(entry.env) === 'legacy'
+        // 'legacy' (the retired MUSTERD_SURFACE) and 'none' (the ADR 165 marker-less shape — the
+        // COMMON pre-286 fleet registration) are both the pre-ADR-286 class: neither can attach,
+        // and confirmed configure's marker-only repair converts both while preserving the entry.
+        return markerGenerationOfEnv(entry.env) !== 'launch'
           ? { state: 'legacy-launch-marker', fingerprint }
           : { state: 'present', fingerprint };
       }
