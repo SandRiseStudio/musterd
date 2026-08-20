@@ -744,7 +744,9 @@ export async function runInit(): Promise<number> {
   try {
     saveProvisioning(process.cwd(), {
       version: 2,
-      profile: role,
+      // The provisioned PROFILE (workspace configuration), never the roster label — the two are
+      // independent since ADR 272 inc 2.
+      profile: template?.profile ?? '',
       desired,
       contributions: {},
       provisionedAt: new Date().toISOString(),

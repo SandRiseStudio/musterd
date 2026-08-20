@@ -394,7 +394,7 @@ function saveLocalState(
   const priorProfile =
     state.provisioning.kind === 'valid'
       ? state.provisioning.value.profile
-      : (readProvisionManifest(worktreeRoot)?.role ?? '');
+      : (readProvisionManifest(worktreeRoot)?.profile ?? '');
   const contributions =
     state.provisioning.kind === 'valid' ? state.provisioning.value.contributions : {};
   const provisioning: WorktreeProvisioning = {

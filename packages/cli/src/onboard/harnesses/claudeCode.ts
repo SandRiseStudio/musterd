@@ -17,7 +17,13 @@ import {
 } from '../mcpEntry.js';
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { STANDARD_FLOOR } from '../permissions.js';
-import { BUILTIN_ROLES, parseRole, userRolesDir, type RoleTemplate } from '../role.js';
+import {
+  BUILTIN_PROFILES,
+  legacyUserRolesDir,
+  parseProfile,
+  userProfilesDir,
+  type Profile,
+} from '../profile.js';
 import { nodeExec, type ExecSeam, type FsSeam, type HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
@@ -959,20 +965,21 @@ function patchHooks(
 
 /** The desired permission entries: the ADR 261 floor plus the provisioned role's profile. */
 function permissionsPayload(ctx: HarnessContext): ProvisionPermissions {
-  let role: RoleTemplate | undefined;
+  let role: Profile | undefined;
   const provisioning = loadProvisioning(ctx.worktreeRoot, ctx.fs);
   const roleName = provisioning.kind === 'valid' ? provisioning.value.profile : '';
   if (roleName !== '') {
-    const rolePath = join(userRolesDir(ctx.worktreeRoot), `${roleName}.json`);
-    const raw = ctx.fs.readFile(rolePath);
-    if (raw !== null) {
+    for (const dir of [userProfilesDir(ctx.worktreeRoot), legacyUserRolesDir(ctx.worktreeRoot)]) {
+      const raw = ctx.fs.readFile(join(dir, `${roleName}.json`));
+      if (raw === null) continue;
       try {
-        role = parseRole(JSON.parse(raw));
+        role = parseProfile(JSON.parse(raw));
+        break;
       } catch {
-        role = undefined; // an unreadable role never blocks the floor
+        role = undefined; // an unreadable profile never blocks the floor
       }
     }
-    role ??= BUILTIN_ROLES[roleName];
+    role ??= BUILTIN_PROFILES[roleName];
   }
   return {
     allow: [...new Set([...STANDARD_FLOOR.allow, ...(role?.tools.permissions.allow ?? [])])].sort(),
