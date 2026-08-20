@@ -33,7 +33,8 @@ MUSTERD_SERVER   = http://localhost:4849
 MUSTERD_TEAM     = dawn
 MUSTERD_AGENT_KEY = mskey_...      # the team agent key (ADR 075/076): authenticates the harness; the seat is claimed at run time (no per-seat token — mskd_ removed in the P3 cutover, ADR 077)
 MUSTERD_GRANT    = msgr_...        # optional; a pre-issued grant that skips the pending/admin-approval lane on claim (ADR 077)
-MUSTERD_SURFACE  = claude-code     # or codex; defaults to 'other'
+MUSTERD_LAUNCH_SURFACE = claude-code  # REQUIRED for an external launch (ADR 286): the launcher's own Surface, written into its registration by the fragment reconciler. No marker ⇒ the adapter refuses Presence attachment (run `musterd harness configure`)
+MUSTERD_TEST_SURFACE   = codex        # test/headless-only override; outranks the launch marker; written by no adapter
 MUSTERD_CLAIM    = seat:Ada        # optional MANUAL OVERRIDE — NOT written by default provisioning (the seat resolves from binding.json, PR #58); folder claim policy (ADR 032): chat | seat:<name> | role:<role>. drives team_join {} + autojoin
 MUSTERD_AUTOJOIN = 1               # optional MANUAL OVERRIDE — NOT written by provisioning (ADR 165 inc 2: it lives in binding.json's `autojoin`); opt-in auto-join/claim on launch (off by default); an explicit 0 beats an opted-in binding
 MUSTERD_PROVENANCE = session       # optional; why this session attaches (ADR 014): session|asked|hook|scheduled|daemon. defaults to 'session'
@@ -42,13 +43,19 @@ MUSTERD_DRIVER     = nick          # optional MANUAL OVERRIDE — NOT written by
 MUSTERD_BINDING    = /abs/.musterd/binding.json  # optional; explicit binding-file path (ADR 018)
 ```
 
-**Identity resolution (ADR 018/075/080) — aligned with the CLI.** `MUSTERD_*` env wins; if it carries
-no field the adapter falls back to the **workspace binding file** `<workspace>/.musterd/binding.json`
-(`{server, team, surface, claim?, agent_key?, grant?}`, `BindingSchema` in `@musterd/protocol`) — the
-explicit `MUSTERD_BINDING` path if set, else walking up from cwd — and then, for the **non-secret**
-fields only, to the committed **`<workspace>/.musterd/workspace.json`** (`WorkspaceSpecSchema` =
-`{server, team, surface, claim}`, ADR 080). So the per-field resolution ladder is **env → binding.json →
-workspace.json**, with the two secrets (`agent_key`, `grant`) coming _only_ from env or the gitignored
+**Identity resolution (ADR 018/075/080/281) — aligned with the CLI.** `MUSTERD_*` env wins; if it
+carries no field the adapter falls back to the **workspace binding file**
+`<workspace>/.musterd/binding.json` (strict v2 `{version: 2, server, team, claim?, agent_key?,
+grant?, …}`, `BindingSchema` in `@musterd/protocol`) — the explicit `MUSTERD_BINDING` path if set,
+else walking up from cwd — and then, for the **non-secret** fields only, to the committed
+**`<workspace>/.musterd/workspace.json`** (`WorkspaceSpecSchema` = `{version: 2, server, team,
+claim}`, ADR 080/281). **Surface is the exception (ADR 286): it is resolved ONCE at startup from
+`MUSTERD_TEST_SURFACE` then `MUSTERD_LAUNCH_SURFACE` and from nothing else — no stored file,
+capture, or observation participates; absence, an invalid value, or any presence of the retired
+`MUSTERD_SURFACE` refuses Presence attachment with the `musterd harness configure` repair. A binding
+refresh may update model/capture/capability fields but never `config.surface`.** For the rest, the
+per-field resolution ladder is **env → binding.json → workspace.json**, with the two secrets
+(`agent_key`, `grant`) coming _only_ from env or the gitignored
 `binding.json`, never the committable spec. `musterd init`/`agent` write both files; the committed spec
 lets a fresh clone self-wire (see `musterd wire`, `04-cli.md`), while binding.json (0600, gitignored)
 carries the machine-local secrets — so the CLI and the adapter resolve to the **same** member in a given
@@ -64,12 +71,15 @@ setups.
 
 Claude Code keys local-scope MCP config by **repo root**, so every git worktree of a repo shares one
 `musterd` entry. A shared slot may hold only what is identical across everything sharing it, so the
-entry holds nothing: no server, team, surface, agent key or grant. The adapter resolves all of them
-from `.musterd/binding.json`, found by walking up from **cwd** — the one signal that is genuinely
-per-worktree — falling back to the committed `workspace.json` for the non-secret fields.
+entry holds exactly ONE thing since ADR 286: `MUSTERD_LAUNCH_SURFACE=<its own surface>` — identical
+for every worktree sharing the slot, so still no per-seat state. The adapter resolves everything
+else from `.musterd/binding.json`, found by walking up from **cwd** — the one signal that is
+genuinely per-worktree — falling back to the committed `workspace.json` for the non-secret fields.
 
-All of `MUSTERD_SERVER`, `MUSTERD_TEAM`, `MUSTERD_SURFACE`, `MUSTERD_AGENT_KEY`, `MUSTERD_GRANT`,
-`MUSTERD_CLAIM` and `MUSTERD_MODEL` remain supported **manual** overrides for headless/CI use.
+All of `MUSTERD_SERVER`, `MUSTERD_TEAM`, `MUSTERD_AGENT_KEY`, `MUSTERD_GRANT`,
+`MUSTERD_CLAIM` and `MUSTERD_MODEL` remain supported **manual** overrides for headless/CI use
+(`MUSTERD_SURFACE` is retired — a registration carrying it refuses attachment until a confirmed
+`musterd harness configure` repairs the marker).
 Provisioning simply never writes them. See ADR 143 and ADR 165. **Identity is optional** (claim-on-first-use, ADR 032): only the **team** is required to load —
 the `agent_key` may be absent, leaving the session a pending presence that claims a seat on first use
 (`team_join` / `musterd claim`, which writes the resolved seat back into binding.json).

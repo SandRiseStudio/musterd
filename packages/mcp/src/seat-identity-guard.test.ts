@@ -32,10 +32,10 @@ const seat = (dir: string, name: string): string => {
   writeFileSync(
     p,
     JSON.stringify({
+      version: 2,
       server: 'http://127.0.0.1:4849',
       team: 'revive',
       agent_key: `mskey_${name}`,
-      surface: 'claude-code',
       claim: { mode: 'seat', name },
     }),
   );

@@ -285,10 +285,10 @@ describe('MCP adapter', () => {
       // Occupy once so the seat is held (bound_at) — the reseat policy's "known" signal.
       const boot = { ...adaConfig(), bindingDir: tmp };
       saveBinding(tmp, {
+        version: 2,
         server: boot.server,
         team: boot.team,
         agent_key: boot.agent_key!,
-        surface: boot.surface,
         claim: { mode: 'seat', name: 'Ada' },
         grant: boot.grant!,
       });

@@ -71,7 +71,9 @@ export function claimCredentialFromEnv(
       agentKey,
       target,
       ...(grant !== undefined ? { grant } : {}),
-      surface: env['MUSTERD_SURFACE'] ?? 'cli',
+      // A CLI act is intrinsically `cli` (ADR 286) — env no longer chooses the Surface here. The
+      // per-command `--surface` flag remains the deliberate manual override where one exists.
+      surface: 'cli',
     },
   };
 }

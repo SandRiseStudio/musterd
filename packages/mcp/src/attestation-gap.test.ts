@@ -50,9 +50,9 @@ const writeSpec = (): void =>
   writeFileSync(
     join(dir, '.musterd', 'workspace.json'),
     JSON.stringify({
+      version: 2,
       server: 'http://127.0.0.1:4849',
       team: 'revive',
-      surface: 'cursor',
       claim: { mode: 'seat', name: 'miley' },
     }),
   );
@@ -62,9 +62,9 @@ const writeBinding = (model?: string): void =>
   writeFileSync(
     join(dir, '.musterd', 'binding.json'),
     JSON.stringify({
+      version: 2,
       server: 'http://127.0.0.1:4849',
       team: 'revive',
-      surface: 'cursor',
       agent_key: 'mskey_test',
       claim: { mode: 'seat', name: 'miley' },
       ...(model ? { model } : {}),
@@ -76,7 +76,7 @@ describe('a seat that resolves an identity but no model', () => {
     writeSpec();
     // The agent key rides in env — exactly how a Cursor/Codex MCP entry supplies it — so this is a
     // fully working, fully credentialed seat. Nothing here fails.
-    const config = loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_test' });
+    const config = loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_test', MUSTERD_TEST_SURFACE: 'cursor' });
 
     expect(config.claim).toEqual({ mode: 'seat', name: 'miley' });
     expect(config.model).toBeUndefined();
@@ -85,7 +85,7 @@ describe('a seat that resolves an identity but no model', () => {
 
   it('says so, loudly and by name, on stderr', () => {
     writeSpec();
-    loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_test' });
+    loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_test', MUSTERD_TEST_SURFACE: 'cursor' });
 
     const warning = errors.join('\n');
     expect(warning).toContain('miley'); // which seat
@@ -96,14 +96,14 @@ describe('a seat that resolves an identity but no model', () => {
   it('warns on stderr, never stdout — stdout is the MCP stdio transport', () => {
     writeSpec();
     const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
-    loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_test' });
+    loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_test', MUSTERD_TEST_SURFACE: 'cursor' });
     expect(stdout).not.toHaveBeenCalled();
   });
 
   it('stays silent when the binding attests — the overwhelmingly common path', () => {
     writeSpec();
     writeBinding('claude-opus-5');
-    const config = loadMcpConfig({});
+    const config = loadMcpConfig({ MUSTERD_TEST_SURFACE: 'cursor' });
 
     expect(config.model).toBe('claude-opus-5');
     expect(config.modelSource).toBe('binding');
@@ -115,6 +115,7 @@ describe('a seat that resolves an identity but no model', () => {
     const config = loadMcpConfig({
       MUSTERD_AGENT_KEY: 'mskey_test',
       MUSTERD_MODEL: 'gpt-5.6-luna',
+      MUSTERD_TEST_SURFACE: 'cursor',
     });
 
     expect(config.model).toBe('gpt-5.6-luna');
@@ -124,14 +125,14 @@ describe('a seat that resolves an identity but no model', () => {
   it('stays silent for a chat-mode session — it holds no seat, so it grades nothing', () => {
     // No spec, no binding: identity falls all the way through to chat. Attestation is meaningless
     // here, and warning on it would train the reader to ignore the warning that matters.
-    loadMcpConfig({ MUSTERD_TEAM: 'revive', MUSTERD_AGENT_KEY: 'mskey_test' });
+    loadMcpConfig({ MUSTERD_TEAM: 'revive', MUSTERD_AGENT_KEY: 'mskey_test', MUSTERD_TEST_SURFACE: 'cli' });
     expect(errors.join('\n')).not.toContain('attesting no model');
   });
 
   it('warns for a seat whose binding exists but carries no model either', () => {
     // Not just the spec-only path: any seat that reaches `unknown` is the same hole in the evidence.
     writeBinding(undefined);
-    loadMcpConfig({});
+    loadMcpConfig({ MUSTERD_TEST_SURFACE: 'cursor' });
     expect(errors.join('\n')).toContain('attesting no model');
   });
 });
