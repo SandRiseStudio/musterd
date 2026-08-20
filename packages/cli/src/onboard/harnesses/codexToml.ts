@@ -86,8 +86,9 @@ export function readServerEnv(toml: string, name: string): Record<string, string
  * freshly rendered one. Per-server idempotency — only this name's tables change; the rest is kept.
  */
 export function upsertServer(toml: string, name: string, s: CodexServer): string {
+  const valid = assertWritableServer(name, s); // refuse an invalid shape before any byte moves
   const stripped = removeServers(toml, [name]).replace(/\s+$/, '');
-  const block = renderServer(name, s); // ends with '\n'
+  const block = renderServer(name, valid); // ends with '\n'
   return stripped.length === 0 ? block : stripped + '\n\n' + block;
 }
 
@@ -152,4 +153,59 @@ function unquoteKey(k: string): string {
 /** Collapse 3+ consecutive newlines to 2 so removals don't leave big gaps. */
 function normalizeBlankRuns(s: string): string {
   return s.replace(/\n{3,}/g, '\n\n');
+}
+
+// ── Strict adapter-owned container representation (ADR 282/286, Task 5) ───────────────────────────
+// The write path refuses an invalid intended shape BEFORE any byte moves: a strict reader following
+// an unvalidated writer turns a corrupted local write into a hard operational failure (ADR 286 §3).
+
+import { z } from 'zod';
+
+export const CodexServerSchema = z
+  .object({
+    command: z.string().min(1),
+    args: z.array(z.string()),
+    env: z.record(z.string(), z.string()),
+  })
+  .strict();
+
+/**
+ * Validate one intended `[mcp_servers.<name>]` representation, throwing with the file kind and
+ * schema issues (never values — env holds credentials) when it is not writable.
+ */
+export function assertWritableServer(name: string, s: unknown): CodexServer {
+  const parsed = CodexServerSchema.safeParse(s);
+  if (parsed.success) return parsed.data;
+  const detail = parsed.error.issues
+    .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+    .join('; ');
+  throw new Error(
+    `refusing to write an invalid Codex mcp_servers.${name} table — ${detail}. The prior TOML ` +
+      'bytes are left unchanged (ADR 286 §3).',
+  );
+}
+
+/**
+ * Read one server's complete table back as a {@link CodexServer}, or null when absent/unreadable.
+ * The read-back half {@link renderServer} writes — command, args, and the `.env` subtable — so a
+ * fragment observation can fingerprint exactly what a re-render would be compared against.
+ */
+export function readServer(toml: string, name: string): CodexServer | null {
+  let command: string | undefined;
+  let args: string[] | undefined;
+  for (const section of splitSections(toml)) {
+    if (sectionHeader(section) !== `mcp_servers.${name}`) continue;
+    for (const line of section.split('\n').slice(1)) {
+      const cm = /^\s*command\s*=\s*"((?:[^"\\]|\\.)*)"\s*$/.exec(line);
+      if (cm) command = cm[1]!.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      const am = /^\s*args\s*=\s*\[(.*)\]\s*$/.exec(line);
+      if (am) {
+        args = [...am[1]!.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) =>
+          m[1]!.replace(/\\"/g, '"').replace(/\\\\/g, '\\'),
+        );
+      }
+    }
+  }
+  if (command === undefined) return null;
+  return { command, args: args ?? [], env: readServerEnv(toml, name) };
 }

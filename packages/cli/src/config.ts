@@ -15,15 +15,20 @@ import {
   BindingSchema,
   bindingSeat,
   assertWritableBinding,
+  ClaimPolicySchema,
   PENDING_DIR,
   WORKSPACE_SPEC_FILE,
   WorkspaceSpecSchema,
   type Binding,
   type ClaimTarget,
+  type LocalLoad,
   type WorkspaceSpec,
 } from '@musterd/protocol';
+import { z } from 'zod';
 import { parseClaimTarget } from './claim-client.js';
 import { machineStatePath } from './machinePaths.js';
+import { nodeFs } from './onboard/reconcile/context.js';
+import { readLocalFile } from './onboard/reconcile/store.js';
 
 /**
  * A v0.3 claim credential resolved from env (ADR 075 Decision 1) — the P3 successor to {@link Identity}.
@@ -66,7 +71,9 @@ export function claimCredentialFromEnv(
       agentKey,
       target,
       ...(grant !== undefined ? { grant } : {}),
-      surface: env['MUSTERD_SURFACE'] ?? 'cli',
+      // A CLI act is intrinsically `cli` (ADR 286) — env no longer chooses the Surface here. The
+      // per-command `--surface` flag remains the deliberate manual override where one exists.
+      surface: 'cli',
     },
   };
 }
@@ -93,7 +100,8 @@ export interface BindingRef {
   team: string;
   /** The bound seat name (v0.3: the fixed seat of a `seat`-policy binding; role pools have none). */
   seat: string;
-  surface: string;
+  /** Pre-ADR-281 registry rows recorded the declared surface; v2 identity has none. Read-only relic. */
+  surface?: string;
 }
 
 /**
@@ -117,37 +125,78 @@ export function findBinding(
   }
 }
 
-/** Paths already warned about, so a corrupt binding announces itself once rather than on every tool
- *  boundary (this read rides the PostToolUse hook). */
-const warnedCorrupt = new Set<string>();
+/**
+ * Recognize the version-1 identity shape (pre-ADR-281): otherwise valid, carries `surface`, has no
+ * `version`. The old schemas were non-strict, so recognition parses loosely; a v1 file whose VALUES
+ * are malformed is `invalid`, never `legacy` (ADR 282 §1). Recognition only — no dual read: nothing
+ * outside a confirmed `musterd harness configure` may consume the value.
+ */
+const LegacyIdentitySchema = z.object({
+  server: z.string(),
+  team: z.string(),
+  surface: z.string().min(1),
+  claim: ClaimPolicySchema.optional(),
+});
+
+function isLegacyIdentity(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || 'version' in value) return false;
+  return LegacyIdentitySchema.safeParse(value).success;
+}
+
+/** Classify `<dir>/.musterd/workspace.json` (ADR 282 `LocalLoad`): missing | legacy | valid | invalid. */
+export function loadWorkspace(dir: string): LocalLoad<WorkspaceSpec> {
+  return readLocalFile(nodeFs, join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE), WorkspaceSpecSchema, {
+    legacy: isLegacyIdentity,
+  });
+}
+
+/** Classify `<dir>/.musterd/binding.json` (ADR 282 `LocalLoad`): missing | legacy | valid | invalid. */
+export function loadBinding(dir: string): LocalLoad<Binding> {
+  return readLocalFile(nodeFs, join(dir, BINDING_DIR, BINDING_FILE), BindingSchema, {
+    legacy: isLegacyIdentity,
+  });
+}
+
+/** The thrown repair diagnostic for a `legacy`/`invalid` local identity file — kind and schema
+ *  issues only, never file contents or secrets (ADR 282). */
+function identityRepairError(kind: 'legacy' | 'invalid', path: string, fileKind: string): Error {
+  if (kind === 'legacy') {
+    return new Error(
+      `${path} is a version-1 ${fileKind} (pre-ADR-281, it still carries "surface") — this ` +
+        'workspace has no usable identity until it is converted. Run `musterd harness configure` ' +
+        'here to confirm the desired harness set and convert it.',
+    );
+  }
+  return new Error(
+    `${path} exists but is not a readable ${fileKind} — this workspace has no usable identity ` +
+      'until the file is repaired or re-provisioned (`musterd init`, or `musterd harness ' +
+      'configure` for an existing worktree).',
+  );
+}
 
 /**
  * `null` here has always meant two very different things — "no binding" and "a binding I could not
  * parse" — and the second one is why #508 was silent for a full session: the seat kept working over
- * MCP while every CLI identity path quietly resolved to nothing. A file that EXISTS but does not
- * parse is a broken workspace, not an unbound one, and it says so. Once per path, on stderr, so it
- * cannot flood a hook or corrupt an MCP stdio channel.
+ * MCP while every CLI identity path quietly resolved to nothing. Post-ADR-282 the compat wrapper
+ * keeps `missing` → null but THROWS the repair diagnostic for `legacy` and `invalid`: a broken or
+ * pre-281 workspace fails loudly with its repair, instead of behaving as if it were unbound.
  */
 function readBinding(path: string): Binding | null {
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return null; // genuinely absent — the ordinary "not a musterd workspace" answer
+  const got = readLocalFile(nodeFs, path, BindingSchema, { legacy: isLegacyIdentity });
+  if (got.kind === 'missing') return null;
+  if (got.kind === 'valid') return got.value;
+  const err = identityRepairError(got.kind, path, 'workspace binding');
+  if (got.kind === 'invalid') {
+    err.message += ` (${got.issues.map((i) => `${i.path}: ${i.message}`).join('; ')})`;
   }
-  try {
-    return BindingSchema.parse(JSON.parse(raw));
-  } catch (err) {
-    if (!warnedCorrupt.has(path)) {
-      warnedCorrupt.add(path);
-      const detail = err instanceof Error ? err.message.replace(/\s+/g, ' ').slice(0, 300) : '';
-      console.error(
-        `[musterd] ${path} exists but does not parse — this workspace has no usable identity until ` +
-          `it is repaired, and every musterd command here will behave as if it were unbound. ${detail}`,
-      );
-    }
-    return null;
-  }
+  throw err;
+}
+
+/** Non-throwing classification of the exact binding file — for writers that replace rather than
+ *  read (the {@link saveBinding} merge-guard preserves fields only from a VALID on-disk file). */
+function classifyBindingFile(path: string): Binding | null {
+  const got = readLocalFile(nodeFs, path, BindingSchema, { legacy: isLegacyIdentity });
+  return got.kind === 'valid' ? got.value : null;
 }
 
 /** A fully-specified identity from `MUSTERD_*` env, aligned with the MCP adapter's binding env. */
@@ -204,7 +253,7 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
   const bindingDir = join(dir, BINDING_DIR);
   mkdirSync(bindingDir, { recursive: true });
   const p = join(bindingDir, BINDING_FILE);
-  const onDisk = readBinding(p);
+  const onDisk = classifyBindingFile(p);
   const dropObserved = opts?.drop?.model_observed === true;
   let merged: Binding = {
     ...binding,
@@ -240,15 +289,15 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
  * Persist the **secret-free** committable launch spec to `<dir>/.musterd/workspace.json` (ADR: the
  * committed launch spec). Unlike {@link saveBinding} this holds NO secret — so it is written with
  * normal perms (no 0600) and is deliberately NOT gitignored, so `git add`ing it makes a fresh
- * clone/worktree self-wireable via `musterd wire`. Callers pass only the non-secret fields; if a full
- * Binding is handed in, `WorkspaceSpecSchema.parse` drops `agent_key`/`grant` so a secret can never
- * leak into the committed file.
+ * clone/worktree self-wireable via `musterd wire`. Strict v2 (ADR 281): callers construct the exact
+ * secret-free object — the schema REJECTS a stray `agent_key`/`grant`/runtime field instead of
+ * stripping it, so a Binding can no longer be laundered into the committed file by parsing.
  */
 export function saveWorkspaceSpec(dir: string, spec: WorkspaceSpec): string {
   const bindingDir = join(dir, BINDING_DIR);
   mkdirSync(bindingDir, { recursive: true });
   const p = join(bindingDir, WORKSPACE_SPEC_FILE);
-  // Parse-then-write so any stray secret field on the input object is stripped, never persisted.
+  // Parse-then-write: a malformed or secret-carrying object throws here, before any byte moves.
   const safe = WorkspaceSpecSchema.parse(spec);
   writeFileSync(p, JSON.stringify(safe, null, 2) + '\n', 'utf8');
   return p;
@@ -257,18 +306,22 @@ export function saveWorkspaceSpec(dir: string, spec: WorkspaceSpec): string {
 /**
  * Locate + parse the committed workspace spec — the same `.musterd/workspace.json` the MCP adapter
  * falls back to, so the two surfaces can't drift. Walks up from `startDir` like {@link findBinding};
- * returns null if absent or unparseable.
+ * `missing` → null, but a `legacy` or `invalid` file THROWS its repair diagnostic (ADR 282) — a
+ * pre-281 spec must direct the human to `musterd harness configure`, not read as unbound.
  */
 export function findWorkspaceSpec(startDir: string = process.cwd()): WorkspaceSpec | null {
   let dir = startDir;
   for (;;) {
     const p = join(dir, BINDING_DIR, WORKSPACE_SPEC_FILE);
     if (existsSync(p)) {
-      try {
-        return WorkspaceSpecSchema.parse(JSON.parse(readFileSync(p, 'utf8')));
-      } catch {
-        return null;
+      const got = readLocalFile(nodeFs, p, WorkspaceSpecSchema, { legacy: isLegacyIdentity });
+      if (got.kind === 'missing') return null;
+      if (got.kind === 'valid') return got.value;
+      const err = identityRepairError(got.kind, p, 'workspace spec');
+      if (got.kind === 'invalid') {
+        err.message += ` (${got.issues.map((i) => `${i.path}: ${i.message}`).join('; ')})`;
       }
+      throw err;
     }
     const parent = dirname(dir);
     if (parent === dir) return null;
@@ -314,7 +367,6 @@ function recordBinding(dir: string, binding: Binding): void {
     config.bindings[resolve(dir)] = {
       team: binding.team,
       seat,
-      surface: binding.surface,
     };
     saveConfig(config);
   } catch {

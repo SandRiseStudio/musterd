@@ -126,10 +126,10 @@ async function holdSeatLive(name: string, grant: string): Promise<{ close: () =>
     // this hold and drop the presence.
     onOccupied: (seat) => {
       saveBinding(process.cwd(), {
+        version: 2,
         server: serverUrl,
         team: 'dawn',
         agent_key: agentKey,
-        surface: 'cli',
         claim: { mode: 'seat', name: seat.name },
         grant,
       });
@@ -313,10 +313,10 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       }
       // Bind this folder to Ada, then a bare `claim` should just confirm — not re-run the handshake.
       saveBinding(cwd, {
+        version: 2,
         server: serverUrl,
         team: 'dawn',
         agent_key: agentKey,
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ada' },
         grant: g,
       });
@@ -336,10 +336,10 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     // it never redeclares the model — so the rewrite must carry it through. (Regression: it didn't, and
     // the seat reverted to `unknown` on the next adapter boot.)
     saveBinding(cwd, {
+      version: 2,
       server: serverUrl,
       team: 'dawn',
       agent_key: agentKey,
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ada' },
       model: 'claude-fable-5',
     });
@@ -361,10 +361,10 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     await declareSeat('Polly');
     const g = await grant('Polly');
     saveBinding(cwd, {
+      version: 2,
       server: serverUrl,
       team: 'dawn',
       agent_key: agentKey,
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Polly' },
       grant: g,
     });

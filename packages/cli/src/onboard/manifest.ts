@@ -1,7 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BINDING_DIR } from '@musterd/protocol';
+import {
+  BINDING_DIR,
+  WorktreeProvisioningSchema,
+  type LocalLoad,
+  type WorktreeProvisioning,
+} from '@musterd/protocol';
 import { z } from 'zod';
+import { nodeFs, type FsSeam } from './reconcile/context.js';
+import { publishLocalFile, readLocalFile } from './reconcile/store.js';
 
 /**
  * The provisioning manifest (ADR 030) — musterd's record of what it provisioned into *this* folder's
@@ -119,4 +126,34 @@ export function writeProvisionManifest(
   const { profile, ...rest } = manifest;
   writeFileSync(path, JSON.stringify({ role: profile, profile, ...rest }, null, 2) + '\n', 'utf8');
   return path;
+}
+
+/**
+ * Classify `.musterd/provisioned.json` as the strict version-2 {@link WorktreeProvisioning}
+ * (ADR 281). A well-formed version-1 {@link ProvisionManifestSchema} manifest is `legacy` — only a
+ * confirmed `musterd harness configure` converts it, retaining the v1 `role` value (as v2 `profile`) and nothing else: the v1
+ * name-only records cannot prove current contents, so they never become v2 ownership evidence.
+ */
+export function loadProvisioning(
+  dir: string,
+  fs: FsSeam = nodeFs,
+): LocalLoad<WorktreeProvisioning> {
+  return readLocalFile(fs, manifestPath(dir), WorktreeProvisioningSchema, {
+    legacy: (value) => ProvisionManifestSchema.safeParse(value).success,
+  });
+}
+
+/** Validate + atomically publish the strict v2 provisioning manifest (ADR 282 writer boundary). */
+export function saveProvisioning(
+  dir: string,
+  provisioning: WorktreeProvisioning,
+  fs: FsSeam = nodeFs,
+): void {
+  publishLocalFile(
+    fs,
+    manifestPath(dir),
+    WorktreeProvisioningSchema,
+    provisioning,
+    'worktree-provisioning',
+  );
 }

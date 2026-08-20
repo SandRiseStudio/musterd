@@ -86,6 +86,7 @@ export function nativeMcpConfig(opts: {
     ...(opts.binding.agent_key !== undefined ? { agent_key: opts.binding.agent_key } : {}),
     ...(opts.binding.grant !== undefined ? { grant: opts.binding.grant } : {}),
     surface: 'musterd',
+    markerGeneration: 'native',
     provenance: 'wake',
     wakeLease: opts.leaseId,
     workspace: opts.workspace,

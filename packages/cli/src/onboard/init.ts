@@ -23,12 +23,14 @@ import { sym } from '../render/ui.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { CANONICAL_SKILL_PATH, establishedHarnesses, writeGuidance } from './guidance.js';
 import type { Harness } from './harness.js';
-import { HARNESSES } from './harnesses/index.js';
-import { writeProvisionManifest } from './manifest.js';
+import { HARNESSES, harnessAdapters } from './harnesses/index.js';
+import { loadProvisioning, saveProvisioning } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { installSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
 import { GENERALIST, isBuiltin, listProfileNames, loadProfile, type Profile } from './profile.js';
+import { defaultHarnessContext } from './reconcile/context.js';
+import { reconcileHarnesses } from './reconcile/engine.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -585,35 +587,43 @@ export async function runInit(): Promise<number> {
   }
 
   const installed = detected.filter((x) => x.d.installed);
-  if (installed.length === 0) {
-    p.note(
-      'Found nowhere to run an agent (looked for Claude Code, Cursor, and Codex).\n' +
-        `Add an agent manually with:\n  ${pc.yellow(`musterd team add <name> --kind agent`)}`,
-      'Nothing to configure',
-    );
-    p.outro('Team is ready — agents can join over MCP or the WS API.');
-    return 0;
-  }
 
-  const harness = guard(
-    await p.select({
-      message: 'Where does this agent run?',
-      options: installed.map(({ h, d }) => ({
-        value: h.id,
-        label: h.label,
-        hint: d.configured
-          ? 'musterd already set up here — will be repointed'
-          : 'not set up yet — will be configured',
-      })),
+  // The ADR 281 multi-select: any SUBSET of the registry (Claude Code, Cursor, Codex, the native
+  // musterd host), chosen once per worktree and machine. Available harnesses start selected;
+  // unavailable ones stay selectable as `pending` (the selection survives the install); empty is
+  // valid (the seat stays reachable through the native host or a later configure).
+  const adapters = harnessAdapters();
+  const installedIds = new Set(installed.map((x) => x.h.id));
+  const picked = guard(
+    await p.multiselect({
+      message: 'Which harnesses should launch this agent? (space toggles, enter confirms)',
+      options: adapters.map((a) => {
+        const legacyHarness = HARNESSES.find((x) => x.id === a.id);
+        return {
+          value: a.id,
+          label: a.id === 'musterd' ? 'musterd (native host)' : (legacyHarness?.label ?? a.id),
+          ...(a.id !== 'musterd' && !installedIds.has(a.id)
+            ? { hint: 'pending — not installed here' }
+            : {}),
+        };
+      }),
+      initialValues: adapters
+        .filter((a) => a.id === 'musterd' || installedIds.has(a.id))
+        .map((a) => a.id),
+      required: false,
     }),
-  );
-  const chosenEntry = installed.find((x) => x.h.id === harness)!;
-  const chosen = chosenEntry.h as Harness;
-  if (chosenEntry.d.configured) {
+  ) as string[];
+  const desired = adapters.map((a) => a.id).filter((id) => picked.includes(id));
+
+  // The primary EXTERNAL harness drives the human-facing bits a set can't (the manual-setup note,
+  // the role-tool provisioning target, the activation hint). Fine to be absent: native-only works.
+  const chosenEntry = installed.find((x) => desired.includes(x.h.id));
+  const chosen = chosenEntry?.h as Harness | undefined;
+  if (chosenEntry?.d.configured) {
     // Re-running over an existing binding repoints it at the new member; the old one isn't deleted.
     p.note(
-      `${pc.bold(chosen.label)} already points at a musterd member here.\n` +
-        `Setting up next mints a ${pc.bold('new')} member and repoints ${chosen.label} at it — so give it a\n` +
+      `${pc.bold(chosenEntry.h.label)} already points at a musterd member here.\n` +
+        `Setting up next mints a ${pc.bold('new')} member and repoints ${chosenEntry.h.label} at it — so give it a\n` +
         `name not already on the team (a repeat name is refused). The previous member stays on the roster.`,
       'Heads up',
     );
@@ -687,16 +697,16 @@ export async function runInit(): Promise<number> {
   const driver = config.current ? config.identities[config.current]?.name?.trim() : undefined;
 
   const binding = {
+    version: 2 as const,
     server,
     team,
     agent_key: agentKey,
-    surface: chosen.surface,
     claim: { mode: 'seat' as const, name },
     ...(model !== undefined ? { model } : {}),
     ...(autojoin ? { autojoin: true } : {}),
     ...(driver ? { driver } : {}),
   };
-  const entry = buildEntry(binding);
+  const entry = chosen ? buildEntry(binding) : undefined;
 
   // ADR 018: write the workspace binding — the single file both the CLI and the MCP adapter read,
   // so an agent that shells out to `musterd` resolves to *this* member (not the global config's
@@ -714,9 +724,9 @@ export async function runInit(): Promise<number> {
   // stays out of it; the machine supplies it.
   try {
     saveWorkspaceSpec(process.cwd(), {
+      version: 2,
       server,
       team,
-      surface: chosen.surface,
       claim: { mode: 'seat', name },
     });
     p.log.info(
@@ -728,40 +738,68 @@ export async function runInit(): Promise<number> {
     p.log.warn(`Couldn't write .musterd/workspace.json (${(err as Error).message}).`);
   }
 
+  // Save the strict v2 selection BEFORE reconciliation (ADR 282): a stop right after this leaves
+  // honest intent that the next `musterd wire` resumes. Reconciliation never rewrites desire.
+  try {
+    saveProvisioning(process.cwd(), {
+      version: 2,
+      // The provisioned PROFILE (workspace configuration), never the roster label — the two are
+      // independent since ADR 272 inc 2.
+      profile: template?.profile ?? '',
+      desired,
+      contributions: {},
+      provisionedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    p.log.warn(`Couldn't write .musterd/provisioned.json (${(err as Error).message}).`);
+  }
+
+  const selectionLabel = desired.length > 0 ? desired.join(', ') : 'the native host only';
   const write = guard(
     await p.confirm({
-      message: `Connect musterd to ${pc.bold(chosen.label)} now? ${pc.dim('(adds the musterd tools so the agent can reach the team)')}`,
+      message: `Wire ${pc.bold(selectionLabel)} now? ${pc.dim('(adds the musterd tools so the agent can reach the team)')}`,
     }),
   );
   if (!write) {
-    p.note(printManual(chosen, entry), 'Manual setup');
-    p.outro('Configure that when ready, then `musterd inbox --watch`.');
+    if (chosen && entry) p.note(printManual(chosen, entry), 'Manual setup');
+    p.outro(
+      'Configure when ready with `musterd wire` (headless, uses this saved selection), then `musterd inbox --watch`.',
+    );
     return 0;
   }
 
   const sc = p.spinner();
-  sc.start(`Configuring ${chosen.label}`);
-  let activation: string;
-  try {
-    const result = await chosen.configure(entry, binding);
-    activation = result.activation;
-    sc.stop(`${chosen.label} configured ${pc.dim(`(${result.target})`)}`);
-    if (result.scope) p.log.info(pc.dim(result.scope));
-    // Anything configure deliberately did NOT do (ADR 168) — e.g. a hook left alone because a newer
-    // musterd wrote it. Loud on purpose: a silent refusal reads exactly like a silent failure.
-    for (const w of result.warnings ?? []) p.log.warn(pc.yellow(w));
-    if (result.secretPath) await warnSecretConfig(result.secretPath);
-  } catch (err) {
-    sc.stop(pc.red(`Could not configure ${chosen.label}: ${(err as Error).message}`));
-    p.note(printManual(chosen, entry), 'Configure it manually');
+  sc.start(`Wiring ${selectionLabel}`);
+  const reconcileCtx = defaultHarnessContext(process.cwd(), process.env, { team });
+  const report = await reconcileHarnesses(reconcileCtx, desired, { legacyRepair: false });
+  sc.stop(
+    report.ok
+      ? `Harness set wired ${pc.dim(`(${selectionLabel})`)}`
+      : pc.yellow('Wired with warnings — `musterd harness status` has the detail'),
+  );
+  for (const r of report.results) {
+    if (
+      r.result !== 'applied' &&
+      r.result !== 'unchanged' &&
+      r.result !== 'satisfied-unmanaged' &&
+      r.result !== 'pending'
+    ) {
+      p.log.warn(pc.yellow(`${r.harness}: ${r.result}${r.detail ? ` — ${r.detail}` : ''}`));
+    }
+  }
+  if (!report.ok) {
+    if (chosen && entry) p.note(printManual(chosen, entry), 'Configure it manually');
     return 1;
   }
+  const activation = activationFor(desired);
 
   // 5a) Provision the chosen profile's tools (ADR 026 Universe-2; additive/reversible/local, ADR 027)
-  // The profile was picked in §4; now that the musterd server is wired, provision its MCP servers
-  // into this harness. `generalist`/no profile provisions nothing extra — only the musterd server +
-  // the standard playbook (ADR 028). This is Universe-2 only — nothing here touches the roster.
-  await provisionProfileTools(chosen, template);
+  // The profile was picked in §4; now that the musterd set is wired, provision its MCP servers into
+  // the primary external harness. `generalist`/no profile provisions nothing extra — only the
+  // musterd server + the standard playbook (ADR 028). Profile MCP-server tools ride this legacy
+  // provision path until they are fragment-modeled; the musterd entry/hooks/permissions/guidance
+  // are the reconciler's. This is Universe-2 only — nothing here touches the roster.
+  if (chosen) await provisionProfileTools(chosen, template);
 
   // The primer's charter is the ROLE layer's (ADR 272 inc 2): when the label names a role in the
   // team's durable library, its charter rides into the primer. A profile's own charter field is
@@ -799,40 +837,10 @@ export async function runInit(): Promise<number> {
     }
   }
 
-  // 5c) Write the on-demand skill + slash commands (ADR 085) -----------------
-  // The primer is the loop kernel; the depth (seat claiming, handoff-with-branch, recovery) lives in a
-  // skill the model opens on demand. Write the harness-neutral canonical skill plus the chosen harness's
-  // native skill/commands, and record them in the manifest so uninstall removes exactly these.
-  // Best-effort — never fails init.
-  try {
-    const g = writeGuidance(process.cwd(), [chosen], { team });
-    if (g.files.length) {
-      p.log.success(
-        `Wrote the musterd skill${chosen.guidance?.commandsDir ? ' + slash commands' : ''} ${pc.dim(`(${g.files.length} file${g.files.length === 1 ? '' : 's'})`)} — ${pc.cyan(name)} can open the playbooks on demand.`,
-      );
-      try {
-        writeProvisionManifest(process.cwd(), {
-          profile: template?.profile ?? '',
-          harness: chosen.id,
-          mcpServers: [],
-          guidance: { files: g.files, contentVersion: g.contentVersion },
-        });
-      } catch {
-        /* manifest is advisory for guidance — the files themselves are stamp-gated for uninstall */
-      }
-      // Like the token config, offer to keep these per-workspace files out of git (ADR 085).
-      await offerGitignoreGuidance(g.files);
-    }
-    if (g.skipped.length) {
-      p.log.info(
-        pc.dim(
-          `Kept your own file(s): ${g.skipped.join(', ')} (re-run with --force to overwrite).`,
-        ),
-      );
-    }
-  } catch (err) {
-    p.log.warn(`Couldn't write the musterd skill (${(err as Error).message}).`);
-  }
+  // 5c) The on-demand skill + slash commands (ADR 085) now land as MANAGED FRAGMENTS: the
+  // reconciliation above wrote each selected harness's guidance fragment plus the canonical
+  // musterd-core skill, fingerprinted and ledger-owned — so uninstall releases exactly these
+  // through the same engine, and nothing here re-writes the v2 manifest with a v1 shape.
 
   // 6) Wait for the agent to actually join ----------------------------------
   p.log.info(`${pc.bold('Next:')} ${activation}.`);
@@ -846,14 +854,15 @@ export async function runInit(): Promise<number> {
   const joined = await waitForPresence(http, team, name, 180);
   if (joined) {
     sw.stop(
-      `${pc.green('●')} ${pc.cyan(name)} is online via ${chosen.surface} ${pc.green('— it worked!')}`,
+      `${pc.green('●')} ${pc.cyan(name)} is online via ${desired[0] ?? 'musterd'} ${pc.green('— it worked!')}`,
     );
   } else {
     sw.stop(pc.yellow(`Still waiting on ${name}.`));
+    const launcher = chosen?.label ?? 'a selected harness';
     p.note(
       (autojoin
-        ? `When you start ${chosen.label}, ${name} joins automatically.\n`
-        : `Start ${chosen.label} and ask ${name} to join the team.\n`) +
+        ? `When you start ${launcher}, ${name} joins automatically.\n`
+        : `Start ${launcher} and ask ${name} to join the team.\n`) +
         `Check any time with ${pc.yellow('musterd status')}.`,
       'No rush',
     );
@@ -867,6 +876,21 @@ export async function runInit(): Promise<number> {
   );
   p.outro(pc.yellow('Welcome to your team.'));
   return 0;
+}
+
+/** A one-line activation hint for the selected harness set — what to launch to bring the seat up. */
+function activationFor(desired: readonly string[]): string {
+  const hints: Record<string, string> = {
+    'claude-code':
+      'in a terminal here, run `claude` (or open this folder in the Claude Code extension)',
+    cursor: 'open this folder in Cursor (or reload its window)',
+    codex: 'open this folder in Codex (it must be a trusted project)',
+    musterd: 'the native musterd host launches it on demand (`musterd host`)',
+  };
+  const firstExternal = desired.find((id) => id !== 'musterd');
+  if (firstExternal && hints[firstExternal]) return hints[firstExternal]!;
+  if (desired.includes('musterd')) return hints['musterd']!;
+  return 'select a harness with `musterd harness configure`, then `musterd wire`';
 }
 
 async function createTeam(
@@ -1047,13 +1071,20 @@ async function provisionProfileTools(
         (permCount ? ` + ${permCount} permission${permCount === 1 ? '' : 's'}` : '') +
         ` ${pc.dim(`(${result.target})`)}`,
     );
+    // Recorded for exact removal in the v2 manifest's contributions — never the v1 shape, which
+    // would clobber the strict v2 file init just saved (ADR 281). Role MCP servers are not yet
+    // fragment-modeled, so they ride a plainly-named pseudo-harness key uninstall can consult.
     try {
-      writeProvisionManifest(process.cwd(), {
-        profile: profile.profile,
-        harness: harness.id,
-        mcpServers: result.servers,
-        permissions: result.permissions,
-      });
+      const current = loadProvisioning(process.cwd());
+      if (current.kind === 'valid' && result.servers.length > 0) {
+        saveProvisioning(process.cwd(), {
+          ...current.value,
+          contributions: {
+            ...current.value.contributions,
+            'role-tools': result.servers.map((s) => `role-server ${harness.id} ${s}`),
+          },
+        });
+      }
     } catch (err) {
       p.log.warn(`Couldn't record the provisioning manifest (${(err as Error).message}).`);
     }
@@ -1183,31 +1214,6 @@ export function missingGitignoreEntries(gitignoreBody: string, rels: string[]): 
  * `.gitignore` is present and doesn't already cover them, prompts once (default yes), and appends the
  * missing lines surgically under a comment. `relFiles` are relative to cwd. Best-effort — never throws.
  */
-async function offerGitignoreGuidance(relFiles: string[]): Promise<void> {
-  try {
-    const gitignore = join(process.cwd(), '.gitignore');
-    if (!existsSync(gitignore)) return; // warnSecretConfig already nudges when there's no .gitignore
-    const body = readFileSync(gitignore, 'utf8');
-    const missing = missingGitignoreEntries(body, relFiles);
-    if (missing.length === 0) return;
-    const n = missing.length;
-    const add = guard(
-      await p.confirm({
-        message: `Add musterd's provisioned guidance (skill + slash commands, ${n} file${n === 1 ? '' : 's'}) to .gitignore? They're regenerated per-workspace, so committing them just churns the repo.`,
-        initialValue: true,
-      }),
-    );
-    if (!add) return;
-    const prefix = body.length && !body.endsWith('\n') ? '\n' : '';
-    appendFileSync(
-      gitignore,
-      `${prefix}\n# musterd — provisioned guidance, regenerated by \`musterd init\` (per-workspace, personal)\n${missing.join('\n')}\n`,
-    );
-    p.log.success(`Added ${n} musterd guidance path${n === 1 ? '' : 's'} to .gitignore.`);
-  } catch {
-    /* advisory only — never fail init over a .gitignore nicety */
-  }
-}
 
 function printManual(
   harness: Harness,

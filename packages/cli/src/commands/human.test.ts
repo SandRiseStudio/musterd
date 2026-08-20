@@ -122,10 +122,10 @@ describe('human command', () => {
     writeFileSync(
       join(home, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: process.env['MUSTERD_SERVER'],
         team: 'dusk',
         agent_key: 'mscr_someone_elses',
-        surface: 'cli',
         claim: { mode: 'seat', name: 'ada' },
       }),
     );
@@ -146,10 +146,10 @@ describe('human command', () => {
     writeFileSync(
       join(home, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: process.env['MUSTERD_SERVER'],
         team: 'dusk',
         agent_key: 'mscr_ancestor',
-        surface: 'cli',
         claim: { mode: 'seat', name: 'ada' },
       }),
     );
@@ -191,10 +191,10 @@ describe('human command', () => {
       writeFileSync(
         join(elsewhere, '.musterd', 'binding.json'),
         JSON.stringify({
+          version: 2,
           server: process.env['MUSTERD_SERVER'],
           team: 'dawn',
           agent_key: 'mscr_held_here',
-          surface: 'cli',
           claim: { mode: 'seat', name: 'lin' },
         }),
       );
@@ -217,10 +217,10 @@ describe('human command', () => {
       writeFileSync(
         join(dead, '.musterd', 'binding.json'),
         JSON.stringify({
+          version: 2,
           server: process.env['MUSTERD_SERVER'],
           team: 'dawn',
           agent_key: agentKey,
-          surface: 'cli',
           claim: { mode: 'seat', name: 'lin' },
         }),
       );

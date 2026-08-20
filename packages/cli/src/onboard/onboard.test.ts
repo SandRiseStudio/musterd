@@ -10,10 +10,10 @@ import { buildEntry, buildMcpEnv } from './mcpEntry.js';
 import { classifyPrimerTarget, removePrimer, renderPrimer, upsertPrimer } from './primer.js';
 
 const binding = {
+  version: 2 as const,
   server: 'http://localhost:4849',
   team: 'dawn',
   agent_key: 'mskey_secret',
-  surface: 'cursor' as const,
   claim: { mode: 'seat' as const, name: 'Ada' },
 };
 

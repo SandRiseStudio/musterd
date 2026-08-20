@@ -1,7 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type ClaimPolicy, type Surface } from '@musterd/protocol';
+import { type ClaimPolicy } from '@musterd/protocol';
 import { primaryCheckoutFor } from './entryGuard.js';
 
 /** A stdio MCP server entry: how a harness should launch the musterd adapter. */
@@ -18,7 +18,6 @@ export interface AgentBinding {
    *  Optional: a keyless folder (a chat/human folder, or a `wire`d clone whose machine has no key
    *  yet) omits it — the tools are still registered; claiming then needs a key or admin approval. */
   agent_key?: string;
-  surface: Surface;
   /** The seat/role this folder claims on launch. Persisted to `.musterd/binding.json` (the source of
    *  truth the adapter reads) — deliberately NOT emitted as `MUSTERD_CLAIM`; see {@link buildMcpEnv}. */
   claim: ClaimPolicy;
@@ -67,6 +66,30 @@ export interface AgentBinding {
  * `MUSTERD_CLAIM`'s removal precisely because no single place recorded the rule. */
 export function buildMcpEnv(_b: AgentBinding): Record<string, string> {
   return {};
+}
+
+/**
+ * The env an ADR 286 fragment-managed MCP registration carries: EXACTLY the launch Surface marker.
+ * Not per-seat state (every sibling worktree launching through this harness gets the same value),
+ * so it does not violate the ADR 165 shared-slot rule above — it is the launcher declaring what it
+ * IS, which no stored identity file may do any more (ADR 281). The retired `MUSTERD_SURFACE` and
+ * the test-only `MUSTERD_TEST_SURFACE` are never written by any adapter.
+ */
+export const LAUNCH_SURFACE_ENV = 'MUSTERD_LAUNCH_SURFACE';
+export const RETIRED_SURFACE_ENV = 'MUSTERD_SURFACE';
+export const TEST_SURFACE_ENV = 'MUSTERD_TEST_SURFACE';
+
+export function launchEntryEnv(surface: string): Record<string, string> {
+  return { [LAUNCH_SURFACE_ENV]: surface };
+}
+
+/** Classify a registered entry's env by its Surface marker generation (ADR 286 §1). */
+export function markerGenerationOfEnv(
+  env: Record<string, string | undefined> | undefined,
+): 'launch' | 'legacy' | 'none' {
+  if (env?.[RETIRED_SURFACE_ENV]) return 'legacy';
+  if (env?.[LAUNCH_SURFACE_ENV]) return 'launch';
+  return 'none';
 }
 
 /**

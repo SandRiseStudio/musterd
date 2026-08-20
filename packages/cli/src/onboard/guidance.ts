@@ -15,7 +15,9 @@ import {
   renderSkillFrontmatter,
   renderSlashCommand,
 } from '@musterd/protocol';
-import type { Harness } from './harness.js';
+import type { Harness, HarnessGuidance } from './harness.js';
+import type { FsSeam } from './reconcile/context.js';
+import { canonicalFingerprint, type ObservedFragment } from './reconcile/fragments.js';
 
 /**
  * File I/O for the on-demand **skill** + slash-command prompts (ADR 085 /
@@ -253,4 +255,83 @@ export function removeGuidance(dir: string, harnesses: Harness[]): { removed: st
     }
   }
   return { removed };
+}
+
+// ── Fragment-contract helpers (ADR 281/282, Task 5) ──────────────────────────────────────────────
+// The guidance surface as a MANAGED FRAGMENT: one deterministic file map (relPath → stamped text)
+// per harness, observed and applied through the reconciler's injected FsSeam. The legacy
+// writeGuidance/removeGuidance above keep serving the pre-282 lifecycle path until it is retired.
+
+/** The per-harness guidance file map, rendered + stamped, keyed by path relative to the worktree. */
+export function guidanceFileMap(g: HarnessGuidance, team: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  out[g.skillPath] = stamped(skillFile(g.frontmatter, team));
+  if (g.sessionsSkillPath) {
+    out[g.sessionsSkillPath] = stamped(
+      `${renderLabelSessionsFrontmatter()}\n\n${renderLabelSessionsSkill()}`,
+    );
+  }
+  if (g.selfLabelSkillPath) {
+    out[g.selfLabelSkillPath] = stamped(
+      `${renderSelfLabelSessionFrontmatter()}\n\n${renderSelfLabelSessionSkill()}`,
+    );
+  }
+  if (g.nudgeSkillPath) {
+    out[g.nudgeSkillPath] = stamped(
+      `${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`,
+    );
+  }
+  if (g.commandsDir) {
+    for (const name of SLASH_COMMANDS) {
+      out[join(g.commandsDir, `musterd-${name}.md`)] = stamped(renderSlashCommand(name));
+    }
+  }
+  return out;
+}
+
+/** The harness-neutral canonical guidance (the musterd-core fragment's file map). */
+export function canonicalGuidanceMap(team: string): Record<string, string> {
+  return { [CANONICAL_SKILL_PATH]: stamped(skillFile('canonical', team)) };
+}
+
+/** Observe a file-map fragment over the EXPECTED key set: all absent ⇒ absent; otherwise the
+ *  fingerprint of exactly what is on disk (missing files as null). Fingerprinting the actual map —
+ *  never the intent — is what lets a payload-less RELEASE intent (rebuilt from ledger evidence)
+ *  observe the same fingerprint the write recorded: equal state hashes equal, whoever asks. */
+export function observeFileMap(
+  fs: FsSeam,
+  root: string,
+  files: Record<string, string>,
+): ObservedFragment {
+  const actual: Record<string, string | null> = {};
+  let anyPresent = false;
+  for (const rel of Object.keys(files)) {
+    const text = fs.readFile(join(root, rel));
+    actual[rel] = text;
+    if (text !== null) anyPresent = true;
+  }
+  if (!anyPresent) return { state: 'absent' };
+  const allEqual = Object.entries(files).every(([rel, text]) => actual[rel] === text);
+  return {
+    state: 'present',
+    fingerprint: allEqual ? canonicalFingerprint(files) : canonicalFingerprint(actual),
+  };
+}
+
+/** Apply a file-map fragment mutation: write every rendered file, or remove every managed path. */
+export function applyFileMap(
+  fs: FsSeam,
+  root: string,
+  files: Record<string, string>,
+  kind: 'write' | 'remove',
+): void {
+  for (const [rel, text] of Object.entries(files)) {
+    const abs = join(root, rel);
+    if (kind === 'remove') {
+      fs.rm(abs);
+    } else {
+      fs.mkdirp(dirname(abs));
+      fs.writeFile(abs, text, 0o644);
+    }
+  }
 }

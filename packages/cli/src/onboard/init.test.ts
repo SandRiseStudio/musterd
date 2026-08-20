@@ -15,7 +15,38 @@ import {
 const h = vi.hoisted(() => {
   const confirmQueue: unknown[] = [];
   const selectQueue: unknown[] = [];
+  const multiQueue: unknown[] = [];
   const textQueue: unknown[] = [];
+  // In-memory physical state for the fake fragment adapters (ADR 282): id → fingerprint or null.
+  const fragState: Record<string, string | null> = {};
+  const adapterFor = (id: string) => ({
+    id,
+    surface: 'other',
+    adapterVersion: 1,
+    availability: async () => ({ available: true }),
+    target: async (ctx: { worktreeRoot: string }) => ({
+      containers: [
+        { containerKey: `folder ${ctx.worktreeRoot} ${id}`, scope: 'folder', handle: null },
+      ],
+    }),
+    desiredFragments: async (ctx: { worktreeRoot: string }) => [
+      {
+        harness: id,
+        resourceKey: `folder ${ctx.worktreeRoot} ${id} entry`,
+        containerKey: `folder ${ctx.worktreeRoot} ${id}`,
+        fragmentKey: 'entry',
+        scope: 'folder',
+        fingerprint: 'f'.repeat(64),
+        payload: { id },
+      },
+    ],
+    observe: async () =>
+      fragState[id] ? { state: 'present', fingerprint: fragState[id]! } : { state: 'absent' },
+    apply: vi.fn(async (_ctx: unknown, m: { kind: string; intent: { fingerprint: string } }) => {
+      fragState[id] = m.kind === 'remove' ? null : m.intent.fingerprint;
+    }),
+  });
+  const adapters: Record<string, ReturnType<typeof adapterFor>> = {};
   const http = {
     createTeam: vi.fn(async () => ({
       token: 'tok-creator',
@@ -96,7 +127,11 @@ const h = vi.hoisted(() => {
   return {
     confirmQueue,
     selectQueue,
+    multiQueue,
     textQueue,
+    fragState,
+    adapterFor,
+    adapters,
     http,
     harness,
     otherHarness,
@@ -124,6 +159,12 @@ vi.mock('@clack/prompts', () => ({
     h.selectOptions.push(o?.options ?? []);
     return h.selectQueue.shift();
   }),
+  multiselect: vi.fn(
+    async (o: { options?: { value: string; hint?: string }[]; initialValues?: string[] }) => {
+      h.selectOptions.push(o?.options ?? []);
+      return h.multiQueue.length > 0 ? h.multiQueue.shift() : (o?.initialValues ?? []);
+    },
+  ),
   text: vi.fn(async () => h.textQueue.shift()),
 }));
 
@@ -157,6 +198,15 @@ vi.mock('./harnesses/index.js', () => ({
   get HARNESSES() {
     return h.registry;
   },
+  // The fragment registry mirrors the lifecycle one, plus the always-available native adapter.
+  harnessAdapters: () => [
+    ...(h.registry as { id: string }[]).map(({ id }) => (h.adapters[id] ??= h.adapterFor(id))),
+    (h.adapters['musterd'] ??= {
+      ...h.adapterFor('musterd'),
+      target: async () => ({ containers: [] }),
+      desiredFragments: async () => [],
+    }),
+  ],
 }));
 
 vi.mock('../config.js', () => ({
@@ -185,7 +235,10 @@ beforeEach(() => {
 
   h.confirmQueue.length = 0;
   h.selectQueue.length = 0;
+  h.multiQueue.length = 0;
   h.textQueue.length = 0;
+  for (const k of Object.keys(h.fragState)) delete h.fragState[k];
+  for (const a of Object.values(h.adapters)) (a.apply as { mockClear?: () => void }).mockClear?.();
   h.claimQueue.length = 0;
   h.claimKeys.length = 0;
   h.selectOptions.length = 0;
@@ -239,8 +292,9 @@ afterEach(() => {
 /** Queue a full happy-path answer set: create team → add agent → configure → role → primer. */
 function happyAnswers() {
   h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend'); // slug, you, your-role, name, role
-  h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role-template
-  h.confirmQueue.push(true, true, true); // autojoin, connect, write-primer
+  h.selectQueue.push('new', 'generalist'); // intent, role-template
+  h.multiQueue.push(['claude-code']); // the ADR 281 harness multi-select
+  h.confirmQueue.push(true, true, true); // autojoin, wire, write-primer
 }
 
 describe('runInit — guards and exits', () => {
@@ -599,12 +653,21 @@ describe('runInit — intent branches', () => {
     expect(h.http.addMember).not.toHaveBeenCalled();
   });
 
-  it('reports when no agent harness is installed', async () => {
+  it('an uninstalled harness stays selectable as pending; native-only init still completes', async () => {
     h.harness.detect.mockResolvedValue({ installed: false, configured: false });
-    h.textQueue.push('dawn', 'nick', '');
-    h.selectQueue.push('new');
+    h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
+    h.selectQueue.push('new', 'generalist');
+    h.multiQueue.push(['musterd']); // nothing external installed — keep only the native host
+    h.confirmQueue.push(true, true, true); // autojoin, wire, primer
     expect(await runInit()).toBe(0);
-    expect(h.http.addMember).not.toHaveBeenCalled();
+    expect(h.http.addMember).toHaveBeenCalled();
+    // The uninstalled harness was OFFERED (selection survives installation state, ADR 281)…
+    const offered = h.selectOptions.find((opts) =>
+      (opts as { value: string; hint?: string }[]).some((o) => o.value === 'claude-code'),
+    ) as { value: string; hint?: string }[];
+    expect(offered.find((o) => o.value === 'claude-code')?.hint).toContain('pending');
+    // …and nothing external was configured.
+    expect(h.adapters['claude-code']?.apply).not.toHaveBeenCalled();
   });
 });
 
@@ -635,29 +698,22 @@ describe('runInit — configures the harness that was chosen, not only Claude Co
 
   it('configures the selected non-claude-code harness, and leaves the other alone', async () => {
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'cursor', 'generalist');
+    h.selectQueue.push('new', 'generalist');
+    h.multiQueue.push(['cursor']); // the selection is cursor, NOT the registry's first entry
     h.confirmQueue.push(true, true, true);
 
     expect(await runInit()).toBe(0);
 
-    // The prescription's whole content: picking this harness re-provisions THIS harness's entry...
-    expect(h.otherHarness.configure).toHaveBeenCalled();
-    // ...and not the one that happens to be first in the registry, which is the failure a
+    // The prescription's whole content: selecting this harness reconciles THIS harness's fragments…
+    expect(h.adapters['cursor']!.apply).toHaveBeenCalled();
+    // …and not the one that happens to be first in the registry, which is the failure a
     // single-harness fixture cannot see.
-    expect(h.harness.configure).not.toHaveBeenCalled();
-
-    const [entry, binding] = h.otherHarness.configure.mock.calls[0]! as unknown as [
-      { env: Record<string, string> },
-      { surface?: string },
-    ];
-    expect(binding.surface).toBe('cursor');
-    // And it re-provisions FROM binding.json rather than re-baking the drift the doctor flagged —
-    // otherwise "re-provision" would hand back the same MUSTERD_* snapshot it was meant to clear,
-    // and the doctor would be prescribing a repair that reinstates the thing it complained about.
-    expect(entry.env['MUSTERD_AGENT_KEY']).toBeUndefined();
-    expect(entry.env['MUSTERD_SURFACE']).toBeUndefined();
-    expect(entry.env['MUSTERD_AUTOJOIN']).toBeUndefined();
-    expect(entry.env['MUSTERD_DRIVER']).toBeUndefined();
+    expect(h.adapters['claude-code']?.apply).not.toHaveBeenCalled();
+    // The saved v2 selection records exactly what was picked.
+    const manifest = JSON.parse(
+      readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'),
+    ) as { desired: string[] };
+    expect(manifest.desired).toEqual(['cursor']);
   });
 });
 
@@ -670,37 +726,50 @@ describe('runInit — add-agent happy path', () => {
       kind: 'agent',
       role: 'backend',
     });
-    expect(h.harness.configure).toHaveBeenCalled();
+    // The selected harness's fragments were reconciled into place (ADR 282).
+    expect(h.adapters['claude-code']!.apply).toHaveBeenCalled();
     // primer written to AGENTS.md in the (temp) cwd
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toContain('## Your musterd team');
-    // autojoin/driver go into binding.json, never the repo-root-shared entry (ADR 165 inc 2)
-    const entry = h.harness.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env['MUSTERD_AUTOJOIN']).toBeUndefined();
-    expect(entry.env['MUSTERD_DRIVER']).toBeUndefined();
+    // The strict v2 manifest records the selection before reconciliation ran.
+    const manifest = JSON.parse(
+      readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'),
+    ) as { version: number; desired: string[] };
+    expect(manifest.version).toBe(2);
+    expect(manifest.desired).toEqual(['claude-code']);
     const { saveBinding } = await import('../config.js');
     const binding = vi.mocked(saveBinding).mock.calls[0]![1] as Record<string, unknown>;
     expect(binding['autojoin']).toBe(true);
     expect(binding['driver']).toBe('nick');
   });
 
-  it('declining the connect step prints manual setup and exits 0', async () => {
+  it('declining the wire step prints manual setup and exits 0 — the saved selection survives', async () => {
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role-template
-    h.confirmQueue.push(true, false); // autojoin yes, connect NO
+    h.selectQueue.push('new', 'generalist'); // intent, role-template
+    h.multiQueue.push(['claude-code']);
+    h.confirmQueue.push(true, false); // autojoin yes, wire NO
     expect(await runInit()).toBe(0);
-    expect(h.harness.configure).not.toHaveBeenCalled();
+    expect(h.adapters['claude-code']?.apply).not.toHaveBeenCalled();
+    // Desire was saved BEFORE the wire question, so `musterd wire` can finish the job headlessly.
+    const manifest = JSON.parse(
+      readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'),
+    ) as { desired: string[] };
+    expect(manifest.desired).toEqual(['claude-code']);
   });
 
   it('returns 1 when minting the member fails', async () => {
     h.http.addMember.mockRejectedValue(new Error('member "Ada" already exists'));
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role-template
-    h.confirmQueue.push(true); // autojoin (mint happens before connect)
+    h.selectQueue.push('new', 'generalist'); // intent, role-template
+    h.multiQueue.push(['claude-code']);
+    h.confirmQueue.push(true); // autojoin (mint happens before wire)
     expect(await runInit()).toBe(1);
   });
 
-  it('returns 1 when harness configuration fails', async () => {
-    h.harness.configure.mockRejectedValue(new Error('claude mcp add failed'));
+  it('returns 1 when harness reconciliation fails', async () => {
+    const adapter = (h.adapters['claude-code'] ??= h.adapterFor('claude-code'));
+    (adapter.apply as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('claude mcp add failed'),
+    );
     happyAnswers();
     expect(await runInit()).toBe(1);
   });
@@ -714,15 +783,17 @@ describe('runInit — add-agent happy path', () => {
 
   it('declining the primer still completes successfully', async () => {
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role
-    h.confirmQueue.push(true, true, false); // autojoin, connect, primer NO
+    h.selectQueue.push('new', 'generalist'); // intent, role
+    h.multiQueue.push(['claude-code']);
+    h.confirmQueue.push(true, true, false); // autojoin, wire, primer NO
     expect(await runInit()).toBe(0);
   });
 
   it('provisioning a richer profile provisions its tools; the label comes only from the free-text prompt (ADR 272 inc 2)', async () => {
     h.textQueue.push('dawn', 'nick', '', 'Ada', ''); // slug, you, your-role, name, role label (blank)
-    h.selectQueue.push('new', 'claude-code', 'backend'); // intent, harness, profile = backend
-    h.confirmQueue.push(true, true, true); // autojoin, connect, primer — no override gate anymore
+    h.selectQueue.push('new', 'backend'); // intent, profile = backend
+    h.multiQueue.push(['claude-code']); // the ADR 281 harness multi-select
+    h.confirmQueue.push(true, true, true); // autojoin, wire, primer — no override gate anymore
     expect(await runInit()).toBe(0);
     // The profile pick does NOT derive the roster label — a profile is configuration, not identity.
     expect(h.http.addMember).toHaveBeenCalledWith('dawn', {
@@ -733,18 +804,21 @@ describe('runInit — add-agent happy path', () => {
     expect(h.harness.provision).toHaveBeenCalled();
     const plan = h.harness.provision.mock.calls[0]![0] as { servers: { name: string }[] };
     expect(plan.servers.map((s) => s.name)).toContain('supabase');
-    // manifest records the provisioned PROFILE (not the roster label)
+    // the v2 manifest records the provisioned PROFILE (not the roster label) AND the profile's
+    // servers for exact removal
     const manifest = JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'));
-    expect(manifest.mcpServers).toContain('supabase');
+    expect(manifest.version).toBe(2);
     expect(manifest.profile).toBe('backend');
+    expect(manifest.contributions['role-tools']).toContain('role-server claude-code supabase');
     // and the profile's charter no longer lands in the primer — charter is the role layer's (ADR 272)
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).not.toContain('## Your charter');
   });
 
   it('a free-text label rides alongside an independent profile pick', async () => {
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'platform'); // …name, then the label
-    h.selectQueue.push('new', 'claude-code', 'backend'); // profile = backend
-    h.confirmQueue.push(true, true, true); // autojoin, connect, primer
+    h.selectQueue.push('new', 'backend'); // intent, profile = backend
+    h.multiQueue.push(['claude-code']);
+    h.confirmQueue.push(true, true, true); // autojoin, wire, primer
     expect(await runInit()).toBe(0);
     expect(h.http.addMember).toHaveBeenCalledWith('dawn', {
       name: 'Ada',
@@ -761,8 +835,9 @@ describe('runInit — add-agent happy path', () => {
       roles: [{ name: 'platform', summary: 'infra toucher', charter: 'You touch infra.' }],
     } as never);
     h.textQueue.push('dawn', 'nick', '', 'Ada', 'platform'); // label names a library role
-    h.selectQueue.push('new', 'claude-code', 'backend'); // profile = backend (has its own charter)
-    h.confirmQueue.push(true, true, true); // autojoin, connect, primer
+    h.selectQueue.push('new', 'backend'); // intent, profile = backend (has its own charter)
+    h.multiQueue.push(['claude-code']);
+    h.confirmQueue.push(true, true, true); // autojoin, wire, primer
     expect(await runInit()).toBe(0);
     const agents = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
     expect(agents).toContain('## Your charter (platform)');
@@ -781,26 +856,10 @@ describe('runInit — add-agent happy path', () => {
   });
 });
 
-describe('runInit — secret/gitignore handling', () => {
-  it('offers to gitignore the in-tree secret config AND the provisioned guidance, appending both', async () => {
-    // binding path already ignored → "already covered"; the harness secret + the guidance skill are not.
-    writeFileSync(join(cwd, '.gitignore'), '.musterd/binding.json\n');
-    h.harness.configure.mockResolvedValue({
-      target: '.cursor/mcp.json',
-      activation: 'reopen Cursor',
-      secretPath: join(cwd, '.cursor', 'mcp.json'),
-    });
-    h.textQueue.push('dawn', 'nick', '', 'Ada', 'backend');
-    h.selectQueue.push('new', 'claude-code', 'generalist'); // intent, harness, role
-    // autojoin, connect, secret-gitignore, guidance-gitignore (ADR 085), primer — content-asserted below.
-    h.confirmQueue.push(true, true, true, true, true);
-    expect(await runInit()).toBe(0);
-    const gi = readFileSync(join(cwd, '.gitignore'), 'utf8');
-    expect(gi).toContain('.cursor/mcp.json'); // the token config (warnSecretConfig)
-    expect(gi).toContain('.musterd/skill/SKILL.md'); // the provisioned guidance (offerGitignoreGuidance)
-    expect(gi).toContain('# musterd');
-  });
-});
+// The old secret/gitignore offers are structurally gone: since ADR 165 the harness entries carry no
+// secret (only the ADR 286 launch marker), and the guidance files ride stamp-gated fragments the
+// reconciler owns — there is no init-time "gitignore the token config" moment left to test. The
+// binding.json warning (warnSecretConfig) keeps its own coverage in config.test.ts.
 
 describe('cachedTeamLive', () => {
   it('is true when the authenticated inbox probe succeeds', async () => {

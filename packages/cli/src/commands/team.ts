@@ -559,10 +559,10 @@ async function teamCreate(parsed: Parsed): Promise<number> {
   // while every other unbound folder stays read-only (ADR 036). The binding carries the folder's
   // claim secret (here the creator's credential) so resolveIdentity yields the admin here.
   const binding: Binding = {
+    version: 2,
     server,
     team: slug,
     agent_key: credential,
-    surface: 'cli',
     claim: { mode: 'seat', name },
   };
   saveBinding(process.cwd(), binding);
@@ -642,7 +642,7 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     process.stdout.write(theme.meta('connect this agent via MCP with the team agent key:') + '\n');
     process.stdout.write(
       theme.meta(
-        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${agentKey} MUSTERD_CLAIM=seat:${name} MUSTERD_SURFACE=claude-code`,
+        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${agentKey} MUSTERD_CLAIM=seat:${name} MUSTERD_LAUNCH_SURFACE=claude-code`,
       ) + '\n',
     );
     process.stdout.write(

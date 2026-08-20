@@ -120,10 +120,10 @@ export async function humanCommand(parsed: Parsed): Promise<number> {
   // what `gather()` reads). The home just gives it a *designated* place instead of "wherever the
   // command happened to run".
   const binding: Binding = {
+    version: 2,
     server,
     team,
     agent_key: credential,
-    surface: 'cli',
     claim: { mode: 'seat', name },
   };
   saveBinding(home, binding);

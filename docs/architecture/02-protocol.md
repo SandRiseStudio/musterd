@@ -204,9 +204,17 @@ export const OccupiedFrame = z.object({ type:'occupied', seat:Member, presence_i
 export const RefusedFrame = z.object({ type:'refused', code:RefusedCode, message, claimable:string[], hint:string });
 export const PendingFrame = z.object({ type:'pending', request_id, message });
 
-// ADR 018/075/080 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
-export const WorkspaceSpec = z.object({ server:string, team:string, surface:Surface, claim?:ClaimPolicy });  // the committed, secret-free `.musterd/workspace.json`
-export const Binding = WorkspaceSpec.extend({ agent_key?:string, grant?:string });                          // gitignored `.musterd/binding.json` = spec + the two secrets
+// ADR 018/075/080/281 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
+export const WorkspaceSpec = z.object({ version:2, server:string, team:string, claim?:ClaimPolicy }).strict();  // the committed, secret-free `.musterd/workspace.json`; v2 carries NO surface (runtime Surface is launcher-only, ADR 286)
+export const Binding = WorkspaceSpec.extend({ agent_key?:string, grant?:string, ... }).strict();                // gitignored `.musterd/binding.json` = spec + secrets + per-machine runtime fields; strict — unknown keys reject, never strip
+
+// ADR 281/282 — strict machine-local provisioning/reconciliation contracts (provisioning.ts). Local-only: never wire types.
+export const HarnessId = z.string(1..64).regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);  // selection vocabulary; unknown ids still parse (registry lives in the CLI)
+export type  LocalLoad<T> = missing | legacy(value) | valid(value) | invalid(issues:LocalStateIssue[]);  // every local loader's result — parse failures never collapse to null
+export const WorktreeProvisioning = z.object({ version:2, role:string, desired:HarnessId[unique], contributions:Record<HarnessId,string[]>, provisionedAt:string }).strict();  // `.musterd/provisioned.json`
+export const FragmentLedger = z.object({ version:1, fragments:Record<resourceKey, { harness, scope:folder|repo-shared|machine, containerKey, fragmentKey, fingerprint, owners:string[unique], adapterVersion:int }> }).strict();  // machine config root, 0600
+export const ReconcileJournal = z.object({ version:1, operationId, action:create|remove|add-owner|release-owner, harness, containerKey, resourceKey, oldFingerprint:string|null, intendedFingerprint:string|null, oldOwners, intendedOwners, worktreeRoot, phase:'prepared' }).strict();  // write-ahead, one per fragment operation
+export const HarnessLockRecord = z.object({ version:1, holderId, pid:int>0, processStartedAt, acquiredAt:ISO, renewedAt:ISO, expiresAt:ISO }).strict();  // recoverable cross-process lease per containerKey
 
 // ADR 210 — the local continuity registry (continuity.ts). Host-only: NOT a wire type, ever.
 export const ContinuityBinding = z.object({ thread_id, harness, session_id, transcript_path?, bound_at:int, captured_at:int }).strict();

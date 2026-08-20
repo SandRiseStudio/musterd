@@ -41,11 +41,11 @@ function writeWorkspace(declared?: string): string {
   writeFileSync(
     join(dir, '.musterd', 'binding.json'),
     JSON.stringify({
+      version: 2,
       server: base,
       team: 'dawn',
       agent_key: agentKey,
       grant,
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ada' },
       ...(declared !== undefined ? { model: declared } : {}),
     }),
@@ -74,7 +74,7 @@ async function connect(dir: string): Promise<MusterdClient> {
   process.chdir(dir);
   let config;
   try {
-    config = loadMcpConfig({});
+    config = loadMcpConfig({ MUSTERD_TEST_SURFACE: 'claude-code' });
   } finally {
     process.chdir(orig);
   }

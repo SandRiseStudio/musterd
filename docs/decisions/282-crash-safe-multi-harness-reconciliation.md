@@ -188,3 +188,19 @@ Target: every matrix row converges idempotently without changing an unrelated fr
 worktree for Claude Code, Codex, Cursor, and musterd, then launches the same Member sequentially on
 each Surface without `wire`. Desired state, ownership, and managed fragment fingerprints must remain
 unchanged; only explicitly allowlisted binding runtime fields may change.
+
+## Implementation notes (2026-08-20, PR #928)
+
+Two refinements the implementation surfaced; neither alters the Decision above.
+
+1. **Adapter observations are payload-independent.** A RELEASE intent is rebuilt from ledger
+   evidence, which carries fingerprints and keys but no payload — so an `observe` that consulted
+   `intent.payload` to compute its fingerprint misclassified every deselection as drift (caught by
+   the Scenario D acceptance suite, `tests/scenarios/multi-harness.test.ts`). Every adapter now
+   fingerprints a canonical form of the PHYSICAL state alone: equal state hashes equal, whoever
+   asks. Falsifier: configure a fragment, deselect it, and the release must classify `owned-exact`,
+   not `release-blocked`.
+2. **Journals recover across sibling fragments.** Journals are per *container*; a journal found
+   under one fragment's lease may belong to a sibling fragment of the same container, so recovery
+   resolves the journaled resource key against ALL of the adapter's current intents, not the one
+   whose lease found it.

@@ -21,6 +21,7 @@ function baseConfig(over: Partial<McpConfig> = {}): McpConfig {
     team: 'dawn',
     agent_key: 'mskey_team',
     surface: 'claude-code',
+    markerGeneration: 'test-override',
     provenance: 'session',
     workspace: 'repo',
     claim: { mode: 'chat' },
@@ -171,10 +172,10 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
       writeFileSync(
         bindingPath(anchor),
         JSON.stringify({
+          version: 2,
           server: 'http://x',
           team: 'dawn',
           agent_key: 'mskey_repaired',
-          surface: 'cursor',
           claim: { mode: 'seat', name: 'Ada' },
           grant: 'msgr_repaired',
         }),
@@ -205,10 +206,10 @@ describe('claimAndJoin (v0.3 handshake, ADR 075)', () => {
       writeFileSync(
         bindingPath(anchor),
         JSON.stringify({
+          version: 2,
           server: 'http://x',
           team: 'dawn',
           agent_key: 'mskey_ryder',
-          surface: 'cursor',
           claim: { mode: 'seat', name: 'ryder' },
           grant: 'msgr_ryder',
         }),
@@ -351,9 +352,9 @@ describe('claimAndJoin concurrency + surface authority (live native-wake finding
     writeFileSync(
       join(dir, BINDING_DIR, BINDING_FILE),
       JSON.stringify({
+        version: 2,
         server: 'http://x',
         team: 'dawn',
-        surface: 'cursor',
         claim: { mode: 'seat', name: 'compo' },
         ...b,
       }),
@@ -413,10 +414,10 @@ describe('claimAndJoin concurrency + surface authority (live native-wake finding
     expect(config.agent_key).toBe('mskey_fresh');
   });
 
-  it('still repairs an UNKNOWN surface from the binding — "other" means we could not tell', async () => {
+  it('never adopts a Surface from disk — the launcher declared it, and v2 identity carries none (ADR 286)', async () => {
     writeBinding({});
     const config = baseConfig({ bindingDir: dir, surface: 'other', claim: { mode: 'chat' } });
     await claimAndJoin(joiningClient(config), config, { seat: 'compo' });
-    expect(config.surface).toBe('cursor');
+    expect(config.surface).toBe('other');
   });
 });

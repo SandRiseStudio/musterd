@@ -57,8 +57,9 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   }
   const grant = flagStr(flags, 'grant') ?? process.env['MUSTERD_GRANT'] ?? binding?.grant;
   const target = resolveTarget(parsed, binding);
-  // The seat the adapter will occupy keeps its harness surface; a bare CLI claim defaults to `cli`.
-  const surface = (flagStr(flags, 'surface') ?? binding?.surface ?? 'cli') as Surface;
+  // A CLI claim is intrinsically `cli` (ADR 286) — identity files no longer declare a surface.
+  // `--surface` stays a deliberate manual override (headless/testing), never a stored default.
+  const surface = (flagStr(flags, 'surface') ?? 'cli') as Surface;
 
   const http = new HttpClient({ server, surface });
   const { members } = await http.roster(team);
@@ -180,10 +181,10 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
         // with, so `binding.grant` carries the reusable token that re-occupies this seat silently.
         const effectiveGrant = resumeGrant ?? grant;
         const next: Binding = {
+          version: 2,
           server,
           team,
           agent_key: agentKey,
-          surface: surface as Binding['surface'],
           // Record the resolved seat as the folder's standing policy so re-launches re-occupy it.
           claim: { mode: 'seat', name: seat },
           ...(effectiveGrant !== undefined ? { grant: effectiveGrant } : {}),

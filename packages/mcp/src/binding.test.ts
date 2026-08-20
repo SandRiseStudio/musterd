@@ -14,10 +14,10 @@ beforeEach(() => {
   writeFileSync(
     bindingPath,
     JSON.stringify({
+      version: 2,
       server: 'http://localhost:9999',
       team: 'lab',
       agent_key: 'mskey_from_file',
-      surface: 'claude-code',
       claim: { mode: 'seat', name: 'Ui' },
     }),
   );
@@ -34,7 +34,10 @@ afterEach(() => {
 
 describe('loadMcpConfig identity alignment (ADR 018)', () => {
   it('falls back to the workspace binding file when env carries no agent key', () => {
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     // v0.3 (ADR 075): the binding carries the agent key + claim policy; the seat resolves at claim.
     expect(cfg.agent_key).toBe('mskey_from_file');
     expect(cfg.member).toBeUndefined();
@@ -45,6 +48,7 @@ describe('loadMcpConfig identity alignment (ADR 018)', () => {
 
   it('lets MUSTERD_* env override the binding file (host-injection / hosted setups)', () => {
     const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
       MUSTERD_BINDING: bindingPath,
       MUSTERD_TEAM: 'lab',
       MUSTERD_AGENT_KEY: 'mskey_from_env',
@@ -56,11 +60,15 @@ describe('loadMcpConfig identity alignment (ADR 018)', () => {
 
   it('errors clearly when neither env nor a binding provides a team', () => {
     // Identity is now optional (claim-on-first-use, ADR 032) — only the team is required to load.
-    expect(() => loadMcpConfig({})).toThrow(/no team/);
+    expect(() => loadMcpConfig({ MUSTERD_TEST_SURFACE: 'claude-code' })).toThrow(/no team/);
   });
 
   it('loads as a pending presence (no seat) when only a team + claim policy is given', () => {
-    const cfg = loadMcpConfig({ MUSTERD_TEAM: 'lab', MUSTERD_CLAIM: 'role:backend' });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_TEAM: 'lab',
+      MUSTERD_CLAIM: 'role:backend',
+    });
     expect(cfg.member).toBeUndefined();
     expect(cfg.agent_key).toBeUndefined();
     expect(cfg.team).toBe('lab');
@@ -68,7 +76,10 @@ describe('loadMcpConfig identity alignment (ADR 018)', () => {
   });
 
   it('reads the claim policy from the binding file when MUSTERD_CLAIM is unset', () => {
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     expect(cfg.claim).toEqual({ mode: 'seat', name: 'Ui' });
   });
 });
@@ -80,9 +91,9 @@ describe('loadMcpConfig committed launch-spec fallback (ADR: committed launch sp
     writeFileSync(
       join(dir, '.musterd', 'workspace.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:7777',
         team: 'clonelab',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Cloned' },
       }),
     );
@@ -91,7 +102,10 @@ describe('loadMcpConfig committed launch-spec fallback (ADR: committed launch sp
   it('resolves server/team/surface/claim from workspace.json + an env key (a fresh clone)', () => {
     writeSpec();
     // Only the key comes from env; everything else from the committed spec — the self-wire case.
-    const cfg = loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_env' });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_AGENT_KEY: 'mskey_env',
+    });
     expect(cfg.team).toBe('clonelab');
     expect(cfg.server).toBe('http://localhost:7777');
     expect(cfg.surface).toBe('claude-code');
@@ -101,13 +115,16 @@ describe('loadMcpConfig committed launch-spec fallback (ADR: committed launch sp
 
   it('never reads a secret from the committed spec (only env/binding supply the key)', () => {
     writeSpec();
-    const cfg = loadMcpConfig({ MUSTERD_TEAM: 'clonelab' }); // no key anywhere
+    const cfg = loadMcpConfig({ MUSTERD_TEST_SURFACE: 'claude-code', MUSTERD_TEAM: 'clonelab' }); // no key anywhere
     expect(cfg.agent_key).toBeUndefined();
   });
 
   it('binding.json wins over the committed spec for the non-secret fields', () => {
     writeSpec();
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     // The binding file (team 'lab') overrides the spec's team 'clonelab'.
     expect(cfg.team).toBe('lab');
     expect(cfg.server).toBe('http://localhost:9999');
@@ -152,7 +169,7 @@ describe('claimCode stability (ADR 087 — a reconnect must not orphan --for <co
     MUSTERD_TEAM: 'lab',
     MUSTERD_CLAIM: 'seat:Ada',
     MUSTERD_WORKSPACE: 'ws-fixed',
-    MUSTERD_SURFACE: 'claude-code',
+    MUSTERD_TEST_SURFACE: 'claude-code',
   };
 
   it('a seat-mode session gets the SAME code across process loads (stable, hash-derived)', () => {
@@ -166,13 +183,27 @@ describe('claimCode stability (ADR 087 — a reconnect must not orphan --for <co
 
   it('the stable code varies by seat, workspace, and surface (the identity of "same seat")', () => {
     const base = loadMcpConfig(seatEnv).claimCode;
-    expect(loadMcpConfig({ ...seatEnv, MUSTERD_CLAIM: 'seat:Bob' }).claimCode).not.toBe(base);
-    expect(loadMcpConfig({ ...seatEnv, MUSTERD_WORKSPACE: 'ws-other' }).claimCode).not.toBe(base);
-    expect(loadMcpConfig({ ...seatEnv, MUSTERD_SURFACE: 'cursor' }).claimCode).not.toBe(base);
+    expect(
+      loadMcpConfig({ MUSTERD_TEST_SURFACE: 'claude-code', ...seatEnv, MUSTERD_CLAIM: 'seat:Bob' })
+        .claimCode,
+    ).not.toBe(base);
+    expect(
+      loadMcpConfig({
+        MUSTERD_TEST_SURFACE: 'claude-code',
+        ...seatEnv,
+        MUSTERD_WORKSPACE: 'ws-other',
+      }).claimCode,
+    ).not.toBe(base);
+    expect(loadMcpConfig({ ...seatEnv, MUSTERD_TEST_SURFACE: 'cursor' }).claimCode).not.toBe(base);
   });
 
   it('role/chat sessions keep a fresh per-process code (several may share one folder)', () => {
-    const roleEnv = { MUSTERD_TEAM: 'lab', MUSTERD_CLAIM: 'role:backend', MUSTERD_WORKSPACE: 'ws' };
+    const roleEnv = {
+      MUSTERD_TEAM: 'lab',
+      MUSTERD_CLAIM: 'role:backend',
+      MUSTERD_WORKSPACE: 'ws',
+      MUSTERD_TEST_SURFACE: 'cli',
+    };
     expect(loadMcpConfig(roleEnv).claimCode).not.toBe(loadMcpConfig(roleEnv).claimCode);
   });
 });
@@ -183,10 +214,10 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
     writeFileSync(
       p,
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:9999',
         team: 'lab',
         agent_key: 'mskey_from_file',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ui' },
         ...(model !== undefined ? { model } : {}),
       }),
@@ -197,13 +228,17 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
   it('attests the model persisted in binding.json when the env declares none (the by-default fix)', () => {
     // A `musterd agent --model qwen3:4b`-provisioned seat: the adapter env carries no MUSTERD_MODEL,
     // but binding.json does — so the seat attests instead of rotting to `unknown`.
-    const config = loadMcpConfig({ MUSTERD_BINDING: bindingWithModel('qwen3:4b') });
+    const config = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingWithModel('qwen3:4b'),
+    });
     expect(config.model).toBe('qwen3:4b');
     expect(config.modelSource).toBe('binding');
   });
 
   it('lets an env declaration override the binding (MUSTERD_MODEL wins, e.g. a /model switch)', () => {
     const config = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
       MUSTERD_BINDING: bindingWithModel('qwen3:4b'),
       MUSTERD_MODEL: 'claude-opus-4-8',
     });
@@ -212,7 +247,10 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
   });
 
   it('stays honestly unknown when neither env nor binding declares a model', () => {
-    const config = loadMcpConfig({ MUSTERD_BINDING: bindingWithModel(undefined) });
+    const config = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingWithModel(undefined),
+    });
     expect(config.model).toBeUndefined();
     expect(config.modelSource).toBe('unknown');
   });
@@ -223,10 +261,10 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
     writeFileSync(
       p,
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:9999',
         team: 'lab',
         agent_key: 'mskey_from_file',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ui' },
         ...(declared !== undefined ? { model: declared } : {}),
         ...(observed !== undefined
@@ -239,6 +277,7 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
 
   it('attests the OBSERVATION over a stale env declaration (the incident shape)', () => {
     const config = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
       MUSTERD_BINDING: bindingWithTiers('grok-4.5', 'claude-opus-4-8'),
       MUSTERD_MODEL: 'grok-4.5',
     });
@@ -249,6 +288,7 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
 
   it('attests the observation over a stale binding declaration too', () => {
     const config = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
       MUSTERD_BINDING: bindingWithTiers('grok-4.5', 'claude-opus-4-8'),
     });
     expect(config.model).toBe('claude-opus-4-8');
@@ -257,6 +297,7 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
 
   it('reports no drift when the observation agrees with the declaration', () => {
     const config = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
       MUSTERD_BINDING: bindingWithTiers('claude-opus-4-8', 'claude-opus-4-8'),
     });
     expect(config.modelSource).toBe('observed');
@@ -264,7 +305,10 @@ describe('model attestation ladder (ADR 101 — attest by default)', () => {
   });
 
   it('still honours a declaration when nothing was observed', () => {
-    const config = loadMcpConfig({ MUSTERD_BINDING: bindingWithTiers('grok-4.5', undefined) });
+    const config = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingWithTiers('grok-4.5', undefined),
+    });
     expect(config.model).toBe('grok-4.5');
     expect(config.modelSource).toBe('binding');
     expect(config.modelDrift).toBeUndefined();
@@ -276,9 +320,9 @@ describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobbe
     const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-saveb-'));
     try {
       const boot = {
+        version: 2,
         server: 'http://s1',
         team: 'lab',
-        surface: 'claude-code' as const,
         claim: { mode: 'seat' as const, name: 'Ui' },
         agent_key: 'mskey_1',
       };
@@ -307,9 +351,9 @@ describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobbe
     const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-badb-'));
     try {
       const boot = {
+        version: 2,
         server: 'http://s1',
         team: 'lab',
-        surface: 'claude-code' as const,
         claim: { mode: 'seat' as const, name: 'Ui' },
         agent_key: 'mskey_1',
       };
@@ -336,9 +380,9 @@ describe('saveBinding merge-guard — the hook-written model observation', () =>
     const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-obs-'));
     try {
       const boot = {
+        version: 2,
         server: 'http://s1',
         team: 'lab',
-        surface: 'claude-code' as const,
         claim: { mode: 'seat' as const, name: 'Ui' },
         agent_key: 'mskey_1',
       };
@@ -363,9 +407,9 @@ describe('saveBinding merge-guard — the hook-written model observation', () =>
     const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-obs2-'));
     try {
       const boot = {
+        version: 2,
         server: 'http://s1',
         team: 'lab',
-        surface: 'claude-code' as const,
         claim: { mode: 'seat' as const, name: 'Ui' },
       };
       saveBinding(ws, {
@@ -393,9 +437,9 @@ describe('saveBinding merge-guard — the hook-written model observation', () =>
     const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-obs-drop-'));
     try {
       const boot = {
+        version: 2,
         server: 'http://s1',
         team: 'lab',
-        surface: 'cursor' as const,
         claim: { mode: 'seat' as const, name: 'Ui' },
       };
       const observation = { model: 'grok-4.6', harness: 'cursor' as const, observed_at: 1 };
@@ -428,10 +472,10 @@ describe('refreshAttestation (the observation the adapter re-reads)', () => {
     writeFileSync(
       bindingPath,
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:9999',
         team: 'lab',
         agent_key: 'mskey_from_file',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ui' },
         ...over,
       }),
@@ -440,7 +484,10 @@ describe('refreshAttestation (the observation the adapter re-reads)', () => {
 
   it('picks up an observation written after boot, and reports the change', () => {
     write({ model: 'claude-declared-1' });
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     expect(cfg.model).toBe('claude-declared-1');
     expect(cfg.modelSource).toBe('binding');
 
@@ -458,7 +505,10 @@ describe('refreshAttestation (the observation the adapter re-reads)', () => {
 
   it('is a no-op — and reports no change — when the observation is unchanged', () => {
     write({ model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 } });
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     expect(cfg.model).toBe('claude-opus-5');
     expect(refreshAttestation(cfg, { MUSTERD_BINDING: bindingPath })).toBe(false);
     expect(cfg.model).toBe('claude-opus-5');
@@ -466,7 +516,10 @@ describe('refreshAttestation (the observation the adapter re-reads)', () => {
 
   it('tracks a mid-session model switch to a NEW observation', () => {
     write({ model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 } });
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     write({ model_observed: { model: 'claude-sonnet-5', harness: 'claude-code', observed_at: 3 } });
     expect(refreshAttestation(cfg, { MUSTERD_BINDING: bindingPath })).toBe(true);
     expect(cfg.model).toBe('claude-sonnet-5');
@@ -474,7 +527,10 @@ describe('refreshAttestation (the observation the adapter re-reads)', () => {
 
   it('never trades a real attestation for unknown when the binding goes unreadable', () => {
     write({ model_observed: { model: 'claude-opus-5', harness: 'claude-code', observed_at: 2 } });
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     rmSync(bindingPath, { force: true });
     expect(refreshAttestation(cfg, { MUSTERD_BINDING: bindingPath })).toBe(false);
     expect(cfg.model).toBe('claude-opus-5'); // the roster never blanks on a bad read
@@ -482,7 +538,11 @@ describe('refreshAttestation (the observation the adapter re-reads)', () => {
 
   it('keeps env above the binding declaration, and the observation above env', () => {
     write({ model: 'claude-declared-1' });
-    const env = { MUSTERD_BINDING: bindingPath, MUSTERD_MODEL: 'claude-from-env' };
+    const env = {
+      MUSTERD_BINDING: bindingPath,
+      MUSTERD_MODEL: 'claude-from-env',
+      MUSTERD_TEST_SURFACE: 'claude-code',
+    };
     const cfg = loadMcpConfig(env);
     expect(cfg.model).toBe('claude-from-env');
     write({
@@ -504,17 +564,17 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
     writeFileSync(
       join(wsDir, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:4849',
         team: 'revive',
         agent_key: 'mskey_from_disk',
         grant: 'msgr_from_disk',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'izzo' },
       }),
     );
     vi.spyOn(process, 'cwd').mockReturnValue(wsDir);
     try {
-      const cfg = loadMcpConfig({});
+      const cfg = loadMcpConfig({ MUSTERD_TEST_SURFACE: 'claude-code' });
       expect(cfg.server).toBe('http://localhost:4849');
       expect(cfg.team).toBe('revive');
       expect(cfg.agent_key).toBe('mskey_from_disk');
@@ -532,10 +592,10 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
     writeFileSync(
       join(wsDir, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:4849',
         team: 'revive',
         agent_key: 'mskey_from_disk',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'izzo' },
         autojoin: true,
         driver: 'nick',
@@ -543,7 +603,7 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
     );
     vi.spyOn(process, 'cwd').mockReturnValue(wsDir);
     try {
-      const cfg = loadMcpConfig({});
+      const cfg = loadMcpConfig({ MUSTERD_TEST_SURFACE: 'claude-code' });
       expect(cfg.autojoin).toBe(true);
       expect(cfg.driver).toBe('nick');
     } finally {
@@ -557,16 +617,17 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
     writeFileSync(
       bindingPath,
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:9999',
         team: 'lab',
         agent_key: 'mskey_from_file',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ui' },
         autojoin: true,
         driver: 'nick',
       }),
     );
     const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
       MUSTERD_BINDING: bindingPath,
       MUSTERD_AUTOJOIN: '0',
       MUSTERD_DRIVER: 'someone-else',
@@ -576,7 +637,10 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
   });
 
   it('defaults to dormant, no driver, when neither env nor binding says otherwise', () => {
-    const cfg = loadMcpConfig({ MUSTERD_BINDING: bindingPath });
+    const cfg = loadMcpConfig({
+      MUSTERD_TEST_SURFACE: 'claude-code',
+      MUSTERD_BINDING: bindingPath,
+    });
     expect(cfg.autojoin).toBe(false);
     expect(cfg.driver).toBeUndefined();
   });
@@ -587,15 +651,17 @@ describe('empty env — the ADR 165 shared-entry contract', () => {
     writeFileSync(
       join(wsDir, '.musterd', 'binding.json'),
       JSON.stringify({
+        version: 2,
         server: 'http://localhost:4849',
         team: 'revive',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'izzo' },
       }),
     );
     vi.spyOn(process, 'cwd').mockReturnValue(wsDir);
     try {
-      expect(loadMcpConfig({ MUSTERD_TEAM: 'other' }).team).toBe('other');
+      expect(
+        loadMcpConfig({ MUSTERD_TEST_SURFACE: 'claude-code', MUSTERD_TEAM: 'other' }).team,
+      ).toBe('other');
     } finally {
       rmSync(wsDir, { recursive: true, force: true });
     }
@@ -607,11 +673,11 @@ describe('clearGrantFromBinding (ADR 193)', () => {
     const ws = mkdtempSync(join(tmpdir(), 'musterd-clear-grant-'));
     try {
       saveBinding(ws, {
+        version: 2,
         server: 'http://localhost:4849',
         team: 'revive',
         agent_key: 'mskey_x',
         grant: 'msgr_stale',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'Ada' },
         model: 'claude-test',
       });

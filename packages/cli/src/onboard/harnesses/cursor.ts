@@ -1,13 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import {
   registeredFromEnv,
   type Harness,
   type ProvisionPlan,
   type UnprovisionPlan,
 } from '../harness.js';
-import type { McpServerEntry } from '../mcpEntry.js';
+import {
+  launchEntryEnv,
+  markerGenerationOfEnv,
+  resolveMcpLaunch,
+  type McpServerEntry,
+} from '../mcpEntry.js';
+import type { FsSeam } from '../reconcile/context.js';
+import {
+  canonicalFingerprint,
+  folderResourceKey,
+  type HarnessAdapter,
+} from '../reconcile/fragments.js';
 
 interface CursorConfig {
   mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
@@ -289,6 +301,272 @@ export const cursor: Harness = {
       removeMusterdCursorHooks();
     } catch {
       /* best-effort */
+    }
+  },
+};
+
+// ── The fragment adapter (ADR 281/282/286, Task 5) ───────────────────────────────────────────────
+// Cursor as MANAGED FRAGMENTS: `.cursor/mcp.json`'s musterd entry, the `.cursor/hooks.json`
+// musterd hook set, and the `.cursor/rules` guidance files — each an independent fragment with its
+// own key, in per-folder containers, parsed and validated as complete JSON before every scoped
+// replacement. All access rides the injected FsSeam.
+
+const CURSOR_HOOK_EVENTS = [
+  ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER],
+  ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER],
+  ['afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER],
+  ['afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER],
+  ['sessionEnd', CURSOR_END_HOOK_MARKER],
+] as const;
+
+function cursorHooksPayload(): { event: string; command: string }[] {
+  return sortHookList(
+    CURSOR_HOOK_EVENTS.map(([event, marker]) => ({
+      event,
+      command: marker === CURSOR_END_HOOK_MARKER ? sessionEndHookCommand() : observeHookCommand(),
+    })),
+  );
+}
+
+/** One canonical order, shared by desire and observation, so equal state hashes equal. */
+function sortHookList<T extends { event: string; command: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) =>
+    a.event === b.event ? (a.command < b.command ? -1 : 1) : a.event < b.event ? -1 : 1,
+  );
+}
+
+function readJsonSeam<T>(fs: FsSeam, path: string): T | null | undefined {
+  const raw = fs.readFile(path);
+  if (raw === null) return undefined; // absent
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null; // invalid
+  }
+}
+
+function writeJsonSeam(fs: FsSeam, path: string, value: unknown): void {
+  fs.mkdirp(dirname(path));
+  fs.writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 0o644);
+}
+
+const CURSOR_SURFACE = 'cursor';
+
+export const cursorAdapter: HarnessAdapter = {
+  id: 'cursor',
+  surface: 'cursor',
+  adapterVersion: 2,
+
+  async availability(ctx) {
+    // Installed iff the user-level Cursor dir exists. Read through the seam so scenario tests can
+    // model a machine without Cursor; HOME comes from ctx.env, never ambient.
+    const home = ctx.env['HOME'] ?? homedir();
+    const present = ctx.fs.readFile(join(home, '.cursor', 'mcp.json')) !== null;
+    const dirPresent = present || existsSync(join(home, '.cursor'));
+    return dirPresent
+      ? { available: true, detail: '~/.cursor present' }
+      : { available: false, detail: '~/.cursor not found' };
+  },
+
+  async target(ctx) {
+    return {
+      containers: [
+        {
+          containerKey: `folder ${ctx.worktreeRoot} .cursor/mcp.json`,
+          scope: 'folder',
+          handle: 'mcp',
+        },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} .cursor/hooks.json`,
+          scope: 'folder',
+          handle: 'hooks',
+        },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} cursor-guidance`,
+          scope: 'folder',
+          handle: 'guidance',
+        },
+      ],
+    };
+  },
+
+  async desiredFragments(ctx) {
+    const launch = resolveMcpLaunch();
+    const mcpPayload = {
+      command: launch.command,
+      args: launch.args,
+      env: launchEntryEnv(CURSOR_SURFACE),
+    };
+    const hooks = cursorHooksPayload();
+    const guidancePayload = guidanceFileMap(cursor.guidance!, ctx.team ?? '');
+    return [
+      {
+        harness: 'cursor',
+        resourceKey: folderResourceKey(ctx.worktreeRoot, 'cursor', 'mcp.musterd'),
+        containerKey: `folder ${ctx.worktreeRoot} .cursor/mcp.json`,
+        fragmentKey: 'mcp.musterd',
+        scope: 'folder',
+        fingerprint: canonicalFingerprint(mcpPayload),
+        payload: mcpPayload,
+      },
+      {
+        harness: 'cursor',
+        resourceKey: folderResourceKey(ctx.worktreeRoot, 'cursor', 'hooks'),
+        containerKey: `folder ${ctx.worktreeRoot} .cursor/hooks.json`,
+        fragmentKey: 'hooks',
+        scope: 'folder',
+        fingerprint: canonicalFingerprint(hooks),
+        payload: hooks,
+      },
+      {
+        harness: 'cursor',
+        resourceKey: folderResourceKey(ctx.worktreeRoot, 'cursor', 'guidance'),
+        containerKey: `folder ${ctx.worktreeRoot} cursor-guidance`,
+        fragmentKey: 'guidance',
+        scope: 'folder',
+        fingerprint: canonicalFingerprint(guidancePayload),
+        payload: guidancePayload,
+      },
+    ];
+  },
+
+  async observe(ctx, intent) {
+    switch (intent.fragmentKey) {
+      case 'mcp.musterd': {
+        const path = join(ctx.worktreeRoot, '.cursor', 'mcp.json');
+        const cfg = readJsonSeam<CursorConfig>(ctx.fs, path);
+        if (cfg === undefined) return { state: 'absent' };
+        if (cfg === null || typeof cfg !== 'object') {
+          return {
+            state: 'invalid-container',
+            issues: [{ path: '<.cursor/mcp.json>', message: 'not valid JSON' }],
+          };
+        }
+        const entry = cfg.mcpServers?.['musterd'];
+        if (!entry) return { state: 'absent' };
+        const observed = { command: entry.command, args: entry.args ?? [], env: entry.env ?? {} };
+        const fingerprint = canonicalFingerprint(observed);
+        return markerGenerationOfEnv(observed.env) === 'legacy'
+          ? { state: 'legacy-launch-marker', fingerprint }
+          : { state: 'present', fingerprint };
+      }
+      case 'hooks': {
+        const path = join(ctx.worktreeRoot, '.cursor', 'hooks.json');
+        const file = readJsonSeam<CursorHooksFile>(ctx.fs, path);
+        if (file === undefined) return { state: 'absent' };
+        if (file === null || typeof file !== 'object') {
+          return {
+            state: 'invalid-container',
+            issues: [{ path: '<.cursor/hooks.json>', message: 'not valid JSON' }],
+          };
+        }
+        // Fingerprint the SORTED physical form — payload-independent, so a release intent rebuilt
+        // from ledger evidence observes the same fingerprint the write recorded.
+        const observed: { event: string; command: string }[] = [];
+        for (const [event, defs] of Object.entries(file.hooks ?? {})) {
+          for (const def of defs) {
+            if (
+              isMusterdCursorHook(def, CURSOR_OBSERVE_HOOK_MARKER) ||
+              isMusterdCursorHook(def, CURSOR_END_HOOK_MARKER)
+            ) {
+              observed.push({ event, command: def.command });
+            }
+          }
+        }
+        if (observed.length === 0) return { state: 'absent' };
+        return { state: 'present', fingerprint: canonicalFingerprint(sortHookList(observed)) };
+      }
+      case 'guidance':
+        return observeFileMap(
+          ctx.fs,
+          ctx.worktreeRoot,
+          (intent.payload as Record<string, string> | undefined) ??
+            guidanceFileMap(cursor.guidance!, ctx.team ?? ''),
+        );
+      default:
+        return { state: 'absent' };
+    }
+  },
+
+  async apply(ctx, mutation) {
+    const { intent } = mutation;
+    switch (intent.fragmentKey) {
+      case 'mcp.musterd': {
+        const path = join(ctx.worktreeRoot, '.cursor', 'mcp.json');
+        const read = readJsonSeam<CursorConfig>(ctx.fs, path);
+        if (read === null) throw new Error('.cursor/mcp.json invalid at apply time');
+        const cfg = read ?? {};
+        const next: CursorConfig = { ...cfg, mcpServers: { ...(cfg.mcpServers ?? {}) } };
+        if (mutation.kind === 'remove') {
+          delete next.mcpServers!['musterd'];
+        } else if (mutation.kind === 'repair-launch-marker') {
+          // Swap ONLY the retired marker on the existing entry; preserve everything else in it.
+          const existing = next.mcpServers!['musterd'];
+          if (existing) {
+            const { ['MUSTERD_SURFACE']: _retired, ...rest } = existing.env ?? {};
+            next.mcpServers!['musterd'] = {
+              ...existing,
+              env: { ...rest, ...launchEntryEnv(CURSOR_SURFACE) },
+            };
+          }
+        } else {
+          const payload = intent.payload as {
+            command: string;
+            args: string[];
+            env: Record<string, string>;
+          };
+          next.mcpServers!['musterd'] = {
+            command: payload.command,
+            args: payload.args,
+            env: payload.env,
+          };
+        }
+        if (next.mcpServers && Object.keys(next.mcpServers).length === 0) delete next.mcpServers;
+        writeJsonSeam(ctx.fs, path, next);
+        return;
+      }
+      case 'hooks': {
+        const path = join(ctx.worktreeRoot, '.cursor', 'hooks.json');
+        const read = readJsonSeam<CursorHooksFile>(ctx.fs, path);
+        if (read === null) throw new Error('.cursor/hooks.json invalid at apply time');
+        const file = read ?? { version: 1, hooks: {} };
+        const next: CursorHooksFile = {
+          version: file.version || 1,
+          hooks: { ...(file.hooks ?? {}) },
+        };
+        const desired =
+          (intent.payload as { event: string; command: string }[] | undefined) ??
+          cursorHooksPayload();
+        const events = new Set(desired.map((d) => d.event));
+        for (const event of events) {
+          const keep = (next.hooks![event] ?? []).filter(
+            (h) =>
+              !isMusterdCursorHook(h, CURSOR_OBSERVE_HOOK_MARKER) &&
+              !isMusterdCursorHook(h, CURSOR_END_HOOK_MARKER),
+          );
+          const added =
+            mutation.kind === 'remove'
+              ? []
+              : desired.filter((d) => d.event === event).map((d) => ({ command: d.command }));
+          const merged = [...keep, ...added];
+          if (merged.length > 0) next.hooks![event] = merged;
+          else delete next.hooks![event];
+        }
+        if (next.hooks && Object.keys(next.hooks).length === 0) delete next.hooks;
+        writeJsonSeam(ctx.fs, path, next);
+        return;
+      }
+      case 'guidance':
+        applyFileMap(
+          ctx.fs,
+          ctx.worktreeRoot,
+          (intent.payload as Record<string, string> | undefined) ??
+            guidanceFileMap(cursor.guidance!, ctx.team ?? ''),
+          mutation.kind === 'remove' ? 'remove' : 'write',
+        );
+        return;
+      default:
+        throw new Error(`unknown cursor fragment ${intent.fragmentKey}`);
     }
   },
 };

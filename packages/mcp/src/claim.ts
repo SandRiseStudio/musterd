@@ -86,16 +86,8 @@ async function performClaim(
     if (fresh && fresh.claim && fresh.claim.mode === 'seat' && fresh.claim.name === target.seat) {
       if (fresh.grant !== undefined) config.grant = fresh.grant;
       if (fresh.agent_key !== undefined) config.agent_key = fresh.agent_key;
-      // Surface is NOT a credential, and adopting it here is only a repair when this session never
-      // knew its own (ADR 251 §2, measured live 2026-08-12). A grant or key on disk can be newer
-      // than the one we booted with — that is the whole point of the re-read. A surface cannot: it
-      // describes what is animating THIS session, which the process knows first-hand and the
-      // workspace file only guesses at. The native backend constructs its config in the host, with
-      // no workspace to read, and declares `musterd` precisely so native occupancies are
-      // roster-distinct; adopting the seat's binding here overwrote that with `cursor` and the
-      // first native occupancy in history attested the wrong harness. `other` is the one honest
-      // exception — it means boot could not tell, so a binding that can is an upgrade.
-      if (config.surface === 'other') config.surface = fresh.surface;
+      // Surface is NOT adopted from disk, ever (ADR 286): it is what the LAUNCHER declared for
+      // THIS session, resolved once at startup. v2 identity files carry no surface to adopt.
     }
   }
 
@@ -140,10 +132,10 @@ export async function adoptIdentity(
 /** Persist the resolved seat as this folder's standing claim policy (so a re-launch re-occupies it). */
 function persistBinding(config: McpConfig, seat: string): void {
   const binding: Binding = {
+    version: 2,
     server: config.server,
     team: config.team,
     ...(config.agent_key ? { agent_key: config.agent_key } : {}),
-    surface: config.surface,
     claim: { mode: 'seat', name: seat },
     ...(config.grant !== undefined ? { grant: config.grant } : {}),
     // Carry the attested model through the rewrite (ADR 101). `config.model` is the resolved ladder

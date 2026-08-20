@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { SurfaceSchema } from './acts.js';
 import { CapabilitiesSchema } from './capabilities.js';
 import { ClaimPolicySchema } from './claim.js';
 
@@ -32,14 +31,23 @@ export const WORKSPACE_SPEC_FILE = 'workspace.json';
  * out). The two secrets — `agent_key` (mskey_) and `grant` (msgr_) — live only in the gitignored
  * `binding.json` / env / the 0600 global config, never here. `claim` policy is the author's choice:
  * `seat:<name>` for a personal agent worktree, `role`/`chat` for a shared repo cloned by many.
+ *
+ * Version 2 (ADR 281): identity no longer carries a Surface — runtime Surface comes from the
+ * launcher (`MUSTERD_LAUNCH_SURFACE`, ADR 286), never from a stored file. Strict: an unknown key is
+ * rejected, not stripped, so a writer can no longer derive the committed spec by parsing a Binding
+ * through this schema — it must construct the exact object. A version-1 file (the pre-281 shape
+ * with `surface` and no `version`) is classified `legacy` by the CLI loaders and converted only by
+ * a confirmed `musterd harness configure`.
  */
-export const WorkspaceSpecSchema = z.object({
-  server: z.string(),
-  team: z.string(),
-  surface: SurfaceSchema,
-  /** Folder claim policy (ADR 018 ladder); absent ⇒ assign-in-chat. The claim-frame target derives from the policy (seat→{seat:name}, role→{role:role}). */
-  claim: ClaimPolicySchema.optional(),
-});
+export const WorkspaceSpecSchema = z
+  .object({
+    version: z.literal(2),
+    server: z.string(),
+    team: z.string(),
+    /** Folder claim policy (ADR 018 ladder); absent ⇒ assign-in-chat. The claim-frame target derives from the policy (seat→{seat:name}, role→{role:role}). */
+    claim: ClaimPolicySchema.optional(),
+  })
+  .strict();
 
 export type WorkspaceSpec = z.infer<typeof WorkspaceSpecSchema>;
 
@@ -92,7 +100,8 @@ export const ModelObservationSchema = z.object({
 
 export type ModelObservation = z.infer<typeof ModelObservationSchema>;
 
-/** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus the two secrets. */
+/** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus the two secrets.
+ *  Strict like the spec (version 2, ADR 281): unknown keys are rejected, never carried along. */
 export const BindingSchema = WorkspaceSpecSchema.extend({
   /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
   agent_key: z.string().optional(),
@@ -133,7 +142,7 @@ export const BindingSchema = WorkspaceSpecSchema.extend({
    *  the WHOLE family as driven. Per-machine, kept out of `workspace.json`; `MUSTERD_DRIVER` env stays
    *  the manual override above it. */
   driver: z.string().min(1).max(80).optional(),
-});
+}).strict();
 
 export type Binding = z.infer<typeof BindingSchema>;
 

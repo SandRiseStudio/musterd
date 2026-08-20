@@ -126,3 +126,11 @@ export function inspectCodexHookDrift(root: string): string[] {
     ? []
     : ['the required musterd Codex hooks are missing or differ from the supported configuration'];
 }
+
+/** The desired musterd Codex hook commands, per event — the fragment payload (ADR 282, Task 5). */
+export function codexHookCommands(): { event: string; command: string }[] {
+  return REQUIRED.map(([event, command]) => ({
+    event,
+    command: `musterd codex-hook ${command} --stdin # ${CODEX_HOOK_MARKER}`,
+  }));
+}

@@ -16,6 +16,8 @@ const h = vi.hoisted(() => ({
   saveWorkspaceSpec: vi.fn(),
   writeSeatFile: vi.fn(),
   configure: vi.fn(async () => ({ target: 'claude mcp', activation: '' })),
+  configureCursor: vi.fn(async () => ({ target: '.cursor/mcp.json', activation: '' })),
+  configureCodex: vi.fn(async () => ({ target: '.codex/config.toml', activation: '' })),
   // dir is set to a real temp dir per-test (the command chdir's into it to register MCP).
   workspace: { dir: '', kind: 'worktree' as const, branch: 'agent/June', created: true },
   rosterHome: {} as Record<string, string>,
@@ -37,8 +39,8 @@ vi.mock('../roster.js', () => ({ writeSeatFile: h.writeSeatFile }));
 vi.mock('../onboard/harnesses/index.js', () => ({
   HARNESSES: [
     { id: 'claude-code', label: 'Claude Code', surface: 'claude-code', configure: h.configure },
-    { id: 'cursor', label: 'Cursor', surface: 'cursor', configure: h.configure },
-    { id: 'codex', label: 'Codex', surface: 'codex', configure: h.configure },
+    { id: 'cursor', label: 'Cursor', surface: 'cursor', configure: h.configureCursor },
+    { id: 'codex', label: 'Codex', surface: 'codex', configure: h.configureCodex },
   ],
 }));
 vi.mock('../onboard/workspace.js', () => ({ provisionWorkspace: () => h.workspace }));
@@ -107,12 +109,15 @@ describe('musterd agent <name>', () => {
     expect(h.saveBinding).toHaveBeenCalledWith(
       h.workspace.dir,
       expect.objectContaining({
+        version: 2,
         team: 'ritual',
         agent_key: 'mskey_team',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'June' },
       }),
     );
+    // v2 identity carries no surface (ADR 281) — runtime Surface is launcher-only (ADR 286).
+    const bindingArg = h.saveBinding.mock.calls[0]![1] as Record<string, unknown>;
+    expect(bindingArg['surface']).toBeUndefined();
     // MCP registered with NO secret (agent_key/grant) in the harness config, so an in-tree config
     // (Cursor/Codex) is commit-safe (ADR 018/115) — and, critically, **no `MUSTERD_BINDING`** (ADR 143).
     //
@@ -136,14 +141,15 @@ describe('musterd agent <name>', () => {
     expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
       h.workspace.dir,
       expect.objectContaining({
+        version: 2,
         team: 'ritual',
-        surface: 'claude-code',
         claim: { mode: 'seat', name: 'June' },
       }),
     );
     const specArg = h.saveWorkspaceSpec.mock.calls[0]![1] as Record<string, unknown>;
     expect(specArg.agent_key).toBeUndefined();
     expect(specArg.grant).toBeUndefined();
+    expect(specArg['surface']).toBeUndefined();
   });
 
   it('writes the ADR 261 permissions floor into the WORKTREE so a non-interactive seat works day one', async () => {
@@ -260,38 +266,33 @@ describe('musterd agent <name>', () => {
     expect(entry.env.MUSTERD_GRANT).toBeUndefined();
   });
 
-  it('--harness cursor wires the Cursor surface (binding, spec, and env)', async () => {
+  it('--harness cursor wires the Cursor adapter — and bakes no surface anywhere', async () => {
     const code = await agentCommand(parseArgs(['June', '--harness', 'cursor']));
     expect(code).toBe(0);
-    expect(h.saveBinding).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'cursor' }),
-    );
-    expect(h.saveWorkspaceSpec).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'cursor' }),
-    );
-    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_SURFACE).toBeUndefined(); // ADR 165: surface is in binding.json
+    expect(h.configureCursor).toHaveBeenCalled();
+    expect(h.configure).not.toHaveBeenCalled();
+    // v2 identity carries no surface (ADR 281): the launcher provides it at runtime (ADR 286).
+    const bindingArg = h.saveBinding.mock.calls[0]![1] as Record<string, unknown>;
+    expect(bindingArg['surface']).toBeUndefined();
+    const specArg = h.saveWorkspaceSpec.mock.calls[0]![1] as Record<string, unknown>;
+    expect(specArg['surface']).toBeUndefined();
+    const entry = h.configureCursor.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_SURFACE).toBeUndefined();
   });
 
-  it('--harness codex wires the Codex surface', async () => {
+  it('--harness codex wires the Codex adapter', async () => {
     const code = await agentCommand(parseArgs(['June', '--harness', 'codex']));
     expect(code).toBe(0);
-    expect(h.saveBinding).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'codex' }),
-    );
-    const entry = h.configure.mock.calls[0]![0] as { env: Record<string, string> };
-    expect(entry.env.MUSTERD_SURFACE).toBeUndefined(); // ADR 165: surface is in binding.json
+    expect(h.configureCodex).toHaveBeenCalled();
+    expect(h.configure).not.toHaveBeenCalled();
+    const entry = h.configureCodex.mock.calls[0]![0] as { env: Record<string, string> };
+    expect(entry.env.MUSTERD_SURFACE).toBeUndefined();
   });
 
   it('defaults to the claude-code harness when --harness is omitted', async () => {
     await agentCommand(parseArgs(['June']));
-    expect(h.saveBinding).toHaveBeenCalledWith(
-      h.workspace.dir,
-      expect.objectContaining({ surface: 'claude-code' }),
-    );
+    expect(h.configure).toHaveBeenCalled();
+    expect(h.configureCursor).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown harness with the valid set', async () => {

@@ -129,3 +129,12 @@ leak, or removal of unrelated configuration fails the evaluation.
 
 **Experiment.** n/a — this is a deterministic configuration and ownership correction, not a user
 preference hypothesis. The acceptance matrix and live falsifier decide correctness directly.
+
+## Implementation notes (2026-08-20, PR #928)
+
+The version-2 `WorktreeProvisioning` field for the provisioned template is named **`profile`**, not
+`role` as the design sketch wrote: the ADR 272 revision (landed between this ADR's acceptance and
+its implementation) renamed the local provisioning concept to *profile*, and a brand-new strict
+schema mints the field under its final name rather than requiring a v2→v2 field migration. The
+recorded value is the provisioned profile name — never the roster label, which ADR 272 increment 2
+made independent.

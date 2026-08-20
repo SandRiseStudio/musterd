@@ -132,9 +132,32 @@ export const CATALOG: readonly CommandEntry[] = [
     summary: 'headless self-wire from a committed .musterd/workspace.json',
     group: 'setup',
     detail:
-      'Headless setup for a fresh clone: register the MCP server from this folder’s committed ' +
-      '.musterd/workspace.json with no prompts and no seat claim (pass `--autojoin` to also claim).',
+      'Headless setup for a fresh clone: reconcile this worktree’s SAVED harness selection from the ' +
+      'committed .musterd/workspace.json + provisioned.json with no prompts and no seat claim (pass ' +
+      '`--autojoin` to also claim). Never edits the selection and never converts pre-ADR-281 state — ' +
+      'a folder without a valid selection exits 6 and names `musterd harness configure` as the fix.',
     examples: ['musterd wire', 'musterd wire --autojoin'],
+  },
+  {
+    name: 'harness',
+    signature: 'configure | status [--json]',
+    summary: 'choose which harnesses launch this worktree — and inspect the wiring',
+    group: 'setup',
+    detail:
+      'The multi-harness front door (ADR 281/282/286). `configure` is the ONE editor of this ' +
+      'worktree’s desired harness set (Claude Code, Cursor, Codex, the native musterd host — any ' +
+      'subset, chosen once per worktree and machine) and the ONE converter of pre-ADR-281 local ' +
+      'state; after you confirm the complete set it saves strict v2 identity/manifest state and ' +
+      'reconciles the managed fragments crash-safely. `status` is read-only: per harness it reports ' +
+      'desired, availability, each managed fragment’s observed state and ownership, pending ' +
+      'journal/lock state, and the repair to run; exit 0 only when every desired fragment is usable ' +
+      'and every deselected contribution is released (a selected-but-uninstalled harness is ' +
+      '`pending`, which is healthy).',
+    examples: [
+      'musterd harness configure',
+      'musterd harness status',
+      'musterd harness status --json',
+    ],
   },
   {
     name: 'serve',

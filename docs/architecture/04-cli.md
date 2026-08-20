@@ -93,7 +93,13 @@ src/
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp; buildMcpEnv returns {} — the repo-root-shared entry carries NO per-seat state, everything resolves from binding.json/workspace.json (ADR 158/165)
     entryGuard.ts     // foreignAdapterNote + siblingWorkspaces + isInside — inspection-path checks for an adapter launched from another seat's checkout (assertEntryIdentity removed by ADR 165: no secrets in the entry, nothing to compare)
-    manifest.ts       // provision manifest read/write (ADR 030) — records what init wrote, for uninstall
+    manifest.ts       // provision manifest read/write (ADR 030); loadProvisioning/saveProvisioning classify + publish the strict v2 desired-set manifest (ADR 281)
+    reconcile/context.ts // HarnessContext — explicit worktree/machine roots + injected fs/process/clock seams (ADR 282); memoryFs is the scenario-suite double
+    reconcile/store.ts   // canonical validated stores (ADR 282/286): LocalLoad classification, canonical JSON, atomic 0600+fsync+rename publish; ledger/journal/lock paths hash the containerKey
+    reconcile/lock.ts    // createHarnessLocks — 30s cross-process recoverable lease per containerKey; reclaim needs expiry + provably-dead PID/process-start identity, unknown liveness stays busy (ADR 282/286)
+    reconcile/fragments.ts // the fragment adapter contract (ADR 281/282): HarnessAdapter/FragmentIntent types, canonical SHA-256 fingerprints, scope-discriminated resource keys, registry order
+    reconcile/engine.ts  // inspectHarnesses (read-only) + reconcileHarnesses: the frozen action matrix, write-ahead journal sequence, fingerprint-compared recovery, one allowlisted musterd.provisioning.operation span per fragment (ADR 282/286)
+    harnesses/musterd.ts // the native musterd adapter (always available, Surface musterd, zero external fragments) + the internal musterd-core guidance fragment producer
     guidance.ts       // writeGuidance/removeGuidance: skill + slash-command files per harness, content-stamped (ADR 085)
     pending.ts        // client-side pending-presence markers (ADR 033)
     permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact
@@ -112,7 +118,8 @@ src/
     git.ts            // RepoFacts extractor over git plumbing; actor identity = ADR 109 attribution
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
-    wire.ts           // musterd wire: headless MCP register from the committed .musterd/workspace.json (ADR 080)
+    wire.ts           // musterd wire: headless, desire-preserving fragment reconcile from the committed spec + saved v2 selection; exit 6 without one, never converts legacy (ADR 080/282)
+    harness.ts        // musterd harness configure|status: the ONE desired-set editor/legacy converter + the read-only fragment inspection (ADR 281/282/286)
     codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249)
     agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)

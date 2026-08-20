@@ -1,11 +1,13 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BINDING_DIR } from '@musterd/protocol';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  loadProvisioning,
   PROVISION_MANIFEST_FILE,
   readProvisionManifest,
+  saveProvisioning,
   writeProvisionManifest,
 } from './manifest.js';
 
@@ -105,5 +107,74 @@ describe('provision manifest', () => {
     expect(readProvisionManifest(dir)).toBeNull();
     writeFileSync(path, JSON.stringify({ version: 2 }));
     expect(readProvisionManifest(dir)).toBeNull();
+  });
+});
+
+describe('loadProvisioning — classified v2 loads (ADR 281/282)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'musterd-prov-'));
+  });
+
+  const v2 = {
+    version: 2,
+    profile: 'backend',
+    desired: ['claude-code', 'musterd'],
+    contributions: { 'claude-code': ['folder:/w#hooks'] },
+    provisionedAt: '2026-08-19T12:00:00.000Z',
+  };
+  const v1 = {
+    version: 1,
+    role: 'backend',
+    harness: 'claude-code',
+    mcpServers: ['musterd'],
+    permissions: { allow: [], ask: [], deny: [] },
+    provisionedAt: '2026-08-01T00:00:00.000Z',
+  };
+  const writeRaw = (value: unknown) => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'provisioned.json'),
+      typeof value === 'string' ? value : JSON.stringify(value),
+    );
+  };
+
+  it('absent → missing', () => {
+    expect(loadProvisioning(dir).kind).toBe('missing');
+  });
+
+  it('strict v2 → valid; saveProvisioning round-trips it', () => {
+    saveProvisioning(dir, v2 as Parameters<typeof saveProvisioning>[1]);
+    const got = loadProvisioning(dir);
+    expect(got.kind).toBe('valid');
+    if (got.kind === 'valid') expect(got.value.desired).toEqual(['claude-code', 'musterd']);
+  });
+
+  it('a well-formed version-1 manifest → legacy (recognized, never consumed)', () => {
+    writeRaw(v1);
+    expect(loadProvisioning(dir).kind).toBe('legacy');
+  });
+
+  it('unknown versions, invalid JSON, and unknown keys → invalid, never legacy', () => {
+    writeRaw({ ...v2, version: 3 });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    writeRaw('{ nope');
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    writeRaw({ ...v2, extra: 1 });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    // Duplicate desired ids violate the uniqueness refinement.
+    writeRaw({ ...v2, desired: ['codex', 'codex'] });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+  });
+
+  it('saveProvisioning refuses an invalid object before any byte moves', () => {
+    saveProvisioning(dir, v2 as Parameters<typeof saveProvisioning>[1]);
+    const before = readFileSync(join(dir, '.musterd', 'provisioned.json'), 'utf8');
+    expect(() =>
+      saveProvisioning(dir, { ...v2, desired: ['Not An Id'] } as Parameters<
+        typeof saveProvisioning
+      >[1]),
+    ).toThrow(/worktree-provisioning/);
+    expect(readFileSync(join(dir, '.musterd', 'provisioned.json'), 'utf8')).toBe(before);
   });
 });

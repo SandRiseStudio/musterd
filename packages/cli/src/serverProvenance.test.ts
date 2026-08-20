@@ -69,10 +69,10 @@ describe('serverProvenance', () => {
     const workdir = join(dir, 'work');
     mkdirSync(workdir);
     saveBinding(workdir, {
+      version: 2,
       server: 'http://127.0.0.1:4849',
       team: 'dawn',
       agent_key: 'mscr_x',
-      surface: 'cli',
       claim: { mode: 'seat', name: 'nick' },
     });
     expect(serverProvenance(workdir).disagreeingBinding).toBeUndefined();
@@ -85,10 +85,10 @@ describe('serverProvenance', () => {
     const workdir = join(dir, 'work');
     mkdirSync(workdir);
     saveBinding(workdir, {
+      version: 2,
       server: 'http://127.0.0.1:4849',
       team: 'dawn',
       agent_key: 'mscr_x',
-      surface: 'cli',
       claim: { mode: 'seat', name: 'nick' },
     });
     const p = serverProvenance(workdir);
