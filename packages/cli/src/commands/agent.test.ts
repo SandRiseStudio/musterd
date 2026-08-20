@@ -158,8 +158,8 @@ describe('musterd agent <name>', () => {
     expect(settings.permissions?.deny ?? []).toEqual([]);
   });
 
-  it('--role read-only layers the deny ceiling over the floor (ADR 261 decision 3)', async () => {
-    const code = await agentCommand(parseArgs(['Watcher', '--role', 'read-only']));
+  it('--profile read-only layers the deny ceiling over the floor (ADR 261 decision 3)', async () => {
+    const code = await agentCommand(parseArgs(['Watcher', '--profile', 'read-only']));
     expect(code).toBe(0);
     const settings = JSON.parse(
       readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
@@ -169,8 +169,46 @@ describe('musterd agent <name>', () => {
     expect(settings.permissions?.allow).toContain('Read');
   });
 
-  it('an unknown --role still creates the seat — permissions are best-effort (floor-only, no throw)', async () => {
-    const code = await agentCommand(parseArgs(['Zed', '--role', 'no-such-role']));
+  it('--profile provisions the workspace without touching the team fact (ADR 272 inc 2)', async () => {
+    const code = await agentCommand(parseArgs(['Watcher', '--profile', 'read-only']));
+    expect(code).toBe(0);
+    // No role label reaches the roster from a profile pick — a profile is configuration, not identity.
+    expect(h.addMember).toHaveBeenCalledWith('ritual', { name: 'Watcher', kind: 'agent' });
+  });
+
+  it('--role is the team fact only — it labels the member and provisions NOTHING (ADR 272 inc 2)', async () => {
+    const code = await agentCommand(parseArgs(['Watcher', '--role', 'read-only']));
+    expect(code).toBe(0);
+    expect(h.addMember).toHaveBeenCalledWith('ritual', {
+      name: 'Watcher',
+      kind: 'agent',
+      role: 'read-only',
+    });
+    const settings = JSON.parse(
+      readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { permissions?: { deny?: string[] } };
+    // Even a label that NAMES a profile compiles no ceiling — the coupling is what inc 2 removed.
+    expect(settings.permissions?.deny ?? []).toEqual([]);
+  });
+
+  it('--role <label> --profile <name> sets the label from one and the workspace from the other', async () => {
+    const code = await agentCommand(
+      parseArgs(['Watcher', '--role', 'auditor', '--profile', 'read-only']),
+    );
+    expect(code).toBe(0);
+    expect(h.addMember).toHaveBeenCalledWith('ritual', {
+      name: 'Watcher',
+      kind: 'agent',
+      role: 'auditor',
+    });
+    const settings = JSON.parse(
+      readFileSync(join(h.workspace.dir, '.claude', 'settings.local.json'), 'utf8'),
+    ) as { permissions?: { deny?: string[] } };
+    expect(settings.permissions?.deny).toEqual(expect.arrayContaining(['Edit', 'Write']));
+  });
+
+  it('an unknown --profile still creates the seat — permissions are best-effort (floor-only, no throw)', async () => {
+    const code = await agentCommand(parseArgs(['Zed', '--profile', 'no-such-profile']));
     expect(code).toBe(0);
   });
 

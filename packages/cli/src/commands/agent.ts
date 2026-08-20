@@ -40,17 +40,10 @@ export async function agentCommand(
       2,
     );
   }
+  // ADR 272 inc 2 — the split: `--role` is the team fact (roster label) and `--profile` is the
+  // local setup (workspace provisioning); neither implies the other. Pre-rename, one flag did both.
   const role = flagStr(parsed.flags, 'role');
-  // ADR 272 rename: `--profile` names the workspace profile to provision. `--role` keeps its full
-  // pre-rename behavior (label + provisioning source when no --profile) so nothing breaks, but as a
-  // provisioning selector it is deprecated — increment 2 narrows it to the roster label only.
-  const profileFlag = flagStr(parsed.flags, 'profile');
-  const profileName = profileFlag ?? role;
-  if (role && !profileFlag) {
-    process.stdout.write(
-      `${theme.meta('note: --role also selects the workspace profile for now — that half is deprecated; use --profile <name> (ADR 272)')}\n`,
-    );
-  }
+  const profileName = flagStr(parsed.flags, 'profile');
   // Model attestation (ADR 101): persist a *declared* model into the seat's binding.json so the adapter
   // attests by default instead of rotting to `unknown`. `--model` wins, else the ambient env the CLI
   // runs in (MUSTERD_MODEL / ANTHROPIC_MODEL, via the shared resolver). Never a guess — undefined stays
@@ -165,11 +158,11 @@ export async function agentCommand(
     ...(driver ? { driver } : {}),
   };
   saveBinding(ws.dir, binding);
-  // ADR 261: the permissions floor — plus the profile's lists when --profile (or the deprecated
-  // --role) names one — lands with the binding, so a NON-INTERACTIVE session in this worktree can
-  // work on day one. Until this write, a fresh seat's first Write failed closed with no way to
-  // prompt and presented as a broken tool (the 2026-08-13 ryder incident). Best-effort like hook
-  // install: a permissions hiccup never fails seat creation. Dir-aware — ws.dir is never cwd().
+  // ADR 261: the permissions floor — plus the profile's lists when --profile names one — lands
+  // with the binding, so a NON-INTERACTIVE session in this worktree can work on day one. Until this
+  // write, a fresh seat's first Write failed closed with no way to prompt and presented as a
+  // broken tool (the 2026-08-13 ryder incident). Best-effort like hook install: a permissions
+  // hiccup never fails seat creation. Dir-aware — ws.dir is never cwd().
   try {
     const template = profileName ? loadProfile(ws.dir, profileName) : undefined;
     installSeatPermissions(ws.dir, template);

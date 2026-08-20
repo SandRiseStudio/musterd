@@ -12,11 +12,12 @@ import { BUILTIN_PROFILE_TEMPLATES } from './profiles/builtins.js';
  * declared scopes, permission defaults — which the local adapter PROVISIONS, additively, into THIS
  * machine's harness). This module owns the Universe-2 half: parse + load a profile, and the shipped
  * built-in seed library. A profile carries no authority — the roster role is a team fact in a
- * different domain (ADR 272).
+ * different domain, the label is never derived from a profile, and a profile's `charter` field is
+ * legacy-descriptive: the primer's charter comes from the team role library (ADR 272 inc 2).
  *
- * Phase 1 (this build) acts on `tools.mcp_servers` (provisioned via the harness's own CLI) and
- * `charter` (injected into AGENTS.md). `resource_scopes` are DECLARED-only (coordination, not a
- * sandbox — ADR 026 §1/§4); `tools.permissions` compile into the harness permission layer (ADR 261).
+ * What provisioning acts on: `tools.mcp_servers` (provisioned via the harness's own CLI) and
+ * `tools.permissions` (compiled into the harness permission layer, ADR 261). `resource_scopes` are
+ * DECLARED-only (coordination, not a sandbox — ADR 026 §1/§4).
  *
  * Profile is not (yet) a wire type — these types live in the CLI until the v0.3 governance gate
  * lands.
@@ -159,25 +160,6 @@ export function listProfileNames(dir: string): string[] {
 /** Is this profile name a built-in (vs. a user-authored file)? Used only for UI hints. */
 export function isBuiltin(name: string): boolean {
   return name in BUILTIN_PROFILES;
-}
-
-/**
- * Derive an agent's roster/primer **role label** from the profile that provisions its tools,
- * so the label you see always matches the tooling you got (provisioning-recipe.md §1 "two
- * projections"; ADR 038). Precedence: an **explicit free-text override wins**; otherwise the
- * **chosen profile's name** drives it; otherwise **empty** (generalist / no profile — labelling
- * is opt-in, the ADR 028 default-nothing posture). Pure + side-effect-free so the interactive init
- * flow stays a thin caller (hard-to-test `@clack` prompts kept out of the logic).
- * (Increment 2 of the ADR 272 migration decouples the label from the profile; until then the
- * coupling is deliberate and unchanged.)
- */
-export function resolveRoleLabel(opts: {
-  template?: Profile | undefined;
-  freeText?: string | undefined;
-}): string {
-  const explicit = opts.freeText?.trim();
-  if (explicit) return explicit;
-  return opts.template?.profile ?? '';
 }
 
 function zodMessage(err: unknown): string {

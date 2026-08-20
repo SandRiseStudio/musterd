@@ -133,9 +133,7 @@
     "charter": "Review teammates’ changes for correctness and clarity. Read widely; edit narrowly.\nstatus_update when you start and finish a review; resolve the thread once the change lands.",
     "capacity": null,
     "mcpServers": [],
-    "resourceScopes": [
-      "**"
-    ],
+    "resourceScopes": ["**"],
     "addedPermissions": {
       "allow": [
         "Read",
@@ -172,10 +170,7 @@
         "Bash(cat *)",
         "Bash(musterd *)"
       ],
-      "ask": [
-        "Edit",
-        "Bash"
-      ],
+      "ask": ["Edit", "Bash"],
       "deny": []
     },
     "settings": {
@@ -215,10 +210,7 @@
           "Bash(cat *)",
           "Bash(musterd *)"
         ],
-        "ask": [
-          "Edit",
-          "Bash"
-        ]
+        "ask": ["Edit", "Bash"]
       }
     },
     "manifest": {
@@ -262,10 +254,7 @@
           "Read",
           "Write"
         ],
-        "ask": [
-          "Bash",
-          "Edit"
-        ],
+        "ask": ["Bash", "Edit"],
         "deny": []
       },
       "provisionedAt": "<normalized>"
@@ -278,19 +267,13 @@
       {
         "name": "supabase",
         "command": "npx",
-        "args": [
-          "-y",
-          "@supabase/mcp-server-supabase@latest"
-        ],
+        "args": ["-y", "@supabase/mcp-server-supabase@latest"],
         "env": {
           "SUPABASE_ACCESS_TOKEN": "${SUPABASE_ACCESS_TOKEN}"
         }
       }
     ],
-    "resourceScopes": [
-      "packages/server/**",
-      "packages/protocol/**"
-    ],
+    "resourceScopes": ["packages/server/**", "packages/protocol/**"],
     "addedPermissions": {
       "allow": [
         "Read",
@@ -327,9 +310,7 @@
         "Bash(cat *)",
         "Bash(musterd *)"
       ],
-      "ask": [
-        "Bash"
-      ],
+      "ask": ["Bash"],
       "deny": []
     },
     "settings": {
@@ -369,18 +350,14 @@
           "Bash(cat *)",
           "Bash(musterd *)"
         ],
-        "ask": [
-          "Bash"
-        ]
+        "ask": ["Bash"]
       }
     },
     "manifest": {
       "version": 1,
       "role": "backend",
       "harness": "claude-code",
-      "mcpServers": [
-        "supabase"
-      ],
+      "mcpServers": ["supabase"],
       "permissions": {
         "allow": [
           "Bash(cat *)",
@@ -417,9 +394,7 @@
           "Read",
           "Write"
         ],
-        "ask": [
-          "Bash"
-        ],
+        "ask": ["Bash"],
         "deny": []
       },
       "provisionedAt": "<normalized>"
@@ -432,20 +407,13 @@
       {
         "name": "figma",
         "command": "npx",
-        "args": [
-          "-y",
-          "figma-developer-mcp",
-          "--stdio"
-        ],
+        "args": ["-y", "figma-developer-mcp", "--stdio"],
         "env": {
           "FIGMA_API_KEY": "${FIGMA_API_KEY}"
         }
       }
     ],
-    "resourceScopes": [
-      "packages/web/**",
-      "packages/ui/**"
-    ],
+    "resourceScopes": ["packages/web/**", "packages/ui/**"],
     "addedPermissions": {
       "allow": [
         "Read",
@@ -482,9 +450,7 @@
         "Bash(cat *)",
         "Bash(musterd *)"
       ],
-      "ask": [
-        "Bash"
-      ],
+      "ask": ["Bash"],
       "deny": []
     },
     "settings": {
@@ -524,18 +490,14 @@
           "Bash(cat *)",
           "Bash(musterd *)"
         ],
-        "ask": [
-          "Bash"
-        ]
+        "ask": ["Bash"]
       }
     },
     "manifest": {
       "version": 1,
       "role": "frontend",
       "harness": "claude-code",
-      "mcpServers": [
-        "figma"
-      ],
+      "mcpServers": ["figma"],
       "permissions": {
         "allow": [
           "Bash(cat *)",
@@ -572,9 +534,7 @@
           "Read",
           "Write"
         ],
-        "ask": [
-          "Bash"
-        ],
+        "ask": ["Bash"],
         "deny": []
       },
       "provisionedAt": "<normalized>"
@@ -584,9 +544,7 @@
     "charter": "Read, review, and report — never write. Surface findings through the team acts.\nstatus_update when you start and finish; request_help instead of working around a limit.",
     "capacity": null,
     "mcpServers": [],
-    "resourceScopes": [
-      "**"
-    ],
+    "resourceScopes": ["**"],
     "addedPermissions": {
       "allow": [
         "Read",
@@ -624,11 +582,7 @@
         "Bash(musterd *)"
       ],
       "ask": [],
-      "deny": [
-        "Edit",
-        "Write",
-        "NotebookEdit"
-      ]
+      "deny": ["Edit", "Write", "NotebookEdit"]
     },
     "settings": {
       "permissions": {
@@ -667,11 +621,7 @@
           "Bash(cat *)",
           "Bash(musterd *)"
         ],
-        "deny": [
-          "Edit",
-          "Write",
-          "NotebookEdit"
-        ]
+        "deny": ["Edit", "Write", "NotebookEdit"]
       }
     },
     "manifest": {
@@ -716,11 +666,7 @@
           "Write"
         ],
         "ask": [],
-        "deny": [
-          "Edit",
-          "NotebookEdit",
-          "Write"
-        ]
+        "deny": ["Edit", "NotebookEdit", "Write"]
       },
       "provisionedAt": "<normalized>"
     }
@@ -729,10 +675,7 @@
     "charter": "Own the docs. Keep them accurate and in sync with the code; one fact, one home.\nstatus_update at task start/finish; resolve threads you finish.",
     "capacity": null,
     "mcpServers": [],
-    "resourceScopes": [
-      "docs/**",
-      "**/*.md"
-    ],
+    "resourceScopes": ["docs/**", "**/*.md"],
     "addedPermissions": {
       "allow": [
         "Read",
@@ -769,9 +712,7 @@
         "Bash(cat *)",
         "Bash(musterd *)"
       ],
-      "ask": [
-        "Bash"
-      ],
+      "ask": ["Bash"],
       "deny": []
     },
     "settings": {
@@ -811,9 +752,7 @@
           "Bash(cat *)",
           "Bash(musterd *)"
         ],
-        "ask": [
-          "Bash"
-        ]
+        "ask": ["Bash"]
       }
     },
     "manifest": {
@@ -857,9 +796,7 @@
           "Read",
           "Write"
         ],
-        "ask": [
-          "Bash"
-        ],
+        "ask": ["Bash"],
         "deny": []
       },
       "provisionedAt": "<normalized>"
