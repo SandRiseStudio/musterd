@@ -218,6 +218,9 @@ vi.mock('../config.js', () => ({
     cfg.knownIdentities.push(si);
   }),
   findBinding: vi.fn(() => h.folderBinding),
+  // The strict identity read (#928 fallout split) resolves the same fixture in these tests — the
+  // legacy-refusal path has its own coverage in cli.e2e.test.ts / config.test.ts.
+  requireUsableBinding: vi.fn(() => h.folderBinding),
   findWorkspaceSpec: vi.fn(() => h.folderSpec),
   wsBase: vi.fn((server: string) => server.replace(/^http/, 'ws')),
 }));

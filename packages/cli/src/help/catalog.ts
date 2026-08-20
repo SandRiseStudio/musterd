@@ -140,7 +140,7 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'harness',
-    signature: 'configure | status [--json]',
+    signature: 'configure [--select <ids> [--yes]] | status [--json]',
     summary: 'choose which harnesses launch this worktree — and inspect the wiring',
     group: 'setup',
     detail:
@@ -152,9 +152,12 @@ export const CATALOG: readonly CommandEntry[] = [
       'desired, availability, each managed fragment’s observed state and ownership, pending ' +
       'journal/lock state, and the repair to run; exit 0 only when every desired fragment is usable ' +
       'and every deselected contribution is released (a selected-but-uninstalled harness is ' +
-      '`pending`, which is healthy).',
+      '`pending`, which is healthy). `configure --select <ids> --yes` is the headless form: naming the ' +
+      'complete set on the command line is the confirmation, so scripts and service agents can ' +
+      'convert a pre-ADR-281 worktree non-interactively.',
     examples: [
       'musterd harness configure',
+      'musterd harness configure --select claude-code,musterd --yes',
       'musterd harness status',
       'musterd harness status --json',
     ],

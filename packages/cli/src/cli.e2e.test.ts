@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
@@ -496,6 +496,34 @@ describe('resolve() identity alignment with the MCP adapter (ADR 018)', () => {
     expect(r.team).toBe('lab');
     expect(r.identity.name).toBe('Ui');
     expect(r.identity.key).toBe('mskd_ui');
+  });
+
+  it('a pre-ADR-281 binding REFUSES identity resolution — never falls through to the global config', () => {
+    // The other half of the #928-fallout split: advisory reads warn and continue, but a verb that
+    // would act AS this workspace's identity must refuse — falling through to the vault would have
+    // the broken workspace silently act as a different member.
+    writeFileSync(
+      nickConfig,
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        current: 'lab',
+        identities: { lab: { name: 'Api', key: 'mskd_api', surface: 'cli' } },
+      }),
+    );
+    const legacyPath = join(dir, '.musterd', 'binding.json');
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        server: process.env['MUSTERD_SERVER'],
+        team: 'lab',
+        surface: 'claude-code',
+        agent_key: 'mskd_ui',
+        claim: { mode: 'seat', name: 'Ui' },
+      }),
+    );
+    process.env['MUSTERD_BINDING'] = legacyPath;
+    expect(() => resolve({})).toThrow(/musterd harness configure/);
   });
 
   it('MUSTERD_* env overrides the binding (same precedence as the MCP adapter)', () => {

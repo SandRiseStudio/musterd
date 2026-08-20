@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveBinding, serverProvenance } from './config.js';
 
 /**
@@ -95,5 +95,35 @@ describe('serverProvenance', () => {
     expect(p.server).toBe('http://127.0.0.1:4899');
     expect(p.source).toBe('machine default');
     expect(p.disagreeingBinding).toEqual({ server: 'http://127.0.0.1:4849', team: 'dawn' });
+  });
+
+  it('survives a pre-ADR-281 binding — the read is advisory, so `stream ensure` keeps ticking (#928 fallout)', () => {
+    // The streamwatch supervisor died every 60s on exactly this: serverProvenance's
+    // disagreeing-binding diagnostic tripping the legacy-binding throw for a verb that needs no
+    // workspace identity at all.
+    writeConfig('http://127.0.0.1:4899');
+    const workdir = join(dir, 'legacy-ws');
+    mkdirSync(join(workdir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(workdir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        server: 'http://127.0.0.1:4849',
+        team: 'dawn',
+        surface: 'claude-code',
+        agent_key: 'mskey_x',
+        claim: { mode: 'seat', name: 'Ada' },
+      }),
+    );
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const p = serverProvenance(workdir);
+      expect(p.server).toBe('http://127.0.0.1:4899');
+      // The unusable binding cannot supply the disagreement diagnostic — that is the honest read.
+      expect(p.disagreeingBinding).toBeUndefined();
+      // …but the repair was said out loud, once.
+      expect(spy.mock.calls.join('\n')).toContain('musterd harness configure');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
