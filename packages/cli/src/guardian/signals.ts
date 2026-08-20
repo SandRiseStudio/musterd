@@ -57,7 +57,13 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
   let bootedAt = now; // no reachable daemon / no booted_at → nothing is "since boot"
   // One failed request is a transport observation, not an outage. Confirm it inside this tick so
   // transient handovers do not enter the daemon_down classifier (ADR 274).
+  // Kept, never swallowed: the reason the LAST attempt failed, and how many were made. The bare
+  // `catch {}` that used to stand here is why 22 daemon_down raises were byte-identical and none
+  // could be adjudicated — the same defect as Chrome's stderr discarded by `stdio: 'ignore'` (#894).
+  let probe: GuardianSignals['healthProbe'];
+  let attempts = 0;
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    attempts = attempt + 1;
     try {
       const h = await d.fetchHealth();
       bootedAt = h.booted_at ?? now;
@@ -67,8 +73,16 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
         schemaOk: d.expected.schema === null || h.schema === d.expected.schema,
         dbPathExpected: h.db === d.expected.dbPath,
       };
+      probe = undefined;
       break;
-    } catch {
+    } catch (err) {
+      // One line, bounded: this rides an alert body, and an unbounded stack would bury the reason.
+      probe = {
+        attempts,
+        lastError: (err instanceof Error ? err.message : String(err))
+          .replace(/\s+/g, ' ')
+          .slice(0, 200),
+      };
       if (attempt < 2) await (d.sleep?.(1_000) ?? Promise.resolve());
     }
   }
@@ -96,6 +110,7 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
   return {
     now,
     health,
+    ...(probe !== undefined ? { healthProbe: probe } : {}),
     handover,
     launchd,
     publisherLog: { freshFailure },

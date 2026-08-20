@@ -42,7 +42,9 @@ describe('classify (guardian spec §4)', () => {
 
   it('unreachable health + nonzero last exit, no recent refresh, is daemon_down', () => {
     const out = classify({ ...healthy, health: null, launchd: { lastExit: 1, runs: 3 } });
-    expect(out).toEqual([{ class: 'daemon_down' }]);
+    // Matched on class rather than whole-object equality: the incident now also carries `evidence`,
+    // and this assertion is about WHICH class fires, not about the incident being empty.
+    expect(out.map((i) => i.class)).toEqual(['daemon_down']);
   });
 
   it('a reachable healthy daemon never classifies from stale evidence — the 8-day-old-log ghost', () => {
@@ -103,5 +105,46 @@ describe('DEFAULT_TIERS (spec §4 shipped defaults)', () => {
       error_rate: 'alert',
       presence_churn: 'alert',
     });
+  });
+});
+
+/**
+ * The two `daemon_down` branches describe genuinely different situations and used to produce the
+ * identical raise. The second one — unreachable while launchd reports a clean exit and no restart —
+ * is the shape a daemon that is merely TOO BUSY TO ANSWER presents, and it is what actually happened
+ * on 2026-08-19: booted_at predated the raise by 69 minutes and never moved, so the daemon never
+ * died. `hydrate.ts` already records the mechanism ("time any handler holds is time /health waits …
+ * Four of those alarms were false for exactly this reason"); the raise just never said so.
+ */
+describe('daemon_down says which kind of down, and what the probe saw', () => {
+  const unreachable = {
+    ...healthy,
+    health: null,
+    healthProbe: { attempts: 3, lastError: 'The operation timed out' },
+  };
+
+  it('a nonzero last exit names the exit code and the probe error', () => {
+    const out = classify({ ...unreachable, launchd: { lastExit: 1, runs: 3 } });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.class).toBe('daemon_down');
+    expect(out[0]!.evidence).toContain('exit 1');
+    expect(out[0]!.evidence).toContain('timed out');
+  });
+
+  it('a clean exit with no restart says the daemon may be alive but unanswering', () => {
+    const out = classify({ ...unreachable, launchd: { lastExit: 0, runs: 1 } });
+    expect(out[0]!.evidence).toMatch(/never restarted|did not restart|still running/i);
+    expect(out[0]!.evidence).toContain('3 attempts');
+  });
+
+  it('the two branches do not read alike — the whole point', () => {
+    const a = classify({ ...unreachable, launchd: { lastExit: 1, runs: 3 } })[0]!.evidence;
+    const b = classify({ ...unreachable, launchd: { lastExit: 0, runs: 1 } })[0]!.evidence;
+    expect(a).not.toBe(b);
+  });
+
+  it('survives a probe that recorded nothing — evidence is still present, never undefined', () => {
+    const out = classify({ ...healthy, health: null, launchd: { lastExit: 1, runs: 3 } });
+    expect(out[0]!.evidence).toBeTruthy();
   });
 });
