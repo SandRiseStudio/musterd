@@ -3718,15 +3718,21 @@ function drawInteriorLight(
     warmPool(ctx, { x: b.x, y: b.y + 24 * fit.scale }, 52 * fit.scale, 0.95, '255, 200, 120', 0.2 * night);
   }
 
-  // A personal glow travelling with each present (online) member — just enough to keep the character work
-  // (faces, cheeks, the round body) from dissolving into the veil away from a lamp. Kept subtle on purpose.
+  // A personal glow travelling with each present (online) member, in two layers: a wide soft halo that
+  // lights the desk and floor AROUND them (nick, 2026-08-19: the first cut kept faces legible but lit no
+  // space — the pools read as face-paint, not lamps), and a brighter core so the character work (faces,
+  // cheeks, the round body) never dissolves into the veil.
   for (const [name, pose] of poses) {
     const node = byName.get(name);
     if (!node || node.presence !== 'online') continue;
     const b = project(pose.lx, pose.ly, fit);
     const scale = pose.small ? 0.7 : 1;
-    // centred a little up the body so it warms the face/torso, not just the floor at the feet
-    warmPool(ctx, { x: b.x, y: b.y - 30 * fit.scale * scale }, 48 * fit.scale * scale, 0.9, '255, 214, 158', 0.22 * night);
+    // the halo sits lower (toward the desk surface/floor) and flatter, like light landing on things.
+    // Gentle on purpose: pools are additive, so two neighbours overlap into a wash if the halo runs hot
+    // (the first cut at 0.19 did exactly that — nick: "now it looks too bright").
+    warmPool(ctx, { x: b.x, y: b.y - 10 * fit.scale * scale }, 88 * fit.scale * scale, 0.72, '255, 206, 140', 0.11 * night);
+    // the core is centred a little up the body so it warms the face/torso, not just the feet
+    warmPool(ctx, { x: b.x, y: b.y - 30 * fit.scale * scale }, 52 * fit.scale * scale, 0.9, '255, 214, 158', 0.25 * night);
   }
 
   ctx.restore();
