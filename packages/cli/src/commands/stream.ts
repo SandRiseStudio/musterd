@@ -17,7 +17,10 @@
  * failure modes, different preconditions, so a different verb.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { makeEnvelope } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import type { Parsed } from '../args.js';
 import {
   DEFAULT_APP,
@@ -35,12 +38,20 @@ import {
   type Check,
   type Exec,
 } from '../broadcast/hosted.js';
-import { loadConfig, serverProvenance, type ServerProvenance } from '../config.js';
+import {
+  FLAP_MAX,
+  FLAP_WINDOW_MS,
+  decideEnsure,
+  readStreamState,
+  writeStreamState,
+} from '../broadcast/streamState.js';
+import { HttpClient } from '../client.js';
+import { configPath, loadConfig, serverProvenance, type ServerProvenance } from '../config.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 
 const USAGE =
-  'usage: musterd stream <doctor|build|start|stop|status> [--app <name>] [--team <slug>] [--json]';
+  'usage: musterd stream <doctor|build|start|stop|status|ensure> [--app <name>] [--team <slug>] [--once] [--reason <text>] [--json]';
 
 export interface StreamDeps {
   exec?: Exec;
@@ -50,6 +61,16 @@ export interface StreamDeps {
   server?: string;
   out?: (s: string) => void;
   err?: (s: string) => void;
+  /** The desired-state file (ADR 293). Defaults to `~/.musterd/stream/state.json`. */
+  statePath?: string;
+  now?: () => number;
+  /** Who is running this verb — the CLI's resolved seat, recorded as stop/start provenance. */
+  who?: () => string;
+  /** Run `fly machine run` with these args; returns the exit code. Injected so tests never
+   * reach the real Fly API (the default inherits stdio for the interactive `start`). */
+  launch?: (flyArgs: string[]) => number;
+  /** Raise the stand-down ask to the team (streamwatch service seat; ADR 293). */
+  sendAsk?: (body: string) => Promise<void>;
 }
 
 /** The daemon's loopback origin — the upgrade probe aims here and spoofs only the `Host` header. */
@@ -76,6 +97,12 @@ export async function streamCommand(parsed: Parsed, deps: StreamDeps = {}): Prom
   const err = deps.err ?? ((s: string) => void process.stderr.write(s));
   const app = typeof parsed.flags['app'] === 'string' ? parsed.flags['app'] : DEFAULT_APP;
   const repoRoot = findRepoRoot(cwd);
+  const statePath = deps.statePath ?? join(dirname(configPath()), 'stream', 'state.json');
+  const now = deps.now ?? (() => Date.now());
+  const who = deps.who ?? currentSeatName;
+  const launch = deps.launch ?? realLaunch;
+  const sendAsk = deps.sendAsk ?? defaultSendAsk;
+  const sup = { statePath, now, who, launch, sendAsk };
 
   switch (sub) {
     case 'doctor':
@@ -94,11 +121,13 @@ export async function streamCommand(parsed: Parsed, deps: StreamDeps = {}): Prom
     case 'build':
       return buildVerb({ exec, app, repoRoot, out });
     case 'start':
-      return startVerb({ exec, app, repoRoot, parsed, out, err });
+      return startVerb({ exec, app, repoRoot, parsed, out, err, ...sup });
     case 'stop':
-      return stopVerb({ exec, app, out });
+      return stopVerb({ exec, app, parsed, out, ...sup });
     case 'status':
-      return statusVerb({ exec, app, out });
+      return statusVerb({ exec, app, out, ...sup });
+    case 'ensure':
+      return ensureVerb({ exec, app, repoRoot, parsed, out, err, ...sup });
     default:
       throw new CliError(`unknown subcommand \`${sub}\`\n${USAGE}`, 2);
   }
@@ -242,23 +271,55 @@ async function buildVerb(a: {
 
 // ── start ────────────────────────────────────────────────────────────────────────────────────────
 
-async function startVerb(a: {
-  exec: Exec;
+/** The injected supervisor plumbing every desired-state verb shares (ADR 293). */
+interface Sup {
+  statePath: string;
+  now: () => number;
+  who: () => string;
+  launch: (flyArgs: string[]) => number;
+  sendAsk: (body: string) => Promise<void>;
+}
+
+/** The `fly machine run` invocation, shared by `start` and the supervisor's relaunch. */
+function launchArgs(a: {
   app: string;
-  repoRoot: string | null;
-  parsed: Parsed;
-  out: (s: string) => void;
-  err: (s: string) => void;
-}): Promise<number> {
+  digest: string;
+  addr: string;
+  team: string;
+  extra?: string | undefined;
+}): string[] {
+  return [
+    'machine',
+    'run',
+    `registry.fly.io/${a.app}:capture@${a.digest}`,
+    '-a',
+    a.app,
+    '--vm-size',
+    VM_SIZE,
+    '--region',
+    REGION,
+    // Machine lifetime = stream lifetime: `--rm` destroys it when the process exits, so `stop`,
+    // the ADR 159 stall watchdog and `--duration` all end the billing too. `fly deploy` is
+    // deliberately not used here — it silently creates a standby machine as well.
+    '--rm',
+    '--restart',
+    'no',
+    '--env',
+    `MUSTERD_AIR_ADDR=${a.addr}`,
+    '--env',
+    `MUSTERD_TEAM=${a.team}`,
+    ...(a.extra ? ['--env', `BROADCAST_ARGS=${a.extra}`] : []),
+  ];
+}
+
+/** Resolve the launch preconditions (image digest + tailnet address) or throw the doctor hint. */
+function launchPreconditions(a: { exec: Exec; repoRoot: string | null }): {
+  digest: string;
+  addr: string;
+} {
   const root = requireRepo(a.repoRoot);
   const digest = readDigest(root);
   if (!digest) throw new CliError('no image recorded — run `musterd stream build` first', 2);
-
-  const live = startedMachines(machineListJson(a.exec, a.app));
-  if (live.length > 0) {
-    throw new CliError(`already live (machine ${live[0]}) — \`musterd stream stop\` first`, 1);
-  }
-
   // The address is discovered, never demanded. Requiring MUSTERD_AIR_ADDR meant every launch began
   // by looking up a name the machine already knows.
   const addr = tailnetAddr(a.exec);
@@ -268,6 +329,24 @@ async function startVerb(a: {
       2,
     );
   }
+  return { digest, addr };
+}
+
+async function startVerb(
+  a: {
+    exec: Exec;
+    app: string;
+    repoRoot: string | null;
+    parsed: Parsed;
+    out: (s: string) => void;
+    err: (s: string) => void;
+  } & Sup,
+): Promise<number> {
+  const live = startedMachines(machineListJson(a.exec, a.app));
+  if (live.length > 0) {
+    throw new CliError(`already live (machine ${live[0]}) — \`musterd stream stop\` first`, 1);
+  }
+  const { digest, addr } = launchPreconditions(a);
   const team =
     (typeof a.parsed.flags['team'] === 'string' ? a.parsed.flags['team'] : undefined) ??
     process.env['MUSTERD_TEAM'] ??
@@ -277,40 +356,43 @@ async function startVerb(a: {
       ? a.parsed.flags['args']
       : process.env['BROADCAST_ARGS'];
 
+  // Intent is recorded BEFORE the launch (ADR 293): a start that fails at `fly` still says "this
+  // stream should be live", and the supervisor's next tick retries it inside the flap budget. The
+  // exception is `--once` — a deliberately unsupervised run records `stopped` so nothing ever
+  // resurrects it (time-boxed `--duration` streams ride this).
+  const once = a.parsed.flags['once'] === true;
+  writeStreamState(
+    a.statePath,
+    once
+      ? { desired: 'stopped', by: a.who(), at: a.now(), reason: '--once run', team, restarts: [] }
+      : { desired: 'live', by: a.who(), at: a.now(), team, restarts: [] },
+  );
+
   a.out(
     `${theme.accent('stream')} ${theme.meta(`${team} · via ${addr} · ${VM_SIZE} ${REGION}`)}\n`,
   );
-  const r = spawnSync(
-    'fly',
-    [
-      'machine',
-      'run',
-      `registry.fly.io/${a.app}:capture@${digest}`,
-      '-a',
-      a.app,
-      '--vm-size',
-      VM_SIZE,
-      '--region',
-      REGION,
-      // Machine lifetime = stream lifetime: `--rm` destroys it when the process exits, so `stop`,
-      // the ADR 159 stall watchdog and `--duration` all end the billing too. `fly deploy` is
-      // deliberately not used here — it silently creates a standby machine as well.
-      '--rm',
-      '--restart',
-      'no',
-      '--env',
-      `MUSTERD_AIR_ADDR=${addr}`,
-      '--env',
-      `MUSTERD_TEAM=${team}`,
-      ...(extra ? ['--env', `BROADCAST_ARGS=${extra}`] : []),
-    ],
-    { encoding: 'utf8', stdio: 'inherit' },
-  );
-  if (r.status !== 0) throw new CliError('fly machine run failed — see the output above', 1);
+  const code = a.launch(launchArgs({ app: a.app, digest, addr, team, extra }));
+  if (code !== 0) throw new CliError('fly machine run failed — see the output above', 1);
   a.out(
     `${theme.ok('◉ live')} ${theme.meta(`watch: fly logs -a ${a.app} · end: musterd stream stop`)}\n`,
   );
   return 0;
+}
+
+/** The real launcher: interactive stdio so `start`'s output streams to the operator. */
+function realLaunch(flyArgs: string[]): number {
+  const r = spawnSync('fly', flyArgs, { encoding: 'utf8', stdio: 'inherit' });
+  return r.status ?? 1;
+}
+
+/** The CLI's resolved seat for the current team — the `by` on start/stop provenance. */
+function currentSeatName(): string {
+  try {
+    const config = loadConfig();
+    return (config.current && config.identities[config.current]?.name) || 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 /** This machine's MagicDNS name, which is what the container puts in `Host`. */
@@ -328,7 +410,23 @@ function machineListJson(exec: Exec, app: string): string {
   return r.code === 0 ? r.stdout : '[]';
 }
 
-function stopVerb(a: { exec: Exec; app: string; out: (s: string) => void }): number {
+function stopVerb(
+  a: { exec: Exec; app: string; parsed: Parsed; out: (s: string) => void } & Sup,
+): number {
+  // The stop record is written FIRST, whatever the machine list says: even mid-race with the
+  // supervisor, a deliberate stop can never be resurrected — and a stop typed at an already-dead
+  // stream (a crash the human noticed first) still records "this silence is intentional".
+  const reason =
+    typeof a.parsed.flags['reason'] === 'string' ? a.parsed.flags['reason'] : undefined;
+  const prev = readStreamState(a.statePath);
+  writeStreamState(a.statePath, {
+    desired: 'stopped',
+    by: a.who(),
+    at: a.now(),
+    ...(reason ? { reason } : {}),
+    ...(prev?.team ? { team: prev.team } : {}),
+    restarts: [],
+  });
   const live = startedMachines(machineListJson(a.exec, a.app));
   const machine = live[0];
   if (!machine) {
@@ -353,14 +451,114 @@ function stopVerb(a: { exec: Exec; app: string; out: (s: string) => void }): num
   return 0;
 }
 
-function statusVerb(a: { exec: Exec; app: string; out: (s: string) => void }): number {
+function statusVerb(a: { exec: Exec; app: string; out: (s: string) => void } & Sup): number {
   const live = startedMachines(machineListJson(a.exec, a.app));
+  const state = readStreamState(a.statePath);
   if (live.length === 0) {
-    a.out(theme.meta('○ not live') + '\n');
+    // Silence has three different meanings, and the bare "not live" hid all of them.
+    if (state?.standDownAt !== undefined) {
+      a.out(
+        `${theme.err('⚠ stood down')} ${theme.meta(
+          `after ${FLAP_MAX} restarts in ${FLAP_WINDOW_MS / 60_000}min — \`musterd stream start\` re-arms`,
+        )}\n`,
+      );
+    } else if (state?.desired === 'live') {
+      a.out(
+        `${theme.warn('○ not live')} ${theme.meta(
+          'but desired live — a crash; the supervisor restarts it within its tick',
+        )}\n`,
+      );
+    } else if (state?.desired === 'stopped' && state.by) {
+      const when = new Date(state.at).toLocaleTimeString();
+      const why = state.reason ? ` · "${state.reason}"` : '';
+      a.out(`${theme.meta(`○ stopped by ${state.by} · ${when}${why}`)}\n`);
+    } else {
+      a.out(theme.meta('○ not live') + '\n');
+    }
     return 0;
   }
   a.out(`${theme.ok('◉ live')} ${theme.meta(`machine ${live.join(', ')} · ${a.app}`)}\n`);
   return 0;
+}
+
+// ── ensure: the supervisor's reconcile tick (ADR 293) ───────────────────────────────────────────
+
+/**
+ * Actual vs desired, once: a machine gone while the state file says live is a crash — relaunch it
+ * inside the flap budget, stand down (and ask a human) at the cap. Deliberate stops and `--once`
+ * runs are `desired: stopped` and never touched. Silent on the healthy paths so the supervisor log
+ * holds findings only, like the sweep's.
+ */
+async function ensureVerb(
+  a: {
+    exec: Exec;
+    app: string;
+    repoRoot: string | null;
+    parsed: Parsed;
+    out: (s: string) => void;
+    err: (s: string) => void;
+  } & Sup,
+): Promise<number> {
+  const state = readStreamState(a.statePath);
+  const liveCount = startedMachines(machineListJson(a.exec, a.app)).length;
+  const d = decideEnsure({ state, liveCount, now: a.now() });
+  switch (d.action) {
+    case 'noop':
+      return 0;
+    case 'stand_down': {
+      writeStreamState(a.statePath, d.state);
+      a.err(`${theme.err('⚠')} ${d.note}\n`);
+      try {
+        await a.sendAsk(
+          `streamwatch: the broadcast crashed ${FLAP_MAX}× in ${FLAP_WINDOW_MS / 60_000}min and the ` +
+            `supervisor stood down — \`musterd stream doctor\` then \`musterd stream start\` to re-arm ` +
+            `(restarts: ${d.state.restarts.map((t) => new Date(t).toLocaleTimeString()).join(', ')})`,
+        );
+      } catch (e) {
+        a.err(
+          theme.meta(`stand-down ask could not be sent (${(e as Error).message}) — logged only\n`),
+        );
+      }
+      return 0;
+    }
+    case 'restart': {
+      // The ledger is stamped BEFORE the launch: a launch that fails still spent an attempt, so a
+      // hard-broken stream converges on stand-down instead of retrying forever.
+      writeStreamState(a.statePath, d.state);
+      a.out(`${theme.warn('↻')} ${d.note}\n`);
+      const { digest, addr } = launchPreconditions(a);
+      const team = d.state.team ?? process.env['MUSTERD_TEAM'] ?? 'revive';
+      const code = a.launch(launchArgs({ app: a.app, digest, addr, team }));
+      if (code !== 0)
+        a.err(`${theme.err('✗')} relaunch failed (fly exit ${code}) — next tick retries\n`);
+      else a.out(`${theme.ok('◉ live again')} ${theme.meta(`machine relaunched · ${a.app}`)}\n`);
+      return 0;
+    }
+  }
+}
+
+/** The stand-down ask, sent as the `streamwatch` service seat (minted at `service install --stream`,
+ * the guardian pattern). Unprovisioned → throw; the caller logs and degrades (ADR 232's shape). */
+async function defaultSendAsk(body: string): Promise<void> {
+  const tokenFile = join(dirname(configPath()), 'stream', 'seat-token');
+  const token = readFileSync(tokenFile, 'utf8').trim();
+  const config = loadConfig();
+  const team = config.current;
+  if (!token || !team)
+    throw new Error('no streamwatch seat token/team — run `musterd service install --stream`');
+  const http = new HttpClient({ server: config.server, key: token, surface: 'cli' });
+  await http.send(
+    team,
+    makeEnvelope({
+      id: ulid(),
+      team,
+      from: 'streamwatch',
+      to: { kind: 'team' },
+      act: 'ask',
+      body,
+      meta: { species: 'consult', tier: 'standard' },
+    }),
+  );
 }
 
 function requireRepo(repoRoot: string | null): string {

@@ -57,6 +57,9 @@ export const SWEEP_LABEL = 'studio.sandrise.musterd-sweep';
  *  which it watches. */
 export const GUARDIAN_LABEL = 'studio.sandrise.musterd-guardian';
 
+/** Stream supervisor (ADR 293) — reconciles the broadcast machine against the desired-state file. */
+export const STREAMWATCH_LABEL = 'studio.sandrise.musterd-streamwatch';
+
 /** Is process lifecycle management implemented for this platform yet? */
 export function serviceSupported(platform: NodeJS.Platform): boolean {
   return platform === 'darwin';
@@ -341,6 +344,26 @@ export function buildSweepPlist(
       o.scriptPath,
       ...o.scriptArgs,
     ],
+    workingDir: o.workingDir,
+    stdoutPath: o.stdoutPath,
+    stderrPath: o.stderrPath,
+    path: o.path,
+    runAtLoad: true,
+    startInterval: o.intervalSeconds,
+  });
+}
+
+/**
+ * The ADR 293 stream-supervisor plist. StartInterval like the sweep — one `stream ensure`
+ * reconcile pass (~1s: read a JSON file, one `fly machine list`) and exit; a KeepAlive would
+ * spin. The program is the CLI verb itself, the auto-refresher's shape.
+ */
+export function buildStreamwatchPlist(
+  o: Omit<PlistOpts, 'serveArgs'> & { intervalSeconds: number },
+): string {
+  return renderPlist({
+    label: o.label,
+    programArguments: [o.node, o.binJs, 'stream', 'ensure'],
     workingDir: o.workingDir,
     stdoutPath: o.stdoutPath,
     stderrPath: o.stderrPath,

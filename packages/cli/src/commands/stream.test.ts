@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseArgs } from '../args.js';
 import type { Exec, ExecResult } from '../broadcast/hosted.js';
+import { readStreamState, writeStreamState } from '../broadcast/streamState.js';
 import { CliError } from '../errors.js';
 import { streamCommand, type StreamDeps } from './stream.js';
 
@@ -56,6 +57,11 @@ describe('musterd stream', () => {
       server: 'http://127.0.0.1:4849',
       out: (s) => void out.push(s),
       err: (s) => void out.push(s),
+      // Hermetic supervisor plumbing: no test may touch ~/.musterd, the real fly, or the daemon.
+      statePath: join(repo, 'stream-state.json'),
+      who: () => 'miley',
+      launch: () => 0,
+      sendAsk: async () => {},
     };
   });
 
@@ -131,12 +137,12 @@ describe('musterd stream', () => {
   });
 
   describe('stop / status', () => {
-    it('is a no-op when nothing is live', async () => {
+    it('stopping nothing still records the intent, and status reports it', async () => {
       expect(await run(['stop'])).toBe(0);
       expect(out.join('')).toContain('nothing live');
       out.length = 0;
       expect(await run(['status'])).toBe(0);
-      expect(out.join('')).toContain('not live');
+      expect(out.join('')).toContain('stopped by miley');
     });
 
     it('stops the started machine with SIGINT so ffmpeg finalizes', async () => {
@@ -168,6 +174,175 @@ describe('musterd stream', () => {
       expect(await run(['status', '--app', 'other-app'], { exec })).toBe(0);
       expect(out.join('')).toContain('abc123');
       expect(out.join('')).toContain('other-app');
+    });
+  });
+
+  // ── desired state + supervisor (ADR 293) ──────────────────────────────────────────────────────
+  describe('desired state', () => {
+    const NOW = 1_787_000_000_000;
+    let statePath: string;
+    let launches: number;
+    let asks: string[];
+
+    beforeEach(() => {
+      statePath = join(repo, 'stream-state.json');
+      launches = 0;
+      asks = [];
+    });
+
+    const sup = (over: Partial<StreamDeps> = {}): Partial<StreamDeps> => ({
+      statePath,
+      now: () => NOW,
+      who: () => 'miley',
+      launch: () => ((launches += 1), 0),
+      sendAsk: async (body: string) => void asks.push(body),
+      ...over,
+    });
+
+    it('start records desired live with provenance before launching', async () => {
+      withImage();
+      expect(await run(['start'], sup())).toBe(0);
+      expect(launches).toBe(1);
+      const st = readStreamState(statePath);
+      expect(st).toMatchObject({
+        desired: 'live',
+        by: 'miley',
+        at: NOW,
+        team: 'revive',
+        restarts: [],
+      });
+    });
+
+    it('start --once records stopped — a deliberately unsupervised run is never resurrected', async () => {
+      withImage();
+      expect(await run(['start', '--once'], sup())).toBe(0);
+      expect(launches).toBe(1);
+      expect(readStreamState(statePath)).toMatchObject({
+        desired: 'stopped',
+        reason: '--once run',
+      });
+    });
+
+    it('start clears a stand-down — the human re-arming IS the human decision', async () => {
+      withImage();
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 1,
+        restarts: [NOW - 3000, NOW - 2000, NOW - 1000],
+        standDownAt: NOW - 500,
+      });
+      await run(['start'], sup());
+      const st = readStreamState(statePath)!;
+      expect(st.standDownAt).toBeUndefined();
+      expect(st.restarts).toEqual([]);
+    });
+
+    it('stop records who and why, even when nothing is live', async () => {
+      expect(await run(['stop', '--reason', 'nick asked'], sup())).toBe(0);
+      expect(readStreamState(statePath)).toMatchObject({
+        desired: 'stopped',
+        by: 'miley',
+        reason: 'nick asked',
+      });
+    });
+
+    it('status surfaces stop provenance instead of a bare "not live"', async () => {
+      writeStreamState(statePath, {
+        desired: 'stopped',
+        by: 'miley',
+        at: NOW,
+        reason: 'nick asked',
+        restarts: [],
+      });
+      await run(['status'], sup());
+      expect(out.join('')).toContain('miley');
+      expect(out.join('')).toContain('nick asked');
+    });
+
+    it('status calls out a crash (desired live, no machine) and a stand-down', async () => {
+      writeStreamState(statePath, { desired: 'live', by: 'miley', at: NOW, restarts: [] });
+      await run(['status'], sup());
+      expect(out.join('')).toMatch(/desired live/i);
+      out.length = 0;
+      writeStreamState(statePath, { desired: 'live', at: NOW, restarts: [], standDownAt: NOW });
+      await run(['status'], sup());
+      expect(out.join('')).toMatch(/stood down/i);
+    });
+  });
+
+  describe('ensure', () => {
+    const NOW = 1_787_000_000_000;
+    let statePath: string;
+    let launches: number;
+    let asks: string[];
+
+    beforeEach(() => {
+      statePath = join(repo, 'stream-state.json');
+      launches = 0;
+      asks = [];
+    });
+
+    const sup = (over: Partial<StreamDeps> = {}): Partial<StreamDeps> => ({
+      statePath,
+      now: () => NOW,
+      who: () => 'miley',
+      launch: () => ((launches += 1), 0),
+      sendAsk: async (body: string) => void asks.push(body),
+      ...over,
+    });
+
+    it('does nothing when desired is stopped or state is absent', async () => {
+      expect(await run(['ensure'], sup())).toBe(0);
+      writeStreamState(statePath, { desired: 'stopped', by: 'miley', at: NOW, restarts: [] });
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(launches).toBe(0);
+      expect(asks).toEqual([]);
+    });
+
+    it('does nothing while the machine is up', async () => {
+      withImage();
+      writeStreamState(statePath, { desired: 'live', at: NOW - 60_000, restarts: [] });
+      const exec = greenExec({
+        'fly machine list': ok(JSON.stringify([{ id: 'abc123', state: 'started' }])),
+      });
+      expect(await run(['ensure'], sup({ exec }))).toBe(0);
+      expect(launches).toBe(0);
+    });
+
+    it('restarts a crashed stream and stamps the ledger', async () => {
+      withImage();
+      writeStreamState(statePath, {
+        desired: 'live',
+        team: 'revive',
+        at: NOW - 60_000,
+        restarts: [],
+      });
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(launches).toBe(1);
+      expect(readStreamState(statePath)!.restarts).toEqual([NOW]);
+    });
+
+    it('at the flap cap: stands down, asks ONCE, and never launches', async () => {
+      withImage();
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [NOW - 20 * 60_000, NOW - 10 * 60_000, NOW - 5 * 60_000],
+      });
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(launches).toBe(0);
+      expect(asks.length).toBe(1);
+      expect(readStreamState(statePath)!.standDownAt).toBe(NOW);
+      // the next tick is quiet — the ask already stands
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(asks.length).toBe(1);
+    });
+
+    it('a failed relaunch still spends the budget (the next ticks converge on stand-down)', async () => {
+      withImage();
+      writeStreamState(statePath, { desired: 'live', at: NOW - 60_000, restarts: [] });
+      expect(await run(['ensure'], sup({ launch: () => 1 }))).toBe(0);
+      expect(readStreamState(statePath)!.restarts).toEqual([NOW]);
     });
   });
 });
