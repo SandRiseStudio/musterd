@@ -3504,12 +3504,19 @@ export async function handleHttp(
         // cannot derive it: a full-looking page may sit on top of thousands the bound cut off, and
         // ADR 287's rule — the cursor never passes what you did not see — has to hold across the
         // fetch boundary, not just inside a client's own slicing.
+        //
+        // Counted from the SAME floor `listInbox` selected on — the later of the cursor and `since`,
+        // exactly as the unreadOnly branch does. A paging caller deliberately does not advance its
+        // cursor mid-drain (that would step past rows it has not rendered), so counting from the
+        // cursor alone re-counts every row the earlier pages already delivered and reports a number
+        // that grows stale the further it walks. It is stated as a count, so it has to be one.
+        const unreadFloor = Math.max(cursor.last_read_ts, since ? Number(since) : 0);
         const unreadRemaining =
           rows.length > 0 && (limit !== undefined || rows.length === INBOX_DEFAULT_LIMIT)
             ? Math.max(
                 0,
-                countUnread(ctx.db, member, cursor.last_read_ts) -
-                  rows.filter((r) => r.ts > cursor.last_read_ts).length,
+                countUnread(ctx.db, member, unreadFloor) -
+                  rows.filter((r) => r.ts > unreadFloor).length,
               )
             : 0;
         const truncated = limit === undefined && rows.length === INBOX_DEFAULT_LIMIT;

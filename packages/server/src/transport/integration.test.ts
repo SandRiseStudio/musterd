@@ -488,6 +488,30 @@ describe('HTTP API', () => {
       expect(r.json.truncated).toBeUndefined();
     });
 
+    /**
+     * `unread_remaining` is stated as a count, so it has to be one on every page — not just the
+     * first. A paging caller walks with `since` and does NOT advance its cursor mid-drain (advancing
+     * past a row it has not rendered is the very loss the prefix exists to prevent), so counting
+     * from the cursor alone re-counts everything the earlier pages already delivered.
+     *
+     * Needs page two to be FULL: on a partial last page the field is suppressed entirely, which is
+     * why a 220-message fixture cannot see this and a 420-message one can.
+     */
+    it('counts what remains after the page it is on, not from the cursor', async () => {
+      const { boTok } = await teamWithBacklog(420);
+      const p1 = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      expect(p1.json.messages).toHaveLength(200);
+      expect(p1.json.unread_remaining).toBe(220);
+
+      const last = (p1.json.messages as { ts: number }[])[199]!.ts;
+      const p2 = await get(`/teams/dawn/inbox?unread=1&since=${last}`, boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      expect(p2.json.messages).toHaveLength(200);
+      // 420 total − 400 delivered across the two pages. Counting from the cursor says 220 again.
+      expect(p2.json.unread_remaining).toBe(20);
+    });
+
     it('leaves an explicit ?limit= alone — that caller asked for the recent tail', async () => {
       const { boTok } = await teamWithBacklog(220);
       const r = await get('/teams/dawn/inbox?unread=1&limit=5', boTok, {

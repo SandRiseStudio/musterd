@@ -131,6 +131,35 @@ describe('inbox command', () => {
     expect((res.out.match(/msg \d+/g) ?? []).length).toBe(20);
   });
 
+  /**
+   * The seed MUST exceed the daemon's 200-row prefix bound, and the history MUST be read. With
+   * everything unread the drain's unread-only paging happens to fetch the remainder, so a small or
+   * all-unread fixture passes vacuously and cannot see the loss: 205 unread = 200 prefix + 5 paged.
+   * Mark it read and the unread-only page comes back empty, stranding everything past the bound.
+   */
+  it('--limit 0 shows the full history when it exceeds the daemon bound and is already read', async () => {
+    await seed(205);
+    // Consume everything, so the read cursor sits at the newest row.
+    await capture(() => inboxCommand(parseArgs(['--limit', '0'])));
+    expect(await unreadCount()).toBe(0);
+
+    const res = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+    expect((JSON.parse(res.out) as unknown[]).length).toBe(205);
+  });
+
+  /**
+   * A filter is a lens over the WHOLE history (ADR 067), and it takes the same unbounded branch as
+   * `--limit 0`. A lens that quietly stopped searching most of the history is worse than a slow one:
+   * it answers "no such message" for one that is sitting right there.
+   */
+  it('--from searches past the daemon bound, not just the prefix it fits in', async () => {
+    await seed(205);
+    await capture(() => inboxCommand(parseArgs(['--limit', '0'])));
+
+    const res = await capture(() => inboxCommand(parseArgs(['--from', 'Ada', '--json'])));
+    expect((JSON.parse(res.out) as unknown[]).length).toBe(205);
+  });
+
   it('--peek never advances the read cursor', async () => {
     await seed(5);
     await capture(() => inboxCommand(parseArgs(['--peek'])));
