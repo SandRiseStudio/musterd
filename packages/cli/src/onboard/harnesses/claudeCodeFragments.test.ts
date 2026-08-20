@@ -43,7 +43,10 @@ describe('claudeCodeAdapter — managed fragments', () => {
 
   it('emits one fingerprinted fragment per managed unit — MCP entry, local hooks, global hooks, permissions, guidance', async () => {
     const ctx = fragCtx();
-    const intents = await claudeCodeAdapter.desiredFragments(ctx, await claudeCodeAdapter.target(ctx));
+    const intents = await claudeCodeAdapter.desiredFragments(
+      ctx,
+      await claudeCodeAdapter.target(ctx),
+    );
     expect(intents.map((i) => i.fragmentKey).sort()).toEqual([
       'guidance',
       'hooks.global',
@@ -61,7 +64,10 @@ describe('claudeCodeAdapter — managed fragments', () => {
 
   it('the desired MCP entry carries exactly MUSTERD_LAUNCH_SURFACE — never the retired or test marker', async () => {
     const ctx = fragCtx();
-    const intents = await claudeCodeAdapter.desiredFragments(ctx, await claudeCodeAdapter.target(ctx));
+    const intents = await claudeCodeAdapter.desiredFragments(
+      ctx,
+      await claudeCodeAdapter.target(ctx),
+    );
     const mcp = intents.find((i) => i.fragmentKey === 'mcp.musterd')!;
     const env = (mcp.payload as { env: Record<string, string> }).env;
     expect(env['MUSTERD_LAUNCH_SURFACE']).toBe('claude-code');
@@ -80,8 +86,14 @@ describe('claudeCodeAdapter — managed fragments', () => {
       ].join('\n'),
     });
     const ctx = fragCtx(memoryFs(), exec.seam);
-    const intents = await claudeCodeAdapter.desiredFragments(ctx, await claudeCodeAdapter.target(ctx));
-    const observed = await claudeCodeAdapter.observe(ctx, intents.find((i) => i.fragmentKey === 'mcp.musterd')!);
+    const intents = await claudeCodeAdapter.desiredFragments(
+      ctx,
+      await claudeCodeAdapter.target(ctx),
+    );
+    const observed = await claudeCodeAdapter.observe(
+      ctx,
+      intents.find((i) => i.fragmentKey === 'mcp.musterd')!,
+    );
     expect(observed.state).toBe('legacy-launch-marker');
   });
 
@@ -95,7 +107,10 @@ describe('claudeCodeAdapter — managed fragments', () => {
       ].join('\n'),
     });
     const ctx = fragCtx(memoryFs(), exec.seam);
-    const intents = await claudeCodeAdapter.desiredFragments(ctx, await claudeCodeAdapter.target(ctx));
+    const intents = await claudeCodeAdapter.desiredFragments(
+      ctx,
+      await claudeCodeAdapter.target(ctx),
+    );
     const mcp = intents.find((i) => i.fragmentKey === 'mcp.musterd')!;
     await claudeCodeAdapter.apply(ctx, { kind: 'repair-launch-marker', intent: mcp });
     const add = exec.calls.find((c) => c[0] === 'mcp' && c[1] === 'add')!;
@@ -120,7 +135,10 @@ describe('claudeCodeAdapter — managed fragments', () => {
       0o600,
     );
     const ctx = fragCtx(fs);
-    const intents = await claudeCodeAdapter.desiredFragments(ctx, await claudeCodeAdapter.target(ctx));
+    const intents = await claudeCodeAdapter.desiredFragments(
+      ctx,
+      await claudeCodeAdapter.target(ctx),
+    );
     const hooks = intents.find((i) => i.fragmentKey === 'hooks.local')!;
     const permissions = intents.find((i) => i.fragmentKey === 'permissions')!;
 
@@ -130,9 +148,11 @@ describe('claudeCodeAdapter — managed fragments', () => {
     expect(parsed.theirKey).toEqual({ keep: true });
     expect(parsed.permissions.allow).toContain('TheirTool');
     expect(parsed.permissions.allow).toContain('Read');
-    expect(parsed.hooks.PostToolUse.some((m: { hooks: { command: string }[] }) =>
-      m.hooks.some((h) => h.command === 'their-hook.sh'),
-    )).toBe(true);
+    expect(
+      parsed.hooks.PostToolUse.some((m: { hooks: { command: string }[] }) =>
+        m.hooks.some((h) => h.command === 'their-hook.sh'),
+      ),
+    ).toBe(true);
     // Now observed as exactly the intent (both fragments read back their own fingerprints).
     expect(await claudeCodeAdapter.observe(ctx, hooks)).toEqual({
       state: 'present',
@@ -156,7 +176,10 @@ describe('claudeCodeAdapter — managed fragments', () => {
   it('guidance renders as a deterministic stamped file map, observed byte-exactly', async () => {
     const fs = memoryFs();
     const ctx = fragCtx(fs);
-    const intents = await claudeCodeAdapter.desiredFragments(ctx, await claudeCodeAdapter.target(ctx));
+    const intents = await claudeCodeAdapter.desiredFragments(
+      ctx,
+      await claudeCodeAdapter.target(ctx),
+    );
     const guidance = intents.find((i) => i.fragmentKey === 'guidance')!;
     expect(await claudeCodeAdapter.observe(ctx, guidance)).toEqual({ state: 'absent' });
     await claudeCodeAdapter.apply(ctx, { kind: 'write', intent: guidance });

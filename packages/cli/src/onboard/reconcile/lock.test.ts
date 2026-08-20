@@ -34,7 +34,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('acquires a fresh lease and writes a valid lock record', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const locks = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const locks = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     const got = locks.acquire(KEY);
     expect(got.status).toBe('acquired');
     const record = loadLockRecord(fs, root, KEY);
@@ -48,7 +53,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('a live, unexpired holder returns busy', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const holder = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const holder = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     expect(holder.acquire(KEY).status).toBe('acquired');
     const other = createHarnessLocks({
       fs,
@@ -62,7 +72,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('a dead, expired holder with the same PID but different process-start identity is reclaimable', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const holder = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's-old' }), machineConfigRoot: root });
+    const holder = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's-old' }),
+      machineConfigRoot: root,
+    });
     expect(holder.acquire(KEY).status).toBe('acquired');
     clock.advance(LEASE_MS + 1);
     // PID 10 is alive again — but as a DIFFERENT process (start identity differs), so not the holder.
@@ -78,7 +93,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('an expired but still-live exact process identity remains busy', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const holder = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const holder = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     expect(holder.acquire(KEY).status).toBe('acquired');
     clock.advance(LEASE_MS + 1);
     const other = createHarnessLocks({
@@ -93,7 +113,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('unknown liveness is busy, never reclaimable', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const holder = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const holder = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     expect(holder.acquire(KEY).status).toBe('acquired');
     clock.advance(LEASE_MS + 1);
     const other = createHarnessLocks({
@@ -108,14 +133,20 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('renewal extends expiry only for the matching holder id', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const holder = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const holder = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     const got = holder.acquire(KEY);
     if (got.status !== 'acquired') throw new Error('expected acquired');
     const before = loadLockRecord(fs, root, KEY);
     clock.advance(RENEW_MS);
     got.lease.renew();
     const after = loadLockRecord(fs, root, KEY);
-    if (before.kind !== 'valid' || after.kind !== 'valid') throw new Error('expected valid records');
+    if (before.kind !== 'valid' || after.kind !== 'valid')
+      throw new Error('expected valid records');
     expect(Date.parse(after.value.expiresAt)).toBeGreaterThan(Date.parse(before.value.expiresAt));
     expect(after.value.holderId).toBe(before.value.holderId);
 
@@ -139,7 +170,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('release from a different holder cannot delete the lease', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const holder = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const holder = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     const first = holder.acquire(KEY);
     if (first.status !== 'acquired') throw new Error('expected acquired');
     const stale = first.lease;
@@ -161,7 +197,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
   it('a stopped holder allows recovery after the 30-second lease', () => {
     const fs = memoryFs();
     const clock = fakeClock();
-    const holder = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const holder = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     expect(holder.acquire(KEY).status).toBe('acquired');
     const successor = createHarnessLocks({
       fs,
@@ -183,7 +224,12 @@ describe('createHarnessLocks — recoverable cross-process lease (ADR 282/286)',
     const fs = memoryFs();
     const clock = fakeClock();
     fs.writeFile(lockPath(root, KEY), '{ torn', 0o600);
-    const locks = createHarnessLocks({ fs, clock, proc: fakeProc({ pid: 10, startedAt: 's10' }), machineConfigRoot: root });
+    const locks = createHarnessLocks({
+      fs,
+      clock,
+      proc: fakeProc({ pid: 10, startedAt: 's10' }),
+      machineConfigRoot: root,
+    });
     const got = locks.acquire(KEY);
     // Conservative: an unreadable record is unknown ownership — busy, never adopt/overwrite.
     expect(got.status).toBe('busy');

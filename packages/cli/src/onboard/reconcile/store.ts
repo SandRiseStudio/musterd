@@ -125,7 +125,13 @@ export function loadLedger(fs: FsSeam, machineConfigRoot: string): LocalLoad<Fra
 }
 
 export function saveLedger(fs: FsSeam, machineConfigRoot: string, ledger: FragmentLedger): void {
-  publishLocalFile(fs, ledgerPath(machineConfigRoot), FragmentLedgerSchema, ledger, 'harness-ledger');
+  publishLocalFile(
+    fs,
+    ledgerPath(machineConfigRoot),
+    FragmentLedgerSchema,
+    ledger,
+    'harness-ledger',
+  );
 }
 
 export function loadJournal(

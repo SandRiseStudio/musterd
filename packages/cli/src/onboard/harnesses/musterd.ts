@@ -79,12 +79,18 @@ export const musterdCoreAdapter: HarnessAdapter = {
   }),
   desiredFragments: async (ctx) => musterdCoreFragments(ctx, ['musterd-core']),
   observe: async (ctx, intent) =>
-    observeFileMap(ctx.fs, ctx.worktreeRoot, intent.payload as Record<string, string>),
+    observeFileMap(
+      ctx.fs,
+      ctx.worktreeRoot,
+      (intent.payload as Record<string, string> | undefined) ??
+        canonicalGuidanceMap(ctx.team ?? ''),
+    ),
   apply: async (ctx, mutation) =>
     applyFileMap(
       ctx.fs,
       ctx.worktreeRoot,
-      mutation.intent.payload as Record<string, string>,
+      (mutation.intent.payload as Record<string, string> | undefined) ??
+        canonicalGuidanceMap(ctx.team ?? ''),
       mutation.kind === 'remove' ? 'remove' : 'write',
     ),
 };

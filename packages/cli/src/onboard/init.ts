@@ -880,7 +880,8 @@ export async function runInit(): Promise<number> {
 /** A one-line activation hint for the selected harness set — what to launch to bring the seat up. */
 function activationFor(desired: readonly string[]): string {
   const hints: Record<string, string> = {
-    'claude-code': 'in a terminal here, run `claude` (or open this folder in the Claude Code extension)',
+    'claude-code':
+      'in a terminal here, run `claude` (or open this folder in the Claude Code extension)',
     cursor: 'open this folder in Cursor (or reload its window)',
     codex: 'open this folder in Codex (it must be a trusted project)',
     musterd: 'the native musterd host launches it on demand (`musterd host`)',

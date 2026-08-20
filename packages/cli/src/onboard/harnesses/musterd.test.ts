@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { memoryFs, nodeClock, nodeProc, type HarnessContext } from '../reconcile/context.js';
-import {
-  MUSTERD_CORE_ID,
-  musterdAdapter,
-  musterdCoreFragments,
-} from './musterd.js';
+import { MUSTERD_CORE_ID, musterdAdapter, musterdCoreFragments } from './musterd.js';
 
 function ctx(worktreeRoot = '/w/a'): HarnessContext {
   return {

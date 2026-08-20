@@ -42,7 +42,9 @@ describe('WorktreeProvisioningSchema (version 2)', () => {
       'claude-code',
       'musterd',
     ]);
-    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, profile: '' }).success).toBe(true);
+    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, profile: '' }).success).toBe(
+      true,
+    );
     expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, desired: [] }).success).toBe(
       true,
     );
@@ -74,9 +76,9 @@ describe('WorktreeProvisioningSchema (version 2)', () => {
     expect(
       WorktreeProvisioningSchema.safeParse({ ...provisioning, desired: ['Not An Id'] }).success,
     ).toBe(false);
-    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, provisionedAt: '' }).success).toBe(
-      false,
-    );
+    expect(
+      WorktreeProvisioningSchema.safeParse({ ...provisioning, provisionedAt: '' }).success,
+    ).toBe(false);
   });
 });
 
@@ -211,8 +213,8 @@ describe('LocalStateIssueSchema', () => {
     expect(
       LocalStateIssueSchema.parse({ path: 'session.started_at', message: 'expected integer' }),
     ).toEqual({ path: 'session.started_at', message: 'expected integer' });
-    expect(LocalStateIssueSchema.safeParse({ path: 'x', message: 'y', contents: '{}' }).success).toBe(
-      false,
-    );
+    expect(
+      LocalStateIssueSchema.safeParse({ path: 'x', message: 'y', contents: '{}' }).success,
+    ).toBe(false);
   });
 });

@@ -43,6 +43,21 @@ All three are automated and use `seedDawn`-style setup. By placement: **Scenario
 6. Assert the full transcript ordering and that all three surfaces saw the relevant messages.
    **Pass:** three members across three surfaces coordinate end-to-end; transcript matches expected act sequence. This same script drives the recorded demo.
 
+### Scenario D — multi-harness worktree selection (ADR 281/282/286)
+
+The live falsifier from the approved multi-harness spec, automated in
+[`tests/scenarios/multi-harness.test.ts`](../../tests/scenarios/multi-harness.test.ts): two machine
+config roots and sibling worktrees never share selections, ledger owners, journals, or locks; one
+worktree configured once for `claude-code`, `cursor`, `codex`, and `musterd` launches the same
+Member through each launcher's own `MUSTERD_LAUNCH_SURFACE` registration (native `musterd` is
+intrinsic) with no intervening `wire`; local state is byte-stable across launches; deselection
+releases exactly this worktree's ownership (a drifted fragment blocks with `release-blocked` and
+retains its evidence); a pre-ADR-286 registration carrying the retired `MUSTERD_SURFACE` cannot
+attach, `harness status` names it, and only a human-confirmed `harness configure` repairs the
+marker; and a fixture `future.harness` adapter participates in selection/reconciliation while
+attaching as Surface `other`. Exercises only shipped commands and launcher contracts — never
+reconciler internals.
+
 ## Per-module acceptance (must pass before the next package in build order)
 
 - **protocol**: every act's meta rule enforced (accept/decline require `in_reply_to`; unknown act rejected; unknown meta preserved); `Envelope` round-trips; version literal pinned.

@@ -160,9 +160,8 @@ describe('uninstallCommand — v2 reconcile-to-empty (ADR 282)', () => {
   it('reconciles to an empty set, then deletes workspace, binding, and manifest', async () => {
     const machineRoot = mkdtempSync(join(tmpdir(), 'musterd-uninstall-machine-'));
     const { nodeFs } = await import('../onboard/reconcile/context.js');
-    const { canonicalFingerprint, folderResourceKey } = await import(
-      '../onboard/reconcile/fragments.js'
-    );
+    const { canonicalFingerprint, folderResourceKey } =
+      await import('../onboard/reconcile/fragments.js');
     const { reconcileHarnesses } = await import('../onboard/reconcile/engine.js');
     const payload = { entry: 'fake-a' };
     let observed: { state: 'absent' } | { state: 'present'; fingerprint: string } = {
@@ -174,7 +173,9 @@ describe('uninstallCommand — v2 reconcile-to-empty (ADR 282)', () => {
       adapterVersion: 1,
       availability: async () => ({ available: true }),
       target: async () => ({
-        containers: [{ containerKey: `folder ${cwd} fake-a`, scope: 'folder' as const, handle: null }],
+        containers: [
+          { containerKey: `folder ${cwd} fake-a`, scope: 'folder' as const, handle: null },
+        ],
       }),
       desiredFragments: async () => [
         {
@@ -218,9 +219,8 @@ describe('uninstallCommand — v2 reconcile-to-empty (ADR 282)', () => {
   it('a blocked release returns nonzero and retains identity + manifest + evidence', async () => {
     const machineRoot = mkdtempSync(join(tmpdir(), 'musterd-uninstall-machine2-'));
     const { nodeFs } = await import('../onboard/reconcile/context.js');
-    const { canonicalFingerprint, folderResourceKey } = await import(
-      '../onboard/reconcile/fragments.js'
-    );
+    const { canonicalFingerprint, folderResourceKey } =
+      await import('../onboard/reconcile/fragments.js');
     const { saveLedger } = await import('../onboard/reconcile/store.js');
     const resource = folderResourceKey(cwd, 'fake-a', 'entry');
     const ctx = {

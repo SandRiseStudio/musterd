@@ -153,7 +153,11 @@ export const CATALOG: readonly CommandEntry[] = [
       'journal/lock state, and the repair to run; exit 0 only when every desired fragment is usable ' +
       'and every deselected contribution is released (a selected-but-uninstalled harness is ' +
       '`pending`, which is healthy).',
-    examples: ['musterd harness configure', 'musterd harness status', 'musterd harness status --json'],
+    examples: [
+      'musterd harness configure',
+      'musterd harness status',
+      'musterd harness status --json',
+    ],
   },
   {
     name: 'serve',

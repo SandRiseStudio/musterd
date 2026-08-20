@@ -255,8 +255,16 @@ export const codexAdapter: HarnessAdapter = {
   async target(ctx) {
     return {
       containers: [
-        { containerKey: `folder ${ctx.worktreeRoot} .codex/config.toml`, scope: 'folder', handle: 'toml' },
-        { containerKey: `folder ${ctx.worktreeRoot} .codex/hooks.json`, scope: 'folder', handle: 'hooks' },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} .codex/config.toml`,
+          scope: 'folder',
+          handle: 'toml',
+        },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} .codex/hooks.json`,
+          scope: 'folder',
+          handle: 'hooks',
+        },
       ],
     };
   },
@@ -268,7 +276,7 @@ export const codexAdapter: HarnessAdapter = {
       args: launch.args,
       env: launchEntryEnv(CODEX_SURFACE),
     };
-    const hooks = codexHookCommands();
+    const hooks = [...codexHookCommands()].sort((a, b) => (a.event < b.event ? -1 : 1));
     return [
       {
         harness: 'codex',
@@ -312,16 +320,11 @@ export const codexAdapter: HarnessAdapter = {
             issues: [{ path: '<.codex/hooks.json>', message: 'not valid JSON' }],
           };
         }
+        // Fingerprint the canonical PHYSICAL form — payload-independent, so a release intent
+        // rebuilt from ledger evidence observes the fingerprint the write recorded.
         const observed = musterdCodexHandlers(file);
         if (observed.length === 0) return { state: 'absent' };
-        const desired = [...(intent.payload as { event: string; command: string }[])].sort((a, b) =>
-          a.event < b.event ? -1 : 1,
-        );
-        const equal = canonicalFingerprint(observed) === canonicalFingerprint(desired);
-        return {
-          state: 'present',
-          fingerprint: equal ? intent.fingerprint : canonicalFingerprint(observed),
-        };
+        return { state: 'present', fingerprint: canonicalFingerprint(observed) };
       }
       default:
         return { state: 'absent' };
@@ -374,7 +377,10 @@ export const codexAdapter: HarnessAdapter = {
           if (retained.length > 0) hooks[event] = retained;
         }
         if (mutation.kind !== 'remove') {
-          for (const { event, command } of intent.payload as { event: string; command: string }[]) {
+          const payload =
+            (intent.payload as { event: string; command: string }[] | undefined) ??
+            codexHookCommands();
+          for (const { event, command } of payload) {
             hooks[event] = [...(hooks[event] ?? []), { hooks: [{ type: 'command', command }] }];
           }
         }

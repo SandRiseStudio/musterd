@@ -43,7 +43,9 @@ describe('cursorAdapter — managed fragments', () => {
     fs.writeFile(
       MCP,
       JSON.stringify({
-        mcpServers: { figma: { command: 'npx', args: ['figma-mcp'], env: { KEY: '${FIGMA_KEY}' } } },
+        mcpServers: {
+          figma: { command: 'npx', args: ['figma-mcp'], env: { KEY: '${FIGMA_KEY}' } },
+        },
         theirSetting: 42,
       }),
       0o600,
@@ -126,7 +128,9 @@ describe('cursorAdapter — managed fragments', () => {
 
     await cursorAdapter.apply(ctx, { kind: 'write', intent: hooks });
     let parsed = JSON.parse(fs.readFile(HOOKS)!);
-    expect(parsed.hooks.sessionStart.some((h: { command: string }) => h.command === 'their-hook.sh')).toBe(true);
+    expect(
+      parsed.hooks.sessionStart.some((h: { command: string }) => h.command === 'their-hook.sh'),
+    ).toBe(true);
     expect(parsed.hooks.afterMCPExecution).toBeDefined();
     expect(await cursorAdapter.observe(ctx, hooks)).toEqual({
       state: 'present',

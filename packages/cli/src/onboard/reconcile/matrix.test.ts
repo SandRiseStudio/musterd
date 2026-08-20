@@ -24,7 +24,11 @@ interface FakeState {
   applyError?: Error;
 }
 
-function fakeAdapter(id: string, state: FakeState, payload: unknown = { hooks: true }): HarnessAdapter {
+function fakeAdapter(
+  id: string,
+  state: FakeState,
+  payload: unknown = { hooks: true },
+): HarnessAdapter {
   const fragmentKey = 'entry';
   const containerKey = `folder ${ROOT} ${id} settings`;
   return {
@@ -74,7 +78,11 @@ const DESIRED_FP = canonicalFingerprint(DESIRED_PAYLOAD);
 const RESOURCE = folderResourceKey(ROOT, 'fake', 'entry');
 const CONTAINER = `folder ${ROOT} fake settings`;
 
-function seedProvisioning(fs: MemoryFs, desired: string[], contributions: Record<string, string[]> = {}) {
+function seedProvisioning(
+  fs: MemoryFs,
+  desired: string[],
+  contributions: Record<string, string[]> = {},
+) {
   const provisioning: WorktreeProvisioning = {
     version: 2,
     profile: '',

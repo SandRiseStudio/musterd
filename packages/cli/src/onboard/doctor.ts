@@ -415,7 +415,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   const provisioning = loadProvisioning(cwd);
   if (provisioning.kind === 'legacy') {
     drift.push(
-      'this folder\'s provisioning manifest is version 1 (single-harness era) — run `musterd ' +
+      "this folder's provisioning manifest is version 1 (single-harness era) — run `musterd " +
         'harness configure` to choose and convert the harness set; until then `musterd wire` exits 6.',
     );
   } else if (provisioning.kind === 'invalid') {

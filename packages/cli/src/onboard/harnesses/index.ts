@@ -9,7 +9,15 @@ import { musterdAdapter } from './musterd.js';
 /** The registry of onboarding-supported harnesses (pluggable; add more here). */
 export const HARNESSES: Harness[] = [claudeCode, cursor, codex];
 
-export { claudeCode, claudeCodeAdapter, codex, codexAdapter, cursor, cursorAdapter, musterdAdapter };
+export {
+  claudeCode,
+  claudeCodeAdapter,
+  codex,
+  codexAdapter,
+  cursor,
+  cursorAdapter,
+  musterdAdapter,
+};
 
 /**
  * The fragment-adapter registry (ADR 281), in canonical selection order:

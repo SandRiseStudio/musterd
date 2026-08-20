@@ -86,7 +86,9 @@ describe('WorkspaceSpec / Binding schemas (strict version 2, ADR 281)', () => {
     // The old strip-to-commit path is gone: a spec built from a Binding must be constructed
     // field-by-field, never by parsing the binding through the spec schema.
     expect(WorkspaceSpecSchema.safeParse({ ...spec, agent_key: 'mskey_leak' }).success).toBe(false);
-    expect(WorkspaceSpecSchema.safeParse({ ...spec, session: binding.session }).success).toBe(false);
+    expect(WorkspaceSpecSchema.safeParse({ ...spec, session: binding.session }).success).toBe(
+      false,
+    );
   });
 
   it('rejects malformed runtime fields', () => {

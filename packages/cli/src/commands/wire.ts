@@ -68,8 +68,8 @@ export async function wireCommand(parsed: Parsed, deps?: WireDeps): Promise<numb
   if (provisioning.kind !== 'valid') {
     throw new CliError(
       provisioning.kind === 'legacy'
-        ? 'this folder\'s provisioning manifest is pre-ADR-281 (version 1) — run `musterd harness ' +
-          'configure` to choose and convert the harness set. Wire never converts local state.'
+        ? "this folder's provisioning manifest is pre-ADR-281 (version 1) — run `musterd harness " +
+            'configure` to choose and convert the harness set. Wire never converts local state.'
         : CONFIGURE_REPAIR,
       6,
     );
@@ -160,7 +160,8 @@ export async function wireCommand(parsed: Parsed, deps?: WireDeps): Promise<numb
 
 function renderWireResult(r: ReconcileResult): string {
   const head = `  ${r.harness.padEnd(13)} ${r.action === 'none' ? '' : `(${r.action}) `}`;
-  if (r.result === 'applied' || r.result === 'unchanged') return `${head}${theme.ok('✓')} ${r.result}`;
+  if (r.result === 'applied' || r.result === 'unchanged')
+    return `${head}${theme.ok('✓')} ${r.result}`;
   if (r.result === 'satisfied-unmanaged') return `${head}${theme.ok('✓')} satisfied (unmanaged)`;
   if (r.result === 'pending') return `${head}· pending (${r.detail ?? 'not installed here'})`;
   return `${head}${theme.err('✗')} ${r.result}${r.detail ? ` — ${r.detail}` : ''}`;

@@ -134,7 +134,10 @@ export function writeProvisionManifest(
  * confirmed `musterd harness configure` converts it, retaining the v1 `role` value (as v2 `profile`) and nothing else: the v1
  * name-only records cannot prove current contents, so they never become v2 ownership evidence.
  */
-export function loadProvisioning(dir: string, fs: FsSeam = nodeFs): LocalLoad<WorktreeProvisioning> {
+export function loadProvisioning(
+  dir: string,
+  fs: FsSeam = nodeFs,
+): LocalLoad<WorktreeProvisioning> {
   return readLocalFile(fs, manifestPath(dir), WorktreeProvisioningSchema, {
     legacy: (value) => ProvisionManifestSchema.safeParse(value).success,
   });

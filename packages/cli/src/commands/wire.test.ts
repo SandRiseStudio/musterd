@@ -53,7 +53,9 @@ function fakeAdapter(
     adapterVersion: 1,
     availability: async () => ({ available: true }),
     target: async (ctx) => ({
-      containers: [{ containerKey: `folder ${ctx.worktreeRoot} ${id}`, scope: 'folder', handle: null }],
+      containers: [
+        { containerKey: `folder ${ctx.worktreeRoot} ${id}`, scope: 'folder', handle: null },
+      ],
     }),
     desiredFragments: async (ctx) => [
       {
@@ -157,7 +159,7 @@ describe('musterd wire (noninteractive, desire-preserving — ADR 282)', () => {
     const { code, out } = await run([], { ctx: ctxOf(), registry: [a] });
     expect(code).toBe(0);
     expect(a.state.applied[0]?.kind).toBe('write');
-    expect(out).toContain("wired this worktree");
+    expect(out).toContain('wired this worktree');
     const binding = readBinding();
     expect(binding.version).toBe(2);
     expect(binding.agent_key).toBe('mskey_fromconfig');

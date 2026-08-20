@@ -64,7 +64,9 @@ export const WorktreeProvisioningSchema = z
      *  renames the local concept to "profile"; v2 mints the field under its final name so the
      *  strict schema never needs a field migration). Empty string means generalist. */
     profile: z.string(),
-    desired: z.array(HarnessIdSchema).refine(uniqueStrings, { message: 'desired ids must be unique' }),
+    desired: z
+      .array(HarnessIdSchema)
+      .refine(uniqueStrings, { message: 'desired ids must be unique' }),
     /** Fragment resource keys this worktree contributes to, per harness. */
     contributions: z.record(HarnessIdSchema, z.array(z.string())),
     provisionedAt: z.string().min(1),

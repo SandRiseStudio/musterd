@@ -190,7 +190,11 @@ export function classifyFragment(
     if (desired) {
       if (fp === null) return { observation: 'absent', plan: 'create', planned: 'applied' };
       if (fp === intentFingerprint) {
-        return { observation: 'unmanaged-equivalent', plan: 'none', planned: 'satisfied-unmanaged' };
+        return {
+          observation: 'unmanaged-equivalent',
+          plan: 'none',
+          planned: 'satisfied-unmanaged',
+        };
       }
       return { observation: 'unmanaged-conflict', plan: 'none', planned: 'conflict' };
     }
@@ -354,11 +358,7 @@ export async function inspectHarnesses(
                 ? 'pending'
                 : 'invalid',
           lock:
-            lockState.kind === 'missing'
-              ? 'free'
-              : lockState.kind === 'valid'
-                ? 'held'
-                : 'invalid',
+            lockState.kind === 'missing' ? 'free' : lockState.kind === 'valid' ? 'held' : 'invalid',
         };
         fragments.push(inspection);
         setOperationAttributes(span, {
@@ -404,8 +404,7 @@ interface LedgerDelta {
 
 function applyLedgerDelta(ctx: HarnessContext, delta: LedgerDelta): void {
   const got = loadLedger(ctx.fs, ctx.machineConfigRoot);
-  const ledger: FragmentLedger =
-    got.kind === 'valid' ? got.value : { version: 1, fragments: {} };
+  const ledger: FragmentLedger = got.kind === 'valid' ? got.value : { version: 1, fragments: {} };
   if (delta.entry === null) delete ledger.fragments[delta.resourceKey];
   else ledger.fragments[delta.resourceKey] = delta.entry;
   saveLedger(ctx.fs, ctx.machineConfigRoot, ledger);

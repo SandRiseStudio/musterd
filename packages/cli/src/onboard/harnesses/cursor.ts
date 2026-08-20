@@ -7,7 +7,12 @@ import {
   type ProvisionPlan,
   type UnprovisionPlan,
 } from '../harness.js';
-import { launchEntryEnv, markerGenerationOfEnv, resolveMcpLaunch, type McpServerEntry } from '../mcpEntry.js';
+import {
+  launchEntryEnv,
+  markerGenerationOfEnv,
+  resolveMcpLaunch,
+  type McpServerEntry,
+} from '../mcpEntry.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import type { FsSeam } from '../reconcile/context.js';
 import {
@@ -315,10 +320,19 @@ const CURSOR_HOOK_EVENTS = [
 ] as const;
 
 function cursorHooksPayload(): { event: string; command: string }[] {
-  return CURSOR_HOOK_EVENTS.map(([event, marker]) => ({
-    event,
-    command: marker === CURSOR_END_HOOK_MARKER ? sessionEndHookCommand() : observeHookCommand(),
-  }));
+  return sortHookList(
+    CURSOR_HOOK_EVENTS.map(([event, marker]) => ({
+      event,
+      command: marker === CURSOR_END_HOOK_MARKER ? sessionEndHookCommand() : observeHookCommand(),
+    })),
+  );
+}
+
+/** One canonical order, shared by desire and observation, so equal state hashes equal. */
+function sortHookList<T extends { event: string; command: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) =>
+    a.event === b.event ? (a.command < b.command ? -1 : 1) : a.event < b.event ? -1 : 1,
+  );
 }
 
 function readJsonSeam<T>(fs: FsSeam, path: string): T | null | undefined {
@@ -357,9 +371,21 @@ export const cursorAdapter: HarnessAdapter = {
   async target(ctx) {
     return {
       containers: [
-        { containerKey: `folder ${ctx.worktreeRoot} .cursor/mcp.json`, scope: 'folder', handle: 'mcp' },
-        { containerKey: `folder ${ctx.worktreeRoot} .cursor/hooks.json`, scope: 'folder', handle: 'hooks' },
-        { containerKey: `folder ${ctx.worktreeRoot} cursor-guidance`, scope: 'folder', handle: 'guidance' },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} .cursor/mcp.json`,
+          scope: 'folder',
+          handle: 'mcp',
+        },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} .cursor/hooks.json`,
+          scope: 'folder',
+          handle: 'hooks',
+        },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} cursor-guidance`,
+          scope: 'folder',
+          handle: 'guidance',
+        },
       ],
     };
   },
@@ -434,7 +460,8 @@ export const cursorAdapter: HarnessAdapter = {
             issues: [{ path: '<.cursor/hooks.json>', message: 'not valid JSON' }],
           };
         }
-        const desired = intent.payload as { event: string; command: string }[];
+        // Fingerprint the SORTED physical form — payload-independent, so a release intent rebuilt
+        // from ledger evidence observes the same fingerprint the write recorded.
         const observed: { event: string; command: string }[] = [];
         for (const [event, defs] of Object.entries(file.hooks ?? {})) {
           for (const def of defs) {
@@ -447,17 +474,15 @@ export const cursorAdapter: HarnessAdapter = {
           }
         }
         if (observed.length === 0) return { state: 'absent' };
-        const sort = (list: { event: string; command: string }[]) =>
-          [...list].sort((a, b) => (a.event < b.event ? -1 : 1));
-        const equal =
-          canonicalFingerprint(sort(observed)) === canonicalFingerprint(sort(desired));
-        return {
-          state: 'present',
-          fingerprint: equal ? intent.fingerprint : canonicalFingerprint(sort(observed)),
-        };
+        return { state: 'present', fingerprint: canonicalFingerprint(sortHookList(observed)) };
       }
       case 'guidance':
-        return observeFileMap(ctx.fs, ctx.worktreeRoot, intent.payload as Record<string, string>);
+        return observeFileMap(
+          ctx.fs,
+          ctx.worktreeRoot,
+          (intent.payload as Record<string, string> | undefined) ??
+            guidanceFileMap(cursor.guidance!, ctx.team ?? ''),
+        );
       default:
         return { state: 'absent' };
     }
@@ -485,7 +510,11 @@ export const cursorAdapter: HarnessAdapter = {
             };
           }
         } else {
-          const payload = intent.payload as { command: string; args: string[]; env: Record<string, string> };
+          const payload = intent.payload as {
+            command: string;
+            args: string[];
+            env: Record<string, string>;
+          };
           next.mcpServers!['musterd'] = {
             command: payload.command,
             args: payload.args,
@@ -505,7 +534,9 @@ export const cursorAdapter: HarnessAdapter = {
           version: file.version || 1,
           hooks: { ...(file.hooks ?? {}) },
         };
-        const desired = intent.payload as { event: string; command: string }[];
+        const desired =
+          (intent.payload as { event: string; command: string }[] | undefined) ??
+          cursorHooksPayload();
         const events = new Set(desired.map((d) => d.event));
         for (const event of events) {
           const keep = (next.hooks![event] ?? []).filter(
@@ -529,7 +560,8 @@ export const cursorAdapter: HarnessAdapter = {
         applyFileMap(
           ctx.fs,
           ctx.worktreeRoot,
-          intent.payload as Record<string, string>,
+          (intent.payload as Record<string, string> | undefined) ??
+            guidanceFileMap(cursor.guidance!, ctx.team ?? ''),
           mutation.kind === 'remove' ? 'remove' : 'write',
         );
         return;

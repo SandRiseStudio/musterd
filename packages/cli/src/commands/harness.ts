@@ -226,7 +226,7 @@ async function configureCommand(parsed: Parsed, deps?: HarnessDeps): Promise<num
   }
   if (workspace.kind === 'invalid' || binding.kind === 'invalid') {
     throw new CliError(
-      'this worktree\'s identity files are unreadable — repair `.musterd/workspace.json` / ' +
+      "this worktree's identity files are unreadable — repair `.musterd/workspace.json` / " +
         '`binding.json` by hand or re-run `musterd init`.',
       1,
     );
@@ -245,7 +245,10 @@ async function configureCommand(parsed: Parsed, deps?: HarnessDeps): Promise<num
 
   const selected =
     deps?.select ??
-    flagStr(parsed.flags, 'select')?.split(',').map((s) => s.trim()).filter(Boolean) ??
+    flagStr(parsed.flags, 'select')
+      ?.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean) ??
     (await promptSelection(registry, availability, current));
   if (selected === null) {
     out(pc.dim('no changes made'));

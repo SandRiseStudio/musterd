@@ -65,7 +65,8 @@ describe('classified local reads (LocalLoad, ADR 282)', () => {
     saveLedger(fs, root, ledger);
     const got = loadLedger(fs, root);
     expect(got.kind).toBe('valid');
-    if (got.kind === 'valid') expect(got.value.fragments['folder:/w/a#hooks']?.owners).toEqual(['/w/a']);
+    if (got.kind === 'valid')
+      expect(got.value.fragments['folder:/w/a#hooks']?.owners).toEqual(['/w/a']);
   });
 
   it('invalid JSON → invalid, and the issues never quote file contents', () => {

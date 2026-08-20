@@ -277,7 +277,9 @@ export function guidanceFileMap(g: HarnessGuidance, team: string): Record<string
     );
   }
   if (g.nudgeSkillPath) {
-    out[g.nudgeSkillPath] = stamped(`${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`);
+    out[g.nudgeSkillPath] = stamped(
+      `${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`,
+    );
   }
   if (g.commandsDir) {
     for (const name of SLASH_COMMANDS) {
@@ -292,8 +294,10 @@ export function canonicalGuidanceMap(team: string): Record<string, string> {
   return { [CANONICAL_SKILL_PATH]: stamped(skillFile('canonical', team)) };
 }
 
-/** Observe a file-map fragment: all present + byte-equal ⇒ the intent's own fingerprint; all absent
- *  ⇒ absent; anything else ⇒ a fingerprint of what is actually there (drift/conflict upstream). */
+/** Observe a file-map fragment over the EXPECTED key set: all absent ⇒ absent; otherwise the
+ *  fingerprint of exactly what is on disk (missing files as null). Fingerprinting the actual map —
+ *  never the intent — is what lets a payload-less RELEASE intent (rebuilt from ledger evidence)
+ *  observe the same fingerprint the write recorded: equal state hashes equal, whoever asks. */
 export function observeFileMap(
   fs: FsSeam,
   root: string,
@@ -307,10 +311,10 @@ export function observeFileMap(
     if (text !== null) anyPresent = true;
   }
   if (!anyPresent) return { state: 'absent' };
-  const equal = Object.entries(files).every(([rel, text]) => actual[rel] === text);
+  const allEqual = Object.entries(files).every(([rel, text]) => actual[rel] === text);
   return {
     state: 'present',
-    fingerprint: equal ? canonicalFingerprint(files) : canonicalFingerprint(actual),
+    fingerprint: allEqual ? canonicalFingerprint(files) : canonicalFingerprint(actual),
   };
 }
 

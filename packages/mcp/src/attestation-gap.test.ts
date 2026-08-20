@@ -76,7 +76,10 @@ describe('a seat that resolves an identity but no model', () => {
     writeSpec();
     // The agent key rides in env — exactly how a Cursor/Codex MCP entry supplies it — so this is a
     // fully working, fully credentialed seat. Nothing here fails.
-    const config = loadMcpConfig({ MUSTERD_AGENT_KEY: 'mskey_test', MUSTERD_TEST_SURFACE: 'cursor' });
+    const config = loadMcpConfig({
+      MUSTERD_AGENT_KEY: 'mskey_test',
+      MUSTERD_TEST_SURFACE: 'cursor',
+    });
 
     expect(config.claim).toEqual({ mode: 'seat', name: 'miley' });
     expect(config.model).toBeUndefined();
@@ -125,7 +128,11 @@ describe('a seat that resolves an identity but no model', () => {
   it('stays silent for a chat-mode session — it holds no seat, so it grades nothing', () => {
     // No spec, no binding: identity falls all the way through to chat. Attestation is meaningless
     // here, and warning on it would train the reader to ignore the warning that matters.
-    loadMcpConfig({ MUSTERD_TEAM: 'revive', MUSTERD_AGENT_KEY: 'mskey_test', MUSTERD_TEST_SURFACE: 'cli' });
+    loadMcpConfig({
+      MUSTERD_TEAM: 'revive',
+      MUSTERD_AGENT_KEY: 'mskey_test',
+      MUSTERD_TEST_SURFACE: 'cli',
+    });
     expect(errors.join('\n')).not.toContain('attesting no model');
   });
 

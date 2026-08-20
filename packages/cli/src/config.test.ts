@@ -522,7 +522,11 @@ describe('classified identity loads (ADR 281/282)', () => {
   });
 
   it('invalid issues carry paths and messages, never contents or secrets', () => {
-    writeBindingFile({ ...v2spec, agent_key: 'mskey_super_secret', session: { harness: '', id: '', started_at: 1.5 } });
+    writeBindingFile({
+      ...v2spec,
+      agent_key: 'mskey_super_secret',
+      session: { harness: '', id: '', started_at: 1.5 },
+    });
     const got = loadBinding(dir);
     expect(got.kind).toBe('invalid');
     if (got.kind === 'invalid') {

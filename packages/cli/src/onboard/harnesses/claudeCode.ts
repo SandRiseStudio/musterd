@@ -865,32 +865,51 @@ export function parseClaudeMcpGet(
   };
 }
 
+/** One canonical hook form, shared by desire and observation, so equal state hashes equal —
+ *  including for a payload-less RELEASE intent rebuilt from ledger evidence (ADR 282). */
+function sortHookEntries<T extends { event: string; command: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) =>
+    a.event === b.event ? (a.command < b.command ? -1 : 1) : a.event < b.event ? -1 : 1,
+  );
+}
+
 /** The desired hook payloads, from the same one table the installer and doctor share (ADR 168). */
 function localHooksPayload(): { event: string; matcher?: string; command: string }[] {
-  return LOCAL_HOOKS.map((spec) => ({
-    event: spec.event,
-    ...(spec.matcher !== undefined ? { matcher: spec.matcher } : {}),
-    command: spec.command(),
-  }));
+  return sortHookEntries(
+    LOCAL_HOOKS.map((spec) => ({
+      event: spec.event,
+      ...(spec.matcher !== undefined ? { matcher: spec.matcher } : {}),
+      command: spec.command(),
+    })),
+  );
 }
 
 function globalHooksPayload(): { event: string; command: string }[] {
-  return [
+  return sortHookEntries([
     { event: 'SessionStart', command: sessionStartHookCommand() },
     { event: 'UserPromptSubmit', command: promptSubmitHookCommand() },
-  ];
+  ]);
 }
 
-/** Every musterd-marked hook command in a settings object, keyed by event — the observation. */
-function observedMusterdHooks(settings: ClaudeSettings): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
+/** Every musterd-marked hook in a settings object, in the canonical form — the observation. */
+function observedMusterdHooks(
+  settings: ClaudeSettings,
+): { event: string; matcher?: string; command: string }[] {
+  const out: { event: string; matcher?: string; command: string }[] = [];
   for (const [event, matchers] of Object.entries(settings.hooks ?? {})) {
-    const ours = matchers
-      .flatMap((m) => m.hooks.map((h) => h.command))
-      .filter((c) => /#\s*musterd-[a-z-]+/.test(c));
-    if (ours.length > 0) out[event] = ours;
+    for (const m of matchers) {
+      for (const h of m.hooks) {
+        if (/#\s*musterd-[a-z-]+/.test(h.command)) {
+          out.push({
+            event,
+            ...(m.matcher !== undefined ? { matcher: m.matcher } : {}),
+            command: h.command,
+          });
+        }
+      }
+    }
   }
-  return out;
+  return sortHookEntries(out);
 }
 
 function readSettingsSeam(fs: FsSeam, path: string): ClaudeSettings | null {
@@ -1000,9 +1019,21 @@ export const claudeCodeAdapter: HarnessAdapter = {
       containers: [
         // Claude Code keys local-scope MCP config by repo ROOT — one registration for every
         // sibling worktree (ADR 143); each worktree contributes ownership, none owns it alone.
-        { containerKey: `repo-shared ${repoRoot} claude-mcp-local`, scope: 'repo-shared', handle: repoRoot },
-        { containerKey: `folder ${ctx.worktreeRoot} ${localSettingsRel()}`, scope: 'folder', handle: localSettingsRel() },
-        { containerKey: `machine claude-code global-settings`, scope: 'machine', handle: globalSettingsPathFor(ctx.env) },
+        {
+          containerKey: `repo-shared ${repoRoot} claude-mcp-local`,
+          scope: 'repo-shared',
+          handle: repoRoot,
+        },
+        {
+          containerKey: `folder ${ctx.worktreeRoot} ${localSettingsRel()}`,
+          scope: 'folder',
+          handle: localSettingsRel(),
+        },
+        {
+          containerKey: `machine claude-code global-settings`,
+          scope: 'machine',
+          handle: globalSettingsPathFor(ctx.env),
+        },
       ],
     };
   },
@@ -1101,21 +1132,11 @@ export const claudeCodeAdapter: HarnessAdapter = {
             issues: [{ path: '<settings>', message: 'not valid JSON' }],
           };
         }
-        const desired = intent.payload as { event: string; matcher?: string; command: string }[];
-        const desiredEvents = new Set(desired.map((p) => p.event));
-        const observed = Object.fromEntries(
-          Object.entries(observedMusterdHooks(settings)).filter(([event]) =>
-            desiredEvents.has(event),
-          ),
-        );
-        if (Object.keys(observed).length === 0) return { state: 'absent' };
-        const expected: Record<string, string[]> = {};
-        for (const p of desired) (expected[p.event] ??= []).push(p.command);
-        const equal = canonicalFingerprint(observed) === canonicalFingerprint(expected);
-        return {
-          state: 'present',
-          fingerprint: equal ? intent.fingerprint : canonicalFingerprint(observed),
-        };
+        // Fingerprint the canonical PHYSICAL form — payload-independent, so a release intent
+        // rebuilt from ledger evidence observes the fingerprint the write recorded.
+        const observed = observedMusterdHooks(settings);
+        if (observed.length === 0) return { state: 'absent' };
+        return { state: 'present', fingerprint: canonicalFingerprint(observed) };
       }
       case 'permissions': {
         const settings = readSettingsSeam(ctx.fs, join(ctx.worktreeRoot, localSettingsRel()));
@@ -1125,7 +1146,8 @@ export const claudeCodeAdapter: HarnessAdapter = {
             issues: [{ path: '<settings>', message: 'not valid JSON' }],
           };
         }
-        const desired = intent.payload as ProvisionPermissions;
+        const desired =
+          (intent.payload as ProvisionPermissions | undefined) ?? permissionsPayload(ctx);
         const present: ProvisionPermissions = { allow: [], ask: [], deny: [] };
         let any = false;
         for (const list of PERM_LISTS) {
@@ -1141,7 +1163,12 @@ export const claudeCodeAdapter: HarnessAdapter = {
         };
       }
       case 'guidance':
-        return observeFileMap(ctx.fs, ctx.worktreeRoot, intent.payload as Record<string, string>);
+        return observeFileMap(
+          ctx.fs,
+          ctx.worktreeRoot,
+          (intent.payload as Record<string, string> | undefined) ??
+            guidanceFileMap(claudeCode.guidance!, ctx.team ?? ''),
+        );
       default:
         return { state: 'absent' };
     }
@@ -1157,7 +1184,11 @@ export const claudeCodeAdapter: HarnessAdapter = {
           await exec.run(bin, ['mcp', 'remove', 'musterd', '-s', 'local']);
           return;
         }
-        let entry = intent.payload as { command: string; args: string[]; env: Record<string, string> };
+        let entry = intent.payload as {
+          command: string;
+          args: string[];
+          env: Record<string, string>;
+        };
         if (mutation.kind === 'repair-launch-marker') {
           // Replace ONLY the retired marker; preserve the observed command/args and unrelated env.
           const got = await exec.run(bin, ['mcp', 'get', 'musterd']);
@@ -1195,7 +1226,9 @@ export const claudeCodeAdapter: HarnessAdapter = {
             : globalSettingsPathFor(ctx.env);
         const settings = readSettingsSeam(ctx.fs, path);
         if (settings === null) throw new Error('settings container invalid at apply time');
-        const payload = intent.payload as { event: string; matcher?: string; command: string }[];
+        const payload =
+          (intent.payload as { event: string; matcher?: string; command: string }[] | undefined) ??
+          (intent.fragmentKey === 'hooks.local' ? localHooksPayload() : globalHooksPayload());
         writeSettingsSeam(
           ctx.fs,
           path,
@@ -1207,8 +1240,12 @@ export const claudeCodeAdapter: HarnessAdapter = {
         const path = join(ctx.worktreeRoot, localSettingsRel());
         const settings = readSettingsSeam(ctx.fs, path);
         if (settings === null) throw new Error('settings container invalid at apply time');
-        const desired = intent.payload as ProvisionPermissions;
-        const next: ClaudeSettings = { ...settings, permissions: { ...(settings.permissions ?? {}) } };
+        const desired =
+          (intent.payload as ProvisionPermissions | undefined) ?? permissionsPayload(ctx);
+        const next: ClaudeSettings = {
+          ...settings,
+          permissions: { ...(settings.permissions ?? {}) },
+        };
         for (const list of PERM_LISTS) {
           const have = next.permissions![list] ?? [];
           if (mutation.kind === 'remove') {
@@ -1222,8 +1259,7 @@ export const claudeCodeAdapter: HarnessAdapter = {
             if (set.size > 0) next.permissions![list] = [...set];
           }
         }
-        if (next.permissions && Object.keys(next.permissions).length === 0)
-          delete next.permissions;
+        if (next.permissions && Object.keys(next.permissions).length === 0) delete next.permissions;
         writeSettingsSeam(ctx.fs, path, next);
         return;
       }
@@ -1231,7 +1267,8 @@ export const claudeCodeAdapter: HarnessAdapter = {
         applyFileMap(
           ctx.fs,
           ctx.worktreeRoot,
-          intent.payload as Record<string, string>,
+          (intent.payload as Record<string, string> | undefined) ??
+            guidanceFileMap(claudeCode.guidance!, ctx.team ?? ''),
           mutation.kind === 'remove' ? 'remove' : 'write',
         );
         return;

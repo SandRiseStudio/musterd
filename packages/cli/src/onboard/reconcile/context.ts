@@ -238,7 +238,11 @@ export function memoryFs(initial?: Record<string, string>): MemoryFs {
     log.push(entry);
     if (!fail || fail.op !== entry.op) return;
     const path =
-      'path' in entry ? entry.path : entry.op === 'rename' ? entry.to : /* istanbul ignore next */ '';
+      'path' in entry
+        ? entry.path
+        : entry.op === 'rename'
+          ? entry.to
+          : /* istanbul ignore next */ '';
     if (fail.pathIncludes !== undefined && !path.includes(fail.pathIncludes)) return;
     fail = null;
     throw new Error(`injected stop at ${entry.op} ${path}`);

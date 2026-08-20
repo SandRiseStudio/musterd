@@ -183,9 +183,10 @@ export type MarkerGeneration = 'launch' | 'test-override' | 'native';
  * Refusal throws: an external adapter that cannot say what launched it must not attach Presence.
  * The error names the repair. Env contents are never logged — only which marker was present.
  */
-export function resolveLaunchSurface(
-  env: NodeJS.ProcessEnv,
-): { surface: Surface; markerGeneration: MarkerGeneration } {
+export function resolveLaunchSurface(env: NodeJS.ProcessEnv): {
+  surface: Surface;
+  markerGeneration: MarkerGeneration;
+} {
   if (env['MUSTERD_SURFACE'] !== undefined) {
     throw new Error(
       'musterd MCP: this registration still sets the retired MUSTERD_SURFACE marker (pre-ADR-286) — ' +

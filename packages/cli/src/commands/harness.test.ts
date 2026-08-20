@@ -136,7 +136,10 @@ function writeV1Identity(): void {
   );
 }
 
-function writeV2Provisioning(desired: string[], contributions: Record<string, string[]> = {}): void {
+function writeV2Provisioning(
+  desired: string[],
+  contributions: Record<string, string[]> = {},
+): void {
   mkdirSync(join(cwd, '.musterd'), { recursive: true });
   writeFileSync(
     join(cwd, '.musterd', 'provisioned.json'),
@@ -318,7 +321,10 @@ describe('musterd harness status', () => {
     // fake-a was configured, then deselected — the ledger still names this worktree.
     const a = fakeAdapter('fake-a');
     await run(['configure'], { ctx: ctxOf(), registry: [a], select: ['fake-a'] });
-    writeV2Provisioning([], JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8')).contributions);
+    writeV2Provisioning(
+      [],
+      JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8')).contributions,
+    );
     const { code, out } = await run(['status'], { ctx: ctxOf(), registry: [a] });
     expect(code).toBe(1);
     expect(out).toContain('not selected');

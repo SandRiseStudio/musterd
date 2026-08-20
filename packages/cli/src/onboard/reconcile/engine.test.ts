@@ -171,7 +171,11 @@ describe('stop-injection recovery (ADR 282 §4)', () => {
     expect(JSON.parse(fs.readFile(CONTAINER)!)['musterd']).toEqual(payload);
 
     const applied: string[] = [];
-    const spy = jsonAdapter({ id: 'fake', containerPath: CONTAINER, fragments: { musterd: payload } });
+    const spy = jsonAdapter({
+      id: 'fake',
+      containerPath: CONTAINER,
+      fragments: { musterd: payload },
+    });
     const wrapped: HarnessAdapter = {
       ...spy,
       apply: async (ctx, mutation) => {
@@ -272,7 +276,9 @@ describe('operation spans (ADR 282 O&E)', () => {
       registry: [adapter],
       tracer,
     });
-    const spans = exporter.getFinishedSpans().filter((s) => s.name === 'musterd.provisioning.operation');
+    const spans = exporter
+      .getFinishedSpans()
+      .filter((s) => s.name === 'musterd.provisioning.operation');
     expect(spans).toHaveLength(2);
     for (const span of spans) {
       expect(span.attributes['musterd.action']).toBe('create');
@@ -301,13 +307,17 @@ describe('operation spans (ADR 282 O&E)', () => {
       registry: [adapter],
       tracer,
     });
-    const conflict = exporter.getFinishedSpans().find((s) => s.attributes['musterd.result'] === 'conflict');
+    const conflict = exporter
+      .getFinishedSpans()
+      .find((s) => s.attributes['musterd.result'] === 'conflict');
     expect(conflict).toBeDefined();
     expect(conflict!.status.code).toBe(2); // SpanStatusCode.ERROR
 
     exporter.reset();
     await inspectHarnesses(ctxOf(fs), ['fake'], { registry: [adapter], tracer });
-    const inspected = exporter.getFinishedSpans().filter((s) => s.name === 'musterd.provisioning.operation');
+    const inspected = exporter
+      .getFinishedSpans()
+      .filter((s) => s.name === 'musterd.provisioning.operation');
     expect(inspected).toHaveLength(1);
     expect(inspected[0]!.attributes['musterd.result']).toBe('inspected');
     expect(inspected[0]!.attributes['musterd.observation']).toBe('unmanaged-conflict');
@@ -396,8 +406,14 @@ describe('unrelated content and partial progress (ADR 282 §5)', () => {
     });
     seedProvisioning(fs, '/w/a', ['fake']);
     seedProvisioning(fs, '/w/b', ['fake']);
-    await reconcileHarnesses(ctxOf(fs, '/w/a'), ['fake'], { legacyRepair: false, registry: [adapter] });
-    await reconcileHarnesses(ctxOf(fs, '/w/b'), ['fake'], { legacyRepair: false, registry: [adapter] });
+    await reconcileHarnesses(ctxOf(fs, '/w/a'), ['fake'], {
+      legacyRepair: false,
+      registry: [adapter],
+    });
+    await reconcileHarnesses(ctxOf(fs, '/w/b'), ['fake'], {
+      legacyRepair: false,
+      registry: [adapter],
+    });
     const resource = resourceKeyOf('musterd');
     let ledger = loadLedger(fs, MACHINE);
     expect(ledger.kind === 'valid' && ledger.value.fragments[resource]?.owners).toEqual([
