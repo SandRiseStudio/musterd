@@ -1,4 +1,10 @@
-# Provisioning recipe — role templates & the local onboarding flow (design)
+# Provisioning recipe — workspace profiles & the local onboarding flow (design)
+
+> **Vocabulary (ADR 272, 2026-08-19):** the "role template" this document describes is now a
+> **workspace profile** — `.musterd/profiles/*.json`, `ProfileSchema`, `--profile` — because the
+> roster **role** (a team fact, ADR 227) and the local provisioning template are different domains
+> and one name kept coupling them. Legacy `.musterd/roles/*.json` files (and their `role:` name key)
+> are still read, never written. The body below keeps its original wording where it is historical.
 
 > **Status: Phase 1 + Phase 2 + the governed half all shipped.** Phase 1 = "roles provision tools" (the Role JSON template, built-in seed library, Claude Code/Cursor/Codex MCP-server provisioning, uninstall manifest, charter injection, init wiring; ADRs 029–031). Phase 2 = the local claim-on-first-use half of §5–§6 — the folder claim policy (`MUSTERD_CLAIM`), the overloaded `team_join`, `musterd claim`, client-side pending presence (ADRs 032–033). **The governed half is now shipped, not future:** the team **agent key** + admin-issued **grants** + the **request/approval lane** + the A.3 `claim` handshake landed in the P3 hard cutover (ADR 077, 2026-06-30) — `hello`/`mskd_` removed, `claim`/`requests decide` live. And the **committed launch spec** (ADR 080) closed the last onboarding gap: a fresh clone self-wires with `musterd wire` from a committed, secret-free `.musterd/workspace.json` — no interactive `init` required. The design is under **ADR 026** (two universes), governed by **ADR 027**/**028**; the wire-level handshake is `SPEC.md` Appendix A.3; the governance/auth model is `membership-model.md`. **This doc owns** the _provisioning recipe_ (Role templates) and the _local onboarding/claim experience_ (`init`/`wire`, claim-on-first-use).
 
@@ -13,7 +19,7 @@ Four principles hold the whole design together; every decision below falls out o
 
 ## 1. A Role is a provisioning template (one file, two projections)
 
-A **Role** is a harness-agnostic template — authored once, shareable, living in `.musterd/roles/*` (plus a shipped built-in set). At use-time it _projects_ into two places:
+A **profile** (né Role) is a harness-agnostic template — authored once, shareable, living in `.musterd/profiles/*` (plus a shipped built-in set; legacy `.musterd/roles/*.json` still loads). At use-time it _projects_ into two places:
 
 ```
             role template  (authored once; the reproduction unit)

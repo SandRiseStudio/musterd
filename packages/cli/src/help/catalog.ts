@@ -283,7 +283,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'agent',
     signature:
-      '<name> [--role <role>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
+      '<name> [--role <label>] [--profile <profile>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
     summary: 'add an agent AND give it its own isolated workspace (worktree)',
     group: 'team',
     primary: true,
@@ -320,13 +320,13 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'role',
     signature:
       'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <builtin>] [--force]',
-    summary: "the team's role library (ADR 227) + local provisioning templates",
+    summary: "the team's role library (ADR 227) + local workspace profiles (ADR 272)",
     group: 'team',
     detail:
       'Two worlds under one name: the durable team library (roles/<name>.toml — list/show read it ' +
       'from the daemon roster; assign edits seats/<seat>.toml in the roster home) and the local ' +
-      'ADR 026 provisioning templates (create scaffolds one; list/show fall back to them when no ' +
-      'team is reachable).',
+      'workspace profiles, the ADR 026 provisioning templates renamed by ADR 272 (create scaffolds ' +
+      'one into .musterd/profiles/; list/show fall back to them when no team is reachable).',
     examples: ['musterd role list', 'musterd role assign wanderer platform'],
   },
 

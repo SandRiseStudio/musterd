@@ -32,19 +32,32 @@ const GuidanceRecordSchema = z.object({
   contentVersion: z.number(),
 });
 
-export const ProvisionManifestSchema = z.object({
-  version: z.literal(1),
-  role: z.string(),
-  harness: z.string(),
-  /** MCP server names musterd registered into the harness (removable exactly). */
-  mcpServers: z.array(z.string()),
-  /** Permission entries musterd added to the harness's allow/ask/deny (removable exactly). */
-  permissions: PermissionsSchema,
-  /** Guidance files written (ADR 085). Optional so pre-085 manifests keep parsing (no migration). */
-  guidance: GuidanceRecordSchema.optional(),
-  /** ISO timestamp of the most recent provision. */
-  provisionedAt: z.string(),
-});
+/** Pre-rename manifests name the provisioned profile with a `role` key; adopt it when absent. */
+function adoptLegacyRoleKey(raw: unknown): unknown {
+  if (raw && typeof raw === 'object' && 'role' in raw && !('profile' in raw)) {
+    const { role, ...rest } = raw as Record<string, unknown>;
+    return { ...rest, profile: role };
+  }
+  return raw;
+}
+
+export const ProvisionManifestSchema = z.preprocess(
+  adoptLegacyRoleKey,
+  z.object({
+    version: z.literal(1),
+    /** The provisioned profile's name (`role` pre-ADR-272-rename; still read, and dual-written). */
+    profile: z.string(),
+    harness: z.string(),
+    /** MCP server names musterd registered into the harness (removable exactly). */
+    mcpServers: z.array(z.string()),
+    /** Permission entries musterd added to the harness's allow/ask/deny (removable exactly). */
+    permissions: PermissionsSchema,
+    /** Guidance files written (ADR 085). Optional so pre-085 manifests keep parsing (no migration). */
+    guidance: GuidanceRecordSchema.optional(),
+    /** ISO timestamp of the most recent provision. */
+    provisionedAt: z.string(),
+  }),
+);
 export type ProvisionManifest = z.infer<typeof ProvisionManifestSchema>;
 
 function manifestPath(dir: string): string {
@@ -64,13 +77,19 @@ export function readProvisionManifest(dir: string): ProvisionManifest | null {
 
 /**
  * Record a provision into `<dir>/.musterd/provisioned.json`. Server names are unioned with any
- * already recorded (so re-provisioning a second role keeps the first role's servers removable);
- * `role`/`harness`/`provisionedAt` reflect the latest provision. Returns the written path.
+ * already recorded (so re-provisioning a second profile keeps the first profile's servers
+ * removable); `profile`/`harness`/`provisionedAt` reflect the latest provision. Returns the
+ * written path.
+ *
+ * Transition dual-write (ADR 272 rename): the file carries the legacy `role` key alongside
+ * `profile`, same value, so an older musterd reading this worktree still parses its removal set
+ * (its zod object strips the unknown `profile` key). Retire the dual-write when the version-2
+ * manifest (izzo's multi-harness work) lands and owns migration.
  */
 export function writeProvisionManifest(
   dir: string,
   entry: {
-    role: string;
+    profile: string;
     harness: string;
     mcpServers: string[];
     permissions?: { allow: string[]; ask: string[]; deny: string[] };
@@ -87,7 +106,7 @@ export function writeProvisionManifest(
   const guidance = entry.guidance ?? prior?.guidance;
   const manifest: ProvisionManifest = {
     version: 1,
-    role: entry.role,
+    profile: entry.profile,
     harness: entry.harness,
     mcpServers: [...merged].sort(),
     permissions: { allow: mergePerm('allow'), ask: mergePerm('ask'), deny: mergePerm('deny') },
@@ -97,6 +116,7 @@ export function writeProvisionManifest(
   const bindingDir = join(dir, BINDING_DIR);
   mkdirSync(bindingDir, { recursive: true });
   const path = manifestPath(dir);
-  writeFileSync(path, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  const { profile, ...rest } = manifest;
+  writeFileSync(path, JSON.stringify({ role: profile, profile, ...rest }, null, 2) + '\n', 'utf8');
   return path;
 }

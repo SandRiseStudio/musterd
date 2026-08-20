@@ -17,14 +17,14 @@ describe('provision manifest', () => {
   it('writes a versioned manifest and reads it back', () => {
     const dir = tmp();
     const path = writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: ['supabase'],
     });
     expect(path).toBe(join(dir, BINDING_DIR, PROVISION_MANIFEST_FILE));
     const m = readProvisionManifest(dir)!;
     expect(m.version).toBe(1);
-    expect(m.role).toBe('backend');
+    expect(m.profile).toBe('backend');
     expect(m.harness).toBe('claude-code');
     expect(m.mcpServers).toEqual(['supabase']);
     expect(typeof m.provisionedAt).toBe('string');
@@ -33,13 +33,13 @@ describe('provision manifest', () => {
   it('records and unions provisioned permissions across re-provisions', () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'reviewer',
+      profile: 'reviewer',
       harness: 'claude-code',
       mcpServers: [],
       permissions: { allow: ['read'], ask: ['bash'], deny: [] },
     });
     writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: [],
       permissions: { allow: ['edit', 'read'], ask: [], deny: [] },
@@ -51,31 +51,31 @@ describe('provision manifest', () => {
 
   it('defaults permissions to empty when omitted (back-compatible manifest)', () => {
     const dir = tmp();
-    writeProvisionManifest(dir, { role: 'x', harness: 'h', mcpServers: ['s'] });
+    writeProvisionManifest(dir, { profile: 'x', harness: 'h', mcpServers: ['s'] });
     expect(readProvisionManifest(dir)!.permissions).toEqual({ allow: [], ask: [], deny: [] });
   });
 
   it('unions server names across re-provisions (stays a complete removal set)', () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: ['supabase'],
     });
     writeProvisionManifest(dir, {
-      role: 'frontend',
+      profile: 'frontend',
       harness: 'claude-code',
       mcpServers: ['figma'],
     });
     const m = readProvisionManifest(dir)!;
     expect(m.mcpServers).toEqual(['figma', 'supabase']); // sorted union
-    expect(m.role).toBe('frontend'); // latest provision
+    expect(m.profile).toBe('frontend'); // latest provision
   });
 
-  it('records the guidance surface and preserves it across a role-only re-provision (ADR 085)', () => {
+  it('records the guidance surface and preserves it across a profile-only re-provision (ADR 085)', () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'backend',
+      profile: 'backend',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: ['.musterd/skill/SKILL.md'], contentVersion: 1 },
@@ -86,7 +86,7 @@ describe('provision manifest', () => {
     });
     // A later provision that doesn't touch guidance must not drop it.
     writeProvisionManifest(dir, {
-      role: 'frontend',
+      profile: 'frontend',
       harness: 'claude-code',
       mcpServers: ['figma'],
     });
@@ -99,7 +99,7 @@ describe('provision manifest', () => {
 
   it('returns null for a corrupt or invalid manifest', () => {
     const dir = tmp();
-    writeProvisionManifest(dir, { role: 'x', harness: 'h', mcpServers: [] });
+    writeProvisionManifest(dir, { profile: 'x', harness: 'h', mcpServers: [] });
     const path = join(dir, BINDING_DIR, PROVISION_MANIFEST_FILE);
     writeFileSync(path, '{ not json');
     expect(readProvisionManifest(dir)).toBeNull();

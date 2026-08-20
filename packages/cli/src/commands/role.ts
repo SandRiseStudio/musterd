@@ -6,24 +6,26 @@ import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { installSeatPermissions } from '../onboard/permissions.js';
 import {
-  BUILTIN_ROLES,
+  BUILTIN_PROFILES,
   GENERALIST,
   isBuiltin,
-  listRoleNames,
-  loadRole,
-  userRolesDir,
-  type RoleTemplate,
-} from '../onboard/role.js';
+  legacyUserRolesDir,
+  listProfileNames,
+  loadProfile,
+  userProfilesDir,
+  type Profile,
+} from '../onboard/profile.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { resolveRead } from './helpers.js';
 
 /**
- * Two worlds under one name (ADR 227 close-out). `list`/`show` are **roster-first**: they render
- * the team's durable role library (`roles/<name>.toml`, read off the daemon roster) above the
- * ADR 026 *provisioning templates*, and degrade to template-only output when no team is reachable
- * (unbound folder, daemon down, older daemon) — the read path never hard-fails. `create` scaffolds
- * a template; `assign` edits the roster (see its doc below).
+ * Two worlds under one name (ADR 227 close-out; ADR 272 names them). `list`/`show` are
+ * **roster-first**: they render the team's durable role library (`roles/<name>.toml`, read off the
+ * daemon roster) above the local **workspace profiles** (the ADR 026 provisioning templates,
+ * renamed), and degrade to profile-only output when no team is reachable (unbound folder, daemon
+ * down, older daemon) — the read path never hard-fails. `create` scaffolds a profile; `assign`
+ * edits the roster (see its doc below).
  */
 
 /** The roster read `list`/`show` render from — injectable so tests need no daemon. */
@@ -181,9 +183,9 @@ function recompileSeatPermissions(
   remove: boolean,
   seatWorkspace: (seat: string) => string | undefined,
 ): { lines: string[]; json: string } {
-  let template: RoleTemplate | undefined;
+  let template: Profile | undefined;
   try {
-    template = loadRole(process.cwd(), roleName);
+    template = loadProfile(process.cwd(), roleName);
   } catch {
     return { lines: [], json: 'no-template' }; // a roster label with no profile — nothing to compile
   }
@@ -236,11 +238,14 @@ function listRosterRoles(musterdDir: string): string[] {
 
 function roleList(parsed: Parsed, roster: RosterRead | null): number {
   const dir = process.cwd();
-  const names = listRoleNames(dir);
-  // A name is user-authored when a `.musterd/roles/<name>.json` exists; a user file that shadows a
-  // built-in is an *override* (loadRole prefers the file).
+  const names = listProfileNames(dir);
+  // A name is user-authored when a `.musterd/profiles/<name>.json` (or a legacy
+  // `.musterd/roles/<name>.json`) exists; a user file that shadows a built-in is an *override*
+  // (loadProfile prefers the file).
   const rows = names.map((name) => {
-    const userFile = existsSync(join(userRolesDir(dir), `${name}.json`));
+    const userFile =
+      existsSync(join(userProfilesDir(dir), `${name}.json`)) ||
+      existsSync(join(legacyUserRolesDir(dir), `${name}.json`));
     const origin = userFile ? (isBuiltin(name) ? 'override' : 'user') : 'built-in';
     return { name, origin };
   });
@@ -279,9 +284,9 @@ function roleList(parsed: Parsed, roster: RosterRead | null): number {
       theme.meta('assign with: musterd role assign <seat> <role> (run in the roster home)') +
         '\n\n',
     );
-    process.stdout.write(`${theme.accent('provisioning templates')} ${theme.meta('(local)')}\n`);
+    process.stdout.write(`${theme.accent('workspace profiles')} ${theme.meta('(local)')}\n`);
   } else {
-    process.stdout.write(`${theme.accent('roles')} ${theme.meta(`(in ${dir})`)}\n`);
+    process.stdout.write(`${theme.accent('workspace profiles')} ${theme.meta(`(in ${dir})`)}\n`);
   }
   for (const { name, origin } of rows) {
     const tag =
@@ -326,19 +331,19 @@ function roleShow(parsed: Parsed, roster: RosterRead | null): number {
     if (caps && typeof caps === 'object' && Object.keys(caps as object).length) {
       process.stdout.write(`  capability defaults: ${JSON.stringify(caps)}\n`);
     }
-    if (listRoleNames(process.cwd()).includes(name)) {
+    if (listProfileNames(process.cwd()).includes(name)) {
       process.stdout.write(
         theme.meta(
-          '  a provisioning template also has this name — show is roster-first; the template renders when no team role matches',
+          '  a workspace profile also has this name — show is roster-first; the profile renders when no team role matches',
         ) + '\n',
       );
     }
     return 0;
   }
 
-  let role: RoleTemplate;
+  let role: Profile;
   try {
-    role = loadRole(process.cwd(), name);
+    role = loadProfile(process.cwd(), name);
   } catch (err) {
     throw new CliError((err as Error).message, 4);
   }
@@ -348,9 +353,11 @@ function roleShow(parsed: Parsed, roster: RosterRead | null): number {
     return 0;
   }
   const overrides =
-    isBuiltin(name) && existsSync(join(userRolesDir(process.cwd()), `${name}.json`));
+    isBuiltin(name) &&
+    (existsSync(join(userProfilesDir(process.cwd()), `${name}.json`)) ||
+      existsSync(join(legacyUserRolesDir(process.cwd()), `${name}.json`)));
   process.stdout.write(
-    `${theme.accent(role.role)} ${theme.meta(overrides ? '(user file, overrides the built-in)' : isBuiltin(name) ? '(built-in)' : '(user)')}\n`,
+    `${theme.accent(role.profile)} ${theme.meta(overrides ? '(user file, overrides the built-in)' : isBuiltin(name) ? '(built-in)' : '(user)')}\n`,
   );
   if (role.capacity) process.stdout.write(`  capacity: ${role.capacity}\n`);
   process.stdout.write(`  charter:\n${indent(role.charter, 4)}\n`);
@@ -378,7 +385,7 @@ function roleCreate(parsed: Parsed): number {
     throw new CliError(`invalid role name "${name}" — use lowercase letters, numbers, hyphens`, 2);
   }
   const dir = process.cwd();
-  const path = join(userRolesDir(dir), `${name}.json`);
+  const path = join(userProfilesDir(dir), `${name}.json`);
   if (existsSync(path) && !parsed.flags['force']) {
     throw new CliError(`${path} already exists — pass --force to overwrite`, 1);
   }
@@ -386,7 +393,7 @@ function roleCreate(parsed: Parsed): number {
   const from = typeof parsed.flags['from'] === 'string' ? parsed.flags['from'] : undefined;
   const template = from ? fromBuiltin(from, name) : skeleton(name);
 
-  mkdirSync(userRolesDir(dir), { recursive: true });
+  mkdirSync(userProfilesDir(dir), { recursive: true });
   writeFileSync(path, JSON.stringify(template, null, 2) + '\n', 'utf8');
 
   if (parsed.flags['json']) {
@@ -408,23 +415,23 @@ function roleCreate(parsed: Parsed): number {
 
 /**
  * Round-trip a built-in into an editable starting point (recipe "Settled vs open"). Serializes the
- * already-validated built-in template, renamed to `<name>` so a customized copy is distinct.
+ * already-validated built-in profile, renamed to `<name>` so a customized copy is distinct.
  */
-function fromBuiltin(from: string, name: string): RoleTemplate {
-  const base = BUILTIN_ROLES[from];
+function fromBuiltin(from: string, name: string): Profile {
+  const base = BUILTIN_PROFILES[from];
   if (!base) {
     throw new CliError(
-      `unknown built-in "${from}" — one of: ${Object.keys(BUILTIN_ROLES).join(', ')}`,
+      `unknown built-in "${from}" — one of: ${Object.keys(BUILTIN_PROFILES).join(', ')}`,
       2,
     );
   }
-  return { ...structuredClone(base), role: name };
+  return { ...structuredClone(base), profile: name };
 }
 
-/** A minimal valid template to fill in (charter is required; tools default empty). */
-function skeleton(name: string): RoleTemplate {
+/** A minimal valid profile to fill in (charter is required; tools default empty). */
+function skeleton(name: string): Profile {
   return {
-    role: name,
+    profile: name,
     charter: `TODO: one or two lines of lens-not-résumé charter for ${name}.`,
     tools: {
       mcp_servers: [],

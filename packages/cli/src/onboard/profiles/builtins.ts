@@ -1,32 +1,33 @@
 /**
- * The built-in role library — a *seed of examples, not a catalog* (ADR 028,
- * provisioning-recipe.md §3). musterd ships a small set of archetypes to teach the template shape
- * and give a one-command start; users author their own in `.musterd/roles/*.json`.
+ * The built-in profile library — a *seed of examples, not a catalog* (ADR 028,
+ * provisioning-recipe.md §3; "role templates" pre-ADR-272-rename). musterd ships a small set of
+ * archetypes to teach the profile shape and give a one-command start; users author their own in
+ * `.musterd/profiles/*.json` (legacy `.musterd/roles/*.json` files still load).
  *
  * These are expressed in-source as raw data (validated through the same schema as user files by
- * {@link import('../role.js').parseRole}) rather than shipped as JSON assets: the package builds
- * with plain `tsc`, which does not copy non-TS files into `dist/`, so file-based built-ins would
- * need a bundler/copy step — a new build dependency we decline (ADR 029). User-authored templates
- * remain JSON. `role create` round-tripping a built-in into an editable `.musterd/roles/<name>.json`
- * is the bridge (recipe "Settled vs open").
+ * {@link import('../profile.js').parseProfile}) rather than shipped as JSON assets: the package
+ * builds with plain `tsc`, which does not copy non-TS files into `dist/`, so file-based built-ins
+ * would need a bundler/copy step — a new build dependency we decline (ADR 029). User-authored
+ * profiles remain JSON. `role create` round-tripping a built-in into an editable
+ * `.musterd/profiles/<name>.json` is the bridge (recipe "Settled vs open").
  *
  * Charters stay lens-not-résumé and minimal. MCP entries are *referenced, not owned* — musterd
  * points at ecosystem servers (npx-launched) and never hosts or version-manages them. Secrets are
  * `${ENV}` references, never inline. `generalist` gets nothing extra.
  *
- * Exported as raw `unknown` (not yet parsed) so this module has no import cycle with `role.ts`,
- * which validates these into the typed `BUILTIN_ROLES` map at its own module-eval time.
+ * Exported as raw `unknown` (not yet parsed) so this module has no import cycle with `profile.ts`,
+ * which validates these into the typed `BUILTIN_PROFILES` map at its own module-eval time.
  */
-export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
+export const BUILTIN_PROFILE_TEMPLATES: Record<string, unknown> = {
   generalist: {
-    role: 'generalist',
+    profile: 'generalist',
     charter:
       'General contributor. Pick up work across the codebase; coordinate through the team acts.',
     // Nothing extra — only the musterd server + this bare charter (ADR 028).
   },
 
   reviewer: {
-    role: 'reviewer',
+    profile: 'reviewer',
     charter: [
       'Review teammates’ changes for correctness and clarity. Read widely; edit narrowly.',
       'status_update when you start and finish a review; resolve the thread once the change lands.',
@@ -43,7 +44,7 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
   },
 
   backend: {
-    role: 'backend',
+    profile: 'backend',
     capacity: 2,
     charter: [
       'Own the server + data layer. Small, tested changes.',
@@ -64,7 +65,7 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
   },
 
   frontend: {
-    role: 'frontend',
+    profile: 'frontend',
     capacity: 2,
     charter: [
       'Own the UI layer. Keep components small and accessible; match the existing design system.',
@@ -90,7 +91,7 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
   // Bash stays allowed but only through read-shaped prefixes; the deny on the edit tools is the
   // profile. (Observer members, ADR 063, are the coordination-layer precedent.)
   'read-only': {
-    role: 'read-only',
+    profile: 'read-only',
     charter: [
       'Read, review, and report — never write. Surface findings through the team acts.',
       'status_update when you start and finish; request_help instead of working around a limit.',
@@ -115,7 +116,7 @@ export const BUILTIN_ROLE_TEMPLATES: Record<string, unknown> = {
   },
 
   docs: {
-    role: 'docs',
+    profile: 'docs',
     charter: [
       'Own the docs. Keep them accurate and in sync with the code; one fact, one home.',
       'status_update at task start/finish; resolve threads you finish.',

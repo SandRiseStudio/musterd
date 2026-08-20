@@ -754,7 +754,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' }); // canonical file only
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -767,7 +767,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
   it('flags a stale-version skill as drift (exit-1)', async () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 0 },
@@ -783,7 +783,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
   it('flags a recorded-but-missing skill file as drift', async () => {
     const dir = tmp();
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: [CANONICAL_SKILL_PATH], contentVersion: 1 },
@@ -799,7 +799,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -812,7 +812,7 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -861,7 +861,7 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
   function provisionCanonicalOnly(dir: string): void {
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -941,7 +941,7 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       // A path musterd used to write and no longer does — absent on disk, and that is correct.
@@ -960,7 +960,7 @@ describe('inspectProvisioning — guidance expected-set drift (ADR 171)', () => 
     const dir = tmp();
     const stale = ['.musterd/skill/SKILL.md', '.claude/commands/musterd-standup.md'];
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: stale, contentVersion: 0 },
@@ -1162,7 +1162,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -1174,7 +1174,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -1199,7 +1199,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },
@@ -1229,7 +1229,7 @@ describe('session-start probe — artifact drift (ADR 171 inc 2)', () => {
     const dir = tmp();
     const g = writeGuidance(dir, [], { team: 'dawn' });
     writeProvisionManifest(dir, {
-      role: 'x',
+      profile: 'x',
       harness: 'claude-code',
       mcpServers: [],
       guidance: { files: g.files, contentVersion: g.contentVersion },

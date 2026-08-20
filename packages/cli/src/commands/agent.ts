@@ -6,7 +6,7 @@ import { infraTouchWarning } from '../infra-gate.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { buildEntry } from '../onboard/mcpEntry.js';
 import { installSeatPermissions } from '../onboard/permissions.js';
-import { loadRole } from '../onboard/role.js';
+import { loadProfile } from '../onboard/profile.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
@@ -36,11 +36,21 @@ export async function agentCommand(
   const name = parsed.positionals[0];
   if (!name || /\s/.test(name)) {
     throw new CliError(
-      'usage: musterd agent <name> [--role <role>] [--model <id>] [--harness <claude-code|cursor|codex>] [--driver <you>] [--here | --path <dir>]',
+      'usage: musterd agent <name> [--role <label>] [--profile <profile>] [--model <id>] [--harness <claude-code|cursor|codex>] [--driver <you>] [--here | --path <dir>]',
       2,
     );
   }
   const role = flagStr(parsed.flags, 'role');
+  // ADR 272 rename: `--profile` names the workspace profile to provision. `--role` keeps its full
+  // pre-rename behavior (label + provisioning source when no --profile) so nothing breaks, but as a
+  // provisioning selector it is deprecated — increment 2 narrows it to the roster label only.
+  const profileFlag = flagStr(parsed.flags, 'profile');
+  const profileName = profileFlag ?? role;
+  if (role && !profileFlag) {
+    process.stdout.write(
+      `${theme.meta('note: --role also selects the workspace profile for now — that half is deprecated; use --profile <name> (ADR 272)')}\n`,
+    );
+  }
   // Model attestation (ADR 101): persist a *declared* model into the seat's binding.json so the adapter
   // attests by default instead of rotting to `unknown`. `--model` wins, else the ambient env the CLI
   // runs in (MUSTERD_MODEL / ANTHROPIC_MODEL, via the shared resolver). Never a guess — undefined stays
@@ -155,16 +165,16 @@ export async function agentCommand(
     ...(driver ? { driver } : {}),
   };
   saveBinding(ws.dir, binding);
-  // ADR 261: the permissions floor — plus the role's profile when --role names one — lands with
-  // the binding, so a NON-INTERACTIVE session in this worktree can work on day one. Until this
-  // write, a fresh seat's first Write failed closed with no way to prompt and presented as a
-  // broken tool (the 2026-08-13 ryder incident). Best-effort like hook install: a permissions
-  // hiccup never fails seat creation. Dir-aware on purpose — ws.dir is never process.cwd().
+  // ADR 261: the permissions floor — plus the profile's lists when --profile (or the deprecated
+  // --role) names one — lands with the binding, so a NON-INTERACTIVE session in this worktree can
+  // work on day one. Until this write, a fresh seat's first Write failed closed with no way to
+  // prompt and presented as a broken tool (the 2026-08-13 ryder incident). Best-effort like hook
+  // install: a permissions hiccup never fails seat creation. Dir-aware — ws.dir is never cwd().
   try {
-    const template = role ? loadRole(ws.dir, role) : undefined;
+    const template = profileName ? loadProfile(ws.dir, profileName) : undefined;
     installSeatPermissions(ws.dir, template);
   } catch {
-    /* an unknown role name or a broken settings file must not block the seat — init --check
+    /* an unknown profile name or a broken settings file must not block the seat — init --check
        (ADR 261 increment 2) is the surface that reports it */
   }
   // Also write the secret-free committed launch spec (ADR: committed launch spec) so this worktree
