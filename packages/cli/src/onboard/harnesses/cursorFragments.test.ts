@@ -112,6 +112,25 @@ describe('cursorAdapter — managed fragments', () => {
     expect(entry.command).toBe('/their/node'); // the rest of the entry is NOT adopted
   });
 
+  it('a marker-less musterd entry (the ADR 165 shape) is pre-ADR-286 — legacy, marker-only repair', async () => {
+    const fs = memoryFs();
+    fs.writeFile(
+      MCP,
+      JSON.stringify({
+        mcpServers: { musterd: { command: '/their/node', args: ['/their/adapter.js'] } },
+      }),
+      0o600,
+    );
+    const ctx = ctxOf(fs);
+    const intents = await intentsOf(ctx);
+    const mcp = intents.find((i) => i.fragmentKey === 'mcp.musterd')!;
+    expect((await cursorAdapter.observe(ctx, mcp)).state).toBe('legacy-launch-marker');
+    await cursorAdapter.apply(ctx, { kind: 'repair-launch-marker', intent: mcp });
+    const entry = JSON.parse(fs.readFile(MCP)!).mcpServers.musterd;
+    expect(entry.env.MUSTERD_LAUNCH_SURFACE).toBe('cursor');
+    expect(entry.command).toBe('/their/node'); // repaired, not adopted
+  });
+
   it('hook fragments preserve the user’s own hooks across write and remove', async () => {
     const fs = memoryFs();
     fs.writeFile(

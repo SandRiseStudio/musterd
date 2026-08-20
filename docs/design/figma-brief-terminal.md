@@ -73,7 +73,7 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
    ```
    Verdict glyphs (exact strings): `✓ in place` (owned-exact, ours) · `✓ satisfied (unmanaged)` ·
    `→ needs wire` (would create/add-owner) · `✗ conflict — not musterd's to overwrite` ·
-   `✗ drifted — evidence retained` · `✗ legacy launch marker — run musterd harness configure` ·
+   `✗ drifted — evidence retained` · `✗ pre-ADR-286 registration — run musterd harness configure` (covers both the retired `MUSTERD_SURFACE` marker and the marker-less ADR 165 shape) ·
    `✗ release blocked — drifted while deselected` · `⏳ busy — another reconciler holds this` ·
    `✗ container unreadable` · `journal pending — re-run musterd wire`.
    Exit code annotation: **0** only when every desired fragment is usable and every undesired owned

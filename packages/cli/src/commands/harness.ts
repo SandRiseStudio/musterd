@@ -162,7 +162,7 @@ export function verdictOf(f: FragmentInspection): string {
     case 'release-blocked':
       return `${theme.err('✗')} release blocked — drifted while deselected`;
     case 'repair-needed':
-      return `${theme.err('✗')} legacy launch marker — run musterd harness configure`;
+      return `${theme.err('✗')} pre-ADR-286 registration — run musterd harness configure`;
     case 'invalid-container':
       return `${theme.err('✗')} container unreadable`;
     default:

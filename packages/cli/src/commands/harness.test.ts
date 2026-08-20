@@ -305,7 +305,7 @@ describe('musterd harness status', () => {
     expect(out).toContain('pending (not installed here)');
   });
 
-  it('a legacy launch marker reports its repair and exits 1', async () => {
+  it('a pre-ADR-286 registration reports its repair and exits 1', async () => {
     writeV2Identity();
     writeV2Provisioning(['fake-a']);
     const a = fakeAdapter('fake-a', {
@@ -313,7 +313,7 @@ describe('musterd harness status', () => {
     });
     const { code, out } = await run(['status'], { ctx: ctxOf(), registry: [a] });
     expect(code).toBe(1);
-    expect(out).toContain('legacy launch marker — run musterd harness configure');
+    expect(out).toContain('pre-ADR-286 registration — run musterd harness configure');
   });
 
   it('an undesired owned contribution that is not yet released exits 1', async () => {

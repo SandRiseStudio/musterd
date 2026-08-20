@@ -385,7 +385,7 @@ describe('multi-harness worktree selection (ADR 281/282/286 acceptance)', () => 
     const ctx = ctxFor(ws, m, exec);
     const st = await status(ws, ctx, registry);
     expect(st.code).toBe(1);
-    expect(st.out).toContain('legacy launch marker');
+    expect(st.out).toContain('pre-ADR-286 registration');
 
     // 3. A human-confirmed configure repairs ONLY the marker.
     const fixed = await configure(ws, ctx, registry, ['cursor']);

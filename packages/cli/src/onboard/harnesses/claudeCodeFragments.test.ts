@@ -97,6 +97,27 @@ describe('claudeCodeAdapter — managed fragments', () => {
     expect(observed.state).toBe('legacy-launch-marker');
   });
 
+  it('a MARKER-LESS musterd entry (the ADR 165 shape) is pre-ADR-286 too — legacy, repairable', async () => {
+    // The common fleet registration: ADR 165 stripped every env var, so the entry carries neither
+    // the launch marker nor the retired one. Classifying it 'present' made configure refuse as
+    // unmanaged-conflict, and the conversion could not complete anywhere (nick's first real run).
+    const exec = scriptedExec({
+      getOut: ['  Command: /their/node', '  Args: /their/adapter.js'].join('\n'),
+    });
+    const ctx = fragCtx(memoryFs(), exec.seam);
+    const intents = await claudeCodeAdapter.desiredFragments(
+      ctx,
+      await claudeCodeAdapter.target(ctx),
+    );
+    const mcp = intents.find((i) => i.fragmentKey === 'mcp.musterd')!;
+    expect((await claudeCodeAdapter.observe(ctx, mcp)).state).toBe('legacy-launch-marker');
+    await claudeCodeAdapter.apply(ctx, { kind: 'repair-launch-marker', intent: mcp });
+    const add = exec.calls.find((c) => c[0] === 'mcp' && c[1] === 'add')!;
+    const joined = add.join(' ');
+    expect(joined).toContain('MUSTERD_LAUNCH_SURFACE=claude-code');
+    expect(joined).toContain('/their/node'); // repaired, not adopted
+  });
+
   it('repair-launch-marker preserves the observed command/args and unrelated env, swapping only the marker', async () => {
     const exec = scriptedExec({
       getOut: [
