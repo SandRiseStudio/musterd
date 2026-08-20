@@ -14,6 +14,7 @@ import { doneCommand } from './commands/done.js';
 import { fmtCommand } from './commands/fmt.js';
 import { gateCommand } from './commands/gate.js';
 import { goalCommand } from './commands/goal.js';
+import { harnessCommand } from './commands/harness.js';
 import { reachabilityNudge } from './commands/helpers.js';
 import { hostCommand } from './commands/host.js';
 import { humanCommand } from './commands/human.js';
@@ -259,6 +260,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return sessionCommand(rest);
     case 'gate':
       return gateCommand(rest);
+    case 'harness':
+      return harnessCommand(rest);
     case 'host':
       return hostCommand(rest);
     case 'wire':

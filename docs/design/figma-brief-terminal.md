@@ -46,6 +46,43 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
 6. `cmd/inbox-watch` — `$ musterd inbox --watch` → same header with a live indicator `◉ watching` (green), a stream of rows, and a blinking-cursor affordance at the bottom. Show one incoming `request_help` highlighted (yellow-bold badge) to demonstrate the flagship moment.
 7. `cmd/status` — `$ musterd status` → table: columns `MEMBER` (member-chip), `KIND`, `ROLE`, `MODEL` (occupancy-attested model id, ADR 101; absent → `unknown`), `LIFECYCLE`, `ACTIVITY` (presence-dot + surface / working label). One row per member. Header row in bright-black, aligned to 80 cols. (The shipped frame still says `PRESENCE` before LIFECYCLE — frame update tracked with ADR 008 lockstep; code is the source of truth.)
 
+### Multi-harness frames (ADR 281/282/286)
+
+8. `cmd/harness-configure` — `$ musterd harness configure` → a registry-ordered **multi-select**
+   (checkbox list), preselecting the current desired set; unavailable adapters stay selectable with
+   a dim `(pending — not installed here)` hint:
+   ```
+   ◆ Which harnesses should launch this worktree's member?
+   ◼ Claude Code
+   ◻ Cursor
+   ◻ Codex (pending — not installed here)
+   ◼ musterd (native host)
+   ```
+   On confirm: `✓ desired harnesses: claude-code, musterd` then one line per reconciled fragment
+   (see the status verdict glyphs below), ending `✓ worktree configured — musterd wire repairs it any time`.
+   Cancel (esc) prints `no changes made` (dim) and exits **0**.
+9. `cmd/harness-status` — `$ musterd harness status` → one block per registry adapter:
+   ```
+   claude-code   selected · available
+     mcp.musterd   repo-shared   ✓ in place
+     hooks.local   folder        ✓ in place
+     permissions   folder        → needs wire
+   cursor        not selected · available
+   codex         selected · pending (not installed here)
+   musterd       selected · native (no external footprint)
+   ```
+   Verdict glyphs (exact strings): `✓ in place` (owned-exact, ours) · `✓ satisfied (unmanaged)` ·
+   `→ needs wire` (would create/add-owner) · `✗ conflict — not musterd's to overwrite` ·
+   `✗ drifted — evidence retained` · `✗ legacy launch marker — run musterd harness configure` ·
+   `✗ release blocked — drifted while deselected` · `⏳ busy — another reconciler holds this` ·
+   `✗ container unreadable` · `journal pending — re-run musterd wire`.
+   Exit code annotation: **0** only when every desired fragment is usable and every undesired owned
+   contribution is released (pending unavailability still exits 0); otherwise **1**.
+10. `state/harness-legacy` — status/wire over a version-1 identity: red
+    `✗ this worktree is pre-ADR-281 (version-1 identity) — run musterd harness configure to convert it`,
+    exit **1** (wire exits **6** when no selection exists at all:
+    `✗ no harness selection here — run musterd harness configure (or musterd init for a fresh folder)`).
+
 ## Page: States (empty + error)
 
 1. `state/empty-inbox` — `inbox empty — nobody's mustered anything yet` (dim). (Exact string; the CLI uses it verbatim.)
