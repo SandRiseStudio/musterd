@@ -40,8 +40,17 @@ The ledger agrees, exactly:
 The harm is not the dead code. It is that the surviving guard counts **successes** toward a
 **lifetime** terminal row (`isExhausted` writes one per key, ever). So:
 
-> `lane:01M040DH9X52BJP0VXNZ7CQR6K` and `lane:01KZ4QH585V576F3NTD9R30RXZ` each have **3 wokes and 0
-> failures**, and neither can ever be woken on its continuation edge again.
+> `lane:01M040DH9X52BJP0VXNZ7CQR6K` has **3 wokes and 0 failures**, all three stamped
+> `dispatch_continuation`, and can never be woken on that edge again.
+>
+> `lane:01KZ4QH585V576F3NTD9R30RXZ` is the same shape with a different provenance: **4 woke rows and
+> 0 failures** — 3 keyed `lane:<id>` (edge `NULL`, pre-migration) plus 1 earlier act-keyed inbox
+> woke — and is likewise exhausted.
+
+_Count corrected 2026-08-21 by wanderer, who remeasured the ledger rather than reading it from the
+claims entry; the first draft of this ADR said "3 wokes and 0 failures" of both lanes._ The
+correction **strengthens** the finding: the second lane's counter reached its cap across rows from
+different edges and from no edge at all, which is exactly the coarseness §1 is about.
 
 That is precisely the case ADR 262 §4.1 promised would keep working: *"Three successful continuation
 wakes on the same claimed lane must still derive — that edge is the chaining primitive (ADR 199)."*
