@@ -159,3 +159,26 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   `worktree` ("in its own worktree"). `TERMINOLOGY_GATE_FROM` 299 therefore failed `vocab:check`
   on main and on every following PR (dolly #975). Bumped to **300**. Cannot backtick the Decision;
   cannot leave the gate red.
+
+- **2026-08-21 (toolkit split, stanley, lane 01M0K5X6D2).** The rename the enforcement PR deferred.
+  `musterd toolkit <list|show|create>` now owns workspace equipment and `musterd role` is
+  roster-only — the two worlds that shared one name are two commands. Four behaviour changes,
+  each of them a fall-through this ADR called a seam: `role list` no longer prints equipment
+  under the team library; `role show` no longer renders a toolkit when the roster has no such
+  role, it names `musterd toolkit show`; `role create` outside a roster home is **refused**
+  rather than silently downgraded to a workspace file (a local file may never assert a team
+  responsibility — §1.3); and `role create --profile` survives as the quiet alias, delegating to
+  the new command. `role create` in a roster home prints the one-release pointer.
+
+  Scope held deliberately: this is the **command surface only**. `.musterd/profiles/` keeps its
+  name on disk and `Profile`/`profile:` keep theirs in the schema — those are file keys, tier 2,
+  landing on-touch with legacy accepted on read. Renaming them here would have been the flag day
+  §3 rejects. Nine tests moved from `role.test.ts` to `toolkit.test.ts` rather than being
+  deleted, so the split cost no coverage.
+
+  Recorded because it nearly shipped silently: trimming the now-unused imports out of `role.ts`
+  also removed two still in use, and `recompileSeatPermissions` catches around its template
+  resolution — so the missing symbol presented as "this role has no provisioning template" and
+  three ADR 261 tests failed with no mention of an import. Lint did not see it; `tsc` did. A
+  catch that swallows a `ReferenceError` alongside the absence it is meant to tolerate will do
+  this again.

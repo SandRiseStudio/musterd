@@ -35,3 +35,15 @@ describe('command catalog', () => {
     expect(HELP).toBe(renderPlainHelp());
   });
 });
+
+describe('toolkit is a first-class command (ADR 296)', () => {
+  it('has its own catalog entry, separate from role', () => {
+    expect(CATALOG.some((c) => c.name === 'toolkit')).toBe(true);
+  });
+
+  it("role's entry no longer advertises two worlds under one name", () => {
+    const role = CATALOG.find((c) => c.name === 'role');
+    expect(role).toBeTruthy();
+    expect(`${role?.summary} ${role?.detail ?? ''}`).not.toContain('Two worlds');
+  });
+});

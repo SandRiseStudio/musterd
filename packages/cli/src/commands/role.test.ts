@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseRoleFile } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
-import { legacyUserRolesDir, userProfilesDir } from '../onboard/profile.js';
+import { userProfilesDir } from '../onboard/profile.js';
 import { roleCommand } from './role.js';
 
 let cwd: string;
@@ -45,19 +45,12 @@ describe('role list/show roster-first (ADR 227 close-out)', () => {
     ],
   };
 
-  it('role list renders the team library first when a roster is reachable', async () => {
+  it('role list renders the team library when a roster is reachable', async () => {
     expect(await roleCommand(parsed(['list']), { fetchRoster: async () => roster })).toBe(0);
-    expect(out.indexOf('team roles')).toBeGreaterThanOrEqual(0);
-    expect(out.indexOf('team roles')).toBeLessThan(out.indexOf('workspace profiles'));
+    expect(out).toContain('team roles');
     expect(out).toContain('platform');
     expect(out).toContain('izzo');
     expect(out).toContain('(unheld)'); // observer has no holder
-  });
-
-  it('role list falls back to template-only output when no roster is reachable', async () => {
-    expect(await roleCommand(parsed(['list']), { fetchRoster: async () => null })).toBe(0);
-    expect(out).not.toContain('team roles');
-    expect(out).toContain('built-in'); // today's output, unchanged
   });
 
   it('role show prefers the team role and names its holders', async () => {
@@ -67,13 +60,6 @@ describe('role list/show roster-first (ADR 227 close-out)', () => {
     expect(out).toContain('infra toucher');
     expect(out).toContain('You touch infra.');
     expect(out).toContain('izzo');
-  });
-
-  it('role show falls through to the provisioning template when the roster has no such role', async () => {
-    expect(
-      await roleCommand(parsed(['show', 'backend']), { fetchRoster: async () => roster }),
-    ).toBe(0);
-    expect(out).toContain('built-in'); // template path, unchanged
   });
 });
 
@@ -230,100 +216,6 @@ describe('role assign (ADR 227 — roster roles, run in the roster home)', () =>
   });
 });
 
-describe('role list', () => {
-  it('lists the built-ins, marking generalist', async () => {
-    expect(await roleCommand(parsed(['list']))).toBe(0);
-    expect(out).toContain('generalist');
-    expect(out).toContain('backend');
-    expect(out).toContain('built-in');
-  });
-
-  it('marks a user file as user, and a same-named file as an override — legacy role-keyed files in .musterd/roles/ included', async () => {
-    mkdirSync(legacyUserRolesDir(cwd), { recursive: true });
-    writeFileSync(
-      join(legacyUserRolesDir(cwd), 'data.json'),
-      JSON.stringify({ role: 'data', charter: 'c' }),
-    );
-    writeFileSync(
-      join(legacyUserRolesDir(cwd), 'backend.json'),
-      JSON.stringify({ role: 'backend', charter: 'mine' }),
-    );
-    await roleCommand(parsed(['list'], { json: true }));
-    // Close-out shape: { team, templates } — team is null when no roster is reachable.
-    const { team, templates } = JSON.parse(out);
-    expect(team).toBeNull();
-    expect(templates).toEqual(expect.arrayContaining([{ name: 'data', origin: 'user' }]));
-    expect(templates).toEqual(expect.arrayContaining([{ name: 'backend', origin: 'override' }]));
-  });
-});
-
-describe('role show', () => {
-  it('shows a built-in resolved template', async () => {
-    expect(await roleCommand(parsed(['show', 'backend']))).toBe(0);
-    expect(out).toContain('backend');
-    expect(out).toContain('supabase'); // its mcp server
-    expect(out).toContain('charter');
-  });
-
-  it('emits the parsed object with --json', async () => {
-    await roleCommand(parsed(['show', 'reviewer'], { json: true }));
-    const role = JSON.parse(out);
-    expect(role.profile).toBe('reviewer');
-    expect(role.tools).toBeTruthy();
-  });
-
-  it('errors (exit 4) on an unknown role', async () => {
-    await expect(roleCommand(parsed(['show', 'nope']))).rejects.toMatchObject({ exitCode: 4 });
-  });
-
-  it('requires a name', async () => {
-    await expect(roleCommand(parsed(['show']))).rejects.toBeInstanceOf(CliError);
-  });
-});
-
-describe('role create', () => {
-  it('scaffolds a minimal skeleton at .musterd/profiles/<name>.json', async () => {
-    expect(await roleCommand(parsed(['create', 'qa']))).toBe(0);
-    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8'));
-    expect(written.profile).toBe('qa');
-    expect(written.charter).toContain('TODO');
-    expect(written.tools.mcp_servers).toEqual([]);
-  });
-
-  it('round-trips a built-in with --from, renamed to the new name', async () => {
-    expect(await roleCommand(parsed(['create', 'mybackend'], { from: 'backend' }))).toBe(0);
-    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'mybackend.json'), 'utf8'));
-    expect(written.profile).toBe('mybackend'); // renamed
-    expect(written.tools.mcp_servers[0].name).toBe('supabase'); // copied from backend
-  });
-
-  it('refuses to overwrite without --force, then allows it with --force', async () => {
-    await roleCommand(parsed(['create', 'qa']));
-    await expect(roleCommand(parsed(['create', 'qa']))).rejects.toMatchObject({ exitCode: 1 });
-    expect(await roleCommand(parsed(['create', 'qa'], { force: true, from: 'docs' }))).toBe(0);
-    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8'));
-    expect(written.tools.resource_scopes).toContain('docs/**'); // overwritten from docs
-  });
-
-  it('rejects an invalid name', async () => {
-    await expect(roleCommand(parsed(['create', 'Bad Name']))).rejects.toMatchObject({
-      exitCode: 2,
-    });
-  });
-
-  it('rejects --from an unknown built-in', async () => {
-    await expect(roleCommand(parsed(['create', 'x'], { from: 'nope' }))).rejects.toMatchObject({
-      exitCode: 2,
-    });
-  });
-});
-
-/**
- * Registry thin slice: in a roster home, `role create` authors the durable role library
- * (`.musterd/roles/<name>.toml`) — the file `role assign` validates against and the daemon
- * reconciles. Outside a roster home nothing changes: the legacy profile scaffold stays as-is
- * (its rename is the ADR 296 enforcement build's, not this slice's).
- */
 describe('role create in a roster home (registry thin slice)', () => {
   function writeRosterHome() {
     const m = join(cwd, '.musterd');
@@ -397,5 +289,66 @@ describe('role create in a roster home (registry thin slice)', () => {
 describe('role dispatch', () => {
   it('rejects an unknown subcommand', async () => {
     await expect(roleCommand(parsed(['bogus']))).rejects.toBeInstanceOf(CliError);
+  });
+});
+
+describe('role is roster-only after the toolkit split (ADR 296)', () => {
+  const roster = {
+    team: 'revive',
+    members: [{ name: 'izzo', roles: ['platform'] }] as any[],
+    roles: [
+      { name: 'platform', summary: 'infra toucher', charter: 'You touch infra.', capabilities: {} },
+    ],
+  };
+
+  it('role list renders the team library and no longer lists workspace equipment', async () => {
+    expect(await roleCommand(parsed(['list']), { fetchRoster: async () => roster })).toBe(0);
+    expect(out).toContain('team roles');
+    expect(out).toContain('platform');
+    // The seam ADR 296 closes: one command, one world.
+    expect(out).not.toContain('workspace profiles');
+    expect(out).not.toContain('workspace toolkits');
+  });
+
+  it('role list points at toolkit list rather than silently rendering toolkits', async () => {
+    expect(await roleCommand(parsed(['list']), { fetchRoster: async () => roster })).toBe(0);
+    expect(out).toContain('musterd toolkit list');
+  });
+
+  it('role list says the roster is unreachable instead of falling back to toolkits', async () => {
+    expect(await roleCommand(parsed(['list']), { fetchRoster: async () => null })).toBe(0);
+    expect(out).not.toContain('built-in');
+    expect(out).toContain('musterd toolkit list');
+  });
+
+  it('role show on a name that is only a toolkit points at toolkit show, not renders it', async () => {
+    mkdirSync(userProfilesDir(cwd), { recursive: true });
+    writeFileSync(
+      join(userProfilesDir(cwd), 'writer.json'),
+      JSON.stringify({ profile: 'writer', charter: 'writes', tools: {} }),
+      'utf8',
+    );
+    await expect(
+      roleCommand(parsed(['show', 'writer']), { fetchRoster: async () => roster }),
+    ).rejects.toThrow(/musterd toolkit show writer/);
+  });
+
+  it('role create outside a roster home refuses and names the command that does equip a workspace', async () => {
+    await expect(roleCommand(parsed(['create', 'writer']))).rejects.toThrow(
+      /musterd toolkit create/,
+    );
+  });
+
+  it('role create --profile still scaffolds a workspace toolkit (quiet alias, no flag day)', async () => {
+    expect(await roleCommand(parsed(['create', 'writer'], { profile: true }))).toBe(0);
+    expect(existsSync(join(userProfilesDir(cwd), 'writer.json'))).toBe(true);
+  });
+
+  it('role create in a roster home authors a team role and prints the one-release pointer', async () => {
+    mkdirSync(join(cwd, '.musterd'), { recursive: true });
+    writeFileSync(join(cwd, '.musterd', 'team.toml'), 'name = "revive"\n', 'utf8');
+    expect(await roleCommand(parsed(['create', 'writer']))).toBe(0);
+    expect(existsSync(join(cwd, '.musterd', 'roles', 'writer.toml'))).toBe(true);
+    expect(out).toContain('musterd toolkit create');
   });
 });

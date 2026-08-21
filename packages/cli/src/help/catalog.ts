@@ -345,15 +345,30 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'role',
     signature:
-      'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <builtin>] [--force]',
-    summary: "the team's role library (ADR 227) + local workspace profiles (ADR 272)",
+      'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <template>] [--force]',
+    summary: "the team's role library — responsibility the team grants (ADR 227)",
     group: 'team',
     detail:
-      'Two worlds under one name: the durable team library (roles/<name>.toml — list/show read it ' +
-      'from the daemon roster; assign edits seats/<seat>.toml in the roster home) and the local ' +
-      'workspace profiles, the ADR 026 provisioning templates renamed by ADR 272 (create scaffolds ' +
-      'one into .musterd/profiles/; list/show fall back to them when no team is reachable).',
+      'A role is a responsibility the team grants: charter plus ceiling, team-side and reviewed. ' +
+      'list/show read the durable library (roles/<name>.toml) off the daemon roster; create ' +
+      'authors one in the roster home; assign edits seats/<seat>.toml there. What a workspace is ' +
+      'equipped with is a toolkit and lives in `musterd toolkit` — a role may name a default ' +
+      'toolkit, but a toolkit can never assert a role (ADR 296).',
     examples: ['musterd role list', 'musterd role assign wanderer platform'],
+  },
+  {
+    name: 'toolkit',
+    signature: 'list | show <name> | create <name> [--from <built-in>] [--force]',
+    summary: 'what a workspace is equipped with — MCP servers, tools, allow-entries (ADR 296)',
+    group: 'team',
+    detail:
+      'A toolkit carries no authority: it is the "installed" layer of the three (installed by a ' +
+      'toolkit, allowed by harness permissions, authorized by the team as a capability — they ' +
+      'compose as AND). create scaffolds one into .musterd/profiles/ (the on-disk path still ' +
+      'carries the old word; renaming it is a wire-and-file-key change, deliberately separate); ' +
+      '`musterd init` provisions it, and a user file overrides a built-in of the same name. ' +
+      'Nothing here reads the roster.',
+    examples: ['musterd toolkit list', 'musterd toolkit create writer --from docs'],
   },
 
   // ── Messaging ──────────────────────────────────────────────────────────────────────────────

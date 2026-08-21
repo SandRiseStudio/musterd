@@ -13,11 +13,8 @@ import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { installSeatPermissions } from '../onboard/permissions.js';
 import {
-  BUILTIN_PROFILES,
-  GENERALIST,
   isBuiltin,
   legacyUserRolesDir,
-  listProfileNames,
   loadProfile,
   userProfilesDir,
   type Profile,
@@ -26,14 +23,18 @@ import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { BUILTIN_ROLE_TEMPLATES, listRoleTemplateNames } from '../roster-roles/templates.js';
 import { resolveRead } from './helpers.js';
+import { toolkitCreate } from './toolkit.js';
+
+/** The command that owns workspace equipment now — named once, so the pointers cannot drift. */
+const TOOLKIT_LIST = 'musterd toolkit list';
+const TOOLKIT_CREATE = 'musterd toolkit create';
 
 /**
- * Two worlds under one name (ADR 227 close-out; ADR 272 names them). `list`/`show` are
- * **roster-first**: they render the team's durable role library (`roles/<name>.toml`, read off the
- * daemon roster) above the local **workspace profiles** (the ADR 026 provisioning templates,
- * renamed), and degrade to profile-only output when no team is reachable (unbound folder, daemon
- * down, older daemon) — the read path never hard-fails. `create` scaffolds a profile; `assign`
- * edits the roster (see its doc below).
+ * **The team's role library, and nothing else** (ADR 227; narrowed by ADR 296). `list`/`show`
+ * render the durable `roles/<name>.toml` read off the daemon roster; `create` authors one in a
+ * roster home; `assign` grants it to a seat. Workspace equipment moved to `musterd toolkit` —
+ * this command used to render both worlds under one name, which is the seam ADR 296 closed.
+ * Derivation flows one way: a role may name a default toolkit; a toolkit may never assert a role.
  */
 
 /** The roster read `list`/`show` render from — injectable so tests need no daemon. */
@@ -97,7 +98,7 @@ function holdersOf(roster: RosterRead, name: string): string[] {
 
 /**
  * Assign (or `--remove`) a **roster role** on a seat (ADR 227) — the durable `roles/<name>.toml`
- * kind, not the provisioning templates the other subcommands manage. Runs in the roster home
+ * kind, which since ADR 296 is the only kind this command knows. Runs in the roster home
  * (the checkout holding `.musterd/team.toml`): edits `seats/<seat>.toml` canonically and leaves the
  * commit to the operator — the file is the single writer (ADR 058); the daemon reconciles on merge.
  * An unknown role is refused with the library named (a typo-guard, not enforcement — `--force`
@@ -245,21 +246,7 @@ function listRosterRoles(musterdDir: string): string[] {
 }
 
 function roleList(parsed: Parsed, roster: RosterRead | null): number {
-  const dir = process.cwd();
-  const names = listProfileNames(dir);
-  // A name is user-authored when a `.musterd/profiles/<name>.json` (or a legacy
-  // `.musterd/roles/<name>.json`) exists; a user file that shadows a built-in is an *override*
-  // (loadProfile prefers the file).
-  const rows = names.map((name) => {
-    const userFile =
-      existsSync(join(userProfilesDir(dir), `${name}.json`)) ||
-      existsSync(join(legacyUserRolesDir(dir), `${name}.json`));
-    const origin = userFile ? (isBuiltin(name) ? 'override' : 'user') : 'built-in';
-    return { name, origin };
-  });
-
   if (parsed.flags['json']) {
-    // Shape change (close-out): { team, templates } — was a bare template array.
     process.stdout.write(
       JSON.stringify({
         team: roster
@@ -272,45 +259,33 @@ function roleList(parsed: Parsed, roster: RosterRead | null): number {
               })),
             }
           : null,
-        templates: rows,
       }) + '\n',
     );
     return 0;
   }
-  if (roster) {
-    process.stdout.write(`${theme.accent('team roles')} ${theme.meta(`(${roster.team})`)}\n`);
-    for (const role of roster.roles) {
-      const holders = holdersOf(roster, role.name);
-      const held = holders.length ? holders.join(', ') : theme.meta('(unheld)');
-      process.stdout.write(
-        `  ${theme.meta(sym.bullet)} ${theme.accent(role.name)} — ${held}` +
-          (role.summary ? `  ${theme.meta(role.summary)}` : '') +
-          '\n',
-      );
-    }
+  if (!roster) {
+    // No silent fallback to workspace equipment: an unreachable roster is a fact worth saying,
+    // not a reason to render a different world under this command's name (ADR 296).
     process.stdout.write(
-      theme.meta('assign with: musterd role assign <seat> <role> (run in the roster home)') +
-        '\n\n',
+      theme.meta('no roster reachable — bind this folder to a team, or run the daemon') + '\n',
     );
-    process.stdout.write(`${theme.accent('workspace profiles')} ${theme.meta('(local)')}\n`);
-  } else {
-    process.stdout.write(`${theme.accent('workspace profiles')} ${theme.meta(`(in ${dir})`)}\n`);
+    process.stdout.write(theme.meta(`workspace equipment lives in: ${TOOLKIT_LIST}`) + '\n');
+    return 0;
   }
-  for (const { name, origin } of rows) {
-    const tag =
-      origin === 'built-in'
-        ? theme.meta('built-in')
-        : origin === 'override'
-          ? theme.accent('overrides built-in')
-          : theme.ok('user');
-    const note = name === GENERALIST ? theme.meta(' — nothing extra') : '';
-    process.stdout.write(`  ${theme.meta(sym.bullet)} ${name}  ${tag}${note}\n`);
+  process.stdout.write(`${theme.accent('team roles')} ${theme.meta(`(${roster.team})`)}\n`);
+  for (const role of roster.roles) {
+    const holders = holdersOf(roster, role.name);
+    const held = holders.length ? holders.join(', ') : theme.meta('(unheld)');
+    process.stdout.write(
+      `  ${theme.meta(sym.bullet)} ${theme.accent(role.name)} — ${held}` +
+        (role.summary ? `  ${theme.meta(role.summary)}` : '') +
+        '\n',
+    );
   }
   process.stdout.write(
-    theme.meta(
-      `inspect with: musterd role show <name>   ${sym.dot}   scaffold: musterd role create <name>`,
-    ) + '\n',
+    theme.meta('assign with: musterd role assign <seat> <role> (run in the roster home)') + '\n',
   );
+  process.stdout.write(theme.meta(`workspace equipment lives in: ${TOOLKIT_LIST}`) + '\n');
   return 0;
 }
 
@@ -318,117 +293,69 @@ function roleShow(parsed: Parsed, roster: RosterRead | null): number {
   const name = parsed.positionals[1];
   if (!name) throw new CliError('usage: musterd role show <name>', 2);
 
-  // Roster-first (close-out): a team-role match wins; the template renders only when no team role
-  // carries the name (or no roster is reachable).
   const teamRole = roster?.roles.find((r) => r.name === name);
-  if (roster && teamRole) {
-    const holders = holdersOf(roster, name);
-    if (parsed.flags['json']) {
-      process.stdout.write(JSON.stringify({ ...teamRole, holders }, null, 2) + '\n');
-      return 0;
-    }
-    process.stdout.write(
-      `${theme.accent(teamRole.name)} ${theme.meta(`(team role, ${roster.team})`)}\n`,
+  if (!teamRole) {
+    // Roster-only (ADR 296). A name that is only workspace equipment is not silently rendered
+    // here under the word "role" — the command that owns it is named instead.
+    const equipped =
+      existsSync(join(userProfilesDir(process.cwd()), `${name}.json`)) ||
+      existsSync(join(legacyUserRolesDir(process.cwd()), `${name}.json`)) ||
+      isBuiltin(name);
+    const hint = equipped
+      ? ` — it is a workspace toolkit: musterd toolkit show ${name}`
+      : `; workspace equipment: musterd toolkit show ${name}`;
+    throw new CliError(
+      roster
+        ? `no team role "${name}" in ${roster.team}${hint}`
+        : `no roster reachable, so no team role can be resolved${hint}`,
+      4,
     );
-    if (teamRole.summary) process.stdout.write(`  ${teamRole.summary}\n`);
-    process.stdout.write(
-      `  holders: ${holders.length ? holders.join(', ') : theme.meta('(unheld)')}\n`,
-    );
-    if (teamRole.charter) process.stdout.write(`  charter:\n${indent(teamRole.charter, 4)}\n`);
-    const caps = teamRole.capabilities;
-    if (caps && typeof caps === 'object' && Object.keys(caps as object).length) {
-      process.stdout.write(`  capability defaults: ${JSON.stringify(caps)}\n`);
-    }
-    if (listProfileNames(process.cwd()).includes(name)) {
-      process.stdout.write(
-        theme.meta(
-          '  a workspace profile also has this name — show is roster-first; the profile renders when no team role matches',
-        ) + '\n',
-      );
-    }
-    return 0;
   }
 
-  let role: Profile;
-  try {
-    role = loadProfile(process.cwd(), name);
-  } catch (err) {
-    throw new CliError((err as Error).message, 4);
-  }
-
+  const holders = holdersOf(roster as RosterRead, name);
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify(role, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ ...teamRole, holders }, null, 2) + '\n');
     return 0;
   }
-  const overrides =
-    isBuiltin(name) &&
-    (existsSync(join(userProfilesDir(process.cwd()), `${name}.json`)) ||
-      existsSync(join(legacyUserRolesDir(process.cwd()), `${name}.json`)));
   process.stdout.write(
-    `${theme.accent(role.profile)} ${theme.meta(overrides ? '(user file, overrides the built-in)' : isBuiltin(name) ? '(built-in)' : '(user)')}\n`,
+    `${theme.accent(teamRole.name)} ${theme.meta(`(team role, ${(roster as RosterRead).team})`)}\n`,
   );
-  if (role.capacity) process.stdout.write(`  capacity: ${role.capacity}\n`);
-  process.stdout.write(`  charter:\n${indent(role.charter, 4)}\n`);
-  const { mcp_servers, resource_scopes, permissions } = role.tools;
+  if (teamRole.summary) process.stdout.write(`  ${teamRole.summary}\n`);
   process.stdout.write(
-    `  mcp servers: ${mcp_servers.length ? mcp_servers.map((s) => s.name).join(', ') : theme.meta('none')}\n`,
+    `  holders: ${holders.length ? holders.join(', ') : theme.meta('(unheld)')}\n`,
   );
-  process.stdout.write(
-    `  resource scopes: ${resource_scopes.length ? resource_scopes.join(', ') : theme.meta('none')} ${theme.meta('(declared — coordination, not a sandbox)')}\n`,
-  );
-  const permParts = (['allow', 'ask', 'deny'] as const)
-    .filter((k) => permissions[k].length)
-    .map((k) => `${k}=[${permissions[k].join(', ')}]`);
-  process.stdout.write(
-    `  permissions: ${permParts.length ? permParts.join('  ') : theme.meta('none')}\n`,
-  );
+  if (teamRole.charter) process.stdout.write(`  charter:\n${indent(teamRole.charter, 4)}\n`);
+  const caps = teamRole.capabilities;
+  if (caps && typeof caps === 'object' && Object.keys(caps as object).length) {
+    process.stdout.write(`  capability defaults: ${JSON.stringify(caps)}\n`);
+  }
   return 0;
 }
 
 function roleCreate(parsed: Parsed): number {
   const name = parsed.positionals[1];
   if (!name)
-    throw new CliError(
-      'usage: musterd role create <name> [--from <template>] [--force] [--profile]',
-      2,
-    );
+    throw new CliError('usage: musterd role create <name> [--from <template>] [--force]', 2);
+
+  // `--profile` survives as a quiet alias for one release (ADR 296) — the same scaffold, under
+  // the command that now owns it. No flag day.
+  if (parsed.flags['profile']) return toolkitCreate(parsed);
+
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
     throw new CliError(`invalid role name "${name}" — use lowercase letters, numbers, hyphens`, 2);
   }
   const dir = process.cwd();
-  // Registry thin slice: in a roster home, `create` authors the durable role library — the
-  // `roles/<name>.toml` that `assign` validates against and the daemon reconciles. The legacy
-  // profile scaffold stays reachable via --profile (and stays the only path outside a roster
-  // home); its rename is ADR 296's, not this command's.
-  if (!parsed.flags['profile'] && existsSync(join(dir, '.musterd', 'team.toml'))) {
-    return createRosterRole(dir, name, parsed);
+  if (!existsSync(join(dir, '.musterd', 'team.toml'))) {
+    // Roster-only. Outside a roster home there is no team to grant a responsibility, and a local
+    // file may never assert one (ADR 296 §1.3, the pre-ADR-272 defect) — so this is refused
+    // rather than quietly downgraded to workspace equipment, which is what it used to do.
+    throw new CliError(
+      `no roster home here (.musterd/team.toml not found) — a role is a team fact, so it cannot ` +
+        `be authored from an unbound folder. To equip this workspace instead: ${TOOLKIT_CREATE} ${name}`,
+      2,
+    );
   }
-  const path = join(userProfilesDir(dir), `${name}.json`);
-  if (existsSync(path) && !parsed.flags['force']) {
-    throw new CliError(`${path} already exists — pass --force to overwrite`, 1);
-  }
-
-  const from = typeof parsed.flags['from'] === 'string' ? parsed.flags['from'] : undefined;
-  const template = from ? fromBuiltin(from, name) : skeleton(name);
-
-  mkdirSync(userProfilesDir(dir), { recursive: true });
-  writeFileSync(path, JSON.stringify(template, null, 2) + '\n', 'utf8');
-
-  if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify({ path, from: from ?? null }) + '\n');
-    return 0;
-  }
-  process.stdout.write(
-    success(`wrote ${theme.accent(path)}${from ? theme.meta(` (from built-in "${from}")`) : ''}`, {
-      next: 'musterd init',
-    }) + '\n',
-  );
-  process.stdout.write(
-    theme.meta(
-      'edit it, then provision it via `musterd init` (it overrides a built-in of the same name)',
-    ) + '\n',
-  );
-  return 0;
+  return createRosterRole(dir, name, parsed);
 }
 
 /**
@@ -478,6 +405,12 @@ function createRosterRole(dir: string, name: string, parsed: Parsed): number {
   process.stdout.write(
     theme.meta('commit both files — the daemon reconciles the roster on merge (ADR 058)') + '\n',
   );
+  // One-release pointer (ADR 296): this command used to scaffold workspace equipment too, so
+  // anyone whose muscle memory lands here for a toolkit gets told where it went. Drop it once
+  // the alias goes.
+  process.stdout.write(
+    theme.meta(`equipping a workspace instead? that is ${TOOLKIT_CREATE} ${name}`) + '\n',
+  );
   return 0;
 }
 
@@ -485,29 +418,8 @@ function createRosterRole(dir: string, name: string, parsed: Parsed): number {
  * Round-trip a built-in into an editable starting point (recipe "Settled vs open"). Serializes the
  * already-validated built-in profile, renamed to `<name>` so a customized copy is distinct.
  */
-function fromBuiltin(from: string, name: string): Profile {
-  const base = BUILTIN_PROFILES[from];
-  if (!base) {
-    throw new CliError(
-      `unknown built-in "${from}" — one of: ${Object.keys(BUILTIN_PROFILES).join(', ')}`,
-      2,
-    );
-  }
-  return { ...structuredClone(base), profile: name };
-}
 
 /** A minimal valid profile to fill in (charter is required; tools default empty). */
-function skeleton(name: string): Profile {
-  return {
-    profile: name,
-    charter: `TODO: one or two lines of lens-not-résumé charter for ${name}.`,
-    tools: {
-      mcp_servers: [],
-      resource_scopes: [],
-      permissions: { allow: [], ask: [], deny: [] },
-    },
-  };
-}
 
 function indent(text: string, n: number): string {
   const pad = ' '.repeat(n);
