@@ -137,7 +137,7 @@ src/
     broadcast-perf.ts // capture-pipeline instrumentation, dark unless MUSTERD_BROADCAST_PERF names a JSONL path: screencast fps/bytes, canvas draw rate, ffmpeg queue depth (its *slope* is the margin metric — `speed=` is pinned ≈1× for a live source), per-tree CPU + load; summarized by scripts/perf/broadcast-baseline.mjs
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // team create / add / remove / archive / export (ADR 058 db→file migration)
-    fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files (ADR 058 guard 2)
+    fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
     join.ts           // join
     send.ts           // send
     inbox.ts          // inbox [--watch] [--wait] [--limit <n>] — bounded recent window + day-grouped smart dates, always-show-unread (ADR 054/117)
@@ -303,7 +303,7 @@ declared surface sits under the rule — mixed web+server lanes stay `normal`.
 
 ### `musterd fmt [--check]`
 
-Canonicalize this folder's `.musterd/team.toml` + `seats/*.toml` — the ADR 058 **guard-2 (tidiness)** tool, so roster diffs stay minimal and blame clean. `--check` asserts the committed files are already canonical (exit 1 + the offending files on drift), the CI-style sibling of `format:check`. Purely cosmetic — correctness rides on the semantic round-trip (guard 1), never byte-equality of hand edits.
+Canonicalize this folder's `.musterd/team.toml` + `seats/*.toml` + `roles/*.toml` — the ADR 058 **guard-2 (tidiness)** tool, so roster diffs stay minimal and blame clean. All three durable classes the daemon reconciles; `roles/` joined 2026-08-21, having had a writer (ADR 298's `role create`) but no formatter, so hand-written role files could drift with nothing to catch them. `--check` asserts the committed files are already canonical (exit 1 + the offending files on drift), the CI-style sibling of `format:check`. Purely cosmetic — correctness rides on the semantic round-trip (guard 1), never byte-equality of hand edits.
 
 ### `musterd unbind`
 
