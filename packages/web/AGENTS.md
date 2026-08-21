@@ -27,6 +27,29 @@ check whether a re-baseline is due instead**: budgets are periodically reset to 
 re-baseline may only tighten — a loosening one is just a raise (ADR 183). Two ceilings were hit in
 one week in 2026-07 because raises were being used to fix a calibration problem.
 
+## Deploying the public site — miley's, not yours
+
+**`pnpm --filter @musterd/web deploy:site` is miley's to run**
+([ADR 308](../../docs/decisions/308-public-site-deploy-authorization.md)). If your change
+ends with prose or pixels on musterd.io, land the PR and tell miley. This is standing, not
+per-request.
+
+**And miley does not wait for per-publish approval.** It is a standing authorization, not a routing
+rule: miley publishes web changes when they are ready, without asking nick each time. Those are two
+different rules and only one of them was in the original sentence — "who may deploy" without "and
+when" is the half that gets guessed at. Deploy authority is also not review authority: it does not
+license merging work miley has not read.
+
+It covers the publish to musterd.io and nothing else. The `/live` bundle is **not** a deploy — merge
+to `main` and the build-publisher republishes within ~60s with no daemon bounce (root `AGENTS.md`,
+[ADR 132](../../docs/decisions/132-live-viewer-on-daemon-origin.md)). `musterd service refresh` is
+the daemon, not the UI. Neither goes through miley.
+
+The reason, in one line: a deploy is the only act in this loop that **no acceptance can
+reverse**, and the only place where *landed* and *live* are different facts. ADR 308 carries the
+evidence — a merged-but-undeployed fix that stayed broken in public, and two defects on the live
+site that no diff, no staging build and no `vite preview` could show.
+
 ## The generated content module
 
 `src/content/generated/site-content.ts` (docs, blog and roadmap rendered to HTML at build-prep time,
