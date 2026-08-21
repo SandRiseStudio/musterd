@@ -85,9 +85,18 @@ breathe between.
   first.
 
 **Amended 2026-08-20 (#946): the title's claim was true of the BOUND and false of the CURSOR that
-walks it.** Decision 1's argument — "a prefix is the only truncation where advancing the cursor to
-the last row seen cannot skip anything" — is correct, and it silently assumes the position that
-advances is total over the rows. It is not. `listInbox` orders by `ts ASC, id ASC` while the cursor
+walks it.** Decision 1 makes two claims in consecutive sentences, and only the second is wrong —
+the distinction is izzo's, from the ADR 294 entry in #947, and it is worth keeping sharp because
+the two sentences read as one thought.
+
+- *"A prefix is the only truncation where advancing the cursor to the last row seen cannot skip
+  anything"* — **true**, and a claim about the BOUND. Nothing here is retracted.
+- *"Catching up takes several reads and reaches every message in order"* — **false**, and a claim
+  about the CURSOR. It inherited the first sentence's confidence without ever being examined on its
+  own.
+
+The gap between them is an assumption nobody wrote down: that the position which advances is total
+over the rows. It is not. `listInbox` orders by `ts ASC, id ASC` while the cursor
 is a bare `ts`, so `id` is a declared tiebreak with no expression in the position. When a tie
 straddled the page boundary, page two asked for `ts > last` and excluded every row sharing that
 millisecond: measured at 220 messages, page one 200, page two **0**, the drain terminating on the
