@@ -120,12 +120,20 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   // path), so "all unread are always shown" is only still true if we walk the pages. The bound is a
   // PREFIX, so paging forward on the last row's ts reaches every message in order and never steps
   // over one — the property the cursor rule above depends on.
-  const drain = async (first: Awaited<ReturnType<typeof http.inbox>>) => {
+  // Paging must REPEAT THE FIRST REQUEST, narrowed by `since` — never a fixed shape of its own. A
+  // drain that always paged `{unread: true}` silently truncated every read that wasn't unread-only:
+  // a full-history read (`--limit 0`, and any `--from`/`--act` lens) got the oldest-200 prefix plus
+  // the unread tail, and everything between was dropped with nothing to say so. The prefix is what
+  // makes walking safe; asking for a different slice on page two is what makes it lossy.
+  const drain = async (
+    opts: { unread?: boolean; limit?: number },
+    first: Awaited<ReturnType<typeof http.inbox>>,
+  ) => {
     const out = [...first.messages];
     let page = first;
     while (page.truncated && page.messages.length > 0) {
       page = await http.inbox(team, {
-        unread: true,
+        ...opts,
         since: page.messages[page.messages.length - 1]!.ts,
       });
       out.push(...page.messages);
@@ -134,12 +142,13 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   };
 
   const bounded = window > 0 && !unread && !filtering;
-  const res = await http.inbox(team, unread ? { unread: true } : bounded ? { limit: window } : {});
+  const query = unread ? { unread: true } : bounded ? { limit: window } : {};
+  const res = await http.inbox(team, query);
   const cursorTs = res.cursor.last_read_ts;
   const total = res.total ?? res.messages.length;
-  let rows = await drain(res);
+  let rows = await drain(query, res);
   if (bounded && rows.length > 0 && rows[0]!.ts > cursorTs) {
-    rows = await drain(await http.inbox(team, { unread: true }));
+    rows = await drain({ unread: true }, await http.inbox(team, { unread: true }));
   }
   const messages = rows.filter((m) => matchesFilter(m, filter));
 
