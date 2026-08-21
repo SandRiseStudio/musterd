@@ -255,6 +255,32 @@ export const CONTROLS: Control[] = [
     ],
   },
   {
+    id: 'guardian-confirms-slow-before-down',
+    kind: 'watchdog',
+    claim:
+      'Before the guardian calls a daemon down, it has tested the rival hypothesis — that the daemon is merely slow — with a probe on a DIFFERENT bound, and the raise reports what that probe found instead of asking a human to go and check.',
+    where:
+      'packages/cli/src/guardian/signals.ts (`collectSignals`, CONFIRM_TIMEOUT_MS) and the two `daemon_down` evidence branches in classify.ts',
+    exercise:
+      'Three fixtures, and the third is the one that matters. (1) SLOW: short probes reject, `confirmHealth` resolves → `health` is non-null and NO incident is produced. (2) WEDGED: both reject → still `daemon_down`, with `confirmMs` and `confirmError` in the evidence. (3) REFUSED: both reject with ECONNREFUSED → still down, and `confirmHealth` was called exactly once, so a real outage pays one fast-failing probe and no delay. Exercising only (1) is NOT coverage — a confirmation that cannot fail is a blindfold, and (2) is the test that it can. Also assert the collector, not the caller, names the bound (`askedFor === CONFIRM_TIMEOUT_MS`): if the caller chose it, a wiring that quietly passed the short bound would still emit evidence claiming the long one, and the raise would assert a discrimination that never happened. All in signals.test.ts / classify.test.ts.',
+    motivatedBy:
+      'Six false `daemon_down` alarms on 2026-08-21, the sixth arriving AFTER the #987 repeat damper shipped — which is what proved the two are different defects. ADR 274 confirms an unreachable /health with two further probes, but all three share one 2 s bound (`rawHealth`, service.ts), so inside a stall longer than that ~8 s window they are one observation repeated. Measured the same day on the live daemon: 25 samples under load gave p50 2.8 ms, p90 16 ms, max 3.22 s, while 90 samples taken quiet gave max 0.02 s — exceeding 2000 ms is normal operation, not pathology.',
+    counterfactual:
+      'Yes for the motivating incident, with a caveat I cannot close retroactively. All six raises were the clean-exit + timeout shape against a daemon whose booted_at never moved, and observed worst-case latency was 3.22 s against this probe\'s 10 s bound — so the confirm would almost certainly have answered and produced no incident at all. "Almost certainly" is the honest word: those moments cannot be re-run, and a stall longer than 10 s would still have raised. That residual is deliberate rather than a gap — a confirmation that cannot come out "down" would be a blindfold, and the wedged-daemon fixture exists to prove this one can.',
+    lastExercised: '2026-08-21',
+    everTripped: false,
+    staleAfterDays: 60,
+    refs: [
+      'lane 01M0K31X42X62KBN504M0VAWP9',
+      'ADR 274 (the three-probe confirmation this extends; its Decision is a floor, not a ceiling)',
+      'control guardian-raise-damped-on-reason (removed the repeats; this one goes after the false positives)',
+      'control daemon-down-raise-carries-evidence (made a raise readable; neither of those made it true)',
+      'docs/claims/entries/2026-08-19-guardian-daemon-down.md',
+    ],
+    watch:
+      'A date cannot settle this one either: the number to watch is `daemon_down` raises per week that a later /health read shows were false. Zero raises is not evidence the discrimination works — it is equally consistent with a quiet platform. The signal is the RATIO of raises that survive adjudication, and it needs a window.',
+  },
+  {
     id: 'guardian-raise-damped-on-reason',
     kind: 'guard',
     claim:

@@ -18,10 +18,33 @@ export interface HealthPayload {
   build?: string;
 }
 
+/**
+ * The bound on the ONE confirming probe, and the whole point of it: a different bound is a
+ * different observation. Derived from measurement rather than taste — /health latency is bursty and
+ * load-correlated (2026-08-21, live daemon: 25 samples under load gave p50 2.8 ms, p90 16 ms, max
+ * 3.22 s; 90 samples while quiet gave max 0.02 s), so 10 s is ~3x the worst answer yet observed and
+ * still a fraction of the ~120 s tick. Revisit it if a raise ever shows this probe failing on a
+ * daemon later found healthy — that is the falsifier, and it is cheap to run.
+ */
+export const CONFIRM_TIMEOUT_MS = 10_000;
+
 export interface SignalDeps {
   now: () => number;
   /** GET /health on the explicitly configured server (#780: name the server you measured). */
   fetchHealth: () => Promise<HealthPayload>;
+  /**
+   * The same GET, on a bound the COLLECTOR dictates rather than the caller.
+   *
+   * Taking `timeoutMs` as an argument is what makes the bound reported in the raise true by
+   * construction: if the caller chose it, a wiring that quietly passed the short bound would still
+   * produce evidence claiming the long one, and the raise would assert a discrimination that never
+   * happened.
+   *
+   * REQUIRED, deliberately. As an optional dep a forgotten wiring would degrade in silence — the
+   * guardian back to calling every slow tick an outage, with nothing to show it had stopped
+   * confirming. Required makes every caller, and every fixture, say what the long probe does.
+   */
+  confirmHealth: (timeoutMs: number) => Promise<HealthPayload>;
   /** Delay between outage-confirmation probes. Injected so tests do not wait. */
   sleep?: (ms: number) => Promise<void>;
   /** `launchctl print gui/<uid>/<daemon label>` raw output; '' when the call fails. */
@@ -84,6 +107,48 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
           .slice(0, 200),
       };
       if (attempt < 2) await (d.sleep?.(1_000) ?? Promise.resolve());
+    }
+  }
+
+  /**
+   * ADR 274 confirms an unreachable /health with two further probes — but all three share the short
+   * bound, so inside one stall they are ONE observation repeated, not three. Repeating the
+   * measurement under question can only restate it; separating slow from down needs a DIFFERENT
+   * bound, which is what this is.
+   *
+   * Run unconditionally rather than gated on the error's shape. The shape does discriminate
+   * ("fetch failed" = nothing listening, "aborted due to timeout" = listening but slow, verified
+   * 2026-08-21) and that is what diagnosed the six false alarms — but it is not worth gating on: a
+   * refused connection fails this probe in about a millisecond, so a real outage pays nothing,
+   * while a shape regex would be one more thing to be wrong about a failure mode nobody has met
+   * yet. The error shape says which hypothesis is worth testing; the probe is what tests it.
+   *
+   * A wedged daemon — process alive, socket listening, event loop stuck — answers neither bound and
+   * still reports down, which is the property that keeps this a discrimination rather than a
+   * blindfold.
+   */
+  if (health === null) {
+    try {
+      const h = await d.confirmHealth(CONFIRM_TIMEOUT_MS);
+      bootedAt = h.booted_at ?? now;
+      health = {
+        ok: h.ok,
+        bootedAt,
+        schemaOk: d.expected.schema === null || h.schema === d.expected.schema,
+        dbPathExpected: h.db === d.expected.dbPath,
+      };
+      // Nothing survives a successful confirm: there is no incident left for a human to adjudicate.
+      probe = undefined;
+    } catch (err) {
+      if (probe !== undefined) {
+        probe = {
+          ...probe,
+          confirmMs: CONFIRM_TIMEOUT_MS,
+          confirmError: (err instanceof Error ? err.message : String(err))
+            .replace(/\s+/g, ' ')
+            .slice(0, 200),
+        };
+      }
     }
   }
 

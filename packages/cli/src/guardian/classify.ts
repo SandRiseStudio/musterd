@@ -31,7 +31,13 @@ export interface GuardianSignals {
   /** Why the probe gave up, present only when `health` is null. The probe's three attempts used to
    *  be swallowed by a bare `catch {}`, which is why no `daemon_down` raise could ever be
    *  diagnosed after the fact. */
-  healthProbe?: { attempts: number; lastError: string };
+  healthProbe?: {
+    attempts: number;
+    lastError: string;
+    /** The bound on the ONE confirming probe, present only when that probe also failed. */
+    confirmMs?: number;
+    confirmError?: string;
+  };
   /** A current autorefresh restart. Only suppresses a confirmed unavailable health result. */
   handover?: { startedAt: number; targetBuild: string } | null;
   launchd: { lastExit: number; runs: number };
@@ -80,10 +86,16 @@ export function classify(s: GuardianSignals): Incident[] {
     // (auto: restart last-known-good); otherwise an unexplained daemon_down (alert).
     // What the probe actually saw, carried into the raise. Without it the two branches below —
     // genuinely different situations — produced byte-identical alerts, and 22 of them did.
+    // Both bounds, when both were spent. Two probes on the SAME bound inside one stall are one
+    // observation repeated; naming the second bound is what lets a reader see that "merely slow"
+    // was tested and ruled out, rather than assumed away.
     const probe =
-      s.healthProbe !== undefined
-        ? `/health did not answer in ${s.healthProbe.attempts} attempts (${s.healthProbe.lastError})`
-        : '/health unreachable (no probe detail recorded)';
+      s.healthProbe === undefined
+        ? '/health unreachable (no probe detail recorded)'
+        : `/health did not answer in ${s.healthProbe.attempts} attempts (${s.healthProbe.lastError})` +
+          (s.healthProbe.confirmMs !== undefined
+            ? `, nor a confirming probe bounded at ${s.healthProbe.confirmMs}ms (${s.healthProbe.confirmError})`
+            : '');
 
     if (recentRefresh && s.launchd.runs > 1 && s.errLinesSinceBoot > 0) {
       auto.push({ class: 'crashloop' });
@@ -97,12 +109,20 @@ export function classify(s: GuardianSignals): Incident[] {
       // this is where we stand. A daemon merely too busy to answer within the timeout presents
       // exactly this way (hydrate.ts: "time any handler holds is time /health waits"), and reading
       // it as death has produced false alarms that cost a human's attention each time.
+      // The old text ended "Check /health directly and compare booted_at before treating this as
+      // an outage" — homework for a human, on a check the guardian can run. It now HAS run: the
+      // confirming probe on a longer bound is exactly that check, so this says what it found.
       alert.push({
         class: 'daemon_down',
         evidence:
           `${probe}, but launchd reports a clean exit and ${s.launchd.runs} run(s) — the process was ` +
-          `never restarted, so it may still be running and merely too slow to answer. ` +
-          `Check /health directly and compare booted_at before treating this as an outage.`,
+          `never restarted. ` +
+          (s.healthProbe?.confirmMs !== undefined
+            ? `Slow-but-alive was tested and ruled out: it answered neither bound. Either it is ` +
+              `wedged with the socket still held, or it went away without launchd noticing — the ` +
+              `two probe errors above tell which.`
+            : `It may still be running and merely too slow to answer; this build recorded no ` +
+              `confirming probe, so compare booted_at before treating this as an outage.`),
       });
     }
   } else {

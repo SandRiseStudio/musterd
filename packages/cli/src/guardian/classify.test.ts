@@ -148,3 +148,51 @@ describe('daemon_down says which kind of down, and what the probe saw', () => {
     expect(out[0]!.evidence).toBeTruthy();
   });
 });
+
+/**
+ * The raise used to end by telling a human to "check /health directly and compare booted_at before
+ * treating this as an outage" — prescribing a check the guardian could run itself, then raising at
+ * standard tier anyway. Every one of the six false alarms on 2026-08-21 carried that sentence. Now
+ * the confirming probe HAS run, so the raise reports a result instead of assigning homework.
+ */
+describe('the raise reports the confirming probe rather than prescribing it', () => {
+  const wedged = {
+    ...healthy,
+    health: null,
+    launchd: { lastExit: 0, runs: 15 },
+    healthProbe: {
+      attempts: 3,
+      lastError: 'The operation was aborted due to timeout',
+      confirmMs: 10_000,
+      confirmError: 'The operation was aborted due to timeout',
+    },
+  };
+
+  it('names the longer bound, so the reader can see slow was ruled out', () => {
+    const e = classify(wedged)[0]!.evidence!;
+    expect(e).toContain('3 attempts');
+    expect(e).toContain('10000ms');
+    // The homework sentence is gone: the guardian did the check it used to delegate.
+    expect(e).not.toMatch(/check \/health directly/i);
+  });
+
+  it('a confirm that failed with a REFUSAL reads differently from one that timed out', () => {
+    const refused = classify({
+      ...wedged,
+      healthProbe: { ...wedged.healthProbe, confirmError: 'connect ECONNREFUSED 127.0.0.1:4849' },
+    })[0]!.evidence!;
+    expect(refused).toContain('ECONNREFUSED');
+    expect(refused).not.toEqual(classify(wedged)[0]!.evidence);
+  });
+
+  it('an old signal with no confirm recorded still classifies and still says what it saw', () => {
+    // Forward-compat: a tick from a build before the confirming probe existed must not lose its
+    // evidence or throw — it simply cannot report a bound it never applied.
+    const e = classify({
+      ...wedged,
+      healthProbe: { attempts: 3, lastError: 'The operation timed out' },
+    })[0]!.evidence!;
+    expect(e).toContain('3 attempts');
+    expect(e).not.toContain('10000ms');
+  });
+});

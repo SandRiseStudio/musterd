@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { collectSignals, parseLaunchctlPrint, type SignalDeps } from './signals.js';
+import {
+  CONFIRM_TIMEOUT_MS,
+  collectSignals,
+  parseLaunchctlPrint,
+  type SignalDeps,
+} from './signals.js';
 
 const NOW = 2_000_000;
 
@@ -7,6 +12,12 @@ function deps(over: Partial<SignalDeps> = {}): SignalDeps {
   return {
     now: () => NOW,
     fetchHealth: async () => ({
+      ok: true,
+      db: '/Users/nick/.musterd/musterd.db',
+      schema: 39,
+      booted_at: 1_500_000,
+    }),
+    confirmHealth: async () => ({
       ok: true,
       db: '/Users/nick/.musterd/musterd.db',
       schema: 39,
@@ -52,6 +63,9 @@ describe('collectSignals', () => {
         fetchHealth: async () => {
           throw new Error('ECONNREFUSED');
         },
+        confirmHealth: async () => {
+          throw new Error('ECONNREFUSED');
+        },
       }),
     );
     expect(s.health).toBeNull();
@@ -81,6 +95,9 @@ describe('collectSignals', () => {
     const s = await collectSignals(
       deps({
         fetchHealth: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+        confirmHealth: async () => {
           throw new Error('ECONNREFUSED');
         },
         readHandover: async () => ({ startedAt: NOW - 1_000, targetBuild: 'nextsha' }),
@@ -171,6 +188,7 @@ describe('the health probe keeps why it failed', () => {
     const s = await collectSignals(
       deps({
         fetchHealth: () => Promise.reject(new Error('connect ECONNREFUSED 127.0.0.1:4849')),
+        confirmHealth: () => Promise.reject(new Error('connect ECONNREFUSED 127.0.0.1:4849')),
       }),
     );
     expect(s.health).toBeNull();
@@ -180,7 +198,10 @@ describe('the health probe keeps why it failed', () => {
 
   it('distinguishes a timeout from a refusal — the two that must not read alike', async () => {
     const s = await collectSignals(
-      deps({ fetchHealth: () => Promise.reject(new Error('The operation timed out')) }),
+      deps({
+        fetchHealth: () => Promise.reject(new Error('The operation timed out')),
+        confirmHealth: () => Promise.reject(new Error('The operation timed out')),
+      }),
     );
     expect(s.healthProbe?.lastError).toContain('timed out');
   });
@@ -189,5 +210,103 @@ describe('the health probe keeps why it failed', () => {
     const s = await collectSignals(deps({}));
     expect(s.health).not.toBeNull();
     expect(s.healthProbe).toBeUndefined();
+  });
+});
+
+/**
+ * Slow is not down. ADR 274 confirms an unreachable /health with two further probes — but all three
+ * share one 2 s bound, so on a stall longer than the ~8 s window they are ONE observation repeated,
+ * not three observations. Repeating the measurement under question says nothing about the rival
+ * hypothesis.
+ *
+ * Measured 2026-08-21 against the live daemon: 25 samples under load gave p50 2.8 ms, p90 16 ms,
+ * max 3.22 s; 90 samples while quiet gave max 0.02 s. Exceeding 2000 ms is normal operation. All
+ * six false `daemon_down` alarms that day were the same shape — clean launchd exit, "aborted due to
+ * timeout".
+ */
+describe('one confirming probe on a longer bound separates a slow daemon from a dead one', () => {
+  const timeout = (): Promise<never> =>
+    Promise.reject(new Error('The operation was aborted due to timeout'));
+
+  it('a daemon that was merely slow answers the long probe — no incident at all', async () => {
+    const s = await collectSignals(
+      deps({
+        fetchHealth: timeout,
+        confirmHealth: async () => ({
+          ok: true,
+          db: '/Users/nick/.musterd/musterd.db',
+          schema: 39,
+          booted_at: 1_500_000,
+        }),
+      }),
+    );
+    expect(s.health).not.toBeNull();
+    expect(s.health?.bootedAt).toBe(1_500_000);
+    // No probe record survives a successful confirm: there is nothing for a human to adjudicate.
+    expect(s.healthProbe).toBeUndefined();
+  });
+
+  it('a WEDGED daemon still fails the long probe and still reports down — the fix must be able to raise', async () => {
+    let askedFor: number | null = null;
+    const s = await collectSignals({
+      ...deps({ fetchHealth: timeout }),
+      confirmHealth: (ms) => {
+        // The COLLECTOR names the bound. If the caller named it, a wiring that passed the short
+        // bound would still produce evidence claiming the long one.
+        askedFor = ms;
+        return timeout();
+      },
+    });
+    expect(s.health).toBeNull();
+    expect(s.healthProbe?.confirmMs).toBe(CONFIRM_TIMEOUT_MS);
+    expect(askedFor).toBe(CONFIRM_TIMEOUT_MS);
+    expect(s.healthProbe?.confirmError).toContain('aborted due to timeout');
+  });
+
+  it('a real outage is not slowed by the confirm — a refused connection fails immediately', async () => {
+    let confirms = 0;
+    const refused = (): Promise<never> =>
+      Promise.reject(new Error('connect ECONNREFUSED 127.0.0.1:4849'));
+    const s = await collectSignals({
+      ...deps({ fetchHealth: refused }),
+      confirmHealth: async () => {
+        confirms += 1;
+        return refused();
+      },
+    });
+    expect(s.health).toBeNull();
+    // Exactly one — the confirm is a second OBSERVATION, never a second retry loop.
+    expect(confirms).toBe(1);
+    expect(s.healthProbe?.confirmError).toContain('ECONNREFUSED');
+  });
+
+  it('the confirm runs whenever the short probes fail, whatever they failed with', async () => {
+    // The error SHAPE is what proved the diagnosis; it is deliberately not what gates the probe.
+    // A refused connection fails the long probe in ~1 ms, so shape-matching would buy nothing and
+    // would add a regex that can be wrong about a failure mode nobody has seen yet.
+    let confirms = 0;
+    const s = await collectSignals({
+      ...deps({ fetchHealth: () => Promise.reject(new Error('some novel transport failure')) }),
+      confirmHealth: async () => {
+        confirms += 1;
+        throw new Error('still nothing');
+      },
+    });
+    expect(confirms).toBe(1);
+    expect(s.health).toBeNull();
+  });
+
+  it('a healthy daemon never spends the long probe', async () => {
+    let confirms = 0;
+    const s = await collectSignals(
+      deps({
+        confirmHealth: async () => {
+          confirms += 1;
+          throw new Error('should not be reached');
+        },
+      }),
+    );
+    expect(s.health).not.toBeNull();
+    expect(confirms).toBe(0);
   });
 });
