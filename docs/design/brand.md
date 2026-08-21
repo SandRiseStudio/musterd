@@ -120,23 +120,33 @@ Single mono size at `14 / 22`; bold for emphasis; never italic in terminal frame
 
 ## 5. Terminology glossary (canonical — used identically in SPEC, CLI, docs, UI)
 
-These five terms are load-bearing. They must appear with these exact meanings everywhere — code identifiers, CLI help text, doc prose, Figma labels. Do not introduce synonyms.
+The original five stay. The load-bearing set grew in [ADR 296](../decisions/296-terminology-architecture.md). Source of truth: `docs/glossary/terms.ts` — `pnpm vocab:check` fails if this table loses a canonical term. Do not introduce synonyms; the Not column is enforced on new docs, not merely published.
 
-| Term         | Definition                                                                                                                                                                                                                                                                                                                                                | Not                                                                               |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| **Team**     | A named, persistent group of Members with shared messaging — a **standing roster**, not a project. It outlives any task, session, _or repository_: the same Team is reused across folders to keep the same agents talking. The folder only decides _where_ a given Member runs (the folder→agent binding); the Team is the durable, cross-project roster. | not "room", "channel", "swarm", "project"                                         |
-| **Member**   | A durable identity in a Team. `kind: agent \| human`. Has a name, role (free text), lifecycle, availability. A Member is **not** a session.                                                                                                                                                                                                               | not "agent", "user", "participant"                                                |
-| **Presence** | Where a Member is currently attached (a Claude Code session, a Codex session, a CLI, later an app). One Member can have multiple Presences.                                                                                                                                                                                                               | not "session", "connection", "status"                                             |
-| **Surface**  | A kind of place a Member can be present: `cli`, `claude-code`, `codex`, (later) `ios`, `web`, `slack`. A Surface hosts a Presence.                                                                                                                                                                                                                        | not "client", "platform", "adapter" (adapter is the code; Surface is the concept) |
-| **Act**      | The typed intent of a message: `message`, `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`, `resolve`. Grounded in the Co-Gym collaboration-act taxonomy.                                                                                                                                                                          | not "type", "kind", "event", "verb"                                               |
+| Term | Definition | Not |
+| --- | --- | --- |
+| **Team** | A named, persistent group of Members with shared messaging — a standing roster, not a project. It outlives any task, session, or repository. | not "room", "channel", "swarm", "project" |
+| **Member** | Anyone on the roster — the canonical noun. `kind` is `agent`, `human`, or `service`. Carries name, `roles[]`, lifecycle, availability. A Member is not a session. | not "agent" (as the generic noun), "seat", "user", "participant" |
+| **Presence** | Where a Member is currently attached (a harness session, the CLI, later an app). One Member can have multiple Presences. | not "session", "connection", "status" |
+| **Surface** | Where a Member touches the team: an agent's harness; a human's musterd CLI or web. Glossary meaning only. | not "client", "adapter"; not the files a lane touches (that's **Scope**); not marketing channels |
+| **Act** | The typed intent of a message: `message`, `status_update`, `request_help`, `handoff`, `accept`, `decline`, `wait`, `resolve`, `steer`, `challenge`, `defer`, `ask`. | not "type", "kind", "event", "verb" |
+| **Agent** | The industry hook, and a *kind* of member (`agent · human · service`). Marketing copy leads with it. | not the generic noun for team participants — any sentence also true of humans or services says *member* |
+| **Seat** | The durable position a member keeps — exists while they are away; claimed, adopted, handed off, woken. Used only where durability or occupancy is the subject. | not a synonym for member; not a license unit |
+| **Role** | A responsibility the team grants a member: charter + ceiling. Team-side, reviewed, harness-independent. May name a `default_toolkit`. | not workspace setup; never granted by a local file |
+| **Toolkit** | What a workspace is equipped with: MCP servers, tools, allow-entries. No authority — installing one grants nothing. | not "profile", not "kit", not "template" |
+| **Workspace** | The folder a seat is bound to. | not "worktree" (git implementation detail) |
+| **Harness** | The agent runtime family: Claude Code, Cursor, Codex. | not "surface"; not "platform" |
+| **Driver** | How a harness session runs: desktop, terminal, IDE, headless. Already the wire field (`presence.driver`). | not a harness; not a surface |
+| **Scope** | The paths a lane may touch (today's `surface_globs`). Wire rename is on-touch (ADR 296 tier 2). | not "surface" |
+| **Permissions** | The harness-native allow/ask/deny rules musterd compiles into the workspace (ADR 261). | not "capabilities" |
+| **Capability** | Team-granted authority on a member, enforced by musterd itself (`is_admin`, MCP tool scoping). Internal/protocol vocabulary; user-facing prose says what it means instead. | not tool wiring; not harness rules |
 
-Secondary nouns (consistent but not in the core five): **Inbox** (a Member's durable mailbox for messages received while offline), **Envelope** (the on-wire message structure), **Roster** (a Team's list of Members), **Lifecycle** (`forever | session | until <ts>`), **Availability** (a Member's schedule; v1 stores it, does not enforce it).
+Secondary nouns (consistent but not in the load-bearing set): **Inbox** (a Member's durable mailbox for messages received while offline), **Envelope** (the on-wire message structure), **Roster** (a Team's list of Members), **Lifecycle** (`forever | session | until <ts>`), **Availability** (a Member's schedule; v1 stores it, does not enforce it).
 
 ---
 
 ## 6. Reversibility note
 
-This entire identity is intentionally small: one name, one accent color, one wordmark family (wordmark + chip + tile), five terms, two typefaces, plain voice. Every choice here can be walked back without code changes beyond a palette constant and a banner string. Do not expand the brand (mascots, multi-color systems, illustration beyond the chip/tile marks) without an ADR and an explicit decision to invest. The chip and tile marks are recorded in [ADR 154](../decisions/154-unified-logo-system.md).
+This entire identity is intentionally small: one name, one accent color, one wordmark family (wordmark + chip + tile), the §5 glossary, two typefaces, plain voice. Every choice here can be walked back without code changes beyond a palette constant and a banner string. Do not expand the brand (mascots, multi-color systems, illustration beyond the chip/tile marks) without an ADR and an explicit decision to invest. The chip and tile marks are recorded in [ADR 154](../decisions/154-unified-logo-system.md).
 
 ## 7. Web surface (carve-out)
 

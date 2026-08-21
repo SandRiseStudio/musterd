@@ -356,6 +356,29 @@ export const CONTROLS: Control[] = [
     refs: ['scripts/check-controls.ts', 'scripts/controls.test.ts', 'lane 01M0ER0A0B'],
   },
   {
+    id: 'adr-296-terminology-gate',
+    kind: 'gate',
+    claim:
+      'After ADR 296, zero banned terminology synonyms (profile / kit / template / worktree) are introduced in new ADRs or new user-facing files, and brand.md §5 cannot silently drop a canonical term.',
+    where: 'scripts/check-vocab.ts (terminology table + glossaryDrift); docs/glossary/terms.ts',
+    exercise:
+      'Add an unbackticked "profile" to a new ADR numbered ≥ 299 (or a new file under packages/cli/src/help/) and run `pnpm vocab:check` — it must fail naming the file. `scripts/check-vocab.test.ts` is that case. Independently: delete **Toolkit** from brand.md §5 and the same command must fail on glossary drift.',
+    motivatedBy:
+      '2026-08-21 design conversation: the team admin asked "aren\'t those profiles just roles?" — ADR 272 had already drawn the line, but the glossary was still prose, so the question was unanswerable from brand.md §5.',
+    counterfactual:
+      'Yes for new introductions of the lintable synonyms (profile/kit/template/worktree) — the fixture fails on the exact word. No for the semantic half of the Not column (agent-as-generic-noun, surface-as-lane-paths): a regex cannot catch those, and claiming it would is the decoration this registry exists to refuse. Those stay a review job against the regenerated glossary.',
+    lastExercised: '2026-08-21',
+    everTripped: false,
+    staleAfterDays: 45,
+    refs: [
+      'ADR 296',
+      'scripts/check-vocab.ts',
+      'scripts/check-vocab.test.ts',
+      'docs/glossary/terms.ts',
+      'lane 01M0JT3RTC',
+    ],
+  },
+  {
     id: 'context-budget-coherence',
     kind: 'gate',
     claim:
