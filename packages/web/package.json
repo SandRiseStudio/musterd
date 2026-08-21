@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "node --disable-warning=ExperimentalWarning scripts/gen-site-content.ts && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "stage:site": "node scripts/stage-site.mjs",
@@ -28,6 +28,7 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
+    "marked": "^18.0.10",
     "typescript": "^5.7.2",
     "vite": "8.1.0"
   }
