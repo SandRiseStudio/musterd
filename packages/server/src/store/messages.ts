@@ -124,6 +124,14 @@ export interface InboxOpts {
   since?: number;
   unreadOnly?: boolean;
   cursorTs?: number;
+  /**
+   * The cursor row's id — the TIEBREAK this query already orders by, finally expressed in the
+   * position that walks it. A read cursor is a `(ts, id)` point, not a ts: two messages can share a
+   * millisecond (musterd fan-out sends land sub-millisecond apart), and `ts > cursorTs` drops the
+   * one that ties. Not "shown late" — never shown, because the cursor only moves forward.
+   * Omitted ⇒ the ts-only floor, which is correct whenever nothing ties.
+   */
+  cursorId?: string | null;
   /** The newest `limit` — the recent tail, for a caller that asked to see the latest few. */
   limit?: number;
   /**
@@ -154,11 +162,23 @@ export function listInbox(
        AND from_member != ?`;
   if (opts.unreadOnly) {
     // Both floors apply when both are given: `cursorTs` is what the seat has already read, `since` is
-    // how far a paging caller has walked. Taking the LATER of the two is what makes a bounded unread
-    // read pageable — honouring only the cursor would hand back page one forever, and honouring only
-    // `since` would page back over messages the seat has already read.
-    where += ' AND ts > ?';
-    params.push(Math.max(opts.cursorTs ?? 0, opts.since ?? 0));
+    // how far a paging caller has walked. They are applied SEPARATELY rather than as `max(...)`,
+    // because only one of them carries a tiebreak: the cursor is a `(ts, id)` point and compares as
+    // one, while `since` is a plain ts and stays strict. Collapsing them to a single number is what
+    // made the tied row unreachable — `max()` cannot express half a comparison. With no ties the two
+    // forms select exactly the same rows.
+    const cursorTs = opts.cursorTs ?? 0;
+    if (opts.cursorId) {
+      where += ' AND (ts > ? OR (ts = ? AND id > ?))';
+      params.push(cursorTs, cursorTs, opts.cursorId);
+    } else {
+      where += ' AND ts > ?';
+      params.push(cursorTs);
+    }
+    if (typeof opts.since === 'number') {
+      where += ' AND ts > ?';
+      params.push(opts.since);
+    }
   } else if (typeof opts.since === 'number') {
     where += ' AND ts > ?';
     params.push(opts.since);
@@ -175,15 +195,33 @@ export function listInbox(
       >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`)
       .all(...params);
   }
-  // The prefix read: same order as the unbounded query, simply stopped early.
+  // The prefix read: same order as the unbounded query, simply stopped early — except that it never
+  // stops in the MIDDLE OF A TIE. A page cut between two rows sharing a millisecond cannot be walked
+  // by a `ts` cursor: the next request asks for `ts > last` and excludes every tied row, so the
+  // remainder is stranded and the empty page reads as "caught up" (izzo's repro: 220 messages, page
+  // one 200, page two 0, silently reaching 200). Completing the group instead of splitting it makes
+  // `ts > last` exact again for EVERY caller — including one on an older client that has no way to
+  // send a tiebreak — rather than adding a cursor field the lossy spelling still sits next to.
+  //
+  // The overshoot is the size of one tie group, so the bound is "about `headLimit`" rather than
+  // exactly it. That is the deliberate trade: a response slightly over budget, or a silent
+  // permanent hole in someone's history.
   if (opts.headLimit) {
-    params.push(opts.headLimit);
-    return db
+    const head = db
       .prepare<
         unknown[],
         MessageRow
       >(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC LIMIT ?`)
-      .all(...params);
+      .all(...params, opts.headLimit);
+    if (head.length < opts.headLimit) return head;
+    const last = head[head.length - 1]!;
+    const tied = db
+      .prepare<
+        unknown[],
+        MessageRow
+      >(`SELECT * FROM messages ${where} AND ts = ? AND id > ? ORDER BY id ASC`)
+      .all(...params, last.ts, last.id);
+    return tied.length > 0 ? [...head, ...tied] : head;
   }
   return db
     .prepare<unknown[], MessageRow>(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC`)
@@ -201,7 +239,22 @@ export function countUnread(
   db: Database,
   member: { id: string; team_id: string },
   cursorTs: number,
+  /** The cursor row's id — same `(ts, id)` comparison {@link listInbox} makes, so the count and the
+   *  listing can never disagree about a tied row. Without it this returns 0 while one still waits. */
+  cursorId?: string | null,
 ): number {
+  if (cursorId) {
+    const row = db
+      .prepare<[string, string, string, number, number, string], { n: number }>(
+        `SELECT COUNT(*) AS n FROM messages
+          WHERE team_id = ?
+            AND (to_member = ? OR to_kind IN ('team','broadcast'))
+            AND from_member != ?
+            AND (ts > ? OR (ts = ? AND id > ?))`,
+      )
+      .get(member.team_id, member.id, member.id, cursorTs, cursorTs, cursorId);
+    return row?.n ?? 0;
+  }
   const row = db
     .prepare<[string, string, string, number], { n: number }>(
       `SELECT COUNT(*) AS n FROM messages

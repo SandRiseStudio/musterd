@@ -84,6 +84,37 @@ breathe between.
   is documented at the type; a future reader tempted to unify them should read the Problem section
   first.
 
+**Amended 2026-08-20 (#946): the title's claim was true of the BOUND and false of the CURSOR that
+walks it.** Decision 1 makes two claims in consecutive sentences, and only the second is wrong —
+the distinction is izzo's, from the ADR 294 entry in #947, and it is worth keeping sharp because
+the two sentences read as one thought.
+
+- *"A prefix is the only truncation where advancing the cursor to the last row seen cannot skip
+  anything"* — **true**, and a claim about the BOUND. Nothing here is retracted.
+- *"Catching up takes several reads and reaches every message in order"* — **false**, and a claim
+  about the CURSOR. It inherited the first sentence's confidence without ever being examined on its
+  own.
+
+The gap between them is an assumption nobody wrote down: that the position which advances is total
+over the rows. It is not. `listInbox` orders by `ts ASC, id ASC` while the cursor
+is a bare `ts`, so `id` is a declared tiebreak with no expression in the position. When a tie
+straddled the page boundary, page two asked for `ts > last` and excluded every row sharing that
+millisecond: measured at 220 messages, page one 200, page two **0**, the drain terminating on the
+empty page and reporting success at 200 of 220. Not one skipped row — the whole tail, silently.
+
+Worse one layer down: the read cursor is also a bare `ts`, so a message sharing the cursor row's
+millisecond was not merely stranded mid-walk, it could never appear as unread again — the cursor
+only moves forward. The cursor row already stored `last_read_message_id`; nothing consulted it.
+
+The repair does not add a cursor field. `since` keeps its exact meaning, and the PREFIX BOUND is
+made to never split a tie group — it completes the group past `headLimit` instead of cutting through
+it — so `ts > last` is exact again for every caller, including one on an older client with no way to
+send a tiebreak. Paying for that in a response occasionally larger than the bound is the deliberate
+trade against a silent permanent hole. The unread floor and `countUnread` do take the `(ts, id)`
+comparison, since the cursor is genuinely a point and both must agree about a tied row. Corrected
+claim: **a bounded read cannot skip a message, because the bound never falls inside a tie and the
+cursor compares as the pair the ordering is defined on.**
+
 ## Observability & Evaluation
 
 **Traces.** No new span. The existing `http_request` line already carries `path` and `ms`, which is
@@ -110,3 +141,11 @@ Run `SHALLOW=24000 ROUNDS=200 node scripts/perf/health-under-burst.mjs` on a qui
 p99 above 100ms falsifies the latency claim. For the safety claim, a bounded `GET /inbox` whose first
 element is not the oldest unread — or a `team_inbox_check` that advances the cursor while
 `unread_remaining` is non-zero — falsifies the decision outright.
+
+**Added 2026-08-20 with the amendment above, since the original falsifier could not fail under a
+tie:** seed a backlog whose rows straddle the bound sharing one millisecond, walk it with `since`,
+and count the ids reached. Reaching fewer than were sent — or an unread message sharing the cursor
+row's ts not appearing in an `unread=1` read — falsifies the corrected claim. Both are pinned by
+test (`integration.test.ts`, `inbox.test.ts`); every fixture in this area seeded `ts: Date.now() + i`
+before this change, which is precisely why a strictly-increasing suite could report the property
+green while it was false. A falsifier that cannot construct the failing case is not one.
