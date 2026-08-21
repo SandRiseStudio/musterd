@@ -13,13 +13,7 @@ import {
 import { HttpClient } from '../client.js';
 import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
-import {
-  type Config,
-  findBinding,
-  findWorkspaceSpec,
-  loadBinding,
-  loadConfig,
-} from '../config.js';
+import { type Config, findBinding, loadBinding, loadConfig, readBindingAt } from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -804,16 +798,6 @@ export async function footprintNotes(
 }
 
 /**
- * A `Binding | null` view of {@link loadBinding} — the recovery scan wants "is there a usable
- * identity here?", not the legacy/invalid classification the doctor renders elsewhere. #858 was
- * written against `readBindingAt`, which ADR 176 (#474) replaced with the classifying loader.
- */
-function readValidBinding(dir: string): Binding | null {
-  const load = loadBinding(dir);
-  return load.kind === 'valid' ? load.value : null;
-}
-
-/**
  * Is this machine's record of the team agent key missing while the key itself is still here?
  *
  * `config.agentKeys` is the only copy the config keeps (ADR 075), and losing it silently disables
@@ -829,7 +813,7 @@ function readValidBinding(dir: string): Binding | null {
 export function agentKeyNotes(
   config: Pick<Config, 'agentKeys' | 'bindings'>,
   team: string | undefined,
-  read: (dir: string) => Binding | null = readValidBinding,
+  read: (dir: string) => Binding | null = readBindingAt,
 ): string[] {
   if (!team || config.agentKeys[team]) return [];
   const found = recoverAgentKey(Object.keys(config.bindings), team, read);
