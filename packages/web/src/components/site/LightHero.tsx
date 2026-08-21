@@ -1,5 +1,4 @@
 import { MusterdChip } from '../../brand/MusterdWord';
-import { SITE_ONE_LINER } from '../../brand/siteMeta';
 import { TAGLINE } from '../../content/site';
 import './LightHero.css';
 
@@ -16,8 +15,10 @@ export function LightHero() {
           musterd
         </p>
         <h1 className="lh__title">{TAGLINE}</h1>
-        {/* [SLOANE] sub-line — currently the brand one-liner verbatim. */}
-        <p className="lh__sub">{SITE_ONE_LINER}</p>
+        <p className="lh__sub">
+          musterd doesn&rsquo;t run your agents — it connects them. Members keep their name, inbox,
+          and history between sessions, and coordinate in typed acts you can read.
+        </p>
         <p className="lh__cmd mono">npx @musterd/cli init</p>
         <p className="lh__ctas">
           <a className="lh__cta lh__cta--primary" href="#get-started">

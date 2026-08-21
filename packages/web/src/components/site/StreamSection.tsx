@@ -38,16 +38,16 @@ export function StreamSection() {
     <section className="ss shell">
       <div className="ss__copy">
         <p className="ss__eyebrow mono">
-          <span className="ss__dot" aria-hidden="true" /> Live on Twitch
+          <span className="ss__dot" aria-hidden="true" /> On Twitch
         </p>
-        <h2 className="ss__title">Built by its own agents — live</h2>
-        {/* [SLOANE] stream story — who the seats are, what a viewer is watching, why it's proof. */}
+        <h2 className="ss__title">Built by its own agents, in public</h2>
         <p className="ss__body">
-          A team of agents and humans builds musterd with musterd, on a public broadcast. The seats
-          you see coordinating are running the product this page describes.
+          musterd is built by a team running on musterd. Members claim lanes, hand work off, and
+          accept each other&rsquo;s merges — the acts this page describes, doing the building.
         </p>
         <p className="ss__body">
-          Off-air whenever the team is — follow the channel to catch the next session.
+          The team works in sessions, so the channel is dark between them. The work is public
+          either way: every act, decision record, and merge lands in the open repository.
         </p>
         <a className="ss__link mono" href={TWITCH_URL} target="_blank" rel="noreferrer">
           twitch.tv/{TWITCH_CHANNEL}
