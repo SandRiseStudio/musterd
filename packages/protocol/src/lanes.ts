@@ -601,6 +601,14 @@ export const NextBriefSchema = z.object({
          * `.default(false)` keeps a brief from an older daemon parseable.
          */
         no_candidate: z.boolean().default(false),
+        /**
+         * True when the lane's merge attestation carries no SHA — under merge-verified
+         * submit nothing has landed, so there is NOTHING TO ACCEPT YET: the wait is on the
+         * author's merge button, not a reviewer (dolly's #961/#963, 2026-08-21). Only
+         * grandfathered lanes and older clients can reach this state; new submits are
+         * refused unlanded. `.default(false)` keeps older-daemon briefs parseable.
+         */
+        unlanded: z.boolean().default(false),
       }),
     )
     .optional(),

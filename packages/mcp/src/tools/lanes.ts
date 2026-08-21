@@ -567,7 +567,10 @@ export function fmtNext(b: NextBrief): string {
         `  ${r.id} "${r.title}"${r.owner ? ` — owner=${r.owner}` : ''} — waiting ${Math.floor(r.waited_ms / 3_600_000)}h` +
           // Not "nobody has answered" — nobody was ASKED. The distinction is the whole point:
           // waiting on a slow reviewer and waiting on no reviewer look identical here otherwise.
-          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : ''),
+          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : '') +
+          // Merge-verified submit: no SHA on the attestation means nothing landed — the wait
+          // is on the author's merge button, and holding for it wastes an acceptor's cycle.
+          (r.unlanded ? ' — NO MERGE ATTESTATION (nothing landed — waiting on its author, not you)' : ''),
       );
   }
   if (b.up_next.length) {

@@ -240,6 +240,10 @@ export function deriveNext(
     // all three on an all-claude roster. Reporting it does not change the routing doctrine — it
     // stops the silence from reading as health.
     no_candidate: readyForReviewHadNoCandidate(db, teamId, lane.id),
+    // Merge-verified submit: an attestation without a SHA means nothing landed — the wait is
+    // on the author's merge, not a reviewer. New submits can't reach this state (refused
+    // seat-side); this badge covers grandfathered lanes and older clients.
+    unlanded: lane.merged?.sha === undefined,
   }));
   // The TOTAL, not the shown count. A cap with no total is a queue that looks as deep as its
   // window: clear the three on offer and the next three appear, with nothing having said they were
