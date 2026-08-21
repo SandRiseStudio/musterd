@@ -4,6 +4,7 @@ import { resolveCodexBin } from '../../codexBin.js';
 import { findBinding, saveBinding } from '../../config.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
 import type { ActuatorBackend, BackendContext, WakeActuation, WakeSpec } from '../backend.js';
+import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
 
 const KILL_GRACE_MS = 10_000;
 const RESUME_VERIFY_WINDOW_MS = 30_000;
@@ -41,12 +42,15 @@ export function parseCodexThreadLine(line: string): string | undefined {
  * attests it on claim, and that is what makes the resulting presence row identifiably THIS wake's.
  * It is a daemon-minted opaque lease id — not a session id, transcript path, or token — so it
  * carries nothing ADR 128 keeps off the wire, and it is already on the wire in the wake order. */
-export function codexWakeEnv(base: NodeJS.ProcessEnv, leaseId?: string): NodeJS.ProcessEnv {
+export function codexWakeEnv(
+  base: NodeJS.ProcessEnv,
+  leaseId?: string,
+  pinnedDir?: string,
+): NodeJS.ProcessEnv {
   const allowed = ['HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM'];
-  const env: NodeJS.ProcessEnv = { MUSTERD_PROVENANCE: 'wake' };
-  if (leaseId) env['MUSTERD_WAKE_LEASE'] = leaseId;
+  const env: NodeJS.ProcessEnv = {};
   for (const key of allowed) if (base[key] !== undefined) env[key] = base[key];
-  return env;
+  return wakeEnv(env, pinnedDir, leaseId);
 }
 
 function killTree(child: ChildProcess, graceMs: number): void {
@@ -76,6 +80,8 @@ export interface CodexDeps {
   recordFreshThread?: (workspace: string, id: string, startedAt: number) => void;
   killGraceMs?: number;
   resumeVerifyWindowMs?: number;
+  /** Injectable pinned-shim write; wake PATH must resolve this actuator's CLI before Homebrew. */
+  ensurePinned?: (opts: { node: string; binJs: string }) => string | undefined;
 }
 
 function recordFreshThread(workspace: string, id: string, startedAt: number): void {
@@ -108,13 +114,14 @@ async function attempt(
   ctx: BackendContext,
   label: 'fresh' | 'resumed',
   timeoutMs: number,
+  pinnedDir: string | undefined,
 ): Promise<Attempt> {
   const startedAt = Date.now();
   let child: ChildProcess;
   try {
     child = (deps.spawn ?? nodeSpawn)(bin, args, {
       cwd: spec.workspace,
-      env: codexWakeEnv(process.env, spec.order.lease_id),
+      env: codexWakeEnv(process.env, spec.order.lease_id, pinnedDir),
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -248,6 +255,10 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
           outcome: { occupied: false, deferred: true, reason: 'local-session-live' },
           settled: Promise.resolve(undefined),
         };
+      const pinnedDir = (deps.ensurePinned ?? ensurePinnedMusterd)({
+        node: process.execPath,
+        binJs: process.argv[1] ?? '',
+      });
       const deadline = Date.now() + spec.bounds.timeout_ms;
       // Absent is legacy: mixed daemon/host versions retain the existing resume path. An explicit
       // portable/fresh order bypasses resume and spawns fresh immediately (ADR 209).
@@ -282,6 +293,7 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
           ctx,
           'resumed',
           spec.bounds.timeout_ms,
+          pinnedDir,
         );
         if (resumed.occupied)
           return {
@@ -333,6 +345,7 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
         ctx,
         'fresh',
         Math.max(1, deadline - Date.now()),
+        pinnedDir,
       );
       return {
         outcome: {
