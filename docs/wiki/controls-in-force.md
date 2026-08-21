@@ -4,7 +4,7 @@ Every guard we believe is protecting us carries a date someone last watched it w
 
 ## The registry
 
-`docs/controls/registry.ts` lists each control with its claim, how to exercise it, and two separate dates. `pnpm controls:check` (in `format:check`) fails when the evidence goes stale. Eight controls registered at 2026-08-20.
+`docs/controls/registry.ts` lists each control with its claim, how to exercise it, and two separate dates. `pnpm controls:check` (in `format:check`) fails when the evidence goes stale. Nine controls registered at 2026-08-20.
 
 **Exercised and tripped are different facts, and conflating them is the bug.** `lastExercised` is *when someone last ran this and watched what happened* — liveness. `everTripped`/`lastTripped` is *whether it has ever actually caught anything* — efficacy. ADR 272's routing gate scores well on the first (stanley ran the query twice) and zero on the second (it has never fired). Both readings are true and neither substitutes: a control exercised often and never tripping may be guarding something that cannot happen, which is worth knowing; a control that tripped once and has not been exercised since may have rotted, which is invisible without a date.
 
@@ -29,6 +29,8 @@ The rule has teeth because it has been paid. Applied to a dating check ryder had
 
 **The registry does not find controls; it only keeps registered ones honest** (2026-08-20; falsify: add an unregistered guard to the repo and run `pnpm controls:check` — it passes, which is the gap). There is no auto-discovery of guards in the tree, so the registry is a floor, not an inventory, and an entry lands only when a seat exercises a control and records what they saw. Claiming completeness on day one would be the same absence-class lie one level up.
 
-A `neverExercised` control is legal — `adr-227-infra-touch-gate` is the current one — but it is printed on every run rather than passing quietly.
+A `neverExercised` control is legal — `adr-227-infra-touch-gate` is the current one — but it is printed on every run rather than passing quietly, **and the absence itself expires**: `neverExercisedSince` ages against the control's own `staleAfterDays`, so the gate fails once the control is old enough that someone should have fired it. ~~Increment 1 did not stale-check declared absences at all~~ CLOSED 2026-08-20 by izzo's acceptance finding — an undated absence was a permanent exemption, the registry's own thesis turned on itself.
+
+Two more increment-2 corrections, both found by acceptors exercising increment 1 rather than reading it (2026-08-20): `adr-227-infra-touch-gate`'s `where` omitted `musterd agent`, the most consequential of its wired verbs — an understated `where` is the same defect class as a stale date; and `roadmap-frozenby-drift-watch`'s counterfactual overclaimed "Yes" where dolly's mutation test proved "partly" — rule 3 cannot fire on a `building` item, so **watched and enforced are different facts**, the registry's exercised/tripped split showing up one level up.
 
 Related: [running the gates](running-the-gates.md) · [shipping a PR](shipping-a-pr.md) · [claims ledger](../claims/README.md)

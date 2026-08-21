@@ -54,15 +54,34 @@ describe('rule 1 — exercised XOR never-exercised (absence must be stated)', ()
     expect(check(control())).toEqual([]);
   });
 
-  it('accepts a control that states why it has never been exercised', () => {
+  it('accepts a control that states why it has never been exercised — dated', () => {
     expect(
       check(
         control({
           lastExercised: undefined,
           neverExercised: 'Shipped 2026-08-04 and no seat has fired it on purpose since.',
+          neverExercisedSince: '2026-08-04',
         }),
       ),
     ).toEqual([]);
+  });
+
+  // izzo's increment-1 acceptance finding (2026-08-20, msg 01M0GVQ36P): an undated absence was a
+  // PERMANENT staleness exemption — the ⚠ became wallpaper and nothing ever forced it to resolve.
+  it('REJECTS a neverExercised reason without a since-date — no permanent exemptions', () => {
+    const errs = check(
+      control({
+        lastExercised: undefined,
+        neverExercised: 'Shipped 2026-08-04 and no seat has fired it on purpose since.',
+      }),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatch(/needs `neverExercisedSince`/);
+  });
+
+  it('REJECTS a since-date without a reason — they travel together', () => {
+    const errs = check(control({ neverExercisedSince: '2026-08-04' }));
+    expect(errs[0]).toMatch(/no `neverExercised` reason/);
   });
 
   // The hole ADR 177 closed for the roadmap, closed here on arrival rather than after it bites.
@@ -80,7 +99,13 @@ describe('rule 1 — exercised XOR never-exercised (absence must be stated)', ()
   });
 
   it('REJECTS a placeholder reason', () => {
-    const errs = check(control({ lastExercised: undefined, neverExercised: 'TODO' }));
+    const errs = check(
+      control({
+        lastExercised: undefined,
+        neverExercised: 'TODO',
+        neverExercisedSince: '2026-08-04',
+      }),
+    );
     expect(errs[0]).toMatch(/must state a real reason/);
   });
 });
@@ -150,16 +175,43 @@ describe('rule 5 — staleness can actually fail', () => {
     expect(check(control({ lastExercised: '2026-05-22', staleAfterDays: 90 }))).toEqual([]);
   });
 
-  it('does NOT stale-check a never-exercised control — there is no date to age', () => {
+  // Increment 1 skipped never-exercised controls here ("no date to age") — which made the reason
+  // a permanent exemption. Increment 2 ages the absence itself, against the same bound.
+  it('REJECTS a declared absence older than the bound — the exemption expires', () => {
+    const errs = check(
+      control({
+        lastExercised: undefined,
+        neverExercised: 'Warn-only gate; nobody has fired it deliberately since it shipped.',
+        neverExercisedSince: '2026-08-04',
+        staleAfterDays: 10, // 16 days elapsed at NOW
+      }),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toMatch(/never exercised in the 16d since it shipped/);
+  });
+
+  it('accepts a declared absence still inside the bound', () => {
     expect(
       check(
         control({
           lastExercised: undefined,
           neverExercised: 'Warn-only gate; nobody has fired it deliberately since it shipped.',
-          staleAfterDays: 1,
+          neverExercisedSince: '2026-08-04',
+          staleAfterDays: 60,
         }),
       ),
     ).toEqual([]);
+  });
+
+  it('runs `neverExercisedSince` through the same date validation as the other dates', () => {
+    const errs = check(
+      control({
+        lastExercised: undefined,
+        neverExercised: 'Warn-only gate; nobody has fired it deliberately since it shipped.',
+        neverExercisedSince: '2026-02-31',
+      }),
+    );
+    expect(errs[0]).toMatch(/`neverExercisedSince` must be a real ISO date/);
   });
 
   it('REJECTS a non-positive staleness bound', () => {

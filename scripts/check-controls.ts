@@ -11,7 +11,8 @@
  *   1. exercised-xor-never   — a control states either a `lastExercised` date or a reason it has
  *      never been exercised. An empty field would mean both "never" and "nobody said", and a check
  *      cannot tell those apart — the ADR 177 lesson that took the roadmap's drift watch from 11 of
- *      82 items to 67 of 85.
+ *      82 items to 67 of 85. A `neverExercised` reason also carries `neverExercisedSince` (when
+ *      the absence started) — increment 2, from izzo's acceptance finding.
  *   2. dates are real        — ISO YYYY-MM-DD, a valid calendar date, not in the future. A future
  *      date would push a control permanently out of staleness.
  *   3. tripped ⟹ dated       — `everTripped: true` needs `lastTripped`. "It has caught things"
@@ -26,8 +27,11 @@
  * The pressure valve is honest, not silent — re-exercise the control and move the date, or widen
  * `staleAfterDays` with a reason in the PR. Both leave a record; ignoring it does not.
  *
- * A `neverExercised` control is NOT stale-checked — there is no date to age. It is counted and
- * printed on every run instead, so it stays visible rather than becoming a permanent free pass.
+ * A `neverExercised` control IS stale-checked as of increment 2 — its `neverExercisedSince` date
+ * ages against the same bound as an exercise date would. Increment 1 skipped it ("no date to
+ * age"), which made the reason a permanent exemption: izzo's acceptance named that as the
+ * registry's own thesis turned on itself, and he was the one entry living in the hole when he
+ * named it. Now a declared absence expires; it is also still printed on every run.
  *
  *   pnpm controls:check
  */
@@ -75,12 +79,25 @@ export function checkControls(controls: Control[], now: Date): string[] {
     if (hasReason && c.neverExercised!.trim().length < 20) {
       at('`neverExercised` must state a real reason, not a placeholder.');
     }
+    // (1b) a declared absence carries its start date — without one, `neverExercised` is a
+    // PERMANENT staleness exemption, which is the registry's own thesis turned on itself
+    // (izzo's increment-1 acceptance finding, 2026-08-20).
+    if (hasReason && c.neverExercisedSince === undefined) {
+      at(
+        '`neverExercised` needs `neverExercisedSince` (when the absence started) — an undated ' +
+          'absence never expires, and a permanent exemption is the exact rot this registry exists to stop.',
+      );
+    }
+    if (!hasReason && c.neverExercisedSince !== undefined) {
+      at('has `neverExercisedSince` but no `neverExercised` reason — they travel together.');
+    }
 
     // (2) dates are real, and not in the future
     const today = now.toISOString().slice(0, 10);
     for (const [field, value] of [
       ['lastExercised', c.lastExercised],
       ['lastTripped', c.lastTripped],
+      ['neverExercisedSince', c.neverExercisedSince],
     ] as const) {
       if (value === undefined) continue;
       if (!isRealDate(value)) {
@@ -108,7 +125,9 @@ export function checkControls(controls: Control[], now: Date): string[] {
       );
     }
 
-    // (5) not stale
+    // (5) not stale — an exercise date ages, and so does a declared absence: `neverExercisedSince`
+    // is checked against the SAME bound, so "nobody has ever fired this" stops being a free pass
+    // once the control is old enough that someone should have.
     if (c.staleAfterDays <= 0) {
       at('`staleAfterDays` must be positive.');
     } else if (c.lastExercised !== undefined && isRealDate(c.lastExercised)) {
@@ -118,6 +137,15 @@ export function checkControls(controls: Control[], now: Date): string[] {
           `last exercised ${age}d ago, past its own ${c.staleAfterDays}d staleness bound. ` +
             'Exercise it and move the date, or widen the bound with a reason — but do not leave ' +
             'the claim standing on evidence this old.',
+        );
+      }
+    } else if (c.neverExercisedSince !== undefined && isRealDate(c.neverExercisedSince)) {
+      const age = daysBetween(c.neverExercisedSince, now);
+      if (age > c.staleAfterDays) {
+        at(
+          `never exercised in the ${age}d since it shipped — past its own ${c.staleAfterDays}d ` +
+            'bound. The declared absence has expired: fire the control deliberately and record ' +
+            'what you saw, or retire the entry. It does not get older quietly.',
         );
       }
     }
@@ -145,8 +173,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       `${never.length} never exercised, ${untripped.length} never tripped\n`,
   );
   // Never-exercised controls are legal but must not go quiet: they are the registry's whole point.
+  // The countdown is printed so the expiry is visible before it fails the build.
   for (const c of never) {
-    process.stdout.write(`  ⚠ ${c.id} — never exercised: ${c.neverExercised}\n`);
+    const left =
+      c.neverExercisedSince !== undefined
+        ? ` (${c.staleAfterDays - Math.floor((Date.now() - new Date(`${c.neverExercisedSince}T00:00:00Z`).getTime()) / 86_400_000)}d until this expires)`
+        : '';
+    process.stdout.write(`  ⚠ ${c.id} — never exercised${left}: ${c.neverExercised}\n`);
   }
 }
 /* c8 ignore stop */
