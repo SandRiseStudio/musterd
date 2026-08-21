@@ -1,5 +1,14 @@
 /* Public-site chrome (ADR 300). Semantic tokens only — see styles/tokens.css. */
 
+.site-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  /* The public pages' own ground: the body gradient underneath opens on a dark band (the old
+   * hero painted over it), which fails AA under the nav. Solid paper, from the theme tokens. */
+  background: var(--surface-solid);
+}
+
 .sitenav {
   display: flex;
   align-items: center;
@@ -17,10 +26,6 @@
   font-weight: 700;
   text-decoration: none;
   letter-spacing: 0.01em;
-}
-
-.sitenav__chip {
-  flex: none;
 }
 
 .sitenav__links {

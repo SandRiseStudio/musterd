@@ -1,11 +1,5 @@
 /* Typography for build-time-generated HTML (docs, blog, roadmap). Tokens only. */
 
-.site-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
 .site-page > .prose {
   flex: 1;
 }

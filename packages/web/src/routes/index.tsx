@@ -24,7 +24,7 @@ export const Route = createFileRoute('/')({
 
 function Home() {
   return (
-    <main>
+    <main className="site-page">
       <SiteNav />
       <LightHero />
       <StreamSection />

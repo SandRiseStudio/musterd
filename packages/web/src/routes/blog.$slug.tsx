@@ -1,11 +1,15 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
-import { blogPosts } from '../content/generated/site-content';
 import '../components/site/Prose.css';
 
 export const Route = createFileRoute('/blog/$slug')({
-  loader: ({ params }) => {
+  // SSR-only content load (ADR 300): the prerender runs this and dehydrates the result into the
+  // page; the client build eliminates the branch, so the generated content module never ships as
+  // client JS. Site nav uses plain <a> full navigations, so the client never runs this loader.
+  loader: async ({ params }) => {
+    if (!import.meta.env.SSR) throw notFound();
+    const { blogPosts } = await import('../content/generated/site-content');
     const post = blogPosts.find((p) => p.slug === params.slug);
     if (!post) throw notFound();
     return post;

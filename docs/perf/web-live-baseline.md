@@ -337,3 +337,30 @@ regroup it replaces (`groupByGoal` + its suite) was deleted in the same change, 
 net of the retirement. Initial JS is untouched (grid rides the existing lazy board chunk).
 Raised `totalJsGzipBytes` 238000 → 241000 and `totalCssGzipBytes` 25300 → 26400 — measured + ~1%
 headroom on JS, +4% on CSS; both were tight-fit ceilings, not calibration drift.
+
+## 2026-08-21 — ADR 300 site expansion (initial raise; landing re-composition)
+
+Branch `miley/musterd-io-expansion`: the public site grows to `/`, `/roadmap`, `/docs/**`,
+`/blog/**`; the landing swaps the canvas office-scene hero for typographic sections
+(SiteNav/LightHero/StreamSection/WhatIs/Teasers). The Twitch player is third-party and deferred
+(no iframe in prerendered HTML; IntersectionObserver injects it), so it touches no JS budget.
+
+Measured (this box, `perf:check` after `pnpm --filter @musterd/web build`; main baseline is the
+2026-08-13 log entry):
+
+- **initial JS (worst route /live): 146.3 KB → 150.4 KB.** The new landing sections ride the entry
+  chunk because the index route is part of it, and /live's eager graph includes entry. Raised
+  `initialJsGzipBytes` 152000 → 156000 (measured 154,010 B + ~1.2% slack, the 2026-08-12 shape).
+- **The lazy remedy was measured and REJECTED** (findings-log entry, do not re-chase without new
+  evidence): splitting the landing component into `index.lazy.tsx` moved the sections out of entry
+  but rolldown re-chunked shared modules — `fileRoute` (10.8 KB gzip) and `jsx-runtime` (2.9 KB)
+  became separate eager chunks in every route's graph — for a WORSE initial (152.1 KB) and
+  **+26 KB total** (35 → 37 chunks, churn + duplication).
+- **total JS: 234.3 KB / 241000 budget — passes.** The generated content module (docs/blog/roadmap
+  HTML) ships as **zero client JS**: content routes load it in loaders behind `import.meta.env.SSR`,
+  the prerender dehydrates each page's own data, and the client build dead-code-eliminates the
+  import. First measured shape (content in a shared chunk hoisted into entry) was 259.0 KB total /
+  121.2 KB entry — the SSR guard is what fixed it.
+- **CSS: 26,406 B vs 26,400 — 6 bytes over; trimmed** (two redundant declarations in the new site
+  CSS) rather than raised.
+- Dead code removed in passing: `LiquidGlass/` (no consumers), `lenis`, `@fontsource/fraunces`.
