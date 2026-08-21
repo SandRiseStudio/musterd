@@ -148,8 +148,13 @@ musterd works fully in a plain shared folder, where per-role tooling degrades to
 
 **Built in Phase 1:** Role JSON schema + zod parser; the built-in seed library; the **Claude Code** renderer (`provision()` → `claude mcp add -s local`, per-server idempotency, `${ENV}` passed verbatim as a reference — Claude Code expands `${VAR}`/`${VAR:-default}` at launch, musterd never resolves/bakes it; **permission defaults merged into `.claude/settings.local.json`** additively); the **Cursor** renderer (MCP servers merged into `.cursor/mcp.json`; Cursor has no managed allowlist, so permissions degrade to declared/charter); the **Codex** renderer (MCP servers merged into the project-local `.codex/config.toml` via a minimal `[mcp_servers.*]`-scoped TOML helper — no TOML dep; no permission model, so permissions degrade like Cursor; ADR 031) — **all three required harnesses are now complete**; the manifest (servers **+ permissions**); charter → `AGENTS.md` (additive, reuses `upsertPrimer`); init's role step (`generalist`=nothing extra; identity unchanged); **`musterd uninstall`** — per-folder reversal that consumes the manifest to remove exactly what init added (role servers + permissions, the musterd server, the primer block) and clears local `.musterd/` state (the member stays on the roster — server-side removal is v0.3); **`musterd role`** — `list` / `show` / `create` for role templates, where `create --from <builtin>` round-trips a built-in into an editable `.musterd/roles/<name>.json` (which then overrides the built-in of that name).
 
-**Built (ADR 038 — role label from the template):** the **free-text role label vs. role template**
-unification. `init` now **picks the role template before minting the member** and **derives the
+**Built (ADR 038 — role label from the template). Superseded 2026-08-19 by ADR 272 — the
+derivation described below no longer exists; kept as the record of what ADR 038 built.** `init`
+still picks the profile before minting the member, but the label no longer comes from it: init's
+role label is a plain free-text prompt, the override gate went with the derivation, and
+`resolveRoleLabel` is deleted. A profile is local setup; the roster role is a team fact (ADR 227)
+that a local file cannot grant. As built in ADR 038: the **free-text role label vs. role template**
+unification — `init` **picks the role template before minting the member** and **derives the
 roster/primer role label from it** (`addMember`'s existing `role` field — no wire change), so the
 label you see always matches the tools you got. Precedence is **explicit free-text override >
 template `role` > empty**, factored into a pure `resolveRoleLabel`; a non-generalist pick offers an

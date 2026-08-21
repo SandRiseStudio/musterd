@@ -962,9 +962,14 @@ async function waitForPresence(
  * Step 4 — pick the workspace profile *before* the member is minted (ADR 038). Lists the built-in
  * seed library plus any user profiles (`.musterd/profiles/*.json`, legacy `.musterd/roles/*.json`);
  * `generalist` is the default and means "no profile" (returns undefined). For a richer pick the
- * profile is loaded and returned so its name can drive the roster/primer label (via
- * {@link resolveRoleLabel}) and its tools can be provisioned later (§5a). A load failure degrades
- * to no-profile (warn, return undefined) so init never wedges here.
+ * profile is loaded and returned so its tools can be provisioned later (§5a) and its name recorded
+ * on the guidance-path manifest. A load failure degrades to no-profile (warn, return undefined) so
+ * init never wedges here.
+ *
+ * It does NOT touch the roster label. ADR 272 severed that: the profile is local setup, the role
+ * label is a team fact, and a local file cannot grant one. This comment used to say the name drove
+ * the label "via resolveRoleLabel" — the symbol was deleted with the coupling, and the sentence
+ * outlived it long enough for ryder to find it while accepting the lane that removed it.
  */
 async function selectProfile(member: string): Promise<Profile | undefined> {
   const names = listProfileNames(process.cwd());
