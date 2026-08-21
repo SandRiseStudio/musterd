@@ -57,6 +57,66 @@ describe('decideEnsure', () => {
     expect(d.state.restarts).toEqual([NOW]);
   });
 
+  // ── deploy vs crash (2026-08-21: two image-push replacements burned 2/3 flap slots) ──────────
+  it('machine gone but the recorded image changed → deploy: relaunch WITHOUT spending the budget', () => {
+    const state = live({ image: 'sha256:' + 'a'.repeat(64) });
+    const d = decideEnsure({
+      state,
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: 'sha256:' + 'b'.repeat(64),
+    });
+    expect(d.action).toBe('restart');
+    expect(d.state.restarts).toEqual([]);
+    expect(d.note).toMatch(/deploy/i);
+  });
+
+  it('a deploy replacement updates the state’s image to what the relaunch will run', () => {
+    const next = 'sha256:' + 'b'.repeat(64);
+    const d = decideEnsure({
+      state: live({ image: 'sha256:' + 'a'.repeat(64) }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: next,
+    });
+    expect(d.state.image).toBe(next);
+  });
+
+  it('a deploy is not a crash even at the flap cap — it never stands down', () => {
+    const recent = [NOW - 20 * 60_000, NOW - 10 * 60_000, NOW - 5 * 60_000];
+    const d = decideEnsure({
+      state: live({ image: 'sha256:' + 'a'.repeat(64), restarts: recent }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: 'sha256:' + 'b'.repeat(64),
+    });
+    expect(d.action).toBe('restart');
+    expect(d.state.restarts).toEqual(recent);
+  });
+
+  it('machine gone with the SAME image recorded → a crash, charged as before', () => {
+    const same = 'sha256:' + 'a'.repeat(64);
+    const d = decideEnsure({
+      state: live({ image: same }),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: same,
+    });
+    expect(d.action).toBe('restart');
+    expect(d.state.restarts).toEqual([NOW]);
+  });
+
+  it('legacy state without an image field → a crash (never a free pass by omission)', () => {
+    const d = decideEnsure({
+      state: live(),
+      liveCount: 0,
+      now: NOW,
+      recordedDigest: 'sha256:' + 'b'.repeat(64),
+    });
+    expect(d.action).toBe('restart');
+    expect(d.state.restarts).toEqual([NOW]);
+  });
+
   it('stood down → noop forever until a human start/stop clears it (one ask, not one per tick)', () => {
     const state = live({ restarts: [NOW - 3000, NOW - 2000, NOW - 1000], standDownAt: NOW - 500 });
     expect(decideEnsure({ state, liveCount: 0, now: NOW }).action).toBe('noop');

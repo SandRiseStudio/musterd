@@ -365,7 +365,7 @@ async function startVerb(
     a.statePath,
     once
       ? { desired: 'stopped', by: a.who(), at: a.now(), reason: '--once run', team, restarts: [] }
-      : { desired: 'live', by: a.who(), at: a.now(), team, restarts: [] },
+      : { desired: 'live', by: a.who(), at: a.now(), team, image: digest, restarts: [] },
   );
 
   a.out(
@@ -501,7 +501,12 @@ async function ensureVerb(
 ): Promise<number> {
   const state = readStreamState(a.statePath);
   const liveCount = startedMachines(machineListJson(a.exec, a.app)).length;
-  const d = decideEnsure({ state, liveCount, now: a.now() });
+  const d = decideEnsure({
+    state,
+    liveCount,
+    now: a.now(),
+    recordedDigest: readDigest(a.repoRoot),
+  });
   switch (d.action) {
     case 'noop':
       return 0;
