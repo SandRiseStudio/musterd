@@ -10,10 +10,10 @@ void_if:
 series:     ~/.musterd/research/adr-166-slot-sweep.jsonl
 cadence:    5m
 opened:     2026-08-21
-opened_by:  izzo
+opened_by:  ryder
 revisit_by: 2026-09-11
-status:     open
-resolution:
+status:     resolved
+resolution: "BREACHED, and the per-case inspection is done — ADR 166 amendment 2026-08-21 (the inspection). The falsifier is met many times over: agents-kimi's 8 demotes on 08-20 hit a Cursor desktop session live 08:42–16:01 (demotes stop the sweep after `.workspace-trusted` appears at 09:55:57), and the wanderer/gptbot clusters were live cursor-agent sessions the deployed scanner could not yet see. 103/109 confirmed live-session demotes, 6 unresolved (evidence deleted), 0 confirmed-correct. Resolution and fix land in one diff, which also trips this watch's own void_if (packages/cli/src/host/** changed): the guard belt was added to the host loop and codex backend. Successor: 2026-08-21-adr-166-demoted-successor-2.md."
 ---
 
 The instrument lane `01M0JNYJ4KHAM6FMEV5BZTQ7FW` needs, replacing 48 MB of ambiguity.

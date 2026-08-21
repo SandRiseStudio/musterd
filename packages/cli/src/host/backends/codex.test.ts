@@ -220,6 +220,37 @@ describe('codexBackend', () => {
     await result.settled;
   });
 
+  it('GUARD: a demoted conflict (slot live, enumeration disagrees) defers — either side saying live refuses (ADR 166 inc 3)', async () => {
+    // The 2026-08-21 inspection of the sweep's 109 demoted observations found every resolvable
+    // case was a live session enumeration could not see (unscanned harness, unwritten
+    // `.workspace-trusted`) — and the one wake that landed in a demote window came through THIS
+    // backend, saved only by a missing codex CLI. The slot's warm transcript is the evidence.
+    const spawned: string[][] = [];
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      readSession: () => ({
+        state: 'resumable',
+        source: 'enumerated',
+        slotState: 'live',
+        disagreed: true,
+        demoted: true,
+        session: { harness: 'codex', id: 'old', started_at: 1 },
+      }),
+      spawn: ((_bin: string, args: string[]) => {
+        spawned.push(args);
+        return new Child();
+      }) as never,
+    });
+    const result = await backend.wake(spec, ctx);
+    expect(spawned).toHaveLength(0);
+    expect(result.outcome).toMatchObject({
+      occupied: false,
+      deferred: true,
+      reason: 'local-session-live',
+    });
+    await result.settled;
+  });
+
   it('resumes the captured thread only when its JSONL identity agrees', async () => {
     const child = new Child();
     const calls: string[][] = [];

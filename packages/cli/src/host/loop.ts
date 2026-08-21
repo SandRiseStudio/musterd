@@ -279,7 +279,10 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
       const live = deps.liveness
         ? deps.liveness(entry.workspace, entry.harness)
         : localSessionLiveness(entry.workspace, Date.now(), undefined, entry.harness);
-      if (live.state === 'live') {
+      // ADR 166 increment 3: the guard resolves disagreement toward LIVE — a demoted slot
+      // (slotState live, enumeration disagreeing) still defers, because the slot only reads live
+      // while its own transcript is being written right now.
+      if (live.state === 'live' || live.slotState === 'live') {
         deps.log(
           `wake deferred: ${order.seat} — a live local session holds ${entry.workspace} ` +
             `(transcript active); the act stays due`,
