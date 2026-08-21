@@ -1,14 +1,15 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { SITE_TAGLINE, SITE_TITLE } from '../brand/siteMeta';
-import { Footer } from '../components/Footer';
 import { GetStarted } from '../components/GetStarted';
-import { Hero } from '../components/Hero/Hero';
-import liveCss from '../live/Live.css?url';
+import { LightHero } from '../components/site/LightHero';
+import { SiteFooter } from '../components/site/SiteFooter';
+import { SiteNav } from '../components/site/SiteNav';
+import { Teasers } from '../components/site/Teasers';
+import { WhatIs } from '../components/site/WhatIs';
 
 export const Route = createFileRoute('/')({
   head: () => ({
     meta: [{ title: SITE_TITLE }, { name: 'description', content: SITE_TAGLINE }],
-    links: [{ rel: 'stylesheet', href: liveCss }],
   }),
   component: Home,
 });
@@ -16,9 +17,12 @@ export const Route = createFileRoute('/')({
 function Home() {
   return (
     <main>
-      <Hero />
+      <SiteNav />
+      <LightHero />
+      <WhatIs />
       <GetStarted />
-      <Footer />
+      <Teasers />
+      <SiteFooter />
     </main>
   );
 }

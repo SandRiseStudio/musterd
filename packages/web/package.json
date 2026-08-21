@@ -12,13 +12,11 @@
     "deploy:site": "pnpm build && pnpm stage:site && pnpm dlx wrangler@4.83.0 deploy"
   },
   "dependencies": {
-    "@fontsource/fraunces": "^5.2.9",
     "@fontsource/space-grotesk": "^5.2.10",
     "@fontsource/space-mono": "^5.2.9",
     "@musterd/protocol": "workspace:*",
     "@tanstack/react-router": "1.170.16",
     "@tanstack/react-start": "1.168.26",
-    "lenis": "1.3.23",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
