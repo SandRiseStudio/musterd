@@ -21,7 +21,7 @@ import { recordLaneClose } from '../store/laneClose.js';
 import { deriveHandoffLane, getLane, type HandoffLaneBasis, updateLane } from '../store/lanes.js';
 import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
-import { currentAttestedModel } from '../store/presence.js';
+import { currentAttestation } from '../store/presence.js';
 import { adminHumanPresent } from '../store/reachability.js';
 import { pickHumanReviewer } from '../store/review.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
@@ -240,13 +240,32 @@ function routeEnvelopeInner(
   // is stamped when present. Unattested → no stamp at all (reads as `unknown` downstream,
   // warn-never-block). Keyed on the *sending* occupancy (senderPresenceId) so a fanned-out member's
   // two sessions on different models don't cross-attribute (ADR 042 human fan-out).
-  const attestedModel = currentAttestedModel(ctx.db, sender.id, senderPresenceId);
-  if (outgoingEnv.meta && 'model' in outgoingEnv.meta) {
-    const { model: _clientModel, ...restMeta } = outgoingEnv.meta;
+  // Read as a pair from ONE row: `model_source` says which tier produced `model` — `observed` (a
+  // harness probe saw it) vs a declaration. Without it a stamp cannot say whether it is a
+  // measurement or an assumption, and an aggregate over both reports a number it cannot support.
+  const { model: attestedModel, source: attestedSource } = currentAttestation(
+    ctx.db,
+    sender.id,
+    senderPresenceId,
+  );
+  // Both keys are server-controlled and stripped from any client-supplied meta, on the same grounds:
+  // a session that could stamp its own tier could launder a declaration into an observation, which
+  // is the one substitution this field exists to make impossible.
+  if (outgoingEnv.meta && ('model' in outgoingEnv.meta || 'model_source' in outgoingEnv.meta)) {
+    const { model: _clientModel, model_source: _clientSource, ...restMeta } = outgoingEnv.meta;
     outgoingEnv = { ...outgoingEnv, meta: restMeta };
   }
   if (attestedModel) {
-    outgoingEnv = { ...outgoingEnv, meta: { ...outgoingEnv.meta, model: attestedModel } };
+    outgoingEnv = {
+      ...outgoingEnv,
+      meta: {
+        ...outgoingEnv.meta,
+        model: attestedModel,
+        // Omitted, never defaulted, when the occupancy does not know its own tier (pre-migration-42
+        // row, or a client too old to send one). Absence is not an assertion (ADR 236).
+        ...(attestedSource ? { model_source: attestedSource } : {}),
+      },
+    };
     recordActModel(attestedModel);
   }
 

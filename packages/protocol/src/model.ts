@@ -110,6 +110,35 @@ export function reviewGrade(
 /** Which tier supplied the attested model. `observed` outranks both declarations. */
 export type AttestationSource = 'observed' | 'environment' | 'binding' | 'unknown';
 
+/**
+ * The attestation sources that travel on the wire — `unknown` is deliberately absent, because an
+ * unattested occupancy carries no model to describe and the stamp is simply omitted (ADR 101's
+ * warn-never-block posture; absence is not an assertion, ADR 236).
+ *
+ * Kept at the full four-value vocabulary rather than collapsed to observed-vs-declared, for the same
+ * reason `model_observed` is never merged into `model`: `environment` is *this session's*
+ * declaration (a harness passing its own pinned model) while `binding` is a provisioning snapshot,
+ * and those rot at different rates. A consumer that only wants the coarse split can collapse it;
+ * one that only ever receives the collapsed value can never get the finer one back.
+ */
+export const WIRE_ATTESTATION_SOURCES = ['observed', 'environment', 'binding'] as const;
+export type WireAttestationSource = (typeof WIRE_ATTESTATION_SOURCES)[number];
+
+/** Is this source one the wire carries (i.e. anything but `unknown`)? */
+export function isWireAttestationSource(v: unknown): v is WireAttestationSource {
+  return (WIRE_ATTESTATION_SOURCES as readonly unknown[]).includes(v);
+}
+
+/**
+ * Does this source mean the value was *observed* (a harness probe saw it) rather than *declared* (a
+ * human or config asserted it)? The distinction the per-act stamp exists to carry: an observed
+ * stamp is a measurement, a declared one is an assumption, and a per-model aggregate that mixes
+ * them is reporting a number it cannot support.
+ */
+export function isObservedAttestation(source: string | null | undefined): boolean {
+  return source === 'observed';
+}
+
 export interface AttestationInput {
   /** The hook-written observation for this workspace, if a harness probe produced one. */
   observed?: ModelObservation | undefined;

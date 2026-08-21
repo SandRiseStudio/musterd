@@ -14,7 +14,7 @@ repo — the only committed structured data are `docs/perf/budgets.json`,
 
 | Store                                          | Size                 | Holds                                                                                                       |
 | ---------------------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `~/.musterd/musterd.db`                        | 16 MB, schema v41    | messages/acts, audit, lanes, seat_memory, residency, wake_leases, wake_turns, tool_call_stats, footprint    |
+| `~/.musterd/musterd.db`                        | 16 MB, schema v41[^v42] | messages/acts, audit, lanes, seat_memory, residency, wake_leases, wake_turns, tool_call_stats, footprint    |
 | `~/.musterd/research/adr-166-slot-sweep.jsonl` | 48 MB, 4,714 samples | [ADR 166](../decisions/166-session-liveness-by-enumeration.md) fleet liveness, every 5 min since 2026-07-27 |
 | `~/.musterd/otel-sink.log` + `.log.1`          | 12.6 MB              | the OTLP capture behind findings 002 and 005                                                                |
 | `~/.musterd/daemon.log` + `.log.1`             | 13.1 MB              | structured `http_request` log (ADR 082 slice 2)                                                             |
@@ -136,3 +136,5 @@ in that repo's config):
 Durability there is worse, not better: all of it plus 4.99 GB of audio sits in one Supabase project
 with no export script (goal `exploring-next-ops`). Its audio will not compress, so this page's
 5.7 MB economics do not transfer.
+
+[^v42]: Measured at v41 on 2026-08-18. Migration 42 (`presence.model_source`, 2026-08-21) lands with [#971](https://github.com/SandRiseStudio/musterd/pull/971) — the dated measurement above stands; the live schema moves past it. See [model attestation](model-attestation.md).

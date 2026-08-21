@@ -7,6 +7,7 @@ import {
   type Envelope,
   type Goal,
   type Lane,
+  isWireAttestationSource,
   type LaneWarning,
   type MemberSummary,
   type MemoryEnvelope,
@@ -706,7 +707,16 @@ export class MusterdClient {
           provenance: this.config.provenance,
           workspace: this.config.workspace,
           ...(this.config.driver ? { driver: this.config.driver } : {}),
-          ...(this.config.model ? { model: this.config.model } : {}),
+          ...(this.config.model
+            ? {
+                model: this.config.model,
+                // The tier rides with the id, never alone: `model_source` describes `model` and is
+                // meaningless without it. `unknown` is not on the wire — no model, no stamp.
+                ...(isWireAttestationSource(this.config.modelSource)
+                  ? { model_source: this.config.modelSource }
+                  : {}),
+              }
+            : {}),
           ...(this.config.build ? { build: this.config.build } : {}),
           ...(this.config.epoch != null ? { epoch: this.config.epoch } : {}),
           // ADR 241: the correlation token, when a wake spawned this session. Absent otherwise —
@@ -766,7 +776,16 @@ export class MusterdClient {
                 // Re-affirm the attested model each heartbeat (ADR 101) so a mid-occupancy switch
                 // or an attestation the claim missed lands without a reconnect; the server no-ops
                 // when unchanged.
-                ...(this.config.model ? { model: this.config.model } : {}),
+                ...(this.config.model
+                  ? {
+                      model: this.config.model,
+                      // The tier rides with the id, never alone: `model_source` describes `model` and is
+                      // meaningless without it. `unknown` is not on the wire — no model, no stamp.
+                      ...(isWireAttestationSource(this.config.modelSource)
+                        ? { model_source: this.config.modelSource }
+                        : {}),
+                    }
+                  : {}),
                 // Occupancy follows capture (ADR 275): refreshAttestation just updated
                 // config.surface from the slot; send it so the presence row does not keep the
                 // claim-time declaration. Absent on CLI/web heartbeats ⇒ no change.

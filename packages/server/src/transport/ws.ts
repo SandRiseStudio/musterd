@@ -493,6 +493,8 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               // Carry the attestation across the approval gap (ADR 101) so the approved occupancy
               // isn't born `unknown`.
               model: frame.model ?? null,
+              // Tier rides with the id: no model, no source (the pair is meaningless split).
+              model_source: frame.model ? (frame.model_source ?? null) : null,
               // A specific-seat claim collapses to one pending request per seat, refreshing the waiter
               // to this newest session — a reconnecting grant-less agent can't stack duplicates.
               collapseByTarget: 'seat' in frame.target,
@@ -575,6 +577,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             workspace: frame.workspace ?? null,
             driver: frame.driver ?? null,
             model: frame.model ?? null,
+            model_source: frame.model ? (frame.model_source ?? null) : null,
             build: frame.build ?? null,
             epoch: frame.epoch ?? null,
             wake_lease: frame.wake_lease ?? null,
