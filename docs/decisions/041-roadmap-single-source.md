@@ -50,3 +50,32 @@ This **inverts** the prior "ROADMAP.md stays the source of truth" note (web READ
   targeted Node 22). `03-server.md`'s runtime line is aligned.
 - No protocol/SPEC change; no product-code change. Tooling + docs only.
 - Cross-references: ADR 037 (web surface), `packages/web/README.md`, AGENTS.md "Where each doc lives".
+
+> **Amendment (2026-08-21): the module moved to the repo root; the Decision's frozen path is dead.**
+> [#487](https://github.com/SandRiseStudio/musterd/pull/487) (2026-07-29) moved the data module from
+> `packages/web/src/content/roadmap.data.ts` to **`content/roadmap.data.ts`**. Nothing this ADR
+> decided changed — one typed module is still the single source, `ROADMAP.md`'s item region is still
+> generated from it, `roadmap:check` still blocks drift. Only the location did, and for the reason
+> the Decision could not have anticipated: the web roadmap map it names was removed in the same PR,
+> so every consumer became a build-time one (`scripts/gen-roadmap.ts`, `check-roadmap-truth`, the
+> steward drift scan, and musterd.io's `/roadmap` build-prep render), and ~82 items of prose have no
+> business in a browser bundle. The Context above describes the pre-decision state accurately and is
+> left as written; the Decision names the old path and is frozen — read it as the repo-root path.
+>
+> **What the move cost, which is the part worth recording.** Six instruction-bearing surfaces went on
+> routing edits to the deleted path for three weeks, while `docs/architecture/08-web.md`, the
+> controls registry, and `packages/web/README.md` had the new one — an instance of
+> [recorded, not routed](../wiki/recorded-not-routed.md). `AGENTS.md`, this ADR, `ROADMAP.md`'s
+> header, and its generated marker line all named the dead path; so did `scripts/steward/CHARTER.md`
+> twice, and that pair had teeth beyond documentation — the steward is a scheduled agent that is fed
+> that charter verbatim, and its hard-rule allowlist (*"Only edit: …"*) named the deleted file and
+> therefore **forbade the one it must edit**. The bite everywhere else is silent: recreating a file
+> at the dead path is an edit nothing imports and no gate reads.
+>
+> **The structural fix, so this cannot recur here.** `gen-roadmap.ts` now **emits** the
+> `<!-- BEGIN GENERATED ROADMAP … -->` marker from the same `SOURCE_PATH` constant its import
+> resolves against, instead of locating it by prefix and copying it through verbatim. That marker was
+> the fence of a generated region and read as generated, but it was hand-authored text the generator
+> never rewrote — which is exactly why `roadmap:check`, the gate this ADR wired up to catch a stale
+> `ROADMAP.md`, watched it name a deleted file for three weeks without a word. It fails on that drift
+> now.
