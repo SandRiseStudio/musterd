@@ -193,6 +193,13 @@ its judgment class and side of the §3 line — a proposal that cannot is return
 the 26-ask corpus is re-classified when the merge-loop ADR lands; drift amends §3 here
 rather than forking taxonomies.
 
+Snapshot-debt: none — the `rare` in the frozen §4 backlog item 4 ("turns the sweep back into a rare backstop") states a TARGET for unbuilt work, not an observed rate, and predates this edit by fifteen days.
+
+_Waiver, 2026-08-21 (ryder)._ The note below adds a dated paragraph to Observability and asserts no
+frequency of its own; the counts it carries (30 raises, 4 distinct bodies, five inside 33 minutes)
+are exact and dated, not frequency claims. The term it was flagged for sits in a section this ADR's
+own immutability rule forbids editing, so a waiver is the only honest move available.
+
 _Note, 2026-08-21 (ryder)._ **The "repeat wakes with an unchanged failure reason" instrument was
 never implemented, and its pathology was found running on a path this ADR did not name: the ask.**
 The guardian's alert tier had no damper at all — `shouldAttempt` was consulted only inside
