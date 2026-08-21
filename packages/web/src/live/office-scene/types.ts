@@ -1,5 +1,6 @@
 import type { LaneState, Posture, WorkingHours } from '@musterd/protocol';
 import type { ActTone } from '../format';
+import type { Addressee } from './speech';
 import type { WallBoard } from './wallboard';
 
 /** Facing on the isometric floor. S = toward the viewer (front), N = away, E/W = profiles. */
@@ -141,7 +142,17 @@ export type OfficeEvent =
   // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
   // the bubble a click-through to the same act in the stream panel.
   // `act` (the wire act name) lets the bubble shape act-aware — status chatter gets a tighter glance.
-  | { kind: 'speech'; who: string; text: string; tone: ActTone; id?: string; act?: string };
+  // `addressee` names who a DIRECTED act is aimed at, so "You were right, I'll take the handoff…"
+  // can't float unaddressed; null for team/broadcast, where the audience is already the default.
+  | {
+      kind: 'speech';
+      who: string;
+      text: string;
+      tone: ActTone;
+      id?: string;
+      act?: string;
+      addressee?: Addressee | null;
+    };
 
 /** The imperative handle the `OfficeScene` component drives the mounted scene through. */
 export interface OfficeHandle {
