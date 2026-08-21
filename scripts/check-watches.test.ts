@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ruleA, ruleAImmutable, ruleB } from './check-watches.ts';
+import { ruleA, ruleAImmutable, ruleB, ruleC, type ChangedWatch } from './check-watches.ts';
 import { parseWatch, type Watch } from './watches.ts';
 
 /*
@@ -171,5 +171,63 @@ describe('rule B — a frequency claim in a Decision needs a watch', () => {
     expect(errors).toHaveLength(2);
     expect(errors[0]).toContain('intermittent');
     expect(errors[1]).toContain('usually');
+  });
+});
+
+/*
+ * Rule C. Without this the protocol has no teeth: a verdict that lands only in `docs/watches/` is a
+ * verdict nobody reads, which is precisely the failure the watch was opened to prevent.
+ */
+
+const CLAIM_REF = 'docs/decisions/166-session-liveness-by-enumeration.md';
+
+describe('rule C — a resolution posts back to what depended on it', () => {
+  const resolving = (): ChangedWatch => ({
+    path: 'docs/watches/w.md',
+    head: watch({ status: 'void', resolution: 'population unstable' }),
+    base: watch(),
+  });
+
+  it('fails a resolution that does not touch claim_ref', () => {
+    const errors = ruleC([resolving()], ['docs/watches/w.md']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(CLAIM_REF);
+  });
+
+  it('passes when the same diff touches claim_ref', () => {
+    expect(ruleC([resolving()], ['docs/watches/w.md', CLAIM_REF])).toEqual([]);
+  });
+
+  it('ignores a watch that was already terminal at the base', () => {
+    const already: ChangedWatch = {
+      path: 'docs/watches/w.md',
+      head: watch({ status: 'void', resolution: 'population unstable' }),
+      base: watch({ status: 'void', resolution: 'population unstable' }),
+    };
+    expect(ruleC([already], ['docs/watches/w.md'])).toEqual([]);
+  });
+
+  it('ignores a watch that is still open', () => {
+    expect(
+      ruleC([{ path: 'docs/watches/w.md', head: watch(), base: watch() }], ['docs/watches/w.md']),
+    ).toEqual([]);
+  });
+
+  it('applies to a brand-new watch that lands already resolved', () => {
+    const born: ChangedWatch = {
+      path: 'docs/watches/w.md',
+      head: watch({ status: 'resolved', resolution: 'target zero breached' }),
+      base: null,
+    };
+    expect(ruleC([born], ['docs/watches/w.md'])).toHaveLength(1);
+  });
+
+  it('fires when a watch moves from one terminal state to the other', () => {
+    const flipped: ChangedWatch = {
+      path: 'docs/watches/w.md',
+      head: watch({ status: 'resolved', resolution: 'actually we have a verdict' }),
+      base: watch({ status: 'void', resolution: 'unattended' }),
+    };
+    expect(ruleC([flipped], ['docs/watches/w.md'])).toHaveLength(1);
   });
 });

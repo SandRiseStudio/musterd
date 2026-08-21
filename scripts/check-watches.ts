@@ -135,6 +135,36 @@ export function ruleB(adrs: { path: string; text: string }[]): string[] {
   return errors;
 }
 
+/**
+ * A verdict that lands only in `docs/watches/` is a verdict nobody reads — the exact failure this
+ * primitive exists to end. Resolving a watch must move the file the watch names as depending on it,
+ * so the answer arrives where the decision lives.
+ *
+ * Fires on ANY transition into a terminal state, including terminal → terminal: changing a `void`
+ * to a `resolved` is a new verdict and the reader of the decision deserves to see it.
+ */
+export function ruleC(changed: ChangedWatch[], changedPaths: string[]): string[] {
+  const errors: string[] = [];
+  const touched = new Set(changedPaths);
+
+  for (const { path, head, base } of changed) {
+    const now = scalar(head, 'status');
+    if (now === undefined || now === 'open') continue;
+    if (base !== null && scalar(base, 'status') === now) continue;
+
+    const claimRef = scalar(head, 'claim_ref');
+    if (claimRef === undefined || touched.has(claimRef)) continue;
+
+    errors.push(
+      `${path} — resolved to \`${now}\` without touching its \`claim_ref\` (${claimRef}). ` +
+        'A resolution has to post back: record the verdict as a dated note on the decision that ' +
+        'depended on it, in the same diff. Otherwise the answer lives somewhere nobody reads, ' +
+        'which is the failure the watch was opened to prevent.',
+    );
+  }
+  return errors;
+}
+
 export function readWatches(repoRoot: string): Watch[] {
   const dir = join(repoRoot, 'docs/watches');
   let names: string[];
@@ -203,7 +233,23 @@ function main(): void {
       .filter((p) => existsSync(join(repoRoot, p)))
       .map((p) => ({ path: p, text: readFileSync(join(repoRoot, p), 'utf8') }));
 
-    errors.push(...ruleB(changedAdrs));
+    const changedWatches: ChangedWatch[] = changedPaths
+      .filter((p) => /^docs\/watches\/.*\.md$/.test(p))
+      .flatMap((p) => {
+        if (!existsSync(join(repoRoot, p))) return []; // deleted in this diff
+        const head = parseWatch(p, readFileSync(join(repoRoot, p), 'utf8'));
+        if (head === null) return [];
+        // Absent at the base means new; `git show` exits non-zero, and that IS the signal.
+        let baseWatch: Watch | null = null;
+        try {
+          baseWatch = parseWatch(p, git('show', `${base}:${p}`));
+        } catch {
+          baseWatch = null;
+        }
+        return [{ path: p, head, base: baseWatch }];
+      });
+
+    errors.push(...ruleB(changedAdrs), ...ruleAImmutable(changedWatches), ...ruleC(changedWatches, changedPaths));
   }
 
   if (errors.length > 0) {
