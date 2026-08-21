@@ -100,8 +100,9 @@ MUSTERD_REAL_CODEX=1 MUSTERD_REAL_CODEX_CONFIRM=1 pnpm test:codex-cli-real
 ```
 
 It creates an isolated Git workspace, in-process daemon, project-local Codex MCP entry, and
-mode-600 binding; it proves MCP join, directed-inbox drain, and exact thread resume without a trust
-or configuration bypass. Codex desktop is separately checked using
+mode-600 binding; it observes MCP join through an online `codex` Presence while the CLI process is
+active, then proves directed-inbox drain and exact thread resume without a trust or configuration
+bypass. Codex desktop is separately checked using
 [`tests/codex-desktop.md`](../../tests/codex-desktop.md). Desktop wake is manual-resume until its
 stable supported API probe passes.
 
