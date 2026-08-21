@@ -11,6 +11,7 @@ import {
   WAKE_DEFER_SNOOZE_MS,
   WAKE_LEASE_TTL_MS,
   WAKE_POLICY_DEFAULTS,
+  WORK_ORDER_CONTINUATION_SUCCESS_CAP,
   buildWakeContext,
   claimWakeLeases,
   effectiveWakePolicy,
@@ -1294,6 +1295,31 @@ describe('claimWakeLeases — spend breaker + still-true (ADR 262)', () => {
     ).run(ts);
   }
 
+  /** A reported successful wake on one (lane, edge) — the rows the ADR 306 bounds derive from. */
+  function wokeEdge(
+    db: Database,
+    teamId: string,
+    laneId: string,
+    edge: string,
+    ts = Date.now() - WAKE_COOLDOWN_MS - 1,
+  ) {
+    appendAudit(db, teamId, {
+      actor: null,
+      action: 'residency.woke',
+      target: 'Ada',
+      result: 'allow',
+      detail: { act: `lane:${laneId}`, lane_id: laneId, edge },
+    });
+    db.prepare(
+      'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
+    ).run(ts);
+  }
+
+  /** Move the lane's own clock — the ADR 306 progress signal, without going through a state patch. */
+  function laneTouched(db: Database, laneId: string, ts: number) {
+    db.prepare('UPDATE lanes SET updated_at = ? WHERE id = ?').run(ts, laneId);
+  }
+
   it('skips when last wake_failed wakeability is enrolled_dead_workspace', () => {
     const { db, team, lane } = reviewDue();
     failEdge(db, team.id, {
@@ -1334,25 +1360,129 @@ describe('claimWakeLeases — spend breaker + still-true (ADR 262)', () => {
     });
   });
 
-  it('three woke on dispatch_continuation still derive', () => {
+  /**
+   * ADR 306. This test previously passed only because it enrolled with `attempt_cap: 10`.
+   * Production runs the ADR 131 default of 3, and at 3 the ADR 262 §4.1 guarantee is FALSE:
+   * `attemptsForAct` counts `residency.woke` as well as `wake_failed`, so three SUCCESSFUL
+   * continuations exhaust the lane-keyed cap and the edge never derives again. Measured on the
+   * live ledger 2026-08-21: lanes `01M040DH9X…` and `01KZ4QH585…`, 3 wokes / 0 failures each,
+   * both permanently exhausted. The override configured the defect out of the test that existed
+   * to catch it — so the enrollment here is deliberately left at the default.
+   *
+   * The guarantee is also NARROWED by the ADR 306 progress precondition: three successful
+   * continuations still derive, but only if each one moved the lane. A wake that changed nothing
+   * does not buy the next one (ADR 247, ADR 250 §2).
+   */
+  it('three woke on dispatch_continuation still derive at the DEFAULT attempt cap', () => {
     const { db, team, ada } = seed();
     setPolicy(db, team.id, { loops: { dispatch: true } });
-    enroll(db, team, ada, HOST, { flow: 'auto', attempt_cap: 10, hourly_cap: 10 });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
     const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
     for (let i = 0; i < 3; i++) {
+      const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+      wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+      // the seat woke and did work: the lane moves after the wake it answered
+      laneTouched(db, lane.id, wokeTs + 1);
+    }
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(true);
+  });
+
+  it('a success does not write a terminal exhaustion row for an edge-bearing work order', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    for (let i = 0; i < 3; i++) {
+      const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+      wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+      laneTouched(db, lane.id, wokeTs + 1);
+    }
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    const exhausted = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted');
+    expect(exhausted).toHaveLength(0);
+  });
+
+  /** ADR 306 §2 — no heartbeat that burns spend while nothing changed (ADR 250 §2). */
+  it('continuation does not re-derive when the lane has not moved since the last woke', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+    laneTouched(db, lane.id, wokeTs - 1_000);
+    wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(false);
+  });
+
+  it('continuation derives again once the lane moves after the last woke', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 10 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    const wokeTs = Date.now() - WAKE_COOLDOWN_MS - 1;
+    wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+    laneTouched(db, lane.id, wokeTs + 1);
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(true);
+  });
+
+  /**
+   * The ceiling is a recorded judgment (ADR 306 §3), not an implementation detail: the test that
+   * exercises it seeds its chain FROM the constant, so it cannot notice the number changing. This
+   * pins the number itself — moving it must be a deliberate edit with an ADR behind it.
+   */
+  it('the continuation ceiling is the number ADR 306 recorded', () => {
+    expect(WORK_ORDER_CONTINUATION_SUCCESS_CAP).toBe(8);
+  });
+
+  /** ADR 306 §3 — a succeeding chain is bounded too; nick rejected indefinite chaining. */
+  it('trips the continuation success cap and records it as a counted event', () => {
+    const { db, team, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto', hourly_cap: 20 });
+    const lane = openLane(db, team.id, team.slug, ada.name, { title: 'c', claim: true });
+    // The chain must sit OUTSIDE the hourly window, or the hourly cap — not the ADR 306 ceiling —
+    // is what stops the ninth wake, and the test would pass for the wrong reason.
+    for (let i = 0; i < WORK_ORDER_CONTINUATION_SUCCESS_CAP; i++) {
+      const wokeTs = Date.now() - 2 * 3_600_000 + i;
+      wokeEdge(db, team.id, lane.id, 'dispatch_continuation', wokeTs);
+      laneTouched(db, lane.id, wokeTs + 1);
+    }
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.some((o) => o.lane_id === lane.id)).toBe(false);
+    const exhausted = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_exhausted');
+    expect(JSON.parse(exhausted.at(-1)!.detail as string)).toMatchObject({
+      reason: 'continuation_cap',
+      edge: 'dispatch_continuation',
+      lane_id: lane.id,
+    });
+  });
+
+  /**
+   * Scope guard for ADR 306 §1: the success-blind counting is restricted to edge-bearing work
+   * orders. An inbox wake (edge NULL) must keep today's semantics exactly — a successful wake
+   * still retires its act, or a delivered doorbell would ring forever.
+   */
+  it('inbox wakes still count successes toward the attempt cap', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    msg(db, team, nick, ada, 'request_help', 'rh1', 1_000);
+    for (let i = 0; i < WAKE_ATTEMPT_CAP; i++) {
       appendAudit(db, team.id, {
         actor: null,
         action: 'residency.woke',
         target: 'Ada',
         result: 'allow',
-        detail: { act: `lane:${lane.id}`, lane_id: lane.id, edge: 'dispatch_continuation' },
+        detail: { act: 'rh1' },
       });
       db.prepare(
         'UPDATE audit SET ts = ? WHERE rowid = (SELECT rowid FROM audit ORDER BY rowid DESC LIMIT 1)',
       ).run(Date.now() - WAKE_COOLDOWN_MS - 1);
     }
     const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
-    expect(orders.some((o) => o.lane_id === lane.id)).toBe(true);
+    expect(orders.some((o) => o.act_id === 'rh1')).toBe(false);
   });
 
   it('review failures do not trip dispatch_handoff on the same lane', () => {

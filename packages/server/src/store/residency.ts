@@ -88,6 +88,20 @@ export const STILL_TRUE_WAKEABILITIES: readonly string[] = [
   'not_enrolled',
 ];
 /**
+ * ADR 306: the ceiling on a SUCCEEDING continuation chain, per (lane, edge). The ADR 262 breaker
+ * bounds failure; nothing bounded success, because `dueDispatchContinuationWorkOrders` re-derives a
+ * candidate for every claimed/active owned lane on every poll, forever.
+ *
+ * This number is a JUDGMENT, not a measurement, and the ledger cannot currently improve it: every
+ * chain in the corpus was truncated at three by the very cap ADR 306 removes, so the observation is
+ * censored — no lane was ever permitted to run longer. Eight is comfortably above the three that
+ * provably strangles real chains (measured 2026-08-21: two lanes dead at 3 wokes / 0 failures) and
+ * low enough that a runaway costs single-digit sessions. The trip is a counted event, so the first
+ * real one is visible; re-measure once trips exist. Deliberately not a policy knob yet — a knob
+ * nobody can calibrate is worse than a constant that says why.
+ */
+export const WORK_ORDER_CONTINUATION_SUCCESS_CAP = 8;
+/**
  * How far back the wake derivation scans for deferring `wait`s (ADR 211 §4). Matches the inbox
  * read's bound: past this a deferral stops suppressing, and the act becomes a wake reason again —
  * the pre-ADR-211 behaviour.
@@ -543,6 +557,56 @@ function workOrderEdgeFailureCount(
   return row?.n ?? 0;
 }
 
+/** ADR 306: successful wakes already spent on this (lane, edge) — the succeeding-chain bound. */
+function workOrderEdgeWokeCount(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): number {
+  const row = db
+    .prepare<[string, string, string], { n: number }>(
+      `SELECT COUNT(*) AS n FROM audit
+        WHERE team_id = ? AND action = 'residency.woke'
+          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.edge') = ?`,
+    )
+    .get(teamId, laneId, edge);
+  return row?.n ?? 0;
+}
+
+/**
+ * ADR 306: has the lane moved since the last successful wake on this edge? A continuation wake that
+ * changed nothing does not buy the next one (ADR 247 — progress is not an outcome; ADR 250 §2 — no
+ * heartbeat that burns spend while nothing changed). No prior woke ⇒ nothing to have stalled since,
+ * so the first firing is always permitted.
+ */
+function laneMovedSinceLastWoke(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  edge: LoopEdge,
+): boolean {
+  const last = db
+    .prepare<[string, string, string], { ts: number }>(
+      `SELECT ts FROM audit
+        WHERE team_id = ? AND action = 'residency.woke'
+          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.edge') = ?
+        ORDER BY ts DESC, rowid DESC LIMIT 1`,
+    )
+    .get(teamId, laneId, edge);
+  if (!last) return true;
+  const lane = db
+    .prepare<
+      [string, string],
+      { updated_at: number }
+    >('SELECT updated_at FROM lanes WHERE team_id = ? AND id = ?')
+    .get(teamId, laneId);
+  if (!lane) return false;
+  return lane.updated_at > last.ts;
+}
+
 function workOrderEdgeStillTrue(
   db: Database,
   teamId: string,
@@ -978,24 +1042,42 @@ export function claimWakeLeases(
       }
       for (const candidate of candidates) {
         const exhKey = wakeExhaustionKey(candidate.act_id, candidate.lane_id);
-        if (isExhausted(db, teamId, exhKey)) continue;
-        if (attemptsForAct(db, teamId, exhKey) >= policy.attempt_cap) {
-          appendAudit(db, teamId, {
-            actor: null,
-            action: 'residency.wake_exhausted',
-            target: member.name,
-            result: 'deny',
-            detail: {
-              act: exhKey,
-              sender: candidate.sender ?? 'board',
-              attempts: policy.attempt_cap,
-              derivation: candidate.derivation,
-              ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
-            },
-          });
-          continue;
-        }
         const edge = loopEdgeOf(candidate);
+        /**
+         * ADR 306 §1. An edge-bearing work order is bounded by the ADR 262 (lane, edge) rules
+         * below and by nothing else. The per-act cap does NOT apply to it, for two reasons the
+         * live ledger showed on 2026-08-21:
+         *
+         *  - it counts `residency.woke` alongside `wake_failed` against a LIFETIME terminal row,
+         *    so three SUCCESSFUL continuations exhausted a lane forever — the exact case ADR 262
+         *    §4.1 promised would keep deriving, dead on two real lanes;
+         *  - keyed `act_id` else `lane:<id>`, it is coarser than (lane, edge) at the same
+         *    threshold of 3 while counting a SUPERSET of the rows. A subset counter behind a
+         *    superset counter at an equal threshold is unreachable: the ADR 262 breaker fired
+         *    zero times in eight days while five (lane, edge) pairs reached its threshold.
+         *
+         * Inbox wakes (edge NULL) are untouched — there a success SHOULD retire the act.
+         */
+        const edgeBound = edge !== null && candidate.lane_id !== undefined;
+        if (!edgeBound) {
+          if (isExhausted(db, teamId, exhKey)) continue;
+          if (attemptsForAct(db, teamId, exhKey) >= policy.attempt_cap) {
+            appendAudit(db, teamId, {
+              actor: null,
+              action: 'residency.wake_exhausted',
+              target: member.name,
+              result: 'deny',
+              detail: {
+                act: exhKey,
+                sender: candidate.sender ?? 'board',
+                attempts: policy.attempt_cap,
+                derivation: candidate.derivation,
+                ...(candidate.lane_id !== undefined ? { lane_id: candidate.lane_id } : {}),
+              },
+            });
+            continue;
+          }
+        }
         if (edge && candidate.lane_id) {
           if (
             workOrderEdgeFailureCount(db, teamId, candidate.lane_id, edge) >=
@@ -1018,6 +1100,33 @@ export function claimWakeLeases(
             continue;
           }
           if (workOrderEdgeStillTrue(db, teamId, candidate.lane_id, edge)) continue;
+          if (edge === 'dispatch_continuation') {
+            // ADR 306 §3 — the succeeding chain has a ceiling too.
+            if (
+              workOrderEdgeWokeCount(db, teamId, candidate.lane_id, edge) >=
+              WORK_ORDER_CONTINUATION_SUCCESS_CAP
+            ) {
+              appendAudit(db, teamId, {
+                actor: null,
+                action: 'residency.wake_exhausted',
+                target: member.name,
+                result: 'deny',
+                detail: {
+                  act: exhKey,
+                  edge,
+                  lane_id: candidate.lane_id,
+                  reason: 'continuation_cap',
+                  attempts: WORK_ORDER_CONTINUATION_SUCCESS_CAP,
+                  derivation: candidate.derivation,
+                },
+              });
+              continue;
+            }
+            // ADR 306 §2 — a wake that moved nothing does not buy the next one. Silent, like the
+            // still-true skip: a stalled lane is the normal resting state of a claimed board, not
+            // an event worth a row on every poll.
+            if (!laneMovedSinceLastWoke(db, teamId, candidate.lane_id, edge)) continue;
+          }
         }
         const lease: WakeLeaseRow = {
           id: ulid(),
