@@ -9,6 +9,7 @@ import { nativeMcpConfig } from '../../packages/cli/src/host/backends/nativeBrid
 import { codexAdapter } from '../../packages/cli/src/onboard/harnesses/codex.js';
 import { cursorAdapter } from '../../packages/cli/src/onboard/harnesses/cursor.js';
 import { musterdAdapter } from '../../packages/cli/src/onboard/harnesses/musterd.js';
+import { markerGenerationOfEnv } from '../../packages/cli/src/onboard/mcpEntry.js';
 import {
   nodeFs,
   type ExecSeam,
@@ -371,10 +372,23 @@ describe('multi-harness worktree selection (ADR 281/282/286 acceptance)', () => 
     );
 
     // 1. The runtime break: the old marker refuses Presence attachment.
+    //
+    // Assert the RETIRED-MARKER refusal specifically, never just /harness configure/. Both pre-286
+    // classes — a retired `MUSTERD_SURFACE` marker and no marker at all — refuse, and both say "run
+    // harness configure", so that regex passes on either. It did: disabling the retired-marker
+    // branch let this env fall through to the marker-less throw and the scenario stayed green
+    // (dolly, accepting #928). The assertion read as coverage and was a coincidence, on precisely
+    // the legacy-vs-marker-less distinction #931 exists to draw.
     const orig = process.cwd();
     process.chdir(ws);
     try {
-      expect(() => loadMcpConfig({ MUSTERD_SURFACE: 'cursor' })).toThrow(/harness configure/);
+      expect(() => loadMcpConfig({ MUSTERD_SURFACE: 'cursor' })).toThrow(
+        /retired MUSTERD_SURFACE marker/,
+      );
+      // ...and the two classes stay distinguishable, so neither refusal can stand in for the other.
+      expect(markerGenerationOfEnv({ MUSTERD_SURFACE: 'cursor' })).toBe('legacy');
+      expect(markerGenerationOfEnv({})).toBe('none');
+      expect(() => loadMcpConfig({})).toThrow(/no launch Surface marker/);
     } finally {
       process.chdir(orig);
     }
