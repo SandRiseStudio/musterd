@@ -335,7 +335,15 @@ function recipientLedger(
   const ownAnswer = eligibleOf(metaOf(msg)) ? anyAnswer(db, msg) : answerBy(db, msg, recipient.id);
   const answered = ownAnswer ?? resolve ?? laneHandoffDischarged(db, msg);
   const cursor = getCursor(db, recipient.id);
-  const seen = cursor.last_read_ts >= msg.ts;
+  // The cursor is a `(ts, id)` point, not a ts (ADR 290, amended 2026-08-20). Comparing on ts alone
+  // called an act tied with the cursor row SEEN although the reader was never handed it — while
+  // `listInbox` called that same act unread, so one message was both at once. `>=` on the id is
+  // deliberate: the cursor row itself IS seen, everything tied after it is not.
+  const seen =
+    cursor.last_read_ts > msg.ts ||
+    (cursor.last_read_ts === msg.ts &&
+      cursor.last_read_message_id !== null &&
+      cursor.last_read_message_id >= msg.id);
   const nudges = ccdNudges(db, msg);
   return {
     seat: recipient.name,

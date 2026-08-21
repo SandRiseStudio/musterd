@@ -69,6 +69,37 @@ describe('slowestInboxLagMs', () => {
     setCursor(db, ada.id, 'm1', now - 30_000);
     expect(slowestInboxLagMs(db, now)).toBe(0);
   });
+
+  /**
+   * Same root cause as ADR 290's amendment, in the backlog gauge: the unread clause compared on ts
+   * alone, so a message sharing the cursor row's millisecond fell out of the join. The gauge then
+   * reports a caught-up inbox — 0, the "nothing to see" value — while a message waits. An absence
+   * claim from an instrument nobody re-derives is the worst shape for this to take.
+   */
+  it('counts a message tied with the cursor row — not caught up while one waits', () => {
+    const { db, team, nick, ada } = seed();
+    const now = 1_000_000;
+    for (const id of ['m1', 'm2']) {
+      insertMessage(
+        db,
+        team.id,
+        nick.id,
+        null,
+        makeEnvelope({
+          id,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'team' },
+          act: 'request_help',
+          body: 'help',
+          ts: now - 30_000, // both in the same millisecond
+        }),
+      );
+    }
+    // Ada reads m1 only. m2 shares its ts and is still waiting.
+    setCursor(db, ada.id, 'm1', now - 30_000);
+    expect(slowestInboxLagMs(db, now)).toBe(30_000);
+  });
 });
 
 describe('countOpenLoops / getMessageTs (ADR 082 slice 3)', () => {

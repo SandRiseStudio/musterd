@@ -84,6 +84,25 @@ describe('actDelivery (ADR 090: the per-act ledger, derived)', () => {
     expect(d.recipients[0]!.answered).toMatchObject({ act: 'accept', id: 'a1', ts: 2_000 });
   });
 
+  /**
+   * A read cursor is a `(ts, id)` point, not a ts (ADR 290's 2026-08-20 amendment). `seen` compared
+   * on ts alone with `>=`, so an act sharing the cursor row's millisecond reported as SEEN although
+   * the reader was never handed it — while `listInbox` reports that same act UNREAD. One message,
+   * both at once, and `seen` is the answer the ADR 090 ledger exists to give.
+   */
+  it('an act tied with the cursor row is not seen — the reader was never handed it', () => {
+    const { db, team, nick, ada } = seed();
+    msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
+    msg(db, team, nick, ada, 'handoff', 'h2', 1_000); // same millisecond, never delivered
+
+    setCursor(db, ada.id, 'h1', 1_000); // ada read h1, and only h1
+
+    expect(actDelivery(db, team.id, 'h1', 10_000)!.recipients[0]!.state).toBe('seen');
+    const tied = actDelivery(db, team.id, 'h2', 10_000)!.recipients[0]!;
+    expect(tied.state).toBe('logged');
+    expect(tied.seen_by).toBeNull();
+  });
+
   it('a resolve on the thread answers for every recipient', () => {
     const { db, team, nick, ada } = seed();
     msg(db, team, nick, null, 'request_help', 'r1', 1_000, { thread: 't1' });
