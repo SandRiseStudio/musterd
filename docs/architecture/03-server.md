@@ -118,11 +118,12 @@ export function routeEnvelope(ctx: Ctx, team: TeamRow, sender: Member, env: Enve
 //         -> return RouteResult
 
 // store/presence.ts
-export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101) + { build } (ADR 135)
+export function attach(db, memberId, surface, connId, ctx?): Presence;    // creates row, status online; ctx = { provenance, workspace } (ADR 014) + { driver } (ADR 021) + { model } (ADR 101) + { model_source } (ADR 301) + { build } (ADR 135)
 export function heartbeat(db, presenceId): void;                          // bumps last_seen_at
-export function reattestModel(db, presenceId, model): {previous}|void;    // ADR 101: mid-occupancy model switch; writes + returns previous only on a real change
+export function reattestModel(db, presenceId, model, modelSource?): {previous}|void;    // ADR 101/301: mid-occupancy model switch; writes + returns previous only on a real change of id or tier
 export function reattestSurface(db, presenceId, surface): {previous}|void; // ADR 275: occupancy follows capture; writes only on a real change; no audit row
 export function currentAttestedModel(db, memberId, presenceId?): string|null; // ADR 101: the per-act model stamp source — the sending occupancy's attestation (presenceId), else newest-attested
+export function currentAttestation(db, memberId, presenceId?): {model, source}; // ADR 301: the pair — source is null when the occupancy does not know its tier
 export function detach(db, presenceId): void;                             // removes row
 export function listPresence(db, teamId): PresenceSummary[];              // for status/roster (incl. provenance/workspace/driver/model)
 export function reapStale(db, timeoutMs): { offlined: string[] };         // presence ids removed

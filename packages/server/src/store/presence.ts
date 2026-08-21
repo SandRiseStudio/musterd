@@ -499,8 +499,7 @@ export function currentAttestedModel(
 }
 
 /**
- * The attested model **and the tier that produced it**, read together from one row (ADR 101
- * increment). Always read as a pair: joining a model from one row to a tier from another is the
+ * The attested model **and the tier that produced it**, read together from one row (ADR 301). Always read as a pair: joining a model from one row to a tier from another is the
  * cross-attribution the `senderPresenceId` key exists to prevent, one field over.
  *
  * `source` is null whenever `model` is null, and may ALSO be null beside a real model — a row

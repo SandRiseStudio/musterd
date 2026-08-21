@@ -4,6 +4,7 @@ import { ClaimFrame, OccupiedFrame, PendingFrame, RefusedFrame } from './claim-h
 import { EnvelopeSchema } from './envelope.js';
 import { ErrorCodeSchema } from './errors.js';
 import { MemberSchema } from './member.js';
+import { WIRE_ATTESTATION_SOURCES } from './model.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 export { ClaimFrame, OccupiedFrame, PendingFrame, RefusedFrame };
@@ -52,6 +53,10 @@ export const HeartbeatFrame = z.object({
   // Absent ⇒ no change (never a clear — attestation only moves forward, `unknown` comes from
   // never attesting, not from omitting the field on one frame).
   model: z.string().max(120).optional(),
+  // WHICH TIER produced `model` (ADR 301). Rides with `model` on the same never-clear rule:
+  // absent ⇒ no change. The pair never travels split — a heartbeat that re-attests the id
+  // without the source would leave a new model under a stale tier.
+  model_source: z.enum(WIRE_ATTESTATION_SOURCES).optional(),
   // Surface re-attestation (ADR 275, additive): occupancy follows capture the same way model
   // does. A mid-session heal (ADR 270 writes `session.harness=cursor`) must not keep the
   // claim-time declaration on the presence row. Absent ⇒ no change (never a clear).

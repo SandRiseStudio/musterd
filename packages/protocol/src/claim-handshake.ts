@@ -81,7 +81,7 @@ export const ClaimFrame = z.object({
    */
   model: z.string().max(120).optional(),
   /**
-   * WHICH TIER produced `model` (ADR 101 increment) — `observed` (a harness probe saw it),
+   * WHICH TIER produced `model` (ADR 301) — `observed` (a harness probe saw it),
    * `environment` (this session's env declared it), or `binding` (a provisioning snapshot declared
    * it). Rides with `model` and means nothing without it; omitted by older clients and by any
    * session attesting nothing.

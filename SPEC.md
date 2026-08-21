@@ -98,7 +98,7 @@ Both bindings MUST funnel sends through one validate→persist→route path so s
 
 ## 6. Versioning & compatibility
 
-- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025), the steering trio `steer`/`challenge`/`defer` (ADR 103), un-stubs the reserved `memory` seam on the `occupied` frame into a seat-scoped continuity envelope (A.3, ADR 093), and adds the optional harness-attested `model` field on the `claim` frame + heartbeat (A.3, ADR 101 — per-occupancy, `unknown` when omitted). ADR 275 adds optional `surface` on the heartbeat so occupancy can follow a mid-session capture (absent ⇒ no change, same never-clear rule as `model`). All MINOR additions are additive (new acts and new optional fields, no change to existing required fields): a client that ignores `memory`/`model`/`surface` or does not recognize a new act is unaffected.
+- The version string is `musterd/MAJOR.MINOR`. `v0.1` was the first; `v0.2` added single-active newest-wins + reclaim grace, roster activity, attach provenance/workspace, driver co-presence (new error codes `member_busy`/`superseded`); **`v0.3`** is current — it adds the terminal `resolve` act (ADR 025), the steering trio `steer`/`challenge`/`defer` (ADR 103), un-stubs the reserved `memory` seam on the `occupied` frame into a seat-scoped continuity envelope (A.3, ADR 093), and adds the optional harness-attested `model` field on the `claim` frame + heartbeat (A.3, ADR 101 — per-occupancy, `unknown` when omitted). ADR 275 adds optional `surface` on the heartbeat so occupancy can follow a mid-session capture (absent ⇒ no change, same never-clear rule as `model`). ADR 301 adds optional `model_source` (`observed` | `environment` | `binding`) beside `model` on claim, heartbeat, grant-less requests, and as server-stamped `meta.model_source` on every act; omitted by older clients and when there is no model (never defaulted to `binding`). All MINOR additions are additive (new acts and new optional fields, no change to existing required fields): a client that ignores `memory`/`model`/`surface`/`model_source` or does not recognize a new act is unaffected.
 - Within a MAJOR, MINOR additions MUST be backward-compatible (new optional `meta`, new optional fields, new endpoints, new error codes). New **acts** or any change to envelope-required fields are a MINOR-or-greater, spec-versioned change requiring an ADR.
 - A server MUST reject a client whose declared `v` it does not support, with a `version_mismatch` error.
 
@@ -184,9 +184,12 @@ State machine: `connecting → authenticated(key) → claim → (occupied | refu
   "target": { "seat":"Ada" } | { "role":"backend" } | { "observe": true },
   "grant":"<grant token>"?,            // omitted → triggers a request (default path)
   "surface":"claude-code",
-  "model":"claude-opus-4-8"? }         // harness-attested model id (ADR 101) — attested, never
+  "model":"claude-opus-4-8"?,           // harness-attested model id (ADR 101) — attested, never
                                        // verified; per-occupancy (the durable seat stays
                                        // model-agnostic, ADR 087); omitted → "unknown", never blocks
+  "model_source":"observed"|"environment"|"binding"? }  // which tier produced `model` (ADR 301);
+                                       // omitted with the id, or by older clients; never `unknown`
+                                       // on the wire (absence is not an assertion)
 
 // server → client
 { "type":"occupied", "seat": <Seat>, "presence_id":"01J…", "server_time": <ms>,
@@ -217,7 +220,7 @@ Rules:
 
 Governance is **not** carried by the collaboration `Envelope`/Acts. It is a distinct set of operations and a **request** object.
 
-**Request** `{ id, team, kind: "claim"|"teammate", from_session, target?, status: pending|approved|denied|expired, decided_by?, ts }`. Created on a no-grant claim (kind `claim`) or an explicit "I need a teammate" (kind `teammate`). Routed to admins; surfaced via `GET /teams/:slug/requests` and a notification. An admin **approves** (issues a grant; for `teammate`, creates a seat then grants), **denies**, or it **expires**.
+**Request** `{ id, team, kind: "claim"|"teammate", from_session, target?, status: pending|approved|denied|expired, decided_by?, ts, model?, model_source? }`. Created on a no-grant claim (kind `claim`) or an explicit "I need a teammate" (kind `teammate`). Optional `model` (ADR 101) and `model_source` (ADR 301) carry the claimant's attestation across the approval gap so the approved occupancy is not born `unknown` / un-tiered. Routed to admins; surfaced via `GET /teams/:slug/requests` and a notification. An admin **approves** (issues a grant; for `teammate`, creates a seat then grants), **denies**, or it **expires**.
 
 Governance operations (admin-only; A.7 HTTP): create/rename/disable/ban/archive seats; create/rename roles; issue/revoke grants; rotate the agent key; set team policy (e.g. `allow_pre_issued_grants`); decide requests.
 
