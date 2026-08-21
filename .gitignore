@@ -67,3 +67,6 @@ workers/*/.wrangler/
 # checkout made it read dirty forever, and the auto-refresher — which rightly refuses to touch a
 # dirty tree — silently skipped every deploy from 18:42 on 2026-08-19 until a human read the log.
 .worktrees/
+
+# Build-prep output of packages/web/scripts/gen-site-content.ts (ADR 302) — regenerated every build.
+packages/web/src/content/generated/

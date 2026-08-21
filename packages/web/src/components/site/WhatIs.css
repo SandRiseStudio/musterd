@@ -1,0 +1,78 @@
+/* What-is section. Semantic tokens only. */
+
+.wi {
+  padding-top: 3.5rem;
+  padding-bottom: 3.5rem;
+}
+
+.wi__eyebrow {
+  color: var(--accent-ink);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin: 0 0 0.5rem;
+}
+
+.wi__title {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 3.5vw, 2rem);
+  color: var(--text);
+  margin: 0 0 1.8rem;
+}
+
+.wi__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1.2rem;
+  margin-bottom: 2.2rem;
+}
+
+.wi__card {
+  background: var(--surface-solid);
+  border: 1px solid var(--mustard-100);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem;
+}
+
+.wi__card h3 {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--text);
+  margin: 0 0 0.5rem;
+}
+
+.wi__card p {
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.wi__wedge {
+  border-left: 3px solid var(--accent);
+  padding: 0.2rem 0 0.2rem 1.2rem;
+}
+
+.wi__wedge h3 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--text);
+  margin: 0 0 0.4rem;
+}
+
+.wi__wedge p {
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin: 0 0 0.6rem;
+  max-width: 60rem;
+}
+
+.wi__refs {
+  display: flex;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+}
+
+.wi__refs a {
+  color: var(--accent-ink);
+  font-size: 0.85rem;
+}

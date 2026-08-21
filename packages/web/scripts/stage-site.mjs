@@ -12,17 +12,22 @@
 import { cp, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DAEMON_ROUTES, PUBLIC_ALLOW } from './stage-allowlist.mjs';
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUILD = join(pkgRoot, 'dist', 'client');
 const STAGE = join(pkgRoot, 'dist', 'site');
 
-/** Everything the landing page needs, and nothing else. Adding to this list is a deploy decision. */
-const ALLOW = ['index.html', 'assets'];
+// The allowlist and the daemon set live in stage-allowlist.mjs (ADR 302) so tests can pin them.
+const ALLOW = PUBLIC_ALLOW;
 
 function die(msg) {
   console.error(`stage-site: ${msg}`);
   process.exit(1);
+}
+
+for (const r of DAEMON_ROUTES) {
+  if (ALLOW.includes(r)) die(`allowlist contains daemon-connected route \`${r}\` — see ADR 302`);
 }
 
 const built = await readdir(BUILD).catch(() => die(`no build at ${BUILD} — run \`pnpm build\` first`));
