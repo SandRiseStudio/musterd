@@ -22,7 +22,7 @@ export const Route = createFileRoute('/character-sheet')({
 
 const NAMES = [
   'miley', 'izzo', 'stanley', 'ryder', 'nick', 'ada', 'bo', 'cy',
-  'dev', 'eli', 'fen', 'gus', 'hana', 'ivy', 'jo', 'kit',
+  'dev', 'eli', 'fen', 'gus', 'hana', 'ivy', 'jo', 'kit', // a name, not the toolkit synonym <!-- vocab:ok -->
   'lu', 'mo', 'nia', 'ola', 'pax', 'quinn', 'rex', 'sol',
 ];
 
