@@ -8,6 +8,7 @@ import {
   type SeatFile,
   seatNameFromPath,
   type TeamFile,
+  unknownRosterKeys,
 } from '@musterd/protocol';
 
 /**
@@ -38,6 +39,17 @@ export interface TeamSpec {
   roles: LoadedRole[];
   /** Per-seat/role parse/validation errors (fail-closed): the entry is skipped, never silently dropped. */
   errors: string[];
+  /**
+   * Keys a roster file carried that no schema knows — dropped on parse, so the entry projects
+   * WITHOUT them. Warnings, never errors, by nick's call (2026-08-21): failing would refuse
+   * `autorefresh`'s seat on the live roster today over a `charter` line that has been silently
+   * ignored since 2026-08-05.
+   *
+   * This closes a hole in the promise one field up. "Never silently dropped" was true of ENTRIES
+   * and false of FIELDS: a seat with an unknown key parsed clean, projected clean, and lost the key
+   * with nothing said. The entry survived; part of it did not.
+   */
+  warnings: string[];
 }
 
 /**
@@ -57,6 +69,16 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
   const seatsDir = join(dir, 'seats');
   const seats: LoadedSeat[] = [];
   const errors: string[] = [];
+  const warnings: string[] = [];
+  const noteDropped = (rel: string, kind: 'team' | 'seat' | 'role', text: string): void => {
+    const keys = unknownRosterKeys(kind, text);
+    if (keys.length > 0) {
+      warnings.push(
+        `${rel}: dropped unknown key(s) ${keys.join(', ')} — not in the schema, so reconcile ignores them`,
+      );
+    }
+  };
+  noteDropped('team.toml', 'team', readFileSync(teamPath, 'utf8'));
   let files: string[] = [];
   try {
     files = readdirSync(seatsDir).filter((f) => f.toLowerCase().endsWith('.toml'));
@@ -66,7 +88,11 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
   for (const f of files.sort()) {
     const name = seatNameFromPath(f);
     try {
-      const seat = parseSeatFile(readFileSync(join(seatsDir, f), 'utf8'), name);
+      const text = readFileSync(join(seatsDir, f), 'utf8');
+      const seat = parseSeatFile(text, name);
+      // Only after a successful parse: an unparseable file's "unknown keys" are noise on top of the
+      // error that already explains it.
+      noteDropped(`seats/${f}`, 'seat', text);
       seats.push({ name, seat });
     } catch (e) {
       errors.push(`${f}: ${(e as Error).message}`);
@@ -85,11 +111,14 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
   for (const f of roleFiles.sort()) {
     const name = seatNameFromPath(f); // same stem rule as seats
     try {
-      roles.push({ name, role: parseRoleFile(readFileSync(join(rolesDir, f), 'utf8')) });
+      const text = readFileSync(join(rolesDir, f), 'utf8');
+      const role = parseRoleFile(text);
+      noteDropped(`roles/${f}`, 'role', text);
+      roles.push({ name, role });
     } catch (e) {
       errors.push(`roles/${f}: ${(e as Error).message}`);
     }
   }
 
-  return { rootDir, team, seats, roles, errors };
+  return { rootDir, team, seats, roles, errors, warnings };
 }
