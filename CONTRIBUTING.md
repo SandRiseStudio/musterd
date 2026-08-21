@@ -59,11 +59,13 @@ GitHub enforces it (squash-only, `main` protected). The playbook is in
    `git push --force-with-lease`. Never merge `main` into your branch. Never
    `git push --force`.
 
-Do **not** run `pnpm format` — its glob is wider than `format:check` and will
-reflow unrelated markdown. Format only the files you touched:
+`pnpm format` is safe to run: since ADR 284 the writer and the checker read one
+scope list, so on a clean tree it changes nothing and on yours it touches only
+what `format:check` would flag (`pnpm exec prettier --write <files>` on your own
+files still works if you prefer it):
 
 ```bash
-pnpm exec prettier --write <files>
+pnpm format
 pnpm format:check
 ```
 
