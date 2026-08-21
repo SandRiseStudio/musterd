@@ -1,9 +1,11 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  parseRoleFile,
   parseSeatFile,
   parseTeamFile,
   seatNameFromPath,
+  serializeRole,
   serializeSeat,
   serializeTeam,
 } from '@musterd/protocol';
@@ -14,10 +16,19 @@ import { hint, success, sym } from '../render/ui.js';
 
 /**
  * `musterd fmt [--check]` — the ADR 058 guard-2 (tidiness) tool. Rewrites `.musterd/team.toml` +
- * `seats/*.toml` to canonical form so PR diffs stay minimal and blame clean; `--check` asserts the
+ * `seats/*.toml` + `roles/*.toml` to canonical form so PR diffs stay minimal and blame clean; `--check` asserts the
  * committed files are *already* canonical (the CI sibling of `format:check`/the arch-tree drift
  * guard), exiting non-zero with the offending files listed. This is purely cosmetic — correctness
  * rides on the semantic round-trip (guard 1), never on byte-equality of hand edits.
+ *
+ * ONE SHARP EDGE, pre-existing and uniform across all three classes (measured 2026-08-21; falsify:
+ * feed any of parseTeamFile/parseSeatFile/parseRoleFile a file with an unrecognised top-level key
+ * and serialize the result — a key that survives means this is fixed). The parsers DROP unknown
+ * keys silently, so formatting a file that carries one **deletes** it. That is not new here and
+ * roles are no worse than seats or team.toml, but the blast radius now includes `roles/`: a key
+ * from a future schema, or a typo'd real one, does not survive `musterd fmt`. Verified lossless on
+ * all six live roster roles before this shipped — semantically idempotent, no keys dropped — so the
+ * hazard is latent rather than active.
  */
 export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()): Promise<number> {
   const check = Boolean(parsed.flags['check']);
@@ -45,6 +56,22 @@ export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()
     const name = seatNameFromPath(f);
     const seat = parseSeatFile(readFileSync(join(seatsDir, f), 'utf8'), name);
     canonical.push([join('seats', f), serializeSeat(seat)]);
+  }
+
+  // Roles are the third durable class the daemon reconciles (ADR 227), and until now the only one
+  // with no formatter — so ADR 298's `role create` output was canonical while every hand-written
+  // sibling could drift unchecked, and `--check` could not see it. Same stem rule as seats
+  // (`seatNameFromPath`), same absence-is-fine handling: a team may define no roles at all.
+  const rolesDir = join(dir, 'roles');
+  let roleFiles: string[] = [];
+  try {
+    roleFiles = readdirSync(rolesDir).filter((f) => f.toLowerCase().endsWith('.toml'));
+  } catch {
+    roleFiles = [];
+  }
+  for (const f of roleFiles.sort()) {
+    const role = parseRoleFile(readFileSync(join(rolesDir, f), 'utf8'));
+    canonical.push([join('roles', f), serializeRole(role)]);
   }
 
   const drifted: string[] = [];

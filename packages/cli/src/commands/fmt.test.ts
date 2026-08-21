@@ -12,11 +12,21 @@ const P = (flags: Record<string, string | boolean> = {}): Parsed => ({
 
 let dir: string;
 
-function writeMusterd(team: string, seats: Record<string, string>): void {
+function writeMusterd(
+  team: string,
+  seats: Record<string, string>,
+  roles?: Record<string, string>,
+): void {
   mkdirSync(join(dir, '.musterd', 'seats'), { recursive: true });
   writeFileSync(join(dir, '.musterd', 'team.toml'), team);
   for (const [n, b] of Object.entries(seats)) {
     writeFileSync(join(dir, '.musterd', 'seats', `${n}.toml`), b);
+  }
+  if (roles) {
+    mkdirSync(join(dir, '.musterd', 'roles'), { recursive: true });
+    for (const [n, b] of Object.entries(roles)) {
+      writeFileSync(join(dir, '.musterd', 'roles', `${n}.toml`), b);
+    }
   }
 }
 
@@ -28,6 +38,34 @@ afterEach(() => {
 });
 
 describe('musterd fmt (ADR 058 guard 2)', () => {
+  it('formats roles/*.toml — the durable class ADR 298 gave a writer but no formatter', async () => {
+    writeMusterd(
+      'slug = "alpha"\n',
+      { olive: 'kind = "agent"\nrole = "reviewer"\n' },
+      // Reversed key order + sloppy spacing, exactly what a hand-written role file looks like.
+      { platform: 'charter   =  "Owns the rails."\nsummary="Platform."\n' },
+    );
+    expect(await fmtCommand(P(), dir)).toBe(0);
+    expect(readFileSync(join(dir, '.musterd', 'roles', 'platform.toml'), 'utf8')).toBe(
+      'summary = "Platform."\ncharter = "Owns the rails."\n',
+    );
+    expect(await fmtCommand(P({ check: true }), dir)).toBe(0);
+  });
+
+  it('--check FAILS on a non-canonical role file, and names it', async () => {
+    writeMusterd(
+      'slug = "alpha"\n',
+      { olive: 'kind = "agent"\nrole = "reviewer"\n' },
+      { platform: 'charter = "Owns the rails."\nsummary = "Platform."\n' },
+    );
+    expect(await fmtCommand(P({ check: true, json: true }), dir)).toBe(1);
+  });
+
+  it('a team with no roles/ dir still formats — absence is not an error', async () => {
+    writeMusterd('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    expect(await fmtCommand(P({ check: true }), dir)).toBe(0);
+  });
+
   it('--check fails (exit 1) on non-canonical files', async () => {
     writeMusterd('slug = "alpha"\n', { olive: 'role = "reviewer"\nkind = "agent"\n' }); // keys reversed
     expect(await fmtCommand(P({ check: true, json: true }), dir)).toBe(1);
