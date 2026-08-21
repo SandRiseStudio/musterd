@@ -27,7 +27,7 @@ honoring the **surveillance asymmetry** — without building the deferred dashbo
   · time-to-unblock 2×"); **Exec** = milestones + exceptions ("on track; one risk blocked 2d"). All three
   are **projections, never stored**. Dashboard/web = **later** (same projection on the web console,
   deferred with the dashboard build). A **scheduled digest posted into the team** (protocol dogfood) is a
-  noted future enrichment, not day-one. *(Retired 2026-08-21 — see the Amendment below.)*
+  noted future enrichment, not day-one.
 - **Flow metrics over velocity** (drop story points — agent capacity is elastic, sprint velocity is
   meaningless): throughput (threads closed/wk), cycle time (open → `resolve`), WIP, work-item age. All
   derivable from the log.
@@ -36,8 +36,7 @@ honoring the **surveillance asymmetry** — without building the deferred dashbo
 - **Cost-per-shipped-work-item in $** — the agent-native flagship metric ("this Goal cost $340 / 6 days;
   bottleneck was human review", a sentence no human-team tool could honestly produce). **Deferred to the
   cost-ingestion seam:** it needs per-member token/compute cost accounting (the observability / "batond"
-  surface). Ships when that data exists; not plumbed into the core now. *(Re-examined 2026-08-21:
-  still deferred, prerequisite now concrete — see the Amendment below.)*
+  surface). Ships when that data exists; not plumbed into the core now.
 - **Waiting-on view** — `openActionNeeded` (ADR 024/046) **aggregated by recipient, sorted by age**
   ("waiting on nick — 8 threads, oldest 2d"). A section of `musterd report`; the per-person slice already
   exists as the ADR-046 nudge + the `status` comeback summary. **Goodhart-safe** (measures queues, not
