@@ -428,10 +428,13 @@ export function registerLanes(
     'lane_resolve',
     {
       description:
-        'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
-        'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
-        'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone. ' +
-        'Prefer lane_submit (ADR 192): a self-close records unconfirmed unless acceptance-exempt.',
+        'Mark a lane done — clears its warnings and releases its surface. If you own the lane and ' +
+        'its branch landed, attest the merge: pass pr, sha, and authorized_by so the audit log ' +
+        'joins your seat to the landed SHA and the authorizing human. Landed without a PR? Omit pr ' +
+        'and pass sha alone. Closing a lane you do not own (counterpart accept): omit pr/sha/' +
+        "authorized_by — the worker's stage-one attestation is frozen (ADR 305); a partial merged " +
+        'patch is ignored. Prefer lane_submit (ADR 192): a self-close records unconfirmed unless ' +
+        'acceptance-exempt.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // `pr` is the PR *number*. Callers reached for `pr:"local"` to mean "merged without a PR";

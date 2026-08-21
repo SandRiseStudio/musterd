@@ -140,9 +140,11 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
   if (sub === 'claim' || sub === 'resolve' || sub === 'ready' || sub === 'submit') {
     const id = parsed.positionals[1];
     if (!id) throw new CliError(USAGE, 2);
-    // resolve/submit may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On resolve it
-    // rides the terminal move into `git.pr_merged`; on submit (ADR 192) it is the worker's stage-one
-    // claim, persisted on the lane so an acceptor's later accept carries it. `ready` is a deprecated alias.
+    // resolve/submit may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On submit
+    // (ADR 192) it is the worker's stage-one claim. On a *self*-resolve it rides the terminal
+    // move into `git.pr_merged`. On a counterpart resolve, omit these flags — the server ignores
+    // merged on a non-owner close so the submit stamp (including ADR 300 verification) is not
+    // replaced by a partial patch (ADR 305). `ready` is a deprecated alias.
     const prRaw = flagStr(parsed.flags, 'pr');
     const pr = prRaw !== undefined ? Number(prRaw) : undefined;
     if (pr !== undefined && !Number.isInteger(pr)) throw new CliError(USAGE, 2);

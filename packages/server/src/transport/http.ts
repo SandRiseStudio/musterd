@@ -2989,7 +2989,18 @@ export async function handleHttp(
         const goalShippedBefore =
           before.goal_id !== null &&
           deriveGoalStatus(lanesForGoal(ctx.db, team.id, team.slug, before.goal_id)) === 'shipped';
-        const lane = updateLane(ctx.db, team.id, laneId, team.slug, body)!;
+        // ADR 305: a counterpart close must not rewrite the worker's stage-one merge
+        // attestation. MCP/CLI `lane_resolve` send `{pr, sha, authorized_by}` without
+        // `verification`, and `updateLane` replaces `merged` wholesale — that dropped
+        // `authorized_by` and the ADR 300 tier on live accepts (01M0K33HMX).
+        const counterpartTerminal =
+          body.state !== undefined &&
+          LANE_TERMINAL_STATES.has(body.state) &&
+          !LANE_TERMINAL_STATES.has(before.state) &&
+          before.owner_seat !== null &&
+          member.name !== before.owner_seat;
+        const patch = counterpartTerminal ? { ...body, merged: undefined } : body;
+        const lane = updateLane(ctx.db, team.id, laneId, team.slug, patch)!;
         // The claim edge is the one that decides who owns work, and it was the only lane edge
         // writing no audit row at all — which is why reconstructing the collision above from the
         // audit log turned up nothing but the release. Record every ownership acquisition.
@@ -3422,7 +3433,14 @@ export async function handleHttp(
           // The close's whole audit — verified-ness, reason, the ADR 172/173 abstentions, the ADR
           // 188 grade, and the ADR 109 merge join — lives in `recordLaneClose` because an acceptor's
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
-          closed = recordLaneClose(ctx.db, team.id, member, before, lane, body.merged);
+          closed = recordLaneClose(
+            ctx.db,
+            team.id,
+            member,
+            before,
+            lane,
+            counterpartTerminal ? undefined : body.merged,
+          );
           // ADR 271: a resolved incident owes its reporters an answer — they parked work behind it.
           // Best-effort and after the close: the resolve is already durable and a delivery failure
           // must not undo it. No-op for every ordinary lane.

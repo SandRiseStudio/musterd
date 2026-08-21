@@ -187,9 +187,10 @@ export function updateLane(
   // let a caller assign an arbitrary owner, which lane_claim is for).
   const ownerSeat = state === 'open' ? null : owned;
   // ADR 192: a merge attestation on a patch that *enters or sits in* awaiting_acceptance is the
-  // worker's stage-one claim — persist it so a counterpart's later accept carries it. (A terminal
-  // patch's `merged` keeps its ADR 109 meaning and flows to the audit at the route layer; persisting
-  // it here too is harmless and keeps the lane's last attestation readable.)
+  // worker's stage-one claim — persist it so a counterpart's later accept carries it. A worker's
+  // own terminal patch may still rewrite it (ADR 109). A counterpart terminal patch must not:
+  // the HTTP layer strips `merged` before this write (ADR 305), because MCP/CLI resolve send a
+  // partial object and wholesale replace dropped `authorized_by` and the ADR 300 verification tier.
   const merged = patch.merged !== undefined ? patch.merged : existing.merged;
   const risk = patch.risk ?? existing.risk;
   const stakes = patch.stakes ?? existing.stakes;
