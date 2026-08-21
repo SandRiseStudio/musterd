@@ -21,6 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { type Composition, coherenceFailures } from './budgetCoherence.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
@@ -90,16 +91,50 @@ if (
   process.exit(1);
 }
 
-const measured: Record<string, number> = {
+const parts: Record<string, number> = {
   toolsListDefaultBytes: toolsDefault,
   toolsListMutedBytes: toolsMuted,
   primerBytes: primer,
   sessionStartNudgesBytes: sessionStart,
   promptSubmitNudgeBytes: promptSubmit,
   labelNudgeBytes: labelNudge,
+};
+
+/*
+ * What each headline is made of, declared instead of hand-summed.
+ *
+ * It used to be arithmetic written out twice — once here as `toolsDefault + promptSubmit +
+ * labelNudge`, and once implicitly in the budget file, where a human had to keep the composite's
+ * number consistent with its parts'. They drifted, silently and in the direction that hurts: on
+ * 2026-08-19 the component budgets were re-baselined and the composites were deliberately left on
+ * their 2026-08-12 baseline (`perSessionTotalBytes`'s justification records the reasoning — perTurn
+ * "still fit ... and per the minimal-raise precedent was not raised"). The result was a gate that
+ * could not be satisfied by obeying its own per-item guidance: every component exactly at budget
+ * summed to 795 B OVER the perTurn budget and 2 B over perSession. Whoever added the next word to
+ * any tool description would have failed a gate that was already unsatisfiable, and read the
+ * failure as their own doing.
+ *
+ * Declaring the composition fixes both halves: the measured total can no longer disagree with the
+ * parts it claims to sum, and `coherence` below refuses a budget set where it could happen again.
+ */
+const COMPOSITES: Composition = {
   // The headline: what multiplies on EVERY turn of every seat session (label nudge due = worst case).
-  perTurnTotalBytes: toolsDefault + promptSubmit + labelNudge,
-  perSessionTotalBytes: toolsDefault + primer + sessionStart + promptSubmit + labelNudge,
+  perTurnTotalBytes: ['toolsListDefaultBytes', 'promptSubmitNudgeBytes', 'labelNudgeBytes'],
+  perSessionTotalBytes: [
+    'toolsListDefaultBytes',
+    'primerBytes',
+    'sessionStartNudgesBytes',
+    'promptSubmitNudgeBytes',
+    'labelNudgeBytes',
+  ],
+};
+
+const sumOf = (item: string, of: Record<string, number>): number =>
+  COMPOSITES[item]!.reduce((n, part) => n + (of[part] ?? 0), 0);
+
+const measured: Record<string, number> = {
+  ...parts,
+  ...Object.fromEntries(Object.keys(COMPOSITES).map((c) => [c, sumOf(c, parts)])),
 };
 
 const failures: string[] = [];
@@ -127,6 +162,12 @@ for (const item of Object.keys(budgets.items)) {
   if (!(item in measured))
     failures.push(`${item}: budgeted but never measured — stale budget line.`);
 }
+
+/*
+ * The budget set must be internally satisfiable — see `budgetCoherence.ts` for why this is checked
+ * against the budgets rather than the measurements.
+ */
+failures.push(...coherenceFailures(budgets.items, COMPOSITES));
 
 console.log('standing-context budgets (spec 2026-08-03)\n');
 console.log(rows.join('\n'));
