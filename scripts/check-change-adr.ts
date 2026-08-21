@@ -25,6 +25,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { decisionSection } from './adr-sections.ts';
 import { isAcceptedAdr } from './adr-status.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -139,15 +140,8 @@ if (addedDeps.length > 0 && !hasAdr) {
 }
 
 // ─── Rule 3: an accepted ADR's Decision is immutable ───────────────────────────────────────────
-/** The body of the `## Decision` section, or null when the ADR has no such heading. */
-function decisionSection(text: string): string | null {
-  const lines = text.split('\n');
-  const start = lines.findIndex((l) => /^##\s+Decision\s*$/i.test(l));
-  if (start === -1) return null;
-  const rest = lines.slice(start + 1);
-  const end = rest.findIndex((l) => /^##\s+/.test(l));
-  return (end === -1 ? rest : rest.slice(0, end)).join('\n').trim();
-}
+// `decisionSection` moved to `adr-sections.ts` so `check-watches.ts` can share the same boundary.
+// Two gates disagreeing about where a Decision starts would make one of them silently wrong.
 
 // The status parser lives in `adr-status.ts` — its own module so a test can import it without
 // running this script. Only the DETECTOR was widened there; what counts as frozen is unchanged:

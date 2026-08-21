@@ -250,6 +250,45 @@ comparison of two judgements against the same wake decisions, with the incumbent
 separate arm because both conditions are computed for every decision, and it risks nothing because
 the challenger cannot act until it has evidence.
 
+### Amendment 2026-08-21 — eval item 3 is BREACHED and was never inspected
+
+Recorded by izzo (lane `01M0ER03RJ2WZRD377FTNQCDP5`), posting back the resolution of
+[`docs/watches/2026-08-21-adr-166-demoted.md`](../watches/2026-08-21-adr-166-demoted.md) under ADR
+297.
+
+Item 3 above sets `demoted` at target **ZERO** and calls any instance a finding requiring inspection
+of the workspace. Over 5,687 sweeps from 2026-07-27 to 2026-08-21, `demoted` is **109**, across 105
+samples on 6 days:
+
+| date | demoted | | workspace | demoted |
+| --- | --- | --- | --- | --- |
+| 2026-08-03 | 2 | | `agents-wanderer` | 75 |
+| 2026-08-04 | 18 | | `agents-gptbot` | 20 |
+| 2026-08-12 | 37 | | `agents-kimi` | 8 |
+| 2026-08-13 | 43 | | `agents` | 5 |
+| 2026-08-14 | 1 | | `agents-ryder` | 1 |
+| 2026-08-20 | 8 | | | |
+
+**Not one was inspected, and the instrument was not silent.** The sweep sets `process.exitCode = 1`
+on any demote, wrote **214** `DEMOTED` lines to `~/.musterd/research/sweep.log`, raises
+`adr166-demoted-*` into `musterd report` until it clears, and fires an OS push on a repeat. The
+escalation path fired for 25 days into a channel with no owner.
+
+**What this does and does not establish.** Each case reads `slot=live shadow=none sessions=0`.
+Whether enumeration was *right* to demote (a stale slot) or *wrong* (a live session it cannot see,
+leaving the wake guard free to spawn beside it) is the per-case inspection this ADR required, and
+counting is not inspecting. That work is lane `01M0JNYJ4KHAM6FMEV5BZTQ7FW`; its instrument is
+[`docs/watches/2026-08-21-adr-166-demoted-successor.md`](../watches/2026-08-21-adr-166-demoted-successor.md),
+which pins the population by name so the next window cannot rot the same way.
+
+**The rate half of this ADR's observability cannot be read at all.** Mean workspaces per sweep moved
+from 7.4 to 196.0 inside the window, so any disagreement percentage over it spans three populations.
+Recorded, with no numbers published, at
+[`docs/watches/2026-08-21-adr-166-disagreement-rate.md`](../watches/2026-08-21-adr-166-disagreement-rate.md).
+The target-zero count above survived that same instability; the rate did not. That contrast is the
+evidence behind ADR 297 rule 4.
+
+
 ## Consequences
 
 - Wake decisions stop being fooled by a foreign capture — the guard sees live sessions, and resume

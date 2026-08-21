@@ -74,7 +74,7 @@ beforeAll(() => {
   git('config', 'user.email', 'fixture@example.com');
   git('config', 'user.name', 'fixture');
   mkdirSync(join(repo, 'scripts'), { recursive: true });
-  for (const f of ['check-change-adr.ts', 'adr-status.ts']) {
+  for (const f of ['check-change-adr.ts', 'adr-status.ts', 'adr-sections.ts']) {
     copyFileSync(join(scriptsDir, f), join(repo, 'scripts', f));
   }
   script = join(repo, 'scripts', 'check-change-adr.ts');
