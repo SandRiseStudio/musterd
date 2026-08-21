@@ -1,10 +1,9 @@
 import type { LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { MusterdWord } from '../brand/MusterdWord';
-import { actLabel, actTone, memberColor, memberPosture } from './format';
+import { memberColor, memberPosture } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
-import { actToEvent } from './office-scene/mapping';
-import { speechAddressee } from './office-scene/speech';
+import { actToEvent, speechEventFor } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import { OfficeOverlay } from './OfficeOverlay';
 import { WorkStack } from './WorkStack';
@@ -214,22 +213,9 @@ export function OfficeScene({
       emittedRef.current.add(e.id);
       const ev = actToEvent(e);
       if (ev) h.emit(ev);
-      // EVERY act also speaks over the sender's head (typed out, lingers, then fades) — the office's
-      // legible counterpart to the stream. Body-less acts (accept/decline/wait/resolve…) speak their act
-      // label so nothing on the team passes invisibly. The envelope id makes the bubble a click-through
-      // to the same act in the stream panel.
-      const text = e.body && e.body.trim() ? e.body : actLabel(e.act);
-      h.emit({
-        kind: 'speech',
-        who: e.from,
-        text,
-        tone: actTone(e.act),
-        id: e.id,
-        act: e.act,
-        // A directed act carries its recipient onto the bubble: without it, "You were right, I'll
-        // take the handoff…" floats with no way to know who "you" is. Team/broadcast pass null.
-        addressee: speechAddressee(e.to, e.from),
-      });
+      // EVERY act also speaks over the sender's head — constructed in mapping.ts (speechEventFor),
+      // where the passthrough of text/tone/addressee is pinned by tests this component can't carry.
+      h.emit(speechEventFor(e));
     }
   }, [envelopes, liveIds]);
 

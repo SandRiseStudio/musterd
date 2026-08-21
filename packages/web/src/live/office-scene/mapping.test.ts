@@ -1,6 +1,6 @@
 import type { Act, Envelope, Recipient } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { actToEvent } from './mapping';
+import { actToEvent, speechEventFor } from './mapping';
 
 function env(act: Act, over: Partial<Envelope> = {}): Envelope {
   return {
@@ -111,5 +111,44 @@ describe('actToEvent', () => {
 
   it('returns null for acts it does not animate', () => {
     expect(actToEvent(env('nope' as Act))).toBeNull();
+  });
+});
+
+/** The bubble every act speaks. This is the layer ryder's 01M0GVNBHA acceptance found unpinned:
+ * `addressee: null` at the emit site left every suite green, because only the pure rule
+ * (speechAddressee) had tests — not the construction that calls it. */
+describe('speechEventFor', () => {
+  it('a directed act carries its recipient onto the bubble — the wiring, not just the rule', () => {
+    expect(speechEventFor(env('message', { body: 'you were right' }))).toEqual({
+      kind: 'speech',
+      who: 'ada',
+      text: 'you were right',
+      tone: 'neutral',
+      id: 'e1',
+      act: 'message',
+      addressee: { name: 'ben', tether: true },
+    });
+  });
+
+  it('team and broadcast acts name nobody (the team is the default audience)', () => {
+    expect(speechEventFor(env('message', { to: { kind: 'team' }, body: 'hi all' })).addressee).toBeNull();
+    expect(speechEventFor(env('message', { to: { kind: 'broadcast' }, body: 'hi' })).addressee).toBeNull();
+  });
+
+  it('a self-addressed act keeps the chip but drops the tether', () => {
+    expect(
+      speechEventFor(env('message', { to: { kind: 'member', name: 'ada' }, body: 'note to self' }))
+        .addressee,
+    ).toEqual({ name: 'ada', tether: false });
+  });
+
+  it('a body-less act speaks its act label so nothing passes invisibly', () => {
+    const ev = speechEventFor(env('accept'));
+    expect(ev.text).toBe('accept');
+    expect(ev.tone).toBe('success');
+  });
+
+  it('whitespace-only bodies count as body-less', () => {
+    expect(speechEventFor(env('status_update', { body: '   ' })).text).toBe('status');
   });
 });
