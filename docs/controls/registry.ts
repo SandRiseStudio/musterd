@@ -124,6 +124,18 @@ export interface Control {
   staleAfterDays: number;
   /** PRs, ADRs, claims-ledger entries, lanes. */
   refs: string[];
+  /**
+   * The watch measuring this control's rate, when a date cannot settle its efficacy (ADR 297).
+   *
+   * {@link Control.lastExercised} answers "did someone watch it work" — a moment. Some controls'
+   * efficacy is a RATE, and a rate needs a window: ADR 227's infra-touch gate is the live instance,
+   * where the warn→redirect rate was "unmeasurable as built" (lane `01M0GX9VD7`).
+   *
+   * Optional, and unset for every control whose efficacy a date does settle. Present with no
+   * consumer yet on purpose — it is the join point, and leaving it out means the next person hits
+   * the same wall ADR 227 did.
+   */
+  watch?: string;
 }
 
 export const CONTROLS: Control[] = [
