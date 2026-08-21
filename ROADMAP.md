@@ -1,13 +1,13 @@
 # Roadmap
 
-> **The item list below is generated** from `packages/web/src/content/roadmap.data.ts` — the single
-> source of truth, and the same module the web roadmap map renders. **Edit that file, then run
+> **The item list below is generated** from `content/roadmap.data.ts` — the single source of truth,
+> and the same module musterd.io's `/roadmap` page renders at build time. **Edit that file, then run
 > `pnpm roadmap:gen`.** Do not hand-edit between the generated markers; it will be overwritten. The
 > intro and footer here are hand-authored and live outside the markers.
 
 musterd's core is deliberately small: a protocol (`SPEC.md`), a local team server, a human CLI, and a universal MCP adapter — shipped as the `@musterd/*` packages on npm. The schema and wire format already **reserve** the fields the items below need, so each lands as a backward-compatible addition — versioned by an ADR and a SPEC minor, never a break for existing clients. The current protocol version lives in `SPEC.md`.
 
-<!-- BEGIN GENERATED ROADMAP — source: packages/web/src/content/roadmap.data.ts · regenerate: pnpm roadmap:gen -->
+<!-- BEGIN GENERATED ROADMAP — source: content/roadmap.data.ts · regenerate: pnpm roadmap:gen -->
 
 ## Shipped
 

@@ -36,7 +36,14 @@ import { WEDGE } from '../packages/web/src/content/site.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const ROADMAP_PATH = join(here, '..', 'ROADMAP.md');
+// The BEGIN marker is located by PREFIX and rewritten from `BEGIN_LINE` on every run. It used to be
+// preserved verbatim from the file, which made it hand-authored text that `roadmap:check` could not
+// see: when #487 moved the data module to the repo root, the marker went on naming the deleted path
+// for a month and nothing could notice (ADR 041, Consequences 2026-08-21). Emitting it means the
+// source path in ROADMAP.md is generated from the same constant the import resolves against.
 const BEGIN = '<!-- BEGIN GENERATED ROADMAP';
+const SOURCE_PATH = 'content/roadmap.data.ts';
+const BEGIN_LINE = `${BEGIN} — source: ${SOURCE_PATH} · regenerate: pnpm roadmap:gen -->`;
 const END = '<!-- END GENERATED ROADMAP -->';
 
 const STATUS_HEADING: Record<Status, string> = {
@@ -132,10 +139,9 @@ function build(src: string): string {
         'Add them around the item region, then re-run.',
     );
   }
-  const afterBeginLine = src.indexOf('\n', beginIdx);
-  const head = src.slice(0, afterBeginLine + 1);
+  const head = src.slice(0, beginIdx);
   const tail = src.slice(endIdx);
-  return `${head}\n${generatedRegion()}\n\n${tail}`;
+  return `${head}${BEGIN_LINE}\n\n${generatedRegion()}\n\n${tail}`;
 }
 
 const check = process.argv.includes('--check');
