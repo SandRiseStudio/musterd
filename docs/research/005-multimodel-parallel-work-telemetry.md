@@ -107,5 +107,20 @@ it is one lab-notebook entry establishing that the telemetry is rich enough to _
   `loop_latency` / `delivery.latency` / `agent.tokens` **dimensioned by `model.family`** (and team).
   This is the direct sequel to findings 001/002: the traces got rich; the aggregated metrics have not
   caught up. Candidate next ADR (increment on ADR 082/101).
+
+  > **Addendum 2026-08-21 — this gap was closed the same day it was named, and nobody noticed for six
+  > weeks.** `24c7350b` ("dimension coordination metrics by team + model.family", #207/#208) landed
+  > 2026-07-09. `loop_latency` now carries team + the **closer's** family (omitted rather than guessed
+  > when unattested); `agent.tokens` carries team + member + raw attested id + family. `open_loops` and
+  > `diversity_flags` gained team but not model. `delivery.latency` gained team and *deliberately*
+  > declines model, with the rationale at the call site: it measures server work, not the sender.
+  > Pinned at the export layer — `telemetry.test.ts` asserts over collected data points, and dropping
+  > the family spread turns it red (verified 2026-08-21 on `233dfff3`).
+  >
+  > The observation above was true when written and is left standing. What is retired is only its
+  > forward-looking clause: the leaderboard's blocker is now **N**, not instrumentation — see this
+  > finding's own honest-N caveat. The six-week lag is itself the lesson: a "what's missing" note
+  > acquires a reader long after its author, and this one was being cited as current in
+  > `docs/wiki/research-corpus.md` as late as 2026-08-18.
 - **A coordination-process note** for the roadmap's review surfaces: auto-merge suppresses
   peer-review-chain telemetry (§6).
