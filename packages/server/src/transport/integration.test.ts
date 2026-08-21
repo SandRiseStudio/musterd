@@ -174,6 +174,9 @@ class TestWs {
     grant?: string,
     model?: string,
     driver?: string,
+    // Appended LAST on purpose: inserting it beside `model` would have silently re-read the
+    // existing `undefined, 'nick' // driver` caller's driver as a model source.
+    modelSource?: string,
   ) {
     this.send({
       type: 'claim',
@@ -183,6 +186,7 @@ class TestWs {
       target: { seat },
       ...(grant ? { grant } : {}),
       ...(model ? { model } : {}),
+      ...(model && modelSource ? { model_source: modelSource } : {}),
       ...(driver ? { driver } : {}),
       surface,
     });
@@ -2205,6 +2209,137 @@ describe('WebSocket', () => {
 });
 
 describe('model attestation (ADR 101)', () => {
+  it('the act stamp carries WHICH TIER attested it — observed vs declared, server-controlled, never defaulted', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Bo', kind: 'agent' }, tok);
+
+    const a = new TestWs();
+    const l = new TestWs();
+    const b = new TestWs();
+    await Promise.all([a.open(), l.open(), b.open()]);
+    // Ada: a harness probe SAW this model. Bo: only a provisioning snapshot DECLARED it.
+    // Same id, same confidence on the wire today — the tier is the only thing separating them.
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(tok, 'Ada'),
+      'claude-opus-4-8',
+      undefined,
+      'observed',
+    );
+    await b.claim(
+      'dawn',
+      team.json.agent_key,
+      'Bo',
+      'cursor',
+      await standingGrant(tok, 'Bo'),
+      'grok-4.6',
+      undefined,
+      'binding',
+    );
+    // Lin attests a model but NO tier — an older client. Absence must stay absence.
+    await l.claim(
+      'dawn',
+      team.json.agent_key,
+      'Lin',
+      'codex',
+      await standingGrant(tok, 'Lin'),
+      'gpt-5.6',
+    );
+
+    // `waitFor` returns the FIRST buffered frame of a type and never consumes it, so three delivers
+    // to one socket would all read as the first. Key on the envelope id instead.
+    const deliverOf = async (ws: TestWs, id: string): Promise<any> => {
+      const deadline = Date.now() + 1000;
+      for (;;) {
+        const f = (ws as unknown as { frames: any[] }).frames.find(
+          (x) => x.type === 'deliver' && x.envelope?.id === id,
+        );
+        if (f) return f;
+        if (Date.now() > deadline) throw new Error(`timeout waiting for deliver ${id}`);
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+
+    const say = (ws: TestWs, from: string, id: string) =>
+      ws.send({
+        type: 'send',
+        envelope: {
+          id,
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from,
+          to: { kind: 'member', name: 'Lin' },
+          act: 'status_update',
+          body: 'x',
+          ts: Date.now(),
+        },
+      });
+
+    say(a, 'Ada', 'ada1');
+    const observed = await deliverOf(l, 'ada1');
+    expect(observed.envelope.meta.model).toBe('claude-opus-4-8');
+    expect(observed.envelope.meta.model_source).toBe('observed');
+
+    say(b, 'Bo', 'bo1');
+    const declared = await deliverOf(l, 'bo1');
+    expect(declared.envelope.meta.model).toBe('grok-4.6');
+    expect(declared.envelope.meta.model_source).toBe('binding');
+
+    // The old client's act keeps its model and carries NO tier — never defaulted to `binding`,
+    // because "we do not know which tier" is a different fact from "it was a declaration".
+    //
+    // AND it spoofs one, which is the case that actually needs the strip. Where the occupancy HAS a
+    // tier the server's value overwrites the client's by spread order, so a missing strip is
+    // invisible; here there is nothing to overwrite with, so an unstripped client tier would ride
+    // out untouched and an UNKNOWN tier would arrive downstream labelled `observed`. Found by
+    // mutation: deleting the strip left the earlier spoof assertion green.
+    l.send({
+      type: 'send',
+      envelope: {
+        id: 'lin1',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Lin',
+        to: { kind: 'member', name: 'Ada' },
+        act: 'status_update',
+        body: 'x',
+        meta: { model_source: 'observed' },
+        ts: Date.now(),
+      },
+    });
+    const untiered = await deliverOf(a, 'lin1');
+    expect(untiered.envelope.meta.model).toBe('gpt-5.6');
+    expect(untiered.envelope.meta.model_source).toBeUndefined();
+
+    // A seat cannot launder its own declaration into an observation: client-supplied tier is
+    // stripped exactly like a client-supplied model, and the occupancy's real tier is stamped.
+    b.send({
+      type: 'send',
+      envelope: {
+        id: 'bo2',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        from: 'Bo',
+        to: { kind: 'member', name: 'Lin' },
+        act: 'status_update',
+        body: 'x',
+        meta: { model: 'claude-opus-4-8', model_source: 'observed' },
+        ts: Date.now(),
+      },
+    });
+    const spoofed = await deliverOf(l, 'bo2');
+    expect(spoofed.envelope.meta.model).toBe('grok-4.6');
+    expect(spoofed.envelope.meta.model_source).toBe('binding');
+
+    await Promise.all([a.close(), l.close(), b.close()]);
+  });
+
   it('claim attests, acts carry the server-side meta.model stamp, heartbeat re-attests + audits', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;

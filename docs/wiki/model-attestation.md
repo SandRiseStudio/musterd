@@ -46,8 +46,23 @@ Related: `wanderer`'s `grok-4.6` declaration happens to be correct today, which 
 
 Given the section above this is arguably the *right* behaviour — a drift alarm here would fire on every intentional switch, and a tripwire that is noisy by design is worse than none. But it is currently an **accidental** silence rather than a decided one, and the two are worth telling apart: nothing records that the noise argument was ever made. See [instrument silence](instrument-silence.md).
 
-## What this costs the corpus (2026-08-21; falsify: find a per-act field carrying the attestation tier)
+## Why the two probed harnesses still land on a declaration (2026-08-21; falsify: for cursor, feed `musterd session observe --stdin` a payload with a new `session_id` and no model and watch `model_observed` survive — it does not)
 
-Per-act `meta.model` carries the model id and **not** which tier produced it. `modelSource` does distinguish `observed` / `environment` / `binding` / `unknown`, but it is emitted only once per session, on the `musterd.mcp.initialize` span as `musterd.model.declaration`.
+Not a missing probe. `observeModel` exists for claude-code, cursor **and** codex, and the hooks are wired in both seats — wanderer's `.cursor/hooks.json` fires `musterd session observe --stdin` on five events, gptbot's `.codex/hooks.json` fires `musterd codex-hook post-tool-use --stdin`. They reach null by two different routes:
 
-So an observed stamp and an unverified declaration are indistinguishable in the act log, and any per-model aggregate mixes measurement with assumption. [research-corpus](research-corpus.md) records that the per-model leaderboard's remaining blocker is **N**; the sharper statement is that **N is not uniform in quality and nothing marks which rows are which** — and under frequent switching that matters more, not less.
+- **Cursor actively DROPS the observation** when a new conversation arrives carrying no model (`session.ts`, deliberate, citing ADR 268 — "a leftover observation is a stopped clock"). Reproduced on a throwaway binding: payload with `model_id` → observation written; new `session_id` with no model → `model_observed` becomes null.
+- **Codex never writes one** unless PostToolUse carries `model` (`parseCodexHookEvent` returns undefined otherwise).
+
+Both then fall through to `binding.model`. **That is the inconsistency worth naming:** the system has already ruled a stale *observation* worse than nothing, and drops it — but has never applied that judgment to a stale *declaration*, which it silently prefers as the fallback. Honest degradation degrades **into** the least-verified tier.
+
+## What this costs the corpus — and the tier that now travels (2026-08-21; falsify: send an act from an occupancy that attested `model_source`, and read `meta.model_source` off the delivered envelope)
+
+Per-act `meta.model` carried the model id and **not** which tier produced it, so an observed stamp and an unverified declaration were indistinguishable in the act log and any per-model aggregate mixed measurement with assumption. `modelSource` existed but reached only the once-per-session `musterd.mcp.initialize` span as `musterd.model.declaration`.
+
+**Fixed 2026-08-21 by [#971](https://github.com/SandRiseStudio/musterd/pull/971)** (nick's call: mark the tier rather than attest `unknown` — see below). The claim/heartbeat carries `model_source`, migration 42 stores it on `presence` beside `model`, and every act is stamped `meta.model_source`. Three properties are mutation-pinned: the stamp itself, the strip of a client-supplied tier, and the refusal to default an unknown tier to `binding`.
+
+Read it as **`observed` = measurement, `environment`/`binding` = assumption**, and note that **absent is a third answer, not a synonym for declared** — rows written before migration 42, or by clients too old to send it, genuinely do not know. Aggregates over acts from before 2026-08-21 have no tier at all and cannot acquire one.
+
+### Why not attest `unknown` instead (nick's decision, 2026-08-21)
+
+The tidier-looking fix — a seat whose probe produced nothing attests `unknown` rather than its declaration — was rejected, and the reason is worth recording because it is not obvious. `wanderer` is the **only non-claude family among live agents**. Its `grok-4.6` is an unverified declaration, so attesting `unknown` would flip the ADR 101 family posture from `diverse` to `monoculture` — a change in the team's stated decorrelation basis driven by a *measurement gap*, not by any change in who is actually working. Marking the tier keeps the information and labels its strength instead of discarding it. [research-corpus](research-corpus.md) records that the per-model leaderboard's remaining blocker is **N**; the sharper statement is that **N is not uniform in quality and nothing marks which rows are which** — and under frequent switching that matters more, not less.

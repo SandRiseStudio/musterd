@@ -83,6 +83,11 @@ export interface PresenceRow {
   /** Harness-attested model id for this occupancy (ADR 101). Attested, never verified; null when
    *  the adapter doesn't attest — rendered as `unknown`, never blocks. Re-attestable mid-occupancy. */
   model: string | null;
+  /** WHICH TIER produced `model` (ADR 101 increment): `observed` (a harness probe saw it),
+   *  `environment`, or `binding` (a declaration). Null when there is no model, and ALSO null on
+   *  rows written before migration 42 or by clients that do not send it — "tier not known" is a
+   *  distinct fact from "it was declared" and is never defaulted into one. */
+  model_source: string | null;
   /** Client-attested build ref of the connecting dist (ADR 135): a git SHA, `-dirty`-suffixed for an
    *  uncommitted build. Null for unstamped/older clients. Only changes with a fresh claim (a build
    *  can only change on process restart), so there is no heartbeat re-attest path. */

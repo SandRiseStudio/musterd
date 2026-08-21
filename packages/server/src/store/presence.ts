@@ -28,6 +28,9 @@ export interface AttachContext {
   driver?: string | null;
   /** Harness-attested model id (ADR 101). Attested, never verified; absent → null (`unknown`). */
   model?: string | null;
+  /** WHICH TIER produced `model` — `observed` | `environment` | `binding`. Rides with `model` and
+   *  means nothing without it; absent → null, which honestly says "this row does not know". */
+  model_source?: string | null;
   /** Client-attested build ref of the connecting dist (ADR 135); absent → null (unstamped client). */
   build?: string | null;
   /** Client-attested feature epoch (ADR 148); absent → null (older client). The roster's skew signal. */
@@ -64,14 +67,15 @@ export function attach(
     workspace: ctx.workspace ?? null,
     driver: ctx.driver ?? null,
     model: ctx.model ?? null,
+    model_source: ctx.model ? (ctx.model_source ?? null) : null,
     build: ctx.build ?? null,
     epoch: ctx.epoch ?? null,
     wake_lease: ctx.wake_lease ?? null,
     created_at: now,
   };
   db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, build, epoch, wake_lease, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @build, @epoch, @wake_lease, @created_at)`,
+    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, wake_lease, created_at)
+     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @model_source, @build, @epoch, @wake_lease, @created_at)`,
   ).run(row);
   return row;
 }
@@ -274,7 +278,10 @@ export function touchAmbientPresence(
     // re-writes provenance must re-write the token in the same breath; a sticky token under a
     // fresh provenance would claim a lease the session no longer belongs to.
     db.prepare(
-      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, wake_lease = ?, model = COALESCE(?, model), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
+      // `model_source` is COALESCEd on the SAME condition as `model` (`ctx.model ? … : null`), so the
+      // pair moves or stays together. Sticky-independently would be worse than not recording it: a
+      // new model under a stale tier is a stamp that lies about its own provenance.
+      'UPDATE presence SET last_seen_at = ?, status = ?, surface = ?, provenance = ?, workspace = ?, driver = ?, wake_lease = ?, model = COALESCE(?, model), model_source = COALESCE(?, model_source), build = COALESCE(?, build), epoch = COALESCE(?, epoch) WHERE id = ?',
     ).run(
       Date.now(),
       'online',
@@ -284,6 +291,7 @@ export function touchAmbientPresence(
       ctx.driver ?? null,
       ctx.wake_lease ?? null,
       ctx.model ?? null,
+      ctx.model ? (ctx.model_source ?? null) : null,
       ctx.build ?? null,
       ctx.epoch ?? null,
       existing.id,
@@ -440,12 +448,20 @@ export function reattestModel(
   db: Database,
   presenceId: string,
   model: string | null,
+  modelSource?: string | null,
 ): { previous: string | null } | undefined {
   const row = presenceById(db, presenceId);
   if (!row) return undefined;
   const next = model ?? null;
-  if ((row.model ?? null) === next) return undefined;
-  db.prepare('UPDATE presence SET model = ? WHERE id = ?').run(next, presenceId);
+  const nextSource = next ? (modelSource ?? null) : null;
+  // Compare BOTH: a heal that only corrects the tier (same id, observation now backing what was a
+  // declaration) is a real change and must be written, or the stamp keeps under-reporting itself.
+  if ((row.model ?? null) === next && (row.model_source ?? null) === nextSource) return undefined;
+  db.prepare('UPDATE presence SET model = ?, model_source = ? WHERE id = ?').run(
+    next,
+    nextSource,
+    presenceId,
+  );
   return { previous: row.model ?? null };
 }
 
@@ -479,20 +495,37 @@ export function currentAttestedModel(
   memberId: string,
   presenceId?: string,
 ): string | null {
-  if (presenceId) {
-    const row = db
-      .prepare<
-        [string, string],
-        { model: string | null }
-      >('SELECT model FROM presence WHERE id = ? AND member_id = ?')
-      .get(presenceId, memberId);
-    return row?.model ?? null;
-  }
-  const row = db
-    .prepare<
-      [string],
-      { model: string | null }
-    >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1')
-    .get(memberId);
-  return row?.model ?? null;
+  return currentAttestation(db, memberId, presenceId).model;
+}
+
+/**
+ * The attested model **and the tier that produced it**, read together from one row (ADR 101
+ * increment). Always read as a pair: joining a model from one row to a tier from another is the
+ * cross-attribution the `senderPresenceId` key exists to prevent, one field over.
+ *
+ * `source` is null whenever `model` is null, and may ALSO be null beside a real model — a row
+ * written before migration 42, or by a client too old to send it. That null is honest and must not
+ * be defaulted to `binding`: "we do not know which tier" is a different fact from "it was a
+ * declaration", and guessing collapses exactly the distinction this carries.
+ */
+export function currentAttestation(
+  db: Database,
+  memberId: string,
+  presenceId?: string,
+): { model: string | null; source: string | null } {
+  const row = presenceId
+    ? db
+        .prepare<
+          [string, string],
+          { model: string | null; model_source: string | null }
+        >('SELECT model, model_source FROM presence WHERE id = ? AND member_id = ?')
+        .get(presenceId, memberId)
+    : db
+        .prepare<
+          [string],
+          { model: string | null; model_source: string | null }
+        >('SELECT model, model_source FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1')
+        .get(memberId);
+  const model = row?.model ?? null;
+  return { model, source: model ? (row?.model_source ?? null) : null };
 }

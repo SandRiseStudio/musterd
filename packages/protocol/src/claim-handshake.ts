@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ProvenanceSchema, SurfaceSchema } from './acts.js';
 import { MemberSchema } from './member.js';
+import { WIRE_ATTESTATION_SOURCES } from './model.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 /**
@@ -79,6 +80,19 @@ export const ClaimFrame = z.object({
    * switch is real); the audit log keeps the switch history (`occupancy.model_attested`).
    */
   model: z.string().max(120).optional(),
+  /**
+   * WHICH TIER produced `model` (ADR 101 increment) — `observed` (a harness probe saw it),
+   * `environment` (this session's env declared it), or `binding` (a provisioning snapshot declared
+   * it). Rides with `model` and means nothing without it; omitted by older clients and by any
+   * session attesting nothing.
+   *
+   * It exists because the id alone cannot say whether it is a measurement or an assumption, and the
+   * two are not interchangeable evidence. A seat whose probe never fired falls through to a
+   * declaration and presents it with exactly the confidence of an observation — which is how a
+   * per-model aggregate ends up mixing measured rows with assumed ones and reporting a single
+   * number over both.
+   */
+  model_source: z.enum(WIRE_ATTESTATION_SOURCES).optional(),
   /**
    * The build ref (git SHA, `-dirty`-suffixed for an uncommitted build) of the *client dist* this
    * session runs from (ADR 135) — read from the dist's own `build.json` stamp, so it reports what the
