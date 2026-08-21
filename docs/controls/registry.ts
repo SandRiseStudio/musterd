@@ -254,13 +254,31 @@ export const CONTROLS: Control[] = [
     motivatedBy:
       'ADR 227 increment 2 (2026-08-04): any agent could restart or rebuild shared infrastructure while teammates depended on it, with no signal to anyone.',
     counterfactual:
-      'Unknown, and that is the finding. The gate is warn-only by design, so "catching" means emitting a warning someone reads — and no measurement exists of whether any warning has ever been read or changed a behaviour. Registering it with `neverExercised` is the honest state; the ADR 227 hardening ramp (warn → --force → refuse) is explicitly gated on a measured warn→redirect rate that has never been measured.',
-    neverExercised:
-      'No deliberate exercise is recorded since it shipped 2026-08-04. The audit row is written by the daemon, but nothing reads the row count, and no seat has fired the gate on purpose to confirm it still warns. izzo (the gate’s owner) committed on 2026-08-20 to firing it and reading the rows — when that lands, this entry flips to a dated exercise and produces the warn→redirect denominator the ADR 227 hardening ramp has been gated on unmeasured.',
-    neverExercisedSince: '2026-08-04',
-    everTripped: false,
+      'The gate does what it claims — it warns, and the row lands. What it CANNOT support is the decision resting on it. ADR 227’s hardening ramp (warn → --force → refuse) is gated on a measured warn→redirect rate, and no redirect signal exists: `result` is always `allow`, the touch always proceeds, and a COMPLETED infra touch writes no row at all, so there is neither a numerator (did this seat back off?) nor a denominator of total touches — only of warned ones. The obvious proxy is worse than absent: "warned, then raised an ask within 30 minutes" scores ryder’s 2026-08-05 touch as a redirect, when their ask in that window was an unrelated lane acceptance and they proceeded with the bounce under nick’s explicit instruction. Of the three rows to date, two are real warned touches and both were correctly proceeded with, so redirects = 0 of 2 — a rate no hardening could honestly rest on. Measured 2026-08-21, lane 01M0GX9VD7.',
+    lastExercised: '2026-08-21',
+    everTripped: true,
+    /**
+     * ryder, 2026-08-05 22:48:31 and 22:49:00 (`verb=refresh`), warned and proceeded — twenty-five
+     * seconds later: "Bouncing the daemon in ~30s, ~5s of downtime — nick asked me to force it."
+     * The bounce is corroborated in the audit table rather than taken on the message's word: at
+     * 22:49:13 every live seat re-claims (claim.occupied + occupancy.model_attested for ryder, kimi,
+     * izzo, and two web seats), which is the restart signature. A real touch, warned, and correctly
+     * overridden by human authority — the warn-only design working, not failing.
+     *
+     * The third row (stanley, 19:31:02, `verb=agent`) is NOT a trip: they fired the endpoint
+     * deliberately while accepting #689 and explicitly declined to run the verb for real. One audit
+     * row shape covers both an exercise and a trip, which is worth knowing about the instrument —
+     * the two facts this schema separates are not separable from the row alone.
+     */
+    lastTripped: '2026-08-05',
     staleAfterDays: 60,
-    refs: ['ADR 227 increment 2', 'PR #654', 'lane 01KZ9JSX10 (the `agent` wiring)'],
+    refs: [
+      'ADR 227 increment 2',
+      'PR #654',
+      'lane 01KZ9JSX10 (the `agent` wiring)',
+      'lane 01M0GX9VD7 (the exercise)',
+      'docs/claims/entries/2026-08-21-infra-gate-never-exercised.md',
+    ],
   },
   {
     id: 'stale-dist-typecheck-guard',
