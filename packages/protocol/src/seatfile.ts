@@ -143,6 +143,49 @@ export function normalizeSeatName(name: string): string {
   return name.normalize('NFC').trim().toLowerCase();
 }
 
+/**
+ * Top-level keys a roster file carries that its schema does not know — the keys zod's default
+ * `.strip()` silently discards on parse, and that `musterd fmt` therefore **deletes** when it
+ * rewrites the file from the parsed value.
+ *
+ * WHY THIS EXISTS AS A SEPARATE ANSWER. `fmt --check` compares bytes, so it reports "not canonical"
+ * identically for a stray blank line and for a paragraph about to be erased. Those are not the same
+ * finding and must not read the same: one is cosmetic, the other is data loss. Measured instance —
+ * `seats/autorefresh.toml` on the live roster carries an authored 587-character `charter`, `charter`
+ * is in RoleFileSchema but NOT SeatFileSchema, and `fmt` drops it without a word (2026-08-21,
+ * falsified into existence by ryder from a claim of mine that said the hazard was latent).
+ *
+ * Reports only what is CURRENTLY unknown. A key that a future schema adopts stops being reported the
+ * moment it is in the shape — the list is derived from the schema, never a hand-kept denylist that
+ * could itself go stale.
+ *
+ * Malformed TOML returns `[]` rather than throwing: an unparseable file is the PARSER's error to
+ * report, and this answering "no unknown keys" for it would be a lie only if anyone read it as
+ * "this file is fine". Callers run it beside a parse, never instead of one.
+ */
+export function unknownRosterKeys(kind: 'team' | 'seat' | 'role', text: string): string[] {
+  // SeatFileSchema is a ZodEffects (it carries a `.refine`), so its object shape lives one level in.
+  // Reaching through `innerType()` rather than duplicating the key list keeps this derived from the
+  // schema — a hand-kept copy is precisely the stale proxy this function exists to catch.
+  const shape =
+    kind === 'team'
+      ? TeamFileSchema.shape
+      : kind === 'seat'
+        ? SeatFileSchema.innerType().shape
+        : RoleFileSchema.shape;
+  let raw: unknown;
+  try {
+    raw = parseToml(text);
+  } catch {
+    return [];
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return [];
+  const known = new Set(Object.keys(shape));
+  return Object.keys(raw as Record<string, unknown>)
+    .filter((k) => !known.has(k))
+    .sort();
+}
+
 /** Parse a `roles/<name>.toml`. The name is the filename stem (not in the body), like seat files. */
 export function parseRoleFile(text: string): RoleFile {
   return RoleFileSchema.parse(parseToml(text));
