@@ -174,10 +174,10 @@ import {
   ACCEPTANCE_EXEMPT_SAMPLE_RATE,
   acceptanceExemption,
   pickHumanReviewer,
-  pickReviewCounterpart,
   pickWakeReviewer,
   REVIEW_LOOP_BREAKER_N,
   reviewLoopBounceCount,
+  selectReviewCounterpart,
   teamFamilyPosture,
   annotateClose,
   closeVerdicts,
@@ -3115,9 +3115,10 @@ export async function handleHttp(
           // picker's ladder still means exactly what it meant — and it means an exempt submit never
           // leases a wake or trips the review-loop breaker on the way to being skipped.
           const exemption = acceptanceExemption(lane);
-          const peerPick = exemption.exempt
-            ? null
-            : pickReviewCounterpart(ctx.db, team.id, lane, worker, ctx.config.presenceTimeoutMs);
+          const peerSelection = exemption.exempt
+            ? { pick: null, snapshot: { selected: null, candidates: [] } }
+            : selectReviewCounterpart(ctx.db, team.id, lane, worker, ctx.config.presenceTimeoutMs);
+          const peerPick = peerSelection.pick;
           const humanFallback =
             lane.risk.length > 0 && !peerPick
               ? pickHumanReviewer(ctx.db, team.id, worker, ctx.config.presenceTimeoutMs)
@@ -3208,6 +3209,22 @@ export async function handleHttp(
               // was built on top of.
               stakes_provenance: lane.stakes_provenance,
               ...(lane.merged ? { merged: lane.merged } : {}),
+              // ADR 303: preserve the evidence the picker actually saw, not a reconstruction from
+              // today's roster. The terminal outcome is explicit because a peer miss can lead to a
+              // human fallback or a queued wake; neither should masquerade as a peer selection.
+              review_selection: {
+                outcome: exemption.exempt
+                  ? 'acceptance_exempt'
+                  : wakeQueued
+                    ? 'wake_queued'
+                    : pick?.grade === 'human'
+                      ? 'human_fallback'
+                      : pick
+                        ? 'peer_selected'
+                        : 'no_candidate',
+                selected: pick ? { reviewer: pick.reviewer, grade: pick.grade } : null,
+                candidates: peerSelection.snapshot.candidates,
+              },
               // ADR 188: the achieved rung of the diversity ladder rides beside the historical
               // two-value route, so a cross_model routing is never mistaken for a cross_family one.
               //

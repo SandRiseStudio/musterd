@@ -434,7 +434,11 @@ describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', (
     const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
     attach(db, unknown.id, 'cli', 'conn-unknown'); // live but deliberately without a model attestation
     agent(db, team, 'busy', 'grok-4.5');
-    const { row: service } = addMember(db, team, { kind: 'service', name: 'autorefresh', role: '' });
+    const { row: service } = addMember(db, team, {
+      kind: 'service',
+      name: 'autorefresh',
+      role: '',
+    });
     attach(db, service.id, 'cli', 'conn-autorefresh', { model: 'gpt-5.6-sol' });
     const { row: observer } = addMember(db, team, {
       kind: 'human',
@@ -446,12 +450,10 @@ describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', (
     const { row: offline } = addMember(db, team, { kind: 'agent', name: 'offline', role: '' });
     // `offline` intentionally has no Presence.
     expect(offline.name).toBe('offline');
-    db
-      .prepare(
-        `INSERT INTO audit (id, team_id, actor, action, target, result, ts, created_at)
+    db.prepare(
+      `INSERT INTO audit (id, team_id, actor, action, target, result, ts, created_at)
          VALUES (?, ?, ?, 'x.did', NULL, 'allow', ?, ?)`,
-      )
-      .run('aud-busy', team.id, 'busy', Date.now() - 5_000, Date.now() - 5_000);
+    ).run('aud-busy', team.id, 'busy', Date.now() - 5_000, Date.now() - 5_000);
     const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
 
     expect(selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT)).toMatchObject({
@@ -460,7 +462,12 @@ describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', (
         selected: { reviewer: 'winner', grade: 'cross_family' },
         candidates: expect.arrayContaining([
           { member: 'worker', family: 'claude', eligible: false, exclusion: 'self' },
-          { member: 'autorefresh', family: 'gpt', eligible: false, exclusion: 'service_or_observer' },
+          {
+            member: 'autorefresh',
+            family: 'gpt',
+            eligible: false,
+            exclusion: 'service_or_observer',
+          },
           { member: 'watcher', family: 'human', eligible: false, exclusion: 'service_or_observer' },
           { member: 'offline', family: 'unknown', eligible: false, exclusion: 'no_live_presence' },
           { member: 'busy', family: 'grok', eligible: false, exclusion: 'busy' },

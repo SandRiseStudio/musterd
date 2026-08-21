@@ -4087,6 +4087,17 @@ describe('two-stage close (ADR 169)', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].detail.merged.pr).toBe(42);
     expect(rows[0].detail.review_grade).toBe('cross_family');
+    // ADR 303: this is the decision-time roster evidence, not a later reconstruction. `ada` was
+    // rejected as self and `nick` was live but excluded from the agents-only peer ladder.
+    expect(rows[0].detail.review_selection).toMatchObject({
+      outcome: 'peer_selected',
+      selected: { reviewer: 'gee', grade: 'cross_family' },
+      candidates: expect.arrayContaining([
+        { member: 'ada', family: 'claude', eligible: false, exclusion: 'self' },
+        { member: 'gee', family: 'gpt', eligible: true, grade: 'cross_family' },
+        { member: 'nick', family: 'human', eligible: false, exclusion: 'not_agent' },
+      ]),
+    });
     expect(ask.meta.lane_review.grade).toBe(rows[0].detail.review_grade);
     expect(ready.json.review.grade).toBe(rows[0].detail.review_grade);
     // No overlap notice when the acceptor never owned the lane — the common case must stay quiet,
@@ -5062,6 +5073,11 @@ describe('two-stage close (ADR 169)', () => {
     const readyRows = await auditRowsFor(solTok, 'solo', 'lane.ready_for_review');
     const r0 = readyRows.find((r: any) => r.detail.lane === lane.json.lane.id)!;
     expect(r0.detail.no_candidate).toBe(true);
+    expect(r0.detail.review_selection).toMatchObject({
+      outcome: 'no_candidate',
+      selected: null,
+      candidates: [{ member: 'sol', family: 'human', eligible: false, exclusion: 'self' }],
+    });
     // ADR 172: the audit row carries the posture compactly (wake_pool as a COUNT, not names), so a
     // series of no_candidate rows is analyzable later without replaying presence history.
     expect(r0.detail.family_posture.state).toBe('unknown');
