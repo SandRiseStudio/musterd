@@ -39,6 +39,8 @@ export interface ReconcileResult {
   minted: Record<string, string>;
   /** Fail-closed parse errors carried from the spec (skipped seats). */
   errors: string[];
+  /** Keys dropped because no schema knows them — the entry projected, minus those fields. */
+  warnings: string[];
 }
 
 function resolveLifecycle(
@@ -97,6 +99,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
     removed: [],
     minted: {},
     errors: [...spec.errors],
+    warnings: [...spec.warnings],
   };
   const desired = new Set(spec.seats.map((s) => s.name));
 
@@ -254,7 +257,19 @@ export function reconcileAll(db: Database, roots: string[]): ReconcileResult[] {
     }
     if (!spec) continue;
     try {
-      results.push(reconcileTeam(db, spec));
+      const result = reconcileTeam(db, spec);
+      // SURFACE what the pass found. Until 2026-08-21 nothing did: `errors` was collected here,
+      // returned, asserted in tests, and read by no production caller — so a fail-closed skipped
+      // seat, the case load.ts calls "never silently dropped", was in fact reported to nobody. Both
+      // channels go to the daemon log now, one line per finding, tagged by kind so a reader can
+      // tell a skipped entry from a dropped field.
+      for (const err of result.errors) {
+        log.warn({ msg: 'reconcile_entry_error', root, team: result.slug, detail: err });
+      }
+      for (const warning of result.warnings) {
+        log.warn({ msg: 'reconcile_key_dropped', root, team: result.slug, detail: warning });
+      }
+      results.push(result);
     } catch (e) {
       log.warn({ msg: 'reconcile_failed', root, err: (e as Error).message });
     }

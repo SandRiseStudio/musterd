@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GENERALIST_CAPABILITIES, parseSeatFile, parseTeamFile } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '../db/open.js';
 import {
   getMemberByName,
@@ -16,7 +16,7 @@ import { listRoleNames, roleSummariesMap } from '../store/roles.js';
 import { toMember } from '../store/rows.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { loadTeamSpec } from './load.js';
-import { reconcileTeam } from './reconcile.js';
+import { reconcileAll, reconcileTeam } from './reconcile.js';
 import { projectTeamToFiles, serializeProjectedTeam } from './serialize.js';
 
 let dir: string;
@@ -318,6 +318,84 @@ describe('reconcile — fail-closed: a corrupt seat is skipped, siblings intact'
     expect(listMembers(db, team.id).map((m) => m.name)).toEqual(['olive']);
     expect(r.errors.length).toBe(1);
     expect(r.errors[0]).toContain('broken.toml');
+  });
+});
+
+describe('reconcile — unknown keys warn, never fail (nick 2026-08-21)', () => {
+  it('warns about a key no schema knows, and still projects the seat', () => {
+    // The live instance: seats/autorefresh.toml carries an authored `charter`, which is in
+    // RoleFileSchema but not SeatFileSchema. Reconcile has silently dropped it since 2026-08-05.
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\ncharter = "A paragraph a human wrote."\n',
+    });
+    const r = reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    // WARN, not fail — the seat still lands. Failing would refuse autorefresh's seat on the live
+    // roster today, which is why this is a warning and nick decided it explicitly.
+    expect(listMembers(db, team.id).map((m) => m.name)).toEqual(['olive']);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([
+      'seats/olive.toml: dropped unknown key(s) charter — not in the schema, so reconcile ignores them',
+    ]);
+  });
+
+  it('warns on team.toml and roles/*.toml too — every durable class, not just seats', () => {
+    writeRoster('slug = "alpha"\nnot_a_team_key = "x"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\n',
+    });
+    writeRole('platform', 'summary = "P"\ncharter = "C"\nnot_a_role_key = "y"\n');
+    const r = reconcile();
+    expect(r.warnings).toEqual([
+      'team.toml: dropped unknown key(s) not_a_team_key — not in the schema, so reconcile ignores them',
+      'roles/platform.toml: dropped unknown key(s) not_a_role_key — not in the schema, so reconcile ignores them',
+    ]);
+  });
+
+  it('a clean roster warns about nothing', () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    expect(reconcile().warnings).toEqual([]);
+  });
+});
+
+describe('reconcileAll surfaces what a pass found (nothing did until 2026-08-21)', () => {
+  it('logs BOTH a skipped entry and a dropped key — collected-and-discarded was the old behaviour', async () => {
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\ncharter = "A paragraph a human wrote."\n',
+      broken: 'this is not = valid toml = at all\n',
+    });
+    const { log } = await import('../log.js');
+    const seen: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(log, 'warn').mockImplementation((f) => {
+      seen.push(f as Record<string, unknown>);
+    });
+    try {
+      reconcileAll(db, [dir]);
+    } finally {
+      spy.mockRestore();
+    }
+    const kinds = seen.map((f) => f['msg']);
+    // The skipped seat — load.ts calls this "never silently dropped", and until now it was.
+    expect(kinds).toContain('reconcile_entry_error');
+    // The dropped field — the case the promise never covered at all.
+    expect(kinds).toContain('reconcile_key_dropped');
+    const dropped = seen.find((f) => f['msg'] === 'reconcile_key_dropped');
+    expect(String(dropped?.['detail'])).toContain('charter');
+    expect(dropped?.['team']).toBe('alpha');
+  });
+
+  it('says nothing about a clean roster', async () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    const { log } = await import('../log.js');
+    const seen: string[] = [];
+    const spy = vi.spyOn(log, 'warn').mockImplementation((f) => {
+      seen.push(String((f as Record<string, unknown>)['msg']));
+    });
+    try {
+      reconcileAll(db, [dir]);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(seen).toEqual([]);
   });
 });
 
