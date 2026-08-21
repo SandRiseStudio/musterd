@@ -395,7 +395,7 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
         'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
         'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
         'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone. ' +
-        'Prefer lane_submit first (ADR 192): resolving your own lane records an unconfirmed close — unless the lane was acceptance-exempt (ADR 234), where self-close is the designed path and records `acceptance_exempt`.',
+        'Prefer lane_submit (ADR 192): a self-close records unconfirmed unless acceptance-exempt.',
       inputSchema: {
         id: z.string().describe('lane id'),
         // `pr` is the PR *number*. Callers reached for `pr:"local"` to mean "merged without a PR";
