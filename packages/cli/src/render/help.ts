@@ -105,6 +105,30 @@ export function renderCommandHelp(name: string): string | null {
   return out.join('\n');
 }
 
+/**
+ * Is `musterd <command> help` a request for that command's help? — the trailing-`help` form.
+ *
+ * `help` used to be recognized only as argv[0] (`musterd help agent`) or as a `--help`/`-h` flag, so
+ * `musterd agent help` — the form most people reach for first — fell through to the command with
+ * "help" as its first positional. For `agent` that positional is a SEAT NAME: on 2026-08-05 the typo
+ * provisioned a member called `help` on team `revive`, complete with a git worktree, a branch and MCP
+ * wiring, and nobody noticed for nine days. Reserving the word here fixes every verb at once rather
+ * than teaching each command to distrust its own arguments.
+ *
+ * Deliberately narrow on THREE sides. It fires only when `help` is the SOLE positional, so
+ * `musterd team add help` still adds a member by that name; only for a catalogued command, so
+ * `musterd bogus help` still reports an unknown command with a did-you-mean; and never for a
+ * command whose first positional is free text (`freeTextPositional`), because there the word is
+ * the user's argument and not a request. `send` is that case: its positional is the message body,
+ * and `--act request_help` with a one-word body of "help" is the most plausible message on the
+ * system. A guard that eats it would break the verb it was meant to protect.
+ */
+export function wantsCommandHelp(command: string, positionals: readonly string[]): boolean {
+  if (positionals.length !== 1 || positionals[0] !== 'help') return false;
+  const cmd = entry(command);
+  return cmd !== undefined && cmd.freeTextPositional !== true;
+}
+
 /** The whole catalog as JSON — a stable machine surface for agents and agentic workflows. */
 export function renderHelpJson(): string {
   return JSON.stringify({

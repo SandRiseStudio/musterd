@@ -15,6 +15,7 @@ import {
   resolveAttestedProvenance,
   resolveAttestedWakeLease,
   TOKEN_PREFIXES,
+  type AgentKeyMint,
   type GuardianTiers,
   type Policy,
   type PolicyOverride,
@@ -267,6 +268,14 @@ export class HttpClient {
       `/teams/${slug}/members/${encodeURIComponent(name)}/credential/rotate`,
       {},
     );
+  }
+  /**
+   * Rotate the team **agent key** (ADR 075) — admin-only and audited daemon-side. Destructive by
+   * nature: every seat binding holding the old `mskey_` stops authenticating, so `musterd team
+   * agent-key` counts them and makes the operator confirm before calling this.
+   */
+  rotateAgentKey(slug: string): Promise<AgentKeyMint> {
+    return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-key/rotate`, {});
   }
   roster(slug: string): Promise<{
     members: MemberSummary[];

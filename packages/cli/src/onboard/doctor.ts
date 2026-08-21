@@ -11,8 +11,9 @@ import {
   type Binding,
 } from '@musterd/protocol';
 import { HttpClient } from '../client.js';
+import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
-import { findBinding, loadBinding, loadConfig } from '../config.js';
+import { type Config, findBinding, loadBinding, loadConfig, readBindingAt } from '../config.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -480,14 +481,23 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       configured: d.configured,
       ...(d.detail !== undefined ? { detail: d.detail } : {}),
     });
-    for (const hookDrift of d.hookDrift ?? []) {
-      // `musterd wire` only registers the MCP server from .musterd/workspace.json — it never calls a
-      // harness's hook installer, so it exited 0 having changed nothing and left this line standing
-      // (observed 2026-08-14). `--refresh-hooks` is the repair that actually runs them, and is the
-      // one ADR 168 sanctions in a live seat's workspace.
-      drift.push(
-        `${h.label}: ${hookDrift} — run \`musterd init --refresh-hooks\` to install the marker-owned hooks.`,
-      );
+    // Hook drift only counts for a harness this folder actually runs musterd through. Unlike
+    // Claude Code's equivalent below — which has always been gated on `claudeConfigured` — this
+    // loop was ungated, so it demanded musterd's Codex hooks from every folder on a machine that
+    // merely has `~/.codex` present. Measured on nick's `cli` seat (2026-08-14): no `.codex/` in
+    // the folder, no `[mcp_servers.musterd]` in the Codex config, and a permanent drift line it
+    // had no way to clear. Drift a folder cannot clear is noise, and noise is how a report stops
+    // being read — the same failure ADR 171 §2 paid down for guidance drift.
+    if (d.configured) {
+      for (const hookDrift of d.hookDrift ?? []) {
+        // `musterd wire` only registers the MCP server from .musterd/workspace.json — it never
+        // calls a harness's hook installer, so it exited 0 having changed nothing and left this
+        // line standing (observed 2026-08-14). `--refresh-hooks` is the repair that actually runs
+        // them, and is the one ADR 168 sanctions in a live seat's workspace.
+        drift.push(
+          `${h.label}: ${hookDrift} — run \`musterd init --refresh-hooks\` to install the marker-owned hooks.`,
+        );
+      }
     }
     // Value-coherence: a legacy baked MUSTERD_CLAIM that disagrees with binding.json pins this
     // harness's team_* tools to a stale seat while the CLI claims the current one (the re-claim drift).
@@ -787,6 +797,34 @@ export async function footprintNotes(
   ];
 }
 
+/**
+ * Is this machine's record of the team agent key missing while the key itself is still here?
+ *
+ * `config.agentKeys` is the only copy the config keeps (ADR 075), and losing it silently disables
+ * `musterd agent` — but the failure surfaces nowhere until someone runs that command and gets an
+ * error mid-provision. On team `revive` (2026-08-14) the map had been empty for long enough that
+ * nobody could say what emptied it, while eight seat bindings on the same machine still carried the
+ * key. This turns that into a warn-only note the operator sees *before* reaching for the command.
+ *
+ * Deliberately silent unless the repair is certain to work: it fires only when a key is actually
+ * recoverable from the local bindings. A note pointing at `--rotate` when nothing can be read back
+ * would be nagging at best and a nudge toward a team-wide outage at worst.
+ */
+export function agentKeyNotes(
+  config: Pick<Config, 'agentKeys' | 'bindings'>,
+  team: string | undefined,
+  read: (dir: string) => Binding | null = readBindingAt,
+): string[] {
+  if (!team || config.agentKeys[team]) return [];
+  const found = recoverAgentKey(Object.keys(config.bindings), team, read);
+  if (!found.key) return [];
+  return [
+    `no team agent key recorded for "${team}" on this machine, so \`musterd agent\` and ` +
+      `\`musterd human\` cannot provision — but ${found.sources.length} seat binding(s) here still ` +
+      `carry it. \`musterd team agent-key --team ${team}\` reads it back; nothing on the team changes.`,
+  ];
+}
+
 /** Render + exit-code for `musterd init --check`. Exit 1 on drift, 0 when healthy or unprovisioned. */
 /**
  * Build-skew notes (ADR 135): is the `musterd` you just typed the code you think it is? Two
@@ -960,6 +998,8 @@ export async function runInitDoctor(json: boolean, cwd: string = process.cwd()):
   report.notes.push(...(await footprintNotes(cwd)));
   // ADR 232 increment 2: LaunchAgent census vs roster service seats — warn-only, never drift.
   report.notes.push(...(await inspectCensus({ cwd })));
+  // A lost local record of the team agent key — warn-only, and only when it is recoverable here.
+  report.notes.push(...agentKeyNotes(loadConfig(), findBinding(cwd)?.team ?? loadConfig().current));
   // The binary a WAKE would resolve is a different question from the one this shell resolves, and
   // nothing asked it until a poisoned shim went a day unnoticed. Warn-only for the same reason as
   // the skew notes: it is a fact about the machine, not this folder's provisioning.

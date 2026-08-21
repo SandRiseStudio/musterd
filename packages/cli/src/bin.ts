@@ -55,6 +55,7 @@ import {
   renderGroupHelp,
   renderHelp,
   renderHelpJson,
+  wantsCommandHelp,
 } from './render/help.js';
 import { setColorEnabled, theme } from './render/theme.js';
 import { emitTerminalTitle, terminalTitleFor } from './render/title.js';
@@ -121,6 +122,14 @@ async function main(argv: string[]): Promise<number> {
       );
     }
     process.stdout.write(renderHelp({ full: rest.flags['full'] === true }) + '\n');
+    return 0;
+  }
+
+  // The OTHER word order: `musterd agent help`. Checked here, before dispatch, because the command
+  // itself cannot tell a help request from an argument — `agent` reads that positional as a seat name
+  // and provisions a worktree for it. See `wantsCommandHelp` for the incident this closes.
+  if (wantsCommandHelp(command, rest.positionals)) {
+    process.stdout.write(renderCommandHelp(command)! + '\n');
     return 0;
   }
 

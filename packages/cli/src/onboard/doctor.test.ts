@@ -1362,3 +1362,43 @@ describe('seat git attribution (ADR 109)', () => {
     expect(r.notes.find((n) => n.includes('attributed to'))).toBeUndefined();
   });
 });
+
+describe('harness hook drift is scoped to harnesses this folder is CONFIGURED for', () => {
+  // Claude Code's hook drift has always been gated on `claudeConfigured`; this loop was not. So a
+  // machine that merely has `~/.codex` present drew a permanent Codex line in every folder — nick's
+  // `cli` seat had no `.codex/` at all, no musterd entry in the Codex config, and a standing
+  // instruction to run `musterd wire`, which that folder cannot even run. Unclearable drift is noise,
+  // and noise is how a report stops being read.
+  const codex = (configured: boolean) => ({
+    label: 'Codex',
+    detect: async () => ({
+      installed: true,
+      configured,
+      hookDrift: ['the project-local Codex hooks are missing from .codex/hooks.json'],
+    }),
+  });
+
+  beforeEach(() => {
+    h.primer = 'none';
+    h.binding = {
+      server: 'http://x',
+      team: 'dawn',
+      surface: 'cli',
+      claim: { mode: 'seat', name: 'Ada' },
+    };
+    h.roster = { members: [] };
+    h.rosterThrows = false;
+  });
+
+  it('stays silent when the harness is not configured here', async () => {
+    h.harnesses = [codex(false)] as never;
+    const report = await inspectProvisioning(mkdtempSync(join(tmpdir(), 'doctor-')));
+    expect(report.drift.filter((d) => d.includes('Codex hooks'))).toEqual([]);
+  });
+
+  it('still reports it when the harness IS configured here', async () => {
+    h.harnesses = [codex(true)] as never;
+    const report = await inspectProvisioning(mkdtempSync(join(tmpdir(), 'doctor-')));
+    expect(report.drift.some((d) => d.includes('Codex hooks'))).toBe(true);
+  });
+});
