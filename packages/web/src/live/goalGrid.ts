@@ -1,4 +1,4 @@
-import type { Goal, Lane, LaneWarning } from '@musterd/protocol';
+import type { FlowMetrics, Goal, GoalFlow, Lane, LaneWarning } from '@musterd/protocol';
 import { compareGoals, isAwaitingAcceptance } from '@musterd/protocol';
 
 /**
@@ -71,6 +71,13 @@ export interface GoalCardModel {
   staleNote: string | null;
   /** ⚡ pill — the card's most recently touched non-terminal lane. */
   lastMoved: { lane: string; title: string; at: number } | null;
+  /**
+   * The daemon's per-goal flow (ADR 295), or null when it sent none — a pre-295 server, or a goal
+   * whose lanes it did not report. Quoted, never recomputed from `dots`: ADR 104 froze the rule
+   * that analytics the board renders are derived server-side, so a client-side cycle time would be
+   * a second, drifting answer to a question `GET /report` already answers.
+   */
+  flow: FlowMetrics | null;
 }
 
 export interface GoalGridModel {
@@ -160,6 +167,7 @@ function buildCard(
   lanes: Lane[],
   now: number,
   stale: Map<string, string>,
+  flow: FlowMetrics | null,
 ): GoalCardModel {
   const live = lanes.filter((l) => l.state !== 'abandoned');
   const done = live.filter((l) => l.state === 'done').length;
@@ -219,6 +227,7 @@ function buildCard(
     lastMoved: lastMoved
       ? { lane: lastMoved.id, title: lastMoved.title, at: lastMoved.updated_at }
       : null,
+    flow,
   };
 }
 
@@ -231,7 +240,14 @@ export function buildGoalGrid(
   goals: Goal[],
   now: number,
   warnings: LaneWarning[] = [],
+  /** `report.goal_flow` (ADR 295); empty against a pre-295 daemon, which leaves every card's
+   *  `flow` null and the grid rendering exactly as it did before. */
+  goalFlow: GoalFlow[] = [],
 ): GoalGridModel {
+  const flowByGoal = new Map<string | null, FlowMetrics>(
+    goalFlow.map((g) => [g.goal_id, g.flow]),
+  );
+  const flowOf = (id: string | null) => flowByGoal.get(id) ?? null;
   const stale = new Map<string, string>();
   for (const w of warnings) {
     if (w.kind === 'stale_acceptance' && !stale.has(w.subject)) stale.set(w.subject, w.detail);
@@ -269,16 +285,16 @@ export function buildGoalGrid(
       shippedShelf.push({ id: g.id, title: g.title, outcome: g.outcome ?? null });
       continue;
     }
-    cards.push(buildCard(g.id, g.title, true, g, owned, now, stale));
+    cards.push(buildCard(g.id, g.title, true, g, owned, now, stale, flowOf(g.id)));
   }
   const declaredIds = new Set(visibleGoals.map((g) => g.id));
   for (const [id, orphans] of byGoal) {
     if (id === null || declaredIds.has(id)) continue;
-    cards.push(buildCard(id, id, false, null, orphans, now, stale));
+    cards.push(buildCard(id, id, false, null, orphans, now, stale, flowOf(id)));
   }
   const unassigned = byGoal.get(null);
   if (unassigned && unassigned.length > 0) {
-    cards.push(buildCard(null, 'Not on a goal yet', true, null, unassigned, now, stale));
+    cards.push(buildCard(null, 'Not on a goal yet', true, null, unassigned, now, stale, flowOf(null)));
   }
   return { cards, shippedShelf, pulse };
 }

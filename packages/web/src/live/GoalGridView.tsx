@@ -1,4 +1,4 @@
-import type { Goal, Lane, LaneWarning, MemberSummary } from '@musterd/protocol';
+import type { FlowMetrics, Goal, GoalFlow, Lane, LaneWarning, MemberSummary } from '@musterd/protocol';
 import { useMemo } from 'react';
 import { buildGoalGrid, type GoalCardModel, type RunwayDot, type ShippedGoal } from './goalGrid';
 import { initial, kindOf, memberAvatar } from './format';
@@ -19,6 +19,31 @@ const CHIP_CLASS: Record<GoalCardModel['chip'], string> = {
   lanes: 'gg-chip--ghost',
 };
 
+/** Compact duration (`3m`, `2h`, `4d`) from a span in ms — the daemon's number, formatted. */
+function dur(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.round(h / 24)}d`;
+}
+
+/**
+ * The card's flow line (ADR 295) — the daemon's per-goal projection, never recomputed here. Reads
+ * queue-first (in flight, oldest, queued) and lets throughput trail, because goals are not
+ * comparable units and the line is meant to answer "is this one stuck", not "which one wins".
+ */
+function flowLine(f: FlowMetrics): string[] {
+  const parts: string[] = [];
+  if (f.wip > 0) parts.push(`${f.wip} in flight`);
+  if (f.oldest_wip_age_ms !== null) parts.push(`oldest ${dur(f.oldest_wip_age_ms)}`);
+  if (f.backlog) parts.push(`${f.backlog} queued`);
+  if (f.cycle_time_ms !== null) parts.push(`cycle ${dur(f.cycle_time_ms)}`);
+  return parts;
+}
+
 /** Compact relative age (`3m`, `2h`, `4d`) from a ms-epoch ts. */
 function ago(now: number, ts: number): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));
@@ -34,6 +59,7 @@ export function GoalGrid({
   lanes,
   goals,
   warnings,
+  goalFlow,
   roster,
   onOpenGoal,
 }: {
@@ -41,13 +67,15 @@ export function GoalGrid({
   goals: Goal[];
   /** The board's live warnings — the grid reads `stale_acceptance` to show review debt. */
   warnings: LaneWarning[];
+  /** `report.goal_flow` (ADR 295); empty against a pre-295 daemon, and the cards render as before. */
+  goalFlow?: GoalFlow[] | undefined;
   roster: MemberSummary[];
   onOpenGoal: (goalId: string | null) => void;
 }) {
   const now = Date.now();
   const model = useMemo(
-    () => buildGoalGrid(lanes, goals, now, warnings),
-    [lanes, goals, now, warnings],
+    () => buildGoalGrid(lanes, goals, now, warnings, goalFlow),
+    [lanes, goals, now, warnings, goalFlow],
   );
   const rosterIdx = useMemo(() => new Map(roster.map((m) => [m.name, m])), [roster]);
 
@@ -165,6 +193,7 @@ function GoalCard({
     card.counts.stale > 0
       ? `${card.counts.stale} need${card.counts.stale === 1 ? 's' : ''} eyes`
       : null;
+  const flow = card.flow ? flowLine(card.flow) : [];
   return (
     <button
       className={`gg-card${card.id === null ? ' gg-card--loose' : ''}`}
@@ -196,6 +225,7 @@ function GoalCard({
         </span>
       )}
       <Runway dots={card.dots} overflow={card.overflow} rosterIdx={rosterIdx} />
+      {flow.length > 0 && <span className="gg-card__flow">{flow.join(' · ')}</span>}
       <span className="gg-foot">
         <span className="gg-foot__count">
           {counts.join(' · ')}

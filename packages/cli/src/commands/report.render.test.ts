@@ -1,7 +1,7 @@
 import type { FlowMetrics, GoalFlow } from '@musterd/protocol';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { renderFlow, renderGoalFlow } from './report.js';
 import { setColorEnabled } from '../render/theme.js';
+import { renderFlow, renderGoalFlow } from './report.js';
 
 beforeAll(() => setColorEnabled(false));
 

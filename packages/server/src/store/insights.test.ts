@@ -201,10 +201,7 @@ describe('goalFlowMetrics (ADR 295 — flow dimensioned by Goal)', () => {
       now - 90 * 60_000,
     );
 
-    expect(goalFlowMetrics(db, team.id, now).map((g) => g.goal_id)).toEqual([
-      'dragging',
-      'fresh',
-    ]);
+    expect(goalFlowMetrics(db, team.id, now).map((g) => g.goal_id)).toEqual(['dragging', 'fresh']);
   });
 
   it('says nothing about a goal with no lanes — the roster lives in report.goals', () => {
