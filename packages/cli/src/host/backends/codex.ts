@@ -238,7 +238,12 @@ export function codexBackend(deps: CodexDeps = {}): ActuatorBackend {
       const liveness =
         deps.readSession?.(spec.workspace) ??
         localSessionLiveness(spec.workspace, Date.now(), undefined, 'codex');
-      if (liveness.state === 'live')
+      // ADR 166 increment 3: the guard question resolves disagreement toward LIVE — if EITHER the
+      // enumerated verdict or the demoted slot says a session is live here, refuse. The slot only
+      // says live while its own transcript is being written, so a demoted conflict is enumeration
+      // failing to see a session, not a stale slot (the 2026-08-21 inspection of all 109 sweep
+      // demotions found no other resolvable cause).
+      if (liveness.state === 'live' || liveness.slotState === 'live')
         return {
           outcome: { occupied: false, deferred: true, reason: 'local-session-live' },
           settled: Promise.resolve(undefined),

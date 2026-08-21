@@ -622,6 +622,32 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(lines.join('\n')).toContain('wake deferred: scout');
   });
 
+  it('the guard defers on a demoted conflict too — slot live, enumeration disagrees (ADR 166 inc 3)', async () => {
+    // Every resolvable demoted case in the 2026-08-21 sweep inspection was a live session
+    // enumeration could not see; the guard question resolves disagreement toward LIVE.
+    const { client, calls } = fakeClient([order()]);
+    const { backend, specs } = fakeBackend();
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({ entries: [entryOf()] }),
+        clientFor: () => client,
+        liveness: () => ({
+          state: 'resumable',
+          source: 'enumerated',
+          slotState: 'live',
+          disagreed: true,
+          demoted: true,
+          session: { harness: 'claude-code', id: 'cap-1', started_at: 1 },
+        }),
+      }),
+    );
+    expect(specs).toHaveLength(0);
+    expect(calls.reports).toEqual([
+      { lease_id: 'L1', occupied: false, deferred: true, reason: 'local-session-live' },
+    ]);
+  });
+
   it('passes a Codex registry harness to the local-session guard', async () => {
     const { client } = fakeClient([order()]);
     const { backend, specs } = fakeBackend('codex');

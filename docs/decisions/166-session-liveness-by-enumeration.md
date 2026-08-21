@@ -288,6 +288,62 @@ Recorded, with no numbers published, at
 The target-zero count above survived that same instability; the rate did not. That contrast is the
 evidence behind ADR 297 rule 4.
 
+### Amendment 2026-08-21 — the inspection: every resolvable demote was a live session enumeration could not see
+
+Recorded by ryder (lane `01M0JNYJ4KHAM6FMEV5BZTQ7FW`), performing the per-case inspection item 3
+mandated and resolving
+[`docs/watches/2026-08-21-adr-166-demoted-successor.md`](../watches/2026-08-21-adr-166-demoted-successor.md).
+Method: each demote window (sample timestamps from the JSONL) was correlated against what the
+harnesses actually recorded — transcript trees, entry timestamps, file birth times, and the host
+log's wake leases (ULID-dated).
+
+**Correction to the amendment above** (invalidate-dated, per the wiki's own rule): each case does
+NOT read `slot=live shadow=none sessions=0`. Only the 28 gptbot/kimi cases do; the other 81 read
+`shadow=resumable` with 3–68 enumerated transcripts, none warm. The distinction matters because it
+rules out "no projects tree" as a cause for the majority.
+
+**Per-cluster verdicts, all 109 cases:**
+
+- **`agents-gptbot` ×20** (08-03 16:53–18:21, 08-04 09:49–10:57 PT) — live **cursor-agent**
+  sessions: `~/.cursor/projects/Users-nick-agents-gptbot` shows agent-tools/terminal writes inside
+  both windows, and no other harness was active there. The deployed sweep predated ADR 265's Cursor
+  scanner, so selection fell through to the Claude scanner, which truthfully found nothing.
+  **Wrongly demoted while live.** Cause fixed by #826 (2026-08-13).
+- **`agents-wanderer` ×75** (08-12, 08-13 ≤11:58) — same cause, live cursor-agent sessions
+  (`grok-4.6`); ADR 265 was measured on this very workspace and merged 08-13 18:19, hours after the
+  last wanderer demote. **Wrongly demoted while live.** No wanderer demote since.
+- **`agents-kimi` ×8** (08-20 09:19–09:54) — live Cursor **desktop** session `5ba9ec45`, running
+  08:42–16:01 with the post-ADR-265 scanner deployed. `.workspace-trusted` was born **09:55:57**;
+  the demotes stop at the next sweep. The scanner (rightly) refuses to guess an untrusted project's
+  workspace — so a live session is unattributable until Cursor writes that file: **74 minutes
+  here**. **Wrongly demoted while live, and the cause is still open**: any not-yet-trusted Cursor
+  project reproduces it.
+- **`agents` ×5** (08-13 09:59–10:19) and **`agents-ryder` ×1** (08-14 11:00:14) — **unresolved**:
+  the warm transcript the slot pointed at is no longer on disk (the `agents` Claude tree held 6
+  transcripts at sweep time, 4 remain), and no surviving transcript shows entries in either window.
+  Direction unrecoverable; the shape matches the other clusters.
+
+**The structural finding, worth more than the tally.** `slot=live` requires the slot's own
+transcript written within the last `LOCAL_SESSION_LIVE_MS` and no `ended_at` — the same clock and
+threshold enumeration uses. A demote therefore asserts "no warm transcript here" about a workspace
+that demonstrably has one being written right now. The demote direction is enumeration blindness
+essentially by construction; "a stale slot rightly demoted" is close to unrealizable. Falsifier: a
+demote whose slot transcript's warmth came from a non-session writer (nothing in 109 cases did).
+
+**Guard exposure and acted harm.** The claude-code and native backends carried increment 3's
+"either side says live ⇒ refuse" belt since #414 (07-27, before every demote). The **host loop and
+the codex backend checked only the enumerated verdict**. Exactly one wake landed inside a demote
+window — gptbot, 08-04 10:51, lease `01KZ6YDCBSYT304ZVS7QEBJCA4`, through the codex backend — and
+it failed on "codex CLI not found" before spawning. **Zero wrongly-permitted spawns in 25 days; the
+margin was an uninstalled CLI, not the guard.** The same diff as this amendment adds the belt to
+both remaining call sites.
+
+**Item 3 disposition: 109 of 109 explained.** 103 confirmed wrong-direction demotes of live
+sessions, 6 unresolved for lost evidence, 0 confirmed-correct demotes. The count stays watched —
+[`docs/watches/2026-08-21-adr-166-demoted-successor-2.md`](../watches/2026-08-21-adr-166-demoted-successor-2.md)
+scopes the question around the one known-open cause so a recurrence of the Cursor trust gap cannot
+wallpaper a novel finding.
+
 
 ## Consequences
 
