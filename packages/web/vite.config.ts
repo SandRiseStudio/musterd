@@ -94,7 +94,9 @@ export default defineConfig(({ command }) => {
       // Three retries a second apart absorb a busy machine; a page that fails four times is a real
       // bug and still fails the build (failOnError stays default-true).
       prerender: { enabled: true, crawlLinks: true, retryCount: 3, retryDelay: 1000 },
-      pages: [{ path: '/' }],
+      // The ADR 300 public set's static roots; the slug pages (/docs/<slug>, /blog/<slug>) are
+      // discovered by crawlLinks from exactly the index pages' <a> lists.
+      pages: [{ path: '/' }, { path: '/roadmap' }, { path: '/docs' }, { path: '/blog' }],
     }),
     viteReact(),
     ...(id ? [buildStamp(id)] : []),
