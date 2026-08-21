@@ -105,6 +105,11 @@ first.
   Two open design questions, neither of them a gap: whether `open_loops`/`diversity_flags` should
   carry model at all (a loop is *between* seats, so "model X's open loops" may not be well-defined),
   and whether `delivery.latency`'s omission should be revisited.
+  **Sharpened 2026-08-21:** N is not only small, it is **not uniform in quality**. A per-act model
+  stamp may be an observation or an unverified declaration, and nothing in the act log says which —
+  see [model attestation](model-attestation.md), which also records that nick switches models
+  mid-session, so a seat's model is not constant even within one session. Read before computing any
+  per-model aggregate over this corpus.
 - **Frontier cadence manifest** — protocol written, zero runs recorded.
 - **Cookoff cells A/B/C2/C3, D-res, cell E** — defined in the frozen manifest, spend not authorised.
 - **ADR 250's weekly reads** (asks-to-founder per merged PR; repeat wakes with unchanged reason;
