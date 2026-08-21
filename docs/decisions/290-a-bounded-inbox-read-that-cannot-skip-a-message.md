@@ -59,28 +59,6 @@ response, and `unread_remaining: n` — counted, not marshalled, so it stays che
 `listInbox` now honours `since` *alongside* `unreadOnly`, taking the later of the two floors, which
 is what makes a bounded unread read pageable at all.
 
-**Amended 2026-08-20 (#946): the title's claim was true of the BOUND and false of the CURSOR that
-walks it.** Decision 1's argument — "a prefix is the only truncation where advancing the cursor to
-the last row seen cannot skip anything" — is correct, and it silently assumes the position that
-advances is total over the rows. It is not. `listInbox` orders by `ts ASC, id ASC` while the cursor
-is a bare `ts`, so `id` is a declared tiebreak with no expression in the position. When a tie
-straddled the page boundary, page two asked for `ts > last` and excluded every row sharing that
-millisecond: measured at 220 messages, page one 200, page two **0**, the drain terminating on the
-empty page and reporting success at 200 of 220. Not one skipped row — the whole tail, silently.
-
-Worse one layer down: the read cursor is also a bare `ts`, so a message sharing the cursor row's
-millisecond was not merely stranded mid-walk, it could never appear as unread again — the cursor
-only moves forward. The cursor row already stored `last_read_message_id`; nothing consulted it.
-
-The repair does not add a cursor field. `since` keeps its exact meaning, and the PREFIX BOUND is
-made to never split a tie group — it completes the group past `headLimit` instead of cutting through
-it — so `ts > last` is exact again for every caller, including one on an older client with no way to
-send a tiebreak. Paying for that in a response occasionally larger than the bound is the deliberate
-trade against a silent permanent hole. The unread floor and `countUnread` do take the `(ts, id)`
-comparison, since the cursor is genuinely a point and both must agree about a tied row. Corrected
-claim: **a bounded read cannot skip a message, because the bound never falls inside a tie and the
-cursor compares as the pair the ordering is defined on.**
-
 **4. Newest-first is preserved where a seat reads once a turn.** ADR 287 is explicit that an agent
 checking at a task boundary must not be handed the stalest 50 and told the urgent ask is behind them.
 So `team_inbox_check` now names its `limit` — it gets the newest tail it actually renders — and takes
@@ -105,6 +83,28 @@ breathe between.
 - Two spellings of "bound this read" now exist (`limit`, `headLimit`). The asymmetry is the point and
   is documented at the type; a future reader tempted to unify them should read the Problem section
   first.
+
+**Amended 2026-08-20 (#946): the title's claim was true of the BOUND and false of the CURSOR that
+walks it.** Decision 1's argument — "a prefix is the only truncation where advancing the cursor to
+the last row seen cannot skip anything" — is correct, and it silently assumes the position that
+advances is total over the rows. It is not. `listInbox` orders by `ts ASC, id ASC` while the cursor
+is a bare `ts`, so `id` is a declared tiebreak with no expression in the position. When a tie
+straddled the page boundary, page two asked for `ts > last` and excluded every row sharing that
+millisecond: measured at 220 messages, page one 200, page two **0**, the drain terminating on the
+empty page and reporting success at 200 of 220. Not one skipped row — the whole tail, silently.
+
+Worse one layer down: the read cursor is also a bare `ts`, so a message sharing the cursor row's
+millisecond was not merely stranded mid-walk, it could never appear as unread again — the cursor
+only moves forward. The cursor row already stored `last_read_message_id`; nothing consulted it.
+
+The repair does not add a cursor field. `since` keeps its exact meaning, and the PREFIX BOUND is
+made to never split a tie group — it completes the group past `headLimit` instead of cutting through
+it — so `ts > last` is exact again for every caller, including one on an older client with no way to
+send a tiebreak. Paying for that in a response occasionally larger than the bound is the deliberate
+trade against a silent permanent hole. The unread floor and `countUnread` do take the `(ts, id)`
+comparison, since the cursor is genuinely a point and both must agree about a tied row. Corrected
+claim: **a bounded read cannot skip a message, because the bound never falls inside a tie and the
+cursor compares as the pair the ordering is defined on.**
 
 ## Observability & Evaluation
 
