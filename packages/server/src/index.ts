@@ -71,6 +71,13 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
     trustProxy: config.trustProxy,
   });
   const db = opts.db ?? openDb(config.dbPath);
+  // The handle is the FACT; `config.dbPath` is only the intention, and an injected `opts.db` never
+  // opened it. Reconciled here, once, so every reader downstream is honest by construction: the
+  // startup log line, the `dbPath` accessor, and `db` on /health — which exists precisely so a
+  // client can confirm which database this daemon serves, and which guardian turns into the
+  // `wrong_db` alert. In production the two always agreed (`openDb(p)` opens exactly `p`), so the
+  // value was accidentally right rather than derived from anything checked.
+  config.dbPath = db.name || config.dbPath;
   const hub = new Hub();
   // Durable roster roots (ADR 058): explicit list (tests) or the rosterHome registry + env override.
   // An explicit list is fixed (hermetic tests); otherwise `reload()` re-resolves from the registry so
