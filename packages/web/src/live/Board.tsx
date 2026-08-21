@@ -1,5 +1,6 @@
 import type {
   Goal,
+  GoalFlow,
   Lane,
   LaneState,
   LaneWarning,
@@ -86,6 +87,8 @@ export interface BoardProps {
   view: 'columns' | 'grid';
   /** Declared Goals with derived status — the grid's mission cards. Empty = grid renders nothing. */
   goals: Goal[];
+  /** `report.goal_flow` (ADR 295) — the daemon's per-goal flow, rendered on the goal cards. */
+  goalFlow?: GoalFlow[] | undefined;
   /** Drill into a goal's lanes (null = the goal-less pool). Absent = cards still render, inert. */
   onOpenGoal?: (goalId: string | null) => void;
   /** Team roster — identity colors (jade agent / rose human) and the handoff seat picker. */
@@ -113,6 +116,7 @@ export function Board({
   warnings,
   view,
   goals,
+  goalFlow,
   onOpenGoal,
   roster,
   me,
@@ -271,6 +275,7 @@ export function Board({
           lanes={lanes.filter((l) => l.state !== 'abandoned')}
           goals={goals}
           warnings={warnings}
+          goalFlow={goalFlow}
           roster={roster}
           onOpenGoal={onOpenGoal ?? (() => undefined)}
         />

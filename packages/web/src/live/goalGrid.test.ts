@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Goal, Lane, LaneWarning } from '@musterd/protocol';
+import type { FlowMetrics, Goal, Lane, LaneWarning } from '@musterd/protocol';
 import { buildGoalGrid, RUNWAY_DOT_CAP } from './goalGrid';
 import * as grid from './goalGrid';
 
@@ -340,5 +340,64 @@ describe('buildGoalGrid — retracted goals (goal-retract design)', () => {
     expect(model.cards).toHaveLength(1);
     expect(model.cards[0]!.id).toBe('gone');
     expect(model.cards[0]!.declared).toBe(false);
+  });
+});
+
+describe('buildGoalGrid — per-goal flow (ADR 295)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const flow = (over: Partial<FlowMetrics> = {}): FlowMetrics => ({
+    throughput_7d: 0,
+    cycle_time_ms: null,
+    wip: 0,
+    oldest_wip_age_ms: null,
+    backlog: 0,
+    ...over,
+  });
+
+  it('attaches the daemon-derived flow to the card whose goal it names', () => {
+    const goals = [goal({ id: 'launch', title: 'Launch' })];
+    const lanes = [lane({ id: 'L1', goal_id: 'launch', state: 'active' })];
+    const goalFlow = [
+      { goal_id: 'launch', flow: flow({ wip: 3, oldest_wip_age_ms: 11 * DAY, backlog: 2 }) },
+    ];
+
+    const model = buildGoalGrid(lanes, goals, NOW, [], goalFlow);
+    expect(model.cards[0]!.flow).toEqual(goalFlow[0]!.flow);
+  });
+
+  it('gives the goal-less card the null-pool entry, not a goal entry', () => {
+    const goals = [goal({ id: 'launch', title: 'Launch' })];
+    const lanes = [
+      lane({ id: 'L1', goal_id: 'launch', state: 'active' }),
+      lane({ id: 'L2', goal_id: null, state: 'active' }),
+    ];
+    const goalFlow = [
+      { goal_id: 'launch', flow: flow({ wip: 1 }) },
+      { goal_id: null, flow: flow({ wip: 9 }) },
+    ];
+
+    const model = buildGoalGrid(lanes, goals, NOW, [], goalFlow);
+    const pool = model.cards.find((c) => c.id === null);
+    expect(pool!.flow!.wip).toBe(9);
+  });
+
+  it('leaves flow null when the daemon sent none — a pre-295 server renders as before', () => {
+    const goals = [goal({ id: 'launch', title: 'Launch' })];
+    const lanes = [lane({ id: 'L1', goal_id: 'launch', state: 'active' })];
+
+    const model = buildGoalGrid(lanes, goals, NOW);
+    expect(model.cards[0]!.flow).toBeNull();
+  });
+
+  it('never invents flow for a goal the daemon did not report', () => {
+    const goals = [goal({ id: 'launch' }), goal({ id: 'other', title: 'Other' })];
+    const lanes = [
+      lane({ id: 'L1', goal_id: 'launch', state: 'active' }),
+      lane({ id: 'L2', goal_id: 'other', state: 'active' }),
+    ];
+    const goalFlow = [{ goal_id: 'launch', flow: flow({ wip: 1 }) }];
+
+    const model = buildGoalGrid(lanes, goals, NOW, [], goalFlow);
+    expect(model.cards.find((c) => c.id === 'other')!.flow).toBeNull();
   });
 });

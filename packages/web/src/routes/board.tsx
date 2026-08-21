@@ -408,6 +408,7 @@ function BoardPage() {
                 view={view}
                 onOpenGoal={openGoal}
                 goals={report?.goals ?? []}
+                goalFlow={report?.goal_flow}
                 roster={roster}
                 me={me}
                 busyId={busyId}

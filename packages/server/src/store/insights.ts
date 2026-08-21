@@ -1,14 +1,16 @@
-import type {
-  BlockedLane,
-  CoordinationDensity,
-  FlowMetrics,
-  LongDeferred,
-  Report,
-  ReviewMetrics,
-  SteeringMetrics,
-  WaitingOnEntry,
-  WakeMetrics,
-  WakeSeatCost,
+import {
+  LANE_CONTENDING_STATES,
+  type BlockedLane,
+  type CoordinationDensity,
+  type FlowMetrics,
+  type GoalFlow,
+  type LongDeferred,
+  type Report,
+  type ReviewMetrics,
+  type SteeringMetrics,
+  type WaitingOnEntry,
+  type WakeMetrics,
+  type WakeSeatCost,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { actAnswered, openDirectedLedger } from './delivery.js';
@@ -34,7 +36,14 @@ const DEFERRAL_SCAN_LIMIT = 2000;
  */
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-const CONTENDING = "('claimed','active','blocked')";
+/**
+ * The contending set as SQL, derived from the protocol's own set rather than restated (ADR 295).
+ * It was a hand-written literal from PR #82 until then, and it never followed ADR 169/192 when
+ * acceptance became a stage — so a lane merged and waiting on a counterpart counted as idle, and
+ * flow could not see the review debt ADR 258 had just made first-class. Deriving it means the next
+ * state added to the set arrives here for free.
+ */
+const CONTENDING = `(${[...LANE_CONTENDING_STATES].map((s) => `'${s}'`).join(',')})`;
 const STEERING_WINDOW_DAYS = 7;
 const STEERING_WINDOW_MS = STEERING_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
@@ -62,12 +71,75 @@ export function flowMetrics(db: Database, teamId: string, now: number = Date.now
     >(`SELECT COUNT(*) AS n, MIN(created_at) AS oldest FROM lanes WHERE team_id = ? AND state IN ${CONTENDING}`)
     .get(teamId)!;
 
+  const backlog = db
+    .prepare<
+      [string],
+      { n: number }
+    >(`SELECT COUNT(*) AS n FROM lanes WHERE team_id = ? AND state = 'open'`)
+    .get(teamId)!;
+
   return {
     throughput_7d: throughput.n,
     cycle_time_ms: cycle.avg === null ? null : Math.round(cycle.avg),
     wip: wip.n,
     oldest_wip_age_ms: wip.oldest === null ? null : Math.max(0, now - wip.oldest),
+    backlog: backlog.n,
   };
+}
+
+/** One grouped row; `goal_id` is SQL NULL for the goal-less pool. */
+interface GoalFlowRow {
+  goal_id: string | null;
+  throughput: number;
+  cycle_avg: number | null;
+  wip: number;
+  oldest: number | null;
+  backlog: number;
+}
+
+/**
+ * Flow dimensioned by Goal (ADR 295) — `flowMetrics`'s aggregates with `GROUP BY goal_id`. The
+ * grouping rides `idx_lanes_goal(team_id, goal_id)` from ADR 084's v12 migration, so no schema
+ * change and no scan.
+ *
+ * One entry per distinct `goal_id` on the team's lanes, plus a `null` entry when goal-less lanes
+ * exist. A declared Goal with no lanes gets NO entry: it has no flow to report, its status is
+ * already `planned` in `report.goals`, and enumerating goals here would make this a second copy of
+ * that roster — free to drift from the first. Sorted oldest-WIP first so the dragging goal reads
+ * first, never by throughput (see {@link GoalFlowSchema} on why that ordering is load-bearing).
+ */
+export function goalFlowMetrics(
+  db: Database,
+  teamId: string,
+  now: number = Date.now(),
+): GoalFlow[] {
+  const rows = db
+    .prepare<[number, string], GoalFlowRow>(
+      `SELECT goal_id                                                             AS goal_id,
+              COUNT(*) FILTER (WHERE state = 'done' AND resolved_at > ?)          AS throughput,
+              AVG(CASE WHEN state = 'done' AND resolved_at IS NOT NULL AND claimed_at IS NOT NULL
+                       THEN resolved_at - claimed_at END)                         AS cycle_avg,
+              COUNT(*) FILTER (WHERE state IN ${CONTENDING})                      AS wip,
+              MIN(CASE WHEN state IN ${CONTENDING} THEN created_at END)           AS oldest,
+              COUNT(*) FILTER (WHERE state = 'open')                              AS backlog
+         FROM lanes
+        WHERE team_id = ?
+        GROUP BY goal_id`,
+    )
+    .all(now - WEEK_MS, teamId);
+
+  return rows
+    .map((r) => ({
+      goal_id: r.goal_id,
+      flow: {
+        throughput_7d: r.throughput,
+        cycle_time_ms: r.cycle_avg === null ? null : Math.round(r.cycle_avg),
+        wip: r.wip,
+        oldest_wip_age_ms: r.oldest === null ? null : Math.max(0, now - r.oldest),
+        backlog: r.backlog,
+      },
+    }))
+    .sort((a, b) => (b.flow.oldest_wip_age_ms ?? -1) - (a.flow.oldest_wip_age_ms ?? -1));
 }
 
 interface DirectedRow {
@@ -733,6 +805,7 @@ export function deriveReport(
     team: teamSlug,
     generated_ts: now,
     flow: flowMetrics(db, teamId, now),
+    goal_flow: goalFlowMetrics(db, teamId, now),
     waiting_on: waitingOn(db, teamId, now),
     goals: listGoals(db, teamId, teamSlug),
     blocked,

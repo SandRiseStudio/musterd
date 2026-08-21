@@ -1,0 +1,60 @@
+- main [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - generic [ref=f1e4]: musterd
+    - generic [ref=f1e9]: / office preview
+    - button "?" [ref=f1e10] [cursor=pointer]
+    - button "!" [ref=f1e11] [cursor=pointer]
+    - button "↦" [ref=f1e12] [cursor=pointer]
+    - button "📣" [ref=f1e13] [cursor=pointer]
+    - button "↪" [ref=f1e14] [cursor=pointer]
+    - button "🤔" [ref=f1e15] [cursor=pointer]
+    - button "»" [ref=f1e16] [cursor=pointer]
+    - button "🙆" [ref=f1e17] [cursor=pointer]
+    - button "👀" [ref=f1e18] [cursor=pointer]
+    - button "🍵" [ref=f1e19] [cursor=pointer]
+    - button "🪑" [ref=f1e20] [cursor=pointer]
+    - button "🍽" [ref=f1e21] [cursor=pointer]
+    - button "💧" [ref=f1e22] [cursor=pointer]
+    - button "☕" [ref=f1e23] [cursor=pointer]
+    - button "📞" [ref=f1e24] [cursor=pointer]
+    - button "D" [ref=f1e25] [cursor=pointer]
+    - button "H" [ref=f1e26] [cursor=pointer]
+    - button "z" [ref=f1e27] [cursor=pointer]
+    - button "☕" [ref=f1e28] [cursor=pointer]
+    - generic [ref=f1e29]: design preview
+  - generic [ref=f1e31]:
+    - generic:
+      - button [ref=f1e35] [cursor=pointer]:
+        - generic [ref=f1e37]: Dev
+        - generic [ref=f1e38]: "?"
+      - button [ref=f1e42] [cursor=pointer]:
+        - generic [ref=f1e44]: Jib
+        - generic [ref=f1e45]: service
+      - button [ref=f1e49] [cursor=pointer]:
+        - generic [ref=f1e51]: Ada
+      - button [ref=f1e59] [cursor=pointer]:
+        - generic [ref=f1e61]: Bo
+      - button [ref=f1e68] [cursor=pointer]:
+        - generic [ref=f1e70]: Cy
+      - button [ref=f1e77] [cursor=pointer]:
+        - generic [ref=f1e79]: Eli
+      - button [ref=f1e86] [cursor=pointer]:
+        - generic [ref=f1e88]: Fen
+      - button [ref=f1e95] [cursor=pointer]:
+        - generic [ref=f1e97]: Hana
+      - button [ref=f1e104] [cursor=pointer]:
+        - generic [ref=f1e106]: Ivy
+    - group "who is in the room, and what they are on" [ref=f1e113]:
+      - generic [ref=f1e114]:
+        - generic [ref=f1e116]: revive
+        - generic [ref=f1e117]: LIVE
+        - generic [ref=f1e119]:
+          - button "previous teammate" [ref=f1e120] [cursor=pointer]: ‹
+          - generic [ref=f1e121]:
+            - text: "1"
+            - generic [ref=f1e122]: /6
+          - button "next teammate" [ref=f1e123] [cursor=pointer]: ›
+      - paragraph [ref=f1e124]:
+        - generic [ref=f1e125]: Ivy
+        - generic [ref=f1e127]: ADR 169 inc 5 — spin-up/spin-down ephemeral cross-family reviewer
+    - paragraph [ref=f1e136]: office choreography preview
