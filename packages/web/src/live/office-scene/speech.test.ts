@@ -4,6 +4,7 @@ import {
   GLANCE_MAX,
   GLANCE_MAX_STATUS,
   shapeSpeech,
+  speechAddressee,
   speechLength,
   speechTokens,
   stripNoise,
@@ -149,5 +150,39 @@ describe('typeCadence', () => {
     const total = GLANCE_MAX * typeCadence(GLANCE_MAX);
     expect(total).toBeGreaterThan(2200);
     expect(total).toBeLessThan(3800);
+  });
+});
+
+describe('speechAddressee', () => {
+  it('names the member a directed act is aimed at', () => {
+    // The bug this fixes: "You were right, I will take the handoff…" floating with no "you".
+    expect(speechAddressee({ kind: 'member', name: 'ryder' }, 'miley')).toEqual({
+      name: 'ryder',
+      tether: true,
+    });
+  });
+
+  it('says nothing for a team act — team is the default, so a chip on every bubble is noise', () => {
+    expect(speechAddressee({ kind: 'team' }, 'miley')).toBeNull();
+  });
+
+  it('says nothing for a broadcast act', () => {
+    expect(speechAddressee({ kind: 'broadcast' }, 'miley')).toBeNull();
+  });
+
+  it('keeps the chip but drops the tether when a seat addresses itself', () => {
+    // A zero-length arc from a desk back to the same desk is a smudge, not a signal.
+    expect(speechAddressee({ kind: 'member', name: 'miley' }, 'miley')).toEqual({
+      name: 'miley',
+      tether: false,
+    });
+  });
+
+  it('is case-sensitive about self-addressing only on an exact seat-name match', () => {
+    // Seat names are exact identifiers; "Miley" is not "miley" and must not be collapsed.
+    expect(speechAddressee({ kind: 'member', name: 'Miley' }, 'miley')).toEqual({
+      name: 'Miley',
+      tether: true,
+    });
   });
 });

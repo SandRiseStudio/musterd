@@ -2,6 +2,7 @@
  * Pure helpers for the ephemeral office speech bubbles — an act's body types out over the sender's head,
  * then fades. Kept separate from the DOM wiring in `index.ts` so the text-shaping logic is unit-testable.
  */
+import type { Recipient } from '@musterd/protocol';
 import { richTokens, type RichToken } from '../format';
 
 /** Glance budget: what a bubble shows unhovered. Wide enough to carry the actual point of a message
@@ -102,6 +103,34 @@ export function shapeSpeech(raw: string, act?: string): ShapedSpeech {
   const glance = truncateSpeech(cleaned, glanceMax);
   const full = cleaned.length <= FULL_MAX ? cleaned : truncateSpeech(cleaned, FULL_MAX);
   return { glance, full, clamped: glance !== full };
+}
+
+/* ─── who a bubble is talking to ─────────────────────────────────────────────────────────────────
+ * A directed act read as an unaddressed soliloquy: "You were right, I will take the handoff…" over
+ * someone's head, with no way to know who "you" is. The envelope always carried `to`; only the
+ * bubble was blind to it (the choreography layer has always used it — a handoff walks to the
+ * recipient's desk). */
+
+/** What the bubble should say about its recipient, or `null` when naming one would be noise. */
+export interface Addressee {
+  /** The recipient seat's name, rendered as a chip on the bubble's leading edge. */
+  name: string;
+  /** Whether to draw the light-trace toward that member's desk. False when there is no meaningful
+   * arc to draw — the scene additionally drops it when the recipient isn't on the floor. */
+  tether: boolean;
+}
+
+/**
+ * Decide how a bubble names its recipient.
+ *
+ * Team and broadcast acts name nobody: the team IS the default audience, so a chip on every bubble
+ * would be chrome rather than information. A member act always names them — that is the whole point
+ * — but a seat addressing itself gets the chip without the tether, because an arc from a desk back
+ * to the same desk is a smudge, not a signal.
+ */
+export function speechAddressee(to: Recipient, from: string): Addressee | null {
+  if (to.kind !== 'member') return null;
+  return { name: to.name, tether: to.name !== from };
 }
 
 /** Per-character typewriter cadence in ms — quicker for longer text, clamped comfortable. Tuned so a

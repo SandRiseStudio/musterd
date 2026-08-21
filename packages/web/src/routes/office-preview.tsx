@@ -80,6 +80,10 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       who: 'Cy',
       text: 'anyone seen the flaky seating test? it fails ~1 in 5 for me',
       tone: 'accent',
+      // An addressed bubble early in the loop, so the chip is visible when someone is WATCHING the
+      // room. It is not the one the gate measures: Cy speaks again at 6700, and one bubble per member
+      // means this one is superseded long before the sweep's shutter — Bo's at 7500 is the survivor.
+      addressee: { name: 'Fen', tether: true },
     },
   },
   { at: 500, ev: { kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' } },
@@ -107,6 +111,38 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
   {
     at: 3700,
     ev: { kind: 'speech', who: 'Fen', text: 'fixed — resolving the thread', tone: 'success' },
+  },
+  // `decline` and `wait` complete the set: every other kind `actToEvent` can produce from a real
+  // envelope was already scripted here, but these two were not — so two states a viewer of /live can
+  // genuinely hit had never been drawn on the one route the office is reviewed and contrast-swept on
+  // (miley, 2026-08-20). Declining and pausing are ordinary things for a seat to do.
+  { at: 7400, ev: { kind: 'decline', who: 'Bo' } },
+  {
+    at: 7500,
+    ev: {
+      kind: 'speech',
+      who: 'Bo',
+      text: "not taking this one — it needs the seating fix first, and that's not mine",
+      // The tones mirror what actTone() would really return for these acts on /live: decline is
+      // `danger`, wait is `info`. A fixture that invents its own tone teaches the wrong room.
+      tone: 'danger',
+      // THE MEASURED CHIP. Bo speaks exactly once in the script, so this bubble is still standing at
+      // the sweep's shutter — verified 2026-08-20, the sweep emits an `lc-speech__to` row keyed
+      // `rgb(90,78,63)` over its own 9% tone wash, and /office-preview stays 0 below AA. A declined
+      // handoff is also the honest place for a recipient chip: "not taking this one" needs a "from
+      // whom" or it is unreadable.
+      addressee: { name: 'Eli', tether: true },
+    },
+  },
+  { at: 8000, ev: { kind: 'wait', who: 'Ivy' } },
+  {
+    at: 8100,
+    ev: {
+      kind: 'speech',
+      who: 'Ivy',
+      text: 'holding until the rig review lands',
+      tone: 'info',
+    },
   },
   { at: 4200, ev: { kind: 'note', from: 'Ada', to: 'Cy', tone: 'info' } },
   // Steering trio (ADR 103): a challenge questions a direction, an interrupt-class steer redirects it,
@@ -318,16 +354,33 @@ function OfficePreviewPage() {
     import('../live/office-scene')
       .then(({ mountOffice }) => {
         if (disposed || !host || !labelHost) return;
-        const handle = mountOffice(host, labelHost, false, { interactiveLabels: true });
+        const search =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search)
+            : new URLSearchParams();
+        /*
+         * `?reduced` — RENDER THE ROOM AS A REDUCED-MOTION VIEWER SEES IT.
+         *
+         * This route hardcodes `reduced: false` (it is a design tool; a designer with Reduce Motion
+         * enabled in their OS would otherwise find it useless, and the a11y gate leans on it moving).
+         * The cost of that default is a blind spot: `prefers-reduced-motion` takes the office
+         * somewhere quite far from here — the rAF loop never starts, walkers snap between desks
+         * instead of walking, ambient life and the pet and the door pulse all stand down, and bubbles
+         * appear whole with no typewriter. **No one had ever looked at that room**, because the one
+         * tool used to review the office structurally could not render it (miley/nick, 2026-08-20).
+         *
+         * Presence, not value, like `?still` and `?quiet` beside it — inert unless explicitly asked
+         * for, so the route's animated day job is unchanged. Opt-in rather than honouring the media
+         * query directly, deliberately: honouring it would make the preview useless to exactly the
+         * designer who has the setting turned on.
+         */
+        const reduced = search.has('reduced');
+        const handle = mountOffice(host, labelHost, reduced, { interactiveLabels: true });
         handle.update(dataRef.current());
         handleRef.current = handle;
         (window as unknown as { __office?: OfficeHandle }).__office = handle; // dev-fixture debug handle
         // `?quiet` skips the looping choreography — a still room of seated members, so an on-demand
         // gesture (pokeGesture / the 🙆👀 buttons) is the only motion. Used to verify gestures in isolation.
-        const search =
-          typeof window !== 'undefined'
-            ? new URLSearchParams(window.location.search)
-            : new URLSearchParams();
         const quiet = search.has('quiet');
         /*
          * `?still` — the MEASUREMENT mode: the same script, played ONCE and immediately, with no

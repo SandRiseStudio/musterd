@@ -1617,6 +1617,65 @@
 }
 
 /* the soft acknowledge pulse the moment a bubble is clicked (focus hands off to the stream flash) */
+/* The recipient chip: who a directed act is aimed at, so the body can safely say "you". The TONE
+   tints the chip's rim and wash only — never its text. `--lc-speech-tone` defaults to
+   `--lc-accent-bright`, which is a FILL token (~1.2:1 as text); the ink stays `--lc-muted`
+   (5.71:1 on the darkest paper), the same fill/ink split the badge palette already enforces. */
+.lc-speech__to {
+  display: inline-block;
+  margin: 0 5px 1px 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--lc-speech-tone) 38%, var(--lc-border));
+  background: color-mix(in srgb, var(--lc-speech-tone) 9%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  line-height: 16px;
+  letter-spacing: -0.01em;
+  color: var(--lc-muted);
+  max-width: 116px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+/* The light-trace: one arc from the bubble toward the recipient's desk, drawn on and then fading, so
+   the room reads as wired together rather than as separate speakers. Inert decoration — it must
+   never intercept the pointer the canvas owns. Suppressed entirely under reduced motion and in
+   measurement mode (the scene does not create it at all in those cases). */
+.lc-speech-trace {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+}
+.lc-speech-trace path {
+  fill: none;
+  stroke: color-mix(in srgb, var(--lc-accent-bright) 62%, transparent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1 0;
+  animation: lc-trace-draw 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes lc-trace-draw {
+  0% {
+    opacity: 0;
+    stroke-dashoffset: 0;
+  }
+  28% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-speech-trace {
+    display: none;
+  }
+}
+
 .lc-speech.is-picked .lc-speech__inner {
   animation: lc-speech-picked 460ms cubic-bezier(0.22, 1, 0.36, 1);
 }

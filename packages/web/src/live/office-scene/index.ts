@@ -43,7 +43,14 @@ import {
 } from './render';
 import { GESTURE } from './skeleton';
 import type { WallBoard } from './wallboard';
-import { shapeSpeech, speechLength, speechTokens, typeCadence, type SpeechToken } from './speech';
+import {
+  shapeSpeech,
+  speechLength,
+  speechTokens,
+  typeCadence,
+  type Addressee,
+  type SpeechToken,
+} from './speech';
 import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, OfficeStats } from './types';
@@ -699,6 +706,36 @@ export function mountOffice(
     repositionSpeeches(headMap);
   }
 
+  /**
+   * The light-trace: one quadratic arc from just under the speaker's bubble to the recipient's head,
+   * bowed upward so it clears the furniture between them rather than cutting through the room. Sized
+   * to the bounding box of the two anchors (plus the bow) so the SVG never covers the whole stage and
+   * intercepts nothing — it is inert decoration over a canvas that owns the pointer.
+   */
+  function drawTether(from: Pt, to: Pt): SVGSVGElement {
+    const bow = Math.min(120, Math.max(48, Math.hypot(to.x - from.x, to.y - from.y) * 0.28));
+    const y0 = from.y - SPEECH_LIFT + 8; // leaves the bubble at its lower edge, not the head
+    const cx = (from.x + to.x) / 2;
+    const cy = Math.min(y0, to.y) - bow;
+    const minX = Math.min(from.x, to.x) - 2;
+    const minY = cy - 2;
+    const w = Math.abs(to.x - from.x) + 4;
+    const h = Math.max(y0, to.y) - minY + 4;
+
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'lc-speech-trace');
+    svg.setAttribute('viewBox', `${minX} ${minY} ${w} ${h}`);
+    svg.style.left = `${minX}px`;
+    svg.style.top = `${minY}px`;
+    svg.style.width = `${w}px`;
+    svg.style.height = `${h}px`;
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M${from.x} ${y0} Q${cx} ${cy} ${to.x} ${to.y}`);
+    // The dash is the whole path length, so the CSS animation draws it on from the speaker's end.
+    svg.appendChild(path);
+    return svg;
+  }
+
   // ── ephemeral speech: an act's body types out over the sender's head, then fades ───────────────────
   function positionSpeech(outer: HTMLDivElement, head: Pt) {
     outer.style.transform = `translate(-50%, -100%) translate(${head.x}px, ${head.y - SPEECH_LIFT}px)`;
@@ -723,7 +760,14 @@ export function mountOffice(
    * even while the office rests; reduced-motion shows the text at once with no typewriter. When the act's
    * envelope `id` is known (and the host wired `onActClick`), the bubble is a click-through to that act
    * in the stream panel. */
-  function showSpeech(who: string, raw: string, tone: string, id?: string, act?: string) {
+  function showSpeech(
+    who: string,
+    raw: string,
+    tone: string,
+    id?: string,
+    act?: string,
+    addressee?: Addressee | null,
+  ) {
     const { glance, full, clamped } = shapeSpeech(raw, act);
     const head = heads.get(who);
     if (!glance || !head) return; // nothing to say, or the sender isn't on the floor (offline / capped)
@@ -747,6 +791,17 @@ export function mountOffice(
       });
     }
     inner.style.setProperty('--lc-speech-tone', toneColor(tone));
+    // ── the recipient chip ────────────────────────────────────────────────────────────────────
+    // A directed act names who it is aimed at, so the body can safely say "you". Team and broadcast
+    // acts pass no addressee: the team is already the default audience, and a chip on every bubble
+    // would be chrome. The chip carries MEANING, so unlike the tether it survives reduced-motion
+    // and measurement mode.
+    if (addressee) {
+      const chip = document.createElement('span');
+      chip.className = 'lc-speech__to';
+      chip.textContent = `→ ${addressee.name}`;
+      inner.appendChild(chip);
+    }
     const textEl = document.createElement('span');
     textEl.className = 'lc-speech__text';
     inner.appendChild(textEl);
@@ -810,6 +865,20 @@ export function mountOffice(
     const s: Speech = { outer, cancels: [] };
     speeches.set(who, s);
     positionSpeech(outer, head);
+
+    // ── the light-trace ───────────────────────────────────────────────────────────────────────
+    // A soft arc from the bubble toward the recipient's desk, drawn once and fading as the bubble
+    // settles: it makes the room read as wired together rather than as a set of separate speakers.
+    // Pure delight, so it stands down wherever delight is not wanted — reduced motion, and STILL
+    // (ADR 285) where a moving line would make the contrast sweep nondeterministic. A recipient who
+    // isn't on the floor (offline, or capped out of the render) has no desk to point at, so the
+    // chip stands alone.
+    const target = addressee?.tether ? heads.get(addressee.name) : undefined;
+    if (target && !reduced && !STILL) {
+      const trace = drawTether(head, target);
+      labelHost.appendChild(trace);
+      s.cancels.push(() => trace.remove());
+    }
 
     // enter on the next frame so the hidden initial state paints first → the CSS transition actually runs
     const raf = requestAnimationFrame(() => outer.classList.add('is-in'));
@@ -1320,7 +1389,7 @@ export function mountOffice(
     }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
-      showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act);
+      showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act, ev.addressee);
       return;
     }
     if (reduced) return;
