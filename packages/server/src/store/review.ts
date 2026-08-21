@@ -57,6 +57,44 @@ export interface ReviewPick {
   reviewer_family: string;
 }
 
+/** Why a seat was not the reviewer in a particular, recorded selection. ADR 303 keeps this
+ * vocabulary deliberately bounded so an audit row remains evidence, not an unstructured diary. */
+export type ReviewSelectionExclusion =
+  | 'self'
+  | 'service_or_observer'
+  | 'no_live_presence'
+  | 'not_agent'
+  | 'busy'
+  | 'unknown_grade'
+  | 'same_model'
+  | 'lower_grade'
+  | 'tie_break';
+
+/** One seat evaluated by the live peer-review picker at decision time. */
+export interface ReviewSelectionCandidate {
+  /** Seat name only — never a credential, Presence id, or transcript path. */
+  member: string;
+  /** Current live model family, or the truthful `unknown` / `human` sentinel. */
+  family: string;
+  /** Whether this seat won the picker after all routing constraints and ladder precedence. */
+  eligible: boolean;
+  /** Present only for the selected candidate. */
+  grade?: ReviewGrade;
+  /** Present when this candidate was not selected. */
+  exclusion?: ReviewSelectionExclusion;
+}
+
+/** Decision-time evidence persisted with `lane.ready_for_review` (ADR 303). */
+export interface ReviewSelectionSnapshot {
+  selected: { reviewer: string; grade: ReviewGrade } | null;
+  candidates: ReviewSelectionCandidate[];
+}
+
+export interface ReviewSelection {
+  pick: ReviewPick | null;
+  snapshot: ReviewSelectionSnapshot;
+}
+
 /** One seat's last attestation, whichever source proved it. */
 interface Attestation {
   model: string | null;
@@ -358,78 +396,99 @@ export function pickReviewCounterpart(
   worker: string,
   presenceTimeoutMs: number,
 ): ReviewPick | null {
+  return selectReviewCounterpart(db, teamId, lane, worker, presenceTimeoutMs).pick;
+}
+
+/**
+ * Select a live agent counterpart and retain the full decision-time evidence for the ready audit.
+ * This is intentionally a peer-picker only: risky human escalation and wake routing remain distinct
+ * paths in the transport, whose explicit outcome is recorded alongside this snapshot.
+ */
+export function selectReviewCounterpart(
+  db: Database,
+  teamId: string,
+  _lane: Lane,
+  worker: string,
+  presenceTimeoutMs: number,
+): ReviewSelection {
   const lastWork = lastActionByActor(db, teamId, {
     excludeActions: ['occupancy.model_attested'],
   });
   const now = Date.now();
-  const candidates = listMembers(db, teamId).filter((m) => {
-    if (m.name === worker || m.observer || m.kind === 'service') return false;
-    if (!hasLivePresence(db, m.id, presenceTimeoutMs)) return false;
-    // Quiet-set inc 1: a live agent mid-turn is not an acceptor. `unknown` (no work
-    // audit in lookback) degrades to presence-only — same as before this filter.
-    // Agents only: a human in this list is dropped by pickLadder({agentsOnly:true})
-    // anyway, but do not mark humans busy here so a future caller cannot empty
-    // the human path by accident.
-    if (m.kind === 'agent') {
-      const actedAt = lastWork.get(m.name);
-      if (
-        actedAt !== undefined &&
-        resolveQuiescence(actedAt, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state === 'busy'
-      ) {
-        return false;
-      }
-    }
-    return true;
-  });
-
-  // Live pick is always agents-only (ADR 253). Humans enter only via pickHumanReviewer: risky
-  // stage two, or risky no-peer fallback. Never on a non-risky lane — including the ADR 191
-  // breaker, which the caller must not reintroduce.
-  return pickLadder(db, teamId, worker, candidates, { agentsOnly: true });
-}
-
-/**
- * The graded ladder (ADR 188 / ADR 253). Decorrelation is a spectrum, and the old boolean rule
- * treated its middle as its bottom: 16 of the first 17 review episodes closed no_candidate on an
- * all-claude roster while a *different claude model* was live and would have caught different
- * mistakes. Live pick order: `cross_family` > `cross_model`. `same_model` and ungradeable seats
- * are never routed — a same-checkpoint review re-runs the worker's blind spots, and an unattested
- * seat cannot prove anything (ADR 158). `agentsOnly` is the live-pick shape (ADR 253): humans are
- * never rungs here. They enter only via pickHumanReviewer, and only on a risky lane.
- */
-function pickLadder(
-  db: Database,
-  teamId: string,
-  worker: string,
-  candidates: MemberRow[],
-  opts: { agentsOnly: boolean },
-): ReviewPick | null {
   const workerSeat = listMembers(db, teamId).find((x) => x.name === worker);
   const workerModel = workerSeat ? latestAttestedModel(db, workerSeat.id) : null;
-  const LADDER = ['human', 'cross_family', 'cross_model'] as const;
-  const graded = candidates
-    .filter((m) => !opts.agentsOnly || m.kind !== 'human')
-    .map((m) => ({
-      m,
-      grade:
-        m.kind === 'human'
-          ? ('human' as const)
-          : reviewGrade(workerModel, latestAttestedModel(db, m.id)),
-    }))
-    .filter(
-      (c): c is { m: MemberRow; grade: (typeof LADDER)[number] } =>
-        c.grade !== null && c.grade !== 'same_model',
-    )
-    // Stable sort: among equal grades the roster order stands — no new tie-break policy here.
-    .sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
-  const best = graded[0];
-  if (!best) return null;
-  return {
-    reviewer: best.m.name,
+  const candidates: ReviewSelectionCandidate[] = [];
+  const selectable: Array<{ index: number; member: MemberRow; grade: ReviewGrade }> = [];
+
+  for (const member of listMembers(db, teamId)) {
+    const candidate: ReviewSelectionCandidate = {
+      member: member.name,
+      family: memberFamily(db, member),
+      eligible: false,
+    };
+    candidates.push(candidate);
+    if (member.name === worker) {
+      candidate.exclusion = 'self';
+      continue;
+    }
+    if (member.observer || member.kind === 'service') {
+      candidate.exclusion = 'service_or_observer';
+      continue;
+    }
+    if (!hasLivePresence(db, member.id, presenceTimeoutMs)) {
+      candidate.exclusion = 'no_live_presence';
+      continue;
+    }
+    // Live peer review is agents-only (ADR 253). Human escalation is a distinct transport path.
+    if (member.kind !== 'agent') {
+      candidate.exclusion = 'not_agent';
+      continue;
+    }
+    const actedAt = lastWork.get(member.name);
+    if (
+      actedAt !== undefined &&
+      resolveQuiescence(actedAt, now, QUIESCENCE_DEFAULT_QUIET_AFTER_MS).state === 'busy'
+    ) {
+      candidate.exclusion = 'busy';
+      continue;
+    }
+    const grade = reviewGrade(workerModel, latestAttestedModel(db, member.id));
+    if (grade === null) {
+      candidate.exclusion = 'unknown_grade';
+      continue;
+    }
+    if (grade === 'same_model') {
+      candidate.exclusion = 'same_model';
+      continue;
+    }
+    selectable.push({ index: candidates.length - 1, member, grade });
+  }
+
+  const LADDER: ReviewGrade[] = ['cross_family', 'cross_model'];
+  // Stable sort preserves roster order for an equal-grade tie, which is the pre-ADR-303 policy.
+  selectable.sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
+  const best = selectable[0];
+  if (!best) return { pick: null, snapshot: { selected: null, candidates } };
+
+  for (const option of selectable) {
+    const candidate = candidates[option.index]!;
+    if (option === best) {
+      candidate.eligible = true;
+      candidate.grade = option.grade;
+    } else {
+      candidate.exclusion = option.grade === best.grade ? 'tie_break' : 'lower_grade';
+    }
+  }
+  const pick: ReviewPick = {
+    reviewer: best.member.name,
     // Wire-compat: `route` keeps its historical value on this path; `grade` carries the finer truth.
     route: 'cross_family',
     grade: best.grade,
-    reviewer_family: memberFamily(db, best.m),
+    reviewer_family: memberFamily(db, best.member),
+  };
+  return {
+    pick,
+    snapshot: { selected: { reviewer: pick.reviewer, grade: best.grade }, candidates },
   };
 }
 

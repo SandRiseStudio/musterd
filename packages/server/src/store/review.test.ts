@@ -422,6 +422,65 @@ describe('pickReviewCounterpart — graded ladder (ADR 188)', () => {
   });
 });
 
+describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', () => {
+  it('records the selected grade and a bounded reason for every rejected seat', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    agent(db, team, 'cross-model', 'claude-opus-4-8');
+    agent(db, team, 'winner', 'gpt-5.6-sol');
+    agent(db, team, 'twin', 'claude-opus-5');
+    const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
+    attach(db, unknown.id, 'cli', 'conn-unknown'); // live but deliberately without a model attestation
+    agent(db, team, 'busy', 'grok-4.5');
+    const { row: service } = addMember(db, team, {
+      kind: 'service',
+      name: 'autorefresh',
+      role: '',
+    });
+    attach(db, service.id, 'cli', 'conn-autorefresh', { model: 'gpt-5.6-sol' });
+    const { row: observer } = addMember(db, team, {
+      kind: 'human',
+      name: 'watcher',
+      role: '',
+      observer: true,
+    });
+    attach(db, observer.id, 'cli', 'conn-watcher');
+    const { row: offline } = addMember(db, team, { kind: 'agent', name: 'offline', role: '' });
+    // `offline` intentionally has no Presence.
+    expect(offline.name).toBe('offline');
+    db.prepare(
+      `INSERT INTO audit (id, team_id, actor, action, target, result, ts, created_at)
+         VALUES (?, ?, ?, 'x.did', NULL, 'allow', ?, ?)`,
+    ).run('aud-busy', team.id, 'busy', Date.now() - 5_000, Date.now() - 5_000);
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
+
+    expect(selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT)).toMatchObject({
+      pick: expect.objectContaining({ reviewer: 'winner', grade: 'cross_family' }),
+      snapshot: {
+        selected: { reviewer: 'winner', grade: 'cross_family' },
+        candidates: expect.arrayContaining([
+          { member: 'worker', family: 'claude', eligible: false, exclusion: 'self' },
+          {
+            member: 'autorefresh',
+            family: 'gpt',
+            eligible: false,
+            exclusion: 'service_or_observer',
+          },
+          { member: 'watcher', family: 'human', eligible: false, exclusion: 'service_or_observer' },
+          { member: 'offline', family: 'unknown', eligible: false, exclusion: 'no_live_presence' },
+          { member: 'busy', family: 'grok', eligible: false, exclusion: 'busy' },
+          { member: 'unknown', family: 'unknown', eligible: false, exclusion: 'unknown_grade' },
+          { member: 'twin', family: 'claude', eligible: false, exclusion: 'same_model' },
+          { member: 'cross-model', family: 'claude', eligible: false, exclusion: 'lower_grade' },
+          { member: 'winner', family: 'gpt', eligible: true, grade: 'cross_family' },
+        ]),
+      },
+    });
+  });
+});
+
 describe('pickReviewCounterpart — drops busy live agents (quiet-set inc 1)', () => {
   const acted = (
     db: ReturnType<typeof seed>['db'],
