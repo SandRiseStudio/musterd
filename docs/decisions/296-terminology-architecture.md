@@ -1,3 +1,146 @@
 # 296 — One meaning per word: the terminology architecture
 
-- Status: reserved (being written)
+- Status: accepted
+- Date: 2026-08-21
+- Deciders: nick (design conversation), stanley (carried)
+- Spec: `docs/superpowers/specs/2026-08-21-terminology-architecture-design.md` (PR #962)
+- Relates to: ADR 098 (the work-item vocabulary and the gate this extends), ADR 227 (roles as the
+  aptitude layer), ADR 261 (the compiled permission layer — this ADR names its layers), ADR 272
+  (the role/profile boundary — this ADR renames its workspace half), ADR 138 (clients render the
+  wire token), brand.md §5 / SPEC.md (the canonical glossary this ADR grows)
+
+## Context
+
+The vocabulary grew by accretion. `SPEC.md:22` makes five terms normative — Team, Member,
+Presence, Surface, Act — while roughly twelve are load-bearing, and the glossary that governs them
+is prose, so it has already drifted (the Member row still says `role (free text)`, superseded by
+ADR 227's `roles[]`; the Act row's list predates `ask`).
+
+The cost is not hypothetical. In one design conversation on 2026-08-21 the team's own admin asked
+"aren't those profiles just roles?" — about a distinction ADR 272 spent a revision cycle
+establishing — and then asked where the desktop-vs-terminal difference lives, which the wire has
+modeled as `presence.driver` for weeks with no word for it in any doc. Four collisions are live:
+`agent` doing double duty as the industry hook *and* the generic noun for participants; `profile`
+naming workspace equipment with a word that teaches nothing and that ADR 261 independently reuses
+for permissions; `surface` carrying three meanings (presence location, a lane's `surface_globs`,
+and marketing "launch surfaces"); and MCP tool access spanning three enforcement layers with no
+per-layer names — the ambiguity that cost hours in ADR 261's founding incident, where the answer
+to "which layer denied this?" was unavailable to the agent, the human, and the logs alike.
+
+A launch-day stranger meets all of this at once.
+
+## Decision
+
+**One meaning per word, one word per meaning — with the Not column enforced, not merely
+published.**
+
+### 1. The vocabulary
+
+The canonical five stay. The glossary grows to the load-bearing set, each term carrying a
+definition and a **Not** column (banned synonyms and banned second meanings). The full table is
+§3 of the spec; the terms it settles:
+
+- **agent** — the industry hook, and a *kind* of member (`agent · human · service`). Not the
+  generic noun: any sentence also true of humans or services says *member*.
+- **member** — anyone on the roster, the canonical noun.
+- **seat** — the durable position a member keeps; used only where durability or occupancy is the
+  subject. Not a synonym for member, not a license unit.
+- **role** — a responsibility the team grants: charter + ceiling, team-side and reviewed.
+- **toolkit** — what a workspace is equipped with (MCP servers, tools, allow-entries), carrying
+  no authority. Replaces "profile"; "kit" and "template" go in its Not column.
+- **workspace** / **harness** / **driver** — the folder a seat is bound to; the runtime family
+  (Claude Code, Cursor, Codex); and how a session runs (desktop, terminal, IDE, headless).
+  `driver` is already the wire field; this ADR makes it vocabulary.
+- **surface** — where a member touches the team, and nothing else. A lane's paths become its
+  **scope**.
+- **permissions** / **capability** — the harness-native compiled rules; and team-granted authority
+  enforced daemon-side. `capability` is internal/protocol vocabulary.
+
+Three structural rules the table encodes:
+
+1. **Three jobs, three words.** Agent is the hook and the kind, member is the noun, seat is the
+   mechanism. The pitch sentence uses each exactly once.
+2. **Installed / allowed / authorized.** A **toolkit** *installs* an MCP server; **permissions**
+   decide whether the harness *allows* a call; a **capability** is what the team has *authorized*,
+   true of the member on every machine. They compose as AND. This names ADR 261's three layers
+   without changing any of them.
+3. **Derivation flows one way.** Role → toolkit is a convenience (a role may name a
+   `default_toolkit`); toolkit → role is the pre-ADR-272 defect — a local unreviewed file
+   asserting a team responsibility — and stays impossible.
+
+Per-driver feature differences (session labeling, hook capture, skills discovery) are neither
+capabilities nor configuration but **observed environment facts**: documented in a support matrix
+and, if ever modeled, attested through presence like the model is. Reserved, not built here.
+
+### 2. Enforcement extends ADR 098's gate; it does not add a second one
+
+`scripts/check-vocab.ts` is already this mechanism for the work-item vocabulary — banned list,
+mention-vs-use masking, `<!-- vocab:ok -->` suppression, grandfathering by ADR number and plan
+date, and self-hosting from its own number. This ADR adds a second banned table (the Not columns)
+and **widens the gated path set** to the user-facing strings the current gate leaves out: CLI help
+and render strings, web UI strings, README, ROADMAP, AGENTS.md. Its path-and-date grandfathering
+is kept in preference to diff-awareness — simpler, proven here, and it makes the burn-down a set
+of named files rather than a heuristic. **ADR 296 self-hosts:** the new table gates ADRs from 296.
+
+The migration carries a controls-registry entry with an expiry, so a stall is loud rather than
+silent — the `neverExercisedSince` aging pattern from the controls work.
+
+### 3. Landing is tiered, and history is never rewritten
+
+- **Tier 1 — docs, CLI help, web strings:** migrate actively under the gate; bound ~45 days.
+- **Tier 2 — wire tokens and file keys** (`surface_globs` → `scope`, profile keys → toolkit):
+  on-touch only, with feature-epoch bumps and legacy accepted on read (ADR 138; the `idle→active`
+  rename and `adoptLegacyRoleKey` are the worked examples). No calendar bound.
+- **Tier 3 — internal identifiers:** opportunistic. Users never see them.
+
+Old ADRs keep their words. Corrections invalidate-date rather than overwrite, per the wiki's rule.
+
+## Alternatives rejected
+
+- **A second vocabulary for strangers, stability underneath** (public docs clean, internals
+  unchanged, with a mapping table) — the cheapest option, and it deliberately manufactures the
+  seam that produced the confusion: `musterd role create` scaffolds a *profile* today precisely
+  because two vocabularies met at one command. ADR 261 rejected a translation layer on the same
+  ground and its §3 defect is what the absence of one looks like when the vocabulary is wrong.
+- **Keep `profile`, always qualified as "workspace profile"** — the qualifier has already eroded
+  in practice (everyone says "profile"), and erosion restores the ambiguity for free.
+- **`kit` instead of `toolkit`** — collides with the launch deliverable already named "marketing
+  asset kit", which is the disease being cured. `kit` goes in the Not column.
+- **Promote `seat` to the headline noun** — evocative and differentiating, but it dethrones a
+  canonical five-term, touches wire vocabulary, and "a team of seats" reads colder than members.
+- **Rename everything at once, including internals** — one vocabulary sooner, at the cost of a
+  big-bang rename across 290+ ADRs and the wire; the tiered ratchet reaches the same destination
+  without a flag day.
+
+## Observability & Evaluation
+
+- **Traces:** none new. The gate is a build-time check; its output is the burn-down count and the
+  controls-registry entry's last-exercised date. No new audit actions, no new spans.
+- **Eval:** the falsifiable claim is narrow — after the extension lands, **zero banned-term
+  introductions merge to main**, and the tier-1 burn-down reaches zero by its registry bound.
+  Baseline is the burn-down count measured when the table lands. The **confusion test** is the
+  qualitative half: the question that started this ADR ("aren't profiles just roles?") must be
+  answerable from the regenerated glossary alone, as must "why does session labeling work on my
+  laptop and not my server?" (driver + support matrix).
+- **The reading that would indict this ADR:** a steady stream of `<!-- vocab:ok -->` suppressions
+  or Not-column edits. Each one is usage voting against a chosen word — that indicts the word, not
+  the writers; revise the term rather than relax the gate.
+- **Experiment:** none — observational. A controlled comparison of vocabularies would need two
+  populations of strangers musterd does not have pre-launch; the gate's counter and the confusion
+  test carry the claim instead.
+
+## Consequences
+
+- `musterd toolkit <create|list|show>` owns workspace equipment and `musterd role` becomes
+  roster-only, ending the "two worlds under one name" seam. `role create` prints a pointer for one
+  release; `--profile` survives as a quiet alias.
+- The glossary becomes a generated artifact rather than prose, and its existing drift is fixed in
+  the same pass — the first thing the new gate does is make the old glossary honest.
+- ADR 272's rename gets renamed: "profile" lasted one week as canonical. Pre-launch is the
+  cheapest this will ever be, and the legacy-key machinery that migration built (`adoptLegacyRoleKey`)
+  is reused rather than rebuilt.
+- Glossary stewardship and the support matrix become product-communications charter work — the
+  role that ADR-in-flight (Sloane) defines. The gate is what keeps that seat honest too.
+- One contingency is recorded rather than left to mood: if pricing (lane 01M08Y95JD) lands
+  per-seat, "seat" becomes an asset; if pricing makes the collision painful, that is the single
+  trigger to revisit the word.
