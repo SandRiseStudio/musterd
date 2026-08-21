@@ -255,6 +255,31 @@ export const CONTROLS: Control[] = [
     ],
   },
   {
+    id: 'guardian-raise-damped-on-reason',
+    kind: 'guard',
+    claim:
+      'The guardian says a given raise once per hour at most, and repeats it only when its reason changes — and every repeat it withholds is counted and carried on the next raise that fires, so suppression never reads as recovery.',
+    where: 'packages/cli/src/guardian/act.ts (`raise`) over damp.ts `shouldRaise`/`recordSuppressed`',
+    exercise:
+      'Drive `actOn` three times with one unchanged reason and assert one ask, two `guardian.suppressed` audits, and `lastRaise.<class>.suppressed === 2`; then change the evidence string and assert the next raise fires immediately. Both directions matter — a damper only exercised in the silencing direction is indistinguishable from a broken probe. The regression fixture is the real 2026-08-21 cluster (five byte-identical bodies at 12:18:10, 12:20:39, 12:23:02, 12:41:55, 12:51:14): `the 2026-08-21 cluster raises ONCE, not five times` in act.test.ts. Also exercise the exemption — two `service install --guardian` runs inside the hour must both print `control probe: alert path fired ✓`, because a dry run that silences the next dry run manufactures the false silence the damper exists to prevent.',
+    motivatedBy:
+      'The alert tier had no damper at all: `shouldAttempt` was consulted only inside the `tier === \'auto\' && remedy !== null` branch, so a class shipping as `alert` — which `daemon_down` does — raised on every tick that classified it. 30 guardian asks all-time carrying 4 distinct bodies; five byte-identical inside 33 minutes on 2026-08-21, all cleared as a false alarm. Nothing counted them as a series, which is ADR 250\'s "repeat wakes with an unchanged failure reason" instrument observed live on the ask path.',
+    counterfactual:
+      'Partly, and the boundary is the point. It would have collapsed the 2026-08-21 five into one and made the series countable — that is what it claims. It would NOT have stopped the first raise of each reason, so of the 30 raises it removes the repeats and not the false positives: the raises were true-positive-shaped and wrong because the daemon was slow inside a restart window, not down. That discrimination is a different control, still absent, and this entry must not be read as covering it — the same boundary its sibling `daemon-down-raise-carries-evidence` draws, one step further along. Read the two together: #923 made a raise diagnosable, this makes it non-repeating, and neither makes it true.',
+    lastExercised: '2026-08-21',
+    everTripped: false,
+    staleAfterDays: 60,
+    refs: [
+      'lane 01M0K1TYNPFQ9TJYR9GQS2ED4T',
+      'ADR 250 §Observability (the instrument this closes on the ask path)',
+      'docs/claims/entries/2026-08-19-guardian-daemon-down.md',
+      'docs/wiki/platform-guardian.md',
+      'control daemon-down-raise-carries-evidence (the sibling half)',
+    ],
+    watch:
+      'Efficacy here is a rate, not a moment: `guardian.suppressed` lines per `guardian.alerted` line in ~/.musterd/guardian/guardian.log. Zero suppressions over a window where raises fired means either a genuinely quiet platform or a damper that is not engaging, and a date cannot tell those apart.',
+  },
+  {
     id: 'adr-227-infra-touch-gate',
     kind: 'guard',
     claim:

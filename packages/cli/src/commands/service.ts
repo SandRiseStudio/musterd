@@ -2081,6 +2081,8 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
         now: () => Date.now(),
         stamp: actStamp,
         tiers: controlProbe ? { ...DEFAULT_TIERS, publisher_failed: 'alert' } : tiers,
+        // The probe must fire on every install and leave damping state alone (see ActDeps).
+        dampRaises: !controlProbe,
         runService: async (args) => {
           if (controlProbe) {
             log(`control probe: would run service ${args.join(' ')}`);
