@@ -11,6 +11,7 @@ import {
 import { resolveProject } from '@musterd/protocol/project';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
+import { SHA_FORMAT, verifyMerge } from '../mergeVerify.js';
 import { errorResult, textResult } from './format.js';
 
 /**
@@ -74,7 +75,11 @@ function branchCleanupHint(lane: Lane): string {
   );
 }
 
-export function registerLanes(server: McpServer, client: MusterdClient): void {
+export function registerLanes(
+  server: McpServer,
+  client: MusterdClient,
+  verify: typeof verifyMerge = verifyMerge,
+): void {
   server.registerTool(
     'lane_open',
     {
@@ -271,14 +276,42 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     branch?: string | undefined;
   }) => {
     try {
+      // Merge-verified submit: awaiting_acceptance MEANS landed. The repo is the source of
+      // truth for "merged" — the attested SHA is checked against origin/main right here, at
+      // the author's own act, so the "your PR never landed" nudge reaches the one seat that
+      // owns the missing merge at the moment it can act (no poller: ADR 294 dec 2 / ADR 297).
+      // Refusals need POSITIVE evidence; abstentions (cross-repo lane, offline) proceed with
+      // the tier recorded on the attestation (ADR 145: degrade, never wedge).
+      if (args.sha !== undefined && !SHA_FORMAT.test(args.sha)) {
+        return textResult(
+          `"${args.sha}" is not a git SHA — pass the squash-merge SHA from origin/main ` +
+            `(git log --oneline -1 after the merge lands).`,
+        );
+      }
+      if (args.pr !== undefined && args.sha === undefined) {
+        return textResult(
+          `a PR number without a landed SHA is an open PR — nothing has landed, so there is ` +
+            `nothing to accept yet. Arm auto-merge (gh pr merge --squash --auto ${args.pr}), ` +
+            `wait for the merge, then resubmit with the squash SHA.`,
+        );
+      }
+      const verification = await verify({ sha: args.sha, cwd: process.cwd() });
+      if (verification === 'not_ancestor') {
+        return textResult(
+          `SHA ${args.sha} is not on origin/main — nothing landed. If the PR is still open, ` +
+            `arm auto-merge and resubmit with the real squash SHA once it lands; if this ` +
+            `landed somewhere else on purpose, that flow needs a design, not a workaround.`,
+        );
+      }
       const merged = {
         ...(args.pr !== undefined ? { pr: args.pr } : {}),
         ...(args.sha !== undefined ? { sha: args.sha } : {}),
         ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
+        verification,
       };
       const { lane, warnings, review } = await client.updateLane(args.id, {
         state: 'awaiting_acceptance',
-        ...(Object.keys(merged).length ? { merged } : {}),
+        merged,
         // ADR 083's argument for `branch` is that work should reach the next person as an ARTIFACT
         // rather than a description — and submit, which hands the lane to an acceptor, is the moment
         // that matters most. It was the one lane edge that could not set it: `branch` is valid on
@@ -350,6 +383,9 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
     'lane_submit',
     {
       description:
+        // The unlanded-refusal behavior (ADR 300) is deliberately NOT described here: the standing
+        // tools/list surface is budget-gated (context:check), and the refusal message itself
+        // teaches at the only moment it matters — when an unlanded submit is attempted.
         'Your work is merged — move the lane to awaiting_acceptance (ADR 192) and attest it ' +
         '(pr/sha/branch/authorized_by). OUTCOME ACCEPTANCE, not a code review: an acceptor judges ' +
         'intent/principles/usable/feel of the landed artifact. Accept closes the lane, reject ' +
@@ -532,7 +568,12 @@ export function fmtNext(b: NextBrief): string {
         `  ${r.id} "${r.title}"${r.owner ? ` — owner=${r.owner}` : ''} — waiting ${Math.floor(r.waited_ms / 3_600_000)}h` +
           // Not "nobody has answered" — nobody was ASKED. The distinction is the whole point:
           // waiting on a slow reviewer and waiting on no reviewer look identical here otherwise.
-          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : ''),
+          (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : '') +
+          // Merge-verified submit: no SHA on the attestation means nothing landed — the wait
+          // is on the author's merge button, and holding for it wastes an acceptor's cycle.
+          (r.unlanded
+            ? ' — NO MERGE ATTESTATION (nothing landed — waiting on its author, not you)'
+            : ''),
       );
   }
   if (b.up_next.length) {

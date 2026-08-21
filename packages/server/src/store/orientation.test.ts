@@ -664,3 +664,21 @@ describe('incidents lead the brief (spec 2026-08-14 inc 1)', () => {
     expect(deriveNext(db, team.id, 'revive', 'miley').incidents).toHaveLength(0);
   });
 });
+
+describe('review_debt unlanded badge (merge-verified submit)', () => {
+  it('marks a lane whose attestation has no SHA as unlanded, and an attested one as not', () => {
+    const { db, team } = seed();
+    const bare = openLane(db, team.id, 'revive', 'nick', { title: 'no attestation', claim: true });
+    updateLane(db, team.id, bare.id, 'revive', { state: 'awaiting_acceptance' });
+    const attested = openLane(db, team.id, 'revive', 'nick', { title: 'landed', claim: true });
+    updateLane(db, team.id, attested.id, 'revive', {
+      state: 'awaiting_acceptance',
+      merged: { sha: 'abc123f', verification: 'ancestor' },
+    });
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    const byId = new Map((brief.review_debt ?? []).map((r) => [r.id, r]));
+    expect(byId.get(bare.id)?.unlanded).toBe(true);
+    expect(byId.get(attested.id)?.unlanded).toBe(false);
+  });
+});
