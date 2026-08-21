@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { extname, join, resolve, sep } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
+  isWireAttestationSource,
   type Act,
   MemberKindSchema,
   LifecycleSchema,
@@ -673,6 +674,20 @@ function attestedModelHeader(req: IncomingMessage): string | undefined {
 }
 
 /**
+ * The tier behind `x-musterd-model`, from `x-musterd-model-source` — `observed` | `environment` |
+ * `binding`. Anything else (including `unknown`, which the wire does not carry) reads as absent, so
+ * a malformed or hostile header degrades to "tier not known" rather than to a plausible-looking
+ * one. Caller pairs it with the model and drops it when the model is absent.
+ */
+function attestedModelSourceHeader(req: IncomingMessage): string | undefined {
+  const raw = req.headers['x-musterd-model-source'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return isWireAttestationSource(trimmed) ? trimmed : undefined;
+}
+
+/**
  * Optional client-attested build ref from `x-musterd-build` (ADR 135). Same shape as the model
  * header; 64-char cap matches the claim frame. Absent or empty → undefined (sticky COALESCE keeps
  * any prior attestation). Unlike model there is NO agent-key gate: build attests the *binary* the
@@ -743,6 +758,8 @@ function authTouch(
   // ADR 121: model attestation is a harness fact — only agent seats re-attest from the header.
   // A human with MUSTERD_MODEL in their shell (or a buggy client) must not stamp their occupancy.
   const model = auth.member.kind === 'agent' ? attestedModelHeader(req) : undefined;
+  // Tier only travels beside a model — a source with nothing to describe is dropped, not stored.
+  const modelSource = model ? attestedModelSourceHeader(req) : undefined;
   const build = attestedBuildHeader(req); // all credentials — the binary is the binary (ADR 135)
   // Provenance describes the *current* animation source (newest-wins, owner call 2026-07-14) —
   // agent seats only, mirroring the model gate: a human shell must not label itself `wake`.
@@ -767,6 +784,7 @@ function authTouch(
     ctx.config.presenceTimeoutMs,
     {
       ...(model !== undefined ? { model } : {}),
+      ...(modelSource !== undefined ? { model_source: modelSource } : {}),
       ...(build !== undefined ? { build } : {}),
       ...(provenance !== undefined ? { provenance } : {}),
       ...(wakeLease !== undefined ? { wake_lease: wakeLease } : {}),
@@ -1662,7 +1680,15 @@ export async function handleHttp(
             targetMember.id,
             existing.surface as import('@musterd/protocol').Surface,
             existing.from_session,
-            { provenance: null, workspace: null, driver: null, model: existing.model ?? null },
+            {
+              provenance: null,
+              workspace: null,
+              driver: null,
+              model: existing.model ?? null,
+              // The tier the claimant declared at the gate, carried onto the occupancy it becomes —
+              // approving a claim must not launder its provenance away.
+              model_source: existing.model ? (existing.model_source ?? null) : null,
+            },
           );
           recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, existing.model);
 

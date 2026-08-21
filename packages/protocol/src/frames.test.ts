@@ -131,6 +131,17 @@ describe('WS frames', () => {
     expect(full.type === 'heartbeat' && full.surface).toBe('cursor');
   });
 
+  it('parses optional model_source on a heartbeat (ADR 301)', () => {
+    const bare = WSClientFrame.parse({ type: 'heartbeat', model: 'grok-4.6' });
+    expect(bare.type === 'heartbeat' && bare.model_source).toBeUndefined();
+    const full = WSClientFrame.parse({
+      type: 'heartbeat',
+      model: 'grok-4.6',
+      model_source: 'binding',
+    });
+    expect(full.type === 'heartbeat' && full.model_source).toBe('binding');
+  });
+
   it('rejects an unknown surface on a heartbeat', () => {
     const r = WSClientFrame.safeParse({ type: 'heartbeat', surface: 'pager' });
     expect(r.success).toBe(false);

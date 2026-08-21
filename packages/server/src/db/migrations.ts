@@ -854,6 +854,24 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 101 increment: an occupancy records WHICH TIER produced its model — `observed` (a harness
+    // probe saw it), `environment`, or `binding` (a declaration). NULL for every pre-existing row
+    // and for any client that does not send it, which is the honest answer: those rows genuinely do
+    // not know, and backfilling a guess would be the exact substitution this column exists to end.
+    version: 42,
+    up: (db) => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+      if (!cols.includes('model_source'))
+        db.exec('ALTER TABLE presence ADD COLUMN model_source TEXT');
+      // `requests` carries the claimant's attestation across the approval gap, so the tier must
+      // cross it too — otherwise an approval-gated claim lands a model whose tier is permanently
+      // unknowable, which is the exact hole this column closes one path over.
+      const reqCols = db.prepare("SELECT name FROM pragma_table_info('requests')").pluck().all();
+      if (!reqCols.includes('model_source'))
+        db.exec('ALTER TABLE requests ADD COLUMN model_source TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

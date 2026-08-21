@@ -152,3 +152,8 @@ Cursor Bugbot review):
   answered by an `accept`/`decline` from a _different_ seat.
 - **Drift check.** `init --check` carries a warn-only note when a live session here attests no model
   (covers stateless HTTP sessions with a null workspace; warns only when _no_ live session attests).
+
+- **2026-08-21 (ADR 301, nick directed).** The id alone cannot say whether it is a measurement or an
+  assumption. `model_source` (`observed` | `environment` | `binding`) now rides claim/heartbeat/
+  requests and is stamped as server-controlled `meta.model_source`. Absence is a third answer, never
+  defaulted to `binding`. See [301](301-per-act-model-source-tier.md).
