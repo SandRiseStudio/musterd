@@ -44,6 +44,21 @@ Two dampers, on the two ways the guardian can become the noise it exists to dete
 - Read it: `musterd service status` (guardian line: last tick age, policy source, goes loud `STALE` past 10 minutes) or `musterd service status --guardian`. `policy team` is a successful scoped read; `policy defaults (guardian unprovisioned)` is intentional; `policy defaults — degraded since …` means the policy endpoint is unreadable but shipped defaults remain in force.
 - The guardian's own death is detectable: no stamp progress + no daily heartbeat act. A quiet guardian with a fresh stamp is healthy; a quiet guardian with a stale stamp is an incident.
 
+## Adjudicating a `daemon_down` raise
+
+Three of thirty raises have been adjudicated (2026-08-19, and two on 2026-08-21); all three were false. The other 27 are unresolved, **not** presumed false — the whole hazard of a noisy instrument is that it trains its readers to clear on sight, and clearing on sight is what makes the one true raise dangerous.
+
+The test, in order:
+
+1. **Read `/health` now.** If it answers, note `booted_at`.
+2. **Did `booted_at` move after the raise?** If no, the daemon never restarted and the raise is false. Done.
+3. **If yes — do NOT stop here.** Check autorefresh's stream for a `bounced the daemon on <sha>` in that window. A deliberate bounce moves `booted_at` exactly as a death does (2026-08-21; falsify: compare `booted_at` either side of any announced bounce — `f588c85` at 14:38:01 against booted_at 14:38:00.362). If a bounce explains the move, the raise is still false.
+4. **Only an unexplained move is evidence of a real outage.**
+
+~~If booted_at moved after the raise, the daemon really died~~ — the recorded test until 2026-08-21, and it would have called that day's seventh false alarm a real outage: raise 14:33:54, booted_at 14:38:00, moved — but autorefresh bounced at 14:38:01 and the daemon had been up since 14:13:37. AMENDED 2026-08-21, ledger entry [2026-08-21-booted-at-cannot-see-a-bounce](../claims/entries/2026-08-21-booted-at-cannot-see-a-bounce.md).
+
+Whatever the verdict, **write the evidence, not the conclusion** — a raise cleared without a recorded reason is indistinguishable from one cleared on sight, which is the habit this instrument's history is made of.
+
 ## Traps
 
 - Recency is the hard rule: classification only trusts boot-gated reads (`/health.booted_at`). A probe that greps a raw log tail pages someone for an incident that ended a week ago (observed 2026-07-20 during the ADR 152 work; falsify: feed the tick an old err.log with a fresh mtime and watch `errLinesSinceBoot` — the mtime gate admits it, the boot gate in the daemon's own `booted_at` bounds it).
@@ -51,4 +66,5 @@ Two dampers, on the two ways the guardian can become the noise it exists to dete
 - A damper that only ever silences is indistinguishable from a broken probe. The raise damper is deliberately built so the withheld count is carried forward rather than dropped: if you see one raise per hour with no `suppressed since` line, nothing is being withheld; if you see the line, the count is the series. Silence with no count would be the failure mode this fix was supposed to remove, one level quieter (falsify: run three ticks on one unchanged reason and read `lastRaise.<class>.suppressed` in `~/.musterd/guardian/stamp.json` — it must be 2, not absent).
 - /health latency is bursty and load-correlated, which is why the 2 s bound was never a safe sole measurement: 25 samples taken under load on 2026-08-21 gave p50 2.8 ms, p90 16 ms and **max 3.22 s**, while 90 samples taken minutes later on a quiet daemon gave max 0.02 s. `hydrate.ts` records the mechanism — "time any handler holds is time /health waits". Exceeding 2000 ms is normal operation on a busy laptop, not pathology (falsify: loop `curl -w %{time_total} localhost:4849/health` during a live multi-session burst and read the tail, not the median — the median is always fine and is what makes this easy to miss).
 - The 10 s confirming bound is a measured guess, not a law: ~3x the worst answer yet observed. Its falsifier is cheap and specific — a `daemon_down` raise whose confirming probe failed, on a daemon a later /health read shows was healthy throughout. That has not been seen; if it is, raise the bound rather than removing the probe.
+- `quietest_busy_ms` in `/health` is NOT a latency proxy, and reading it as one will make you distrust a healthy daemon. Measured 2026-08-21 with six live sessions and `quietest_busy_ms: 78350`: 30 samples of /health gave p50 1.9 ms and max 2.19 s. It tracks long-lived connection age (websockets held open), not how long a handler holds (falsify: sample /health latency while that field reads tens of seconds — if the samples track it, this is wrong and the confirming probe's bound is too low).
 - Suppression is per reason, not per incident: the raise stops repeating, the incident does not stop existing. An open unanswered `daemon_down` ask still means the daemon may be down. Adjudicate the ask; do not read the quiet as recovery.
