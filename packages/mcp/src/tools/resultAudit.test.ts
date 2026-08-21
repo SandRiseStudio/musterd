@@ -276,9 +276,10 @@ describe('empty states name the next action', () => {
 
     it('never invents one: a submit without a branch leaves the lane’s alone', async () => {
       // A docs-only lane legitimately has no branch, so the field must stay absent from the patch
-      // rather than arrive as null and clear whatever the lane already carried.
+      // rather than arrive as null and clear whatever the lane already carried. (No pr here on
+      // purpose: merge-verified submit refuses a pr without a landed sha before any patch.)
       const { client, patches } = patchSpy();
-      await captureAll(registerLanes, client)['lane_submit']!({ id: 'L-1', pr: 706 });
+      await captureAll(registerLanes, client)['lane_submit']!({ id: 'L-1' });
       expect(patches[0]).not.toHaveProperty('branch');
     });
 

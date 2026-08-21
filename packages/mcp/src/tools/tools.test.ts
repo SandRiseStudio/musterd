@@ -1637,3 +1637,95 @@ describe('value layer: goal outcome + review debt + claim-time linking', () => {
     expect(out).toContain('owner=June');
   });
 });
+
+describe('lane_submit merge verification (merge-verified submit)', () => {
+  const submittedLane: Lane = {
+    id: 'L1',
+    team: 'dawn',
+    project: 'default',
+    title: 't',
+    detail: null,
+    owner_seat: 'Ada',
+    role: null,
+    surface_globs: [],
+    depends_on: [],
+    branch: null,
+    goal_id: null,
+    state: 'awaiting_acceptance',
+    created_by: 'Ada',
+    created_at: 0,
+    claimed_at: null,
+    resolved_at: null,
+    updated_at: 0,
+  };
+
+  function submitWith(tier: string) {
+    const updateLane = vi.fn(async () => ({ lane: submittedLane, warnings: [] }));
+    const handlers = captureAll(
+      (s: any, c: any) => registerLanes(s, c, async () => tier as any),
+      { updateLane } as Partial<MusterdClient>,
+    );
+    return { submit: handlers['lane_submit']!, updateLane };
+  }
+
+  it('refuses pr without sha — an open PR is not a landed artifact', async () => {
+    const { submit, updateLane } = submitWith('ancestor');
+    const out = text(await submit({ id: 'L1', pr: 42 }));
+    expect(out).toMatch(/open PR/i);
+    expect(out).toMatch(/arm auto-merge/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed sha before any lane mutation', async () => {
+    const { submit, updateLane } = submitWith('ancestor');
+    const out = text(await submit({ id: 'L1', sha: 'not-a-sha!' }));
+    expect(out).toMatch(/not a git SHA/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses not_ancestor with actionable guidance and no lane mutation', async () => {
+    const { submit, updateLane } = submitWith('not_ancestor');
+    const out = text(await submit({ id: 'L1', sha: 'abc123f' }));
+    expect(out).toContain('not on origin/main');
+    expect(out).toContain('arm auto-merge');
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('proceeds on ancestor and stamps the tier on the attestation', async () => {
+    const { submit, updateLane } = submitWith('ancestor');
+    await submit({ id: 'L1', pr: 42, sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'awaiting_acceptance',
+      merged: { pr: 42, sha: 'abc123f', verification: 'ancestor' },
+    });
+  });
+
+  it('proceeds on fetch_failed (degrade, never wedge) with the tier recorded', async () => {
+    const { submit, updateLane } = submitWith('fetch_failed');
+    await submit({ id: 'L1', sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'awaiting_acceptance',
+      merged: { sha: 'abc123f', verification: 'fetch_failed' },
+    });
+  });
+
+  it('artifact-less submit proceeds, stamped unattested', async () => {
+    const { submit, updateLane } = submitWith('unattested');
+    await submit({ id: 'L1' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'awaiting_acceptance',
+      merged: { verification: 'unattested' },
+    });
+  });
+
+  it('the deprecated lane_ready alias gets the same refusal', async () => {
+    const updateLane = vi.fn(async () => ({ lane: submittedLane, warnings: [] }));
+    const handlers = captureAll(
+      (s: any, c: any) => registerLanes(s, c, async () => 'not_ancestor' as any),
+      { updateLane } as Partial<MusterdClient>,
+    );
+    const out = text(await handlers['lane_ready']!({ id: 'L1', sha: 'abc123f' }));
+    expect(out).toContain('not on origin/main');
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+});
