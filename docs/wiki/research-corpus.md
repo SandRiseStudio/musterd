@@ -89,8 +89,22 @@ first.
   under the Sandrise org on HF). Roadmap item `coordination-dataset`.
 - **ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR
   184 all build on has never been accepted.
-- **Per-model leaderboard**, blocked by finding 005's named cause: the coordination gauges carry no
-  team/model dimension, so per-model cost and latency must be reconstructed from spans.
+- **Per-model leaderboard** — still not built, but **not for the reason recorded here until
+  2026-08-21** (corrected; falsify: run `packages/server/src/telemetry.test.ts` and read the
+  `#207` case, or drop the `model.family` spread in `recordLoopClosure` and watch it fail). This
+  list said the coordination gauges carry no team/model dimension. They have carried both since
+  `24c7350b` (#207/#208, 2026-07-09) — the *same day* finding 005 named the gap, which is why the
+  claim was written and why nobody re-checked it. On main: `coordination.loop_latency` carries team
+  + the closer's `model.family` (absent, never guessed, when the closer didn't attest);
+  `agent.tokens` carries team + member + raw id + family; `open_loops` and `insight.diversity_flags`
+  carry team. `delivery.latency` carries team and act and deliberately omits model, with the reason
+  stated at the call site — it measures server work, not the sender. All of it is pinned at the
+  **export** layer (the test asserts over `reader.collect()` data points, not over the record call).
+  What actually blocks the leaderboard is **N**, not instrumentation: finding 005's own honest-N
+  caveat (one team, ~4h, 41 acts, two vendors) and the cookoff cells whose spend is not authorised.
+  Two open design questions, neither of them a gap: whether `open_loops`/`diversity_flags` should
+  carry model at all (a loop is *between* seats, so "model X's open loops" may not be well-defined),
+  and whether `delivery.latency`'s omission should be revisited.
 - **Frontier cadence manifest** — protocol written, zero runs recorded.
 - **Cookoff cells A/B/C2/C3, D-res, cell E** — defined in the frozen manifest, spend not authorised.
 - **ADR 250's weekly reads** (asks-to-founder per merged PR; repeat wakes with unchanged reason;
