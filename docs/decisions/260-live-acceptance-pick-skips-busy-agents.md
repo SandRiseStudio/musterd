@@ -219,3 +219,9 @@ A team whose every live cross-model agent is mid-turn will wake an offline seat 
   The open question this leaves is a design one and not mine to settle alone: whether the
   obligation rail should be harness-specific at all, or whether ADR 225's guarantee is only as
   strong as the weakest adapter — which today means it does not hold for any non-claude seat.
+
+- **2026-08-21 — the concentration `FAIL` is descriptive, not causal** (ADR 303). The evaluator
+  rebuilt historic reviewer families from each Member's latest model attestation and did not retain
+  the decision-time eligible candidate set. It can show a skew but cannot distinguish selection
+  policy from absent, busy, or ungradeable candidates. Do not change routing or build increment 2
+  from that result; ADR 303 requires ready-row selection snapshots before the next controlled read.
