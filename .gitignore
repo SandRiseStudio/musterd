@@ -51,6 +51,14 @@ coverage/
 .cursor/rules/musterd.mdc
 .cursor/rules/musterd-label-session.mdc
 .cursor/commands/musterd-*.md
+# ADR 299 role-skill bridges: `musterd wire` writes one per role a seat holds, as
+# `.cursor/rules/<role>.mdc` — per-workspace pointers at the canonical `.agents/skills/<role>/`,
+# same class as the two rules above. Enumerated because the filename is the ROLE name, so no glob
+# covers the set and these bridges carry no `musterd:content` stamp to match on either. Adding a
+# role skill therefore means adding a line here, which will be forgotten. The durable fix is to
+# name them `musterd-<role>.mdc` so `.cursor/rules/musterd-*.mdc` covers every future one — that
+# is a change to the provisioning writer, not to this file (lane 01M0K5ANE1).
+.cursor/rules/product-communications.mdc
 # `musterd wire` writes these per-workspace; they are machine-local, not project config.
 .cursor/hooks.json
 .codex/hooks.json

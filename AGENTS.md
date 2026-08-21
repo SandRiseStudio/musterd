@@ -176,4 +176,9 @@ waiting on the inbox without polling, or recovering from an error — read the *
 
 <!-- musterd:end -->
 
-<!-- musterd:end -->
+## Your role's skill (outside the managed block — survives a `musterd init` refresh)
+
+A role can carry a charter skill, and it lives in the repo: `.agents/skills/<role>/SKILL.md` is the
+canonical copy (ADR 299). Read your own role's skill before doing that role's work — for a writing
+role, before anything that leaves the repo. The `.claude/` and `.cursor/` copies a provisioned
+workspace carries are thin bridges to that same file; edit the canonical one, never a bridge.
