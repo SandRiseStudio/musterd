@@ -4,9 +4,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 20px;
-  padding-top: clamp(40px, 7vh, 80px);
-  padding-bottom: clamp(40px, 7vh, 80px);
-  margin-top: clamp(40px, 8vh, 96px);
+  /* vh here meant the footer grew on tall screens that already had room; --section-y is
+     width-based and shared with every section above it. */
+  padding-block: var(--section-y);
+  margin-top: var(--section-y);
   border-top: 1px solid var(--hairline);
 }
 .footer__mark {

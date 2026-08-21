@@ -1,10 +1,10 @@
 .gs {
-  padding: clamp(48px, 9vh, 104px) var(--gutter) clamp(40px, 8vh, 96px);
+  padding: var(--section-y) var(--gutter);
 }
 
 /* Echoes .hero__eyebrow — same voice, so the page reads as one hand. */
 .gs__eyebrow {
-  margin: 0 0 1.1rem;
+  margin: 0 0 0.35rem;
   font-size: 12px;
   letter-spacing: 0.32em;
   text-transform: uppercase;
@@ -12,14 +12,14 @@
 }
 
 .gs__title {
-  margin: 0 0 18px;
-  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  margin: 0 0 10px;
+  font-size: clamp(1.2rem, 2.4vw, 1.55rem);
   letter-spacing: -0.03em;
 }
 .gs__body {
   margin: 0;
   max-width: 62ch;
-  font-size: clamp(1rem, 2vw, 1.15rem);
+  font-size: 0.92rem;
   line-height: 1.7;
   color: var(--text-dim);
 }
@@ -31,7 +31,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 28px;
+  margin-top: 14px;
   max-width: 640px;
 }
 /* The commands are the point of the section: full-strength ink on a faint mustard paper, while the
@@ -41,7 +41,7 @@
   display: flex;
   align-items: baseline;
   gap: 14px;
-  padding: 13px 16px;
+  padding: 9px 12px;
   border: 1px solid var(--hairline);
   border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 5%, transparent);
@@ -73,7 +73,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 26px;
+  margin-top: 14px;
 }
 .gs__ref {
   font-size: 12px;

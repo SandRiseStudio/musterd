@@ -7,22 +7,22 @@
 .prose {
   width: min(68ch, 100% - 2.5rem);
   margin-inline: auto;
-  padding-block: 2rem 4rem;
+  padding-block: var(--section-y) calc(var(--section-y) * 1.4);
   color: var(--text);
   line-height: 1.65;
 }
 
 .prose h1 {
   font-family: var(--font-display);
-  font-size: clamp(1.7rem, 4vw, 2.4rem);
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
   line-height: 1.15;
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.35rem;
 }
 
 .prose h2 {
   font-family: var(--font-display);
-  font-size: 1.25rem;
-  margin: 2.2rem 0 0.6rem;
+  font-size: 1.1rem;
+  margin: 1.5rem 0 0.45rem;
 }
 
 .prose p,
