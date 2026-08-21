@@ -132,8 +132,22 @@ describe('fmtNext — review_debt unlanded badge (merge-verified submit)', () =>
   it('badges an unlanded entry so an acceptor never holds for an unmerged lane', () => {
     const b = brief(null);
     b.review_debt = [
-      { id: 'L1', title: 'no attestation', owner: 'dolly', waited_ms: 60_000, no_candidate: false, unlanded: true },
-      { id: 'L2', title: 'landed', owner: 'dolly', waited_ms: 60_000, no_candidate: false, unlanded: false },
+      {
+        id: 'L1',
+        title: 'no attestation',
+        owner: 'dolly',
+        waited_ms: 60_000,
+        no_candidate: false,
+        unlanded: true,
+      },
+      {
+        id: 'L2',
+        title: 'landed',
+        owner: 'dolly',
+        waited_ms: 60_000,
+        no_candidate: false,
+        unlanded: false,
+      },
     ];
     const out = fmtNext(b);
     const lines = out.split('\n');

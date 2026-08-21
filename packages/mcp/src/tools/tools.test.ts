@@ -1661,10 +1661,9 @@ describe('lane_submit merge verification (merge-verified submit)', () => {
 
   function submitWith(tier: string) {
     const updateLane = vi.fn(async () => ({ lane: submittedLane, warnings: [] }));
-    const handlers = captureAll(
-      (s: any, c: any) => registerLanes(s, c, async () => tier as any),
-      { updateLane } as Partial<MusterdClient>,
-    );
+    const handlers = captureAll((s: any, c: any) => registerLanes(s, c, async () => tier as any), {
+      updateLane,
+    } as Partial<MusterdClient>);
     return { submit: handlers['lane_submit']!, updateLane };
   }
 

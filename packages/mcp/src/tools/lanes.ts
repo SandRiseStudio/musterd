@@ -570,7 +570,9 @@ export function fmtNext(b: NextBrief): string {
           (r.no_candidate ? ' — NO REVIEWER WAS ASKED (no eligible counterpart at submit)' : '') +
           // Merge-verified submit: no SHA on the attestation means nothing landed — the wait
           // is on the author's merge button, and holding for it wastes an acceptor's cycle.
-          (r.unlanded ? ' — NO MERGE ATTESTATION (nothing landed — waiting on its author, not you)' : ''),
+          (r.unlanded
+            ? ' — NO MERGE ATTESTATION (nothing landed — waiting on its author, not you)'
+            : ''),
       );
   }
   if (b.up_next.length) {

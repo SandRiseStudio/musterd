@@ -22,13 +22,19 @@ describe('verifyMerge', () => {
 
   it('fetch ok, object exists, ancestor → ancestor', async () => {
     expect(
-      await verifyMerge({ sha: 'abc123f', cwd }, fake({ fetch: 0, 'cat-file': 0, 'merge-base': 0 })),
+      await verifyMerge(
+        { sha: 'abc123f', cwd },
+        fake({ fetch: 0, 'cat-file': 0, 'merge-base': 0 }),
+      ),
     ).toBe('ancestor');
   });
 
   it('fetch ok, object exists, not an ancestor → not_ancestor (positive evidence)', async () => {
     expect(
-      await verifyMerge({ sha: 'abc123f', cwd }, fake({ fetch: 0, 'cat-file': 0, 'merge-base': 1 })),
+      await verifyMerge(
+        { sha: 'abc123f', cwd },
+        fake({ fetch: 0, 'cat-file': 0, 'merge-base': 1 }),
+      ),
     ).toBe('not_ancestor');
   });
 

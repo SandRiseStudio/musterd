@@ -401,4 +401,26 @@ export const CONTROLS: Control[] = [
       'lane 01M0GXCJDJ',
     ],
   },
+  {
+    id: 'lane-submit-refuses-unlanded',
+    kind: 'guard',
+    claim:
+      'A lane cannot enter awaiting_acceptance claiming an artifact that has not landed: lane_submit verifies the attested SHA against origin/main seat-side and refuses a PR-without-SHA or a not-ancestor SHA (ADR 300 — awaiting_acceptance means landed).',
+    where: 'packages/mcp/src/tools/lanes.ts (laneSubmitHandler) + packages/mcp/src/mergeVerify.ts; ADR 300',
+    exercise:
+      "From a seat worktree with unmerged commits: `node -e` verifyMerge({sha: <HEAD>, cwd}) from the built dist — must return 'not_ancestor' (and 'ancestor' for a landed SHA). Or lane_submit a scratch lane with pr and no sha — refused with 'arm auto-merge'. mergeVerify.integration.test.ts runs the same tiers against a real bare-remote repo.",
+    motivatedBy:
+      "2026-08-21: dolly's #961/#963 sat awaiting_acceptance with green unmerged PRs (auto-merge never armed). wanderer spent two check cycles holding for lanes with nothing to accept; the false 'landed' claim propagated into ryder's wiki page and cost a second seat a lane (#967). Lane 01M0JSKTA3.",
+    counterfactual:
+      "Yes — dolly submitted with a PR number and no landed SHA (none existed; the PRs were open). The pr-without-sha refusal fires on exactly that call, and the refusal text reaches the one seat that owns the missing act, at the moment it acts.",
+    lastExercised: '2026-08-21',
+    everTripped: false,
+    staleAfterDays: 90,
+    refs: [
+      'ADR 300',
+      'lane 01M0JSKTA3YH2CTHD869X1YWCZ',
+      'docs/superpowers/specs/2026-08-21-merge-verified-submit-design.md',
+      'packages/mcp/src/mergeVerify.integration.test.ts',
+    ],
+  },
 ];
