@@ -1,21 +1,24 @@
 # @musterd/web
 
-The foundation of the musterd web surface. Today it serves one page — the **roadmap** — as a
-bleeding-edge, immersive landing experience. It is built on the same stack the future stateful
-dashboard will grow into, so that surface adds routes here rather than starting over.
+The musterd web surface. It serves the **public site** — the landing page plus `/roadmap`, `/docs`
+and `/blog`, all prerendered to static HTML (ADR 300) — and the daemon-connected surfaces
+(`/live`, `/board`, `/audit`, …) that only ever ship on the daemon origin. One stack for both, so
+new surfaces add routes here rather than starting over.
 
 ## Stack
 
-- **TanStack Start v1** (React 19, Vite + Rolldown) — type-safe file routing, SSR-capable, but the
-  roadmap route is **prerendered to static HTML** for top load performance.
-- **three.js** + the **anime.js Three.js adapter** — the immersive hero (a drifting mustard particle
-  field; the entrance is timeline-driven through the adapter). Loaded client-only and code-split.
-- **Liquid glass** — a single tasteful SVG-displacement refraction accent (ported from the reference
-  CodePen), over DOM content only.
-- Aesthetic direction and its guardrails: `docs/decisions/037-web-surface-aesthetic.md` +
-  `docs/design/brand.md` §7. Content is the typed roadmap **source of truth**
-  (`src/content/roadmap.data.ts`), imported directly here; **the repo's `ROADMAP.md` is generated
-  from it** (`pnpm roadmap:gen`, ADR 041). Edit the data module, not `ROADMAP.md`.
+- **TanStack Start v1** (React 19, Vite + Rolldown) — type-safe file routing, SSR-capable; every
+  public route is **prerendered to static HTML** for top load performance.
+- **Typographic landing hero** — type-led, CSS-only (the earlier canvas office-scene hero, and the
+  three.js particle hero before it, are both retired from `/`; the office scene lives on in
+  `/live`).
+- **Build-prep content pipeline** — `scripts/gen-site-content.ts` renders markdown (docs, blog) and
+  the repo-root roadmap data to HTML strings at build time; no markdown runtime and no roadmap
+  dataset in the client bundle.
+- Aesthetic direction and its guardrails: `docs/decisions/037-web-surface-aesthetic.md` (as amended
+  by ADR 300) + `docs/design/brand.md` §7. The roadmap **source of truth** is the repo-root
+  `content/roadmap.data.ts`; **`ROADMAP.md` is generated from it** (`pnpm roadmap:gen`, ADR 041).
+  Edit the data module, not `ROADMAP.md`.
 
 ## Develop
 
@@ -27,12 +30,11 @@ pnpm --filter @musterd/web typecheck
 ```
 
 The static artifact is `dist/client/` — deployable to any static host (Cloudflare Pages, Vercel,
-Netlify, …). The page's text is in the prerendered HTML and never depends on JS; reduced-motion
-users get a static gradient instead of WebGL.
+Netlify, …). Every public page's text is in the prerendered HTML and never depends on JS.
 
 ## Serving
 
-### musterd.io — the public landing page
+### musterd.io — the public site
 
 ```bash
 pnpm --filter @musterd/web deploy:site   # build → stage → wrangler deploy
@@ -41,8 +43,9 @@ pnpm --filter @musterd/web deploy:site   # build → stage → wrangler deploy
 One command, three steps, and the middle one is the important one:
 
 1. `pnpm build` prerenders **every** route, `/live` and `/board` included.
-2. `pnpm stage:site` (`scripts/stage-site.mjs`) copies **only** `index.html` + `assets/` into
-   `dist/site`, and prints the routes it withheld. This is a deliberate allowlist: `/live`,
+2. `pnpm stage:site` (`scripts/stage-site.mjs`) copies **only** the ADR 300 public set (the
+   landing `index.html`, `assets/`, `roadmap/`, `docs/`, `blog/`) into `dist/site`, and prints the
+   routes it withheld. This is a deliberate allowlist: `/live`,
    `/board`, `/audit`, `/approvals` and the previews are daemon-connected, so on a public origin
    with no daemon behind them they render dead UI — [ADR 132](../../docs/decisions/132-live-viewer-on-daemon-origin.md)
    puts the live viewer on the daemon origin and
@@ -78,9 +81,8 @@ static-file handler guarded by a config flag, pointed at this build output. Trac
 
 ## Accessibility & performance notes
 
-- WebGL is client-only, lazy-initialized after first paint, DPR-capped, and paused when the tab is
-  hidden; all GL resources are disposed on unmount.
-- All heavy motion (WebGL, smooth-scroll, the liquid-glass lens) is gated behind
-  `prefers-reduced-motion`.
-- Chromatic aberration in the liquid-glass lens is left off — it is the expensive two-pass path the
-  reference flags for mobile.
+- The public pages carry no render loops and no client-side content rendering; the only third-party
+  frame (the landing page's Twitch player) is injected after first paint, visibility-gated, and
+  never present in the prerendered HTML.
+- Motion is gated behind `prefers-reduced-motion`; the perf contract and its gates live in
+  [AGENTS.md](./AGENTS.md).

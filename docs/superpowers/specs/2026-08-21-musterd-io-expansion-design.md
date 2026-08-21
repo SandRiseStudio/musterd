@@ -128,6 +128,23 @@ public-route allowlist policy for the musterd.io origin.
   it never becomes a server.
 - Analytics (separate decision).
 
+## Premise corrections (2026-08-21, post-approval)
+
+The design conversation inherited two stale premises from `packages/web/README.md`; nick approved
+the intent, and the corrections only shrink the work:
+
+1. **There is no three.js to retire.** The immersive roadmap map was dropped from the web on
+   2026-07-28; three.js/anime.js are not in `packages/web/package.json`. Today's hero
+   (`src/components/Hero/`) is a 2D-canvas office scene over a synthetic 5-member team. "New
+   lightweight hero" = replace that canvas hero with a typographic one.
+2. **`/roadmap` is a new page, not a move.** Roadmap data lives at repo-root
+   `content/roadmap.data.ts` (82 items, build-time consumers only). The new `/roadmap` renders it
+   via the build-prep pipeline — the dataset stays out of the browser bundle, honoring the comment
+   in `src/content/site.ts` that moved it out.
+3. **The nav live-badge is dropped** per this spec's own else-branch: Twitch's Helix API requires
+   an auth token; there is no public unauthenticated liveness endpoint, and a liveness proxy would
+   be a server. The embedded player itself communicates liveness.
+
 ## Sequencing
 
 1. Site chrome + new landing structure (placeholder copy) + `/roadmap` rebuild; three.js leaves
