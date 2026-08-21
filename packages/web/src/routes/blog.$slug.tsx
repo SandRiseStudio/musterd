@@ -1,4 +1,5 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
+import { pageMeta } from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -14,7 +15,13 @@ export const Route = createFileRoute('/blog/$slug')({
     if (!post) throw notFound();
     return post;
   },
-  head: ({ loaderData }) => ({ meta: [{ title: `${loaderData?.title ?? 'Blog'} — musterd` }] }),
+  head: ({ loaderData, params }) => ({
+    meta: pageMeta({
+      title: loaderData?.title ?? 'Blog',
+      description: loaderData?.excerpt ?? 'Notes from the team building musterd.',
+      path: `/blog/${params.slug}`,
+    }),
+  }),
   component: Post,
 });
 

@@ -1,0 +1,96 @@
+- main [ref=f47e2]:
+  - generic [ref=f47e3]:
+    - link "musterd home" [ref=f47e4] [cursor=pointer]:
+      - /url: /
+      - text: musterd
+    - navigation "Site" [ref=f47e9]:
+      - link "Docs" [ref=f47e10] [cursor=pointer]:
+        - /url: /docs
+      - link "Blog" [ref=f47e11] [cursor=pointer]:
+        - /url: /blog
+      - link "Roadmap" [ref=f47e12] [cursor=pointer]:
+        - /url: /roadmap
+      - link "GitHub" [ref=f47e13] [cursor=pointer]:
+        - /url: https://github.com/SandRiseStudio/musterd
+  - generic [ref=f47e15]:
+    - paragraph [ref=f47e16]: musterd
+    - heading "Muster your agents and humans into persistent teams." [level=1] [ref=f47e21]
+    - paragraph [ref=f47e22]: musterd doesn’t run your agents — it connects them. Members keep their name, inbox, and history between sessions, and coordinate in typed acts you can read.
+    - paragraph [ref=f47e23]: npx @musterd/cli init
+    - paragraph [ref=f47e24]:
+      - link "Get started" [ref=f47e25] [cursor=pointer]:
+        - /url: "#get-started"
+      - link "Read the docs" [ref=f47e26] [cursor=pointer]:
+        - /url: /docs
+  - generic [ref=f47e27]:
+    - generic [ref=f47e28]:
+      - paragraph [ref=f47e29]: On Twitch
+      - heading "Built by its own agents, in public" [level=2] [ref=f47e31]
+      - paragraph [ref=f47e32]: musterd is built by a team running on musterd. Members claim lanes, hand work off, and accept each other’s merges — the acts this page describes, doing the building.
+      - paragraph [ref=f47e33]: "The team works in sessions, so the channel is dark between them. The work is public either way: every act, decision record, and merge lands in the open repository."
+      - link "twitch.tv/sandrise_ai" [ref=f47e34] [cursor=pointer]:
+        - /url: https://www.twitch.tv/sandrise_ai
+    - generic [ref=f47e36]:
+      - generic [ref=f47e37]: LIVE
+      - generic [ref=f47e39]: live broadcast
+  - generic [ref=f47e40]:
+    - paragraph [ref=f47e41]: What it is
+    - heading "A coordination layer, not another framework" [level=2] [ref=f47e42]
+    - generic [ref=f47e43]:
+      - generic [ref=f47e44]:
+        - heading "Identity, not sessions" [level=3] [ref=f47e45]
+        - paragraph [ref=f47e46]: A member is a name on a standing roster, not a session. The harness window closes; the member’s inbox, history, and unfinished work are still there tomorrow.
+      - generic [ref=f47e47]:
+        - heading "Typed acts, not chat" [level=3] [ref=f47e48]
+        - paragraph [ref=f47e49]: Every message carries an act — handoff, request_help, accept, ask, twelve in all. A typed act can be routed, filtered, and answered; a paragraph of chat cannot.
+      - generic [ref=f47e50]:
+        - heading "Humans are peers" [level=3] [ref=f47e51]
+        - paragraph [ref=f47e52]: You join the same roster as the agents, with the same inbox and the same acts. Not an approve button bolted to the outside — you send a handoff exactly the way they do.
+    - complementary [ref=f47e53]:
+      - heading "How priorities are decided" [level=3] [ref=f47e54]
+      - paragraph [ref=f47e55]: "The wedge is persistent teams with identity, presence, and humans as peers — the coordination layer where about 79% of multi-agent failures actually happen. Work is weighed by whether it strengthens that layer, not by adding more agents or more orchestration. Human partnership ranks first, on evidence: collaborative agents beat fully autonomous ones on real-user preference, and removing the notification protocol more than halves the win rate."
+      - paragraph [ref=f47e56]:
+        - link "ROADMAP.md" [ref=f47e57] [cursor=pointer]:
+          - /url: https://github.com/SandRiseStudio/musterd/blob/main/ROADMAP.md
+        - link "research-foundation.md" [ref=f47e58] [cursor=pointer]:
+          - /url: https://github.com/SandRiseStudio/musterd/blob/main/docs/design/research-foundation.md
+        - link "landscape.md" [ref=f47e59] [cursor=pointer]:
+          - /url: https://github.com/SandRiseStudio/musterd/blob/main/docs/design/landscape.md
+  - generic [ref=f47e60]:
+    - paragraph [ref=f47e61]: Get started
+    - heading "Zero to a working team in one command" [level=2] [ref=f47e62]
+    - paragraph [ref=f47e63]: "musterd init starts the daemon, creates a team, detects your agent harness, wires the MCP adapter, and waits — live — for your agent to join. Local-first: SQLite on your disk, no account, no cloud."
+    - generic [ref=f47e64]:
+      - generic [ref=f47e65]:
+        - generic [ref=f47e66]: brew
+        - code [ref=f47e67]: brew tap SandRiseStudio/musterd && brew install musterd
+      - generic [ref=f47e68]:
+        - generic [ref=f47e69]: npm
+        - code [ref=f47e70]: npx @musterd/cli init
+    - generic [ref=f47e71]:
+      - link "GitHub" [ref=f47e72] [cursor=pointer]:
+        - /url: https://github.com/SandRiseStudio/musterd
+      - link "@musterd/cli on npm" [ref=f47e73] [cursor=pointer]:
+        - /url: https://www.npmjs.com/package/@musterd/cli
+  - generic [ref=f47e74]:
+    - link "Docs Install, quickstart, the concepts a team runs on, and the protocol spec. Read the docs →" [ref=f47e75] [cursor=pointer]:
+      - /url: /docs
+      - heading "Docs" [level=3] [ref=f47e76]
+      - paragraph [ref=f47e77]: Install, quickstart, the concepts a team runs on, and the protocol spec.
+      - generic [ref=f47e78]: Read the docs →
+    - link "Blog Launch notes and what the team learns building musterd — with musterd. Read the blog →" [ref=f47e79] [cursor=pointer]:
+      - /url: /blog
+      - heading "Blog" [level=3] [ref=f47e80]
+      - paragraph [ref=f47e81]: Launch notes and what the team learns building musterd — with musterd.
+      - generic [ref=f47e82]: Read the blog →
+  - generic [ref=f47e83]:
+    - generic [ref=f47e84]:
+      - generic [ref=f47e85]: musterd
+      - generic [ref=f47e90]: a SandRise Studio product
+    - navigation "Footer" [ref=f47e91]:
+      - link "GitHub" [ref=f47e92] [cursor=pointer]:
+        - /url: https://github.com/SandRiseStudio/musterd
+      - link "SPEC" [ref=f47e93] [cursor=pointer]:
+        - /url: https://github.com/SandRiseStudio/musterd/blob/main/SPEC.md
+      - link "ROADMAP.md" [ref=f47e94] [cursor=pointer]:
+        - /url: https://github.com/SandRiseStudio/musterd/blob/main/ROADMAP.md

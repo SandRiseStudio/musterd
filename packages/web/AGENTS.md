@@ -27,6 +27,16 @@ check whether a re-baseline is due instead**: budgets are periodically reset to 
 re-baseline may only tighten — a loosening one is just a raise (ADR 183). Two ceilings were hit in
 one week in 2026-07 because raises were being used to fix a calibration problem.
 
+## The generated content module
+
+`src/content/generated/site-content.ts` (docs, blog and roadmap rendered to HTML at build-prep time,
+ADR 302) is **gitignored and produced on demand** — `pnpm build` and `pnpm typecheck` both run
+`scripts/gen-site-content.ts` first. That is why typecheck runs a script: without it, a fresh
+checkout reports `Cannot find module '../content/generated/site-content'` across five route files
+and the red looks like the checker-outer's fault. Three seats hit exactly that on 2026-08-21 before
+typecheck was wired to the generator. **Never commit the generated file** — it would go stale
+against the markdown the moment either changed.
+
 ## Standing rules (each one is a shipped, measured win — don't undo it)
 
 - **Web lanes default to `stakes: low`, and raising it is your call to make** (ADR 244). A team admin
