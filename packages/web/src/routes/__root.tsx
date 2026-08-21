@@ -4,7 +4,8 @@ import brandCss from '../brand/brand.css?url';
 import chipIcon from '../brand/chip.svg?url';
 import socialCard from '../brand/social-card.png?url';
 import {
-  SITE_ONE_LINER,
+  SITE_CARD_ALT,
+  SITE_SHARE_DESCRIPTION,
   SITE_ORIGIN,
   SITE_TAGLINE,
   SITE_TITLE,
@@ -24,11 +25,11 @@ export const Route = createRootRoute({
       { title: SITE_TITLE },
       { name: 'description', content: SITE_TAGLINE },
       { property: 'og:title', content: SITE_TITLE },
-      { property: 'og:description', content: SITE_ONE_LINER },
+      { property: 'og:description', content: SITE_SHARE_DESCRIPTION },
       { property: 'og:type', content: 'website' },
       { property: 'og:url', content: SITE_ORIGIN },
       { property: 'og:image', content: ogImage },
-      { property: 'og:image:alt', content: SITE_ONE_LINER },
+      { property: 'og:image:alt', content: SITE_CARD_ALT },
       { name: 'twitter:card', content: 'summary_large_image' },
       { name: 'twitter:image', content: ogImage },
     ],
