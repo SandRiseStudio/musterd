@@ -29,7 +29,8 @@ one week in 2026-07 because raises were being used to fix a calibration problem.
 
 ## Deploying the public site — miley's, not yours
 
-**`pnpm --filter @musterd/web deploy:site` is miley's to run** (nick, 2026-08-21). If your change
+**`pnpm --filter @musterd/web deploy:site` is miley's to run**
+([ADR 308](../../docs/decisions/308-public-site-deploy-authorization.md)). If your change
 ends with prose or pixels on musterd.io, land the PR and tell miley. This is standing, not
 per-request.
 
@@ -44,13 +45,10 @@ to `main` and the build-publisher republishes within ~60s with no daemon bounce 
 [ADR 132](../../docs/decisions/132-live-viewer-on-daemon-origin.md)). `musterd service refresh` is
 the daemon, not the UI. Neither goes through miley.
 
-The reason, because a rule without one gets optimized away: a deploy is the only act in this loop
-that **no acceptance can reverse**, and the only place where *landed* and *live* are different
-facts. On 2026-08-21 #996 sat merged-but-undeployed while both defects it fixed stayed live on the
-public origin. The same seat caught two defects on #984 that were invisible outside a running
-browser — an iframe painting a postage stamp, and Twitch refusing autoplay so the embed counted no
-viewers at all. Neither was visible in a diff, in staging, or in `vite preview`. The seat that
-verifies the public origin in a real browser is the seat that publishes to it.
+The reason, in one line: a deploy is the only act in this loop that **no acceptance can
+reverse**, and the only place where *landed* and *live* are different facts. ADR 308 carries the
+evidence — a merged-but-undeployed fix that stayed broken in public, and two defects on the live
+site that no diff, no staging build and no `vite preview` could show.
 
 ## The generated content module
 
