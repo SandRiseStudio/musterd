@@ -30,8 +30,14 @@ one week in 2026-07 because raises were being used to fix a calibration problem.
 ## Deploying the public site — miley's, not yours
 
 **`pnpm --filter @musterd/web deploy:site` is miley's to run** (nick, 2026-08-21). If your change
-ends with prose or pixels on musterd.io, land the PR and hand the deploy over. This is standing, not
+ends with prose or pixels on musterd.io, land the PR and tell miley. This is standing, not
 per-request.
+
+**And miley does not wait for per-publish approval.** It is a standing authorization, not a routing
+rule: miley publishes web changes when they are ready, without asking nick each time. Those are two
+different rules and only one of them was in the original sentence — "who may deploy" without "and
+when" is the half that gets guessed at. Deploy authority is also not review authority: it does not
+license merging work miley has not read.
 
 It covers the publish to musterd.io and nothing else. The `/live` bundle is **not** a deploy — merge
 to `main` and the build-publisher republishes within ~60s with no daemon bounce (root `AGENTS.md`,
