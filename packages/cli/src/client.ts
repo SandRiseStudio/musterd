@@ -262,6 +262,13 @@ export class HttpClient {
    * the provisioning bar (localhost unauthenticated, admin off-host), so this deliberately does NOT
    * require the client to carry a key: the caller's whole problem is that they have none.
    */
+  rotateCredential(slug: string, name: string): Promise<{ member: string; credential: string }> {
+    return this.request(
+      'POST',
+      `/teams/${slug}/members/${encodeURIComponent(name)}/credential/rotate`,
+      {},
+    );
+  }
   /**
    * Rotate the team **agent key** (ADR 075) — admin-only and audited daemon-side. Destructive by
    * nature: every seat binding holding the old `mskey_` stops authenticating, so `musterd team
@@ -269,13 +276,6 @@ export class HttpClient {
    */
   rotateAgentKey(slug: string): Promise<AgentKeyMint> {
     return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-key/rotate`, {});
-  }
-  rotateCredential(slug: string, name: string): Promise<{ member: string; credential: string }> {
-    return this.request(
-      'POST',
-      `/teams/${slug}/members/${encodeURIComponent(name)}/credential/rotate`,
-      {},
-    );
   }
   roster(slug: string): Promise<{
     members: MemberSummary[];

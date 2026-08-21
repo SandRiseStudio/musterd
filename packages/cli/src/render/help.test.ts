@@ -109,3 +109,22 @@ describe('wantsCommandHelp — `musterd <cmd> help` is a help request, not an ar
     expect(wantsCommandHelp('bogus', ['help'])).toBe(false);
   });
 });
+
+describe('wantsCommandHelp does not eat a free-text argument (#858 follow-up)', () => {
+  it('a one-word body of exactly "help" still sends — send carries free text, not subcommands', () => {
+    // `musterd send --to nick --act request_help help` must SEND the word, not print usage.
+    // On a request_help act, "help" is the most plausible one-word body anyone would ever type,
+    // so the word the guard reserves is the word that verb exists to carry.
+    expect(wantsCommandHelp('send', ['help'])).toBe(false);
+  });
+
+  it('still fires for a verb whose positional is a subcommand', () => {
+    expect(wantsCommandHelp('agent', ['help'])).toBe(true);
+    expect(wantsCommandHelp('team', ['help'])).toBe(true);
+  });
+
+  it('still ignores a non-sole positional and an uncatalogued command', () => {
+    expect(wantsCommandHelp('team', ['add', 'help'])).toBe(false);
+    expect(wantsCommandHelp('bogus', ['help'])).toBe(false);
+  });
+});

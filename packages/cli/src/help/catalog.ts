@@ -35,6 +35,16 @@ export interface CommandEntry {
   detail?: string;
   /** Copy-paste examples for `musterd help <name>`. */
   examples?: string[];
+  /**
+   * This command's first positional is FREE TEXT, not a subcommand — so `musterd <name> help` is an
+   * argument the user meant, never a help request. Set it and `wantsCommandHelp` stands down.
+   *
+   * `send` is the case that forced this: its positional is the message body, and on a
+   * `request_help` act a one-word body of exactly "help" is the most plausible message anyone
+   * would ever type. Reserving the word globally would have swallowed the very word that verb
+   * exists to carry.
+   */
+  freeTextPositional?: boolean;
 }
 
 /** The rooms of the floor, in display order. */
@@ -365,6 +375,7 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Messaging ──────────────────────────────────────────────────────────────────────────────
   {
     name: 'send',
+    freeTextPositional: true,
     signature:
       '--to <name|a,b|@team|@broadcast> --act <act> [--thread <id>] [--reply-to <id>] [--meta k=v] [--urgent --urgent-reason <why>] [--blocked-by <gate> [--ref <what>] [--sig <detail>]] <body…>',
     summary: 'send a typed act to a teammate, a few teammates, the team, or everyone',
