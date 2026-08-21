@@ -1,7 +1,7 @@
 import { MusterdChip } from '../../brand/MusterdWord';
 import './site.css';
 
-/** The public-site nav. Daemon-connected surfaces never appear here (ADR 300). */
+/** The public-site nav. Daemon-connected surfaces never appear here (ADR 302). */
 export const NAV_LINKS = [
   { label: 'Docs', href: '/docs' },
   { label: 'Blog', href: '/blog' },

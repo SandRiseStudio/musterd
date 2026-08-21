@@ -1,4 +1,4 @@
-# 300 — musterd.io is a public multi-page site
+# 302 — musterd.io is a public multi-page site
 
 - Status: accepted
 - Date: 2026-08-21

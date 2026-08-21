@@ -4,7 +4,7 @@ import { TAGLINE } from '../../content/site';
 import './LightHero.css';
 
 /**
- * The typographic landing hero (ADR 300): type on the warm mustard ground, no canvas, no render
+ * The typographic landing hero (ADR 302): type on the warm mustard ground, no canvas, no render
  * loop. The pitch is the prerendered text itself.
  */
 export function LightHero() {

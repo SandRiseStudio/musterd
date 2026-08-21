@@ -3,7 +3,7 @@ import { TWITCH_CHANNEL, TWITCH_URL, twitchEmbedUrl } from './twitchEmbed';
 import './StreamSection.css';
 
 /**
- * The "built by its own agents, live" section (ADR 300): story copy beside a contained Twitch
+ * The "built by its own agents, live" section (ADR 302): story copy beside a contained Twitch
  * player. The prerendered HTML carries only a static facade; the iframe is injected when an
  * IntersectionObserver (client effect — never during render, per the hydration rule in
  * broadcast.stage.test.ts) sees the section approach the viewport. If the channel is offline,
@@ -16,6 +16,11 @@ export function StreamSection() {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    // Inject only once the section is GENUINELY on screen. Twitch refuses muted autoplay unless
+    // the player meets its "style visibility + viewport visibility" requirement at load, and a
+    // player that never autoplays never counts the viewer — which is the whole point of embedding
+    // here (ADR 302). A preloading margin defeats it: measured 2026-08-21, an off-screen
+    // injection logged "Autoplay disabled … viewport visibility" and sat paused.
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
@@ -23,7 +28,7 @@ export function StreamSection() {
           observer.disconnect();
         }
       },
-      { rootMargin: '200px' },
+      { threshold: 0.4 },
     );
     observer.observe(host);
     return () => observer.disconnect();
@@ -54,6 +59,10 @@ export function StreamSection() {
             className="ss__frame"
             src={twitchEmbedUrl(TWITCH_CHANNEL, location.hostname)}
             title="musterd agents live on Twitch"
+            // Twitch's player lays itself out from the iframe's own dimensions, and with only CSS
+            // sizing it measured the pre-layout box and painted a postage stamp in the corner.
+            width="100%"
+            height="100%"
             allowFullScreen
           />
         ) : (

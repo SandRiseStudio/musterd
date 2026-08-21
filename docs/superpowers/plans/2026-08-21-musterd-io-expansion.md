@@ -36,7 +36,7 @@ Task 1 records these in the spec.
 
 ---
 
-### Task 1: Spec corrections, stale README, and ADR 300
+### Task 1: Spec corrections, stale README, and ADR 302
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-08-21-musterd-io-expansion-design.md`
@@ -44,17 +44,17 @@ Task 1 records these in the spec.
 - Create: `docs/decisions/300-musterd-io-public-site.md`
 
 **Interfaces:**
-- Produces: ADR 300 (referenced by later commit messages and the wrangler comment in Task 7).
+- Produces: ADR 302 (referenced by later commit messages and the wrangler comment in Task 7).
 
 - [ ] **Step 1: Append a "Premise corrections" section to the spec** — copy the three numbered corrections above verbatim under a `## Premise corrections (2026-08-21, post-approval)` heading, noting nick approved the intent and the corrections only shrink the work.
 
 - [ ] **Step 2: Fix `packages/web/README.md`** — replace the three.js/anime.js hero description ("**three.js** + the **anime.js Three.js adapter** — the immersive hero…") with the current truth (2D-canvas office-scene hero, being replaced by the typographic hero in this change), and update the "serves one page — the roadmap" intro to describe the multi-page public site (/, /roadmap, /docs, /blog public; daemon surfaces excluded).
 
-- [ ] **Step 3: Write ADR 300** at `docs/decisions/300-musterd-io-public-site.md`, following the house format of ADR 298 (check its header fields and mirror them). Content: (a) musterd.io grows from one landing route to the public set `/`, `/roadmap`, `/docs/**`, `/blog/**`; (b) the landing hero changes from the canvas office scene to a typographic hero — amends ADR 037's hero treatment, the aesthetic direction (warm mustard palette, type-led, honest copy per brand.md) stands; (c) the public-route allowlist in `stage-site.mjs` is the origin's safety property — adding a route to it is a deploy decision recorded in that file, daemon surfaces stay excluded (reaffirms ADR 132/156); (d) markdown/roadmap content is rendered to HTML at build-prep time — no markdown runtime in the client; (e) the Twitch broadcast embeds on `/` as a deferred, visibility-gated iframe (channel sandrise_ai), muted autoplay, never in the prerendered HTML.
+- [ ] **Step 3: Write ADR 302** at `docs/decisions/300-musterd-io-public-site.md`, following the house format of ADR 298 (check its header fields and mirror them). Content: (a) musterd.io grows from one landing route to the public set `/`, `/roadmap`, `/docs/**`, `/blog/**`; (b) the landing hero changes from the canvas office scene to a typographic hero — amends ADR 037's hero treatment, the aesthetic direction (warm mustard palette, type-led, honest copy per brand.md) stands; (c) the public-route allowlist in `stage-site.mjs` is the origin's safety property — adding a route to it is a deploy decision recorded in that file, daemon surfaces stay excluded (reaffirms ADR 132/156); (d) markdown/roadmap content is rendered to HTML at build-prep time — no markdown runtime in the client; (e) the Twitch broadcast embeds on `/` as a deferred, visibility-gated iframe (channel sandrise_ai), muted autoplay, never in the prerendered HTML.
 
 - [ ] **Step 4: Run the docs gate** — `pnpm format:check` (fix anything it flags; it enforces ADR house rules).
 
-- [ ] **Step 5: Commit** — `git add -A docs packages/web/README.md && git commit -m "docs: ADR 300 — musterd.io public site; correct stale web premises"` (+ trailers).
+- [ ] **Step 5: Commit** — `git add -A docs packages/web/README.md && git commit -m "docs: ADR 302 — musterd.io public site; correct stale web premises"` (+ trailers).
 
 ---
 
@@ -472,7 +472,7 @@ export function twitchEmbedUrl(channel: string, parent: string): string {
 **Files:**
 - Create: `packages/web/scripts/stage-allowlist.mjs`
 - Modify: `packages/web/scripts/stage-site.mjs`
-- Modify: `packages/web/wrangler.jsonc` (comment only: the origin now serves the ADR 300 public set)
+- Modify: `packages/web/wrangler.jsonc` (comment only: the origin now serves the ADR 302 public set)
 - Test: `packages/web/scripts/stage-site.test.ts`
 
 **Interfaces:**
@@ -485,7 +485,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs data module
 import { PUBLIC_ALLOW, DAEMON_ROUTES } from './stage-allowlist.mjs';
 
-describe('the public-origin allowlist (ADR 300)', () => {
+describe('the public-origin allowlist (ADR 302)', () => {
   it('stages exactly the public set', () => {
     expect([...PUBLIC_ALLOW].sort()).toEqual(['assets', 'blog', 'build.json', 'docs', 'index.html', 'roadmap'].sort());
   });
@@ -502,11 +502,11 @@ describe('the public-origin allowlist (ADR 300)', () => {
 
 - [ ] **Step 2: Run → FAIL.**
 
-- [ ] **Step 3: Implement** — `stage-allowlist.mjs` exports the two lists with the "adding here is a deploy decision (ADR 300)" comment moved from stage-site.mjs; `stage-site.mjs` imports them, and adds one new check before staging: `for (const r of DAEMON_ROUTES) if (ALLOW... includes(r)) die(...)` plus the existing missing/unexpected checks unchanged.
+- [ ] **Step 3: Implement** — `stage-allowlist.mjs` exports the two lists with the "adding here is a deploy decision (ADR 302)" comment moved from stage-site.mjs; `stage-site.mjs` imports them, and adds one new check before staging: `for (const r of DAEMON_ROUTES) if (ALLOW... includes(r)) die(...)` plus the existing missing/unexpected checks unchanged.
 
 - [ ] **Step 4: Test → PASS.** Full pipeline: `pnpm --filter @musterd/web build && pnpm --filter @musterd/web stage:site`; verify output lists `index.html, assets, roadmap, docs, blog` staged and the daemon routes withheld; `ls dist/site` confirms.
 
-- [ ] **Step 5: Commit** — `feat(web): stage-site allowlist covers the ADR 300 public set`.
+- [ ] **Step 5: Commit** — `feat(web): stage-site allowlist covers the ADR 302 public set`.
 
 ---
 
@@ -528,7 +528,7 @@ describe('the public-origin allowlist (ADR 300)', () => {
 
 ### Task 9: Land and hand off
 
-- [ ] **Step 1:** Push branch, open the PR (`gh pr create`) titled `musterd.io expansion — public multi-page site (ADR 300)`; body summarizes spec + premise corrections, PR trailer per repo convention.
+- [ ] **Step 1:** Push branch, open the PR (`gh pr create`) titled `musterd.io expansion — public multi-page site (ADR 302)`; body summarizes spec + premise corrections, PR trailer per repo convention.
 - [ ] **Step 2:** `lane_update` → `awaiting_acceptance` via `lane_submit` once CI is green; acceptance routes per ADR 244 at the lane's declared `normal` stakes.
 - [ ] **Step 3:** Open the copy lane for sloane — title "musterd.io copy — landing, what-is, stream story, getting-started, launch post"; surface `packages/web/content/**`, `packages/web/src/components/site/**`; detail lists every `[SLOANE]` marker location; `team_send {act:'handoff'}` to sloane.
 - [ ] **Step 4:** Deploy is nick's call — note in the PR that `deploy:site` should wait for sloane's copy unless nick wants the placeholder version live.

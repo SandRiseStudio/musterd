@@ -78,7 +78,7 @@ const ROUTES = arg('routes', '')
   ? arg('routes', '').split(',')
   : [
       '/',
-      // The ADR 300 public routes — one representative per template (Prose.css carries the rest).
+      // The ADR 302 public routes — one representative per template (Prose.css carries the rest).
       '/roadmap',
       '/docs',
       '/docs/getting-started',

@@ -4,7 +4,7 @@ import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
 
 export const Route = createFileRoute('/blog/')({
-  // SSR-only content load (ADR 300) — see blog.$slug.tsx for the pattern's rationale.
+  // SSR-only content load (ADR 302) — see blog.$slug.tsx for the pattern's rationale.
   loader: async () => {
     if (!import.meta.env.SSR) throw notFound();
     const { blogPosts } = await import('../content/generated/site-content');

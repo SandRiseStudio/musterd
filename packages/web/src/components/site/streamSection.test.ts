@@ -30,4 +30,16 @@ describe('the stream embed is deferred', () => {
   it('parent comes from location.hostname so previews work', () => {
     expect(src()).toContain('location.hostname');
   });
+
+  it('does not pre-inject off-screen: Twitch refuses autoplay unless the player is in view', () => {
+    // A rootMargin here would load the player before it is visible; Twitch then logs
+    // "Autoplay disabled … viewport visibility" and the embed never counts the viewer.
+    expect(src()).not.toContain('rootMargin');
+    expect(src()).toMatch(/threshold:/);
+  });
+
+  it('the iframe carries its own dimensions — the player lays out from them', () => {
+    expect(src()).toMatch(/width="100%"/);
+    expect(src()).toMatch(/height="100%"/);
+  });
 });

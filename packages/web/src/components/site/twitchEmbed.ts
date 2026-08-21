@@ -4,7 +4,7 @@ export const TWITCH_URL = `https://www.twitch.tv/${TWITCH_CHANNEL}`;
 /**
  * player.twitch.tv iframe URL. `parent` is Twitch's embed allowlist — the embedding hostname.
  * Muted autoplay is deliberate: browsers permit it, and a muted playing embed still counts as a
- * concurrent Twitch viewer (ADR 300 records the falsifier if that policy changes).
+ * concurrent Twitch viewer (ADR 302 records the falsifier if that policy changes).
  */
 export function twitchEmbedUrl(channel: string, parent: string): string {
   const u = new URL('https://player.twitch.tv/');

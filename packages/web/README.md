@@ -1,7 +1,7 @@
 # @musterd/web
 
 The musterd web surface. It serves the **public site** — the landing page plus `/roadmap`, `/docs`
-and `/blog`, all prerendered to static HTML (ADR 300) — and the daemon-connected surfaces
+and `/blog`, all prerendered to static HTML (ADR 302) — and the daemon-connected surfaces
 (`/live`, `/board`, `/audit`, …) that only ever ship on the daemon origin. One stack for both, so
 new surfaces add routes here rather than starting over.
 
@@ -16,7 +16,7 @@ new surfaces add routes here rather than starting over.
   the repo-root roadmap data to HTML strings at build time; no markdown runtime and no roadmap
   dataset in the client bundle.
 - Aesthetic direction and its guardrails: `docs/decisions/037-web-surface-aesthetic.md` (as amended
-  by ADR 300) + `docs/design/brand.md` §7. The roadmap **source of truth** is the repo-root
+  by ADR 302) + `docs/design/brand.md` §7. The roadmap **source of truth** is the repo-root
   `content/roadmap.data.ts`; **`ROADMAP.md` is generated from it** (`pnpm roadmap:gen`, ADR 041).
   Edit the data module, not `ROADMAP.md`.
 
@@ -43,7 +43,7 @@ pnpm --filter @musterd/web deploy:site   # build → stage → wrangler deploy
 One command, three steps, and the middle one is the important one:
 
 1. `pnpm build` prerenders **every** route, `/live` and `/board` included.
-2. `pnpm stage:site` (`scripts/stage-site.mjs`) copies **only** the ADR 300 public set (the
+2. `pnpm stage:site` (`scripts/stage-site.mjs`) copies **only** the ADR 302 public set (the
    landing `index.html`, `assets/`, `roadmap/`, `docs/`, `blog/`) into `dist/site`, and prints the
    routes it withheld. This is a deliberate allowlist: `/live`,
    `/board`, `/audit`, `/approvals` and the previews are daemon-connected, so on a public origin

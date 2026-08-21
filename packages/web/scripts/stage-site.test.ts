@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs data module
 import { DAEMON_ROUTES, PUBLIC_ALLOW } from './stage-allowlist.mjs';
 
-describe('the public-origin allowlist (ADR 300)', () => {
+describe('the public-origin allowlist (ADR 302)', () => {
   it('stages exactly the public set', () => {
     expect([...PUBLIC_ALLOW].sort()).toEqual(['assets', 'blog', 'docs', 'index.html', 'roadmap'].sort());
   });

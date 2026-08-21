@@ -4,7 +4,7 @@ import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
 
 export const Route = createFileRoute('/blog/$slug')({
-  // SSR-only content load (ADR 300): the prerender runs this and dehydrates the result into the
+  // SSR-only content load (ADR 302): the prerender runs this and dehydrates the result into the
   // page; the client build eliminates the branch, so the generated content module never ships as
   // client JS. Site nav uses plain <a> full navigations, so the client never runs this loader.
   loader: async ({ params }) => {

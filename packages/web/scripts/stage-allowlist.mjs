@@ -1,5 +1,5 @@
 /**
- * The musterd.io deploy allowlist (ADR 300). Everything the public site needs, and nothing else —
+ * The musterd.io deploy allowlist (ADR 302). Everything the public site needs, and nothing else —
  * adding an entry here is a deploy decision, not a build side effect. `stage-site.mjs` stages
  * exactly this set and refuses anything unexpected; `stage-site.test.ts` pins the two lists
  * disjoint.

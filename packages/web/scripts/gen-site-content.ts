@@ -1,5 +1,5 @@
 /**
- * Build-prep content pipeline (ADR 300): render the docs manifest, the blog posts, and the
+ * Build-prep content pipeline (ADR 302): render the docs manifest, the blog posts, and the
  * repo-root roadmap data to HTML strings in a generated module, so the client bundle carries no
  * markdown runtime and no roadmap dataset. Runs before `vite build` (see package.json `build`).
  *

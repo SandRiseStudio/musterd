@@ -1,5 +1,5 @@
 /**
- * The ONLY repo files that reach the public /docs section (ADR 300). Entries resolve relative to
+ * The ONLY repo files that reach the public /docs section (ADR 302). Entries resolve relative to
  * the REPO ROOT. An explicit list, never a glob: repo docs are written for the team, and each
  * line here is a deliberate publish decision. `gen-site-content.ts` fails the build if a source
  * is missing. `title: null` lifts the title from the file's first `# ` heading.

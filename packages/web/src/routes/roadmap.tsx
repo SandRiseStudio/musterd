@@ -4,7 +4,7 @@ import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
 
 export const Route = createFileRoute('/roadmap')({
-  // SSR-only content load (ADR 300) — see blog.$slug.tsx for the pattern's rationale. The ~82-item
+  // SSR-only content load (ADR 302) — see blog.$slug.tsx for the pattern's rationale. The ~82-item
   // roadmap dataset thus never rides the client bundle, honoring the move recorded in
   // src/content/site.ts.
   loader: async () => {

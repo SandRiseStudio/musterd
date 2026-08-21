@@ -18,7 +18,7 @@ const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const BUILD = join(pkgRoot, 'dist', 'client');
 const STAGE = join(pkgRoot, 'dist', 'site');
 
-// The allowlist and the daemon set live in stage-allowlist.mjs (ADR 300) so tests can pin them.
+// The allowlist and the daemon set live in stage-allowlist.mjs (ADR 302) so tests can pin them.
 const ALLOW = PUBLIC_ALLOW;
 
 function die(msg) {
@@ -27,7 +27,7 @@ function die(msg) {
 }
 
 for (const r of DAEMON_ROUTES) {
-  if (ALLOW.includes(r)) die(`allowlist contains daemon-connected route \`${r}\` — see ADR 300`);
+  if (ALLOW.includes(r)) die(`allowlist contains daemon-connected route \`${r}\` — see ADR 302`);
 }
 
 const built = await readdir(BUILD).catch(() => die(`no build at ${BUILD} — run \`pnpm build\` first`));

@@ -338,7 +338,7 @@ net of the retirement. Initial JS is untouched (grid rides the existing lazy boa
 Raised `totalJsGzipBytes` 238000 → 241000 and `totalCssGzipBytes` 25300 → 26400 — measured + ~1%
 headroom on JS, +4% on CSS; both were tight-fit ceilings, not calibration drift.
 
-## 2026-08-21 — ADR 300 site expansion (initial raise; landing re-composition)
+## 2026-08-21 — ADR 302 site expansion (initial raise; landing re-composition)
 
 Branch `miley/musterd-io-expansion`: the public site grows to `/`, `/roadmap`, `/docs/**`,
 `/blog/**`; the landing swaps the canvas office-scene hero for typographic sections
