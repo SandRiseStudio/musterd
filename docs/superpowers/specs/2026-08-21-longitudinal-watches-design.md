@@ -216,8 +216,9 @@ who hits it knows both who to ask and that the one-line fix is not a dodge.
 A `## Decision` section asserting a frequency claim must carry a `Snapshot-debt:` header line.
 
 `check-change-adr.ts:176` already documents the trap: making that gate a tree check *"would fire on
-every PR touching one of those 94."* We have 291 ADRs; a tree-scoped adverb rule would light up most
-of them and be switched off within a week. So Rule B reuses `check-change-adr.ts`'s base resolution
+every PR touching one of those 94."* Measured on this corpus: **14 of 292** existing ADRs carry a frequency term inside their
+`## Decision`. That is not most of them, but it is 14 failures an author cannot fix on a PR that
+touched none of them — which is how a gate gets switched off. So Rule B reuses `check-change-adr.ts`'s base resolution
 (`--base` → `$CHANGE_ADR_BASE` → `origin/main`, compared at the merge-base) and its existing
 `## Decision` body extractor at line 142. It judges only what the branch changed, and only inside
 `## Decision`, where an assertion is being made rather than history quoted.

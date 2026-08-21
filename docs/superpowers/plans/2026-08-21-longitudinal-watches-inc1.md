@@ -748,8 +748,8 @@ const SNAPSHOT_DEBT = /^-?\s*Snapshot-debt:\s*(\S.*)$/m;
 
 /**
  * DIFF-SCOPED BY ITS CALLER, NEVER TREE-SCOPED. `check-change-adr.ts:176` records why: making that
- * gate a tree check "would fire on every PR touching one of those 94". There are 291 ADRs here, and
- * a rule that reddens most of them is a rule that gets deleted within the week.
+ * gate a tree check "would fire on every PR touching one of those 94". Measured 2026-08-21: 14 of
+ * 292 existing ADRs carry a frequency term in their Decision — not most, but 14 an author cannot fix.
  */
 export function ruleB(adrs: { path: string; text: string }[]): string[] {
   const errors: string[] = [];

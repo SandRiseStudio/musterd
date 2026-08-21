@@ -19,9 +19,11 @@
  * read. Renewal has to cost a decision, so `revisit_by` cannot move: continuing a question means a
  * NEW watch file, with a new question, in a diff someone reviews.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { decisionSection } from './adr-sections.ts';
 import { parseWatch, scalar, validateWatch, type Watch } from './watches.ts';
 
 export interface ChangedWatch {
@@ -66,6 +68,73 @@ export function ruleAImmutable(changed: ChangedWatch[]): string[] {
   return errors;
 }
 
+/**
+ * Frequency of a time-varying quantity — the tell that a claim needs a window, not a moment.
+ *
+ * Deliberately EXCLUDES `always` / `never`. Those are ADR 294 `absence`-class claims: ubiquitous in
+ * ordinary prose, and the controls registry's problem rather than this one. Including them would
+ * fire on most Decisions in the corpus and get the rule switched off.
+ */
+export const FREQUENCY_TERMS = [
+  'flaky',
+  'intermittent',
+  'intermittently',
+  'rare',
+  'rarely',
+  'usually',
+  'often',
+  'frequently',
+  'occasionally',
+  'sometimes',
+  'sporadic',
+  'sporadically',
+  'under load',
+  'most of the time',
+] as const;
+
+/** A waiver has to carry a reason. `Snapshot-debt: none` on its own is an assertion, not an argument. */
+const SNAPSHOT_DEBT = /^-?\s*(?:\*\*)?Snapshot-debt:?(?:\*\*)?:?\s*(\S.*)$/m;
+
+function satisfiesSnapshotDebt(text: string): boolean {
+  const value = SNAPSHOT_DEBT.exec(text)?.[1]?.trim();
+  if (value === undefined) return false;
+  // `none` alone is a bare waiver; `none — <why>` is a waiver with its reasoning attached.
+  return !/^none\.?$/i.test(value);
+}
+
+/**
+ * DIFF-SCOPED BY ITS CALLER, NEVER TREE-SCOPED. `check-change-adr.ts:176` records why: making that
+ * gate a tree check "would fire on every PR touching one of those 94". Measured here on 2026-08-21:
+ * 14 of 292 existing ADRs carry a frequency term in their `## Decision`. Not most of them — but 14
+ * failures an author cannot fix, on a PR that touched none of them, is how a gate gets switched off.
+ *
+ * NOTE: `base...HEAD` sees COMMITTED changes only, matching `check-change-adr.ts`. A staged-but-
+ * uncommitted ADR will not be judged until it is committed. That is the house convention (these
+ * gates are written for CI on a pushed branch), not an oversight.
+ */
+export function ruleB(adrs: { path: string; text: string }[]): string[] {
+  const errors: string[] = [];
+  for (const { path, text } of adrs) {
+    const decision = decisionSection(text);
+    if (decision === null) continue;
+    if (satisfiesSnapshotDebt(text)) continue;
+
+    const hit = FREQUENCY_TERMS.find((term) =>
+      new RegExp(`\\b${term.replace(/ /g, '\\s+')}\\b`, 'i').test(decision),
+    );
+    if (hit === undefined) continue;
+
+    errors.push(
+      `${path} — \`## Decision\` asserts a frequency claim (\`${hit}\`). A frequency claim is a ` +
+        'window, not a moment. Either cite a watch:\n' +
+        '      Snapshot-debt: docs/watches/<date>-<slug>.md\n' +
+        '    or waive it with a reason:\n' +
+        '      Snapshot-debt: none — <why this is not a snapshot you are asserting>',
+    );
+  }
+  return errors;
+}
+
 export function readWatches(repoRoot: string): Watch[] {
   const dir = join(repoRoot, 'docs/watches');
   let names: string[];
@@ -83,12 +152,59 @@ export function readWatches(repoRoot: string): Watch[] {
   return watches;
 }
 
+function git(...args: string[]): string {
+  return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+}
+
+/**
+ * The merge-base against `origin/main`, or null when it cannot be resolved.
+ *
+ * NOT imported from `check-change-adr.ts`, which resolves its base at module top level and would
+ * run the whole ADR gate on import. Same precedence as that file so the two agree in CI.
+ *
+ * Returns null rather than exiting, because unlike that gate this one also has TREE rules that stay
+ * valid without a base — a shallow clone should still be told about an overdue watch. What it must
+ * never do is skip the diff rules SILENTLY; see `main`.
+ */
+function resolveBase(): string | null {
+  const flagIdx = process.argv.indexOf('--base');
+  const requested =
+    (flagIdx !== -1 ? process.argv[flagIdx + 1] : undefined) ??
+    process.env['WATCH_BASE'] ??
+    process.env['CHANGE_ADR_BASE'] ??
+    'origin/main';
+  try {
+    return git('merge-base', 'HEAD', requested).trim();
+  } catch {
+    return null;
+  }
+}
+
 function main(): void {
   const repoRoot = process.cwd();
   const today = new Date().toISOString().slice(0, 10);
   const watches = readWatches(repoRoot);
 
   const errors = [...watches.flatMap((w) => validateWatch(w, { repoRoot })), ...ruleA(watches, today)];
+
+  const base = resolveBase();
+  if (base === null) {
+    // Announced, never silent. A rule that did not run and says nothing is indistinguishable from a
+    // rule that ran and found nothing — the `absence` failure this whole primitive is about.
+    process.stderr.write(
+      '! watch:check — no merge-base against origin/main, so rules B and C DID NOT RUN ' +
+        '(frequency claims, resolution post-back). Fetch origin/main, or pass --base <ref>.\n',
+    );
+  } else {
+    const changedPaths = git('diff', '--name-only', `${base}...HEAD`).split('\n').filter(Boolean);
+
+    const changedAdrs = changedPaths
+      .filter((p) => /^docs\/decisions\/\d+-.*\.md$/.test(p))
+      .filter((p) => existsSync(join(repoRoot, p)))
+      .map((p) => ({ path: p, text: readFileSync(join(repoRoot, p), 'utf8') }));
+
+    errors.push(...ruleB(changedAdrs));
+  }
 
   if (errors.length > 0) {
     process.stderr.write(`✗ watch:check\n\n${errors.map((e) => `  ${e}\n`).join('\n')}\n`);
