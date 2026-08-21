@@ -5,6 +5,7 @@ import {
   enumerateClaudeSessions,
   enumerateCodexSessions,
   enumerateCursorSessions,
+  LOCAL_SESSION_LIVE_MS,
   type SessionFile,
 } from './enumerate.js';
 
@@ -25,9 +26,7 @@ import {
  * harness appends to it on every message/tool event, so a live session touches it constantly.
  */
 
-/** A transcript untouched for this long means no live local session (the guard threshold): long
- *  enough to protect a human who is thinking, well under the 30-minute batched-wake cooldown. */
-export const LOCAL_SESSION_LIVE_MS = 10 * 60_000;
+export { LOCAL_SESSION_LIVE_MS };
 
 /** Claude Code GCs sessions after 30 days (`cleanupPeriodDays` default) — a capture older than
  *  this cannot resume; skip straight to fresh (design doc §3, claude-code row). */
