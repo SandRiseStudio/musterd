@@ -51,6 +51,8 @@ describe('decisionSection', () => {
   });
 
   it('matches the heading case-insensitively, as the corpus is not uniform', () => {
-    expect(decisionSection('# 301\n\n## decision\n\nLowercase heading.\n')).toBe('Lowercase heading.');
+    expect(decisionSection('# 301\n\n## decision\n\nLowercase heading.\n')).toBe(
+      'Lowercase heading.',
+    );
   });
 });

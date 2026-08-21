@@ -116,16 +116,31 @@ rules 2 and 3 exist to make it structural rather than cultural.
 ## Observability & Evaluation
 
 Pre-registered, because an ADR about pre-registration that pre-registers nothing would be the joke
-telling itself. Assessed **2026-11-01**:
+telling itself.
+
+**Traces.** The watch files are the trace. Each carries its own `opened`, `opened_by`, `revisit_by`
+and terminal `resolution`, and git supplies who/when for the file itself (ADR 109). `claim_ref` and
+Rule C link every verdict to the decision it settles, so a watch is reachable from the decision and
+the decision from the watch. `series` points at where the samples live, so the data is reachable
+from both.
+
+**Eval.** Dataset: the `docs/watches/` corpus, baselined against the ADR 166 sweep it replaces —
+5,687 samples over 24.8 days, read zero times, resolved never. Assessed **2026-11-01**:
 
 1. **Has any watch been opened by a seat other than izzo?** Target: at least one. A primitive only
    its author uses did not become a practice, whatever its merits.
 2. **Has any watch resolved with a verdict rather than `void: unattended`?** Target: at least one.
-   All-void would mean we built a more honest way to record that nobody looked, which is worth
-   something but is not what this is for.
-3. **How many `Snapshot-debt:` lines are watch citations vs. waivers?** No target — this is
-   descriptive. A corpus of nothing but `none — …` waivers is the signal that the adverb rule is
-   being routed around rather than used, and rule 1 has failed.
+   All-void would mean we built a more honest way to record that nobody looked — worth something,
+   but not what this is for.
+3. **Of the `Snapshot-debt:` lines in the corpus, how many are watch citations vs. waivers?**
+   Descriptive, no target. All-waivers is the signal that the adverb rule is being routed around
+   rather than used, and rule 1 has failed.
+
+**Experiment.** The natural before/after is ADR 166's own series against its successor watch
+(`docs/watches/2026-08-21-adr-166-demoted-successor.md`), which asks the same question over a
+population pinned by name. Baseline: 25 days, 109 target-zero breaches, 214 escalation lines, zero
+inspections. If the successor also reaches `revisit_by` uninspected, the schema added ceremony and
+not attention — and that is the falsifier below, not an outcome to explain away.
 
 ## Falsifier for this ADR's premise
 

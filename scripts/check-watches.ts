@@ -182,8 +182,20 @@ export function readWatches(repoRoot: string): Watch[] {
   return watches;
 }
 
-function git(...args: string[]): string {
-  return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+/**
+ * `quiet` suppresses the child's stderr, which `execFileSync` otherwise forwards to ours.
+ *
+ * Needed because "this watch does not exist at the base" is detected by `git show` FAILING, and
+ * that is the normal path for every newly added watch. Without it the gate prints `fatal: path ...
+ * exists on disk, but not in <sha>` on a perfectly healthy run — an alarming line for a
+ * non-event, in a gate whose whole subject is not crying wolf.
+ */
+function git(args: string[], opts: { quiet?: boolean } = {}): string {
+  return execFileSync('git', args, {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', opts.quiet === true ? 'ignore' : 'inherit'],
+  });
 }
 
 /**
@@ -204,7 +216,7 @@ function resolveBase(): string | null {
     process.env['CHANGE_ADR_BASE'] ??
     'origin/main';
   try {
-    return git('merge-base', 'HEAD', requested).trim();
+    return git(['merge-base', 'HEAD', requested], { quiet: true }).trim();
   } catch {
     return null;
   }
@@ -215,7 +227,10 @@ function main(): void {
   const today = new Date().toISOString().slice(0, 10);
   const watches = readWatches(repoRoot);
 
-  const errors = [...watches.flatMap((w) => validateWatch(w, { repoRoot })), ...ruleA(watches, today)];
+  const errors = [
+    ...watches.flatMap((w) => validateWatch(w, { repoRoot })),
+    ...ruleA(watches, today),
+  ];
 
   const base = resolveBase();
   if (base === null) {
@@ -226,7 +241,9 @@ function main(): void {
         '(frequency claims, resolution post-back). Fetch origin/main, or pass --base <ref>.\n',
     );
   } else {
-    const changedPaths = git('diff', '--name-only', `${base}...HEAD`).split('\n').filter(Boolean);
+    const changedPaths = git(['diff', '--name-only', `${base}...HEAD`])
+      .split('\n')
+      .filter(Boolean);
 
     const changedAdrs = changedPaths
       .filter((p) => /^docs\/decisions\/\d+-.*\.md$/.test(p))
@@ -242,21 +259,27 @@ function main(): void {
         // Absent at the base means new; `git show` exits non-zero, and that IS the signal.
         let baseWatch: Watch | null = null;
         try {
-          baseWatch = parseWatch(p, git('show', `${base}:${p}`));
+          baseWatch = parseWatch(p, git(['show', `${base}:${p}`], { quiet: true }));
         } catch {
           baseWatch = null;
         }
         return [{ path: p, head, base: baseWatch }];
       });
 
-    errors.push(...ruleB(changedAdrs), ...ruleAImmutable(changedWatches), ...ruleC(changedWatches, changedPaths));
+    errors.push(
+      ...ruleB(changedAdrs),
+      ...ruleAImmutable(changedWatches),
+      ...ruleC(changedWatches, changedPaths),
+    );
   }
 
   if (errors.length > 0) {
     process.stderr.write(`✗ watch:check\n\n${errors.map((e) => `  ${e}\n`).join('\n')}\n`);
     process.exit(1);
   }
-  process.stdout.write(`✓ watch:check — ${watches.length} watch(es), none past their revisit_by.\n`);
+  process.stdout.write(
+    `✓ watch:check — ${watches.length} watch(es), none past their revisit_by.\n`,
+  );
 }
 
 // The robust form, matching check-wiki.ts:164. Not check-controls.ts's `file://` template literal,

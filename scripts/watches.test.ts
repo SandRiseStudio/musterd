@@ -93,23 +93,29 @@ describe('validateWatch', () => {
   });
 
   it('rejects revisit_by on or before opened', () => {
-    expect(validateWatch(withField('revisit_by', '2026-08-21'), { repoRoot: ROOT }).join(' ')).toContain(
-      'revisit_by',
-    );
+    expect(
+      validateWatch(withField('revisit_by', '2026-08-21'), { repoRoot: ROOT }).join(' '),
+    ).toContain('revisit_by');
   });
 
   it('rejects a claim_ref that does not exist — the post-back target must be real', () => {
     expect(
-      validateWatch(withField('claim_ref', 'docs/decisions/999-nope.md'), { repoRoot: ROOT }).join(' '),
+      validateWatch(withField('claim_ref', 'docs/decisions/999-nope.md'), { repoRoot: ROOT }).join(
+        ' ',
+      ),
     ).toContain('claim_ref');
   });
 
   it('rejects an unknown status', () => {
-    expect(validateWatch(withField('status', 'paused'), { repoRoot: ROOT }).join(' ')).toContain('status');
+    expect(validateWatch(withField('status', 'paused'), { repoRoot: ROOT }).join(' ')).toContain(
+      'status',
+    );
   });
 
   it('requires a resolution once the watch is no longer open', () => {
-    expect(validateWatch(withField('status', 'void'), { repoRoot: ROOT }).join(' ')).toContain('resolution');
+    expect(validateWatch(withField('status', 'void'), { repoRoot: ROOT }).join(' ')).toContain(
+      'resolution',
+    );
   });
 
   it('rejects a resolution on a watch that is still open', () => {
@@ -129,6 +135,8 @@ describe('validateWatch', () => {
   });
 
   it('rejects a date that parses but is not a real day', () => {
-    expect(validateWatch(withField('opened', '2026-02-30'), { repoRoot: ROOT }).join(' ')).toContain('opened');
+    expect(
+      validateWatch(withField('opened', '2026-02-30'), { repoRoot: ROOT }).join(' '),
+    ).toContain('opened');
   });
 });

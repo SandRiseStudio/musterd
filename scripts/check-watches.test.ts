@@ -54,9 +54,9 @@ describe('rule A — no watch outlives its revisit_by', () => {
   });
 
   it('passes the same overdue watch once it is resolved', () => {
-    expect(ruleA([watch({ status: 'resolved', resolution: 'target zero breached' })], '2026-09-05')).toEqual(
-      [],
-    );
+    expect(
+      ruleA([watch({ status: 'resolved', resolution: 'target zero breached' })], '2026-09-05'),
+    ).toEqual([]);
   });
 
   it('passes the same overdue watch once it is void', () => {
@@ -87,7 +87,9 @@ describe('rule A — revisit_by is immutable once merged', () => {
   });
 
   it('passes when revisit_by is unchanged', () => {
-    expect(ruleAImmutable([{ path: 'docs/watches/w.md', head: watch(), base: watch() }])).toEqual([]);
+    expect(ruleAImmutable([{ path: 'docs/watches/w.md', head: watch(), base: watch() }])).toEqual(
+      [],
+    );
   });
 
   it('passes a brand-new watch, which has no base to contradict', () => {
