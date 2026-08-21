@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parseRoleFile } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
 import { legacyUserRolesDir, userProfilesDir } from '../onboard/profile.js';
@@ -314,6 +315,82 @@ describe('role create', () => {
     await expect(roleCommand(parsed(['create', 'x'], { from: 'nope' }))).rejects.toMatchObject({
       exitCode: 2,
     });
+  });
+});
+
+/**
+ * Registry thin slice: in a roster home, `role create` authors the durable role library
+ * (`.musterd/roles/<name>.toml`) — the file `role assign` validates against and the daemon
+ * reconciles. Outside a roster home nothing changes: the legacy profile scaffold stays as-is
+ * (its rename is the ADR 296 enforcement build's, not this slice's).
+ */
+describe('role create in a roster home (registry thin slice)', () => {
+  function writeRosterHome() {
+    const m = join(cwd, '.musterd');
+    mkdirSync(join(m, 'seats'), { recursive: true });
+    writeFileSync(join(m, 'team.toml'), 'slug = "alpha"\n');
+    return m;
+  }
+
+  it('writes a canonical roles/<name>.toml skeleton, not a profile json', async () => {
+    const m = writeRosterHome();
+    expect(await roleCommand(parsed(['create', 'qa']))).toBe(0);
+    const text = readFileSync(join(m, 'roles', 'qa.toml'), 'utf8');
+    // Canonical serializeRole form: summary line first, charter TODO to fill in.
+    expect(text).toMatch(/^summary = /);
+    expect(text).toContain('TODO');
+    // Round-trips through the daemon's own parser — reconcile will accept it as written.
+    expect(() => parseRoleFile(text)).not.toThrow();
+    // The legacy profile path must NOT have been written — this is a role, not a toolkit.
+    expect(() => readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8')).toThrow();
+  });
+
+  it('instantiates a built-in role template with --from, structural capabilities included', async () => {
+    const m = writeRosterHome();
+    expect(await roleCommand(parsed(['create', 'watcher'], { from: 'observer' }))).toBe(0);
+    const role = parseRoleFile(readFileSync(join(m, 'roles', 'watcher.toml'), 'utf8'));
+    expect(role.summary).toMatch(/read-only/i);
+    // Observer's capabilities are structural — the template must carry them or the role is a label.
+    expect(role.capabilities.can_message).toBe('none');
+    expect(role.capabilities.can_flag_urgent).toBe(false);
+  });
+
+  it('carries is_admin on the admin template — the ADR 172 clamp depends on roles being the carrier', async () => {
+    const m = writeRosterHome();
+    expect(await roleCommand(parsed(['create', 'admin'], { from: 'admin' }))).toBe(0);
+    const role = parseRoleFile(readFileSync(join(m, 'roles', 'admin.toml'), 'utf8'));
+    expect(role.capabilities.is_admin).toBe(true);
+  });
+
+  it('refuses to overwrite an existing role file without --force', async () => {
+    const m = writeRosterHome();
+    await roleCommand(parsed(['create', 'qa']));
+    await expect(roleCommand(parsed(['create', 'qa']))).rejects.toMatchObject({ exitCode: 1 });
+    expect(await roleCommand(parsed(['create', 'qa'], { force: true, from: 'observer' }))).toBe(0);
+    const role = parseRoleFile(readFileSync(join(m, 'roles', 'qa.toml'), 'utf8'));
+    expect(role.capabilities.can_message).toBe('none'); // overwritten from the template
+  });
+
+  it('rejects --from an unknown role template, naming the valid set', async () => {
+    writeRosterHome();
+    await expect(roleCommand(parsed(['create', 'x'], { from: 'nope' }))).rejects.toThrow(
+      /observer/,
+    );
+  });
+
+  it('keeps the legacy profile scaffold reachable in a roster home via --profile', async () => {
+    writeRosterHome();
+    expect(await roleCommand(parsed(['create', 'qa'], { profile: true }))).toBe(0);
+    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8'));
+    expect(written.profile).toBe('qa');
+    expect(() => readFileSync(join(cwd, '.musterd', 'roles', 'qa.toml'), 'utf8')).toThrow();
+  });
+
+  it('points at assign + commit as the next step — the file is the single writer', async () => {
+    writeRosterHome();
+    await roleCommand(parsed(['create', 'qa']));
+    expect(out).toMatch(/role assign/);
+    expect(out).toMatch(/commit/i);
   });
 });
 
