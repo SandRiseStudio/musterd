@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseSeatFile, seatNameFromPath, seatRoles, serializeSeat } from '@musterd/protocol';
+import {
+  parseSeatFile,
+  type RoleFile,
+  seatNameFromPath,
+  seatRoles,
+  serializeRole,
+  serializeSeat,
+} from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
@@ -17,6 +24,7 @@ import {
 } from '../onboard/profile.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
+import { BUILTIN_ROLE_TEMPLATES, listRoleTemplateNames } from '../roster-roles/templates.js';
 import { resolveRead } from './helpers.js';
 
 /**
@@ -380,11 +388,21 @@ function roleShow(parsed: Parsed, roster: RosterRead | null): number {
 function roleCreate(parsed: Parsed): number {
   const name = parsed.positionals[1];
   if (!name)
-    throw new CliError('usage: musterd role create <name> [--from <builtin>] [--force]', 2);
+    throw new CliError(
+      'usage: musterd role create <name> [--from <template>] [--force] [--profile]',
+      2,
+    );
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
     throw new CliError(`invalid role name "${name}" — use lowercase letters, numbers, hyphens`, 2);
   }
   const dir = process.cwd();
+  // Registry thin slice: in a roster home, `create` authors the durable role library — the
+  // `roles/<name>.toml` that `assign` validates against and the daemon reconciles. The legacy
+  // profile scaffold stays reachable via --profile (and stays the only path outside a roster
+  // home); its rename is ADR 296's, not this command's.
+  if (!parsed.flags['profile'] && existsSync(join(dir, '.musterd', 'team.toml'))) {
+    return createRosterRole(dir, name, parsed);
+  }
   const path = join(userProfilesDir(dir), `${name}.json`);
   if (existsSync(path) && !parsed.flags['force']) {
     throw new CliError(`${path} already exists — pass --force to overwrite`, 1);
@@ -409,6 +427,56 @@ function roleCreate(parsed: Parsed): number {
     theme.meta(
       'edit it, then provision it via `musterd init` (it overrides a built-in of the same name)',
     ) + '\n',
+  );
+  return 0;
+}
+
+/**
+ * Author a `roles/<name>.toml` in this roster home — canonical from birth (serializeRole, same as
+ * every other durable file) so `musterd fmt` has nothing to renormalize and reconcile accepts it
+ * as written. The file is the single writer (ADR 058): the commit stays with the operator, and the
+ * daemon projects the role on merge, exactly as with a hand-written file.
+ */
+function createRosterRole(dir: string, name: string, parsed: Parsed): number {
+  const rolesDir = join(dir, '.musterd', 'roles');
+  const path = join(rolesDir, `${name}.toml`);
+  if (existsSync(path) && !parsed.flags['force']) {
+    throw new CliError(`${path} already exists — pass --force to overwrite`, 1);
+  }
+
+  const from = typeof parsed.flags['from'] === 'string' ? parsed.flags['from'] : undefined;
+  let role: RoleFile;
+  if (from) {
+    const template = BUILTIN_ROLE_TEMPLATES[from];
+    if (!template) {
+      throw new CliError(
+        `unknown role template "${from}" — one of: ${listRoleTemplateNames().join(', ')}`,
+        2,
+      );
+    }
+    role = structuredClone(template);
+  } else {
+    role = {
+      summary: `TODO: one line the roster surfaces for ${name}.`,
+      charter: `TODO: one or two lines of lens-not-résumé charter for ${name}.`,
+      capabilities: {},
+    };
+  }
+
+  mkdirSync(rolesDir, { recursive: true });
+  writeFileSync(path, serializeRole(role), 'utf8');
+
+  if (parsed.flags['json']) {
+    process.stdout.write(JSON.stringify({ path, from: from ?? null, kind: 'team-role' }) + '\n');
+    return 0;
+  }
+  process.stdout.write(
+    success(`wrote ${theme.accent(path)}${from ? theme.meta(` (from template "${from}")`) : ''}`, {
+      next: `edit it, then musterd role assign <seat> ${name}`,
+    }) + '\n',
+  );
+  process.stdout.write(
+    theme.meta('commit both files — the daemon reconciles the roster on merge (ADR 058)') + '\n',
   );
   return 0;
 }

@@ -27,6 +27,8 @@ src/
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
   codexBin.ts         // PATH-robust, shell-free `codex` binary resolution plus read-only `--version`/help capability probe; an unresolved or incompatible install stays non-wakeable (ADR 216)
   roster.ts           // durable seat-file writer: buildSeat + writeSeatFile (ADR 058 §5, file = single writer)
+  roster-roles/
+    templates.ts      // built-in role templates `role create --from` instantiates into roles/<name>.toml — seeds with structural capabilities only, no promotion machinery (ADR 298)
   infra-gate.ts       // warn-only infra-touch check: asks the daemon whether the acting seat holds `platform`; every failure mode is silence, never a block (ADR 227 inc 2)
   workingTree.ts      // session-start marker + the advisory a stage-shaped `git add -A` earns for paths that PREDATE this session; local-only, warn-never-deny (ADR 239 verdict)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
