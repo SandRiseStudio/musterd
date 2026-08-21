@@ -153,3 +153,9 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   `docs/glossary/terms.ts` is the glossary source; brand.md §5 is checked against it. The
   profile→toolkit CLI rename (`musterd toolkit`) is the next cut of this lane, not this commit —
   nick holds `packages/cli/src/help/catalog.ts` on 01M018624.
+
+- **2026-08-21 (GATE_FROM bump, wanderer, lane 01M0JVYFECA).** ADR 299 landed on main minutes
+  before the enforcement PR (`63d53ab6` then `5c755ce0`). Its frozen Decision uses unquoted
+  `worktree` ("in its own worktree"). `TERMINOLOGY_GATE_FROM` 299 therefore failed `vocab:check`
+  on main and on every following PR (dolly #975). Bumped to **300**. Cannot backtick the Decision;
+  cannot leave the gate red.
