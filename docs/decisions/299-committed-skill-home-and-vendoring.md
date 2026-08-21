@@ -38,7 +38,7 @@ skills, nor a policy for vendored third-party skill material.
    The first resident is `product-communications`. The directory is repo content: authored on
    branches, reviewed in PRs, owned like any doc. `musterd init` never writes here.
 2. **Per-harness bridges are thin pointers, provisioned per-seat — not repo content.** A seat
-   that should load a committed skill gets a bridge in its own worktree (a `.claude/skills/`
+   that should load a committed skill gets a bridge in its own workspace (a `.claude/skills/`
    stub with frontmatter, a `.cursor/rules/*.mdc` stub, and for Codex an AGENTS.md pointer
    outside the musterd-managed markers), each of which says "read
    `.agents/skills/<name>/SKILL.md`" rather than duplicating the body. One canonical body, no
@@ -56,7 +56,7 @@ skills, nor a policy for vendored third-party skill material.
 - The repo gains its first committed skill: `.agents/skills/product-communications/`
   (SKILL.md + PROVENANCE.md + LICENSES/), adapted from four MIT-licensed upstreams pinned at
   their 2026-08-21 HEADs.
-- Sloane's worktree gains the three thin bridges; no other worktree is touched. Other seats
+- Sloane's workspace gains the three thin bridges; no other workspace is touched. Other seats
   that later want the skill get the same bridges, not copies.
 - ADR 085's generated pipeline is unchanged; nothing moves out of it. The two systems are
   distinguishable by one rule: **generated guidance is gitignored, reviewed content is
