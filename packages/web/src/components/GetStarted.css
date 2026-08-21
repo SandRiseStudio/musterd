@@ -55,11 +55,18 @@
   text-transform: uppercase;
   color: var(--text-faint);
 }
+/* No `white-space: nowrap`: with it, the brew line ran to 539px inside a 375px viewport and the
+   parent's `overflow-x: auto` scrolled it silently — a phone showed "brew tap SandRiseStudio/musterd
+   &&" and stopped, with no affordance saying there was more. Wrapping is visual only; `user-select:
+   all` still selects the whole command. */
 .gs__cmd-text {
   font-size: 0.85rem;
-  white-space: nowrap;
   color: var(--text);
   user-select: all;
+  /* A flex item defaults to min-width:auto and will not shrink below its content, so dropping
+     nowrap alone changed nothing — measured, still 539px wide in a 375px viewport. */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .gs__refs {

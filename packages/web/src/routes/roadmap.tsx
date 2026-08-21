@@ -1,4 +1,5 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
+import { pageMeta } from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -12,7 +13,14 @@ export const Route = createFileRoute('/roadmap')({
     const { roadmapSections } = await import('../content/generated/site-content');
     return roadmapSections;
   },
-  head: () => ({ meta: [{ title: 'Roadmap — musterd' }] }),
+  head: () => ({
+    meta: pageMeta({
+      title: 'Roadmap',
+      description:
+        'What musterd has shipped and what is next — generated from the same source of truth as ROADMAP.md.',
+      path: '/roadmap',
+    }),
+  }),
   component: Roadmap,
 });
 

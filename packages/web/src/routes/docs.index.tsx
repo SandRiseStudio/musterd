@@ -1,4 +1,5 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
+import { pageMeta } from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -10,7 +11,13 @@ export const Route = createFileRoute('/docs/')({
     const { docsPages } = await import('../content/generated/site-content');
     return docsPages.map(({ slug, title }) => ({ slug, title }));
   },
-  head: () => ({ meta: [{ title: 'Docs — musterd' }] }),
+  head: () => ({
+    meta: pageMeta({
+      title: 'Docs',
+      description: 'Install musterd, learn the concepts a team runs on, and read the protocol spec.',
+      path: '/docs',
+    }),
+  }),
   component: DocsIndex,
 });
 
