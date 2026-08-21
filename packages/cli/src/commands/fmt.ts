@@ -24,11 +24,22 @@ import { hint, success, sym } from '../render/ui.js';
  * ONE SHARP EDGE, pre-existing and uniform across all three classes (measured 2026-08-21; falsify:
  * feed any of parseTeamFile/parseSeatFile/parseRoleFile a file with an unrecognised top-level key
  * and serialize the result — a key that survives means this is fixed). The parsers DROP unknown
- * keys silently, so formatting a file that carries one **deletes** it. That is not new here and
- * roles are no worse than seats or team.toml, but the blast radius now includes `roles/`: a key
- * from a future schema, or a typo'd real one, does not survive `musterd fmt`. Verified lossless on
- * all six live roster roles before this shipped — semantically idempotent, no keys dropped — so the
- * hazard is latent rather than active.
+ * keys silently, so formatting a file that carries one **deletes** it. Not new here, and roles are
+ * no worse than seats or team.toml — but the blast radius includes `roles/` as of 2026-08-21.
+ *
+ * ~~the hazard is latent rather than active (2026-08-21)~~ **FALSIFIED the same day, by ryder,
+ * using the falsifier above.** It is ACTIVE on the live roster: `seats/autorefresh.toml` carries an
+ * authored `charter` paragraph and `charter` is in RoleFileSchema but NOT SeatFileSchema, so
+ * `musterd fmt` silently deletes 587 characters of human-written prose. Reproduced independently on
+ * a copy — raw has `charter`, output does not.
+ *
+ * My "latent" was drawn from checking only the six ROLE files, which is where my change looked; the
+ * live instance was one directory over, in the class fmt had covered all along. Functionally the
+ * text is already dead (`members` has no charter column — only `roles` does — so reconcile has been
+ * dropping it since 2026-08-05), but it is dead prose a human wrote and may believe is live.
+ *
+ * PRACTICAL CONSEQUENCE: `musterd fmt` on a roster is not a safe no-op. Diff the writes on a copy
+ * before running it anywhere that matters.
  */
 export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()): Promise<number> {
   const check = Boolean(parsed.flags['check']);
