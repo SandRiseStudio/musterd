@@ -24,6 +24,18 @@ It falls back to shipped defaults on a read error and writes a log line, but `se
 not expose whether the policy view is current. An on-call instrument must make a degraded control
 input visible without treating an intentional unprovisioned service seat as an incident.
 
+### Note, 2026-08-21 (ryder) — the confirmation was three probes on one bound
+
+Snapshot-debt: none — this note records exact dated counts and latency samples, not a rate, and it adds nothing to `## Decision`.
+
+Decision 1 below is a **floor** ("only three consecutive failed probes MAY enter ordinary outage classification"), and it stands. What it did not say is that all three probes share one bound: `rawHealth` sets `AbortSignal.timeout(2000)` for every attempt, three attempts 1 s apart. Inside a stall longer than that ~8 s window those are **one observation repeated**, not three observations — repeating the measurement under question can only restate it, and says nothing about the rival hypothesis this ADR's own Context names ("a daemon merely too busy to answer").
+
+Six false `daemon_down` alarms on 2026-08-21 came through that hole, all with a clean launchd exit and `"The operation was aborted due to timeout"`, against a daemon whose `booted_at` never moved. Measured the same day on the live daemon: 25 samples under load gave p50 2.8 ms, p90 16 ms, max **3.22 s**; 90 samples taken quiet gave max 0.02 s. Exceeding 2000 ms is normal operation.
+
+The repair adds a fourth probe on a **different** bound (10 s) rather than a fourth on the same one, which raises this ADR's floor rather than reversing it — no supersede. The rejected alternative "wait for the next scheduled tick" was rejected for alert latency, and that objection does not reach a longer probe inside the same tick. Control: `guardian-confirms-slow-before-down`.
+
+Also noted and NOT acted on: this ADR is still `Status: proposed` although its code has shipped since 2026-08-14. That is nick and gptbot's call, not the author's of this note.
+
 ## Decision
 
 1. **Confirm an unreachable health result inside one guardian tick.** A `daemon_down` candidate

@@ -2001,12 +2001,16 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
     }
   };
 
-  const rawHealth = async (): Promise<HealthPayload> => {
+  const probeHealth = async (timeoutMs: number): Promise<HealthPayload> => {
     const server = loadConfig().server;
-    const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(2000) });
+    const res = await fetch(`${server}/health`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) throw new Error(`health ${res.status}`);
     return (await res.json()) as HealthPayload;
   };
+  /** The fast probe: three of these, 1 s apart, are ADR 274's confirmation. */
+  const rawHealth = (): Promise<HealthPayload> => probeHealth(2000);
+  /** The DIFFERENT observation — same request, on whatever bound the collector asks for. */
+  const confirmHealth = probeHealth;
 
   /** mtime-gated read: a file untouched since `epochMs` contributes nothing (recency hard rule);
    *  a touched file contributes its tail (cap 400 lines — bounded work on an 8 GB machine). */
@@ -2048,6 +2052,7 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
         collectSignals({
           now: () => Date.now(),
           fetchHealth: rawHealth,
+          confirmHealth,
           sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
           launchctlPrint: async () => {
             const uid = typeof process.getuid === 'function' ? process.getuid() : '';
