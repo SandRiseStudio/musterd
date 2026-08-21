@@ -42,6 +42,7 @@ import { sessionCommand } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
 import { streamCommand } from './commands/stream.js';
 import { teamCommand } from './commands/team.js';
+import { toolkitCommand } from './commands/toolkit.js';
 import { unbindCommand } from './commands/unbind.js';
 import { uninstallCommand } from './commands/uninstall.js';
 import { wakeContextCommand } from './commands/wake-context.js';
@@ -268,6 +269,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return wireCommand(rest);
     case 'role':
       return roleCommand(rest);
+    case 'toolkit':
+      return toolkitCommand(rest);
     case 'reset':
       return resetCommand(rest);
     case 'uninstall':
