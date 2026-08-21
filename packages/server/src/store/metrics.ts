@@ -24,6 +24,10 @@ export function activePresenceBySurface(
  * How stale the slowest inbox is, in ms: the largest age of any member's oldest *unread* message
  * (addressed to them or team/broadcast, not their own send, past their read cursor). 0 when every
  * member is caught up. This is the "shouting into the void" / backlog signal, derived not stored.
+ *
+ * "Past their read cursor" is a `(ts, id)` comparison, not a ts one (ADR 290, amended 2026-08-20):
+ * a message sharing the cursor row's millisecond used to fall out of the join, so the gauge could
+ * report 0 — the caught-up value — while a message waited.
  */
 export function slowestInboxLagMs(db: Database, now: number = Date.now()): number {
   const row = db
@@ -35,7 +39,9 @@ export function slowestInboxLagMs(db: Database, now: number = Date.now()): numbe
            ON msg.team_id = m.team_id
           AND (msg.to_member = m.id OR msg.to_kind IN ('team','broadcast'))
           AND msg.from_member != m.id
-          AND msg.ts > COALESCE(c.last_read_ts, 0)
+          AND (msg.ts > COALESCE(c.last_read_ts, 0)
+               OR (msg.ts = c.last_read_ts
+                   AND msg.id > COALESCE(c.last_read_message_id, '')))
         WHERE m.left_at IS NULL
         GROUP BY m.id
         ORDER BY oldest ASC
