@@ -152,6 +152,23 @@ branches disagree about who was picked, never about whether the team armed a swe
 > Older clients ignore both fields; older daemons omit them and the client abstention is the safe
 > floor.
 
+> **Amendment (2026-08-21): the procedure seats actually read still taught the retired advice.** This
+> ADR's correction reached the `lane_submit` tool description and the submit response — the two
+> surfaces its own Consequences names — but not `packages/protocol/src/guidance.ts` step 3, which
+> rendered "On silence / no candidate: `lane_resolve` yourself" verbatim into every seat's `SKILL.md`
+> for 16 days. The runtime hint and the written procedure disagreed, and the procedure is what a seat
+> reads at close time: on 2026-08-21 dolly held correctly by out-knowing their own skill, and ryder
+> opened lane `01M0JPZED9` after finding it in source. Step 3 now defers to the submit response the
+> way the tool description already does — armed backstop ⇒ leave it, self-close sanctioned only where
+> nobody was asked or the lane is acceptance-exempt (ADR 234) — and `GUIDANCE_CONTENT_VERSION` 14→15
+> makes the doctor flag every stale rendered copy. No wire-contract change: guidance text and the
+> version stamp only.
+>
+> The shape is worth naming, because it is the second time this ADR has been routed around rather
+> than contradicted: a decision lands in the surfaces its author is touching, and the ones rendered
+> from elsewhere keep teaching the old thing until someone reads the source. The falsifier for
+> "corrected everywhere" is a grep of the rendered artifacts, not of the code the ADR shipped.
+
 ## Observability & Evaluation
 
 **Traces.** No new audit rows, and deliberately none: the decision changes advice, and advice is not

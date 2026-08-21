@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 14;
+export const GUIDANCE_CONTENT_VERSION = 15;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -167,8 +167,11 @@ export function renderSkillBody(opts: { team: string }): string {
     '1. After merge: `lane_submit` / `musterd lane submit` with the merge attestation (`pr`, `sha`,',
     '   `authorized_by`). Moves the lane to `awaiting_acceptance` and asks an acceptor.',
     '2. Acceptor: accept (→ done) or reject (→ active with a concrete note). Not style nits.',
-    '3. On silence / no candidate: `lane_resolve` / `musterd lane resolve` yourself — recorded',
-    '   **unconfirmed**, never a wedge. Prefer a live acceptor over self-close.',
+    '3. Then **follow the submit response** — it names the contract (ADR 235). Acceptor asked and a',
+    '   backstop armed: you are done — do **not** self-close on silence (acceptors came back 20 of 20',
+    '   times; the daemon sweeps unanswered lanes itself). Only when nobody was asked — no eligible',
+    '   acceptor, or acceptance-exempt (ADR 234) — is `lane_resolve` / `musterd lane resolve` yourself',
+    '   sanctioned (recorded **unconfirmed**, never a wedge).',
     '',
     '(`lane_ready` / `musterd lane ready` remain as deprecated aliases for submit.)',
     '',

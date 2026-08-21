@@ -92,6 +92,7 @@ describe('version-bump discipline (ADR 085)', () => {
     12: '30bf29a8c1e89fc9',
     13: '18db5d31ab51fe37', // + the tick installs when the lockfile moved; a failed tick notifies (pinned, not down) // + daemon refresh: the auto-refresher owns the bounce; never prescribe `service refresh`
     14: '8c1b079d28c39788', // + shared blockers: blocked_by report-and-park + incident convergence (spec 2026-08-14 inc 1)
+    15: 'bab60b1f09b5234b', // lane-close step 3 follows ADR 235: backstop armed ⇒ no self-close on silence; self-close stays sanctioned only for nobody-asked / acceptance-exempt (ADR 234)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
@@ -132,5 +133,25 @@ describe('skill body — shared-blocker norm (spec 2026-08-14 inc 1)', () => {
     const body = renderSkillBody({ team: 'revive' });
     expect(body).toContain('meta.blocked_by');
     expect(body).toContain('park behind it');
+  });
+});
+
+describe('lane-close step 3 follows ADR 235, not the retired self-resolve-on-silence', () => {
+  const body = renderSkillBody({ team: 'dawn' });
+
+  it('no longer prescribes unconditional self-resolve on silence', () => {
+    expect(body).not.toMatch(/On silence \/ no candidate/);
+  });
+
+  it('tells the closer to follow the submit response and names the armed backstop', () => {
+    expect(body).toMatch(/follow the submit response/i);
+    expect(body).toMatch(/do \*\*not\*\* self-close on silence/i);
+    expect(body).toContain('ADR 235');
+  });
+
+  it('keeps the sanctioned branches: nobody asked, or acceptance-exempt', () => {
+    expect(body).toMatch(/no eligible\s+acceptor/i);
+    expect(body).toMatch(/acceptance-exempt/i);
+    expect(body).toMatch(/\*\*unconfirmed\*\*, never a wedge/);
   });
 });
