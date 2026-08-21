@@ -17,7 +17,7 @@ export const Route = createFileRoute('/roadmap')({
     meta: pageMeta({
       title: 'Roadmap',
       description:
-        'What musterd has shipped and what is next — generated from the same source of truth as ROADMAP.md.',
+        'What musterd has shipped, what is next, and what it has ruled out on principle — with the reasoning kept in the open.',
       path: '/roadmap',
     }),
   }),
