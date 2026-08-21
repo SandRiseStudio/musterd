@@ -63,8 +63,16 @@ when the record says so; the failure mode would be this ADR citing a trigger tha
 
 ## Observability & Evaluation
 
-No new traces — role creation is a local file write; the daemon's existing reconcile logging is
-the projection signal. Eval: `role create` in a roster home round-trips through `parseRoleFile`
-and reconcile accepts the file unmodified (covered by `role.test.ts`); the falsifier for the scope
-claim is any diff in this change touching send routing, holder resolution, or the reconcile path —
-there is none.
+**Traces.** Nothing new — role creation is a local file write; the daemon's existing reconcile
+logging is the projection signal, unchanged.
+
+**Eval.** Dataset: the `role create in a roster home` block in
+`packages/cli/src/commands/role.test.ts` (7 cases, written red-first). Baseline: pre-change,
+`role create` in a roster home writes a profile JSON and no `roles/*.toml` (pinned by the
+`--profile` escape-hatch case). Success: every written file round-trips through `parseRoleFile`
+and reconcile accepts it unmodified. The falsifier for the scope claim is any diff in this change
+touching send routing, holder resolution, or the reconcile path — there is none.
+
+**Experiment.** n/a — an authoring affordance with no behavioral hypothesis to test in production;
+the §5 reopening decision stays with ADR 272's measured triggers, which this ADR does not read or
+alter.
