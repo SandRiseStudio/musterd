@@ -100,9 +100,13 @@ oldest-WIP first, so the first row is the one worth reading.
 
 ### The renders
 
-- **The goal cards** (`/board`, the ADR 256 grid): each card gains a flow line under its runway —
-  in-flight count, oldest age, cycle time, and the queued count. This is the payoff; it puts the
-  numbers on the object they describe, where a human is already asking how the goal is going.
+- **The goal cards** (`/board`, the ADR 256 grid): each card gains a flow line under its runway
+  carrying **time and the queue only** — oldest age, cycle time, queued count. This is the payoff;
+  it puts the numbers on the object they describe, where a human is already asking how the goal is
+  going. What it deliberately omits is lane *composition*: the card's foot already says how many
+  lanes, how many shipped, how many in review, how many stuck, and a `wip` count beside it read as
+  a second slightly-different count of the same lanes rather than as new information. The line's
+  job is the axis the card had no way to show — how long.
 - **The insight rail**: a per-goal list behind the existing "more" disclosure, beside the MAST
   detectors. The rail stays calm by default; the breakdown is for the reader who wants to compare
   goals in one column rather than scanning cards.
@@ -121,13 +125,17 @@ metric by an existing key does not create a new class of measurement, it slices 
 would cost a second, narrower type and would leave the per-goal and team-wide blocks structurally
 different for a reason no reader could see.
 
-The mitigation is in the rendering, which is where the invitation to misread actually lives. The goal
-card leads with the queue-shaped numbers — in flight, oldest, queued — and the rail's per-goal list
-is **sorted by oldest-WIP, never by throughput**, so the reading the surface invites is "which goal
-is stuck", not "which goal wins". Goals are not comparable units: they differ in size, in scope, and
-in how many lanes a piece of work is cut into, so a ranking by ship count is a misreading of the
-number rather than a use of it. That sentence belongs in this ADR precisely because the number is
-now easy to rank on.
+The mitigation is in the rendering, which is where the invitation to misread actually lives, and it
+is graded by surface. **The goal cards omit `throughput_7d` entirely.** A grid of cards is the one
+rendering that lines goals up side by side at a glance, which is exactly the layout that turns
+"which goal is stuck" into "which goal wins" — so the card carries durations and the queue, and no
+ship count. The rail and the CLI keep it, because neither lays the goals out for visual comparison,
+and both sort **by oldest-WIP, never by throughput**.
+
+Goals are not comparable units: they differ in size, in scope, and in how many lanes a piece of work
+is cut into, so a ranking by ship count is a misreading of the number rather than a use of it. That
+sentence belongs in this ADR precisely because the number is now easy to rank on — and the card's
+omission is what keeps the easiest surface to misread from offering it.
 
 ## Alternatives rejected
 

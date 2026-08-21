@@ -369,16 +369,18 @@
   }
 }
 
-/* ADR 295: the daemon's per-goal flow, sitting between the runway (shape) and the foot (counts).
- * Tabular figures so the numbers line up down a column of cards — the comparison a reader makes is
- * vertical, card against card, and ragged digits make that scan work harder than it should. */
+/* ADR 295: the daemon's per-goal flow — how the goal is MOVING, between the runway (its shape) and
+ * the foot (what it is made of). It carries durations, the foot carries counts, and the two sat
+ * directly adjacent in identical quiet ink until the accent split them: the pace line is the one a
+ * reader is scanning for, and two twin rows of small brown text made them hunt for it.
+ * Tabular figures because that scan is vertical, card against card, and ragged digits fight it. */
 .gg-card__flow {
   display: block;
   margin-top: 5px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.01em;
-  color: var(--gg-ink-quiet);
+  color: var(--gg-ink-accent);
   font-variant-numeric: tabular-nums;
 }
 

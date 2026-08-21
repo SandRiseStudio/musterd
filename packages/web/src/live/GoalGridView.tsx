@@ -31,16 +31,20 @@ function dur(ms: number): string {
 }
 
 /**
- * The card's flow line (ADR 295) — the daemon's per-goal projection, never recomputed here. Reads
- * queue-first (in flight, oldest, queued) and lets throughput trail, because goals are not
- * comparable units and the line is meant to answer "is this one stuck", not "which one wins".
+ * The card's flow line (ADR 295) — the daemon's per-goal projection, never recomputed here.
+ *
+ * It carries **time and the queue only**. Lane composition (how many, shipped, in review, stuck)
+ * already sits in the card's foot, so repeating `wip` here read as a second, slightly different
+ * count of the same lanes rather than as new information. `throughput_7d` is deliberately absent
+ * from the card for the ADR's Goodhart reason: a per-goal ship count on a grid of cards is the one
+ * rendering that turns "which goal is stuck" into "which goal wins", and goals are not comparable
+ * units. It stays available in the rail and the CLI, where nothing lines the goals up side by side.
  */
-function flowLine(f: FlowMetrics): string[] {
+export function flowLine(f: FlowMetrics): string[] {
   const parts: string[] = [];
-  if (f.wip > 0) parts.push(`${f.wip} in flight`);
   if (f.oldest_wip_age_ms !== null) parts.push(`oldest ${dur(f.oldest_wip_age_ms)}`);
-  if (f.backlog) parts.push(`${f.backlog} queued`);
   if (f.cycle_time_ms !== null) parts.push(`cycle ${dur(f.cycle_time_ms)}`);
+  if (f.backlog) parts.push(`${f.backlog} queued`);
   return parts;
 }
 
