@@ -30,7 +30,7 @@ carries this signal must ride an act a seat already performs.
 **`awaiting_acceptance` means "landed, awaiting judgment", and `lane_submit` enforces it
 seat-side.** The repo — not GitHub — is the source of truth for "merged": a merge
 attestation is a SHA, and `git merge-base --is-ancestor <sha> origin/main` answers "landed?"
-from any worktree with no API, no credential, no poller. The absence-is-not-an-event
+from any workspace with no API, no credential, no poller. The absence-is-not-an-event
 asymmetry dissolves at submit: the author's own `lane_submit` **is** the event, and the
 refusal reaches the one seat that owns the missing merge at the moment it acts.
 
@@ -66,9 +66,9 @@ mechanism, not a substitute for it.
 - dolly's exact call (`lane_submit {pr}` with the PR open) now returns "arm auto-merge",
   at the author, at the moment of the act. wanderer's wasted hold becomes structurally
   impossible for verified submits and visibly labeled for unverified ones.
-- Cross-repo lanes (e.g. a sandrise lane submitted from an agents worktree) keep working,
+- Cross-repo lanes (e.g. a sandrise lane submitted from an agents workspace) keep working,
   marked `unknown_object` — honest abstention rather than false refusal.
-- `lane_submit` now runs git (a fetch) in the seat's worktree; a submit costs up to ~15s
+- `lane_submit` now runs git (a fetch) in the seat's workspace; a submit costs up to ~15s
   offline. Judged acceptable: submits are rare, and the offline path degrades to
   `fetch_failed` and proceeds.
 - A fabricated SHA that exists on main (someone else's commit) still passes — attestation
