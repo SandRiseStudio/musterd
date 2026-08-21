@@ -292,6 +292,16 @@ export const LaneSchema = z.object({
       pr: z.number().int().optional(),
       sha: z.string().optional(),
       authorized_by: z.string().optional(),
+      /**
+       * Seat-side verification tier stamped by `lane_submit` (merge-verified submit):
+       * `ancestor` (SHA reachable from origin/main — landed), `unknown_object` (SHA not in the
+       * submitting worktree's repo — cross-repo lane), `fetch_failed` (could not refresh
+       * origin/main — abstained), `unattested` (no SHA given). `not_ancestor` never appears
+       * here: it is refused at submit, before any lane mutation. A z.string rather than an
+       * enum so a newer client's tier parses instead of rejecting; consumers compare against
+       * {@link MERGE_VERIFICATION_TIERS} and say nothing on values they don't know.
+       */
+      verification: z.string().optional(),
     })
     .nullable()
     .default(null),
@@ -435,10 +445,24 @@ export const UpdateLaneSchema = z.object({
       pr: z.number().int().optional(),
       sha: z.string().optional(),
       authorized_by: z.string().optional(),
+      /** Seat-side verification tier — see the field's doc on {@link LaneSchema}. */
+      verification: z.string().optional(),
     })
     .optional(),
 });
 export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
+
+/**
+ * The verification tiers a submit can persist (merge-verified submit). `not_ancestor` is
+ * deliberately not a member: it is a refusal outcome at `lane_submit`, never a stored state.
+ */
+export const MERGE_VERIFICATION_TIERS = [
+  'ancestor',
+  'unknown_object',
+  'fetch_failed',
+  'unattested',
+] as const;
+export type MergeVerification = (typeof MERGE_VERIFICATION_TIERS)[number];
 
 /**
  * Every mutating lane verb returns the lane plus any contention warnings (ADR 083 §4). Under

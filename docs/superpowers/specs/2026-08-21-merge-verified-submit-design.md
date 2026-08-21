@@ -70,8 +70,10 @@ The server is not an enforcement point for this: an older client can still flip 
 ### Attestation carries its tier
 
 `Lane.merged` (packages/protocol/src/lanes.ts) gains optional
-`verified: 'ancestor' | 'unknown_object' | 'fetch_failed' | 'unattested'`
-(`not_ancestor` never lands on a lane — it is refused). The adapter stamps it; the server
+`verification: 'ancestor' | 'unknown_object' | 'fetch_failed' | 'unattested'`
+(named `verification`, not `verified` — `Lane.verified` already means "close was a
+counterpart acceptance", ADR 169/191, and must not be overloaded; `not_ancestor` never
+lands on a lane — it is refused). The adapter stamps it; the server
 persists it inside `merged_json` unchanged. Schema-optional, so older daemons and clients
 interoperate.
 
