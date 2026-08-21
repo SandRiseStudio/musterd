@@ -3497,6 +3497,7 @@ export async function handleHttp(
         const rows = listInbox(ctx.db, member, {
           unreadOnly: unread,
           cursorTs: cursor.last_read_ts,
+          cursorId: cursor.last_read_message_id,
           ...(since ? { since: Number(since) } : {}),
           ...(limit ? { limit } : { headLimit: INBOX_DEFAULT_LIMIT }),
         });
@@ -3510,16 +3511,37 @@ export async function handleHttp(
         // cursor mid-drain (that would step past rows it has not rendered), so counting from the
         // cursor alone re-counts every row the earlier pages already delivered and reports a number
         // that grows stale the further it walks. It is stated as a count, so it has to be one.
-        const unreadFloor = Math.max(cursor.last_read_ts, since ? Number(since) : 0);
+        // `>=`, not `===`: a prefix page is completed past the bound rather than cut through a tie
+        // group (see listInbox), so a full page can be LONGER than INBOX_DEFAULT_LIMIT. Testing for
+        // equality would read an over-long page as a short one and report `truncated: false` — which
+        // is the same silent stranding the completion exists to prevent, reintroduced one layer up.
+        const full = rows.length >= INBOX_DEFAULT_LIMIT;
+        // The cursor tiebreak only applies when the floor IS the cursor; once a paging caller has
+        // walked past it, `since` is a plain ts and carries no id.
+        const sinceTs = since ? Number(since) : 0;
+        const useCursorId = sinceTs <= cursor.last_read_ts;
+        const unreadFloor = Math.max(cursor.last_read_ts, sinceTs);
         const unreadRemaining =
-          rows.length > 0 && (limit !== undefined || rows.length === INBOX_DEFAULT_LIMIT)
+          rows.length > 0 && (limit !== undefined || full)
             ? Math.max(
                 0,
-                countUnread(ctx.db, member, unreadFloor) -
-                  rows.filter((r) => r.ts > unreadFloor).length,
+                countUnread(
+                  ctx.db,
+                  member,
+                  unreadFloor,
+                  useCursorId ? cursor.last_read_message_id : null,
+                ) -
+                  rows.filter(
+                    (r) =>
+                      r.ts > unreadFloor ||
+                      (useCursorId &&
+                        r.ts === unreadFloor &&
+                        cursor.last_read_message_id !== null &&
+                        r.id > cursor.last_read_message_id),
+                  ).length,
               )
             : 0;
-        const truncated = limit === undefined && rows.length === INBOX_DEFAULT_LIMIT;
+        const truncated = limit === undefined && full;
         const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
 
         // ADR 211 §3: pendingness is unread-by-cursor OR deferred-and-raised. The cursor is a single

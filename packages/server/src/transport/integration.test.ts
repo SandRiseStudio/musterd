@@ -428,13 +428,22 @@ describe('HTTP API', () => {
      * a reader that advances its cursor to the newest row it received after a tail-truncated read
      * steps over everything that was cut, which is ADR 287's loss reintroduced as a latency fix.
      */
-    const teamWithBacklog = async (n: number) => {
+    /**
+     * `tieFrom`: every row from that index on carries the ts of the row before it, so a millisecond
+     * tie straddles the 200-row bound. Every other fixture in this file seeds `ts: Date.now() + i`,
+     * strictly increasing — which makes a tie unconstructible and is exactly why no existing test
+     * can see the defect below.
+     */
+    const teamWithBacklog = async (n: number, tieFrom?: number) => {
       const team = await post('/teams', {
         slug: 'dawn',
         creator: { name: 'nick', kind: 'human' },
       });
       const nickTok = team.json.human_credential;
       const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+      // Pinned ONCE: `Date.now()` per iteration drifts, so tied rows would not actually tie —
+      // the fixture would encode the same strictly-increasing assumption it exists to break.
+      const t0 = Date.now();
       for (let i = 0; i < n; i++) {
         await post(
           '/teams/dawn/messages',
@@ -447,7 +456,7 @@ describe('HTTP API', () => {
               to: { kind: 'member', name: 'bo' },
               act: 'message',
               body: 'x',
-              ts: Date.now() + i,
+              ts: t0 + (tieFrom !== undefined && i >= tieFrom ? tieFrom - 1 : i),
             },
           },
           nickTok,
@@ -510,6 +519,68 @@ describe('HTTP API', () => {
       expect(p2.json.messages).toHaveLength(200);
       // 420 total − 400 delivered across the two pages. Counting from the cursor says 220 again.
       expect(p2.json.unread_remaining).toBe(20);
+    });
+
+    /**
+     * The bound is safe; the CURSOR that walks it has to be too. `listInbox` orders by `ts ASC,
+     * id ASC`, but `since` filters `ts >` strictly and `id` — the declared tiebreak — has no
+     * expression in it. A tie straddling the page boundary therefore strands the WHOLE remainder,
+     * not one row: page two comes back empty, the drain loop reads that as "caught up", and the
+     * caller is told nothing. Found by izzo re-reviewing #943 (lane 01M0GT12W8).
+     */
+    it('reaches every message when a ts tie straddles the page boundary', async () => {
+      const { boTok } = await teamWithBacklog(220, 200);
+      const p1 = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
+      const seen = [...(p1.json.messages as { id: string; ts: number }[])];
+      let page = p1;
+      while (page.json.truncated && (page.json.messages as unknown[]).length > 0) {
+        const last = seen[seen.length - 1]!;
+        page = await get(`/teams/dawn/inbox?unread=1&since=${last.ts}`, boTok, {
+          'x-musterd-no-touch': '1',
+        });
+        seen.push(...(page.json.messages as { id: string; ts: number }[]));
+      }
+      // Nothing may be stranded by the walk: every message, each exactly once.
+      expect(new Set(seen.map((m) => m.id)).size).toBe(220);
+    });
+
+    /**
+     * The same root cause one layer down, and worse: the read cursor is a ts, the unread filter is
+     * `ts > last_read_ts`, so a message sharing the cursor row's millisecond is not merely stranded
+     * mid-walk — it can never appear as unread again. The cursor row already stores
+     * `last_read_message_id`, so the tiebreak is persisted; it just isn't consulted.
+     */
+    it('still shows an unread message that shares the cursor row millisecond', async () => {
+      const { boTok } = await teamWithBacklog(3, 2); // b0002 carries b0001's ts
+      const all = await get('/teams/dawn/inbox', boTok, { 'x-musterd-no-touch': '1' });
+      const ids = (all.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toEqual(['b0000', 'b0001', 'b0002']);
+
+      // Read up to b0001 — the honest thing after seeing it, and b0002 shares its ts.
+      await post('/teams/dawn/inbox/cursor', { last_read_message_id: 'b0001' }, boTok);
+      const unread = await get('/teams/dawn/inbox?unread=1', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      expect((unread.json.messages as { id: string }[]).map((m) => m.id)).toEqual(['b0002']);
+    });
+
+    /**
+     * The tail read has the same boundary, cut from the other end. It does not page (`truncated` is
+     * never set for an explicit limit), so nothing can be stranded — but "the newest 5" must still
+     * be a well-defined five when twenty rows share the newest millisecond, or two identical
+     * requests disagree about what the recent tail is.
+     */
+    it('takes the newest by (ts, id) when a tie sits on an explicit ?limit= boundary', async () => {
+      const { boTok } = await teamWithBacklog(220, 200); // b0199..b0219 all share one ts
+      const r = await get('/teams/dawn/inbox?unread=1&limit=5', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toEqual(['b0215', 'b0216', 'b0217', 'b0218', 'b0219']);
+      const again = await get('/teams/dawn/inbox?unread=1&limit=5', boTok, {
+        'x-musterd-no-touch': '1',
+      });
+      expect((again.json.messages as { id: string }[]).map((m) => m.id)).toEqual(ids);
     });
 
     it('leaves an explicit ?limit= alone — that caller asked for the recent tail', async () => {

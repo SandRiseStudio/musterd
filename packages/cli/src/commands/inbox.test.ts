@@ -62,9 +62,14 @@ describe('inbox command', () => {
     }
   }
 
-  /** Ada broadcasts `n` messages to @team (visible to nick), one per minute, oldest first. */
-  async function seed(n: number): Promise<void> {
+  /**
+   * Ada broadcasts `n` messages to @team (visible to nick), one per minute, oldest first.
+   * `tieFrom`: every row from that index on carries the ts of the row before it — a millisecond tie,
+   * which the one-per-minute default makes unconstructible.
+   */
+  async function seed(n: number, tieFrom?: number): Promise<void> {
     for (let i = 0; i < n; i++) {
+      const slot = tieFrom !== undefined && i >= tieFrom ? tieFrom - 1 : i;
       await ada.send(
         'dawn',
         makeEnvelope({
@@ -74,7 +79,7 @@ describe('inbox command', () => {
           to: { kind: 'team' },
           act: 'message',
           body: `msg ${i}`,
-          ts: base + i * 60_000,
+          ts: base + slot * 60_000,
           thread: null,
           meta: null,
         }),
@@ -158,6 +163,22 @@ describe('inbox command', () => {
 
     const res = await capture(() => inboxCommand(parseArgs(['--from', 'Ada', '--json'])));
     expect((JSON.parse(res.out) as unknown[]).length).toBe(205);
+  });
+
+  /**
+   * `drain` stops on an empty page, which is only sound if an empty page means "nothing left". A tie
+   * straddling the daemon's prefix bound used to empty page two through the cursor alone — the walk
+   * reported success having reached 200 of 205, and the terminal said nothing. The drain must stop
+   * on a genuinely exhausted inbox and never on one the cursor emptied.
+   */
+  it('--limit 0 reaches every message when a ts tie straddles the daemon bound', async () => {
+    await seed(205, 200); // msg 200..204 share msg 199's millisecond
+    await capture(() => inboxCommand(parseArgs(['--limit', '0'])));
+    expect(await unreadCount()).toBe(0);
+
+    const res = await capture(() => inboxCommand(parseArgs(['--limit', '0', '--peek', '--json'])));
+    const ids = (JSON.parse(res.out) as { id: string }[]).map((m) => m.id);
+    expect(new Set(ids).size).toBe(205); // every message, each exactly once
   });
 
   it('--peek never advances the read cursor', async () => {
