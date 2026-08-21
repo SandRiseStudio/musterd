@@ -338,6 +338,35 @@ describe('musterd stream', () => {
       expect(asks.length).toBe(1);
     });
 
+    it('a machine gone across an image change is a deploy — relaunched, budget untouched', async () => {
+      withImage(); // .image-digest now says aaa… — but the dead machine ran bbb…
+      writeStreamState(statePath, {
+        desired: 'live',
+        at: NOW - 60_000,
+        restarts: [],
+        image: 'sha256:' + 'b'.repeat(64),
+      });
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(launches).toBe(1);
+      const st = readStreamState(statePath)!;
+      expect(st.restarts).toEqual([]);
+      expect(st.image).toBe('sha256:' + 'a'.repeat(64));
+      expect(out.join('')).toMatch(/deploy/i);
+    });
+
+    it('start records the launched image so ensure can tell a deploy from a crash', async () => {
+      withImage();
+      expect(await run(['start'], sup())).toBe(0);
+      expect(readStreamState(statePath)!.image).toBe('sha256:' + 'a'.repeat(64));
+    });
+
+    it('a crash relaunch records the image it launched too', async () => {
+      withImage();
+      writeStreamState(statePath, { desired: 'live', at: NOW - 60_000, restarts: [] });
+      expect(await run(['ensure'], sup())).toBe(0);
+      expect(readStreamState(statePath)!.image).toBe('sha256:' + 'a'.repeat(64));
+    });
+
     it('a failed relaunch still spends the budget (the next ticks converge on stand-down)', async () => {
       withImage();
       writeStreamState(statePath, { desired: 'live', at: NOW - 60_000, restarts: [] });

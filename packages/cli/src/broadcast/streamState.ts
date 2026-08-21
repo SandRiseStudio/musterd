@@ -22,6 +22,8 @@ export interface StreamState {
   /** Free-text provenance on a stop (`--reason`), surfaced by `stream status`. */
   reason?: string;
   team?: string;
+  /** The image digest the last launch ran — what lets `ensure` tell a deploy from a crash. */
+  image?: string;
   /** Supervisor restart stamps (epoch ms), pruned to the flap window. */
   restarts: number[];
   /** Set when the flap guard tripped; only a human start/stop clears it — one ask, not one per tick. */
@@ -42,13 +44,19 @@ export interface EnsureDecision {
   note: string;
 }
 
-/** The reconcile rule, pure: actual (liveCount) vs desired, under the flap budget. */
+/** The reconcile rule, pure: actual (liveCount) vs desired, under the flap budget.
+ * `recordedDigest` is what a relaunch would run right now (`.image-digest`); a machine gone while
+ * it differs from the digest the dead machine ran is a deploy, not a crash (2026-08-21: two
+ * image-push replacements burned 2/3 flap slots and were one event from standing down a healthy
+ * stream). A deploy relaunches without spending the budget — once, since the relaunch records the
+ * new digest and the next disagreement is real again. */
 export function decideEnsure(args: {
   state: StreamState | null;
   liveCount: number;
   now: number;
+  recordedDigest?: string | null;
 }): EnsureDecision {
-  const { state, liveCount, now } = args;
+  const { state, liveCount, now, recordedDigest } = args;
   if (!state)
     return {
       action: 'noop',
@@ -63,6 +71,14 @@ export function decideEnsure(args: {
   }
   const restarts = state.restarts.filter((t) => now - t < FLAP_WINDOW_MS);
   if (liveCount > 0) return { action: 'noop', state: { ...state, restarts }, note: 'live' };
+  // A missing `image` (legacy state) is never a free pass — only an observed change is a deploy.
+  if (recordedDigest && state.image && state.image !== recordedDigest) {
+    return {
+      action: 'restart',
+      state: { ...state, restarts, image: recordedDigest },
+      note: `deploy detected: machine gone and the recorded image changed (${state.image.slice(7, 15)} → ${recordedDigest.slice(7, 15)}) — replacing, not charged to the flap window`,
+    };
+  }
   if (restarts.length >= FLAP_MAX) {
     return {
       action: 'stand_down',
@@ -72,7 +88,11 @@ export function decideEnsure(args: {
   }
   return {
     action: 'restart',
-    state: { ...state, restarts: [...restarts, now] },
+    state: {
+      ...state,
+      restarts: [...restarts, now],
+      ...(recordedDigest ? { image: recordedDigest } : {}),
+    },
     note: `crash detected: machine gone, no stop record — restarting (${restarts.length + 1}/${FLAP_MAX} in window)`,
   };
 }
