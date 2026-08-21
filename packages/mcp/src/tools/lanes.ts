@@ -383,10 +383,11 @@ export function registerLanes(
     'lane_submit',
     {
       description:
+        // The unlanded-refusal behavior (ADR 300) is deliberately NOT described here: the standing
+        // tools/list surface is budget-gated (context:check), and the refusal message itself
+        // teaches at the only moment it matters — when an unlanded submit is attempted.
         'Your work is merged — move the lane to awaiting_acceptance (ADR 192) and attest it ' +
-        '(pr/sha/branch/authorized_by). The SHA is verified against origin/main seat-side: an ' +
-        'unlanded submit (open PR, or a SHA not on main) is refused — awaiting_acceptance means ' +
-        'landed. OUTCOME ACCEPTANCE, not a code review: an acceptor judges ' +
+        '(pr/sha/branch/authorized_by). OUTCOME ACCEPTANCE, not a code review: an acceptor judges ' +
         'intent/principles/usable/feel of the landed artifact. Accept closes the lane, reject ' +
         'returns it to active. The response says whether to wait or self-close — follow it, not a ' +
         'fixed timer (ADR 235). Auto-merge first, then submit.',
