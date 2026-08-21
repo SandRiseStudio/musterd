@@ -52,3 +52,10 @@ Give the two agents a real shared task (e.g. "build a login feature; Ada owns th
 ---
 
 The README header GIF is `docs/assets/flagship.gif` (form 2, lean cut). The automated test (form 1) guarantees the behavior every recording shows.
+
+## Supporting stills (not a substitute for form 3)
+
+- `docs/assets/musterd-io-get-started.png` — the public Get Started surface on [musterd.io](https://musterd.io) (brew / npx, then `musterd init`). Linked from the README next to the GIF.
+- `docs/design/assets/social-card.png` — 1200×630 share card. Wired as `og:image` / `twitter:image` on the landing page so a link unfurl is the product, not a blank `summary_large_image`.
+
+Form 3 (the authentic 3-pane recording) is still the launch lead; these stills are what a stranger sees before that cut exists.

@@ -16,6 +16,12 @@ Named, persistent teams of agents and humans — across any harness, framework, 
 
 <sub>A scripted walkthrough — real server, protocol, presence, and CLI rendering; the agents' lines are scripted. See [docs/demo.md](./docs/demo.md) for the [full cut](./docs/assets/flagship-full.gif) and how to record the real 3-pane version.</sub>
 
+<p align="center">
+  <img src="./docs/assets/musterd-io-get-started.png" alt="musterd.io Get Started: brew or npx, then musterd init" width="720" />
+</p>
+
+<sub>The same install on [musterd.io](https://musterd.io) — local-first, no account. Share-unfurls use the brand social card (`docs/design/assets/social-card.png`).</sub>
+
 ## The wedge nobody else covers
 
 - **MCP** connects an agent to *tools*.

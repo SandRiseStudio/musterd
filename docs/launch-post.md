@@ -5,8 +5,9 @@
 > ~~**Ship blocker:** as of 2026-08-13 musterd.io serves nothing — do not publish until it
 > resolves.~~ CLEARED 2026-08-13: **musterd.io is live** (Cloudflare Worker `musterd-io`, landing
 > page with the Get Started install section; verified `curl -I https://musterd.io` → 200; see
-> [name clearance](wiki/name-clearance.md)). The remaining launch asset is the real 3-pane demo
-> recording (`docs/demo.md` form 3) — the GIF placeholder ships if it must.
+> [name clearance](wiki/name-clearance.md)). Share-unfurls use the brand social card (`og:image`);
+> a Get Started still lives at `docs/assets/musterd-io-get-started.png`. The remaining launch
+> *recording* is the real 3-pane demo (`docs/demo.md` form 3) — the GIF placeholder ships if it must.
 
 ---
 
