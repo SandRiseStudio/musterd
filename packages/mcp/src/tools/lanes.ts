@@ -104,8 +104,8 @@ export function registerLanes(server: McpServer, client: MusterdClient): void {
           .enum(['low', 'normal', 'high'])
           .optional()
           .describe(
-            'how much this is worth someone’s eyes: low | normal (default) | high. Declared, not ' +
-              'inferred from the files — recorded for measurement; nothing routes on it yet',
+            'how much this is worth someone’s eyes (default normal). Declared, not inferred ' +
+              'from the files; a low lane may be exempted from acceptance (ADR 234)',
           ),
         claim: z.boolean().optional().describe('own it yourself now (recommended at task start)'),
       },

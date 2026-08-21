@@ -2,8 +2,8 @@
   "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context — tools/list render, primer, hook nudges, including the due-gated label nudge — measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
   "items": {
     "toolsListDefaultBytes": {
-      "budget": 16646,
-      "justification": "2026-08-19 (15853 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 288) + 5% headroom"
+      "budget": 15851,
+      "justification": "2026-08-20: ALLOCATED, not measured — perTurnTotalBytes (16051) minus the two per-turn nudge budgets (97 + 103). The prior 16646 was measurement+5% derived independently of the total, which let this item legally exceed what the per-turn ceiling could pay for: 795 B of budget that could never be spent. measurement+5% is how a ceiling is set, not how a share of one is; the headroom belongs to the total and is divided, not granted again per part. The surface measured 15854 when this was written and was trimmed to fit rather than the ceiling being raised."
     },
     "toolsListMutedBytes": {
       "budget": 5531,
@@ -27,11 +27,11 @@
     },
     "perTurnTotalBytes": {
       "budget": 16051,
-      "justification": "2026-08-12 (15287 B, +team_goal_outcome tool + claim-time goal_id on lane_claim — value layer ADR 258) + 5% headroom"
+      "justification": "2026-08-12 (15287 B, +team_goal_outcome tool + claim-time goal_id on lane_claim — value layer ADR 258) + 5% headroom. UNCHANGED on 2026-08-20 and now the binding ceiling: its components are allocations of this number rather than independent measurement+5% lines. Raising THIS is the deliberate act of letting standing context grow, and it is the one that needs the argument — the contradiction fixed that day (this budget sitting 795 B below the sum of its parts) was resolvable by raising it to 16846, which would have made the headline unable to fail and left per-item re-baselining as the only control: a ratchet that only ever goes up. Growth is not forbidden here, it is made visible and singular."
     },
     "perSessionTotalBytes": {
       "budget": 20064,
-      "justification": "2026-08-19 (19109 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 288) + 5% headroom. perTurnTotalBytes still fit under its 2026-08-12 budget (8 B headroom) and per the minimal-raise precedent (ADR 254 note) was not raised."
+      "justification": "2026-08-19 (19109 B, +team_goal_retract tool + include_retracted on team_goals — goal retract ADR 288) + 5% headroom. Unchanged 2026-08-20: it was 2 B below the sum of its parts, and lowering toolsListDefaultBytes into its per-turn allocation resolved that from underneath (parts now sum to 19271) without touching this line. The 2026-08-19 note here — that perTurnTotalBytes \"still fit ... and was not raised\" — is how the contradiction was recorded at the time it was created; kept deliberately as the trail."
     }
   }
 }

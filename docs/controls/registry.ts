@@ -291,4 +291,27 @@ export const CONTROLS: Control[] = [
     staleAfterDays: 180,
     refs: ['scripts/check-controls.ts', 'scripts/controls.test.ts', 'lane 01M0ER0A0B'],
   },
+  {
+    id: 'context-budget-coherence',
+    kind: 'gate',
+    claim:
+      'The standing-context budget set is internally satisfiable: no composite budget (perTurnTotalBytes, perSessionTotalBytes) may sit below the sum of its components’ budgets, so obeying every line item can never fail the headline.',
+    where: 'scripts/context/budgetCoherence.ts, called from scripts/context/check-budgets.ts (`pnpm context:check`, wired into CI)',
+    exercise:
+      'Lower `perTurnTotalBytes` in docs/perf/context-budgets.json below the sum of toolsListDefaultBytes + promptSubmitNudgeBytes + labelNudgeBytes and run `pnpm context:check`: it must fail naming the shortfall and both repairs. `scripts/context/budgetCoherence.test.ts` reconstructs the real 2026-08-20 violation and asserts "short by 795".',
+    motivatedBy:
+      '2026-08-20: perTurnTotalBytes sat 795 B below the sum of its parts (and perSessionTotalBytes 2 B below its own) after the components were re-baselined on 2026-08-19 while the composites kept an older baseline. The per-turn headroom was down to 7 B, so the next word added to any MCP tool description would have failed a gate that was already unsatisfiable — and the failure text said "trim it, or raise the budget", which could not work. dolly flagged the trap on #941; nick called it.',
+    counterfactual:
+      'Yes. Run against the file as committed on 2026-08-19 it fails immediately — the contradiction was created that day, and this rule reads budgets rather than measurements precisely so it fires when the file is written rather than months later when something finally grows into it. Worth naming the limit too: it proves the set is SATISFIABLE, not that the ceiling is small enough. Only a human raising perTurnTotalBytes decides that, which is now a single deliberate act instead of a side effect of re-baselining a part.',
+    lastExercised: '2026-08-20',
+    everTripped: true,
+    lastTripped: '2026-08-20',
+    staleAfterDays: 180,
+    refs: [
+      'scripts/context/budgetCoherence.ts',
+      'scripts/context/budgetCoherence.test.ts',
+      'docs/perf/context-budgets.json',
+      'lane 01M0GXCJDJ',
+    ],
+  },
 ];
