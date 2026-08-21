@@ -2,12 +2,17 @@ import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import brandCss from '../brand/brand.css?url';
 import chipIcon from '../brand/chip.svg?url';
+import socialCard from '../brand/social-card.png?url';
+import {
+  SITE_ONE_LINER,
+  SITE_ORIGIN,
+  SITE_TAGLINE,
+  SITE_TITLE,
+  absoluteUrl,
+} from '../brand/siteMeta';
 import globalCss from '../styles/global.css?url';
 
-const TITLE = 'musterd — roadmap';
-const DESCRIPTION =
-  'Muster your agents and humans into persistent teams. The roadmap for musterd: ' +
-  'what is shipped, what is near-term, and what is reserved for later.';
+const ogImage = absoluteUrl(socialCard);
 
 export const Route = createRootRoute({
   head: () => ({
@@ -16,12 +21,16 @@ export const Route = createRootRoute({
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
       { name: 'color-scheme', content: 'light' },
       { name: 'theme-color', content: '#f7efe2' },
-      { title: TITLE },
-      { name: 'description', content: DESCRIPTION },
-      { property: 'og:title', content: TITLE },
-      { property: 'og:description', content: DESCRIPTION },
+      { title: SITE_TITLE },
+      { name: 'description', content: SITE_TAGLINE },
+      { property: 'og:title', content: SITE_TITLE },
+      { property: 'og:description', content: SITE_ONE_LINER },
       { property: 'og:type', content: 'website' },
+      { property: 'og:url', content: SITE_ORIGIN },
+      { property: 'og:image', content: ogImage },
+      { property: 'og:image:alt', content: SITE_ONE_LINER },
       { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:image', content: ogImage },
     ],
     links: [
       { rel: 'icon', href: chipIcon, type: 'image/svg+xml' },

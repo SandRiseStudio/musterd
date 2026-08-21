@@ -55,6 +55,12 @@ One command, three steps, and the middle one is the important one:
    `not_found_handling: "none"` — an unknown path 404s instead of falling back to the SPA shell and
    booting the board client-side.
 
+The landing `<head>` is the share card: `og:image` / `twitter:image` point at the hashed
+`src/brand/social-card.png` (source of truth `docs/design/assets/social-card.png`), which Vite
+emits into `assets/` so it rides the existing stage allowlist. `og:title` is `musterd`, not the
+retired roadmap title. After merge, `deploy:site` (or the next site publish) is what makes a
+Slack/X unfurl pick up the new tags — the daemon's `/live` bundle is a different origin.
+
 **Never point wrangler at `dist/client` directly** — that ships the whole prerender, which is the
 one thing the staging step exists to prevent.
 
