@@ -61,6 +61,14 @@ describe('ADR 296 terminology table', () => {
     expect(checkVocab(root).ok).toBe(true);
   });
 
+  it('does not apply the terminology table to ADR 299 (landed before the gate; Decision frozen)', () => {
+    const root = repo({
+      'docs/decisions/299-predates-gate.md':
+        "# 299\n\nA seat gets a bridge in its own worktree. Sloane's worktree gains the stubs.\n",
+    });
+    expect(checkVocab(root).ok).toBe(true);
+  });
+
   it('treats double-quoted and backticked words as mentions', () => {
     const root = repo({
       'docs/decisions/300-mentions.md':

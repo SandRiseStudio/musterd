@@ -256,11 +256,34 @@ describe('enumerateCursorSessions (ADR 265)', () => {
     expect(enumerateCursorSessions(ws, home)?.map((f) => f.id)).toEqual(['cli', 'desktop']);
   });
 
-  it('leaves a project with no .workspace-trusted unattributed rather than slug-decoding', () => {
+  it('leaves a COLD project with no .workspace-trusted unattributed rather than slug-decoding', () => {
     project('Users-nick-agents-wanderer', {
-      sessions: [{ id: 'orphan', kind: 'txt' }],
+      sessions: [{ id: 'orphan', kind: 'txt', ageMin: 60 }],
     });
     expect(enumerateCursorSessions(ws, home)).toEqual([]);
+  });
+
+  it('a WARM transcript in an untrusted project blinds the scan — cannot-tell, never invisible', () => {
+    // The 2026-08-21 inspection: agents-kimi's live desktop session was demoted for the 74 minutes
+    // before Cursor wrote .workspace-trusted, and most projects on the measured machine never get
+    // the file at all. A session being written right now that nobody can place might be THIS
+    // workspace's; "no sessions here" would launder cannot-tell into permission.
+    project('Users-nick-agents-kimi', {
+      sessions: [{ id: 'live-unplaceable', kind: 'jsonl', ageMin: 1 }],
+    });
+    project('trusted-elsewhere', {
+      workspacePath: ws,
+      sessions: [{ id: 'ours-cold', kind: 'txt', ageMin: 60 }],
+    });
+    expect(enumerateCursorSessions(ws, home)).toBeUndefined();
+  });
+
+  it('a cold orphan does not blind — attributed rows still come back', () => {
+    project('untrusted-cold', {
+      sessions: [{ id: 'orphan', kind: 'jsonl', ageMin: 30 }],
+    });
+    project('trusted', { workspacePath: ws, sessions: [{ id: 'ours', kind: 'txt', ageMin: 2 }] });
+    expect(enumerateCursorSessions(ws, home)?.map((f) => f.id)).toEqual(['ours']);
   });
 
   it('does not claim a project whose workspacePath belongs elsewhere', () => {

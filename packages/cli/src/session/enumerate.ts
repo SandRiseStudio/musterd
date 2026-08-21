@@ -32,6 +32,12 @@ import { findWorkspaceDir } from '../commands/helpers.js';
  * missing projects tree must not be laundered into permission.
  */
 
+/** A transcript untouched for this long means no live local session (the guard threshold): long
+ *  enough to protect a human who is thinking, well under the 30-minute batched-wake cooldown.
+ *  Lives here (not liveness.ts, which re-exports it) so the scanners can judge warmth without an
+ *  import cycle. */
+export const LOCAL_SESSION_LIVE_MS = 10 * 60_000;
+
 /** One session the harness has on disk for a workspace. */
 export interface SessionFile {
   /** The harness session id (`claude --resume <id>`) — the transcript's basename. */
@@ -334,6 +340,16 @@ export function enumerateCursorSessions(
     cursorMemo = { root, at: now, rows: scanCursorTree(root) };
   }
   if (cursorMemo.rows === undefined) return undefined;
+  // ADR 265 amendment (2026-08-21): a transcript being written RIGHT NOW in a project Cursor has
+  // not yet stamped with `.workspace-trusted` is a live session nobody can place — possibly this
+  // workspace's. Answering "no sessions here" would launder cannot-tell into permission: the ADR
+  // 166 inspection measured agents-kimi's live desktop session demoted for the 74 minutes before
+  // the trust file appeared, and most projects on the measured machine never get the file at all.
+  // A warm orphan therefore blinds the whole scan; cold orphans stay uncounted as before (they
+  // cannot affect the live judgement, and claiming them would be the slug-decoding trap).
+  if (cursorMemo.rows.some((r) => r.workspace === null && now - r.mtime < LOCAL_SESSION_LIVE_MS)) {
+    return undefined;
+  }
   const target = resolve(workspace);
   return cursorMemo.rows
     .filter((row) => row.workspace !== null && resolve(row.workspace) === target)

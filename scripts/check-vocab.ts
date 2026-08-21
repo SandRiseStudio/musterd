@@ -7,8 +7,8 @@
  *
  *   1. ADR 098 work-item nouns (epic / milestone / sprint / story points) — ADRs ≥ 098,
  *      plans ≥ 2026-07-06, new design docs. Unchanged.
- *   2. ADR 296 terminology Not-column (profile / kit / template / worktree) — ADRs ≥ 299
- *      (296 is the decision; 296–298 landed before this enforcement PR, the same split as
+ *   2. ADR 296 terminology Not-column (profile / kit / template / worktree) — ADRs ≥ 300
+ *      (296 is the decision; 296–299 landed before this enforcement PR, the same split as
  *      obs-evals' ADR 052 vs GATE_FROM 60), plus new user-facing files (CLI help/render,
  *      web copy, README/ROADMAP/AGENTS.md). Existing user-facing files are a frozen
  *      baseline: the tier-1 burn-down, not a silent exemption.
@@ -29,10 +29,11 @@ const REPO_ROOT = join(here, '..');
 /** First ADR number the work-item table enforces (ADR 098 self-hosts). */
 export const GATE_FROM = 98;
 /**
- * First ADR number the terminology table enforces. 296 is the decision; 296–298 shipped
- * before this gate existed (spec PR then enforcement PR).
+ * First ADR number the terminology table enforces. 296 is the decision; 296–299 shipped
+ * before this gate existed (spec PR, then 297–299, then the enforcement PR). ADR 299's
+ * Decision uses unquoted "worktree" and is frozen — GATE_FROM 299 made main red on landing.
  */
-export const TERMINOLOGY_GATE_FROM = 299;
+export const TERMINOLOGY_GATE_FROM = 300;
 export const PLANS_GATE_FROM = '2026-07-06';
 export const GRANDFATHERED_PLANS: string[] = [];
 export const DESIGN_BASELINE = new Set([
