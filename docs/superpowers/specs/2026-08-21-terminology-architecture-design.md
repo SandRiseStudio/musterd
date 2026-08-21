@@ -92,10 +92,18 @@ A migration norm without machinery never lands. Three mechanical pieces:
    column. brand.md §5 and SPEC.md's terminology section are generated from it or checked against
    it — prose can no longer drift silently. The known drift (Member's `role (free text)`, the
    stale Act list) is fixed in the same pass.
-2. **Diff-aware lint** (`pnpm glossary:check`, alongside `wiki:check` / `roadmap-truth:check`).
-   Touched files cannot *introduce* banned terms in user-facing text (docs/**, web strings, CLI
-   help and render strings); existing uses are counted as a burn-down on main. Regression becomes
-   impossible; progress becomes a number.
+2. **Extend the existing vocabulary gate — do not build a second one.** `scripts/check-vocab.ts`
+   (ADR 098, already in the `format:check` chain as `pnpm vocab:check`) is this exact mechanism
+   for a different vocabulary: a banned-term list, mention-vs-use masking (backticks and fenced
+   blocks are always legal), line-level `<!-- vocab:ok -->` suppression, and grandfathering by
+   ADR number / plan date / a frozen design-doc baseline. ADR 098 self-hosts its own gate
+   (`GATE_FROM = 98`), which is the precedent for this ADR self-hosting too.
+
+   Two extensions are needed: the banned list grows a second table (the Not columns of §3), and
+   the **gated path set widens** beyond docs to the user-facing strings the current gate
+   explicitly leaves out — CLI help and render strings, web UI strings, README, ROADMAP,
+   AGENTS.md. Path-and-date grandfathering is preferred over diff-awareness: it is simpler, it is
+   already proven here, and it makes the burn-down a set of named files rather than a heuristic.
 3. **A controls-registry entry with an expiry.** The burn-down carries a landing bound the build
    enforces (the `neverExercisedSince` aging pattern). A stalled migration is loud, not silent.
 
@@ -136,9 +144,9 @@ guidance every seat gets at session start, and the lint catches whoever forgets 
 
 ## 7. Evaluation
 
-- **Falsifiable claim:** after the lint lands, zero banned-term introductions merge to main
-  (the lint's job), and the tier-1 burn-down reaches zero by its registry bound (the expiry's
-  job). Either failing indicts the mechanism, not the team.
+- **Falsifiable claim:** after the gate extension lands, zero banned-term introductions merge to
+  main (the gate's job), and the tier-1 burn-down reaches zero by its registry bound (the
+  expiry's job). Either failing indicts the mechanism, not the team.
 - **The confusion test:** the question that started this spec — "aren't profiles just roles?" —
   must be unaskable from the regenerated glossary alone: a reader who has seen only brand.md §5
   can answer it. Same for "why does session labeling work on my laptop and not my server?"
