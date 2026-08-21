@@ -74,6 +74,12 @@
   --maxw: 920px;
   --gutter: clamp(20px, 5vw, 56px);
 
+  /* Vertical rhythm for the public site. One token so section spacing is a decision, not 8 ad-hoc
+   * paddings that drift apart. Width-based, never vh: section padding in vh made every section
+   * taller on exactly the big screens that already had room, which is how the page grew to 2,657px
+   * of mostly air. Sections separate with --section-y; groups INSIDE a section stay tight. */
+  --section-y: clamp(22px, 2.4vw, 32px);
+
   /* ---- Semantic — DARK (active default) ---- */
 
   /* Semantic status (brand.md §2, dark column) */
