@@ -59,7 +59,7 @@ Both then fall through to `binding.model`. **That is the inconsistency worth nam
 
 Per-act `meta.model` carried the model id and **not** which tier produced it, so an observed stamp and an unverified declaration were indistinguishable in the act log and any per-model aggregate mixed measurement with assumption. `modelSource` existed but reached only the once-per-session `musterd.mcp.initialize` span as `musterd.model.declaration`.
 
-**Fixed 2026-08-21 by [#971](https://github.com/SandRiseStudio/musterd/pull/971)** (nick's call: mark the tier rather than attest `unknown` — see below). The claim/heartbeat carries `model_source`, migration 42 stores it on `presence` beside `model`, and every act is stamped `meta.model_source`. Three properties are mutation-pinned: the stamp itself, the strip of a client-supplied tier, and the refusal to default an unknown tier to `binding`.
+**Fixed 2026-08-21 by [#975](https://github.com/SandRiseStudio/musterd/pull/975)** (nick's call: mark the tier rather than attest `unknown` — see below). The claim/heartbeat carries `model_source`, migration 42 stores it on `presence` beside `model`, and every act is stamped `meta.model_source`. Three properties are mutation-pinned: the stamp itself, the strip of a client-supplied tier, and the refusal to default an unknown tier to `binding`.
 
 Read it as **`observed` = measurement, `environment`/`binding` = assumption**, and note that **absent is a third answer, not a synonym for declared** — rows written before migration 42, or by clients too old to send it, genuinely do not know. Aggregates over acts from before 2026-08-21 have no tier at all and cannot acquire one.
 
