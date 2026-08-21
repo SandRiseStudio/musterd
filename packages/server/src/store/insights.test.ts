@@ -8,6 +8,7 @@ import {
   deriveSteeringMetrics,
   deriveWakeMetrics,
   flowMetrics,
+  goalFlowMetrics,
   waitingOn,
 } from './insights.js';
 import { openLane, updateLane } from './lanes.js';
@@ -59,7 +60,13 @@ describe('flowMetrics (ADR 050 Part 5, from lane timestamps)', () => {
   it('is empty-safe: null cycle time and oldest age when nothing qualifies', () => {
     const { db, team } = seed();
     const f = flowMetrics(db, team.id, 1000);
-    expect(f).toEqual({ throughput_7d: 0, cycle_time_ms: null, wip: 0, oldest_wip_age_ms: null });
+    expect(f).toEqual({
+      throughput_7d: 0,
+      cycle_time_ms: null,
+      wip: 0,
+      oldest_wip_age_ms: null,
+      backlog: 0,
+    });
   });
 
   it('excludes done lanes older than 7 days from throughput', () => {
@@ -75,6 +82,161 @@ describe('flowMetrics (ADR 050 Part 5, from lane timestamps)', () => {
     );
     updateLane(db, team.id, old.id, 'revive', { state: 'done' }, now - 30 * 24 * 60 * 60 * 1000);
     expect(flowMetrics(db, team.id, now).throughput_7d).toBe(0);
+  });
+
+  // ADR 295: the engine kept its own SQL literal for the contending set and never followed ADR
+  // 169/192 when acceptance became a stage. A lane merged and waiting on a counterpart is in
+  // flight — counting it as idle is what made review debt invisible to flow.
+  it('counts a lane awaiting acceptance as WIP', () => {
+    const { db, team } = seed();
+    const now = 10_000_000;
+    const lane = openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'merged, unaccepted', claim: true },
+      now - 6 * 60_000,
+    );
+    updateLane(db, team.id, lane.id, 'revive', { state: 'awaiting_acceptance' }, now - 60_000);
+
+    const f = flowMetrics(db, team.id, now);
+    expect(f.wip).toBe(1);
+    expect(f.oldest_wip_age_ms).toBe(6 * 60_000);
+  });
+
+  it('reports the backlog — lanes still open, declared and unowned', () => {
+    const { db, team } = seed();
+    const now = 10_000_000;
+    openLane(db, team.id, 'revive', 'ada', { title: 'queued a' }, now - 60_000);
+    openLane(db, team.id, 'revive', 'ada', { title: 'queued b' }, now - 60_000);
+    openLane(db, team.id, 'revive', 'ada', { title: 'taken', claim: true }, now - 60_000);
+
+    expect(flowMetrics(db, team.id, now).backlog).toBe(2);
+  });
+});
+
+describe('goalFlowMetrics (ADR 295 — flow dimensioned by Goal)', () => {
+  it('groups the same flow numbers by the goal its lanes name', () => {
+    const { db, team } = seed();
+    const now = 10_000_000;
+    // launch: one done lane (cycle 3m) and one live lane created 4m ago.
+    const shipped = openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'a', claim: true, goal_id: 'launch' },
+      now - 5 * 60_000,
+    );
+    updateLane(db, team.id, shipped.id, 'revive', { state: 'done' }, now - 2 * 60_000);
+    openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'b', claim: true, goal_id: 'launch' },
+      now - 4 * 60_000,
+    );
+    // research: one queued lane only.
+    openLane(db, team.id, 'revive', 'ada', { title: 'c', goal_id: 'research' }, now - 60_000);
+
+    const byGoal = goalFlowMetrics(db, team.id, now);
+    const launch = byGoal.find((g) => g.goal_id === 'launch');
+    const research = byGoal.find((g) => g.goal_id === 'research');
+
+    expect(launch?.flow).toEqual({
+      throughput_7d: 1,
+      cycle_time_ms: 3 * 60_000,
+      wip: 1,
+      oldest_wip_age_ms: 4 * 60_000,
+      backlog: 0,
+    });
+    expect(research?.flow).toEqual({
+      throughput_7d: 0,
+      cycle_time_ms: null,
+      wip: 0,
+      oldest_wip_age_ms: null,
+      backlog: 1,
+    });
+  });
+
+  it('collects goal-less lanes under a null entry, not under a goal', () => {
+    const { db, team } = seed();
+    const now = 10_000_000;
+    openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'on a goal', claim: true, goal_id: 'launch' },
+      now - 60_000,
+    );
+    openLane(db, team.id, 'revive', 'ada', { title: 'orphan', claim: true }, now - 2 * 60_000);
+
+    const byGoal = goalFlowMetrics(db, team.id, now);
+    const pool = byGoal.find((g) => g.goal_id === null);
+    expect(pool?.flow.wip).toBe(1);
+    expect(pool?.flow.oldest_wip_age_ms).toBe(2 * 60_000);
+    expect(byGoal.filter((g) => g.goal_id === 'launch')[0]?.flow.wip).toBe(1);
+  });
+
+  it('sorts oldest-WIP first, so the dragging goal reads first', () => {
+    const { db, team } = seed();
+    const now = 10_000_000;
+    openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'recent', claim: true, goal_id: 'fresh' },
+      now - 60_000,
+    );
+    openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'ancient', claim: true, goal_id: 'dragging' },
+      now - 90 * 60_000,
+    );
+
+    expect(goalFlowMetrics(db, team.id, now).map((g) => g.goal_id)).toEqual([
+      'dragging',
+      'fresh',
+    ]);
+  });
+
+  it('says nothing about a goal with no lanes — the roster lives in report.goals', () => {
+    const { db, team } = seed();
+    expect(goalFlowMetrics(db, team.id, 1000)).toEqual([]);
+  });
+
+  it('rides the one projection — deriveReport carries the goal_flow block', () => {
+    const { db, team } = seed();
+    const now = 10_000_000;
+    openLane(
+      db,
+      team.id,
+      'revive',
+      'ada',
+      { title: 'a', claim: true, goal_id: 'launch' },
+      now - 60_000,
+    );
+
+    const report = deriveReport(db, team.id, 'revive', now);
+    expect(report.goal_flow).toEqual([
+      {
+        goal_id: 'launch',
+        flow: {
+          throughput_7d: 0,
+          cycle_time_ms: null,
+          wip: 1,
+          oldest_wip_age_ms: 60_000,
+          backlog: 0,
+        },
+      },
+    ]);
   });
 });
 

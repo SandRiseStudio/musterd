@@ -24,8 +24,32 @@ export const FlowMetricsSchema = z.object({
   wip: z.number().int(),
   /** Age of the oldest still-live lane (now − created_at), in ms; null if nothing live. */
   oldest_wip_age_ms: z.number().nullable(),
+  /**
+   * Lanes still `open` — the backlog queue (ADR 295). The board's Backlog column lived only in
+   * `/lanes`, so the CLI and MCP report — which have no second fetch — were blind to the queue.
+   * Optional for back-compat with pre-295 daemons; the server always sets it.
+   */
+  backlog: z.number().int().optional(),
 });
 export type FlowMetrics = z.infer<typeof FlowMetricsSchema>;
+
+/**
+ * Flow for one Goal (ADR 295) — the same {@link FlowMetricsSchema}, grouped by `lanes.goal_id`.
+ * Reusing the type whole is deliberate: one derivation, one renderer, and no way for the team-wide
+ * and per-goal blocks to disagree about what "cycle time" means.
+ *
+ * Goodhart (ADR 050's guard restated): `throughput_7d` is included because it is an outcome count
+ * that already passes the guard team-wide, and slicing an existing metric by an existing key does
+ * not create a new class of measurement. Goals are **not** comparable units — they differ in size,
+ * scope, and how finely work is cut into lanes — so ranking them by ship count misreads the number.
+ * Surfaces render the queue-shaped fields first and sort by oldest-WIP, never by throughput.
+ */
+export const GoalFlowSchema = z.object({
+  /** The Goal these lanes name; `null` is the goal-less pool. */
+  goal_id: z.string().nullable(),
+  flow: FlowMetricsSchema,
+});
+export type GoalFlow = z.infer<typeof GoalFlowSchema>;
 
 /**
  * The waiting-on view (ADR 050 Part 6): who owes replies. `openActionNeeded` (ADR 024/025) aggregated
@@ -448,6 +472,14 @@ export const ReportSchema = z.object({
   team: z.string(),
   generated_ts: z.number().int(),
   flow: FlowMetricsSchema,
+  /**
+   * The same flow numbers dimensioned by Goal (ADR 295) — one entry per distinct `goal_id` on the
+   * team's lanes, plus a `null` entry for the goal-less pool, sorted oldest-WIP first. Deliberately
+   * NOT a second goal list: a declared Goal with no lanes gets no entry, because it has no flow to
+   * report and its status already lives in {@link ReportSchema.shape.goals}. Optional for
+   * back-compat with pre-295 daemons; the server always sets it.
+   */
+  goal_flow: z.array(GoalFlowSchema).optional(),
   waiting_on: z.array(WaitingOnEntrySchema),
   /** Declared Goals with derived status — the coarse board (planned/in-flight/shipped). */
   goals: z.array(GoalSchema),

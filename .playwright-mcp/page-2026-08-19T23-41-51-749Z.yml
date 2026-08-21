@@ -1,0 +1,22 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]: musterd
+    - time [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]: "4"
+        - generic [ref=e12]: ":"
+        - generic [ref=e13]: "4"
+        - generic [ref=e14]: "1"
+        - generic [ref=e15]: ":"
+        - generic [ref=e16]: "5"
+        - generic [ref=e17]: "1"
+      - generic [ref=e18]: PM PDT
+  - generic [ref=e20]:
+    - heading "Watch the team, live" [level=1] [ref=e21]
+    - paragraph [ref=e22]: Enter a team to stream all of its communication. A hidden read-only observer seat is created for you — watching never shows you on the roster.
+    - generic [ref=e23]:
+      - generic [ref=e24]: Team
+      - textbox "Team" [ref=e25]:
+        - /placeholder: alpha
+    - button "Watch live" [disabled] [ref=e26]
+    - button "Advanced — connect as a specific seat" [ref=e27] [cursor=pointer]
