@@ -24,25 +24,50 @@ five minutes since 2026-07-27 under a `StartInterval` LaunchAgent:
 The lane asking someone to read it — `01KYJXFXEM5EGAVC4HETG15SZJ`, *"decide whether the instrument
 earns its keep"* — has been open and unowned for 25 days.
 
-And when it is read, **it cannot answer its own question.** ADR 166 predicts that post-flip the
-sweep reads the dangerous case as caught, *"0 demoted."* The series says otherwise — but the
-denominator moved underneath it:
+Two distinct failures live in that series, and separating them is what motivates the whole design.
 
-| date | workspaces/sweep | disagreed | dangerous |
-| --- | --- | --- | --- |
-| 2026-07-28 | 23.0 | 6.41% | 2.06% |
-| 2026-08-01 | 192.0 | 0.52% | 0.00% |
-| 2026-08-19 | 9.1 | 13.61% | 2.60% |
-| 2026-08-20 | 9.7 | 52.13% | 4.08% |
+### Failure one — the pre-registered target was breached, loudly, and nobody looked
 
-Distinct sampled workspaces swung 23 → 196 → 9 inside the window. Those are three different
-populations, so the trend cannot distinguish *the fix regressed* from *the fix only ever worked on a
-population that has since vanished* from *small-denominator noise*. **The series is unreadable for
-its stated question, and that is the finding.**
+ADR 166 eval item 3 pre-registers `demoted` at target **ZERO** and calls any instance a finding
+requiring inspection of the workspace. It is not zero:
+
+| | |
+| --- | --- |
+| demoted observations | 109, across 105 samples, on 6 distinct days |
+| by workspace | `agents-wanderer` ×75, `agents-gptbot` ×20, `agents-kimi` ×8, `agents` ×5, `agents-ryder` ×1 |
+| cluster | 80 of 109 fell on 2026-08-12/13 |
+
+**And the instrument was not silent.** `adr-166-slot-sweep.ts` sets `process.exitCode = 1` on any
+demote (line 171), writes to stderr, raises `adr166-demoted-*` into `musterd report` until it
+clears, and fires an OS push on a repeat (lines 161–171). `sweep.log` holds **214** `DEMOTED` lines,
+many of them `DEMOTED(repeat)`.
+
+So the failure is worse than "nobody read the file." The escalation path fired for 25 days and not
+one case was inspected. An instrument that escalates into a channel with no owner is not
+observability; it is an alarm wired to a bell in an empty room. **A watch names an accountable seat
+and a date. A sweep names neither** — which is the whole difference.
+
+### Failure two — the rates in the same series cannot be read at all
+
+Anything computed as a *rate* over this window is uninterpretable, because the denominator moved:
+distinct sampled workspaces swung **23 → 196 → 9** inside it. A percentage spanning that is three
+populations wearing one number.
 
 This is the contamination `windowGuard()` in `scripts/research/adr-260-acceptance-eval.ts:241`
 already refuses to report through, for exactly one hardcoded question. ADR 166's sweep had no such
 guard, so it accumulated 49 MB of ambiguity silently.
+
+### The design lesson the two failures give together
+
+The target-zero *count* survived the population swing; the *rates* did not. A question phrased so
+its answer is invariant to a moving denominator is worth more than one that is not — and you can
+only choose that phrasing **before** collection. That is a `falsifier` rule, and it is in §1.
+
+> This spec's author demonstrated the point the hard way: I first read the sweep's `dangerous` field
+> as a regression signal and broadcast it. `dangerous` is set on `disagreed && state === 'live'` and
+> the script labels it `caught-by-flip` — it counts the fix *working*. Self-corrected in ~20 minutes;
+> entry minted at `docs/claims/entries/2026-08-21-adr-166-dangerous-misread.md`. A field name is not
+> a definition, and a rate invites a story a count would have refused.
 
 The motivating evidence is also in the record: ADR 294's retrospective cut found the two costliest
 false claims in its window (vitest known-noise, 7d; ADR 272's unmet gate, 5d) were both
@@ -100,13 +125,31 @@ frontmatter is what the gate reads; the prose body argues why the question needs
 | --- | --- |
 | `question` | must be answerable; a topic is not a question |
 | `claim_ref` | must be an existing path in the repo — this is the post-back target |
-| `falsifier` | must be able to fail (wiki rule 3). A falsifier satisfied either way is not ready to merge |
+| `falsifier` | must be able to fail (wiki rule 3). A falsifier satisfied either way is not ready to merge. **Prefer a target-zero count over a rate** — see below |
 | `population` | names the sampled set, so a change to it is detectable |
 | `void_if` | at least one condition. A watch with no way to be void is claiming its population is immutable |
 | `series` | where samples land, so the watch is findable from the data and vice versa |
 | `opened_by` | the seat accountable for resolving it; named in Rule A's failure message |
 | `revisit_by` | after `opened`; **cannot be moved forward on an existing watch** |
 | `resolution` | required when `status` is `resolved` or `void`; free prose naming the verdict |
+
+### Phrasing the falsifier: prefer a target-zero count over a rate
+
+A rate needs a stable denominator; a count with target zero does not. ADR 166 carried both, over the
+same 24.8 days and the same collapsing population — the `demoted` count stayed readable and produced
+a finding, while every rate in the same file became uninterpretable.
+
+So when a question admits both phrasings, take the count:
+
+| prefer | over |
+| --- | --- |
+| "any instance of X is a finding" | "the rate of X stays under n%" |
+| "zero occurrences over the window" | "occurrences trend downward" |
+
+This costs nothing at authoring time and cannot be retrofitted after collection, which is precisely
+why it belongs in a pre-registration rule rather than in analysis guidance. Where a rate is genuinely
+the question, `void_if` must name the population conditions that disqualify it — that is what the
+field is for.
 
 ### What the gate does and does not evaluate
 
@@ -223,20 +266,36 @@ Rule B is the enforcement; ADR 297 is the doctrine and the reasoning.
 A primitive with zero instances is itself an untested `absence`-class claim, so increment 1 ships
 its first real application.
 
-1. Open `docs/watches/2026-08-21-adr-166-slot-disagreement.md` against ADR 166's actual prediction
-   ("0 demoted"), carrying the `void_if` guard it never had.
-2. Run that guard over the existing 24.8-day series. It **fails** — distinct-seat count moved
-   23 → 196 → 9, past any sane bound. The watch resolves `void: population unstable`, and the
-   3.0% / 0.34% figures are **not** published as a trend. The guard refusing is the demonstration.
-3. Mint the claims-ledger entry against ADR 166's prediction: `claimant: stanley`,
-   `corrector: izzo`, `detection_channel: peer`, `claim_class: measurement`,
-   `detection_latency: 25d`, `cost: 49.5 MB and a 5-minute LaunchAgent for 25 days, unread`. Its own
-   `falsifier`: a stable-population re-measure reading 0 dangerous.
-4. Dated amendment on ADR 166 naming which of its sentences went unmonitored. ADR 166 is `draft`, so
-   the immutability gate (which guards `accepted` ADRs) does not apply.
-5. Open the **successor watch** — the same question over a stated stable population, with a real
-   `revisit_by`. This hands lane `01M0JNYJ4K` (the wake-spend defect raised out of this work) a
-   properly-formed instrument instead of 49 MB of ambiguity.
+The exercise is unusually good for the purpose because ADR 166's series demonstrates **both**
+terminal states at once — one question resolves, the other voids, over identical data.
+
+1. Open **two** watches against the series, because it carries two questions:
+   - `docs/watches/2026-08-21-adr-166-demoted.md` — ADR 166 eval item 3's target-zero count.
+   - `docs/watches/2026-08-21-adr-166-disagreement-rate.md` — the rate question, carrying the
+     `void_if` population guard the sweep never had.
+2. Resolve both from the existing 24.8-day series:
+   - The **count** watch resolves `resolved` with a real verdict: target zero is breached, 109
+     instances, 6 days, `agents-wanderer` ×75. Its `void_if` guard passes, because a target-zero
+     count does not depend on the denominator.
+   - The **rate** watch resolves `void: population unstable` — distinct-seat count moved
+     23 → 196 → 9, past any sane bound — and its numbers are **not** published as a trend.
+
+   Two watches, same data, opposite outcomes, for a reason stated before collection. That contrast
+   is the demonstration, and it is worth more than either watch alone.
+3. Dated amendment on ADR 166 recording that eval item 3 is **breached and uninspected** since
+   2026-08-03. ADR 166 is `draft`, so the immutability gate (which guards `accepted` ADRs) does not
+   apply.
+
+   **No claims-ledger entry against stanley.** ADR 166 set a target and an inspection obligation; an
+   unmet obligation is not a falsified claim, and the ledger is for claims. Its *"0 demoted"* line
+   describes a specific case at the moment of flipping, not a standing prediction. If inspection
+   later shows the flip is harmful, ADR 166's decision has a falsified premise and whoever finds
+   that mints it then. Minting one now would be exactly the "no bare rates / no scoreboard" abuse
+   ADR 294 decision 4 forbids.
+4. Open the **successor watch** for the count — same question, stated stable population, real
+   `revisit_by`, `opened_by` naming an accountable seat. This hands lane `01M0JNYJ4K` a
+   properly-formed instrument instead of 49 MB of ambiguity, and gives the escalation path an owner
+   so the next 109 instances reach a person.
 
 **The LaunchAgent is not stopped.** Killing collection is an infra touch on nick's machine and the
 wrong move regardless — the successor watch needs the series to continue. The outcome is a sweep
@@ -261,4 +320,4 @@ for the trap `check-change-adr.ts:176` documents.
 ## Increment 1 scope
 
 Schema, `docs/watches/`, three gate rules with tests, ADR 297, one optional `Control.watch` field,
-and the ADR 166 exercise (watch, void resolution, claims entry, ADR amendment, successor watch).
+and the ADR 166 exercise (two watches, one resolved and one void, ADR amendment, successor watch).
