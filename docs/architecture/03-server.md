@@ -36,7 +36,7 @@ src/
     interruptCandidates.ts // listInterruptCandidates: the unread rows pendingInterrupts can actually use (urgent/steer/obligation + resolve/accept/decline/eligible) — keep in step with the fold (ADR 088/225/254)
     deferralFold.ts   // deferralFold: held + raised + the seat's own sends, hydrating the 2000-row window ONLY when a deferral is actually held (ADR 211 §3)
     metrics.ts        // backing queries for the observable telemetry gauges (ADR 015)
-    lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084)
+    lanes.ts          // coordination lanes P1: CRUD + the two warn-only checks; goal_id join + deriveGoalStatus (ADR 083/084); counterpart close does not rewrite merged (ADR 305, stripped at HTTP)
     incidents.ts      // incident convergence inc 1 (ADR 266): recordBlockedReport pools blocked_by reports per (team, gate), opens ONE unowned kind:'incident' lane at 2 distinct seats, appends after; openIncidents/incidentReporters feed the team_next banner and the route hook's fan-out
     laneClose.ts      // recordLaneClose: the terminal edge's audit (verified/reason/grade + the ADR 109 merge join), shared by the board PATCH and an acceptor's accept (ADR 169/188/192/202)
     laneSweep.ts      // sweepAbandonedAcceptance: the backstop — closes a lane parked past the 24h grace in awaiting_acceptance as `review_swept`, never verified, since the ADR 217 reasons label a close and never cause one (ADR 229)
@@ -67,7 +67,7 @@ src/
   notify/
     slack.ts          // ask-stream Slack delivery: formatAskSlackText + postSlackWebhook — the daemon's one outbound call, fire-and-forget, opt-in via policy ask_slack_webhook (ADR 149)
   transport/
-    http.ts           // HTTP route table (02-protocol HTTP API), including POST /wake-context's recipient-only body-free index (ADR 209; allow+deny `residency.context_read` audit); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135)
+    http.ts           // HTTP route table (02-protocol HTTP API), including POST /wake-context's recipient-only body-free index (ADR 209; allow+deny `residency.context_read` audit); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135); counterpart terminal PATCH strips merged (ADR 305)
     ws.ts             // WS upgrade, handshake state machine, frame dispatch
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
   presence/

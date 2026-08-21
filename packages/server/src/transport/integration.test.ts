@@ -4746,6 +4746,83 @@ describe('two-stage close (ADR 169)', () => {
     expect(merged[0].detail.attested_by).toBe('ada');
   });
 
+  it('counterpart close with a partial merged patch keeps the worker attestation (ADR 305)', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'keep the submit stamp', branch: 'ada/keep-stamp', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    await patchLane(
+      laneId,
+      {
+        state: 'ready_for_review',
+        merged: {
+          pr: 42,
+          sha: 'abc123',
+          authorized_by: 'nick',
+          verification: 'ancestor',
+        },
+      },
+      ada,
+    );
+
+    // The MCP/CLI counterpart-resolve shape: re-sends pr/sha/authorized_by and drops verification.
+    const closed = await patchLane(
+      laneId,
+      { state: 'done', merged: { pr: 42, sha: 'abc123', authorized_by: 'nick' } },
+      nickTok,
+    );
+    expect(closed.status).toBe(200);
+    expect(closed.json.lane.merged).toEqual({
+      pr: 42,
+      sha: 'abc123',
+      authorized_by: 'nick',
+      verification: 'ancestor',
+    });
+
+    const merged = await auditRows(nickTok, 'git.pr_merged');
+    expect(merged[0].detail.pr).toBe(42);
+    expect(merged[0].detail.sha).toBe('abc123');
+    expect(merged[0].detail.authorized_by).toBe('nick');
+    expect(merged[0].detail.attested_by).toBe('ada');
+  });
+
+  it('owner close may still rewrite merged — ADR 305 is counterpart-only', async () => {
+    const { ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'worker may re-attest', branch: 'ada/re-attest', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    await patchLane(
+      laneId,
+      {
+        state: 'ready_for_review',
+        merged: {
+          pr: 42,
+          sha: 'abc123',
+          authorized_by: 'nick',
+          verification: 'ancestor',
+        },
+      },
+      ada,
+    );
+    const closed = await patchLane(
+      laneId,
+      { state: 'done', merged: { pr: 42, sha: 'abc123', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(closed.status).toBe(200);
+    expect(closed.json.lane.merged).toEqual({
+      pr: 42,
+      sha: 'abc123',
+      authorized_by: 'nick',
+    });
+  });
+
   /**
    * ADR 202 — the verdict moves the lane it judges. Before this, an `accept` answering an acceptance
    * ask wrote telemetry and left the lane sitting in awaiting_acceptance; the acceptor had to

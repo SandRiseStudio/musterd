@@ -1396,6 +1396,7 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
   });
 
   it('passes the merge attestation through as merged {pr, sha, authorized_by} (ADR 109)', async () => {
+    // Worker self-close. A counterpart omits these fields (ADR 305); the server ignores them if sent.
     const updateLane = vi.fn(async () => ({ lane: lane({ branch: 'feat/x' }), warnings: [] }));
     const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
     await handlers['lane_resolve']!({ id: 'lane1', pr: 167, sha: 'abc123', authorized_by: 'nick' });

@@ -106,6 +106,12 @@ human asks get the same framing plus peer findings.
   forward. Living docs (architecture, AGENTS, skill) update in the same change set.
 - Protocol state addition is ADR-gated (this ADR).
 
+- **2026-08-21 — a counterpart close must not rewrite `merged` (ADR 305).** `updateLane` replaced
+  the worker's stage-one attestation wholesale whenever the closing PATCH carried `merged`. MCP/CLI
+  `lane_resolve` send `{pr, sha, authorized_by}` without `verification`, so a counterpart who used
+  the documented flags dropped `authorized_by` and the ADR 300 tier. The HTTP layer now strips
+  `merged` on a non-owner terminal PATCH; the worker's own close may still rewrite it.
+
 ## Observability & Evaluation
 
 - **Traces.** Same audit actions as ADR 169/188; ask body change is visible in message text.
