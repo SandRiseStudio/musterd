@@ -103,6 +103,15 @@ export interface Control {
    * "nobody said", and a check cannot tell those apart (the ADR 177 lesson, applied here).
    */
   neverExercised?: string;
+  /**
+   * ISO date the declared absence STARTED (usually the day the control shipped). Required with
+   * {@link neverExercised}, and stale-checked against {@link staleAfterDays} exactly like an
+   * exercise date — so a declared absence acquires an expiry instead of being a permanent
+   * exemption. Increment 1 lacked this, and izzo's acceptance named the hole precisely: a control
+   * could sit unexercised forever while the gate stayed green and the ⚠ became wallpaper — the
+   * registry's own thesis turned on itself (2026-08-20, msg 01M0GVQ36P).
+   */
+  neverExercisedSince?: string;
   /** Has this control ever actually caught something in the wild? */
   everTripped: boolean;
   /** ISO date of the most recent real trip. Required when {@link everTripped} is true. */
@@ -198,7 +207,7 @@ export const CONTROLS: Control[] = [
     motivatedBy:
       'The check originally watched 11 of 82 items, because an absent anchor meant both "no ADR freezes this" and "nobody said" — and two of the items that had drifted were in the unwatched set. ADR 177 made the negative a stated value (`unfrozen`), which is what closed it.',
     counterfactual:
-      'Yes, once ADR 177 forced the anchor to be stated — before that it would have missed its own motivating drift, since the drifted items were exactly the ones with no anchor. Worth noting the residual hole: `unfrozen` items are still exempt from rule 3 by design, so they are declared-but-unwatched. ADR 272 sat there until 2026-08-20.',
+      'PARTLY — corrected 2026-08-20 from a "Yes" that overclaimed, by dolly’s mutation test during the #942 acceptance: flipping ADR 272 back to `proposed` does NOT fail the gate, because rule 3’s two enforcement branches fire only on `shipped` and `plan` items, and role-routing-profiles sits at `building`. She proved the gate does bite where it applies (flipping ADR 21 under the shipped driver-co-presence → exit 1). So: watched and enforced are different facts — a `building` item is anchored but not enforceable until it moves, and the headline "under drift watch" percentage counts items rule 3 cannot currently fail on. The residual `unfrozen` hole also stands: declared-but-unwatched by design.',
     lastExercised: '2026-08-20',
     everTripped: true,
     lastTripped: '2026-08-04',
@@ -208,6 +217,7 @@ export const CONTROLS: Control[] = [
       'ADR 177',
       'lane 01KYNBYEW8 (frozenBy coverage)',
       'lane 01M0GRM42W (ADR 272 moved into the watched set)',
+      'msg 01M0GWYAAY (dolly’s mutation test — the "partly" correction)',
     ],
   },
   {
@@ -238,18 +248,19 @@ export const CONTROLS: Control[] = [
     claim:
       'A seat touching shared infrastructure without holding the `platform` role gets warned, and the touch leaves an `infra.touch.warned` audit row.',
     where:
-      'GET /teams/:slug/infra-gate, wired into `service install|restart|refresh` and `reset` (ADR 227 increment 2)',
+      'GET /teams/:slug/infra-gate, wired into `service install|restart|refresh`, `reset`, AND `musterd agent` (agent.ts:90, lane 01KZ9JSX10 — the verb that rewrites the machine-shared MCP entry, the most consequential of the touches; increment 1 omitted it, and izzo’s acceptance flagged the understatement as the same defect class as a stale date)',
     exercise:
-      'From a seat that does not hold `platform`, run `musterd service restart` against a team with a platform holder; expect the warning on stderr and one `infra.touch.warned` row in the audit table. The CLI half is a silence contract, so also confirm an unreachable daemon produces nothing rather than stalling the verb.',
+      'From a seat that does not hold `platform`, run `musterd service restart` AND `musterd agent` against a team with a platform holder; expect the warning on stderr and one `infra.touch.warned` row per touch in the audit table. Exercising only the `service` verbs is not coverage — `agent` is the biggest surface. The CLI half is a silence contract, so also confirm an unreachable daemon produces nothing rather than stalling the verb.',
     motivatedBy:
       'ADR 227 increment 2 (2026-08-04): any agent could restart or rebuild shared infrastructure while teammates depended on it, with no signal to anyone.',
     counterfactual:
       'Unknown, and that is the finding. The gate is warn-only by design, so "catching" means emitting a warning someone reads — and no measurement exists of whether any warning has ever been read or changed a behaviour. Registering it with `neverExercised` is the honest state; the ADR 227 hardening ramp (warn → --force → refuse) is explicitly gated on a measured warn→redirect rate that has never been measured.',
     neverExercised:
-      'No deliberate exercise is recorded since it shipped 2026-08-04. The audit row is written by the daemon, but nothing reads the row count, and no seat has fired the gate on purpose to confirm it still warns.',
+      'No deliberate exercise is recorded since it shipped 2026-08-04. The audit row is written by the daemon, but nothing reads the row count, and no seat has fired the gate on purpose to confirm it still warns. izzo (the gate’s owner) committed on 2026-08-20 to firing it and reading the rows — when that lands, this entry flips to a dated exercise and produces the warn→redirect denominator the ADR 227 hardening ramp has been gated on unmeasured.',
+    neverExercisedSince: '2026-08-04',
     everTripped: false,
     staleAfterDays: 60,
-    refs: ['ADR 227 increment 2', 'PR #654'],
+    refs: ['ADR 227 increment 2', 'PR #654', 'lane 01KZ9JSX10 (the `agent` wiring)'],
   },
   {
     id: 'stale-dist-typecheck-guard',
@@ -274,10 +285,33 @@ export const CONTROLS: Control[] = [
     ],
   },
   {
+    id: 'change-adr-decision-immutability',
+    kind: 'gate',
+    claim:
+      'An accepted ADR’s `## Decision` section cannot be edited in place — supersession or a dated Consequences note is the only path — and protocol-schema or new-runtime-dependency changes cannot land without an ADR in the same change.',
+    where: 'scripts/check-change-adr.ts (`pnpm change-adr:check`, CI ci.yml — diff-based, judged at the merge-base)',
+    exercise:
+      'Edit any accepted ADR’s `## Decision` on a branch and run `pnpm change-adr:check` — it must fail naming the file and the supersession path. dolly did exactly this by accident on 2026-08-20 (#946’s ADR 290 amendment), and the gate named the fix: amendments go in Consequences as a dated note.',
+    motivatedBy:
+      '2026-08-05: the status matcher’s `\\s*$` anchor silently disabled rule 3 for 94 of 223 accepted ADRs — the ones with annotated status lines, which is the house style — and PR #733 rewrote ADR 131’s frozen `## Decision` with CI green. The full history is the header of scripts/adr-status.test.ts.',
+    counterfactual:
+      'NO at first, and that is the registered lesson: the gate existed when #733 landed and did not fire, because the matcher exempted exactly the annotated-status ADRs that included the motivating case. After the matcher fix it is a yes with live evidence rather than argument — 2026-08-20, the gate caught dolly editing accepted ADR 290’s Decision and she reported the trip to the team unprompted (msg 01M0GVXW6Q). A control whose counterfactual moved from no to yes is what exercising looks like over time.',
+    lastExercised: '2026-08-20',
+    everTripped: true,
+    lastTripped: '2026-08-20',
+    staleAfterDays: 120,
+    refs: [
+      'scripts/check-change-adr.ts',
+      'scripts/adr-status.test.ts (the 2026-08-05 matcher hole)',
+      'PR #733 (the miss)',
+      'msg 01M0GVXW6Q (the live trip, dolly, 2026-08-20)',
+    ],
+  },
+  {
     id: 'control-registry-liveness',
     kind: 'gate',
     claim:
-      'Every control in this registry carries exercise evidence within its own staleness bound, or a stated reason it has never been exercised — so a guard cannot quietly become a guard nobody has watched work.',
+      'Every control in this registry carries exercise evidence within its own staleness bound, or a stated-and-dated reason it has never been exercised whose age is checked against the same bound — so a guard cannot quietly become a guard nobody has watched work, and a declared absence cannot become a permanent exemption (the increment-1 hole izzo’s acceptance found).',
     where: 'scripts/check-controls.ts, wired into `pnpm format:check`',
     exercise:
       'Backdate any `lastExercised` past its `staleAfterDays` and run `pnpm controls:check`: it must name the control and exit 1. Each of the five rules also has a failing case in scripts/controls.test.ts.',
