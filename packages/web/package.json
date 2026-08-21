@@ -7,7 +7,7 @@
     "dev": "vite dev",
     "build": "node --disable-warning=ExperimentalWarning scripts/gen-site-content.ts && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node --disable-warning=ExperimentalWarning scripts/gen-site-content.ts && tsc --noEmit",
     "stage:site": "node scripts/stage-site.mjs",
     "deploy:site": "pnpm build && pnpm stage:site && pnpm dlx wrangler@4.83.0 deploy"
   },
