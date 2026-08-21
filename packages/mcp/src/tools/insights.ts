@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { Report } from '@musterd/protocol';
+import type { GoalFlow, Report } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { errorResult, textResult } from './format.js';
@@ -18,7 +18,24 @@ function ago(ms: number): string {
   return `${s}s`;
 }
 
-function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
+/** `(no goal)` — the goal-less pool reads as a group, never as a bare `null` (ADR 295). */
+const goalLabel = (id: string | null) => id ?? '(no goal)';
+
+/**
+ * One per-goal flow line (ADR 295). Queue-shaped fields lead and throughput trails: goals are not
+ * comparable units, so the line is built to be read as "which goal is stuck", not as a ranking.
+ */
+function goalFlowLine(g: GoalFlow): string {
+  const f = g.flow;
+  const parts = [`wip ${f.wip}`];
+  if (f.oldest_wip_age_ms !== null) parts.push(`oldest ${ago(f.oldest_wip_age_ms)}`);
+  if (f.backlog) parts.push(`queued ${f.backlog}`);
+  if (f.cycle_time_ms !== null) parts.push(`cycle ${ago(f.cycle_time_ms)}`);
+  if (f.throughput_7d) parts.push(`${f.throughput_7d}/wk`);
+  return `  ${goalLabel(g.goal_id)} — ${parts.join(' · ')}`;
+}
+
+export function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
   const shipped = r.goals.filter((g) => g.status === 'shipped').length;
   const inFlight = r.goals.filter((g) => g.status === 'in-flight').length;
   const planned = r.goals.filter((g) => g.status === 'planned').length;
@@ -61,8 +78,14 @@ function fmtReport(r: Report, altitude: 'ic' | 'team' | 'exec'): string {
     const pct = (x: number) => `${Math.round(x * 100)}%`;
     lines.push('\nflow:');
     lines.push(
-      `  throughput ${f.throughput_7d}/wk · cycle ${f.cycle_time_ms === null ? '—' : ago(f.cycle_time_ms)} · WIP ${f.wip} · oldest ${f.oldest_wip_age_ms === null ? '—' : ago(f.oldest_wip_age_ms)}`,
+      `  throughput ${f.throughput_7d}/wk · cycle ${f.cycle_time_ms === null ? '—' : ago(f.cycle_time_ms)} · WIP ${f.wip} · oldest ${f.oldest_wip_age_ms === null ? '—' : ago(f.oldest_wip_age_ms)}` +
+        // Absent (not zero) against a pre-295 daemon — say nothing rather than claim an empty queue.
+        (f.backlog === undefined ? '' : ` · queued ${f.backlog}`),
     );
+    if (r.goal_flow?.length) {
+      lines.push('\nper goal:');
+      for (const g of r.goal_flow) lines.push(goalFlowLine(g));
+    }
     lines.push('\ncoordination:');
     lines.push(
       `  ${pct(c.exchange_ratio)} exchange · ${pct(c.journal_ratio)} broadcast journal (${c.acts} acts / ${c.window_days}d)`,
