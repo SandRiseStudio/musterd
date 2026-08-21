@@ -1,5 +1,6 @@
 import type { Envelope } from '@musterd/protocol';
-import { actTone, laneEvent } from '../format';
+import { actLabel, actTone, laneEvent } from '../format';
+import { speechAddressee } from './speech';
 import type { OfficeEvent } from './types';
 
 /**
@@ -60,4 +61,28 @@ export function actToEvent(env: Envelope): OfficeEvent | null {
     default:
       return null;
   }
+}
+
+/**
+ * The bubble EVERY act speaks (typed out over the sender's head) — the office's legible counterpart
+ * to the stream. Body-less acts (accept/decline/wait/resolve…) speak their act label so nothing on
+ * the team passes invisibly; the envelope id makes the bubble a click-through to the same act in
+ * the stream panel; a directed act carries its recipient so "You were right, I'll take the
+ * handoff…" can't float with no way to know who "you" is.
+ *
+ * Pure and constructed HERE, not at the component's emit site: the addressee passthrough was
+ * originally assembled inline in OfficeScene.tsx, where reverting it to `addressee: null` left
+ * every suite green (ryder's 01M0GVNBHA acceptance addendum — only the rule was pinned, not the
+ * construction calling it).
+ */
+export function speechEventFor(env: Envelope): Extract<OfficeEvent, { kind: 'speech' }> {
+  return {
+    kind: 'speech',
+    who: env.from,
+    text: env.body && env.body.trim() ? env.body : actLabel(env.act),
+    tone: actTone(env.act),
+    id: env.id,
+    act: env.act,
+    addressee: speechAddressee(env.to, env.from),
+  };
 }
