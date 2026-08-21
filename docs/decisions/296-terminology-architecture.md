@@ -144,3 +144,12 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
 - One contingency is recorded rather than left to mood: if pricing (lane 01M08Y95JD) lands
   per-seat, "seat" becomes an asset; if pricing makes the collision painful, that is the single
   trigger to revisit the word.
+
+- **2026-08-21 (enforcement PR, wanderer, lane 01M0JT3RTC).** The gate extends `scripts/check-vocab.ts`
+  rather than adding a second checker. The terminology table's `TERMINOLOGY_GATE_FROM` is **299**,
+  not 296: 296 is the decision, and 296–298 had already landed (spec then two follow-ups) before
+  this enforcement existed — the same split as obs-evals' ADR 052 vs `GATE_FROM` 60. A frozen
+  `USER_FACING_BASELINE` is the tier-1 burn-down (CLI help/render, web copy, README/ROADMAP/AGENTS.md).
+  `docs/glossary/terms.ts` is the glossary source; brand.md §5 is checked against it. The
+  profile→toolkit CLI rename (`musterd toolkit`) is the next cut of this lane, not this commit —
+  nick holds `packages/cli/src/help/catalog.ts` on 01M018624.
