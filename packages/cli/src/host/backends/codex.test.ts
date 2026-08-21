@@ -86,6 +86,20 @@ describe('Codex residency argv', () => {
     expect(codexWakeEnv({ HOME: '/h' }, 'L42').MUSTERD_WAKE_LEASE).toBe('L42');
     expect(codexWakeEnv({ HOME: '/h' }).MUSTERD_WAKE_LEASE).toBeUndefined();
   });
+
+  it('puts the pinned actuator build before a Homebrew musterd on PATH', () => {
+    expect(
+      codexWakeEnv(
+        { PATH: '/opt/homebrew/bin:/usr/bin', MUSTERD_AGENT_KEY: 'secret' },
+        'L42',
+        '/Users/nick/.musterd/bin',
+      ),
+    ).toMatchObject({
+      PATH: '/Users/nick/.musterd/bin:/opt/homebrew/bin:/usr/bin',
+      MUSTERD_PROVENANCE: 'wake',
+      MUSTERD_WAKE_LEASE: 'L42',
+    });
+  });
 });
 
 describe('codexBackend', () => {
@@ -197,6 +211,32 @@ describe('codexBackend', () => {
     await result.settled;
   });
 
+  it('spawns Codex with the actuator-pinned musterd before Homebrew on PATH', async () => {
+    const child = new Child();
+    let spawnedEnv: NodeJS.ProcessEnv | undefined;
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      recordFreshThread: () => undefined,
+      ensurePinned: () => '/Users/nick/.musterd/bin',
+      spawn: ((_bin: string, _args: string[], opts: { env: NodeJS.ProcessEnv }) => {
+        spawnedEnv = opts.env;
+        return child;
+      }) as never,
+    });
+    const priorPath = process.env.PATH;
+    process.env.PATH = '/opt/homebrew/bin:/usr/bin';
+    try {
+      const wake = backend.wake(spec, ctx);
+      await Promise.resolve();
+      child.out('{"type":"thread.started","thread_id":"new"}');
+      await wake;
+      expect(spawnedEnv?.PATH).toBe('/Users/nick/.musterd/bin:/opt/homebrew/bin:/usr/bin');
+      child.exit();
+    } finally {
+      process.env.PATH = priorPath;
+    }
+  });
+
   it('a wake that genuinely produced nothing still FAILS — deferral is not the catch-all', async () => {
     // The guard on the guard: an empty roster is a real failure and must keep consuming budget,
     // or a host that spawns nothing retries forever (ADR 236's ceiling reasoning, one layer out).
@@ -254,25 +294,35 @@ describe('codexBackend', () => {
   it('resumes the captured thread only when its JSONL identity agrees', async () => {
     const child = new Child();
     const calls: string[][] = [];
+    let spawnedEnv: NodeJS.ProcessEnv | undefined;
     const backend = codexBackend({
       resolveBin: async () => '/codex',
       readSession: () => ({
         state: 'resumable',
         session: { harness: 'codex', id: 'old', started_at: 1 },
       }),
-      spawn: ((_bin: string, args: string[]) => {
+      ensurePinned: () => '/Users/nick/.musterd/bin',
+      spawn: ((_bin: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
         calls.push(args);
+        spawnedEnv = opts.env;
         return child;
       }) as never,
     });
-    const wake = backend.wake(spec, ctx);
-    await Promise.resolve();
-    child.out('{"type":"thread.started","thread_id":"old"}');
-    const result = await wake;
-    expect(calls[0]).toEqual(buildCodexResumeArgs('wake line', 'old'));
-    expect(result.outcome.session).toBe('resumed');
-    child.exit();
-    await result.settled;
+    const priorPath = process.env.PATH;
+    process.env.PATH = '/opt/homebrew/bin:/usr/bin';
+    try {
+      const wake = backend.wake(spec, ctx);
+      await Promise.resolve();
+      child.out('{"type":"thread.started","thread_id":"old"}');
+      const result = await wake;
+      expect(calls[0]).toEqual(buildCodexResumeArgs('wake line', 'old'));
+      expect(spawnedEnv?.PATH).toBe('/Users/nick/.musterd/bin:/opt/homebrew/bin:/usr/bin');
+      expect(result.outcome.session).toBe('resumed');
+      child.exit();
+      await result.settled;
+    } finally {
+      process.env.PATH = priorPath;
+    }
   });
   it('portable fresh orders bypass resume even with a valid local capture', async () => {
     const child = new Child();
