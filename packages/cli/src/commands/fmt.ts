@@ -8,6 +8,7 @@ import {
   serializeRole,
   serializeSeat,
   serializeTeam,
+  unknownRosterKeys,
 } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import { CliError } from '../errors.js';
@@ -54,7 +55,18 @@ export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()
 
   // (relativePath, canonical) for every durable file under .musterd/.
   const canonical: Array<[string, string]> = [];
-  canonical.push(['team.toml', serializeTeam(parseTeamFile(readFileSync(teamPath, 'utf8')))]);
+  // Keys each file carries that its schema does not know — the ones a rewrite would DELETE. Tracked
+  // apart from `drifted` on purpose: byte-inequality is cosmetic, a dropped key is data loss, and a
+  // guard that reports them with one word teaches the reader to ignore both.
+  const dataLoss: Array<{ file: string; keys: string[] }> = [];
+  const noteLoss = (rel: string, kind: 'team' | 'seat' | 'role', text: string): void => {
+    const keys = unknownRosterKeys(kind, text);
+    if (keys.length > 0) dataLoss.push({ file: rel, keys });
+  };
+
+  const teamText = readFileSync(teamPath, 'utf8');
+  noteLoss('team.toml', 'team', teamText);
+  canonical.push(['team.toml', serializeTeam(parseTeamFile(teamText))]);
 
   const seatsDir = join(dir, 'seats');
   let seatFiles: string[] = [];
@@ -65,8 +77,9 @@ export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()
   }
   for (const f of seatFiles.sort()) {
     const name = seatNameFromPath(f);
-    const seat = parseSeatFile(readFileSync(join(seatsDir, f), 'utf8'), name);
-    canonical.push([join('seats', f), serializeSeat(seat)]);
+    const text = readFileSync(join(seatsDir, f), 'utf8');
+    noteLoss(join('seats', f), 'seat', text);
+    canonical.push([join('seats', f), serializeSeat(parseSeatFile(text, name))]);
   }
 
   // Roles are the third durable class the daemon reconciles (ADR 227), and until now the only one
@@ -81,8 +94,9 @@ export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()
     roleFiles = [];
   }
   for (const f of roleFiles.sort()) {
-    const role = parseRoleFile(readFileSync(join(rolesDir, f), 'utf8'));
-    canonical.push([join('roles', f), serializeRole(role)]);
+    const text = readFileSync(join(rolesDir, f), 'utf8');
+    noteLoss(join('roles', f), 'role', text);
+    canonical.push([join('roles', f), serializeRole(parseRoleFile(text))]);
   }
 
   const drifted: string[] = [];
@@ -95,22 +109,45 @@ export async function fmtCommand(parsed: Parsed, baseDir: string = process.cwd()
   }
 
   if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify({ check, drifted, total: canonical.length }) + '\n');
+    process.stdout.write(
+      JSON.stringify({ check, drifted, dataLoss, total: canonical.length }) + '\n',
+    );
+    // `dataLoss` deliberately does NOT widen the exit condition, because it cannot: an unknown key
+    // is absent from the serialized form, so its file's bytes always differ and every data-loss file
+    // is already in `drifted`. Verified, not assumed — a mutation removing `|| dataLoss.length > 0`
+    // killed no test, which is what sent me to check the invariant rather than keep defensive dead
+    // code. The value here is entirely in SAYING WHICH drifted files are the dangerous kind.
     return check && drifted.length > 0 ? 1 : 0;
   }
 
+  // Data loss is printed FIRST and never folded into the drift list: the drift line ends with "run
+  // `musterd fmt`", and running it is exactly what destroys these keys. A reader who acts on the
+  // wrong line loses the data the guard was warning about.
+  const lossReport = (): string =>
+    `${theme.err(sym.err)} ${dataLoss.length} file(s) carry keys no schema knows — ` +
+    `\`musterd fmt\` would DELETE these:\n` +
+    dataLoss.map((d) => `  ${theme.meta(sym.dot)} ${d.file} — ${d.keys.join(', ')}`).join('\n') +
+    `\n${theme.meta('  fix the schema or remove the keys deliberately; do not format past this')}\n`;
+
   if (check) {
-    if (drifted.length === 0) {
+    if (drifted.length === 0 && dataLoss.length === 0) {
       process.stdout.write(success(`${canonical.length} roster file(s) already canonical`) + '\n');
       return 0;
     }
-    process.stdout.write(
-      `${theme.err(sym.err)} ${drifted.length} roster file(s) are not canonical — run \`musterd fmt\`:\n` +
-        drifted.map((d) => `  ${theme.meta(sym.dot)} ${d}`).join('\n') +
-        '\n',
-    );
+    if (dataLoss.length > 0) process.stdout.write(lossReport());
+    if (drifted.length > 0) {
+      process.stdout.write(
+        `${theme.err(sym.err)} ${drifted.length} roster file(s) are not canonical — run \`musterd fmt\`:\n` +
+          drifted.map((d) => `  ${theme.meta(sym.dot)} ${d}`).join('\n') +
+          '\n',
+      );
+    }
     return 1;
   }
+
+  // A WRITE run warns too, before it rewrites anything — this is the last moment anyone sees the
+  // keys, because after the write they are gone and the file looks tidy.
+  if (dataLoss.length > 0) process.stdout.write(lossReport());
 
   if (drifted.length === 0) {
     process.stdout.write(success('already canonical — nothing to do') + '\n');
