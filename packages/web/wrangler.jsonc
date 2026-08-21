@@ -1,8 +1,9 @@
 {
   // musterd.io — the public landing page, as an assets-only Worker (no script).
   //
-  // What it serves: ONLY the prerendered landing route, staged into `dist/site` by
-  // `scripts/stage-site.mjs`. The build also prerenders /live, /board, /audit and friends, and
+  // What it serves: ONLY the prerendered public set (ADR 300: `/`, /roadmap, /docs/**, /blog/**),
+  // staged into `dist/site` by `scripts/stage-site.mjs` from the allowlist in
+  // `scripts/stage-allowlist.mjs`. The build also prerenders /live, /board, /audit and friends, and
   // those must NEVER reach this origin: they are daemon-connected surfaces that would render dead
   // UI on a public host (ADR 132 puts the live viewer on the daemon origin; ADR 156 keeps /live out
   // of packaged installs). `not_found_handling: "none"` is the second half of that guarantee —
