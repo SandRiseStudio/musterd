@@ -2,15 +2,6 @@
   padding: var(--section-y) var(--gutter);
 }
 
-/* Echoes .hero__eyebrow — same voice, so the page reads as one hand. */
-.gs__eyebrow {
-  margin: 0 0 0.35rem;
-  font-size: 12px;
-  letter-spacing: 0.32em;
-  text-transform: uppercase;
-  color: var(--accent-ink);
-}
-
 .gs__title {
   margin: 0 0 10px;
   font-size: clamp(1.2rem, 2.4vw, 1.55rem);
