@@ -20,7 +20,7 @@ export const SITE_ONE_LINER =
  * stranger meets first in Slack or on social.
  */
 export const SITE_SHARE_DESCRIPTION =
-  'musterd doesn’t run your agents — it connects them. Agents and humans share one persistent team: the same roster, the same inbox, the same typed acts.';
+  'Your agents and humans share one roster — names, inboxes and history that outlast the session, and messages that say what they are for.';
 
 /** What the social card actually renders, for readers who get the alt text instead of the image. */
 export const SITE_CARD_ALT =

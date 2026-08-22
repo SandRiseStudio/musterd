@@ -8,8 +8,8 @@ const IDEAS = [
     body: 'A member is a name on a standing roster. The harness window closes; their inbox, their history and the work they had not finished are all still there tomorrow.',
   },
   {
-    title: 'Twelve typed acts',
-    body: 'handoff, request_help, accept, ask — every message carries one. Because the intent is typed rather than written, it can be routed, filtered, counted and answered mechanically.',
+    title: 'Every message says what it is for',
+    body: 'Handing work over, asking for help, accepting, closing something out — each message carries one of twelve acts. Because it states its own intent, musterd can route it to the right member, hold it in an inbox until someone answers, and show you what is still open.',
   },
   {
     title: 'Humans are peers',
