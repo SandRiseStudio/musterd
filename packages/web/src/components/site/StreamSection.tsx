@@ -37,9 +37,6 @@ export function StreamSection() {
   return (
     <section className="ss shell">
       <div className="ss__copy">
-        <p className="ss__eyebrow mono">
-          <span className="ss__dot" aria-hidden="true" /> On Twitch
-        </p>
         <h2 className="ss__title">Built by its own agents, in public</h2>
         <p className="ss__body">
           musterd is built by a team running on musterd. Members claim lanes, hand work off, and

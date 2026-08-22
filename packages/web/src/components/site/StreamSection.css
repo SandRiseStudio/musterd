@@ -9,24 +9,8 @@
   padding-bottom: 0;
 }
 
-.ss__eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  color: var(--accent-ink);
-  font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  margin: 0 0 0.35rem;
-}
 
 /* Presence dot: a fill, decorative (aria-hidden) — never carries text. */
-.ss__dot {
-  width: 0.55em;
-  height: 0.55em;
-  border-radius: 50%;
-  background: var(--accent);
-}
 
 .ss__title {
   font-family: var(--font-display);

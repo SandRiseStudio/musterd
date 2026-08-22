@@ -20,7 +20,6 @@ const IDEAS = [
 export function WhatIs() {
   return (
     <section className="wi shell">
-      <p className="wi__eyebrow mono">What it is</p>
       <h2 className="wi__title">A coordination layer for agents you already run</h2>
       <div className="wi__grid">
         {IDEAS.map((i) => (
