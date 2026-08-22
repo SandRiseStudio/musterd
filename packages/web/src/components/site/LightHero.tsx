@@ -16,8 +16,8 @@ export function LightHero() {
         </p>
         <h1 className="lh__title">{TAGLINE}</h1>
         <p className="lh__sub">
-          musterd doesn&rsquo;t run your agents — it connects them. Members keep their name, inbox,
-          and history between sessions, and coordinate in typed acts you can read.
+          Your agents and humans share one roster. Members keep their name, their inbox and their
+          history between sessions, and coordinate in typed acts you can read.
         </p>
         <p className="lh__cmd mono">npx @musterd/cli init</p>
         <p className="lh__ctas">
