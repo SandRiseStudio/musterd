@@ -1460,11 +1460,19 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
   it('passes the merge attestation through as merged {pr, sha, authorized_by} (ADR 109)', async () => {
     // Worker self-close. A counterpart omits these fields (ADR 305); the server ignores them if sent.
     const updateLane = vi.fn(async () => ({ lane: lane({ branch: 'feat/x' }), warnings: [] }));
-    const handlers = captureAll(registerLanes, { updateLane } as Partial<MusterdClient>);
-    await handlers['lane_resolve']!({ id: 'lane1', pr: 167, sha: 'abc123', authorized_by: 'nick' });
+    const handlers = captureAll(
+      (s: any, c: any) => registerLanes(s, c, async () => 'ancestor' as any),
+      { updateLane } as Partial<MusterdClient>,
+    );
+    await handlers['lane_resolve']!({
+      id: 'lane1',
+      pr: 167,
+      sha: 'abc123f',
+      authorized_by: 'nick',
+    });
     expect(updateLane).toHaveBeenCalledWith('lane1', {
       state: 'done',
-      merged: { pr: 167, sha: 'abc123', authorized_by: 'nick' },
+      merged: { pr: 167, sha: 'abc123f', authorized_by: 'nick', verification: 'ancestor' },
     });
   });
 
@@ -1789,5 +1797,92 @@ describe('lane_submit merge verification (merge-verified submit)', () => {
     const out = text(await handlers['lane_ready']!({ id: 'L1', sha: 'abc123f' }));
     expect(out).toContain('not on origin/main');
     expect(updateLane).not.toHaveBeenCalled();
+  });
+});
+
+describe('lane_resolve merge verification (done means landed — the #997/#998 aliasing)', () => {
+  // lane_submit verified its attestation while lane_resolve — the worker self-close that writes
+  // the SAME merged object — verified nothing. Two lanes sat `done` for 3 days with open PRs
+  // while five seats cited the unmerged page. Resolve now runs the same checks as submit.
+  const doneLane: Lane = {
+    id: 'L1',
+    team: 'dawn',
+    project: 'default',
+    title: 't',
+    detail: null,
+    owner_seat: 'Ada',
+    role: null,
+    surface_globs: [],
+    depends_on: [],
+    branch: null,
+    goal_id: null,
+    state: 'done',
+    created_by: 'Ada',
+    created_at: 0,
+    claimed_at: null,
+    resolved_at: null,
+    updated_at: 0,
+  };
+
+  function resolveWith(tier: string) {
+    const updateLane = vi.fn(async () => ({ lane: doneLane, warnings: [] }));
+    const handlers = captureAll((s: any, c: any) => registerLanes(s, c, async () => tier as any), {
+      updateLane,
+    } as Partial<MusterdClient>);
+    return { resolve: handlers['lane_resolve']!, updateLane };
+  }
+
+  it('refuses pr without sha — an open PR is not a landed artifact', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    const out = text(await resolve({ id: 'L1', pr: 997 }));
+    expect(out).toMatch(/open PR/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed sha before any lane mutation', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    const out = text(await resolve({ id: 'L1', sha: 'not-a-sha!' }));
+    expect(out).toMatch(/not a git SHA/i);
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('refuses not_ancestor — done with an unlanded attestation is the aliasing itself', async () => {
+    const { resolve, updateLane } = resolveWith('not_ancestor');
+    const out = text(await resolve({ id: 'L1', sha: 'abc123f' }));
+    expect(out).toContain('not on origin/main');
+    expect(updateLane).not.toHaveBeenCalled();
+  });
+
+  it('proceeds on ancestor and stamps the tier on the attestation', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    await resolve({ id: 'L1', pr: 42, sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'done',
+      merged: { pr: 42, sha: 'abc123f', verification: 'ancestor' },
+    });
+  });
+
+  it('proceeds on fetch_failed (degrade, never wedge) with the tier recorded', async () => {
+    const { resolve, updateLane } = resolveWith('fetch_failed');
+    await resolve({ id: 'L1', sha: 'abc123f' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'done',
+      merged: { sha: 'abc123f', verification: 'fetch_failed' },
+    });
+  });
+
+  it('an attestation-less resolve still sends no merged object (counterpart accepts, ADR 305)', async () => {
+    const { resolve, updateLane } = resolveWith('unattested');
+    await resolve({ id: 'L1' });
+    expect(updateLane).toHaveBeenCalledWith('L1', { state: 'done' });
+  });
+
+  it('an attestation without a sha is stamped unattested, same as submit', async () => {
+    const { resolve, updateLane } = resolveWith('ancestor');
+    await resolve({ id: 'L1', authorized_by: 'nick' });
+    expect(updateLane).toHaveBeenCalledWith('L1', {
+      state: 'done',
+      merged: { authorized_by: 'nick', verification: 'unattested' },
+    });
   });
 });
