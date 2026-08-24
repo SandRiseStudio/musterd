@@ -82,11 +82,6 @@ const USER_FACING_ROOTS = ['README.md', 'ROADMAP.md', 'AGENTS.md', 'PRODUCT.md',
 
 /** Frozen at gate landing — the tier-1 burn-down. New files under the same globs are gated. */
 export const USER_FACING_BASELINE = new Set([
-  'AGENTS.md',
-  'PRIVACY.md',
-  'PRODUCT.md',
-  'README.md',
-  'ROADMAP.md',
 ]);
 
 export interface VocabCheckOptions {
