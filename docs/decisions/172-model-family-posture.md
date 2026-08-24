@@ -7,7 +7,7 @@
   `no_candidate` close reason this enriches — PR #450/#453 are the immediate ancestors),
   [ADR 101](101-model-as-a-variable.md) / [ADR 158](158-model-attestation-truth.md) (attestation:
   observed-over-declared, `unknown` is legal and never blocks),
-  [ADR 056](056-research-as-first-class-practice.md) (correlated models make correlated mistakes — the
+  [ADR 314](314-correlated-models-correlated-mistakes.md) (correlated models make correlated mistakes — the
   family boundary is the decorrelation line), [ADR 145](145-human-role-refounded.md) (humans are
   peers with an authority overlay, not a diversity ingredient).
 
@@ -30,7 +30,7 @@ human reading the roster (by eye).
 ## Problem
 
 "No agent on this team runs outside the family the others use" is a fact the flow needs — it decides
-whether cross-family review is possible, whether ADR 056 conclusions drawn this week were drawn under
+whether cross-family review is possible, whether ADR 314 conclusions drawn this week were drawn under
 monoculture, and whether the remedy for an empty reviewer pool is to wake an enrolled seat or to
 enroll one. Nothing derived it, so every consumer either recomputed a slice of it or guessed.
 
@@ -159,6 +159,10 @@ inc 5 toward attestation coverage before reviewer spin-up.
 
 ## Consequences
 
+- _Dated note (2026-08-24):_ the Decision's citations of "ADR 056 conclusions" resolve to
+  [ADR 314](314-correlated-models-correlated-mistakes.md), the diversity charter — ADR 056 never
+  stated the thesis (its acceptance amendment records this); the Decision text is frozen, so the
+  repoint lives here.
 - The `no_candidate` degradation stops being a shrug: it names the team's shape and who could be
   woken to change it, in the worker's own context at the moment of degradation.
 - ADR 056 analyses gain a team-level series to condition on — "these chains were scored under

@@ -51,7 +51,7 @@ action at all — so a baked copy begins rotting the moment it is written.
 **Why the existing tripwire missed it.** The harness attestation tripwire (#273) classifies
 declarations as `environment` / `binding` / `unknown` and warns on `unknown`. It detects _absent_
 attestation only. A confidently wrong declaration is indistinguishable from a correct one to it, so
-this failure passed silently — the mode most damaging to ADR 056 conclusions, since a wrong value
+this failure passed silently — the mode most damaging to ADR 314 conclusions, since a wrong value
 poisons a chain while looking healthy.
 
 ## Decision
@@ -169,7 +169,7 @@ The never-erase, never-clobber, and never-fail contracts carry over unchanged, p
 - Claude Code seats gain real attestation without anyone setting an env var; Cursor seats are
   honestly `unknown` until Cursor exposes something to read.
 - `unknown` may become _more_ common than under the old bake, and that is the point: constraint A is
-  that musterd would rather say nothing than say something false, because ADR 056 conclusions are
+  that musterd would rather say nothing than say something false, because ADR 314 conclusions are
   built on this field.
 - One new coupling: an undocumented transcript format, isolated to one module with an `undefined`
   fallback.

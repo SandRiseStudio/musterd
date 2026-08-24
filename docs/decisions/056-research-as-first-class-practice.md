@@ -104,7 +104,7 @@ future homes). These stay in the decision as direction, with no delivery implied
 `landscape.md`, `the-standing-acceptor.md`, among others) cites "ADR 056 diversity conclusions"
 and "correlated models make correlated mistakes." This ADR contains no such claim — three of
 those citations link to files that never existed under other titles. That correlated-failure /
-model-diversity thesis is real and load-bearing, and it gets its own charter (follow-up lane
+model-diversity thesis is real and load-bearing, and it gets its own charter — [ADR 314](314-correlated-models-correlated-mistakes.md) (follow-up lane
 opened at acceptance); it is not retro-written into this one.
 
 ## Observability & Evaluation
