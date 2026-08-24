@@ -3,6 +3,23 @@
   "version": "0.4.1",
   "description": "musterd telemetry SDK: the shared OTLP bootstrap every component boots (server, MCP adapter, CLI)",
   "license": "MIT",
+  "homepage": "https://musterd.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SandRiseStudio/musterd.git",
+    "directory": "packages/telemetry"
+  },
+  "bugs": "https://github.com/SandRiseStudio/musterd/issues",
+  "keywords": [
+    "agents",
+    "multi-agent",
+    "coordination",
+    "mcp",
+    "team",
+    "telemetry",
+    "opentelemetry",
+    "otlp"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
