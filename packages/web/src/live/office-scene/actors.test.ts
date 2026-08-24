@@ -22,6 +22,8 @@ function node(name: string, presence: OfficeNode['presence'] = 'online'): Office
     workSource: null,
     laneState: null,
     moreLanes: 0,
+    offline_reason: null,
+    last_seen_at: null,
   };
 }
 function world(nodes: OfficeNode[]) {

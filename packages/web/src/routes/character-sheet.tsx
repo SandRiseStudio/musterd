@@ -108,6 +108,8 @@ function CharacterSheet() {
               workSource: null,
               laneState: null,
               moreLanes: 0,
+              offline_reason: null,
+              last_seen_at: null,
             };
             const seed = seedOf(name);
             const skel = solveSkeleton({

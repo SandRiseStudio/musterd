@@ -41,6 +41,10 @@ export interface OfficeNode {
   workSource: 'lane' | 'status' | null;
   laneState: LaneState | null;
   moreLanes: number;
+  /** Why the seat is dark (ADR 141/315) — drives the owned-desk texture and the left_team exit. */
+  offline_reason: string | null;
+  /** Last seen (wire fact) — the warm-desk fade and the desk-capacity tiebreak read it. */
+  last_seen_at: number | null;
 }
 
 /** The office has no arcs — relationships show as choreography, not edges. */

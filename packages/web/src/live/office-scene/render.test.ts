@@ -70,6 +70,8 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
     workSource: null,
     laneState: null,
     moreLanes: 0,
+    offline_reason: null,
+    last_seen_at: null,
   };
 }
 
@@ -171,6 +173,51 @@ describe('animatedDeskAnchors', () => {
     const minusOne = new Set(allSlots);
     minusOne.delete(mugSlot!.id);
     expect(animatedDeskAnchors(fit, minusOne).coffees.length).toBe(full - 1);
+  });
+});
+
+describe('owned empty desks (presence-honesty \u00a74)', () => {
+  const fit = fitFloor(1200, 900);
+
+  function bakeTexts(n: OfficeNode): string[] {
+    const texts: string[] = [];
+    const ctx = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
+            return () => ({ addColorStop() {} });
+          if (prop === 'measureText') return () => ({ width: 0 });
+          if (prop === 'fillText') return (s: string) => void texts.push(s);
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    const members = new Map([[n.name, n]]);
+    const placements = assignSeats([n]);
+    renderScene(ctx, fit, placements, members, homePoses(placements, members), 0);
+    return texts;
+  }
+
+  const offlineNode = (over: Partial<OfficeNode> = {}): OfficeNode => ({
+    ...node('sleeper', 'offline'),
+    presence: 'offline',
+    posture: 'offline',
+    ...over,
+  });
+
+  it('bakes the owner\'s name onto their kept desk — furniture-with-a-name', () => {
+    expect(bakeTexts(offlineNode())).toContain('sleeper');
+  });
+
+  it('a left_team member leaves no desk and no plate', () => {
+    expect(bakeTexts(offlineNode({ offline_reason: 'left_team' }))).not.toContain('sleeper');
+  });
+
+  it('a present member\'s desk carries no baked plate — floating labels stay present-only', () => {
+    expect(bakeTexts(node('worker', 'working'))).not.toContain('worker');
   });
 });
 
