@@ -36,6 +36,7 @@
     "steward:notify": "node --disable-warning=ExperimentalWarning scripts/steward/notify.ts",
     "radar:sweep": "node --disable-warning=ExperimentalWarning scripts/radar/sweep.ts",
     "liveness:sweep": "node --disable-warning=ExperimentalWarning scripts/research/adr-166-slot-sweep.ts",
+    "wakes:repeats": "node --disable-warning=ExperimentalWarning scripts/research/adr-250-repeat-wakes.ts",
     "corpus:snapshot": "node --disable-warning=ExperimentalWarning scripts/corpus/snapshot.ts",
     "dataset:export": "node --disable-warning=ExperimentalWarning scripts/dataset/export.ts",
     "release": "node --disable-warning=ExperimentalWarning scripts/release.ts",
