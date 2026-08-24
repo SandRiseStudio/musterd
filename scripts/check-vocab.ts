@@ -100,6 +100,8 @@ export const USER_FACING_BASELINE = new Set([
 export interface VocabCheckOptions {
   /** Override the frozen user-facing baseline (tests). */
   userFacingBaseline?: string[];
+  /** Override the frozen design baseline (tests). */
+  designBaseline?: string[];
 }
 
 export interface VocabCheckResult {
@@ -132,7 +134,7 @@ interface GatedFile {
   tables: Table[];
 }
 
-function gatedFiles(root: string, baseline: Set<string>): GatedFile[] {
+function gatedFiles(root: string, baseline: Set<string>, design: Set<string>): GatedFile[] {
   const out: GatedFile[] = [];
 
   const adrDir = join(root, 'docs', 'decisions');
@@ -161,7 +163,7 @@ function gatedFiles(root: string, baseline: Set<string>): GatedFile[] {
 
   const designDir = join(root, 'docs', 'design');
   for (const entry of listDir(designDir)) {
-    if (entry.endsWith('.md') && !DESIGN_BASELINE.has(entry))
+    if (entry.endsWith('.md') && !design.has(entry))
       out.push({
         abs: join(designDir, entry),
         rel: `docs/design/${entry}`,
@@ -267,9 +269,31 @@ function glossaryDrift(root: string): string[] {
   return errors;
 }
 
+/**
+ * A baseline entry naming a file that no longer exists is rot: the exemption stays counted in the
+ * burn-down while exempting nothing, so the count the ADR 296 eval measures against can never
+ * reach zero honestly — it can only be declared done. Found live 2026-08-21: two web components
+ * deleted by the site rework sat in USER_FACING_BASELINE, reading 49 where the real work was 47.
+ * Same shape as the controls registry's `neverExercisedSince` aging: the mechanism to notice
+ * must itself be checked for staleness.
+ */
+function baselineRot(root: string, baseline: Set<string>, design: Set<string>): string[] {
+  const errors: string[] = [];
+  const check = (rel: string, listName: string) => {
+    if (!existsSync(join(root, rel)))
+      errors.push(`✗ ${listName} names a missing file — remove the dead exemption: ${rel}`);
+  };
+  for (const rel of baseline) check(rel, 'USER_FACING_BASELINE');
+  for (const name of design) check(`docs/design/${name}`, 'DESIGN_BASELINE');
+  for (const name of GRANDFATHERED_PLANS)
+    check(`docs/superpowers/plans/${name}`, 'GRANDFATHERED_PLANS');
+  return errors;
+}
+
 export function checkVocab(root: string, opts: VocabCheckOptions = {}): VocabCheckResult {
   const baseline = new Set(opts.userFacingBaseline ?? USER_FACING_BASELINE);
-  const files = gatedFiles(root, baseline);
+  const design = new Set(opts.designBaseline ?? DESIGN_BASELINE);
+  const files = gatedFiles(root, baseline, design);
   const tables = [
     { name: 'work-item' as const, bans: WORK_ITEM_BANNED, label: 'structural noun (ADR 098)' },
     {
@@ -280,6 +304,7 @@ export function checkVocab(root: string, opts: VocabCheckOptions = {}): VocabChe
   ];
   const errors: string[] = [];
   for (const file of files) errors.push(...scanFile(file, tables));
+  errors.push(...baselineRot(root, baseline, design));
   errors.push(...glossaryDrift(root));
   return { ok: errors.length === 0, errors, checked: files.length };
 }
