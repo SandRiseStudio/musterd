@@ -356,12 +356,13 @@ pnpm typecheck && pnpm format:check
 
 Expected: PASS, including architecture tree, vocabulary, ADR-number, guidance, and observability checks.
 
-- [ ] **Step 4: Run milestone tests for touched packages**
+- [ ] **Step 4: Run the test suites for touched packages**
 
 Run:
 
 ```bash
 pnpm --filter @musterd/protocol test
+pnpm --filter @musterd/server test
 pnpm --filter @musterd/cli test
 pnpm --filter @musterd/mcp test
 ```
