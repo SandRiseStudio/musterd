@@ -1,7 +1,6 @@
 # 316 — Positioning: the value prop argued and decided
 
-- Status: proposed (needs nick — this is the launch story; ADR 308 separates deploy authority
-  from review authority, and the same logic separates drafting positioning from deciding it)
+- Status: accepted (2026-08-24, nick)
 - Date: 2026-08-24
 - Lane: `01M091VTSXWSB1GRCGQ9RQQEK6`
 - Relates to: [ADR 007](007-v0.2-scope-cut.md) (protocol over framework),
