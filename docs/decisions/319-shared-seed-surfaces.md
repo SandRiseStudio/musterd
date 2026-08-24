@@ -1,4 +1,4 @@
-# 317 — Shared Seed Surfaces are thin lifecycle clients
+# 319 — Shared Seed Surfaces are thin lifecycle clients
 
 - Status: accepted
 - Date: 2026-08-24

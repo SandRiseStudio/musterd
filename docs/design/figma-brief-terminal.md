@@ -83,7 +83,7 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
     exit **1** (wire exits **6** when no selection exists at all:
     `✗ no harness selection here — run musterd harness configure (or musterd init for a fresh folder)`).
 
-### Shared Seed frames (ADR 317)
+### Shared Seed frames (ADR 319)
 
 11. `cmd/seed-list` — `$ musterd seed list` → one active tray row per Seed, using the exact
     `<id> <state>[ — <explorer>] · <body>` shape. Sample:
