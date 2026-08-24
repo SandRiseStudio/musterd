@@ -357,7 +357,76 @@ describe('reconcile — unknown keys warn, never fail (nick 2026-08-21)', () => 
   });
 });
 
+describe('reconcile — canonical drift is reported, because nothing else reads it', () => {
+  /**
+   * `musterd fmt --check` has existed since ADR 058 and NOTHING RUNS IT. Measured 2026-08-24: two
+   * role files on the live roster drifted from 2026-08-04 until a human happened to check by hand,
+   * twenty days later. CI cannot cover it — the roster is not in this repo — so the reader has to be
+   * the one process that already opens every roster file on every pass.
+   */
+  it('reports a file whose bytes are not what the serializer would write', () => {
+    // The exact live shape, inverted: a flush table header is now the non-canonical one (ADR 309).
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    writeRole('platform', 'summary = "P"\n[capabilities]\nis_admin = false\n');
+    const r = reconcile();
+    expect(r.drift).toEqual(['roles/platform.toml']);
+  });
+
+  it('still projects the drifted entry — cosmetic drift is never fail-closed', () => {
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\n[capabilities]\ncan_message = "none"\n',
+    });
+    const r = reconcile();
+    const team = getTeamBySlug(db, 'alpha')!;
+    expect(listMembers(db, team.id).map((m) => m.name)).toEqual(['olive']);
+    expect(r.errors).toEqual([]);
+    expect(r.drift).toEqual(['seats/olive.toml']);
+  });
+
+  it('keeps drift separate from a dropped key — they mean different things', () => {
+    // ADR 304's own lesson: a reader must be able to tell data loss from tidiness. An unknown key
+    // ALSO makes the bytes non-canonical, so this file is both — and says so twice, distinctly.
+    writeRoster('slug = "alpha"\n', {
+      olive: 'kind = "agent"\nrole = "reviewer"\ncharter = "A paragraph a human wrote."\n',
+    });
+    const r = reconcile();
+    expect(r.drift).toEqual(['seats/olive.toml']);
+    expect(r.warnings).toEqual([
+      'seats/olive.toml: dropped unknown key(s) charter — not in the schema, so reconcile ignores them',
+    ]);
+  });
+
+  it('a canonical roster reports no drift — including the hand-authored blank-line shape', () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    writeRole('platform', 'summary = "P"\n\n[capabilities]\nis_admin = false\n');
+    const r = reconcile();
+    expect(r.drift).toEqual([]);
+    expect(r.warnings).toEqual([]);
+  });
+});
+
 describe('reconcileAll surfaces what a pass found (nothing did until 2026-08-21)', () => {
+  it('logs canonical drift as its own line, distinct from a dropped key', async () => {
+    writeRoster('slug = "alpha"\n', { olive: 'kind = "agent"\nrole = "reviewer"\n' });
+    writeRole('platform', 'summary = "P"\n[capabilities]\nis_admin = false\n');
+    const { log } = await import('../log.js');
+    const seen: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(log, 'warn').mockImplementation((f) => {
+      seen.push(f as Record<string, unknown>);
+    });
+    try {
+      reconcileAll(db, [dir]);
+    } finally {
+      spy.mockRestore();
+    }
+    const drifted = seen.find((f) => f['msg'] === 'reconcile_file_drifted');
+    expect(drifted).toBeDefined();
+    expect(String(drifted?.['detail'])).toContain('roles/platform.toml');
+    expect(drifted?.['team']).toBe('alpha');
+    // The instrument must not borrow ADR 304's channel — that would re-merge the two meanings.
+    expect(seen.map((f) => f['msg'])).not.toContain('reconcile_key_dropped');
+  });
+
   it('logs BOTH a skipped entry and a dropped key — collected-and-discarded was the old behaviour', async () => {
     writeRoster('slug = "alpha"\n', {
       olive: 'kind = "agent"\nrole = "reviewer"\ncharter = "A paragraph a human wrote."\n',

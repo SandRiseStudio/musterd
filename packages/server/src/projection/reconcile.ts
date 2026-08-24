@@ -41,6 +41,8 @@ export interface ReconcileResult {
   errors: string[];
   /** Keys dropped because no schema knows them — the entry projected, minus those fields. */
   warnings: string[];
+  /** Roster files whose bytes are not canonical (ADR 058 guard 2) — projected anyway. */
+  drift: string[];
 }
 
 function resolveLifecycle(
@@ -100,6 +102,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
     minted: {},
     errors: [...spec.errors],
     warnings: [...spec.warnings],
+    drift: [...spec.drift],
   };
   const desired = new Set(spec.seats.map((s) => s.name));
 
@@ -268,6 +271,17 @@ export function reconcileAll(db: Database, roots: string[]): ReconcileResult[] {
       }
       for (const warning of result.warnings) {
         log.warn({ msg: 'reconcile_key_dropped', root, team: result.slug, detail: warning });
+      }
+      // ADR 058 guard 2, finally read. `musterd fmt --check` was correct and unrun; two role files
+      // drifted for twenty days with nobody aware. Its own line, not folded into `reconcile_key_-
+      // dropped`, because untidy bytes and lost data are different findings with different fixes.
+      for (const file of result.drift) {
+        log.warn({
+          msg: 'reconcile_file_drifted',
+          root,
+          team: result.slug,
+          detail: `${file}: not canonical — run \`musterd fmt\` (cosmetic; the entry projected)`,
+        });
       }
       results.push(result);
     } catch (e) {

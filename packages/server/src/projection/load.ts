@@ -7,6 +7,9 @@ import {
   type RoleFile,
   type SeatFile,
   seatNameFromPath,
+  serializeRole,
+  serializeSeat,
+  serializeTeam,
   type TeamFile,
   unknownRosterKeys,
 } from '@musterd/protocol';
@@ -50,6 +53,18 @@ export interface TeamSpec {
    * with nothing said. The entry survived; part of it did not.
    */
   warnings: string[];
+  /**
+   * Roster files whose bytes are not what the serializer would write — ADR 058 guard 2, read here
+   * because nothing else reads it anywhere. `musterd fmt --check` has been correct and unrun since
+   * the guard was written: two role files on the live roster drifted from 2026-08-04 until a human
+   * checked by hand on 2026-08-24, twenty days later. CI cannot cover it (the roster is not in the
+   * repo), so the reader is the one process that already opens every roster file on every pass.
+   *
+   * Deliberately NOT folded into `warnings`: a dropped key loses data, drift is only untidy, and
+   * ADR 304's lesson is that a reader must be able to tell them apart. A drifted file still
+   * projects — fail-closed here would refuse a seat over a blank line.
+   */
+  drift: string[];
 }
 
 /**
@@ -70,6 +85,15 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
   const seats: LoadedSeat[] = [];
   const errors: string[] = [];
   const warnings: string[] = [];
+  const drift: string[] = [];
+  /**
+   * One string compare per file against the canonical form the serializer would emit. Parsing is
+   * whitespace-tolerant by design (guard 1), so this is the only place the byte form is ever
+   * judged — and the reason it can be judged cheaply is that the parse already happened.
+   */
+  const noteDrift = (rel: string, canonical: string, text: string): void => {
+    if (canonical !== text) drift.push(rel);
+  };
   const noteDropped = (rel: string, kind: 'team' | 'seat' | 'role', text: string): void => {
     const keys = unknownRosterKeys(kind, text);
     if (keys.length > 0) {
@@ -78,7 +102,9 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
       );
     }
   };
-  noteDropped('team.toml', 'team', readFileSync(teamPath, 'utf8'));
+  const teamText = readFileSync(teamPath, 'utf8');
+  noteDropped('team.toml', 'team', teamText);
+  noteDrift('team.toml', serializeTeam(team), teamText);
   let files: string[] = [];
   try {
     files = readdirSync(seatsDir).filter((f) => f.toLowerCase().endsWith('.toml'));
@@ -93,6 +119,7 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
       // Only after a successful parse: an unparseable file's "unknown keys" are noise on top of the
       // error that already explains it.
       noteDropped(`seats/${f}`, 'seat', text);
+      noteDrift(`seats/${f}`, serializeSeat(seat), text);
       seats.push({ name, seat });
     } catch (e) {
       errors.push(`${f}: ${(e as Error).message}`);
@@ -114,11 +141,12 @@ export function loadTeamSpec(rootDir: string): TeamSpec | null {
       const text = readFileSync(join(rolesDir, f), 'utf8');
       const role = parseRoleFile(text);
       noteDropped(`roles/${f}`, 'role', text);
+      noteDrift(`roles/${f}`, serializeRole(role), text);
       roles.push({ name, role });
     } catch (e) {
       errors.push(`roles/${f}: ${(e as Error).message}`);
     }
   }
 
-  return { rootDir, team, seats, roles, errors, warnings };
+  return { rootDir, team, seats, roles, errors, warnings, drift };
 }
