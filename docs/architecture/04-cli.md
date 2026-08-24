@@ -150,7 +150,7 @@ src/
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)
-    seed.ts           // shared Seed tray/read/claim/clarification/brief/conclude/promote Surface (ADR 317)
+    seed.ts           // shared Seed tray/read/claim/clarification/brief/conclude/promote Surface (ADR 320)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
     done.ts           // close your work — mark the lane done (auto-targets your live lane), then show next (ADR 049/084)
     goal.ts           // declare/list team Goals — the declared-outcome layer above lanes (ADR 048/084)
@@ -241,7 +241,7 @@ All commands accept global `--team <slug>`, `--server <url>`, `--json` (machine 
 
 ### `musterd seed <list|show|claim|ask|answer|brief|conclude|promote>`
 
-The human Shared Seed Surface (ADR 317). `list` shows the active tray — `open`, `exploring`,
+The human Shared Seed Surface (ADR 320). `list` shows the active tray — `open`, `exploring`,
 `needs_clarification`, `clarified`, plus `completed` for three days — while `--history` shows every
 Seed and `--json` emits the protocol object. `show <id>` renders the immutable Slack source and public
 thread. An agent Member uses `claim`, then `ask`; only the submitting human Member uses `answer`.

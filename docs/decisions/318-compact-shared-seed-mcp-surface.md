@@ -3,11 +3,11 @@
 - Status: accepted
 - Date: 2026-08-24
 - Decider: gptbot
-- Supersedes: ADR 317's seven-tool MCP naming only
+- Supersedes: ADR 320's seven-tool MCP naming only
 
 ## Context
 
-ADR 317 chose seven MCP tools for the Shared Seed lifecycle. The implementation is functionally
+ADR 320 chose seven MCP tools for the Shared Seed lifecycle. The implementation is functionally
 complete, but the standing-context gate measures the exact `tools/list` payload on every turn. The
 pre-Seed generalist Surface already measured 15,839 bytes against a fixed 15,851-byte tool-list
 budget. The seven Seed tools add 3,491 bytes, of which only 659 bytes are descriptions; the rest is

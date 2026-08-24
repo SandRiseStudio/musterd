@@ -514,7 +514,7 @@ export class HttpClient {
     return parsed.data;
   }
 
-  // ── Shared Seeds (ADR 317). Every wire response is parsed at this boundary.
+  // ── Shared Seeds (ADR 320). Every wire response is parsed at this boundary.
   async seeds(slug: string): Promise<Seed[]> {
     const parsed = SeedListSchema.safeParse(await this.request('GET', `/teams/${slug}/seeds`));
     if (!parsed.success) throw new CliError('Seeds response did not match the protocol schema', 1);

@@ -68,7 +68,7 @@ hand someone a spectator view without provisioning them a real seat.
   server-projected `posture` (`working`·`idle`·`away`·`offline`), with offline chips preferring
   `offline_reason` (`reconnecting`/`disconnected`/`signed off`/`off hours`) when known; account-status
   only for exceptions (`disabled`/`banned`/`archived`); capability deviations; presence dot.
-- **Shared Seeds tray** (`live/SeedsTray.tsx`) — a read-only drawer from the `/live` top bar (ADR 317).
+- **Shared Seeds tray** (`live/SeedsTray.tsx`) — a read-only drawer from the `/live` top bar (ADR 320).
   Active uses the protocol's shared tray rule; history reveals completed/promoted work and links a
   promoted Seed to the ordinary focused Lane view. It refetches on firehose activity so promotion
   leaves the active tray without adding a browser mutation path.

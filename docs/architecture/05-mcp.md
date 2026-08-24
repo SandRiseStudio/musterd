@@ -160,7 +160,7 @@ goals, memory, insight) and `lane_*` (the work-board sub-surface). The split is 
 drift (MCP spec #2808's namespacing direction favors several small namespaces over one flat
 prefix); the full statement lives in `toolNames.ts`.
 
-### Shared Seed tools (ADR 317)
+### Shared Seed tools (ADR 320)
 
 Three `team_seed_*` tools expose the same Shared Seed lifecycle as the CLI over HTTP:
 `team_seed_list`, `team_seed_get`, and `team_seed_update` (ADR 318). List defaults to the shared
@@ -397,7 +397,7 @@ src/
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305)
-    seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 317/318)
+    seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 320/318)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
     format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135)
