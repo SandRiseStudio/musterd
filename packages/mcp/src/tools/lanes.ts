@@ -97,7 +97,7 @@ export function registerLanes(
         scope: z
           .array(z.string())
           .optional()
-          .describe('the paths this lane touches, e.g. ["packages/server/src/store/**"]'),
+          .describe('paths this lane touches, e.g. ["packages/server/src/store/**"]'),
         depends_on: z.array(z.string()).optional().describe('lane ids this lane builds on'),
         branch: z.string().optional().describe('git branch carrying the work'),
         goal_id: z
@@ -240,7 +240,7 @@ export function registerLanes(
         state: z.enum(LaneStateSchema.options).optional().describe('new state'),
         title: z.string().min(1).optional().describe('correct a mis-stated title'),
         detail: z.string().optional(),
-        scope: z.array(z.string()).optional().describe('the paths this lane touches'),
+        scope: z.array(z.string()).optional(),
         stakes: z
           .enum(['low', 'normal', 'high'])
           .optional()
