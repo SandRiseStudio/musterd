@@ -148,7 +148,7 @@ export interface StatusHead {
  * The `status` header — an orientation card, read top-down in order of what you need first:
  *
  *   1. **the team** + a live dot (mustard, bold) — the anchor, and proof the daemon answered
- *   2. **who you are here** — with six seats across worktrees, "which seat is this folder?" is the
+ *   2. **who you are here** — with six seats across workspaces, "which seat is this folder?" is the
  *      question `status` is really asked, and the old header never answered it
  *   3. **what needs you** — the ⚑ banner (inverse mustard), outranking everything by design (ADR 024)
  *   4. **what you were doing** — the seat-memory continuity line (ADR 093)

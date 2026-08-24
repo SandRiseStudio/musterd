@@ -87,14 +87,6 @@ export const USER_FACING_BASELINE = new Set([
   'PRODUCT.md',
   'README.md',
   'ROADMAP.md',
-  'packages/cli/src/help/catalog.ts',
-  'packages/cli/src/help/plain.ts',
-  'packages/cli/src/render/credentials.ts',
-  'packages/cli/src/render/help.ts',
-  'packages/cli/src/render/rows.ts',
-  'packages/cli/src/render/theme.ts',
-  'packages/cli/src/render/title.ts',
-  'packages/cli/src/render/ui.ts',
 ]);
 
 export interface VocabCheckOptions {

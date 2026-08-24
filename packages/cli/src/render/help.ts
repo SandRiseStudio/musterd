@@ -111,7 +111,7 @@ export function renderCommandHelp(name: string): string | null {
  * `help` used to be recognized only as argv[0] (`musterd help agent`) or as a `--help`/`-h` flag, so
  * `musterd agent help` — the form most people reach for first — fell through to the command with
  * "help" as its first positional. For `agent` that positional is a SEAT NAME: on 2026-08-05 the typo
- * provisioned a member called `help` on team `revive`, complete with a git worktree, a branch and MCP
+ * provisioned a member called `help` on team `revive`, complete with a workspace, a branch and MCP
  * wiring, and nobody noticed for nine days. Reserving the word here fixes every verb at once rather
  * than teaching each command to distrust its own arguments.
  *
