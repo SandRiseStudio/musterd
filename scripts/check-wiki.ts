@@ -8,6 +8,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// Circular with wiki-coverage.ts (it reads this file's regexes) — safe: both sides only touch the
+// other's bindings inside functions, never during module evaluation.
+import { coverageFailures, extractClaims, measureCoverage } from './wiki-coverage.ts';
 import { renderIndex, WIKI_DIR } from './wiki-index.ts';
 
 /** The dangerous shape: an assertion that something is broken/absent. Deliberately narrow — a
@@ -28,7 +31,7 @@ import { renderIndex, WIKI_DIR } from './wiki-index.ts';
  *  than implying the whole rule is, and `wiki.test.ts` pins the corpus of shapes — when the next
  *  family shows up, add it there WITH its failing example, and expect this comment to be wrong
  *  again. */
-const DEFECT_RE = new RegExp(
+export const DEFECT_RE = new RegExp(
   [
     // Intransitive — unambiguous wherever they appear.
     /\b(?:is broken|is missing|never (?:fires|runs|installs|happens|works|comes))\b/,
@@ -52,7 +55,7 @@ const DEFECT_RE = new RegExp(
     .join('|'),
   'i',
 );
-const DATED_RE = /\(20\d\d-\d\d(?:-\d\d)?/;
+export const DATED_RE = /\(20\d\d-\d\d(?:-\d\d)?/;
 /** A heading with nothing under it — a section left dangling by a partial edit.
  *
  *  KNOWN LIMIT, measured 2026-08-13 before shipping: this does NOT catch the case that motivated it.
@@ -61,7 +64,7 @@ const DATED_RE = /\(20\d\d-\d\d(?:-\d\d)?/;
  *  passes it (reproduced live on the real page: exit 0). Catching that needs a diff-aware check —
  *  a heading line removed while its body survives — which is history-dependent, unlike the rest of
  *  this gate. Do not read a green run as "no section was eaten". */
-const HEADING_RE = /^#{1,6}\s/;
+export const HEADING_RE = /^#{1,6}\s/;
 const LINK_RE = /\]\(([^)#\s]+\.md)(?:#[^)]*)?\)/g;
 
 /** Headings of a page paired with the first non-blank line beneath each — fence-aware, so a
@@ -202,6 +205,13 @@ function pagesAtRef(ref: string): Map<string, string> | null {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const failures = checkWiki(WIKI_DIR);
 
+  // The coverage meter (wiki-coverage.ts): labels must stay complete — the NUMBER never gates.
+  const labels = JSON.parse(
+    readFileSync(new URL('./wiki-claim-labels.json', import.meta.url), 'utf8'),
+  );
+  failures.push(...coverageFailures(WIKI_DIR, labels));
+  const cov = measureCoverage(extractClaims(WIKI_DIR), labels);
+
   // The diff-aware half. Its base ref must exist or the check is inert — and an instrument that
   // silently never fires is the defect class this whole gate was built against, so a missing base
   // is announced, not swallowed. CI already checks out with fetch-depth: 0.
@@ -227,6 +237,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   process.stdout.write(
-    `✓ wiki clean — index in sync, defect claims in known shapes dated, links live, sections whole${diffChecked ? `, none eaten since ${baseRef}` : ''}\n`,
+    `✓ wiki clean — index in sync, defect claims in known shapes dated, links live, sections whole${diffChecked ? `, none eaten since ${baseRef}` : ''}\n` +
+      `  defect-claim coverage ${cov.covered}/${cov.defects}` +
+      ` — ${cov.shapeMisses.length} shape misses (widen DEFECT_RE), ${cov.headingMisses.length} heading misses (never linted)\n`,
   );
 }
