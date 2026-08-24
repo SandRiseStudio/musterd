@@ -596,6 +596,56 @@ describe('HTTP API', () => {
       expect(ids).toEqual(['b0215', 'b0216', 'b0217', 'b0218', 'b0219']);
       expect(r.json.truncated).toBeUndefined();
     });
+
+    it('pins an old unread handoff into an explicit ?limit= page of newer team broadcasts', async () => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      const nickTok = team.json.human_credential;
+      const bo = await post('/teams/dawn/members', { name: 'bo', kind: 'human' }, nickTok);
+      const t0 = Date.now();
+      await post(
+        '/teams/dawn/messages',
+        {
+          envelope: {
+            id: 'handoff-old',
+            v: PROTOCOL_VERSION,
+            team: 'dawn',
+            from: 'nick',
+            to: { kind: 'member', name: 'bo' },
+            act: 'handoff',
+            body: 'take this',
+            ts: t0,
+          },
+        },
+        nickTok,
+      );
+      for (let i = 0; i < 20; i++) {
+        await post(
+          '/teams/dawn/messages',
+          {
+            envelope: {
+              id: `t${String(i).padStart(4, '0')}`,
+              v: PROTOCOL_VERSION,
+              team: 'dawn',
+              from: 'nick',
+              to: { kind: 'team' },
+              act: 'message',
+              body: 'noise',
+              ts: t0 + 10 + i,
+            },
+          },
+          nickTok,
+        );
+      }
+      const r = await get('/teams/dawn/inbox?unread=1&limit=5', bo.json.human_credential, {
+        'x-musterd-no-touch': '1',
+      });
+      const ids = (r.json.messages as { id: string }[]).map((m) => m.id);
+      expect(ids).toContain('handoff-old');
+      expect(ids).toEqual(expect.arrayContaining(['t0016', 't0017', 't0018', 't0019']));
+    });
   });
 
   describe('meta.eligible stand-down trace on GET /inbox', () => {

@@ -19,8 +19,16 @@ import { planInboxCheck } from './inboxCheck.js';
  * view didn't render." This is that same guarantee, on the surface every agent seat actually uses.
  */
 
-function env(id: string, ts: number): Envelope {
-  return { id, from: 'stanley', act: 'message', body: id, ts } as Envelope;
+function env(id: string, ts: number, extra: Partial<Envelope> = {}): Envelope {
+  return {
+    id,
+    from: 'stanley',
+    act: 'message',
+    body: id,
+    ts,
+    to: { kind: 'team' },
+    ...extra,
+  } as Envelope;
 }
 
 /** Ascending by ts, the order the tool builds before it slices. */
@@ -88,5 +96,23 @@ describe('planInboxCheck — no unread is consumed unseen (ADR 287)', () => {
     const plan = planInboxCheck(ordered(10), 50, 0);
     expect(plan.elided).toBe(0);
     expect(plan.advanceTo).not.toBeNull();
+  });
+
+  it('keeps an old unread handoff when the newest slice is team broadcasts', () => {
+    const handoff = env('handoff-old', 1, {
+      act: 'handoff',
+      to: { kind: 'member', name: 'Ada' },
+    });
+    const plan = planInboxCheck([handoff, ...ordered(100)], 50);
+    expect(plan.shown.map((e) => e.id)).toContain('handoff-old');
+    expect(plan.shown.map((e) => e.id)).toContain('m99');
+    expect(plan.advanceTo).toBeNull();
+  });
+
+  it('names a drain limit that covers the elided unread, not the fetched slice', () => {
+    const plan = planInboxCheck(ordered(50), 50, 100);
+    expect(plan.shown).toHaveLength(50);
+    expect(plan.elided).toBe(100);
+    expect(plan.drainLimit).toBe(150);
   });
 });

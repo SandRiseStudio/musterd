@@ -133,6 +133,8 @@ export function insertMessage(db, env: Envelope, fromMemberId, toMemberId|null):
 export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolean; limit?:number }): StoredMessage[];
 //   inbox(member) = messages WHERE team=member.team AND (to_member=member OR to_kind IN ('team','broadcast'))
 //                   AND from_member != member  [AND ts > cursor.last_read_ts if unreadOnly]
+//   limit = newest N; when unreadOnly, also pin action-needed unread (request_help/ask/directed
+//   non-message) so MCP's always-on limit cannot hide a waiting handoff behind team broadcasts.
 ```
 
 ## Startup sequence (`createServer().listen()`)

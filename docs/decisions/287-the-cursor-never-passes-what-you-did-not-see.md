@@ -109,6 +109,13 @@ A seat that ignores the notice will re-read the same 50 next time. That is inten
 safe direction, but it does mean the notice has to be readable — hence leading the output rather
 than trailing it.
 
+**2026-08-24.** Newest-N plus "do not advance the cursor" was not enough: MCP always sends `limit`,
+so the page is team broadcasts and a waiting handoff never appears. The CLI banner reads with no
+limit and counts it. `listInbox` now pins action-needed unread into a limited unread page, the
+planner keeps those pins through its own slice, the drain notice names `shown + elided` rather than
+the fetched slice, and an empty page with elided unread does not say nothing is waiting. Directed
+`message` stays newest-N so a mailbox of DMs does not explode the bound.
+
 **What this does not fix, including the thing it was filed for.** gptbot opened the lane after
 losing a directed review reply, and their repro is a message that *was* delivered inside the limit
 and then became hard to find once the cursor passed it. This ADR does not address that: a message
