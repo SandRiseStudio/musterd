@@ -79,13 +79,15 @@ team grants a member: charter + ceiling … not workspace setup; never granted b
 **Toolkit**: "what a workspace is equipped with … no authority — installing one grants nothing.
 Not 'profile'." The two Not columns answer the admin's question directly, in two rows.
 
-**Q2 — "Why does session labeling work on my laptop and not my server?"** PARTIAL. **Driver**
+**Q2 — "Why does session labeling work on my laptop and not my server?"** ~~PARTIAL. **Driver**
 ("how a harness session runs: desktop, terminal, IDE, headless") gives the reader the right
 question — the laptop runs a desktop/terminal driver, the server headless — but the per-harness
 specifics live in the driver support matrix, and that is still the open reserved lane
 01M0K5ZC33 (2026-08-24; falsify: the lane board — a claimed/done state, or a support-matrix page
-in this wiki, disproves this). Until it lands, the glossary tells you *where* the difference
-lives, not *what* it is. Q2 completes when that lane does.
+in this wiki, disproves this).~~ COMPLETED 2026-08-24: the matrix exists —
+[driver support matrix](driver-support-matrix.md) — and its labeling row answers Q2 concretely
+(desktop = cross_rename via the app's MCP tools, terminal = OSC 0 tab title only, headless = none).
+Q2 PASSES from the glossary plus that page.
 
 ## Control exercised 2026-08-24
 

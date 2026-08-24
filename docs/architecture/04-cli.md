@@ -108,7 +108,7 @@ src/
     primer.ts         // renderRepositoryPrimer + idempotent upsertPrimer → Team-only AGENTS.md primer (ADR 307)
     profile.ts        // Profile = harness-agnostic provisioning template ("role template" pre-ADR-272); resolve/apply (ADR 026/029/038)
     profiles/builtins.ts // the shipped built-in profile seed library
-    harnesses/
+    harnesses/        // per-harness feature differences (labeling, hooks, skills discovery) are observed environment facts — documented in docs/wiki/driver-support-matrix.md, not modelled (ADR 296)
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
       cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks for model_id observe (ADR 198); CLI also wires afterShellExecution + afterMCPExecution (ADR 265)
