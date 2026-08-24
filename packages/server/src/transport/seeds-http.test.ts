@@ -52,18 +52,8 @@ beforeEach(async () => {
   });
   agentKey = created.json.agent_key;
   nickCredential = created.json.human_credential;
-  await request(
-    'POST',
-    '/teams/bravo/members',
-    { name: 'Ada', kind: 'agent' },
-    nickCredential,
-  );
-  await request(
-    'POST',
-    '/teams/bravo/members',
-    { name: 'Lin', kind: 'agent' },
-    nickCredential,
-  );
+  await request('POST', '/teams/bravo/members', { name: 'Ada', kind: 'agent' }, nickCredential);
+  await request('POST', '/teams/bravo/members', { name: 'Lin', kind: 'agent' }, nickCredential);
 
   const team = getTeamBySlug(server.db, 'bravo')!;
   server.db
@@ -187,9 +177,10 @@ describe('Seed lifecycle HTTP authorization', () => {
     const team = getTeamBySlug(server.db, 'bravo')!;
     expect(listLanes(server.db, team.id, team.slug)).toHaveLength(1);
     const audit = server.db
-      .prepare<[string], { action: string; detail: string | null }>(
-        "SELECT action, detail FROM audit WHERE team_id = ? AND action LIKE 'seed.%' ORDER BY ts, id",
-      )
+      .prepare<
+        [string],
+        { action: string; detail: string | null }
+      >("SELECT action, detail FROM audit WHERE team_id = ? AND action LIKE 'seed.%' ORDER BY ts, id")
       .all(team.id);
     expect(audit).toHaveLength(3);
     expect(audit.map((row) => row.action)).toEqual(
