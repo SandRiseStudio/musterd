@@ -37,11 +37,11 @@ describe('seat file — guard 2: canonical byte-equality + idempotence', () => {
     // ADR 070: per-seat capability narrowing as a trailing [capabilities] table
     [
       'narrowed',
-      'kind = "agent"\nrole = "reviewer"\n[capabilities]\ncan_flag_urgent = false\ncan_message = "none"\n',
+      'kind = "agent"\nrole = "reviewer"\n\n[capabilities]\ncan_flag_urgent = false\ncan_message = "none"\n',
     ],
     [
       'scoped',
-      'kind = "agent"\nrole = "backend"\naccount_status = "disabled"\n[capabilities]\nvisibility_level = "team"\ntool_allowlist = ["read", "grep"]\ndeclared_resource_scopes = []\n',
+      'kind = "agent"\nrole = "backend"\naccount_status = "disabled"\n\n[capabilities]\nvisibility_level = "team"\ntool_allowlist = ["read", "grep"]\ndeclared_resource_scopes = []\n',
     ],
   ];
 
@@ -83,6 +83,49 @@ describe('seat file — guard 2: canonical byte-equality + idempotence', () => {
     for (const text of canonicalTeams) {
       expect(serializeTeam(parseTeamFile(text))).toBe(text);
     }
+  });
+});
+
+/**
+ * ADR 227's byte-identity note was a no-churn-at-migration promise, not a permanent freeze of the
+ * byte form. Measured 2026-08-24 on the live revive roster: three files (team.toml, roles/admin.toml,
+ * roles/observer.toml) drifted from canonical in exactly one way — a blank line before the table
+ * header. Three independent hand-authors inserted it; zero preferred flush. A check that fails on
+ * every hand-edit teaches people to ignore the check, so canonical form moves to the form humans
+ * write. Falsifier: if a hand-authored roster file ever appears with a flush table header, this
+ * premise is wrong and the rule should be re-argued, not quietly re-flipped.
+ */
+describe('table headers sit under a blank line — the form hand-authors write', () => {
+  it('serializes a seat capabilities table with a blank line before the header', () => {
+    const text = 'kind = "agent"\nrole = "reviewer"\n\n[capabilities]\ncan_message = "none"\n';
+    expect(serializeSeat(parseSeatFile(text, 'olive'))).toBe(text);
+  });
+
+  it('serializes a role capabilities table with a blank line before the header', () => {
+    // The live roles/admin.toml shape, reduced.
+    const text = 'summary = "Governance"\n\n[capabilities]\nis_admin = true\n';
+    expect(serializeRole(parseRoleFile(text))).toBe(text);
+  });
+
+  it('serializes the team working-hours table with a blank line before the header', () => {
+    // The live team.toml shape.
+    const text =
+      'slug = "revive"\n\n[working_hours]\ntimezone = "America/Los_Angeles"\ndays = ["mon", "tue", "wed", "thu", "fri"]\nstart = "11:00"\nend = "15:00"\n';
+    expect(serializeTeam(parseTeamFile(text))).toBe(text);
+  });
+
+  it('a table-only role file gets no leading blank line (nothing to separate from)', () => {
+    const text = '[capabilities]\nis_admin = true\n';
+    expect(serializeRole(parseRoleFile(text))).toBe(text);
+  });
+
+  it('a file already in the hand-authored shape is already canonical (fmt --check is quiet)', () => {
+    const seat = 'kind = "agent"\nrole = "x"\n\n[capabilities]\nis_admin = false\n';
+    const role = 'charter = "lead"\n\n[capabilities]\nis_admin = true\n';
+    expect(serializeSeat(parseSeatFile(seat, 'x'))).toBe(seat);
+    expect(serializeRole(parseRoleFile(role))).toBe(role);
+    // …and idempotent on that shape.
+    expect(serializeRole(parseRoleFile(serializeRole(parseRoleFile(role))))).toBe(role);
   });
 });
 
@@ -187,7 +230,7 @@ describe('seat file — capabilities + account_status (ADR 070)', () => {
   });
 
   it('an explicit empty list override is preserved (narrows to nothing)', () => {
-    const text = 'kind = "agent"\nrole = "x"\n[capabilities]\ntool_allowlist = []\n';
+    const text = 'kind = "agent"\nrole = "x"\n\n[capabilities]\ntool_allowlist = []\n';
     const seat = parseSeatFile(text, 'a');
     expect(seat.capabilities).toEqual({ tool_allowlist: [] });
     expect(serializeSeat(seat)).toBe(text);
@@ -199,7 +242,7 @@ describe('role file — roles/<name>.toml (ADR 070)', () => {
     '', // an empty role (exists by filename only) is the empty string
     'charter = "Review PRs; do not merge."\n',
     '[capabilities]\nis_admin = true\nvisibility_level = "admin"\n',
-    'charter = "Backend."\n[capabilities]\ncan_flag_urgent = false\ntool_allowlist = ["read", "edit"]\n',
+    'charter = "Backend."\n\n[capabilities]\ncan_flag_urgent = false\ntool_allowlist = ["read", "edit"]\n',
   ];
 
   it('round-trips each canonical role file byte-for-byte', () => {
@@ -273,7 +316,7 @@ describe('role file — summary (ADR 227)', () => {
   });
 
   it('a summary-less role file parses and stays byte-identical (back-compat)', () => {
-    const text = 'charter = "lead"\n[capabilities]\nis_admin = true\n';
+    const text = 'charter = "lead"\n\n[capabilities]\nis_admin = true\n';
     const role = parseRoleFile(text);
     expect(role.summary).toBeUndefined();
     expect(serializeRole(role)).toBe(text);

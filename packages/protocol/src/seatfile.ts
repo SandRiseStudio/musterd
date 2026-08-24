@@ -227,9 +227,22 @@ function arrayLine(key: string, values: string[]): string {
   return `${key} = [${values.map(tomlString).join(', ')}]\n`;
 }
 
-function serializeWorkingHours(value: NonNullable<SeatFile['working_hours']>): string {
+/**
+ * A table header, under one blank line when anything precedes it. Canonical form is the form
+ * hand-authors write: measured 2026-08-24, three independent authors put a blank line before the
+ * header on the live roster and none preferred flush, and a `fmt --check` that fails on every
+ * hand-edit teaches people to ignore it. A table that opens the file gets no leading blank.
+ */
+function tableHeader(name: string, precededBy: string): string {
+  return `${precededBy ? '\n' : ''}[${name}]\n`;
+}
+
+function serializeWorkingHours(
+  value: NonNullable<SeatFile['working_hours']>,
+  precededBy: string,
+): string {
   return (
-    '[working_hours]\n' +
+    tableHeader('working_hours', precededBy) +
     `timezone = ${tomlString(value.timezone)}\n` +
     `days = [${value.days.map(tomlString).join(', ')}]\n` +
     `start = ${tomlString(value.start)}\n` +
@@ -264,7 +277,7 @@ export function serializeTeam(team: TeamFile): string {
   let out = line('slug', team.slug);
   if (team.display) out += line('display', team.display);
   if (team.lifecycle && team.lifecycle !== 'forever') out += line('lifecycle', team.lifecycle);
-  if (team.working_hours) out += serializeWorkingHours(team.working_hours);
+  if (team.working_hours) out += serializeWorkingHours(team.working_hours, out);
   return out;
 }
 
@@ -289,12 +302,12 @@ export function serializeSeat(seat: SeatFile): string {
   // Admin-set account status (top-level key — must precede any table). Omitted when unset (the common
   // active/provisioned case is derived, never written).
   if (seat.account_status) out += line('account_status', seat.account_status);
-  if (seat.working_hours) out += serializeWorkingHours(seat.working_hours);
+  if (seat.working_hours) out += serializeWorkingHours(seat.working_hours, out);
   // Per-seat capability narrowing as a trailing `[capabilities]` table (TOML requires tables after
   // top-level keys). Omitted entirely when the override is absent or empty (a known normalization).
   if (seat.capabilities) {
     const body = serializeCapabilities(seat.capabilities);
-    if (body) out += `[capabilities]\n${body}`;
+    if (body) out += tableHeader('capabilities', out) + body;
   }
   return out;
 }
@@ -310,6 +323,6 @@ export function serializeRole(role: RoleFile): string {
   if (role.summary) out += line('summary', role.summary);
   if (role.charter) out += line('charter', role.charter);
   const body = serializeCapabilities(role.capabilities ?? {});
-  if (body) out += `[capabilities]\n${body}`;
+  if (body) out += tableHeader('capabilities', out) + body;
   return out;
 }

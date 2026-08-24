@@ -119,7 +119,14 @@ Determinism comes from fixing every free choice:
   "forever"`** (a forever seat is the common case and stays a 2-line file). Omit `display` when
   empty. This makes "minimal" well-defined without consulting the team default at serialize time.
 - **Style** — `key = value`, single spaces around `=`, double-quoted strings, one trailing newline,
-  LF line endings, no blank lines. One seat per file (ADR 058 §2), so no array-of-tables ambiguity.
+  LF line endings. One seat per file (ADR 058 §2), so no array-of-tables ambiguity.
+- **Blank lines** — exactly one before each table header (`[capabilities]`, `[working_hours]`), and
+  none anywhere else; a table that opens the file gets none. This rule changed on 2026-08-24: the
+  form used to be flush, and every hand-authored file on the live roster disagreed with it (three
+  authors inserted the blank line, none preferred flush). A `fmt --check` that fails on every
+  hand-edit teaches people to ignore the check, so canonical form moved to the form humans write.
+  Falsifier: a hand-authored roster file appearing with a flush table header would put the premise
+  back in question — re-argue it, do not quietly re-flip the serializer.
 
 Because the serializer is total and deterministic, guard 2's byte-equality is well-posed:
 `serialize(parse(committed)) === committed` for any canonical file.
