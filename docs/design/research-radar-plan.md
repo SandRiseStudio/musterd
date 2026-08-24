@@ -1,6 +1,6 @@
 # Research radar — implementation plan
 
-> **Plan.** The implementation plan for the *ingest* half of musterd's research practice (ADR 056): a scheduled agent that sweeps new research, triages it for relevance, and emits an in-repo digest a human curates. Corrections via ADR + update this doc. Status: **M1–M3 landed (scaffold + dry-sweep + two-tier triage); M4–M5 not built. 2026-06-25 / updated 2026-07-23**.
+> **Plan.** The implementation plan for the *ingest* half of musterd's research practice (ADR 056): a scheduled agent that sweeps new research, triages it for relevance, and emits an in-repo digest a human curates. Corrections via ADR + update this doc. Status: **M1–M4 landed (scaffold + dry-sweep + two-tier triage + emit, with the Exploring Next feed as a third source); M5 deferred (§8). 2026-06-25 / updated 2026-08-24**.
 
 ## 1. Goal & scope
 
@@ -16,7 +16,8 @@ Keep musterd shaped by the field without a human manually trawling arXiv. Each w
 | Cadence | **Weekly** | Matches paper-publication pace; daily is mostly empty/noise. |
 | Output | **In-repo file** (`docs/research/radar/<YYYY-WW>.md`) | Versioned, diffable, reviewable; a notify pings when ready. |
 | Graduation | **Digest only** | Radar surfaces + scores; human picks winners; ADRs/evidence drafted on request. No auto-merge into the thesis. |
-| Run location | **Cloud routine** (via the `schedule` skill) | Survives the machine being off; it's a standing job. |
+| Run location | ~~Cloud routine~~ **Deferred** (2026-08-24, nick) | Hand-run weekly until a few digests prove the rail; see §8. |
+| Exploring Next | **Source, not sink** (2026-08-24, nick) | The feed direction inverted: EN's hand-curated pipeline feeds the radar (read-only GET of its public feed). Nothing posts into EN — its ingest auto-generates an episode per URL (no review stage exists), so an outbound feed would be auto-publish, not suggestion. |
 
 ## 3. Architecture — lift, don't reinvent
 
@@ -31,11 +32,11 @@ These are external repos; the radar reimplements the small slices it needs in th
 
 ## 4. Pipeline (one synchronous run)
 
-1. **Sweep** — arXiv (`cs.MA`, `cs.AI`, `cs.HC`) + HF Papers on a fixed query set: multi-agent coordination, human-agent collaboration, agent failure taxonomies, LLM-agent eval/observability, agent topology, human-in-the-loop. Reuse the Exploring Next fetchers' shape.
+1. **Sweep** — arXiv (`cs.MA`, `cs.AI`, `cs.HC`) + HF Papers + the Exploring Next public feed (`exn` — items are already human-curated for interest; rows carry `audio_summary`, triage signal no abstract has; arXiv-linked rows normalize to the arXiv id so cross-source dedup collapses them) on a fixed query set: multi-agent coordination, human-agent collaboration, agent failure taxonomies, LLM-agent eval/observability, agent topology, human-in-the-loop. Reuse the Exploring Next fetchers' shape.
 2. **Dedup** — drop anything already in `docs/research/radar/seen.json` (by arXiv id / HF id). *This is the gap both prior projects left open — it is load-bearing for digest readability.*
 3. **Tier-1 filter (cheap model)** — score the ~50 new candidates for coarse relevance; keep a shortlist (~5–10). Mirrors Exploring Next's cheap-planner pattern.
 4. **Tier-2 honest-score (stronger model)** — on the shortlist only: the weighted relevance score + the **brutal-honesty** gut-check + a verdict. Expensive model runs on few items.
-5. **Emit** — write the weekly digest + append the surfaced ids to `seen.json`; emit a one-line "digest ready" notify.
+5. **Emit** — write the weekly digest + append **every triaged id** to `seen.json` (changed from "surfaced ids" 2026-08-24: marking only surfaced would re-pay tier-1 for the same ignores every week, since the fetch window overlaps the cadence); print a one-line "digest ready" notify. A same-week re-emit refuses rather than overwriting.
 
 Synchronous, single-threaded, no queue. A weekly job has no need for async workers (amprealize proved the sync core works; its queue pivot never shipped).
 
@@ -80,7 +81,7 @@ Model ids live in one config constant; recorded per-run. Avoid amprealize's "Opu
 
 ## 8. Scheduling
 
-A weekly cloud routine via the `schedule` skill (cron, e.g. Monday 08:00 local). The routine runs the radar command/agent, which writes the digest + updates `seen.json` + notifies. The routine is the one outward-facing artifact — its exact schedule/command gets confirmed before creation.
+**Deferred (2026-08-24, nick).** With Exploring Next as a read-side source there is nothing to couple to its crons, and §10 rule 1 says nothing more until the digest has run for weeks. Current cadence: hand-run `pnpm radar:sweep --triage --emit` weekly; revisit a runner (cloud routine vs local) after a few real digests. The original choice (weekly cloud routine, Monday 08:00) stands as the default when M5 is picked back up — its exact schedule/command gets confirmed with nick before creation.
 
 ## 9. Guardrails
 
@@ -104,8 +105,8 @@ amprealize's *core* research_service stayed lean and worked; the platform around
 - **M1 — scaffold:** `docs/research/radar/` + empty `seen.json` + the versioned triage prompt. **Done.**
 - **M2 — ingestion:** arXiv + HF fetchers (port the Exploring Next slices) + dedup against `seen.json`; verify a dry sweep returns sane candidates. **Done** (`pnpm radar:sweep`).
 - **M3 — triage:** tier-1 filter + tier-2 honest-score + verdict ladder; verify on a hand-picked week. **Done** (`pnpm radar:sweep --triage`).
-- **M4 — emit:** digest writer (frontmatter + verdict grouping) + `seen.json` update + notify.
-- **M5 — schedule:** the weekly cloud routine; confirm cadence/command with Nick before creating it.
+- **M4 — emit:** digest writer (frontmatter + verdict grouping) + `seen.json` update + notify. **Done** (`pnpm radar:sweep --triage --emit`; the Exploring Next source landed with it).
+- **M5 — schedule:** deferred — see §8.
 
 Each of M1–M5 is a complete, runnable step (run the radar by hand through M4 before automating in M5).
 
@@ -119,4 +120,4 @@ Each of M1–M5 is a complete, runnable step (run the radar by hand through M4 b
 
 - **ADR 056** — this is the ingest mechanism that doc names; `docs/research/` is the produce-side counterpart.
 - **ADR 051/052** — prompt-versioning + per-run model/eval recording makes the radar a small flywheel data source, dogfooding the gate.
-- **Exploring Next** — beyond ingestion code, it's a ready distribution channel for the produce side: feed a finding/digest to it → a podcast episode about musterd's research. Opportunity, not scope.
+- **Exploring Next** — now a live *source* (§2, §4): the radar reads its public feed. The produce-side idea (feed a musterd finding to it → an episode) remains an opportunity, not scope — and note its ingest has no review stage, so anything posted becomes an episode.

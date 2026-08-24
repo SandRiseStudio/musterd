@@ -7,6 +7,7 @@ export function loadSeen(path = seenPath): SeenLedger {
   return {
     arxiv: Array.isArray(raw.arxiv) ? raw.arxiv.map(String) : [],
     hf: Array.isArray(raw.hf) ? raw.hf.map(String) : [],
+    exn: Array.isArray(raw.exn) ? raw.exn.map(String) : [],
   };
 }
 
@@ -16,6 +17,7 @@ export function partitionBySeen(
 ): { fresh: RadarCandidate[]; alreadySeen: RadarCandidate[] } {
   const arxiv = new Set(seen.arxiv);
   const hf = new Set(seen.hf);
+  const exn = new Set(seen.exn);
   const fresh: RadarCandidate[] = [];
   const alreadySeen: RadarCandidate[] = [];
   const seenPair = new Set<string>();
@@ -23,10 +25,9 @@ export function partitionBySeen(
     const key = `${c.source}:${c.id}`;
     if (seenPair.has(key)) continue;
     seenPair.add(key);
-    const known = c.source === 'arxiv' ? arxiv.has(c.id) : hf.has(c.id);
-    // Cross-source: an HF paper with the same arXiv id already in arxiv ledger counts as seen
-    const cross = arxiv.has(c.id) || hf.has(c.id);
-    if (known || cross) alreadySeen.push(c);
+    // Cross-source: an HF paper with the same arXiv id already in the arxiv ledger counts as
+    // seen (exn ids are uuids, so they can never collide with the paper ledgers).
+    if (arxiv.has(c.id) || hf.has(c.id) || exn.has(c.id)) alreadySeen.push(c);
     else fresh.push(c);
   }
   return { fresh, alreadySeen };
