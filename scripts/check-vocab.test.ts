@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { GLOSSARY } from '../docs/glossary/terms.ts';
-import { checkVocab } from './check-vocab.ts';
+import { checkVocab, DESIGN_BASELINE, USER_FACING_BASELINE } from './check-vocab.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -22,6 +22,15 @@ function repo(files: Record<string, string>): string {
   mkdirSync(join(dir, 'docs/decisions'), { recursive: true });
   mkdirSync(join(dir, 'docs/superpowers/plans'), { recursive: true });
   mkdirSync(join(dir, 'docs/design'), { recursive: true });
+  // The rot check is always-on: every real baseline entry must exist, so the fixture repo
+  // carries the whole grandfather list as empty files (baseline files are never scanned).
+  // brand.md alone needs a real §5 or glossaryDrift fires; a test may overwrite it below.
+  for (const rel of USER_FACING_BASELINE) write(dir, rel, '');
+  for (const name of DESIGN_BASELINE) write(dir, `docs/design/${name}`, '');
+  const glossary = GLOSSARY.filter((g) => g.status === 'canonical')
+    .map((t) => `**${t.term[0]!.toUpperCase()}${t.term.slice(1)}** — .`)
+    .join('\n');
+  write(dir, 'docs/design/brand.md', `## 5. Glossary\n\n${glossary}\n`);
   for (const [rel, body] of Object.entries(files)) write(dir, rel, body);
   return dir;
 }
@@ -104,6 +113,42 @@ describe('ADR 296 terminology table', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.some((e) => e.includes('new-help.ts') && e.includes('profile'))).toBe(true);
     expect(r.errors.some((e) => e.includes('README.md'))).toBe(false);
+  });
+});
+
+describe('baseline rot (lane 01M0K5YCCQ)', () => {
+  it('reconstructs 2026-08-21: a baseline entry naming a deleted file fails the gate', () => {
+    const root = repo({});
+    const r = checkVocab(root, {
+      userFacingBaseline: ['README.md', 'packages/web/src/components/Hero/Hero.tsx'],
+    });
+    expect(r.ok).toBe(false);
+    expect(
+      r.errors.some((e) => e.includes('USER_FACING_BASELINE') && e.includes('Hero/Hero.tsx')),
+    ).toBe(true);
+  });
+
+  it('a dead design-baseline entry fails the same way', () => {
+    const root = repo({});
+    const r = checkVocab(root, { designBaseline: [...DESIGN_BASELINE, 'deleted-doc.md'] });
+    expect(r.ok).toBe(false);
+    expect(
+      r.errors.some((e) => e.includes('DESIGN_BASELINE') && e.includes('deleted-doc.md')),
+    ).toBe(true);
+  });
+
+  it('the real baselines carry no rot against the real repo', () => {
+    // Not a fixture: this runs the shipped lists against the working tree, so a deletion
+    // that strands an exemption fails here even before the CI entrypoint runs.
+    const repoRoot = join(import.meta.dirname, '..');
+    for (const rel of USER_FACING_BASELINE) {
+      expect(existsSync(join(repoRoot, rel)), `USER_FACING_BASELINE: ${rel}`).toBe(true);
+    }
+    for (const name of DESIGN_BASELINE) {
+      expect(existsSync(join(repoRoot, 'docs/design', name)), `DESIGN_BASELINE: ${name}`).toBe(
+        true,
+      );
+    }
   });
 });
 
