@@ -142,7 +142,7 @@ export const CATALOG: readonly CommandEntry[] = [
     summary: 'headless self-wire from a committed .musterd/workspace.json',
     group: 'setup',
     detail:
-      'Headless setup for a fresh clone: reconcile this worktree’s SAVED harness selection from the ' +
+      'Headless setup for a fresh clone: reconcile this workspace’s SAVED harness selection from the ' +
       'committed .musterd/workspace.json + provisioned.json with no prompts and no seat claim (pass ' +
       '`--autojoin` to also claim). Never edits the selection and never converts pre-ADR-281 state — ' +
       'a folder without a valid selection exits 6 and names `musterd harness configure` as the fix.',
@@ -151,12 +151,12 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'harness',
     signature: 'configure [--select <ids> [--yes]] | status [--json]',
-    summary: 'choose which harnesses launch this worktree — and inspect the wiring',
+    summary: 'choose which harnesses launch this workspace — and inspect the wiring',
     group: 'setup',
     detail:
       'The multi-harness front door (ADR 281/282/286). `configure` is the ONE editor of this ' +
-      'worktree’s desired harness set (Claude Code, Cursor, Codex, the native musterd host — any ' +
-      'subset, chosen once per worktree and machine) and the ONE converter of pre-ADR-281 local ' +
+      'workspace’s desired harness set (Claude Code, Cursor, Codex, the native musterd host — any ' +
+      'subset, chosen once per workspace and machine) and the ONE converter of pre-ADR-281 local ' +
       'state; after you confirm the complete set it saves strict v2 identity/manifest state and ' +
       'reconciles the managed fragments crash-safely. `status` is read-only: per harness it reports ' +
       'desired, availability, each managed fragment’s observed state and ownership, pending ' +
@@ -164,7 +164,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'and every deselected contribution is released (a selected-but-uninstalled harness is ' +
       '`pending`, which is healthy). `configure --select <ids> --yes` is the headless form: naming the ' +
       'complete set on the command line is the confirmation, so scripts and service agents can ' +
-      'convert a pre-ADR-281 worktree non-interactively.',
+      'convert a pre-ADR-281 workspace non-interactively.',
     examples: [
       'musterd harness configure',
       'musterd harness configure --select claude-code,musterd --yes',
@@ -241,7 +241,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'build aborts before the bounce). `restart`/`stop`/`refresh` refuse while teammates hold live ' +
       'sessions unless `--force`. Add `--live` to target the /live viewer instead of the daemon ' +
       '(ADR 132): `install --live` stands up a self-updating build-publisher (a dedicated ' +
-      'detached-on-main worktree + an interval agent that rebuilds the web app and publishes it into ' +
+      'detached-on-main workspace + an interval agent that rebuilds the web app and publishes it into ' +
       'the daemon’s web-root whenever main moves), so the daemon serves /live from its own origin — ' +
       'always the latest main, no dev server, no daemon restart; `refresh --live` forces a rebuild now. ' +
       'Add `--wake` to target the wake actuator (ADR 131 inc 5): `install --wake` runs `musterd host` ' +
@@ -325,13 +325,14 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'agent',
     signature:
-      '<name> [--role <label>] [--profile <profile>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]',
-    summary: 'add an agent AND give it its own isolated workspace (worktree)',
+      // The live flag is still `--profile` (rename is ADR 296 tier 3) — the signature must match it. <!-- vocab:ok -->
+      '<name> [--role <label>] [--profile <profile>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]', // <!-- vocab:ok -->
+    summary: 'add an agent AND give it its own isolated workspace',
     group: 'team',
     primary: true,
     detail:
-      'Add an agent and give it its own isolated git-worktree workspace, wired to run (ADR 065). One ' +
-      'command instead of team add + worktree + wire + claim. `--harness` picks which harness to wire ' +
+      'Add an agent and give it its own isolated workspace on its own branch, wired to run (ADR 065). ' +
+      'One command instead of team add + workspace + wire + claim. `--harness` picks which harness to wire ' +
       '(default claude-code; also cursor, codex) — the same adapters `musterd init` uses. Do not run ' +
       '`--here` inside a live seat’s folder.',
     examples: ['musterd agent scout --role researcher', 'musterd agent ryder --harness cursor'],
@@ -343,7 +344,7 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'team',
     primary: true,
     detail:
-      'The mirror of `musterd agent`: agents stand in worktrees, the human stands in the **team ' +
+      'The mirror of `musterd agent`: agents stand in workspaces, the human stands in the **team ' +
       'home** — `~/musterd/<team>` by default, holding their 0600 binding, so `musterd board`, ' +
       '`musterd inbox --watch` and `musterd send` are simply them with no `--as` and nothing pasted. ' +
       'Mints the credential for a new person, reuses one this machine already holds, and offers a ' +
@@ -361,7 +362,8 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'role',
     signature:
-      'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <template>] [--force]',
+      // `--from <template>` is the command's own usage string (role.ts) — the signature must match it. <!-- vocab:ok -->
+      'list | show <name> | assign <seat> <role> [--remove] [--force] | create <name> [--from <template>] [--force]', // <!-- vocab:ok -->
     summary: "the team's role library — responsibility the team grants (ADR 227)",
     group: 'team',
     detail:
@@ -380,7 +382,8 @@ export const CATALOG: readonly CommandEntry[] = [
     detail:
       'A toolkit carries no authority: it is the "installed" layer of the three (installed by a ' +
       'toolkit, allowed by harness permissions, authorized by the team as a capability — they ' +
-      'compose as AND). create scaffolds one into .musterd/toolkits/; the older .musterd/profiles/ ' +
+      // `.musterd/profiles/` is the literal legacy path on disk, not the concept. <!-- vocab:ok -->
+      'compose as AND). create scaffolds one into .musterd/toolkits/; the older .musterd/profiles/ ' + // <!-- vocab:ok -->
       'and .musterd/roles/ homes are still read, never written; ' +
       '`musterd init` provisions it, and a user file overrides a built-in of the same name. ' +
       'Nothing here reads the roster.',
