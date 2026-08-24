@@ -1,6 +1,7 @@
 import { seedInActiveTray, type Seed } from '@musterd/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchSeeds, type LiveConfig } from './client';
+import type { LiveConfig } from './client';
+import { fetchSeeds } from './seedClient';
 
 export function traySeeds(seeds: Seed[], history: boolean): Seed[] {
   return history ? seeds : seeds.filter(seedInActiveTray);

@@ -116,6 +116,7 @@ routes/                         // one file per route (live, board, approvals, a
 content/roadmap.data.ts         // the roadmap SOURCE — ROADMAP.md is generated from it (scripts/gen-roadmap.ts)
 live/
   client.ts                     // observer claim + backfill + WS subscribe (browser port of the CLI watch)
+  seedClient.ts                 // lazy Seed HTTP projection; keeps Seed schemas out of eager `/live`
   useLiveStream.ts              // the React hook: envelopes, roster, liveIds, conn status; drives the chime
   format.ts                     // act tone/label, laneEvent recovery, roster/colour/status projections
   Stream.tsx                    // the act feed + ACT_GLYPH + typewriter

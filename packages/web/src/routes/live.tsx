@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
@@ -10,7 +10,6 @@ import { BoardOverlay, preloadBoard } from '../live/BoardOverlay';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
-import { SeedsTray } from '../live/SeedsTray';
 import type { LiveConfig } from '../live/client';
 import {
   provisionObserver,
@@ -34,6 +33,10 @@ import { officeRoom } from '../live/officeRoom';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { useReport } from '../live/useReport';
 import { roomEntries } from '../live/workingOn';
+
+const LazySeedsTray = lazy(() =>
+  import('../live/SeedsTray').then((module) => ({ default: module.SeedsTray })),
+);
 
 export const Route = createFileRoute('/live')({
   head: () => ({
@@ -521,11 +524,13 @@ function LivePage() {
             />
           )}
           {seedsOpen && (
-            <SeedsTray
-              cfg={cfg!}
-              activityKey={envelopes[envelopes.length - 1]?.id}
-              onClose={() => setSeedsOpen(false)}
-            />
+            <Suspense fallback={null}>
+              <LazySeedsTray
+                cfg={cfg!}
+                activityKey={envelopes[envelopes.length - 1]?.id}
+                onClose={() => setSeedsOpen(false)}
+              />
+            </Suspense>
           )}
         </>
       )}

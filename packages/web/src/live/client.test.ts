@@ -7,10 +7,10 @@ import {
   createLane,
   fetchReport,
   fetchRoster,
-  fetchSeeds,
   isStaleCredential,
   updateLane,
 } from './client';
+import { fetchSeeds } from './seedClient';
 
 describe('fetchSeeds', () => {
   const cfg = { team: 'revive', as: 'watcher', token: 'mscr_watch' };
