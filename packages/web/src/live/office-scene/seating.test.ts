@@ -81,7 +81,7 @@ describe('assignSeats', () => {
   });
 
   it('sends idle members to the leisure furniture, not to a desk', () => {
-    const roster = [member('busy'), member('slacking', { activity: 'idle' })];
+    const roster = [member('busy'), member('slacking', { activity: 'active' })];
     const seats = assignSeats(roster);
     expect(seats.get('busy')?.kind).toBe('desk');
     expect(seats.get('slacking')?.kind).toBe('leisure');
@@ -89,7 +89,7 @@ describe('assignSeats', () => {
 
   it('gives every idle member a distinct leisure spot (no two on one cushion)', () => {
     const roster = Array.from({ length: LEISURE_SPOTS.length }, (_, i) =>
-      member(`m${i}`, { activity: 'idle' }),
+      member(`m${i}`, { activity: 'active' }),
     );
     const seats = assignSeats(roster);
     const spots = new Set<number>();
@@ -103,7 +103,7 @@ describe('assignSeats', () => {
 
   it('spills idle members onto desks only once the leisure furniture is full', () => {
     const n = LEISURE_SPOTS.length + 3;
-    const roster = Array.from({ length: n }, (_, i) => member(`m${i}`, { activity: 'idle' }));
+    const roster = Array.from({ length: n }, (_, i) => member(`m${i}`, { activity: 'active' }));
     const seats = assignSeats(roster);
     const kinds = roster.map((m) => seats.get(m.name)?.kind);
     expect(kinds.filter((k) => k === 'leisure')).toHaveLength(LEISURE_SPOTS.length);
@@ -113,7 +113,7 @@ describe('assignSeats', () => {
   it('never spills an idle member onto a desk a working member needs', () => {
     // Leisure full + every desk contested: working members win the desks, the rest queue.
     const idle = Array.from({ length: LEISURE_SPOTS.length + 6 }, (_, i) =>
-      member(`i${i}`, { activity: 'idle' }),
+      member(`i${i}`, { activity: 'active' }),
     );
     const working = Array.from({ length: DESK_SLOTS.length }, (_, i) => member(`w${i}`));
     const seats = assignSeats([...idle, ...working]);

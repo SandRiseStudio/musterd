@@ -781,7 +781,7 @@ describe('HTTP API', () => {
     await get('/teams/dawn/inbox', adaTok);
     const after = await get('/teams/dawn/members', nickTok);
     const adaRow = after.json.members.find((m: any) => m.name === 'Ada');
-    expect(adaRow?.activity).toBe('idle'); // present, but no status_update → not "working"
+    expect(adaRow?.activity).toBe('active'); // present, but no status_update → not "working"
     expect(adaRow?.presence).toBe('online');
     // the ambient row is connectionless and carries the surface header
     expect(adaRow?.presences?.[0]?.surface).toBe('cli');
@@ -1494,9 +1494,9 @@ describe('WebSocket', () => {
     expect(by('Ada').activity).toBe('working');
     expect(by('Ada').state).toBe('refactoring auth');
     expect(by('Ada').posture).toBe('working');
-    expect(by('nick').activity).toBe('idle');
+    expect(by('nick').activity).toBe('active');
     expect(by('nick').state).toBeNull();
-    expect(by('nick').posture).toBe('idle');
+    expect(by('nick').posture).toBe('active');
     expect(by('Lin').activity).toBe('offline');
     expect(by('Lin').posture).toBe('offline');
     expect(by('Lin').offline_reason).toBe('unknown');
@@ -1553,13 +1553,13 @@ describe('WebSocket', () => {
     expect(nickRow.presence).toBe('online');
     expect(nickRow.presences[0].surface).toBe('web');
     // Tab open, nothing reported → idle, not working (the ladder's online-but-no-task read).
-    expect(nickRow.activity).toBe('idle');
-    expect(nickRow.posture).toBe('idle');
+    expect(nickRow.activity).toBe('active');
+    expect(nickRow.posture).toBe('active');
 
     tab.close();
   });
 
-  it('a live human decays working → idle past the presence timeout; an agent does not (ADR 155 Inc 3)', async () => {
+  it("working decays to active past each kind's window — presence timeout for humans, agentIdleMs for agents (ADR 155 Inc 3, presence-honesty §2.1)", async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
@@ -1608,15 +1608,25 @@ describe('WebSocket', () => {
       .run(Date.now() - 60_000);
 
     roster = await get('/teams/dawn/members', nickTok);
-    // The human decays to idle — still online, last_status_at kept, no stale working label.
+    // The human decays to active — still online, and the claim is kept with its age
+    // (presence-honesty §2.1): state + last_status_at survive for the `last: …` render.
     expect(by(roster, 'nick').presence).toBe('online');
-    expect(by(roster, 'nick').activity).toBe('idle');
-    expect(by(roster, 'nick').state).toBeNull();
+    expect(by(roster, 'nick').activity).toBe('active');
+    expect(by(roster, 'nick').state).toBe('shipping inc 3');
     expect(by(roster, 'nick').last_status_at).not.toBeNull();
-    expect(by(roster, 'nick').posture).toBe('idle');
-    // The agent keeps the ADR 010 never-silently-revert read.
+    expect(by(roster, 'nick').posture).toBe('active');
+    // The agent's window is minutes, not seconds — 60s stale is still fresh evidence.
     expect(by(roster, 'Ada').activity).toBe('working');
     expect(by(roster, 'Ada').state).toBe('shipping inc 3');
+
+    // Past the agent window (15 min default) the agent decays too, claim kept.
+    server.db
+      .prepare("UPDATE messages SET ts = ? WHERE act = 'status_update'")
+      .run(Date.now() - 16 * 60_000);
+    roster = await get('/teams/dawn/members', nickTok);
+    expect(by(roster, 'Ada').activity).toBe('active');
+    expect(by(roster, 'Ada').state).toBe('shipping inc 3');
+    expect(by(roster, 'Ada').last_status_at).not.toBeNull();
 
     tab.close();
     a.close();

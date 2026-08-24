@@ -60,7 +60,7 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
     service: false,
     presence: 'online',
     activity,
-    posture: activity === 'working' ? 'working' : 'idle',
+    posture: activity === 'working' ? 'working' : 'active',
     state: null,
     color: memberColor(name, 'agent'),
     role: '',
@@ -193,7 +193,7 @@ describe('working monitor desktop', () => {
   });
 
   it('keeps Stanley’s idle monitor dim', () => {
-    expect(paintsFor('idle')).not.toContain('#2f9a8a');
+    expect(paintsFor('active')).not.toContain('#2f9a8a');
   });
 });
 
@@ -572,8 +572,8 @@ describe('renderScene draws the whole office without throwing', () => {
     const paints: string[] = [];
     const nodes: OfficeNode[] = [
       node('desker', 'working'),
-      node('lounger', 'idle'),
-      node('reader', 'idle'),
+      node('lounger', 'active'),
+      node('reader', 'active'),
     ];
     const byName = new Map(nodes.map((n) => [n.name, n]));
     const placements = assignSeats(nodes);

@@ -7,6 +7,7 @@ import {
   hostnameOf,
   isLocalPeer,
   isLoopbackHost,
+  AGENT_IDLE_MS,
   PRESENCE_TIMEOUT_MS,
   RECLAIM_GRACE_MS,
   resolveConfig,
@@ -21,6 +22,7 @@ const TOUCHED = [
   'MUSTERD_INSECURE_TRUST_PROXY',
   'MUSTERD_HEARTBEAT_INTERVAL_MS',
   'MUSTERD_PRESENCE_TIMEOUT_MS',
+  'MUSTERD_AGENT_IDLE_MS',
   'MUSTERD_REAPER_INTERVAL_MS',
   'MUSTERD_RECLAIM_GRACE_MS',
   'MUSTERD_ALLOWED_HOSTS',
@@ -182,6 +184,12 @@ describe('resolveConfig', () => {
     const c = resolveConfig();
     expect(c.presenceTimeoutMs).toBe(120_000);
     expect(c.reclaimGraceMs).toBe(90_000);
+  });
+  it('agent decay window: 15 min default, MUSTERD_AGENT_IDLE_MS override (presence-honesty §2.1)', () => {
+    expect(resolveConfig().agentIdleMs).toBe(AGENT_IDLE_MS);
+    expect(AGENT_IDLE_MS).toBe(900_000);
+    process.env['MUSTERD_AGENT_IDLE_MS'] = '1200000';
+    expect(resolveConfig().agentIdleMs).toBe(1_200_000);
   });
   it('rejects a non-positive / non-numeric timeout', () => {
     process.env['MUSTERD_PRESENCE_TIMEOUT_MS'] = '-5';

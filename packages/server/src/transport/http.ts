@@ -1161,14 +1161,14 @@ function summarize(
     const steering = s.member.kind === 'human' && liveDrivers.has(s.member.name);
     const live = s.status !== 'offline' || steering;
     const presenceStatus = steering && s.status === 'offline' ? 'online' : s.status;
-    // Humans get the ADR 155 Inc 3 idle window (reusing the presence timeout — decision 2): a human
-    // kept live by an authenticated /live tab decays working → idle once their last status_update
-    // ages past it. Agents keep the ADR 010 never-silently-revert read (window omitted).
+    // The ADR 155 Inc 3 decay window now applies to everyone (presence-honesty §2.1): humans keep
+    // the presence timeout; agents get their own generous window — `working` requires fresh
+    // evidence, and past it the read decays to `active` with the claim kept, aged.
     const activity = resolveActivity(
       live,
       latestStatusUpdate(ctx.db, s.member.id),
       steering,
-      s.member.kind === 'human' ? ctx.config.presenceTimeoutMs : undefined,
+      s.member.kind === 'human' ? ctx.config.presenceTimeoutMs : ctx.config.agentIdleMs,
     );
     const member = toMember(s.member, teamSlug);
     const effectiveWorkingHours = member.working_hours ?? teamWorkingHours;

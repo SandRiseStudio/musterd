@@ -1,6 +1,6 @@
 # 138 — Roster posture chip from source (`working` · `idle` · `away` · `offline`)
 
-- Status: accepted
+- Status: accepted; amended 2026-08-24 by ADR 316 — the `idle` posture token is now `active` (legacy `idle` accepted on read)
 - Date: 2026-07-13
 - Supersedes: ADR 137 (client display rename of account_status `active` → `enabled`)
 - Related: ADR 044 (availability outranks activity), ADR 073 (governance roster rail), ADR 010 (activity two-clocks)

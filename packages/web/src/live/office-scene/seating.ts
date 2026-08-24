@@ -79,9 +79,9 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
   const away = present.filter((m) => isAway(m));
   const rest = present.filter((m) => !isAway(m));
 
-  // Idle first — they have first call on the leisure furniture, and the desks they'd otherwise hold.
+  // Active (between claims) first — they have first call on the leisure furniture, and the desks they'd otherwise hold.
   const spilled: Seatable[] = [];
-  for (const m of rest.filter((m) => m.posture === 'idle')) {
+  for (const m of rest.filter((m) => m.posture === 'active')) {
     const spot = probe(m.name, spots);
     if (spot >= 0) out.set(m.name, { kind: 'leisure', spot });
     else spilled.push(m); // lounge full — they wait it out at a desk, below
@@ -93,7 +93,7 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
     if (slot >= 0) out.set(m.name, { kind: 'desk', slot });
     else out.set(m.name, { kind: 'strip', index: overflow++ });
   };
-  for (const m of rest) if (m.posture !== 'idle') toDesk(m);
+  for (const m of rest) if (m.posture !== 'active') toDesk(m);
   for (const m of spilled) toDesk(m);
 
   for (const m of away) out.set(m.name, { kind: 'nook' });

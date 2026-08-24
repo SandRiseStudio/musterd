@@ -17,6 +17,8 @@ export interface ResolvedConfig {
   dbPath: string;
   heartbeatIntervalMs: number;
   presenceTimeoutMs: number;
+  /** Agent working→active decay window (presence-honesty §2.1) — generous by design. */
+  agentIdleMs: number;
   reaperIntervalMs: number;
   /** Footprint sampler tick interval (seat-footprint design). */
   footprintIntervalMs: number;
@@ -53,6 +55,12 @@ export interface ResolvedConfig {
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 export const PRESENCE_TIMEOUT_MS = 45_000;
+/**
+ * Agent working→active decay (presence-honesty §2.1): `working` requires a status_update fresher
+ * than this. 15 min is deliberately generous — hooks nudge status at task boundaries, and an
+ * accepted consequence is a heads-down agent reading `active` with its stale claim shown aged.
+ */
+export const AGENT_IDLE_MS = 900_000;
 export const REAPER_INTERVAL_MS = 15_000;
 /** Single-active grace: a dropped holder may reclaim its member for this long before it frees (ADR 010). */
 export const RECLAIM_GRACE_MS = 45_000;
@@ -209,6 +217,7 @@ export function resolveConfig(opts?: ConfigOptions): ResolvedConfig {
     dbPath: opts?.dbPath ?? defaultDbPath(),
     heartbeatIntervalMs: envMs('MUSTERD_HEARTBEAT_INTERVAL_MS', HEARTBEAT_INTERVAL_MS),
     presenceTimeoutMs: envMs('MUSTERD_PRESENCE_TIMEOUT_MS', PRESENCE_TIMEOUT_MS),
+    agentIdleMs: envMs('MUSTERD_AGENT_IDLE_MS', AGENT_IDLE_MS),
     reaperIntervalMs: envMs('MUSTERD_REAPER_INTERVAL_MS', REAPER_INTERVAL_MS),
     footprintIntervalMs: envMs('MUSTERD_FOOTPRINT_INTERVAL_MS', FOOTPRINT_INTERVAL_MS),
     footprintRetentionMs: envMs('MUSTERD_FOOTPRINT_RETENTION_MS', FOOTPRINT_RETENTION_MS),
