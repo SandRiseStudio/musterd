@@ -2151,6 +2151,11 @@ describe('WebSocket', () => {
     const roster = await get('/teams/dawn/members', nickTok);
     expect(roster.json.members.some((m: any) => m.name === 'Ada')).toBe(true);
 
+    // The deliberate exit is stamped as seat_released, not crash clothing (presence-honesty §2.3).
+    expect(roster.json.members.find((m: any) => m.name === 'Ada').offline_reason).toBe(
+      'seat_released',
+    );
+
     // Unbind requires a valid token (self-only); an anonymous call is unauthorized.
     const anon = await post('/teams/dawn/unbind', {}, undefined);
     expect(anon.status).toBe(401);

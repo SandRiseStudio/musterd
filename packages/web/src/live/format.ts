@@ -480,8 +480,14 @@ export function offlineReasonMeta(reason: OfflineReason): StatusMeta {
       return { label: 'reconnecting', tone: 'pending', quiet: false };
     case 'disconnected':
       return { label: 'disconnected', tone: 'muted', quiet: true };
-    case 'signed_off':
-      return { label: 'signed off', tone: 'muted', quiet: true };
+    case 'left_team':
+      return { label: 'left team', tone: 'muted', quiet: true };
+    case 'seat_released':
+      return { label: 'seat released', tone: 'muted', quiet: true };
+    case 'session_ended':
+      return { label: 'session ended', tone: 'muted', quiet: true };
+    case 'signed_off': // legacy from an old daemon — renders as the release it was
+      return { label: 'seat released', tone: 'muted', quiet: true };
     case 'off_hours':
       return { label: 'off hours', tone: 'pending', quiet: false };
     case 'unknown':

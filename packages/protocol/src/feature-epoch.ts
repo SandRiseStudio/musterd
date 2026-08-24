@@ -60,5 +60,9 @@
 // Epoch 11 — value layer (ADR 258): team_goal_outcome + Goal.outcome, lane_claim {goal_id},
 // stale_acceptance warning, review_debt in the brief, notices on lane mutations. An epoch-10 seat
 // reads goals/briefs as before (all fields additive) but cannot record an outcome or claim-link.
-export const FEATURE_EPOCH = 11 as const;
+// Epoch 12 — ADR 315: offline-reason deliberate-exit split (presence-honesty §2.3). `offline_reason`
+// gains `left_team` / `seat_released` / `session_ended`; `signed_off` is legacy — accepted on read,
+// resolved as `seat_released`, never newly stamped. An older web bundle drops the row it cannot
+// parse (per-row tolerance, ADR 232's lesson) and the roster's `behind` hint is the cue.
+export const FEATURE_EPOCH = 12 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

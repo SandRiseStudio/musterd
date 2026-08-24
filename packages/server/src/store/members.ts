@@ -598,7 +598,7 @@ export function leaveMember(db: Database, memberId: string): void {
   const member = getMemberById(db, memberId);
   const now = Date.now();
   db.prepare(
-    "UPDATE members SET left_at = ?, last_offline_reason = 'signed_off', updated_at = ? WHERE id = ?",
+    "UPDATE members SET left_at = ?, last_offline_reason = 'left_team', updated_at = ? WHERE id = ?",
   ).run(now, now, memberId);
   // ADR 196: soft-remove must free in-flight WIP — otherwise the board asserts ownership for a
   // name every roster filter already drops. awaiting_acceptance keeps the owner (verified-ness).
@@ -607,10 +607,17 @@ export function leaveMember(db: Database, memberId: string): void {
   }
 }
 
-/** Sticky offline reason for an intentional seat release (unbind) — ADR 141. */
-export function markSignedOff(db: Database, memberId: string): void {
+/** Sticky offline reason for an intentional seat release (unbind) — ADR 141, presence-honesty §2.3. */
+export function markSeatReleased(db: Database, memberId: string): void {
   db.prepare(
-    "UPDATE members SET last_offline_reason = 'signed_off', updated_at = ? WHERE id = ?",
+    "UPDATE members SET last_offline_reason = 'seat_released', updated_at = ? WHERE id = ?",
+  ).run(Date.now(), memberId);
+}
+
+/** Sticky offline reason for a clean session exit (graceful release) — presence-honesty §2.3. */
+export function markSessionEnded(db: Database, memberId: string): void {
+  db.prepare(
+    "UPDATE members SET last_offline_reason = 'session_ended', updated_at = ? WHERE id = ?",
   ).run(Date.now(), memberId);
 }
 

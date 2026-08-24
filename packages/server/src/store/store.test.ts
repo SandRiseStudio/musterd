@@ -13,6 +13,8 @@ import {
   getMemberByName,
   hashToken,
   leaveMember,
+  markSeatReleased,
+  markSessionEnded,
   listMembers,
   mintCredential,
   reapExcessIdleObservers,
@@ -615,7 +617,7 @@ describe('presence', () => {
     );
   });
 
-  it('sticky offline reason: release stamps disconnected; re-attach clears; leave stamps signed_off (ADR 141)', () => {
+  it('sticky offline reason: release stamps disconnected; re-attach clears; leave stamps left_team (ADR 141 + presence-honesty split)', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBeNull();
@@ -628,7 +630,29 @@ describe('presence', () => {
     expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBeNull();
 
     leaveMember(db, ada.row.id);
-    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBe('signed_off');
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBe('left_team');
+  });
+
+  it('deliberate-exit stamps: unbind stamps seat_released; clean session end stamps session_ended', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+
+    markSeatReleased(db, ada.row.id);
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBe('seat_released');
+
+    markSessionEnded(db, ada.row.id);
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBe('session_ended');
+  });
+
+  it('a said goodbye survives the socket close: release does not overwrite a deliberate-exit stamp', () => {
+    // The SessionEnd hook stamps session_ended, then the WS drops moments later. If release()
+    // stamped unconditionally, every clean exit would still end up wearing crash clothing.
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const p = attach(db, ada.row.id, 'claude-code', 'c1');
+    markSessionEnded(db, ada.row.id);
+    release(db, p.id, 45_000);
+    expect(getMemberById(db, ada.row.id)?.last_offline_reason).toBe('session_ended');
   });
 
   it('listReclaimableMemberIds: a held-within-grace seat is reclaimable though it reads offline (ADR 105)', () => {
