@@ -28,4 +28,13 @@ any of these by rebuilding `packages/web` and repeating the step described.
 
 ## More pane traps
 
+- **`resize_window` reports success and the viewport does not move.** It returns
+  "Successfully resized window ... to 375x812" and `innerWidth` stays exactly where it was —
+  measured 1155 across two consecutive resize attempts on 2026-08-24, while `outerWidth` read 679,
+  so the two disagree with each other as well. Anything width-dependent measured in the pane after a
+  resize is therefore measured at the WRONG width, with a success message on the record saying
+  otherwise. Use chrome-devtools `emulate {viewport: "375x812x3,mobile,touch"}`, which does set it
+  (`innerWidth` 375 immediately after); `resize_page` alone also fell short, landing at 500.
+  Falsify: resize the pane and read `innerWidth` — if the claim is wrong it equals the width asked
+  for.
 - `computer {action:'zoom'}` is not supported in the pane — to inspect a region of a tall canvas, `drawImage` the crop into a `position:fixed` overlay canvas on a rAF loop.
