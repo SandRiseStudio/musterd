@@ -73,6 +73,19 @@ beforeEach(async () => {
     { name: 'Ada', kind: 'agent', role: 'backend' },
     tokens['nick'],
   );
+  // Occupancy, not the Workspace primer, is the authority for Ada's Team Role charter (ADR 307).
+  // Seed the role projection directly: this fixture injects its database and intentionally has no
+  // roster root for the normal file reconciler to project.
+  const teamId = server.db
+    .prepare<[], { id: string }>("SELECT id FROM teams WHERE slug = 'dawn'")
+    .get()!.id;
+  const now = Date.now();
+  server.db
+    .prepare(
+      `INSERT INTO roles (team_id, name, capabilities, charter, summary, created_at, updated_at)
+       VALUES (?, 'backend', '{}', 'Own the rails.', NULL, ?, ?)`,
+    )
+    .run(teamId, now, now);
   // Issue a standing grant for Ada's seat so the claim occupies immediately (no admin-approval lane).
   const grant = await api(
     'POST',
@@ -131,6 +144,7 @@ describe('MCP adapter', () => {
 
     await client.join();
     expect(client.joined).toBe(true);
+    expect(client.charter).toBe('Own the rails.');
     const ada = await rosterMember('Ada');
     expect(ada.presence).toBe('online');
     expect(ada.presences.some((p: any) => p.surface === 'claude-code')).toBe(true);

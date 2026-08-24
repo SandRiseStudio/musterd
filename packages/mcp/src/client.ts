@@ -147,6 +147,8 @@ export class MusterdClient {
   /** The seat's memory envelope delivered on the occupied frame (ADR 093) — headline + age + size,
    * never the body. Rendered by team_join as the one-line pointer; null when nothing is saved. */
   private memoryEnvelope: MemoryEnvelope | null = null;
+  /** The Team Role charter delivered by authenticated occupancy; never sourced from Workspace files. */
+  private charterText: string | null = null;
   /** Why the last join attempt failed — surfaced by the dormant tool guards so a silent autojoin
    * failure (e.g. wrong-db token rejection) is visible to the agent, not just "call team_join". */
   private lastJoinErrorMsg: string | null = null;
@@ -208,6 +210,11 @@ export class MusterdClient {
   /** The memory envelope the last occupy delivered (ADR 093), or null when the seat has no note. */
   get memory(): MemoryEnvelope | null {
     return this.memoryEnvelope;
+  }
+
+  /** The Team Role charter the last authenticated occupancy delivered, if the Member has one. */
+  get charter(): string | null {
+    return this.charterText;
   }
 
   /**
@@ -682,6 +689,7 @@ export class MusterdClient {
     this.wantPresence = false;
     this.joinedFlag = false;
     this.memoryEnvelope = null; // occupy-scoped: stale once the seat is released
+    this.charterText = null;
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.ws?.close();
@@ -747,6 +755,7 @@ export class MusterdClient {
         this.pendingRequestId = null;
         this.waitOnPending = false;
         this.config.member = frame.seat.name;
+        this.charterText = frame.charter?.trim() || null;
         // The continuity envelope (ADR 093): headline + age, never the body — team_join renders it
         // as the one-line pointer; the body is fetched only by an explicit team_memory_read.
         this.memoryEnvelope = frame.memory ?? null;
@@ -930,6 +939,8 @@ export class MusterdClient {
     this.closed = true;
     this.wantPresence = false;
     this.joinedFlag = false;
+    this.memoryEnvelope = null;
+    this.charterText = null;
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.ws?.close();
   }

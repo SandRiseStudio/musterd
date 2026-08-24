@@ -17,6 +17,11 @@ const DESCRIPTION =
  *  later approval still occupies in the background — a follow-up team_join then reports already-joined. */
 const JOIN_WAIT_MS = 120_000;
 
+function charterBlock(client: MusterdClient): string {
+  const charter = client.charter?.trim();
+  return charter ? `\n\nYour Team Role charter:\n${charter}` : '';
+}
+
 /**
  * Resolve what to claim: explicit `as`/`role` win; else an already-bound identity (back-compat — an
  * `init`-minted seat re-occupies itself); else the folder policy; else ask the session to name itself.
@@ -49,8 +54,9 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
         // Still show the continuity pointer (ADR 093): the occupy that delivered it may have happened
         // silently in the background (an admin approval after a team_join timeout, ADR 087), making
         // this confirm call the first place the agent can see it.
-        const memory = client.memory ? ` ${memoryLine(client.memory)}` : '';
-        return textResult(`Already joined ${config.team} as ${config.member}.${memory}`);
+        const charter = charterBlock(client);
+        const memory = client.memory ? `\n\n${memoryLine(client.memory)}` : '';
+        return textResult(`Already joined ${config.team} as ${config.member}.${charter}${memory}`);
       }
 
       const target = resolveTarget(args, config.claim, config.member);
@@ -67,12 +73,13 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
       try {
         const result = await claimAndJoin(client, config, target, JOIN_WAIT_MS);
         const role = 'role' in target ? ` (role ${target.role})` : '';
+        const charter = charterBlock(client);
         // The continuity one-liner (ADR 093 §3): at most one line — headline + age, never the body.
         const memory = client.memory ? `\n\n${memoryLine(client.memory)}` : '';
         return textResult(
           `Joined ${config.team} as ${result.member}${role} (${config.surface}). ` +
             `You are now the live occupant of this seat — that's who you are on this team. ` +
-            `Your charter + the team working-loop are in AGENTS.md in this folder.${memory}\n\n` +
+            `The server authenticated this occupancy.${charter}${memory}\n\n` +
             `IMPORTANT — stay in sync: call team_inbox_check now, then again whenever you finish a ` +
             `task or a reply. Report progress with team_send {act:'status_update'}; hand work off ` +
             `with {act:'handoff'}.`,

@@ -182,7 +182,7 @@ import {
   annotateClose,
   closeVerdicts,
 } from '../store/review.js';
-import { listRoles } from '../store/roles.js';
+import { getRoleCharter, listRoles } from '../store/roles.js';
 import type { MemberRow, TeamRow } from '../store/rows.js';
 import {
   hasFullMessageVisibility,
@@ -1708,6 +1708,7 @@ export async function handleHttp(
             presence_id: presence.id,
             server_time: Date.now(),
             ...(resumeToken ? { grant: resumeToken } : {}),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
 
@@ -2466,6 +2467,7 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -2502,6 +2504,7 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -2545,6 +2548,7 @@ export async function handleHttp(
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
