@@ -91,6 +91,28 @@ export const SeedSchema = z.object({
 });
 export type Seed = z.infer<typeof SeedSchema>;
 
+/** ADR 314: one shared rule for the default Seed tray on every Surface. */
+export const COMPLETED_SEED_TRAY_MS = 3 * 24 * 60 * 60 * 1_000;
+
+export function seedInActiveTray(
+  seed: Pick<Seed, 'state' | 'completed_at'>,
+  now = Date.now(),
+): boolean {
+  if (
+    seed.state === 'open' ||
+    seed.state === 'exploring' ||
+    seed.state === 'needs_clarification' ||
+    seed.state === 'clarified'
+  ) {
+    return true;
+  }
+  return (
+    seed.state === 'completed' &&
+    seed.completed_at !== null &&
+    seed.completed_at >= now - COMPLETED_SEED_TRAY_MS
+  );
+}
+
 export const ClaimSeedSchema = z.object({});
 export type ClaimSeed = z.infer<typeof ClaimSeedSchema>;
 

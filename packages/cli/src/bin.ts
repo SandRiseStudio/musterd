@@ -36,6 +36,7 @@ import { resetCommand } from './commands/reset.js';
 import { residencyCommand } from './commands/residency.js';
 import { roleCommand } from './commands/role.js';
 import { sendCommand } from './commands/send.js';
+import { seedCommand } from './commands/seed.js';
 import { serveCommand } from './commands/serve.js';
 import { serviceCommand } from './commands/service.js';
 import { sessionCommand } from './commands/session.js';
@@ -218,6 +219,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return sendCommand(rest);
     case 'lane':
       return laneCommand(rest);
+    case 'seed':
+      return seedCommand(rest);
     case 'lanes':
       return lanesCommand(rest);
     case 'next':

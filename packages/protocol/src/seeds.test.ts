@@ -8,9 +8,23 @@ import {
   SeedSchema,
   SeedStateSchema,
   SubmitSeedBriefSchema,
+  seedInActiveTray,
 } from './seeds.js';
 
 describe('shared Seeds (ADR 291)', () => {
+  it('keeps active work and only recently completed Seeds in the default tray', () => {
+    const now = Date.UTC(2026, 7, 24);
+    const seed = (state: 'open' | 'completed' | 'promoted', completedAt: number | null) =>
+      ({ state, completed_at: completedAt }) as Parameters<typeof seedInActiveTray>[0];
+
+    expect(seedInActiveTray(seed('open', null), now)).toBe(true);
+    expect(seedInActiveTray(seed('completed', now - 3 * 24 * 60 * 60 * 1_000), now)).toBe(true);
+    expect(seedInActiveTray(seed('completed', now - 3 * 24 * 60 * 60 * 1_000 - 1), now)).toBe(
+      false,
+    );
+    expect(seedInActiveTray(seed('promoted', now), now)).toBe(false);
+  });
+
   it('accepts only the declared lifecycle states', () => {
     expect(SeedStateSchema.parse('open')).toBe('open');
     expect(SeedStateSchema.safeParse('lane')).toMatchObject({ success: false });

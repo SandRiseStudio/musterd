@@ -8,6 +8,8 @@ import {
   GrantMintSchema,
   LaneBoardSchema,
   LaneResultSchema,
+  SeedListSchema,
+  SeedResultSchema,
   NextBriefSchema,
   PROTOCOL_VERSION,
   ReportSchema,
@@ -55,6 +57,9 @@ import {
   type IssueGrant,
   type LaneBoard,
   type LaneResult,
+  type Seed,
+  type SubmitSeedBrief,
+  type PromoteSeed,
   type Member,
   type MemberKind,
   type MemberSummary,
@@ -507,6 +512,63 @@ export class HttpClient {
     const parsed = LaneBoardSchema.safeParse(json);
     if (!parsed.success) throw new CliError('lanes response did not match the protocol schema', 1);
     return parsed.data;
+  }
+
+  // ── Shared Seeds (ADR 314). Every wire response is parsed at this boundary.
+  async seeds(slug: string): Promise<Seed[]> {
+    const parsed = SeedListSchema.safeParse(await this.request('GET', `/teams/${slug}/seeds`));
+    if (!parsed.success) throw new CliError('Seeds response did not match the protocol schema', 1);
+    return parsed.data.seeds;
+  }
+
+  async seed(slug: string, id: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('GET', `/teams/${slug}/seeds/${encodeURIComponent(id)}`),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async claimSeed(slug: string, id: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/claim`, {}),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async askSeed(slug: string, id: string, body: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/clarification`, {
+        body,
+      }),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async answerSeed(slug: string, id: string, body: string): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/answer`, { body }),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async submitSeed(slug: string, id: string, body: SubmitSeedBrief): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/brief`, body),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  async promoteSeed(slug: string, id: string, body: PromoteSeed): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/promote`, body),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
   }
 
   /** The orientation brief (ADR 049/084) — `GET /teams/:slug/next`, one server-side projection. */
