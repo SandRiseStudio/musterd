@@ -133,23 +133,25 @@ describe('guardianTick', () => {
    * only when the NEXT tick still cannot reach it. A stall that recovers leaves a measured span in
    * the log instead of a page.
    */
-  const unreachableCleanExit = (over: Record<string, unknown> = {}) => async () => ({
-    now: NOW,
-    health: null,
-    healthProbe: {
-      attempts: 3,
-      lastError: 'The operation was aborted due to timeout',
-      confirmMs: 10_000,
-      confirmError: 'The operation was aborted due to timeout',
-    },
-    launchd: { lastExit: 0, runs: 15 },
-    publisherLog: { freshFailure: false },
-    errLinesSinceBoot: 0,
-    httpErrorRateSinceBoot: 0,
-    reaperStormSinceBoot: false,
-    lastRefreshAt: null,
-    ...over,
-  });
+  const unreachableCleanExit =
+    (over: Record<string, unknown> = {}) =>
+    async () => ({
+      now: NOW,
+      health: null,
+      healthProbe: {
+        attempts: 3,
+        lastError: 'The operation was aborted due to timeout',
+        confirmMs: 10_000,
+        confirmError: 'The operation was aborted due to timeout',
+      },
+      launchd: { lastExit: 0, runs: 15 },
+      publisherLog: { freshFailure: false },
+      errLinesSinceBoot: 0,
+      httpErrorRateSinceBoot: 0,
+      reaperStormSinceBoot: false,
+      lastRefreshAt: null,
+      ...over,
+    });
 
   it('first clean-exit unreachable tick defers: no act, pendingDownSince stamped', async () => {
     const { d, lines } = tickDeps({ collect: unreachableCleanExit() });
