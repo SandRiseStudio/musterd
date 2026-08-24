@@ -388,3 +388,14 @@ Branch `miley/delight0-css-budget-split`, measured on main @ 6bcc8c4a the way th
 - **Classification is closed**: `check-budgets.ts` fails on any CSS bundle not named in
   `budgets.cssBundles` (exercised: a stray `Mystery-abc123.css` fails; an over-budget group fails
   naming only its own bundles as the remedy).
+
+## 2026-08-24 — owned empty desks: totalJsGzipBytes 241,000 → 242,000 (a raise, logged as one)
+
+Presence-honesty §4 (lane 01M0GVNXHC, PR #1046) adds the owned-desk pass to the office canvas:
+offline owners keep desks in `assignSeats`, and `drawWorkstation` bakes a nameplate, a fading
+screen afterglow and the `disconnected` glint. Measured on the branch (`pnpm --filter @musterd/web
+build && pnpm perf:check`): total JS gzip 241,0xx locally / 241,4xx in CI against 241,000 — the
+ceiling had ~0.5 KB free before the change. The helpers were inlined into the prop pipeline first
+(−~0.3 KB); no dead JS was found to trade. Raise covers measured + ~0.2% slack, same shape as the
+2026-08-12 goals-grid raise. Trap re-paid in this change: `perf:check` reads the last build — run
+the build in the same breath or the number you defend is the previous commit's.
