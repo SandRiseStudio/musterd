@@ -3,6 +3,25 @@
   "version": "0.4.1",
   "description": "musterd team server daemon: SQLite store, WS+HTTP API, presence + inbox",
   "license": "MIT",
+  "homepage": "https://musterd.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SandRiseStudio/musterd.git",
+    "directory": "packages/server"
+  },
+  "bugs": "https://github.com/SandRiseStudio/musterd/issues",
+  "keywords": [
+    "agents",
+    "multi-agent",
+    "coordination",
+    "mcp",
+    "team",
+    "server",
+    "websocket",
+    "sqlite",
+    "presence",
+    "inbox"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

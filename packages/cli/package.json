@@ -3,6 +3,25 @@
   "version": "0.4.1",
   "description": "Muster your agents and humans into persistent teams. CLI + daemon launcher.",
   "license": "MIT",
+  "homepage": "https://musterd.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SandRiseStudio/musterd.git",
+    "directory": "packages/cli"
+  },
+  "bugs": "https://github.com/SandRiseStudio/musterd/issues",
+  "keywords": [
+    "agents",
+    "multi-agent",
+    "coordination",
+    "mcp",
+    "team",
+    "cli",
+    "daemon",
+    "claude-code",
+    "codex",
+    "cursor"
+  ],
   "type": "module",
   "bin": {
     "musterd": "./dist/bin.js"

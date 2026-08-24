@@ -3,6 +3,23 @@
   "version": "0.4.1",
   "description": "musterd protocol: shared types + zod schemas (the wire contract)",
   "license": "MIT",
+  "homepage": "https://musterd.io",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SandRiseStudio/musterd.git",
+    "directory": "packages/protocol"
+  },
+  "bugs": "https://github.com/SandRiseStudio/musterd/issues",
+  "keywords": [
+    "agents",
+    "multi-agent",
+    "coordination",
+    "mcp",
+    "team",
+    "protocol",
+    "zod",
+    "schemas"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

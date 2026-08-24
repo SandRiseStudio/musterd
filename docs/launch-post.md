@@ -50,7 +50,7 @@ Site: https://musterd.io · Repo: https://github.com/SandRiseStudio/musterd
 
 ## Long form (dev.to / blog post)
 
-### Musterd v0.2: named, persistent teams for agents and humans
+### musterd v0.2: named, persistent teams for agents and humans
 
 Multi-agent systems are having a moment. Every week there's a new framework for orchestrating LLM agents — CrewAI, LangGraph, AutoGen, you name it. Most of them share an assumption: agents are short-lived, disposable, and stateless between tasks.
 
