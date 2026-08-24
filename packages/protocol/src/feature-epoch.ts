@@ -68,5 +68,9 @@
 // decay now applies to agents (agentIdleMs, default 15 min). Legacy `idle` accepted on read and
 // normalized; decayed reads keep state + last_status_at so the claim renders aged, never erased.
 // An older seat renders what it receives and the roster's `behind` hint is the cue.
-export const FEATURE_EPOCH = 13 as const;
+// Epoch 14 — ADR 296 tier 2: a lane's paths are its `scope` on the wire (was `surface_globs`).
+// Legacy accepted on read everywhere (schema preprocess), and the full Lane shape mirrors the old
+// key so an epoch-13 client parses a new daemon's lanes unchanged; it simply keeps writing the
+// legacy token, which the daemon adopts. The mirror drops in a later epoch, on-touch.
+export const FEATURE_EPOCH = 14 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

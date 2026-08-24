@@ -64,6 +64,7 @@ import {
   type MemberKind,
   type MemberSummary,
   type MemoryEnvelope,
+  mirrorLegacyScopeOnSend,
   type NextBrief,
   type OpenLane,
   type RefusedCode,
@@ -481,7 +482,7 @@ export class HttpClient {
 
   // ── Coordination lanes, Phase 1 (ADR 083). Mutations return { lane, warnings } — warn-only.
   async openLane(slug: string, body: OpenLane): Promise<LaneResult> {
-    const json = await this.request('POST', `/teams/${slug}/lanes`, body);
+    const json = await this.request('POST', `/teams/${slug}/lanes`, mirrorLegacyScopeOnSend(body));
     const parsed = LaneResultSchema.safeParse(json);
     if (!parsed.success) throw new CliError('lane response did not match the protocol schema', 1);
     return parsed.data;
@@ -491,7 +492,7 @@ export class HttpClient {
     const json = await this.request(
       'PATCH',
       `/teams/${slug}/lanes/${encodeURIComponent(id)}`,
-      patch,
+      mirrorLegacyScopeOnSend(patch),
     );
     const parsed = LaneResultSchema.safeParse(json);
     if (!parsed.success) throw new CliError('lane response did not match the protocol schema', 1);

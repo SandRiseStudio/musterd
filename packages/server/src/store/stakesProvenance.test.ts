@@ -24,7 +24,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/web/src/x.ts'],
+      scope: ['packages/web/src/x.ts'],
     });
     expect(lane.stakes).toBe('normal');
     expect(lane.stakes_provenance).toBe('declared');
@@ -34,7 +34,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed(web);
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/web/src/live/client.ts'],
+      scope: ['packages/web/src/live/client.ts'],
     });
     expect(lane.stakes).toBe('low');
     // The whole point. Without this the Eval sees a `low` it cannot attribute.
@@ -47,7 +47,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed(web);
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/web/src/live/client.ts'],
+      scope: ['packages/web/src/live/client.ts'],
       stakes: 'high',
     });
     expect(lane.stakes).toBe('high');
@@ -61,7 +61,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed(web);
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/web/src/live/client.ts'],
+      scope: ['packages/web/src/live/client.ts'],
       stakes: 'low',
     });
     expect(lane.stakes).toBe('low');
@@ -74,7 +74,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed([{ surface: 'packages/server/**', stakes: 'normal' }]);
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/server/src/store/x.ts'],
+      scope: ['packages/server/src/store/x.ts'],
     });
     expect(lane.stakes).toBe('normal');
     expect(lane.stakes_provenance).toBe('defaulted');
@@ -84,7 +84,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed(web);
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/web/src/x.ts', 'packages/server/src/y.ts'],
+      scope: ['packages/web/src/x.ts', 'packages/server/src/y.ts'],
     });
     expect(lane.stakes).toBe('normal');
     expect(lane.stakes_provenance).toBe('declared');
@@ -96,7 +96,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/web/src/x.ts'],
+      scope: ['packages/web/src/x.ts'],
     });
     expect(lane.stakes).toBe('normal');
     setPolicy(db, team.id, { stakes_defaults: web });
@@ -111,7 +111,7 @@ describe('openLane + admin default stakes', () => {
     const { db, team } = seed(web);
     const lane = openLane(db, team.id, 'revive', 'ada', {
       title: 't',
-      surface_globs: ['packages/web/src/x.ts'],
+      scope: ['packages/web/src/x.ts'],
     });
     expect(lane.stakes_provenance).toBe('defaulted');
     const after = updateLane(db, team.id, lane.id, 'revive', { stakes: 'high' });

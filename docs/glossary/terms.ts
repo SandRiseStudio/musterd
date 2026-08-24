@@ -111,7 +111,8 @@ export const GLOSSARY: GlossaryTerm[] = [
   {
     term: 'scope',
     status: 'canonical',
-    definition: "The paths a lane may touch (today's surface_globs). Tier 2 — on-touch on the wire.",
+    definition:
+      'The paths a lane may touch. The wire token since 2026-08-24 (epoch 12); legacy surface_globs accepted on read.',
     not: [],
   },
   {

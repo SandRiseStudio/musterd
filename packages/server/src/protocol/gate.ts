@@ -48,7 +48,7 @@ export interface GateContext {
 
 /**
  * Gate A — lane-ownership (ADR 150). An edit to a declared **contended surface** requires the acting
- * seat to own a claimed lane whose `surface_globs` cover the target path. The check is one lane-board
+ * seat to own a claimed lane whose `scope` covers the target path. The check is one lane-board
  * read: does this seat hold a contending lane covering `req.target`?
  *   - **Owns it** → allow, quietly (`allowed`, no nag) — under either posture. Ownership IS the point;
  *     a seat that claimed its lane should never be warned or blocked.
@@ -251,7 +251,7 @@ export function adjudicateGate(
  * spawns, so reads never reach here.
  *
  * **What is persisted, and why the split.** A path-shaped target (`src/x.ts`) is stored in the clear:
- * lane `surface_globs` already hold plain repo-relative paths, so a path is not the sensitive class, and
+ * lane `scope` globs already hold plain repo-relative paths, so a path is not the sensitive class, and
  * "which surfaces do subagents write to" is the question the ledger exists to answer. A `Bash` command is
  * NOT stored — command text is exactly what ADR 051 protects (it can carry tokens, URLs, secrets), and
  * ADR 150's gate rows already refuse it. Commands are reduced to a sha256 fingerprint, which still

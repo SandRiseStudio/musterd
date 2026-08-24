@@ -93,6 +93,7 @@ describe('version-bump discipline (ADR 085)', () => {
     13: '18db5d31ab51fe37', // + the tick installs when the lockfile moved; a failed tick notifies (pinned, not down) // + daemon refresh: the auto-refresher owns the bounce; never prescribe `service refresh`
     14: '8c1b079d28c39788', // + shared blockers: blocked_by report-and-park + incident convergence (spec 2026-08-14 inc 1)
     15: 'bab60b1f09b5234b', // lane-close step 3 follows ADR 235: backstop armed ⇒ no self-close on silence; self-close stays sanctioned only for nobody-asked / acceptance-exempt (ADR 234)
+    16: 'fc1472575867804e', // ADR 296 tier 2: lane_open teaches `scope` (was `surface_globs`)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

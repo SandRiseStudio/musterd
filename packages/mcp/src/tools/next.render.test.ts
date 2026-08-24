@@ -82,7 +82,7 @@ describe('fmtNext — an unconfirmed close says WHY (ADR 283)', () => {
         kind: null,
         owner_seat: 'izzo',
         role: null,
-        surface_globs: [],
+        scope: [],
         depends_on: [],
         branch: null,
         goal_id: null,

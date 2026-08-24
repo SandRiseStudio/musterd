@@ -23,11 +23,14 @@ import { errorResult, textResult } from './format.js';
 
 function fmtLane(l: Lane): string {
   const owner = l.owner_seat ?? 'unowned';
-  const surface = l.surface_globs.length ? ` surface=[${l.surface_globs.join(', ')}]` : '';
+  // This client renders daemon JSON unparsed, so an epoch-13 daemon's lanes carry only the legacy
+  // key — read both (ADR 296 skew posture; the fallback drops with the mirror).
+  const scopeGlobs = l.scope ?? l.surface_globs ?? [];
+  const scope = scopeGlobs.length ? ` scope=[${scopeGlobs.join(', ')}]` : '';
   const deps = l.depends_on.length ? ` deps=[${l.depends_on.join(', ')}]` : '';
   const branch = l.branch ? ` branch=${l.branch}` : '';
   const goal = l.goal_id ? ` goal=${l.goal_id}` : '';
-  return `${l.id} [${l.state}] "${l.title}" — owner=${owner} project=${l.project}${goal}${surface}${deps}${branch}`;
+  return `${l.id} [${l.state}] "${l.title}" — owner=${owner} project=${l.project}${goal}${scope}${deps}${branch}`;
 }
 
 function fmtWarnings(warnings: LaneWarning[]): string {
@@ -90,14 +93,11 @@ export function registerLanes(
       inputSchema: {
         title: z.string().describe('the work-item, short'),
         detail: z.string().optional().describe('acceptance criteria / notes'),
-        project: z
-          .string()
-          .optional()
-          .describe('surface-space scope; defaults to this workspace’s repo'),
-        surface_globs: z
+        project: z.string().optional().describe('surface-space; defaults to this workspace’s repo'),
+        scope: z
           .array(z.string())
           .optional()
-          .describe('declared paths, e.g. ["packages/server/src/store/**"]'),
+          .describe('the paths this lane touches, e.g. ["packages/server/src/store/**"]'),
         depends_on: z.array(z.string()).optional().describe('lane ids this lane builds on'),
         branch: z.string().optional().describe('git branch carrying the work'),
         goal_id: z
@@ -231,7 +231,7 @@ export function registerLanes(
     'lane_update',
     {
       description:
-        'Update a lane: state (active/blocked/done/…), title, surface_globs, depends_on, branch, ' +
+        'Update a lane: state (active/blocked/done/…), title, scope, depends_on, branch, ' +
         'detail, project, goal_id. Going active re-runs contention checks.',
       inputSchema: {
         id: z.string().describe('lane id'),
@@ -240,14 +240,14 @@ export function registerLanes(
         state: z.enum(LaneStateSchema.options).optional().describe('new state'),
         title: z.string().min(1).optional().describe('correct a mis-stated title'),
         detail: z.string().optional(),
-        surface_globs: z.array(z.string()).optional(),
+        scope: z.array(z.string()).optional().describe('the paths this lane touches'),
         stakes: z
           .enum(['low', 'normal', 'high'])
           .optional()
           .describe('re-declare acceptance stakes (ADR 234): low | normal | high'),
         depends_on: z.array(z.string()).optional(),
         branch: z.string().optional(),
-        project: z.string().optional().describe('re-scope the surface-space'),
+        project: z.string().optional().describe('re-declare the surface-space'),
         // Protocol UpdateLaneSchema already has this; the MCP schema omitted it, so the ADR 256
         // no_goal warning named a call (`lane_update {goal_id}`) that bounced as unknown.
         goal_id: z

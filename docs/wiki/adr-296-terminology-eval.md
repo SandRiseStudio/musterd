@@ -72,7 +72,7 @@ Counted 2026-08-24 at f125a735 (falsify: `grep -rn 'vocab:ok' --include='*.ts' -
 No steady stream, no vote against any chosen word. The suppressions that exist are the gate
 meeting reality (live flags, legacy paths, a name), not writers resisting the vocabulary.
 
-## The confusion test: one pass, one half-pass
+## The confusion test: two passes
 
 **Q1 — "Aren't those profiles just roles?"** PASS from §5 alone. **Role**: "a responsibility the
 team grants a member: charter + ceiling … not workspace setup; never granted by a local file."

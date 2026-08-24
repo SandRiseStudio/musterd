@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 15;
+export const GUIDANCE_CONTENT_VERSION = 16;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -139,7 +139,7 @@ export function renderSkillBody(opts: { team: string }): string {
     'claim*, not a menu to read past — a seeded board that nobody claims produces three agents all building',
     'the same thing and throwing two-thirds of it away. So: `lane_board` / `musterd lanes` to see what is',
     'open and who owns what, then `lane_claim` / `musterd lane claim` **the one lane you will do** before you',
-    'start editing. Open a new one with `lane_open {title, surface_globs, claim:true}` / `musterd lane open',
+    'start editing. Open a new one with `lane_open {title, scope, claim:true}` / `musterd lane open',
     '"<title>" --surface <globs> --claim` if your work is not on the board yet.',
     '',
     '- **Never build in a lane a teammate already owns.** If the lane you need is claimed, coordinate —',

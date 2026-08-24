@@ -92,7 +92,7 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     const june = openLane(db, team.id, 'bravo', 'June', {
       title: 'P3.1 schema',
       project: 'musterd',
-      surface_globs: ['packages/server/src/store/**'],
+      scope: ['packages/server/src/store/**'],
       claim: true,
     });
     updateLane(db, team.id, june.id, 'bravo', { state: 'active' });
@@ -165,13 +165,13 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     openLane(db, team.id, 'bravo', 'June', {
       title: 'store work',
       project: 'musterd',
-      surface_globs: ['packages/server/src/store/**'],
+      scope: ['packages/server/src/store/**'],
       claim: true,
     });
     const jasmine = openLane(db, team.id, 'bravo', 'Jasmine', {
       title: 'governance',
       project: 'musterd',
-      surface_globs: ['packages/protocol/src/capabilities.ts'],
+      scope: ['packages/protocol/src/capabilities.ts'],
       claim: true,
     });
     expect(laneWarnings(db, team.id, 'bravo', jasmine)).toHaveLength(0);
@@ -182,13 +182,13 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     const a = openLane(db, team.id, 'bravo', 'June', {
       title: 'schema',
       project: 'musterd',
-      surface_globs: ['packages/server/src/store/**'],
+      scope: ['packages/server/src/store/**'],
       claim: true,
     });
     const b = openLane(db, team.id, 'bravo', 'Cleo', {
       title: 'also schema',
       project: 'musterd',
-      surface_globs: ['packages/server/**'],
+      scope: ['packages/server/**'],
       claim: true,
     });
     const w = laneWarnings(db, team.id, 'bravo', b);
@@ -206,13 +206,13 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     openLane(db, team.id, 'bravo', 'June', {
       title: 'members',
       project: 'musterd',
-      surface_globs: ['store/members.ts'],
+      scope: ['store/members.ts'],
       claim: true,
     });
     const cleo = openLane(db, team.id, 'bravo', 'Cleo', {
       title: 'members elsewhere',
       project: 'izzocam',
-      surface_globs: ['store/members.ts'],
+      scope: ['store/members.ts'],
       claim: true,
     });
     expect(laneWarnings(db, team.id, 'bravo', cleo)).toHaveLength(0);
@@ -227,14 +227,14 @@ describe('lane lifecycle + the two checks (spec §8 acceptance scenarios)', () =
     const { db, team } = seed();
     const legacy = openLane(db, team.id, 'bravo', 'June', {
       title: 'members (opened before derivation)',
-      surface_globs: ['store/members.ts'],
+      scope: ['store/members.ts'],
       claim: true,
     });
     expect(legacy.project).toBe('default');
     const scoped = openLane(db, team.id, 'bravo', 'Cleo', {
       title: 'members',
       project: 'musterd',
-      surface_globs: ['store/members.ts'],
+      scope: ['store/members.ts'],
       claim: true,
     });
     // Both directions — the wildcard is symmetric.
