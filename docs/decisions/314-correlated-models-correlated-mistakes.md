@@ -1,6 +1,6 @@
 # 314 — Correlated models make correlated mistakes: the diversity charter
 
-- Status: proposed (needs nick's sign-off — charter)
+- Status: accepted (2026-08-24, nick)
 - Date: 2026-08-24
 - Lane: `01M0TXHHZTSRABBYYAS6B5AE2K`
 - Relates to: [ADR 056](056-research-as-first-class-practice.md) (the research practice this
