@@ -107,7 +107,7 @@ One span per Envelope on the single validate→persist→route path (`musterd.en
 - No vendor SDKs; `@opentelemetry/sdk-node` + OTLP exporter only (dependency-budget note: this touches ADR 002's dependency discipline; the OTel SDK is the one justified addition).
 - **No phone-home, ever.** musterd emits telemetry only to endpoints the operator configures. If product-usage analytics are ever wanted, that is a separate, explicit, opt-in decision with its own ADR.
 
-### Acceptance for the first milestone
+### Acceptance for the first increment
 
 Run the server with `OTEL_EXPORTER_OTLP_ENDPOINT` pointed at any OTLP backend; send a team message via the CLI; see the envelope span with correct act/team attributes and the counters move. That's it — a day or two of work, not a project.
 

@@ -36,36 +36,7 @@ export const GATE_FROM = 98;
 export const TERMINOLOGY_GATE_FROM = 300;
 export const PLANS_GATE_FROM = '2026-07-06';
 export const GRANDFATHERED_PLANS: string[] = [];
-export const DESIGN_BASELINE = new Set([
-  'agent-ontology.md',
-  'agent-primer.md',
-  'brainstorm-arc-reachability-to-ontology.md',
-  'brand-coordination-observability.md',
-  'brand.md',
-  'deployment-topology.md',
-  'figma-brief-brand.md',
-  'figma-brief-dashboard.md',
-  'figma-brief-terminal.md',
-  'human-agent-dynamics.md',
-  'interrupt-line-mid-loop-reachability.md',
-  'landscape.md',
-  'lane-phase1-mvp-spec.md',
-  'lanes-and-the-multi-agent-tax.md',
-  'membership-model.md',
-  'migration-bootstrap.md',
-  'model-experimentation.md',
-  'observability.md',
-  'office-rive-character-spec.md',
-  'planning-and-insights-brainstorm.md',
-  'projection-reconcile.md',
-  'provisioning-recipe.md',
-  'research-foundation.md',
-  'research-radar-plan.md',
-  'seat-file-format.md',
-  'seat-lifecycle-as-files.md',
-  'security.md',
-  'spec-v0.3-draft.md',
-]);
+export const DESIGN_BASELINE = new Set([]);
 
 const WORK_ITEM_BANNED: { re: RegExp; word: string }[] = [
   { re: /\bepics?\b/i, word: 'epic' },

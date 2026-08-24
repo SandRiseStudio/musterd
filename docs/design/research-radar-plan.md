@@ -99,7 +99,7 @@ amprealize's *core* research_service stayed lean and worked; the platform around
 4. No new abstraction layer until 3+ similar pipelines exist to generalize from.
 5. Ship minimal end-to-end first; polish (more sources, dashboards, rotation) only after it's earning its keep.
 
-## 11. Build milestones (when implemented)
+## 11. Build sequence (when implemented)
 
 - **M1 — scaffold:** `docs/research/radar/` + empty `seen.json` + the versioned triage prompt. **Done.**
 - **M2 — ingestion:** arXiv + HF fetchers (port the Exploring Next slices) + dedup against `seen.json`; verify a dry sweep returns sane candidates. **Done** (`pnpm radar:sweep`).
@@ -107,7 +107,7 @@ amprealize's *core* research_service stayed lean and worked; the platform around
 - **M4 — emit:** digest writer (frontmatter + verdict grouping) + `seen.json` update + notify.
 - **M5 — schedule:** the weekly cloud routine; confirm cadence/command with Nick before creating it.
 
-Each milestone is a complete, runnable step (run the radar by hand through M4 before automating in M5).
+Each of M1–M5 is a complete, runnable step (run the radar by hand through M4 before automating in M5).
 
 ## 12. Deferred / open
 
