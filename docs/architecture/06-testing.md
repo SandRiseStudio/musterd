@@ -101,7 +101,10 @@ MUSTERD_REAL_CODEX=1 MUSTERD_REAL_CODEX_CONFIRM=1 pnpm test:codex-cli-real
 
 It creates an isolated Git workspace, in-process daemon, project-local Codex MCP entry, and
 mode-600 binding; it proves MCP join, directed-inbox drain, and exact thread resume without a trust
-or configuration bypass. Codex desktop is separately checked using
+or configuration bypass. Last owner run: 2026-08-24, Codex CLI 0.149.1, green — the first real
+execution; the fixture as landed in #621 predated ADR 281/286 identity and could not have run
+(falsifier: `git show 1790bc6d:tests/codex-cli.acceptance.test.ts` writes a version-less binding
+with a `surface` key the strict v2 schema rejects). Codex desktop is separately checked using
 [`tests/codex-desktop.md`](../../tests/codex-desktop.md). Desktop wake is manual-resume until its
 stable supported API probe passes.
 
