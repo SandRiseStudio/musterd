@@ -143,6 +143,46 @@ export const PromoteSeedSchema = z.object({
 });
 export type PromoteSeed = z.infer<typeof PromoteSeedSchema>;
 
+/** ADR 316: compact MCP discovery envelope; each action still parses its full protocol input. */
+export const SeedMcpUpdateSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.literal('claim'),
+      id: SeedSchema.shape.id,
+      input: ClaimSeedSchema.strict().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('ask'),
+      id: SeedSchema.shape.id,
+      input: AskSeedClarificationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('answer'),
+      id: SeedSchema.shape.id,
+      input: AnswerSeedClarificationSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('submit'),
+      id: SeedSchema.shape.id,
+      input: SubmitSeedBriefSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('promote'),
+      id: SeedSchema.shape.id,
+      input: PromoteSeedSchema.optional(),
+    })
+    .strict(),
+]);
+export type SeedMcpUpdate = z.infer<typeof SeedMcpUpdateSchema>;
+
 export const SeedResultSchema = z.object({ seed: SeedSchema });
 export type SeedResult = z.infer<typeof SeedResultSchema>;
 

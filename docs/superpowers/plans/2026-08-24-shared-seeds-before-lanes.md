@@ -161,13 +161,15 @@ git commit -m "server: expose authorized Seed lifecycle routes" -m "Refs ADR-291
 - Create: `packages/cli/src/commands/seed.test.ts`, `packages/mcp/src/tools/seeds.test.ts`, focused web Seed tests
 - Modify: `docs/architecture/04-cli.md`, `docs/architecture/05-mcp.md`, `docs/architecture/06-testing.md`, `docs/architecture/08-web.md`, terminal frames
 
-**Interfaces:** Consume Task 1 schemas and Task 3 endpoints. Produce `musterd seed` commands, equivalent `team_seed_*` MCP tools, the active Seed tray, and Seed history with linked-Lane provenance.
+**Interfaces:** Consume Task 1 schemas and Task 3 endpoints. Produce `musterd seed` commands, the compact ADR 316 `team_seed_*` MCP Surface, the active Seed tray, and Seed history with linked-Lane provenance.
 
 - [ ] **Step 1: Write failing Surface tests**
 
 ```ts
 expect(await runCli(['seed', 'claim', seed.id])).toContain('exploring');
-await expect(toolHandlers.team_seed_answer({ id: seed.id, body: 'CLI' })).resolves.toMatchObject({ state: 'clarified' });
+await expect(
+  toolHandlers.team_seed_update({ action: 'answer', id: seed.id, input: { body: 'CLI' } }),
+).resolves.toMatchObject({ state: 'clarified' });
 expect(renderSeedTray([openSeed, promotedSeed]).queryByText(promotedSeed.body)).toBeNull();
 ```
 
@@ -203,4 +205,3 @@ git commit -m "web: surface shared Seeds" -m "Refs ADR-291" -m "Co-authored-by: 
 - Spec coverage: Task 1 owns contract and source attribution; Tasks 2–3 own durable lifecycle, privacy, transactions, and permissions; Task 4 owns every required Surface, tray/history expiry, observability, and end-to-end verification.
 - Placeholder scan: no unresolved implementation placeholder is present.
 - Type consistency: every surface consumes Task 1 schemas and Task 3 endpoints; every durable transition is implemented in Task 2.
-

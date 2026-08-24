@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-The **universal harness adapter**. One MCP (stdio) server exposing **thirty-one tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the Seed, Lane, Goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209/314). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
+The **universal harness adapter**. One MCP (stdio) server exposing **twenty-seven tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the Seed, Lane, Goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209/314/316). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
 
 ## Stack
 
@@ -149,7 +149,7 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 ## The core tools (JSON schemas — verbatim contract)
 
 This section contracts the **six core team tools** verbatim; the lane, goal, seat-memory, and report
-tools (31 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/209/314). Two lifecycle
+tools (27 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/209/314/316). Two lifecycle
 tools (`team_join` / `team_leave`) gate the working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
 Tool names are stable; descriptions are written for the _agent_ reading them — concise,
@@ -162,20 +162,21 @@ prefix); the full statement lives in `toolNames.ts`.
 
 ### Shared Seed tools (ADR 314)
 
-Seven `team_seed_*` tools expose the same Shared Seed lifecycle as the CLI over HTTP:
-`team_seed_list`, `team_seed_get`, `team_seed_claim`, `team_seed_ask`, `team_seed_answer`,
-`team_seed_submit`, and `team_seed_promote`. List defaults to the shared active-tray rule and accepts
-`history:true`; get returns the immutable Slack source plus public thread. Submit takes the exhaustive
-brief as structured fields rather than a file. Every result carries both action-naming text and the
-protocol Seed in `structuredContent`; list carries the protocol Seed array. Capability scoping keeps
-list/get on read-only Surfaces and removes the five lifecycle mutations.
+Three `team_seed_*` tools expose the same Shared Seed lifecycle as the CLI over HTTP:
+`team_seed_list`, `team_seed_get`, and `team_seed_update` (ADR 316). List defaults to the shared
+active-tray rule and accepts `history:true`; get returns the immutable Slack source plus public
+thread. Update selects `claim | ask | answer | submit | promote` with `action` and carries the
+action-specific structured object in `input`; the handler parses the full envelope through
+`SeedMcpUpdateSchema`. Every result carries both action-naming text and the protocol Seed in
+`structuredContent`; list carries the protocol Seed array. Capability scoping keeps list/get on
+read-only Surfaces and removes update.
 
 ### `team_join` (overloaded — claim-on-first-use, ADR 032)
 
 ```json
 {
   "name": "team_join",
-  "description": "Claim your seat on the team and go online — call once when you start working. {as:\"Ada\"} claims a named seat (auto-minted if new); {role:\"backend\"} claims the next open seat in that pool; {} uses this folder's claim policy. Blocks until an admin approves when approval is needed, so one call gets you seated. After joining, check your inbox.",
+  "description": "Claim a Team seat and go online. Use as, role, or this Workspace's policy. May wait for approval; check your Inbox after.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -208,7 +209,7 @@ Drops Presence (`client.leave()`). The seat is held ~45s (the reclaim grace) so 
 ```json
 {
   "name": "team_send",
-  "description": "Send an act to a teammate, '@team', or '@broadcast'. Acts: status_update = report progress; request_help = you are blocked; handoff = pass work; accept/decline = answer the latest open ask (set reply_to to override); wait = paused; resolve = close a thread (set thread to its root id); steer = redirect a teammate (interrupts; newest steer wins; meta.goal_id scopes it to a Goal); challenge = demand justification (answered by an accept with evidence); defer = shelve a Goal (meta.goal_id). Goal-scoped steer/defer re-sequence the plan and flag lanes building against the old one.",
+  "description": "Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to transfer work, accept/decline to answer, wait to pause, resolve to close a thread, steer to redirect, challenge for justification, defer to shelve a Goal, or ask a human. ask requires meta.species and meta.tier; 2–4 to names mean any may answer.",
   "inputSchema": {
     "type": "object",
     "required": ["act", "body"],
@@ -396,7 +397,7 @@ src/
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305)
-    seeds.ts      // seven team_seed_* tools: shared tray/read plus claim/clarification/submit/promote (ADR 314)
+    seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 314/316)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
     format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135)

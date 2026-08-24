@@ -1,41 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import {
-  AnswerSeedClarificationSchema,
-  AskSeedClarificationSchema,
-  ClaimSeedSchema,
-  PromoteSeedSchema,
-  SubmitSeedBriefSchema,
-  seedInActiveTray,
-  type Seed,
-} from '@musterd/protocol';
+import { SeedMcpUpdateSchema, SeedSchema, seedInActiveTray, type Seed } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { errorResult, notReadyMessage, textResult } from './format.js';
 
 const IdSchema = z.string().min(1).describe('Seed id');
-// MCP SDK consumes Zod v4 fields; protocol currently ships Zod v3 schemas. This describes the same
-// wire shape for tool discovery, while every handler still parses through the protocol schema.
-const McpSeedBriefSchema = z.object({
-  problem: z.string().trim().min(1),
-  context: z.string().trim().min(1),
-  external_evidence: z.array(z.string().trim().min(1)),
-  approaches: z
-    .array(
-      z.object({
-        approach: z.string().trim().min(1),
-        tradeoffs: z.string().trim().min(1),
-      }),
-    )
-    .min(1),
-  constraints: z.array(z.string().trim().min(1)),
-  risks: z.array(z.string().trim().min(1)),
-  unknowns: z.array(z.string().trim().min(1)),
-  recommendation: z.string().trim().min(1),
-  proposed_lane: z.object({
-    title: z.string().trim().min(1),
-    detail: z.string().trim().min(1),
-  }),
-});
 
 function fmtSeed(seed: Seed): string {
   const explorer = seed.explorer ? ` explorer=${seed.explorer}` : '';
@@ -94,7 +63,7 @@ export function registerSeeds(server: McpServer, client: MusterdClient): void {
     },
     async (args) => {
       try {
-        const seed = await client.seed(IdSchema.parse(args.id));
+        const seed = await client.seed(SeedSchema.shape.id.parse(args.id));
         return seedResult(fmtSeed(seed), seed);
       } catch (err) {
         return errorResult(err);
@@ -103,106 +72,42 @@ export function registerSeeds(server: McpServer, client: MusterdClient): void {
   );
 
   server.registerTool(
-    'team_seed_claim',
-    {
-      description: 'Claim an open Seed as its one active explorer before researching it.',
-      inputSchema: { id: IdSchema },
-    },
-    async (args) => {
-      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'claim a Seed'));
-      try {
-        ClaimSeedSchema.parse({});
-        const seed = await client.claimSeed(IdSchema.parse(args.id));
-        return seedResult(`Seed ${seed.id} — exploring as ${seed.explorer}`, seed);
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
-  );
-
-  server.registerTool(
-    'team_seed_ask',
+    'team_seed_update',
     {
       description:
-        'Ask the submitting human Member the one clarification needed to continue exploring.',
-      inputSchema: { id: IdSchema, body: z.string().trim().min(1) },
-    },
-    async (args) => {
-      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'ask a Seed clarification'));
-      try {
-        const input = AskSeedClarificationSchema.parse({ body: args.body });
-        const seed = await client.askSeed(IdSchema.parse(args.id), input.body);
-        return seedResult(`Seed ${seed.id} — waiting for ${seed.submitted_by}`, seed);
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
-  );
-
-  server.registerTool(
-    'team_seed_answer',
-    {
-      description: 'Answer the active explorer as the human Member who submitted this Seed.',
-      inputSchema: { id: IdSchema, body: z.string().trim().min(1) },
-    },
-    async (args) => {
-      if (!client.holdsSeat)
-        return textResult(notReadyMessage(client, 'answer a Seed clarification'));
-      try {
-        const input = AnswerSeedClarificationSchema.parse({ body: args.body });
-        const seed = await client.answerSeed(IdSchema.parse(args.id), input.body);
-        return seedResult(`Seed ${seed.id} — clarified`, seed);
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
-  );
-
-  server.registerTool(
-    'team_seed_submit',
-    {
-      description:
-        'Submit the exhaustive exploration result. result:promote opens the proposed Lane; result:complete records why no Lane should open.',
+        'Advance a Seed: claim, ask, answer, submit, or promote. input is {body}, {result,brief,conclusion?}, or {title?,detail?}; omit it for claim.',
       inputSchema: {
+        action: z.enum(['claim', 'ask', 'answer', 'submit', 'promote']),
         id: IdSchema,
-        result: z.enum(['promote', 'complete']),
-        brief: McpSeedBriefSchema,
-        conclusion: z.string().trim().min(1).optional(),
+        input: z.record(z.string(), z.unknown()).optional(),
       },
     },
     async (args) => {
-      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'submit a Seed result'));
+      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'update a Seed'));
       try {
-        const id = IdSchema.parse(args.id);
-        const body = SubmitSeedBriefSchema.parse(args);
-        const seed = await client.submitSeed(id, body);
-        return seedResult(
-          seed.state === 'promoted'
-            ? `Seed ${seed.id} — promoted to Lane ${seed.linked_lane_id}`
-            : `Seed ${seed.id} — completed`,
-          seed,
-        );
-      } catch (err) {
-        return errorResult(err);
-      }
-    },
-  );
-
-  server.registerTool(
-    'team_seed_promote',
-    {
-      description: 'Explicitly skip research and promote a Seed directly to a Lane.',
-      inputSchema: {
-        id: IdSchema,
-        title: z.string().trim().min(1).optional(),
-        detail: z.string().trim().min(1).optional(),
-      },
-    },
-    async (args) => {
-      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'promote a Seed'));
-      try {
-        const body = PromoteSeedSchema.parse({ title: args.title, detail: args.detail });
-        const seed = await client.promoteSeed(IdSchema.parse(args.id), body);
+        const update = SeedMcpUpdateSchema.parse(args);
+        if (update.action === 'claim') {
+          const seed = await client.claimSeed(update.id);
+          return seedResult(`Seed ${seed.id} — exploring as ${seed.explorer}`, seed);
+        }
+        if (update.action === 'ask') {
+          const seed = await client.askSeed(update.id, update.input.body);
+          return seedResult(`Seed ${seed.id} — waiting for ${seed.submitted_by}`, seed);
+        }
+        if (update.action === 'answer') {
+          const seed = await client.answerSeed(update.id, update.input.body);
+          return seedResult(`Seed ${seed.id} — clarified`, seed);
+        }
+        if (update.action === 'submit') {
+          const seed = await client.submitSeed(update.id, update.input);
+          return seedResult(
+            seed.state === 'promoted'
+              ? `Seed ${seed.id} — promoted to Lane ${seed.linked_lane_id}`
+              : `Seed ${seed.id} — completed`,
+            seed,
+          );
+        }
+        const seed = await client.promoteSeed(update.id, update.input ?? {});
         return seedResult(`Seed ${seed.id} — promoted to Lane ${seed.linked_lane_id}`, seed);
       } catch (err) {
         return errorResult(err);

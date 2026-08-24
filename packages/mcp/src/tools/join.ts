@@ -8,10 +8,7 @@ import { repairHint, textResult } from './format.js';
 import { memoryLine } from './memory.js';
 
 const DESCRIPTION =
-  'Claim your seat on the team and go online — call once when you start working. ' +
-  '{as:"Ada"} claims a named seat (auto-minted if new); {role:"backend"} claims the next open ' +
-  "seat in that pool; {} uses this folder's claim policy. Blocks until an admin approves when " +
-  'approval is needed, so one call gets you seated. After joining, check your inbox.';
+  "Claim a Team seat and go online. Use as, role, or this Workspace's policy. May wait for approval; check your Inbox after.";
 
 /** How long team_join blocks waiting for an admin to approve a claim before returning (ADR 087). A
  *  later approval still occupies in the background — a follow-up team_join then reports already-joined. */

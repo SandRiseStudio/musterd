@@ -42,6 +42,18 @@ function seed(over: Partial<Seed> = {}): Seed {
   };
 }
 
+const brief = {
+  problem: 'Ideas disappear',
+  context: 'The Team needs a tray',
+  external_evidence: ['Relay observation'],
+  approaches: [{ approach: 'Shared Seeds', tradeoffs: 'Adds lifecycle' }],
+  constraints: ['Keep Lanes unchanged'],
+  risks: ['Clutter'],
+  unknowns: ['Volume'],
+  recommendation: 'Ship the bounded tray',
+  proposed_lane: { title: 'Build it', detail: 'Add each Surface' },
+};
+
 describe('Shared Seed MCP tools', () => {
   it('lists the active tray by default and returns structured Seeds', async () => {
     const seeds = vi
@@ -59,7 +71,8 @@ describe('Shared Seed MCP tools', () => {
 
   it('claims a Seed and makes the next state explicit', async () => {
     const claimSeed = vi.fn().mockResolvedValue(seed({ state: 'exploring', explorer: 'Ada' }));
-    const result = await captureAll({ claimSeed })['team_seed_claim']!({
+    const result = await captureAll({ claimSeed })['team_seed_update']!({
+      action: 'claim',
       id: '01SEED00000000000000000000',
     });
 
@@ -72,23 +85,10 @@ describe('Shared Seed MCP tools', () => {
   it('submits the structured exhaustive result without a file intermediary', async () => {
     const completed = seed({ state: 'completed', completed_at: 2, conclusion: 'Not now' });
     const submitSeed = vi.fn().mockResolvedValue(completed);
-    const brief = {
-      problem: 'Ideas disappear',
-      context: 'The Team needs a tray',
-      external_evidence: ['Relay observation'],
-      approaches: [{ approach: 'Shared Seeds', tradeoffs: 'Adds lifecycle' }],
-      constraints: ['Keep Lanes unchanged'],
-      risks: ['Clutter'],
-      unknowns: ['Volume'],
-      recommendation: 'Ship the bounded tray',
-      proposed_lane: { title: 'Build it', detail: 'Add each Surface' },
-    };
-
-    const result = await captureAll({ submitSeed })['team_seed_submit']!({
+    const result = await captureAll({ submitSeed })['team_seed_update']!({
+      action: 'submit',
       id: completed.id,
-      result: 'complete',
-      brief,
-      conclusion: 'Not now',
+      input: { result: 'complete', brief, conclusion: 'Not now' },
     });
 
     expect(submitSeed).toHaveBeenCalledWith(completed.id, {
@@ -97,6 +97,23 @@ describe('Shared Seed MCP tools', () => {
       conclusion: 'Not now',
     });
     expect(result.structuredContent).toEqual({ seed: completed });
+  });
+
+  it('routes clarification and manual promotion actions through one lifecycle tool', async () => {
+    const askSeed = vi.fn().mockResolvedValue(seed({ state: 'needs_clarification' }));
+    const answerSeed = vi.fn().mockResolvedValue(seed({ state: 'clarified' }));
+    const promoteSeed = vi
+      .fn()
+      .mockResolvedValue(seed({ state: 'promoted', linked_lane_id: 'lane-1' }));
+    const update = captureAll({ askSeed, answerSeed, promoteSeed })['team_seed_update']!;
+
+    await update({ action: 'ask', id: '01SEED', input: { body: 'Which Surface?' } });
+    await update({ action: 'answer', id: '01SEED', input: { body: 'CLI' } });
+    await update({ action: 'promote', id: '01SEED', input: { title: 'Build it' } });
+
+    expect(askSeed).toHaveBeenCalledWith('01SEED', 'Which Surface?');
+    expect(answerSeed).toHaveBeenCalledWith('01SEED', 'CLI');
+    expect(promoteSeed).toHaveBeenCalledWith('01SEED', { title: 'Build it' });
   });
 
   it('refuses every mutation when this adapter no longer holds its seat', async () => {
@@ -114,11 +131,15 @@ describe('Shared Seed MCP tools', () => {
     const handlers = captureAll(client);
     const id = '01SEED00000000000000000000';
     const calls = [
-      handlers['team_seed_claim']!({ id }),
-      handlers['team_seed_ask']!({ id, body: 'question' }),
-      handlers['team_seed_answer']!({ id, body: 'answer' }),
-      handlers['team_seed_submit']!({ id, result: 'complete', brief: {}, conclusion: 'done' }),
-      handlers['team_seed_promote']!({ id }),
+      handlers['team_seed_update']!({ action: 'claim', id }),
+      handlers['team_seed_update']!({ action: 'ask', id, input: { body: 'question' } }),
+      handlers['team_seed_update']!({ action: 'answer', id, input: { body: 'answer' } }),
+      handlers['team_seed_update']!({
+        action: 'submit',
+        id,
+        input: { result: 'complete', brief, conclusion: 'done' },
+      }),
+      handlers['team_seed_update']!({ action: 'promote', id }),
     ];
 
     for (const result of await Promise.all(calls)) {

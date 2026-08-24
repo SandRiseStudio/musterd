@@ -5,6 +5,7 @@ import {
   ConcludeSeedSchema,
   RelaySeedSchema,
   RelaySeedListSchema,
+  SeedMcpUpdateSchema,
   SeedSchema,
   SeedStateSchema,
   SubmitSeedBriefSchema,
@@ -112,5 +113,18 @@ describe('shared Seeds (ADR 291)', () => {
     expect(ConcludeSeedSchema.safeParse({ conclusion: ' ' }).success).toBe(false);
     expect(AnswerSeedClarificationSchema.safeParse({ body: ' ' }).success).toBe(false);
     expect(ClaimSeedSchema.parse({})).toEqual({});
+  });
+
+  it('parses the compact MCP lifecycle envelope by action', () => {
+    expect(
+      SeedMcpUpdateSchema.parse({ action: 'ask', id: '01SEED', input: { body: 'Which Surface?' } }),
+    ).toEqual({ action: 'ask', id: '01SEED', input: { body: 'Which Surface?' } });
+    expect(
+      SeedMcpUpdateSchema.safeParse({ action: 'ask', id: '01SEED', input: { body: ' ' } }).success,
+    ).toBe(false);
+    expect(
+      SeedMcpUpdateSchema.safeParse({ action: 'claim', id: '01SEED', input: { body: 'extra' } })
+        .success,
+    ).toBe(false);
   });
 });

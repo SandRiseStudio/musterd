@@ -386,11 +386,7 @@ export function registerLanes(
         // The unlanded-refusal behavior (ADR 300) is deliberately NOT described here: the standing
         // tools/list surface is budget-gated (context:check), and the refusal message itself
         // teaches at the only moment it matters — when an unlanded submit is attempted.
-        'Your work is merged — move the lane to awaiting_acceptance (ADR 192) and attest it ' +
-        '(pr/sha/branch/authorized_by). OUTCOME ACCEPTANCE, not a code review: an acceptor judges ' +
-        'intent/principles/usable/feel of the landed artifact. Accept closes the lane, reject ' +
-        'returns it to active. The response says whether to wait or self-close — follow it, not a ' +
-        'fixed timer (ADR 235). Auto-merge first, then submit.',
+        'After merge, move a Lane to awaiting_acceptance with PR/SHA evidence. The response names the acceptor and whether to wait or self-close.',
       inputSchema: {
         id: z.string().describe('lane id'),
         pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
@@ -524,9 +520,7 @@ export function registerLanes(
     'team_next',
     {
       description:
-        'Your orientation brief at session start: what you are carrying, what just shipped, open ' +
-        "lanes to pick up, and the latest handoff's why — derived from the team's own lane and " +
-        'act state, no human prompt needed.',
+        'Read your orientation: carried work, shipped work, open Lanes, and the latest handoff.',
       inputSchema: {},
     },
     async () => {

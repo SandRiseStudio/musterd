@@ -55,6 +55,9 @@ controls because there are no mutation controls.
 - CLI and MCP use the same lifecycle words while fitting their native input forms.
 - The web Surface adds shared visibility without becoming another mutation or credential flow.
 - A later editable browser Seed workflow requires a separate decision and authorization design.
+- 2026-08-24: [ADR 316](316-compact-shared-seed-mcp-surface.md) supersedes only the seven-tool MCP
+  naming above. The shipped prerelease Surface keeps list/get and consolidates five mutations into
+  `team_seed_update` so the fixed standing-context budget remains a ceiling.
 
 ## Observability & Evaluation
 
