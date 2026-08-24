@@ -159,6 +159,9 @@ Co-authored-by: gptbot <gptbot@revive.musterd>"
 - Modify: `packages/cli/src/onboard/init.test.ts`
 - Modify: `packages/mcp/src/index.ts`
 - Modify: `packages/mcp/src/mcp.test.ts`
+- Modify: `packages/mcp/src/client.ts`
+- Modify: `packages/mcp/src/tools/join.ts`
+- Modify: `packages/mcp/src/tools/tools.test.ts`
 - Modify: `scripts/context/check-budgets.ts`
 
 **Interfaces:**
@@ -278,6 +281,12 @@ Update `scripts/context/check-budgets.ts` to import both public renderers and se
 larger of the repository and named-runtime variants. This keeps the existing single-primer budget
 conservative without adding a second budget item for two mutually exclusive delivery variants.
 
+Add a focused `team_join` handler test proving that the charter on the authenticated `occupied`
+frame is surfaced in the tool result and that the stale claim directing agents to `AGENTS.md` is
+gone. Store the latest occupancy charter on `MusterdClient`, clear it on leave, and render it under
+`Your Team Role charter:` after a successful claim. This closes the live gap discovered while
+reconciling `05-mcp.md`; `OccupiedFrame` already carries the optional field, so no schema changes.
+
 - [ ] **Step 8: Run the focused MCP test and verify GREEN**
 
 Run:
@@ -291,7 +300,7 @@ Expected: PASS for named, seat-targeted, and unresolved runtime variants.
 - [ ] **Step 9: Commit the consumer boundary**
 
 ```bash
-git add packages/cli/src/onboard/primer.ts packages/cli/src/onboard/onboard.test.ts packages/cli/src/onboard/init.ts packages/cli/src/onboard/init.test.ts packages/mcp/src/index.ts packages/mcp/src/mcp.test.ts scripts/context/check-budgets.ts docs/superpowers/plans/2026-08-24-workspace-local-primer-identity.md
+git add packages/cli/src/onboard/primer.ts packages/cli/src/onboard/onboard.test.ts packages/cli/src/onboard/init.ts packages/cli/src/onboard/init.test.ts packages/mcp/src/index.ts packages/mcp/src/mcp.test.ts packages/mcp/src/client.ts packages/mcp/src/tools/join.ts packages/mcp/src/tools/tools.test.ts scripts/context/check-budgets.ts docs/superpowers/plans/2026-08-24-workspace-local-primer-identity.md
 git commit -m "fix: keep Member identity out of repository primers
 
 Refs ADR-307

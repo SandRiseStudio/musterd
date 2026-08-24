@@ -1,6 +1,6 @@
 # 307 — Primer identity is local to the Workspace
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-08-24
 
 ## Context

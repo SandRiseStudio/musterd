@@ -140,40 +140,38 @@ checks), so don't improvise a merge method or a catch-up strategy.
 **Hard rules:** never merge with a merge-commit or rebase-merge (disabled anyway); never `git push --force` (use `--force-with-lease`); never merge past a red `gates` run. Auto-delete clears the **remote** branch; you still clear the **local** one (step 6) — `git branch -d` won't (squash-merge isn't an ancestor), so use `-D` once the PR is merged. The `gates` check runs `build → typecheck → test → coverage → format:check → change-adr:check`. The `review` workflow ([ADR 180](docs/decisions/180-review-after-bugbot.md)) posts advisory findings on PRs touching `packages/protocol/src` or `packages/server/src`; read them, but they are not a gate and never block a merge.
 
 <!-- musterd:start (managed by `musterd init` — edit outside these markers) -->
-
 ## Your musterd team
 
-You are **stanley** on the **revive** team. musterd is your coordination layer: your teammates — other agents _and_ humans — are
+**revive** Team. Member identity is Workspace-local: trust MCP instructions/occupancy or `musterd whoami`. If unwired, repair or ask; never claim from this file. musterd is your coordination layer: your teammates — other agents *and* humans — are
 reachable through it, and humans on the team are peers, not approvers.
 
 **Your channel.** If this session has the `team_*` tools (the musterd MCP server), they are your
-channel — use them. If it does not, coordinate with the `musterd` CLI instead. Use one channel only
-— with the `team_*` tools, do not also drive the CLI (it can resolve to a different identity and your
-sends will fail).
+channel — use them; otherwise coordinate with the `musterd` CLI. Use one channel only: with the
+`team_*` tools, do not also drive the CLI (it resolves to a different identity and your sends fail).
 
 The loop — `team_*` tool form / `musterd` CLI form:
 
-- **Get on the team when you start.** `team_join` / `musterd claim <name>` then `musterd status`, so
-  teammates can see and reach you.
+- **Get on the team when you start.** Your seat auto-claims on your first `team_*` call, so
+  `team_inbox_check` / `musterd claim <name>` is enough; `team_join` only if a tool says otherwise.
 - **Check your inbox at every task boundary.** `team_inbox_check` / `musterd inbox` — on start, when
   you finish a unit of work, and after being heads-down. Directed acts wait there for a reply.
 - **Report status as you work.** `team_send {act:'status_update'}` / `musterd send --act
-status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
-- **Claim a lane _before_ you build — reading the board is not enough.** `lane_claim` / `musterd lane
-claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
+  status_update '<one line>'` on start and finish — this is what flips you to `working` on the roster.
+- **Claim a lane *before* you build — reading the board is not enough.** `lane_claim` / `musterd lane
+  claim` the ONE you will do (`lane_open` if new); **never build in a lane a teammate owns.** Hand off
   with `team_send {act:'handoff'}`; after merge `lane_submit`, then accept or `lane_resolve`.
 - **Ask a human before you act big or stall.** For a costly / irreversible / out-of-scope action, or
   when only a human can unblock you: `team_send {act:'ask'}` / `musterd send --act ask` (`meta.species`
-  - `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
+  + `meta.tier`). The `team_send` reply hands you the contract: blocking 15m HOLDS; standard 5m / advisory 3m PROCEED (risk logged).
 
 Invoke the tools/commands for real and use what they return — never write down an imagined inbox or
-reply. Keep messages short: use the acts, do not narrate in free text.
+reply. Keep messages short: use the acts, do not narrate in free text. **The daemon refreshes itself
+— never ask a human to:** your merge reaches it without you (`~/.musterd/autorefresh/refresh.log`).
 
-**Going past the basics?** Claiming or adopting a seat, handing off with a branch, lane contention,
-waiting on the inbox without polling, or recovering from an error — read the **musterd skill**
+**Going past the basics?** Adopting a seat, handing off a branch, lane contention, waiting without
+polling, daemon refresh, or recovering from an error — read the **musterd skill**
 (`.claude/skills/musterd/SKILL.md`, `.cursor/rules/musterd.mdc`, or `.musterd/skill/SKILL.md`) or run
 `musterd help` for the full command reference.
-
 <!-- musterd:end -->
 
 ## Your role's skill (outside the managed block — survives a `musterd init` refresh)

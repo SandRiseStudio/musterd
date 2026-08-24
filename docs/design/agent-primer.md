@@ -1,6 +1,6 @@
 # Design — the agent primer (`musterd init` writes standing context)
 
-> **Status:** ✅ implemented (`packages/cli/src/onboard/primer.ts` + init wiring; tests in `onboard/onboard.test.ts`). The **collision guard** (§7) remains unbuilt. Grounds out the 🔴 onboarding-gap finding in `docs/implementation-plan.md` §4.A item 3. Decision recorded in ADR 012.
+> **Status:** Historical design record for ADR 012. ADR 307 supersedes the identity and shared-renderer details in §§2–6 and §8: repository `AGENTS.md` now carries Team intent only, while MCP instructions may carry a Workspace-local Member target; Role and charter arrive through authenticated occupancy. Current implementation contracts live in [`04-cli.md`](../architecture/04-cli.md) and [`05-mcp.md`](../architecture/05-mcp.md). The historical template below is frozen, not a second current specification.
 
 ## 1. Problem
 
