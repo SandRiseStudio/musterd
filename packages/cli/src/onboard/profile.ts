@@ -22,9 +22,10 @@ import { BUILTIN_PROFILE_TEMPLATES } from './profiles/builtins.js';
  * Profile is not (yet) a wire type — these types live in the CLI until the v0.3 governance gate
  * lands.
  *
- * Back-compat (the rename is read-compatible, never write-legacy): a profile authored pre-rename
- * names itself with a `role` key and lives in `.musterd/roles/<name>.json` — both still load; new
- * files are written `profile`-keyed into `.musterd/profiles/`.
+ * Back-compat (each rename is read-compatible, never write-legacy). The concept has been named
+ * three times, and all three on-disk shapes still load: `role`-keyed in `.musterd/roles/` (pre-ADR
+ * 272), `profile`-keyed in `.musterd/profiles/` (pre-ADR 296), and the canonical `toolkit`-keyed
+ * file in `.musterd/toolkits/`, which is the only shape ever written (ADR 296 tier 2).
  */
 
 /** A concrete MCP server entry inside a profile's `tools.mcp_servers`. Secrets are `${ENV}` refs. */
@@ -62,19 +63,28 @@ const CharterSchema = z
   .transform((v) => (Array.isArray(v) ? v.join('\n') : v))
   .refine((v) => v.trim().length > 0, { message: 'charter must not be empty' });
 
-/** Pre-rename files name themselves with a `role` key; adopt it as `profile` when absent. */
-function adoptLegacyRoleKey(raw: unknown): unknown {
-  if (raw && typeof raw === 'object' && 'role' in raw && !('profile' in raw)) {
-    const { role, ...rest } = raw as Record<string, unknown>;
-    return { ...rest, profile: role };
+/**
+ * The name key has been renamed twice, and both older spellings still load (ADR 296 tier 2 —
+ * legacy accepted on read, never written): `role` pre-ADR-272, `profile` pre-ADR-296. A file
+ * carrying more than one wins on the newest it has, so a hand-merged file never silently adopts
+ * the oldest name.
+ */
+function adoptLegacyToolkitKey(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || 'toolkit' in raw) return raw;
+  const rec = raw as Record<string, unknown>;
+  for (const legacy of ['profile', 'role'] as const) {
+    if (legacy in rec) {
+      const { [legacy]: value, ...rest } = rec;
+      return { ...rest, toolkit: value };
+    }
   }
   return raw;
 }
 
 export const ProfileSchema = z.preprocess(
-  adoptLegacyRoleKey,
+  adoptLegacyToolkitKey,
   z.object({
-    profile: z.string().min(1),
+    toolkit: z.string().min(1),
     capacity: z.number().int().positive().optional(),
     charter: CharterSchema,
     tools: ProfileToolsSchema,
@@ -95,8 +105,16 @@ export const BUILTIN_PROFILES: Record<string, Profile> = Object.fromEntries(
   Object.entries(BUILTIN_PROFILE_TEMPLATES).map(([name, raw]) => [name, parseProfile(raw)]),
 );
 
-/** Where a project's user-authored profiles live: `.musterd/profiles/<name>.json`. */
-export function userProfilesDir(dir: string): string {
+/** Where a project's user-authored toolkits live: `.musterd/toolkits/<name>.json`. */
+export function userToolkitsDir(dir: string): string {
+  return join(dir, BINDING_DIR, 'toolkits');
+}
+
+/**
+ * The ADR 272 home, `.musterd/profiles/` — still read, never written, like the `roles/` home
+ * before it. Only `*.json` files here are toolkits.
+ */
+export function legacyUserProfilesDir(dir: string): string {
   return join(dir, BINDING_DIR, 'profiles');
 }
 
@@ -110,41 +128,57 @@ export function legacyUserRolesDir(dir: string): string {
 }
 
 /**
+ * Where a toolkit may live, newest home first: the canonical `.musterd/toolkits/`, then the two
+ * older homes, which are read and never written. One list, so the loader and the lister can never
+ * disagree about which files exist.
+ */
+const TOOLKIT_HOMES = [userToolkitsDir, legacyUserProfilesDir, legacyUserRolesDir] as const;
+
+/**
+ * The toolkit search path for `dir`, newest home first — the one list every reader walks. Callers
+ * outside this module use it instead of naming the homes themselves, so adding or retiring a home
+ * is one edit and no caller silently keeps the old set.
+ */
+export function toolkitHomes(dir: string): string[] {
+  return TOOLKIT_HOMES.map((home) => home(dir));
+}
+
+/**
  * Load a profile by name for `dir`. A user file wins over a built-in of the same name
- * (customization); `.musterd/profiles/<name>.json` wins over the legacy `.musterd/roles/<name>.json`.
+ * (customization), and the newest home wins over the older ones ({@link toolkitHomes}).
  * Throws a friendly Error if the file is missing or invalid.
  */
 export function loadProfile(dir: string, name: string): Profile {
-  for (const home of [userProfilesDir(dir), legacyUserRolesDir(dir)]) {
+  for (const home of toolkitHomes(dir)) {
     const path = join(home, `${name}.json`);
     if (!existsSync(path)) continue;
     let raw: unknown;
     try {
       raw = JSON.parse(readFileSync(path, 'utf8'));
     } catch (err) {
-      throw new Error(`could not read profile ${name} (${path}): ${(err as Error).message}`);
+      throw new Error(`could not read toolkit ${name} (${path}): ${(err as Error).message}`);
     }
     try {
       return parseProfile(raw);
     } catch (err) {
-      throw new Error(`profile ${name} (${path}) is invalid: ${zodMessage(err)}`);
+      throw new Error(`toolkit ${name} (${path}) is invalid: ${zodMessage(err)}`);
     }
   }
   const builtin = BUILTIN_PROFILES[name];
   if (builtin) return builtin;
   throw new Error(
-    `unknown profile "${name}" (no built-in and no .musterd/profiles/${name}.json — nor a legacy .musterd/roles/${name}.json)`,
+    `unknown toolkit "${name}" (no built-in and no .musterd/toolkits/${name}.json — nor a legacy .musterd/profiles/ or .musterd/roles/ file of that name)`,
   );
 }
 
 /**
- * List profile names available for `dir`: built-ins ∪ user files in `.musterd/profiles/*.json` ∪
- * legacy `.musterd/roles/*.json`. `generalist` is always first (the default). De-duplicated; user
- * files don't double-list a built-in.
+ * List toolkit names available for `dir`: built-ins ∪ user files in every home in
+ * {@link TOOLKIT_HOMES}. `generalist` is always first (the default). De-duplicated; user files
+ * don't double-list a built-in.
  */
 export function listProfileNames(dir: string): string[] {
   const names = new Set<string>(Object.keys(BUILTIN_PROFILES));
-  for (const home of [userProfilesDir(dir), legacyUserRolesDir(dir)]) {
+  for (const home of toolkitHomes(dir)) {
     try {
       for (const f of readdirSync(home)) {
         if (f.endsWith('.json')) names.add(f.slice(0, -'.json'.length));
@@ -157,7 +191,7 @@ export function listProfileNames(dir: string): string[] {
   return [GENERALIST, ...rest];
 }
 
-/** Is this profile name a built-in (vs. a user-authored file)? Used only for UI hints. */
+/** Is this toolkit name a built-in (vs. a user-authored file)? Used only for UI hints. */
 export function isBuiltin(name: string): boolean {
   return name in BUILTIN_PROFILES;
 }

@@ -17,13 +17,7 @@ import {
   RETIRED_SURFACE_ENV,
 } from '../mcpEntry.js';
 import { STANDARD_FLOOR } from '../permissions.js';
-import {
-  BUILTIN_PROFILES,
-  legacyUserRolesDir,
-  parseProfile,
-  userProfilesDir,
-  type Profile,
-} from '../profile.js';
+import { BUILTIN_PROFILES, parseProfile, toolkitHomes, type Profile } from '../profile.js';
 import { nodeExec, type ExecSeam, type FsSeam, type HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
@@ -969,7 +963,7 @@ function permissionsPayload(ctx: HarnessContext): ProvisionPermissions {
   const provisioning = loadProvisioning(ctx.worktreeRoot, ctx.fs);
   const roleName = provisioning.kind === 'valid' ? provisioning.value.profile : '';
   if (roleName !== '') {
-    for (const dir of [userProfilesDir(ctx.worktreeRoot), legacyUserRolesDir(ctx.worktreeRoot)]) {
+    for (const dir of toolkitHomes(ctx.worktreeRoot)) {
       const raw = ctx.fs.readFile(join(dir, `${roleName}.json`));
       if (raw === null) continue;
       try {

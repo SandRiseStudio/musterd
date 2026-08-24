@@ -380,8 +380,8 @@ export const CATALOG: readonly CommandEntry[] = [
     detail:
       'A toolkit carries no authority: it is the "installed" layer of the three (installed by a ' +
       'toolkit, allowed by harness permissions, authorized by the team as a capability — they ' +
-      'compose as AND). create scaffolds one into .musterd/profiles/ (the on-disk path still ' +
-      'carries the old word; renaming it is a wire-and-file-key change, deliberately separate); ' +
+      'compose as AND). create scaffolds one into .musterd/toolkits/; the older .musterd/profiles/ ' +
+      'and .musterd/roles/ homes are still read, never written; ' +
       '`musterd init` provisions it, and a user file overrides a built-in of the same name. ' +
       'Nothing here reads the roster.',
     examples: ['musterd toolkit list', 'musterd toolkit create writer --from docs'],

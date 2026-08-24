@@ -12,13 +12,7 @@ import type { Parsed } from '../args.js';
 import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { installSeatPermissions } from '../onboard/permissions.js';
-import {
-  isBuiltin,
-  legacyUserRolesDir,
-  loadProfile,
-  userProfilesDir,
-  type Profile,
-} from '../onboard/profile.js';
+import { isBuiltin, loadProfile, toolkitHomes, type Profile } from '../onboard/profile.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { BUILTIN_ROLE_TEMPLATES, listRoleTemplateNames } from '../roster-roles/templates.js';
@@ -298,8 +292,7 @@ function roleShow(parsed: Parsed, roster: RosterRead | null): number {
     // Roster-only (ADR 296). A name that is only workspace equipment is not silently rendered
     // here under the word "role" — the command that owns it is named instead.
     const equipped =
-      existsSync(join(userProfilesDir(process.cwd()), `${name}.json`)) ||
-      existsSync(join(legacyUserRolesDir(process.cwd()), `${name}.json`)) ||
+      toolkitHomes(process.cwd()).some((home) => existsSync(join(home, `${name}.json`))) ||
       isBuiltin(name);
     const hint = equipped
       ? ` — it is a workspace toolkit: musterd toolkit show ${name}`

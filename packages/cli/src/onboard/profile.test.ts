@@ -12,13 +12,14 @@ import {
   listProfileNames,
   loadProfile,
   parseProfile,
-  userProfilesDir,
+  userToolkitsDir,
+  legacyUserProfilesDir,
 } from './profile.js';
 
 describe('parseProfile', () => {
   it('parses a minimal profile and applies tool defaults', () => {
-    const profile = parseProfile({ profile: 'x', charter: 'do x' });
-    expect(profile.profile).toBe('x');
+    const profile = parseProfile({ toolkit: 'x', charter: 'do x' });
+    expect(profile.toolkit).toBe('x');
     expect(profile.tools.mcp_servers).toEqual([]);
     expect(profile.tools.resource_scopes).toEqual([]);
     expect(profile.tools.permissions).toEqual({ allow: [], ask: [], deny: [] });
@@ -26,7 +27,18 @@ describe('parseProfile', () => {
 
   it('accepts the legacy `role` key as the profile name (pre-rename files)', () => {
     const profile = parseProfile({ role: 'x', charter: 'do x' });
-    expect(profile.profile).toBe('x');
+    expect(profile.toolkit).toBe('x');
+  });
+
+  it('accepts the ADR 272 `profile` key as the toolkit name (pre-296 files)', () => {
+    expect(parseProfile({ profile: 'x', charter: 'do x' }).toolkit).toBe('x');
+  });
+
+  it('prefers the newest key a hand-merged file carries (toolkit > profile > role)', () => {
+    expect(
+      parseProfile({ toolkit: 'new', profile: 'mid', role: 'old', charter: 'c' }).toolkit,
+    ).toBe('new');
+    expect(parseProfile({ profile: 'mid', role: 'old', charter: 'c' }).toolkit).toBe('mid');
   });
 
   it('a legacy role-keyed value parses identically to its profile-keyed form', () => {
@@ -36,7 +48,7 @@ describe('parseProfile', () => {
       tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
     });
     const renamed = parseProfile({
-      profile: 'x',
+      toolkit: 'x',
       charter: ['a', 'b'],
       tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
     });
@@ -44,13 +56,13 @@ describe('parseProfile', () => {
   });
 
   it('joins an array charter into a single string (multi-line friendliness)', () => {
-    const profile = parseProfile({ profile: 'x', charter: ['line one', 'line two'] });
+    const profile = parseProfile({ toolkit: 'x', charter: ['line one', 'line two'] });
     expect(profile.charter).toBe('line one\nline two');
   });
 
   it('defaults mcp_server args/env', () => {
     const profile = parseProfile({
-      profile: 'x',
+      toolkit: 'x',
       charter: 'c',
       tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
     });
@@ -58,7 +70,7 @@ describe('parseProfile', () => {
   });
 
   it('rejects an empty charter', () => {
-    expect(() => parseProfile({ profile: 'x', charter: '   ' })).toThrow();
+    expect(() => parseProfile({ toolkit: 'x', charter: '   ' })).toThrow();
   });
 
   it('rejects a missing profile name', () => {
@@ -66,7 +78,7 @@ describe('parseProfile', () => {
   });
 
   it('rejects a non-positive capacity', () => {
-    expect(() => parseProfile({ profile: 'x', charter: 'c', capacity: 0 })).toThrow();
+    expect(() => parseProfile({ toolkit: 'x', charter: 'c', capacity: 0 })).toThrow();
   });
 });
 
@@ -100,19 +112,19 @@ describe('loadProfile / listProfileNames', () => {
   }
 
   it('loads a built-in by name', () => {
-    expect(loadProfile(tmp(), 'reviewer').profile).toBe('reviewer');
+    expect(loadProfile(tmp(), 'reviewer').toolkit).toBe('reviewer');
   });
 
-  it('throws a friendly error for an unknown profile', () => {
-    expect(() => loadProfile(tmp(), 'nope')).toThrow(/unknown profile/);
+  it('throws a friendly error for an unknown toolkit', () => {
+    expect(() => loadProfile(tmp(), 'nope')).toThrow(/unknown toolkit/);
   });
 
   it('loads a user file from .musterd/profiles/<name>.json', () => {
     const dir = tmp();
-    mkdirSync(userProfilesDir(dir), { recursive: true });
+    mkdirSync(userToolkitsDir(dir), { recursive: true });
     writeFileSync(
-      join(userProfilesDir(dir), 'data.json'),
-      JSON.stringify({ profile: 'data', charter: 'own the warehouse' }),
+      join(userToolkitsDir(dir), 'data.json'),
+      JSON.stringify({ toolkit: 'data', charter: 'own the warehouse' }),
     );
     expect(loadProfile(dir, 'data').charter).toBe('own the warehouse');
     expect(isBuiltin('data')).toBe(false);
@@ -125,17 +137,17 @@ describe('loadProfile / listProfileNames', () => {
       join(legacyUserRolesDir(dir), 'data.json'),
       JSON.stringify({ role: 'data', charter: 'own the warehouse' }),
     );
-    expect(loadProfile(dir, 'data').profile).toBe('data');
+    expect(loadProfile(dir, 'data').toolkit).toBe('data');
     expect(loadProfile(dir, 'data').charter).toBe('own the warehouse');
   });
 
   it('.musterd/profiles/ wins over the legacy .musterd/roles/ for the same name', () => {
     const dir = tmp();
-    mkdirSync(userProfilesDir(dir), { recursive: true });
+    mkdirSync(userToolkitsDir(dir), { recursive: true });
     mkdirSync(legacyUserRolesDir(dir), { recursive: true });
     writeFileSync(
-      join(userProfilesDir(dir), 'data.json'),
-      JSON.stringify({ profile: 'data', charter: 'new home' }),
+      join(userToolkitsDir(dir), 'data.json'),
+      JSON.stringify({ toolkit: 'data', charter: 'new home' }),
     );
     writeFileSync(
       join(legacyUserRolesDir(dir), 'data.json'),
@@ -146,10 +158,10 @@ describe('loadProfile / listProfileNames', () => {
 
   it('a user file overrides a built-in of the same name', () => {
     const dir = tmp();
-    mkdirSync(userProfilesDir(dir), { recursive: true });
+    mkdirSync(userToolkitsDir(dir), { recursive: true });
     writeFileSync(
-      join(userProfilesDir(dir), 'backend.json'),
-      JSON.stringify({ profile: 'backend', charter: 'custom backend' }),
+      join(userToolkitsDir(dir), 'backend.json'),
+      JSON.stringify({ toolkit: 'backend', charter: 'custom backend' }),
     );
     expect(loadProfile(dir, 'backend').charter).toBe('custom backend');
   });
@@ -166,20 +178,20 @@ describe('loadProfile / listProfileNames', () => {
 
   it('throws a friendly error for an invalid user file', () => {
     const dir = tmp();
-    mkdirSync(userProfilesDir(dir), { recursive: true });
-    writeFileSync(join(userProfilesDir(dir), 'bad.json'), '{ not json');
-    expect(() => loadProfile(dir, 'bad')).toThrow(/could not read profile/);
-    writeFileSync(join(userProfilesDir(dir), 'bad2.json'), JSON.stringify({ profile: 'bad2' }));
+    mkdirSync(userToolkitsDir(dir), { recursive: true });
+    writeFileSync(join(userToolkitsDir(dir), 'bad.json'), '{ not json');
+    expect(() => loadProfile(dir, 'bad')).toThrow(/could not read toolkit/);
+    writeFileSync(join(userToolkitsDir(dir), 'bad2.json'), JSON.stringify({ toolkit: 'bad2' }));
     expect(() => loadProfile(dir, 'bad2')).toThrow(/is invalid/);
   });
 
   it('lists built-ins ∪ user profiles (both dirs) with generalist first', () => {
     const dir = tmp();
-    mkdirSync(userProfilesDir(dir), { recursive: true });
+    mkdirSync(userToolkitsDir(dir), { recursive: true });
     mkdirSync(legacyUserRolesDir(dir), { recursive: true });
     writeFileSync(
-      join(userProfilesDir(dir), 'data.json'),
-      JSON.stringify({ profile: 'data', charter: 'c' }),
+      join(userToolkitsDir(dir), 'data.json'),
+      JSON.stringify({ toolkit: 'data', charter: 'c' }),
     );
     writeFileSync(
       join(legacyUserRolesDir(dir), 'olddata.json'),
@@ -199,6 +211,46 @@ describe('loadProfile / listProfileNames', () => {
     mkdirSync(legacyUserRolesDir(dir), { recursive: true });
     writeFileSync(join(legacyUserRolesDir(dir), 'platform.toml'), 'summary = "a roster role"\n');
     expect(listProfileNames(dir)).not.toContain('platform');
+  });
+
+  it('still loads an ADR 272 user file from .musterd/profiles/<name>.json (profile-keyed)', () => {
+    const dir = tmp();
+    mkdirSync(legacyUserProfilesDir(dir), { recursive: true });
+    writeFileSync(
+      join(legacyUserProfilesDir(dir), 'data.json'),
+      JSON.stringify({ profile: 'data', charter: 'own the warehouse' }),
+    );
+    expect(loadProfile(dir, 'data').toolkit).toBe('data');
+    expect(loadProfile(dir, 'data').charter).toBe('own the warehouse');
+  });
+
+  it('walks the homes newest-first: toolkits/ beats profiles/ beats roles/', () => {
+    const dir = tmp();
+    for (const [home, key, charter] of [
+      [userToolkitsDir(dir), 'toolkit', 'newest home'],
+      [legacyUserProfilesDir(dir), 'profile', 'middle home'],
+      [legacyUserRolesDir(dir), 'role', 'oldest home'],
+    ] as const) {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(home, 'data.json'), JSON.stringify({ [key]: 'data', charter }));
+    }
+    expect(loadProfile(dir, 'data').charter).toBe('newest home');
+  });
+
+  it('lists user files from all three homes', () => {
+    const dir = tmp();
+    for (const [home, key, name] of [
+      [userToolkitsDir(dir), 'toolkit', 'newdata'],
+      [legacyUserProfilesDir(dir), 'profile', 'middata'],
+      [legacyUserRolesDir(dir), 'role', 'olddata'],
+    ] as const) {
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(home, `${name}.json`), JSON.stringify({ [key]: name, charter: 'c' }));
+    }
+    const names = listProfileNames(dir);
+    expect(names).toContain('newdata');
+    expect(names).toContain('middata');
+    expect(names).toContain('olddata');
   });
 
   it('lists only built-ins when there is no user dir at all', () => {
@@ -260,7 +312,7 @@ describe('round-trip: built-ins render the identical workspace', () => {
       expect(settings).toEqual(expected.settings);
 
       writeProvisionManifest(dir, {
-        profile: profile.profile,
+        profile: profile.toolkit,
         harness: 'claude-code',
         mcpServers: profile.tools.mcp_servers.map((s) => s.name),
         permissions: added,
@@ -277,7 +329,7 @@ describe('round-trip: built-ins render the identical workspace', () => {
       expect(compat).toEqual(expected.manifest);
 
       // And the typed reader surfaces the new field.
-      expect(readProvisionManifest(dir)?.profile).toBe(profile.profile);
+      expect(readProvisionManifest(dir)?.profile).toBe(profile.toolkit);
     });
   }
 
@@ -294,14 +346,14 @@ describe('round-trip: built-ins render the identical workspace', () => {
     const dirLegacy = mkdtempSync(join(tmpdir(), 'musterd-legacy-'));
     const dirNew = mkdtempSync(join(tmpdir(), 'musterd-new-'));
     mkdirSync(legacyUserRolesDir(dirLegacy), { recursive: true });
-    mkdirSync(userProfilesDir(dirNew), { recursive: true });
+    mkdirSync(userToolkitsDir(dirNew), { recursive: true });
     writeFileSync(
       join(legacyUserRolesDir(dirLegacy), 'data.json'),
       JSON.stringify({ role: 'data', ...raw }),
     );
     writeFileSync(
-      join(userProfilesDir(dirNew), 'data.json'),
-      JSON.stringify({ profile: 'data', ...raw }),
+      join(userToolkitsDir(dirNew), 'data.json'),
+      JSON.stringify({ toolkit: 'data', ...raw }),
     );
     const fromLegacy = loadProfile(dirLegacy, 'data');
     const fromNew = loadProfile(dirNew, 'data');

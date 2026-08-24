@@ -182,3 +182,38 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   three ADR 261 tests failed with no mention of an import. Lint did not see it; `tsc` did. A
   catch that swallows a `ReferenceError` alongside the absence it is meant to tolerate will do
   this again.
+
+- **2026-08-24 (toolkit file keys, stanley, lane 01M0K5YTZ2).** The file-key half the toolkit split
+  deferred. Canonical toolkits are now `toolkit`-keyed JSON in `.musterd/toolkits/`, and that is
+  the only shape written. Both older shapes still load — `profile`-keyed in `.musterd/profiles/`
+  (ADR 272) and `role`-keyed in `.musterd/roles/` (pre-272) — so this is tier 2 as specified:
+  legacy accepted on read, no flag day, no migration command. A file carrying more than one name
+  key resolves on the newest it has, so a hand-merged file never silently adopts the oldest name.
+
+  **The lane's own premise was wrong, and measuring first is what caught it.** The lane read
+  "profile keys become toolkit keys in **seat and roster files**" and named
+  `protocol/src/seatfile.ts`, `server/src/projection/*` and `cli/src/roster.ts` as its surface.
+  Those files contain **no `profile` key at all** — their `role`/`roles` is the roster role, the
+  one word ADR 296 §1 *keeps*. Renaming anything there would have corrupted the roster vocabulary
+  in the name of fixing it. The real file keys were three, all in the workspace half: the toolkit
+  JSON schema, the built-in seed library, and `provisioned.json`.
+
+  **`provisioned.json` is deliberately NOT in this increment,** and the reason is a constraint
+  worth writing down: `WorktreeProvisioningSchema` is `.strict()`, and its own contract says an
+  unknown field is `invalid`, never `legacy`. So the dual-write that carried the ADR 272 rename in
+  the v1 manifest (`{ role, profile, ... }`, safe because that reader strips unknown keys) is
+  **impossible** under a strict schema — an older musterd meeting a `toolkit` key would report the
+  file broken rather than old. Renaming that field needs a version-3 bump with v2 recognized as
+  `legacy` and converted by `musterd harness configure`, which is exactly the path v1→v2 already
+  walks. That is a separate increment, and it should not be started while the v1→v2 migration is
+  still live.
+
+  Also fixed here: `docs/architecture/04-cli.md` still documented `musterd role` doing the
+  workspace-equipment job it stopped doing in the split three days earlier — the doc described
+  behaviour that no longer existed, under the exact word this ADR is disambiguating. Two hand-rolled
+  copies of the home list (in `role.ts` and the Claude Code adapter) were replaced by one exported
+  `toolkitHomes()`, so a fourth home cannot be added to the loader and missed by a caller.
+
+  Not renamed, and named here so it is not mistaken for an oversight: `musterd agent --profile` is
+  a CLI token rather than a file key, and `Profile`/`parseProfile`/`loadProfile` are internal
+  identifiers — tier 3, opportunistic.
