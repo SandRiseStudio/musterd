@@ -106,8 +106,8 @@ function writeProvisioning(desired: string[]) {
   writeFileSync(
     join(cwd, BINDING_DIR, 'provisioned.json'),
     JSON.stringify({
-      version: 2,
-      profile: '',
+      version: 3,
+      toolkit: '',
       desired,
       contributions: {},
       provisionedAt: '2026-08-19T00:00:00.000Z',

@@ -363,8 +363,8 @@ describe('multi-harness worktree selection (ADR 281/282/286 acceptance)', () => 
     writeFileSync(
       join(ws, '.musterd', 'provisioned.json'),
       JSON.stringify({
-        version: 2,
-        profile: '',
+        version: 3,
+        toolkit: '',
         desired: ['cursor'],
         contributions: {},
         provisionedAt: '2026-08-19T00:00:00.000Z',

@@ -6,6 +6,7 @@ import {
   LocalStateIssueSchema,
   ReconcileJournalSchema,
   WorktreeProvisioningSchema,
+  WorktreeProvisioningV2Schema,
 } from './provisioning.js';
 
 describe('HarnessIdSchema', () => {
@@ -25,10 +26,10 @@ describe('HarnessIdSchema', () => {
   });
 });
 
-describe('WorktreeProvisioningSchema (version 2)', () => {
+describe('WorktreeProvisioningSchema (version 3)', () => {
   const provisioning = {
-    version: 2 as const,
-    profile: 'backend',
+    version: 3 as const,
+    toolkit: 'backend',
     desired: ['claude-code', 'musterd'],
     contributions: {
       'claude-code': ['folder:/w/a:hooks', 'repo:/r:musterd-mcp'],
@@ -37,12 +38,12 @@ describe('WorktreeProvisioningSchema (version 2)', () => {
     provisionedAt: '2026-08-19T12:00:00.000Z',
   };
 
-  it('parses the exact version-2 fixture, including an empty generalist role', () => {
+  it('parses the exact version-3 fixture, including an empty generalist toolkit', () => {
     expect(WorktreeProvisioningSchema.parse(provisioning).desired).toEqual([
       'claude-code',
       'musterd',
     ]);
-    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, profile: '' }).success).toBe(
+    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, toolkit: '' }).success).toBe(
       true,
     );
     expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, desired: [] }).success).toBe(
@@ -66,10 +67,22 @@ describe('WorktreeProvisioningSchema (version 2)', () => {
     ).toBe(false);
   });
 
-  it('rejects version 1, unknown keys, and malformed values', () => {
+  it('rejects versions 1 and 2, unknown keys, and malformed values', () => {
     expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, version: 1 }).success).toBe(
       false,
     );
+    expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, version: 2 }).success).toBe(
+      false,
+    );
+    // The v2 spelling of the field is not silently accepted at v3 — that is the legacy path's job.
+    expect(
+      WorktreeProvisioningSchema.safeParse({
+        ...provisioning,
+        version: 2,
+        profile: 'backend',
+        toolkit: undefined,
+      }).success,
+    ).toBe(false);
     expect(WorktreeProvisioningSchema.safeParse({ ...provisioning, harness: 'x' }).success).toBe(
       false,
     );
@@ -79,6 +92,29 @@ describe('WorktreeProvisioningSchema (version 2)', () => {
     expect(
       WorktreeProvisioningSchema.safeParse({ ...provisioning, provisionedAt: '' }).success,
     ).toBe(false);
+  });
+});
+
+describe('WorktreeProvisioningV2Schema (frozen legacy shape)', () => {
+  const v2 = {
+    version: 2 as const,
+    profile: 'backend',
+    desired: ['claude-code', 'musterd'],
+    contributions: { 'claude-code': ['folder:/w/a:hooks'] },
+    provisionedAt: '2026-08-19T12:00:00.000Z',
+  };
+
+  it('recognizes the exact version-2 shape, empty generalist profile included', () => {
+    expect(WorktreeProvisioningV2Schema.safeParse(v2).success).toBe(true);
+    expect(WorktreeProvisioningV2Schema.safeParse({ ...v2, profile: '' }).success).toBe(true);
+  });
+
+  it('stays strict — an unknown key or the v3 spelling is not v2 (legacy never absorbs invalid)', () => {
+    expect(WorktreeProvisioningV2Schema.safeParse({ ...v2, extra: 1 }).success).toBe(false);
+    const { profile: _profile, ...rest } = v2;
+    expect(WorktreeProvisioningV2Schema.safeParse({ ...rest, toolkit: 'backend' }).success).toBe(
+      false,
+    );
   });
 });
 

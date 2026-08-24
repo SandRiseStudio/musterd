@@ -390,8 +390,8 @@ describe('inspectProvisioning', () => {
       writeFileSync(
         join(dir, '.musterd', 'provisioned.json'),
         JSON.stringify({
-          version: 2,
-          profile: '',
+          version: 3,
+          toolkit: '',
           desired: ['codex'],
           contributions: {},
           provisionedAt: '2026-08-19T00:00:00.000Z',

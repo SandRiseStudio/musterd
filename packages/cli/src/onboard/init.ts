@@ -742,10 +742,10 @@ export async function runInit(): Promise<number> {
   // honest intent that the next `musterd wire` resumes. Reconciliation never rewrites desire.
   try {
     saveProvisioning(process.cwd(), {
-      version: 2,
-      // The provisioned PROFILE (workspace configuration), never the roster label — the two are
+      version: 3,
+      // The provisioned TOOLKIT (workspace equipment), never the roster label — the two are
       // independent since ADR 272 inc 2.
-      profile: template?.toolkit ?? '',
+      toolkit: template?.toolkit ?? '',
       desired,
       contributions: {},
       provisionedAt: new Date().toISOString(),

@@ -139,13 +139,32 @@ function writeV1Identity(): void {
 function writeV2Provisioning(
   desired: string[],
   contributions: Record<string, string[]> = {},
+  profile = '',
 ): void {
   mkdirSync(join(cwd, '.musterd'), { recursive: true });
   writeFileSync(
     join(cwd, '.musterd', 'provisioned.json'),
     JSON.stringify({
       version: 2,
-      profile: '',
+      profile,
+      desired,
+      contributions,
+      provisionedAt: '2026-08-19T00:00:00.000Z',
+    }),
+  );
+}
+
+function writeV3Provisioning(
+  desired: string[],
+  contributions: Record<string, string[]> = {},
+  toolkit = '',
+): void {
+  mkdirSync(join(cwd, '.musterd'), { recursive: true });
+  writeFileSync(
+    join(cwd, '.musterd', 'provisioned.json'),
+    JSON.stringify({
+      version: 3,
+      toolkit,
       desired,
       contributions,
       provisionedAt: '2026-08-19T00:00:00.000Z',
@@ -184,7 +203,7 @@ describe('musterd harness configure', () => {
 
   it('an empty set is valid — everything owned is released', async () => {
     writeV2Identity();
-    writeV2Provisioning([]);
+    writeV3Provisioning([]);
     const a = fakeAdapter('fake-a');
     const { code, out } = await run(['configure'], {
       ctx: ctxOf(),
@@ -195,7 +214,7 @@ describe('musterd harness configure', () => {
     expect(out).toContain('desired harnesses: (none)');
   });
 
-  it('converts a recognized version-1 worktree only after confirmation, retaining role as profile', async () => {
+  it('converts a recognized version-1 worktree only after confirmation, retaining role as toolkit', async () => {
     writeV1Identity();
     const a = fakeAdapter('fake-a');
     const { code, out } = await run(['configure'], {
@@ -205,7 +224,7 @@ describe('musterd harness configure', () => {
       confirm: true,
     });
     expect(code).toBe(0);
-    expect(out).toContain('converted the version-1 identity/manifest to version 2');
+    expect(out).toContain('converted the legacy identity/manifest to the current format');
     const spec = JSON.parse(readFileSync(join(cwd, '.musterd', 'workspace.json'), 'utf8'));
     expect(spec.version).toBe(2);
     expect(spec.surface).toBeUndefined();
@@ -214,12 +233,49 @@ describe('musterd harness configure', () => {
     expect(binding.surface).toBeUndefined();
     expect(binding.model).toBe('claude-fable-5'); // runtime fields carried through
     const prov = loadProvisioning(cwd);
-    expect(prov.kind === 'valid' && prov.value.profile).toBe('backend');
+    expect(prov.kind === 'valid' && prov.value.toolkit).toBe('backend');
     // v1 name-only records never became evidence: the recorded contribution is the FRESH one the
     // reconciler just created and journaled (the physical fragment was re-observed absent, then
     // written) — not a carried-over v1 mcpServers list.
     expect(prov.kind === 'valid' && Object.keys(prov.value.contributions)).toEqual(['fake-a']);
     expect(a.state.applied[0]?.kind).toBe('write');
+  });
+
+  it('converts a version-2 manifest only after confirmation, carrying profile across as toolkit (ADR 296)', async () => {
+    writeV2Identity();
+    writeV2Provisioning(['fake-a'], {}, 'backend');
+    const a = fakeAdapter('fake-a');
+    const { code, out } = await run(['configure'], {
+      ctx: ctxOf(),
+      registry: [a],
+      select: ['fake-a'],
+      confirm: true,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('converted the legacy identity/manifest to the current format');
+    const raw = JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'));
+    expect(raw.version).toBe(3);
+    expect(raw.toolkit).toBe('backend');
+    expect(raw.profile).toBeUndefined();
+    const prov = loadProvisioning(cwd);
+    expect(prov.kind === 'valid' && prov.value.toolkit).toBe('backend');
+  });
+
+  it('a declined v2-manifest conversion writes NOTHING and exits 0', async () => {
+    writeV2Identity();
+    writeV2Provisioning(['fake-a'], {}, 'backend');
+    const before = readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8');
+    const a = fakeAdapter('fake-a');
+    const { code, out } = await run(['configure'], {
+      ctx: ctxOf(),
+      registry: [a],
+      select: ['fake-a'],
+      confirm: false,
+    });
+    expect(code).toBe(0);
+    expect(out).toContain('no changes made');
+    expect(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8')).toBe(before);
+    expect(a.state.applied).toEqual([]);
   });
 
   it('a declined conversion writes NOTHING and exits 0', async () => {
@@ -280,9 +336,22 @@ describe('musterd harness status', () => {
     expect(out).toContain('pre-ADR-281');
   });
 
-  it('exit 0 only when every desired fragment is usable — a needed create exits 1', async () => {
+  it('reports a version-2 manifest as legacy WITHOUT misnaming it a version-1 identity', async () => {
     writeV2Identity();
     writeV2Provisioning(['fake-a']);
+    const { code, out } = await run(['status'], {
+      ctx: ctxOf(),
+      registry: [fakeAdapter('fake-a')],
+    });
+    expect(code).toBe(1);
+    expect(out).toContain('older provisioning manifest');
+    expect(out).toContain('musterd harness configure');
+    expect(out).not.toContain('pre-ADR-281');
+  });
+
+  it('exit 0 only when every desired fragment is usable — a needed create exits 1', async () => {
+    writeV2Identity();
+    writeV3Provisioning(['fake-a']);
     const a = fakeAdapter('fake-a'); // fragment absent → needs wire
     const first = await run(['status'], { ctx: ctxOf(), registry: [a] });
     expect(first.code).toBe(1);
@@ -298,7 +367,7 @@ describe('musterd harness status', () => {
 
   it('pending unavailability exits zero — the selection survives the harness not being installed', async () => {
     writeV2Identity();
-    writeV2Provisioning(['fake-a']);
+    writeV3Provisioning(['fake-a']);
     const a = fakeAdapter('fake-a', { available: false });
     const { code, out } = await run(['status'], { ctx: ctxOf(), registry: [a] });
     expect(code).toBe(0);
@@ -307,7 +376,7 @@ describe('musterd harness status', () => {
 
   it('a pre-ADR-286 registration reports its repair and exits 1', async () => {
     writeV2Identity();
-    writeV2Provisioning(['fake-a']);
+    writeV3Provisioning(['fake-a']);
     const a = fakeAdapter('fake-a', {
       observed: { state: 'legacy-launch-marker', fingerprint: 'l'.repeat(64) },
     });
@@ -321,7 +390,7 @@ describe('musterd harness status', () => {
     // fake-a was configured, then deselected — the ledger still names this worktree.
     const a = fakeAdapter('fake-a');
     await run(['configure'], { ctx: ctxOf(), registry: [a], select: ['fake-a'] });
-    writeV2Provisioning(
+    writeV3Provisioning(
       [],
       JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8')).contributions,
     );
@@ -332,7 +401,7 @@ describe('musterd harness status', () => {
 
   it('--json exposes the same stable fields', async () => {
     writeV2Identity();
-    writeV2Provisioning(['fake-a']);
+    writeV3Provisioning(['fake-a']);
     const a = fakeAdapter('fake-a');
     const { code, out } = await run(['status', '--json'], {
       ctx: ctxOf(),
@@ -364,7 +433,7 @@ describe('musterd harness configure --select --yes (the headless form)', () => {
       // No deps.select / deps.confirm: the parsed flags drive it, as a service agent would.
     });
     expect(code).toBe(0);
-    expect(out).toContain('converted the version-1 identity/manifest to version 2');
+    expect(out).toContain('converted the legacy identity/manifest to the current format');
     expect(JSON.parse(readFileSync(join(cwd, '.musterd', 'workspace.json'), 'utf8')).version).toBe(
       2,
     );

@@ -767,7 +767,7 @@ describe('runInit — add-agent happy path', () => {
     const manifest = JSON.parse(
       readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'),
     ) as { version: number; desired: string[] };
-    expect(manifest.version).toBe(2);
+    expect(manifest.version).toBe(3);
     expect(manifest.desired).toEqual(['claude-code']);
     const { saveBinding } = await import('../config.js');
     const binding = vi.mocked(saveBinding).mock.calls[0]![1] as Record<string, unknown>;
@@ -840,8 +840,8 @@ describe('runInit — add-agent happy path', () => {
     // the v2 manifest records the provisioned PROFILE (not the roster label) AND the profile's
     // servers for exact removal
     const manifest = JSON.parse(readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'));
-    expect(manifest.version).toBe(2);
-    expect(manifest.profile).toBe('backend');
+    expect(manifest.version).toBe(3);
+    expect(manifest.toolkit).toBe('backend');
     expect(manifest.contributions['role-tools']).toContain('role-server claude-code supabase');
     // and the profile's charter no longer lands in the primer — charter is the role layer's (ADR 272)
     expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).not.toContain('## Your charter');

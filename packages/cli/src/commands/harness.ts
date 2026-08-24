@@ -6,6 +6,7 @@ import {
   WORKSPACE_SPEC_FILE,
   BindingSchema,
   WorkspaceSpecSchema,
+  WorktreeProvisioningV2Schema,
   type Binding,
   type WorkspaceSpec,
   type WorktreeProvisioning,
@@ -94,8 +95,15 @@ const LEGACY_LINE =
 async function statusCommand(parsed: Parsed, deps?: HarnessDeps): Promise<number> {
   const out = deps?.out ?? ((line: string) => process.stdout.write(`${line}\n`));
   const { ctx, workspace, provisioning } = localState(deps);
-  if (workspace.kind === 'legacy' || provisioning.kind === 'legacy') {
+  if (workspace.kind === 'legacy') {
     out(`${theme.err('✗')} ${LEGACY_LINE}`);
+    return 1;
+  }
+  if (provisioning.kind === 'legacy') {
+    out(
+      `${theme.err('✗')} this worktree carries an older provisioning manifest — run ` +
+        '`musterd harness configure` to convert it',
+    );
     return 1;
   }
   if (workspace.kind === 'invalid' || provisioning.kind === 'invalid') {
@@ -236,12 +244,14 @@ async function configureCommand(parsed: Parsed, deps?: HarnessDeps): Promise<num
   const availability = new Map<string, { available: boolean; detail?: string }>();
   for (const adapter of registry) availability.set(adapter.id, await adapter.availability(ctx));
 
-  const converting = workspace.kind === 'legacy' || binding.kind === 'legacy';
+  const converting =
+    workspace.kind === 'legacy' || binding.kind === 'legacy' || provisioning.kind === 'legacy';
   const current =
     provisioning.kind === 'valid'
       ? provisioning.value.desired
-      : // Legacy manifest: preselect ONLY the corresponding former harness as a suggestion.
-        legacySuggestion(ctx);
+      : // Legacy manifest: preselect the recorded selection (v2 carries `desired`; a v1 manifest
+        // suggests only its single former harness).
+        legacySuggestion(ctx, provisioning);
 
   // The headless form (`--select a,b --yes`): a human naming the complete set on the command line
   // IS the ADR 286 confirmation — it exists so service agents and fleet scripts have a
@@ -277,7 +287,7 @@ async function configureCommand(parsed: Parsed, deps?: HarnessDeps): Promise<num
       (parsed.flags['yes'] === true
         ? true
         : await confirmPrompt(
-            `Convert this pre-ADR-281 worktree and set its complete harness set to ` +
+            `Convert this worktree's legacy musterd files and set its complete harness set to ` +
               `${desired.length > 0 ? desired.join(', ') : '(none)'}?`,
           ));
     if (!confirmed) {
@@ -295,7 +305,7 @@ async function configureCommand(parsed: Parsed, deps?: HarnessDeps): Promise<num
     ...(deps?.registry ? { registry: deps.registry } : {}),
   });
   for (const r of report.results) out(renderResult(r));
-  if (converted) out(pc.dim('converted the version-1 identity/manifest to version 2'));
+  if (converted) out(pc.dim('converted the legacy identity/manifest to the current format'));
   if (report.ok) out(`${theme.ok('✓')} worktree configured — musterd wire repairs it any time`);
   return report.ok ? 0 : 1;
 }
@@ -315,8 +325,16 @@ function renderResult(r: ReconcileResult): string {
   return `  ${label}${verdictText}`;
 }
 
-/** The v1 manifest's harness (or nothing) — the ONLY preselection a legacy folder gets. */
-function legacySuggestion(ctx: HarnessContext): string[] {
+/** A legacy folder's preselection: the v2 manifest's own `desired` set, else the v1 manifest's
+ *  single harness (or nothing). */
+function legacySuggestion(
+  ctx: HarnessContext,
+  provisioning: ReturnType<typeof loadProvisioning>,
+): string[] {
+  if (provisioning.kind === 'legacy') {
+    const v2 = WorktreeProvisioningV2Schema.safeParse(provisioning.value);
+    if (v2.success) return v2.data.desired;
+  }
   const manifest = readProvisionManifest(ctx.worktreeRoot);
   return manifest?.harness ? [manifest.harness] : [];
 }
@@ -351,10 +369,11 @@ async function confirmPrompt(message: string): Promise<boolean> {
 }
 
 /**
- * Persist the strict v2 identity + manifest for the confirmed selection. Converts a RECOGNIZED
- * legacy identity (drop `surface`, add `version: 2`, keep the fields the v2 schemas carry) and a
- * legacy v1 manifest (retain `role` as `profile` — name-only v1 records never become ownership
- * evidence). Returns whether a conversion happened.
+ * Persist the strict identity + manifest for the confirmed selection (identity at v2, provisioning
+ * at v3). Converts the RECOGNIZED legacy shapes: a v1 identity (drop `surface`, add `version: 2`,
+ * keep the fields the v2 schemas carry), a v2 manifest (carry `profile` as `toolkit`, keep its
+ * contributions), and a v1 manifest (retain `role` as `toolkit` and nothing else — name-only v1
+ * records never become ownership evidence). Returns whether a conversion happened.
  */
 function saveLocalState(
   ctx: HarnessContext,
@@ -408,15 +427,27 @@ function saveLocalState(
     converted = true;
   }
 
-  const priorProfile =
+  const legacyV2 =
+    state.provisioning.kind === 'legacy'
+      ? WorktreeProvisioningV2Schema.safeParse(state.provisioning.value)
+      : null;
+  const priorToolkit =
     state.provisioning.kind === 'valid'
-      ? state.provisioning.value.profile
-      : (readProvisionManifest(worktreeRoot)?.profile ?? '');
+      ? state.provisioning.value.toolkit
+      : legacyV2?.success
+        ? legacyV2.data.profile
+        : (readProvisionManifest(worktreeRoot)?.profile ?? '');
+  // A legacy v2 manifest's contributions ARE evidence — they were recorded by the same reconciler
+  // under the same ledger rules; only the v1 name-only records are discarded.
   const contributions =
-    state.provisioning.kind === 'valid' ? state.provisioning.value.contributions : {};
+    state.provisioning.kind === 'valid'
+      ? state.provisioning.value.contributions
+      : legacyV2?.success
+        ? legacyV2.data.contributions
+        : {};
   const provisioning: WorktreeProvisioning = {
-    version: 2,
-    profile: priorProfile,
+    version: 3,
+    toolkit: priorToolkit,
     desired,
     contributions,
     provisionedAt: new Date(clock.now()).toISOString(),

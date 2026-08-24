@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   BINDING_DIR,
   WorktreeProvisioningSchema,
+  WorktreeProvisioningV2Schema,
   type LocalLoad,
   type WorktreeProvisioning,
 } from '@musterd/protocol';
@@ -129,21 +130,25 @@ export function writeProvisionManifest(
 }
 
 /**
- * Classify `.musterd/provisioned.json` as the strict version-2 {@link WorktreeProvisioning}
- * (ADR 281). A well-formed version-1 {@link ProvisionManifestSchema} manifest is `legacy` — only a
- * confirmed `musterd harness configure` converts it, retaining the v1 `role` value (as v2 `profile`) and nothing else: the v1
- * name-only records cannot prove current contents, so they never become v2 ownership evidence.
+ * Classify `.musterd/provisioned.json` as the strict version-3 {@link WorktreeProvisioning}
+ * (ADR 281/296). Two RECOGNIZED previous shapes are `legacy`, converted only by a confirmed
+ * `musterd harness configure`: a version-2 file (its `profile` value carries across as v3
+ * `toolkit`), and a version-1 {@link ProvisionManifestSchema} manifest (its `role` value carries,
+ * and nothing else — the v1 name-only records cannot prove current contents, so they never become
+ * ownership evidence).
  */
 export function loadProvisioning(
   dir: string,
   fs: FsSeam = nodeFs,
 ): LocalLoad<WorktreeProvisioning> {
   return readLocalFile(fs, manifestPath(dir), WorktreeProvisioningSchema, {
-    legacy: (value) => ProvisionManifestSchema.safeParse(value).success,
+    legacy: (value) =>
+      WorktreeProvisioningV2Schema.safeParse(value).success ||
+      ProvisionManifestSchema.safeParse(value).success,
   });
 }
 
-/** Validate + atomically publish the strict v2 provisioning manifest (ADR 282 writer boundary). */
+/** Validate + atomically publish the strict v3 provisioning manifest (ADR 282 writer boundary). */
 export function saveProvisioning(
   dir: string,
   provisioning: WorktreeProvisioning,
