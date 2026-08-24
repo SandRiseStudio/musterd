@@ -7,7 +7,7 @@
   `no_candidate` close reason this enriches — PR #450/#453 are the immediate ancestors),
   [ADR 101](101-model-as-a-variable.md) / [ADR 158](158-model-attestation-truth.md) (attestation:
   observed-over-declared, `unknown` is legal and never blocks),
-  [ADR 056](056-research-as-first-class-practice.md) (correlated models make correlated mistakes — the
+  [ADR 314](314-correlated-models-correlated-mistakes.md) (correlated models make correlated mistakes — the
   family boundary is the decorrelation line), [ADR 145](145-human-role-refounded.md) (humans are
   peers with an authority overlay, not a diversity ingredient).
 
@@ -30,7 +30,7 @@ human reading the roster (by eye).
 ## Problem
 
 "No agent on this team runs outside the family the others use" is a fact the flow needs — it decides
-whether cross-family review is possible, whether ADR 056 conclusions drawn this week were drawn under
+whether cross-family review is possible, whether ADR 314 conclusions drawn this week were drawn under
 monoculture, and whether the remedy for an empty reviewer pool is to wake an enrolled seat or to
 enroll one. Nothing derived it, so every consumer either recomputed a slice of it or guessed.
 
@@ -46,7 +46,7 @@ one.
 - **Family comes from live attestation only, never the seat name.** The ADR 101/158 ladder is the
   sole source; a seat's name is a label someone chose optimistically.
 - **A live agent attesting `unknown` counts as `unattested`, not in the denominator.** It cannot
-  prove diversity, and a wrong guess poisons the posture the way a wrong attestation poisons ADR 056
+  prove diversity, and a wrong guess poisons the posture the way a wrong attestation poisons ADR 314
   conclusions. This is the picker's per-seat rule, applied to the aggregate.
 - **Humans ride beside the posture (`humans_live`), never inside it.** Human review is its own
   requirement class — the ADR 169 risk route (user-facing, expensive, destructive, prod-touching

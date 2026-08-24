@@ -67,7 +67,7 @@ all (ADR 225's own Context, since marked provisional), so a promise-derived dead
 
 `recordLaneClose` derives `verified = done && closer.name !== ownerAtClose`. A system closer satisfies
 that predicate trivially, so **the naive implementation would record every swept lane as
-`counterpart_confirm`** — a genuine cross-seat review that never happened, feeding the ADR 056
+`counterpart_confirm`** — a genuine cross-seat review that never happened, feeding the ADR 314
 diversity conclusions that read off exactly this field.
 
 So the closer gains an explicit `kind: 'system'`, and verified-ness requires a non-system closer.

@@ -6,7 +6,7 @@
 - Relates to: ADR 158 (observed over declared — the ladder this adopts), ADR 101 (model as a
   variable), ADR 119 (ambient HTTP re-attest), ADR 121 (a human shell must not stamp a model),
   ADR 187 (grading speaks only about a session running now), ADR 188 (the graded review ladder that
-  consumes this), ADR 010 (the reclaim grace whose interaction causes it), ADR 056 (the diversity
+  consumes this), ADR 010 (the reclaim grace whose interaction causes it), ADR 314 (the diversity
   conclusions downstream)
 
 ## Context
@@ -55,7 +55,7 @@ de-attestation (new: null) proves nothing`. Across the whole audit table at the 
 `occupancy.model_attested` rows, zero with `new: null`.** The row was designed for and never emitted.
 
 Three consumers were silently wrong for as long as this ran: ADR 188 routing (the eligible pool
-changed with no recorded cause), ADR 056 diversity conclusions (a review episode's candidate set was
+changed with no recorded cause), ADR 314 diversity conclusions (a review episode's candidate set was
 smaller than the roster suggests, with no artefact saying why), and ADR 234's acceptance measurements
 (a lane finding no candidate looks like a routing outcome when it was an attestation gap). This is
 the instrument-vs-system confusion in its purest form: `unknown` reads as a fact about the seat while
@@ -180,7 +180,7 @@ rows are deleted on detach, so the 17:47 control exists only because it was capt
 investigation. A comparison of this kind has to be taken before the fix ships or not at all.
 
 **Experiment.** None. An arm without the fix is an arm where the review pool silently shrinks and no
-artefact records it, which corrupts the ADR 056 diversity conclusions at the source — the same reason
+artefact records it, which corrupts the ADR 314 diversity conclusions at the source — the same reason
 ADR 241 declined an arm. The discriminating evidence was gathered before the change instead: the live
 DB read that separated the ambient path from the claim path by the null-epoch fingerprint, and the
 binding timestamp that proved the attestation was available twelve seconds before it was dropped.

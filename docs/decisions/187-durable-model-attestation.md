@@ -11,7 +11,7 @@
   further, to the seat), [ADR 172](172-model-family-posture.md) (the posture and `wake_pool` this
   reshapes), [ADR 169](169-two-stage-close.md) (the review pick whose candidate set this is about),
   [ADR 179](179-board-triggered-work-order-wakes.md) (the review loop that would spend on a wake),
-  [ADR 056](056-research-as-first-class-practice.md) (why a false diversity claim is worse than none),
+  [ADR 314](314-correlated-models-correlated-mistakes.md) (why a false diversity claim is worse than none),
   [ADR 101](101-model-as-a-variable.md) (the attestation itself), [ADR 131](131-harness-residency-wake-ledger-host.md)
   (what a wake costs).
 
@@ -113,7 +113,7 @@ and the durable map is unreachable from it.
 This is the load-bearing half of the design. A live seat whose current occupancy attested nothing
 must read `unknown` and stay ineligible. If it fell back to what it attested last week, a stale
 memory could certify a live review as cross-family — and a review whose diversity claim is false is
-worse than no review at all (ADR 056), because the two-stage close would then report a catch it did
+worse than no review at all (ADR 314), because the two-stage close would then report a catch it did
 not make. The two questions are kept in separate functions so the mistake cannot be made by
 forgetting an argument: "what is this seat running now" reads presence; "what would waking this idle
 seat bring" reads the durable record.

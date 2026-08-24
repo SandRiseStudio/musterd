@@ -42,7 +42,7 @@ Two hard constraints were settled before this ADR and are not re-litigated
 
 One founder decision, made at design time for this ADR, extends §6: **the reviewer must come from
 a different model _family_ than the worker.** An Opus 5 worker's lane cannot be confirmed by any
-`claude-*` seat. The reasoning is ADR 056's: correlated models make correlated mistakes, so a
+`claude-*` seat. The reasoning is [ADR 314](314-correlated-models-correlated-mistakes.md)'s: correlated models make correlated mistakes, so a
 same-family review re-runs the worker's own blind spots and attests little. The observed model
 attestation ADR 158 built is exactly the fact this check needs — and this ADR is its first
 consumer beyond the doctor.
