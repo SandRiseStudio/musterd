@@ -82,6 +82,12 @@ const ROUTES = arg('routes', '')
       '/roadmap',
       '/docs',
       '/docs/getting-started',
+      // /docs/spec is NOT a redundant second prose page: it is the only route with tables, so the
+      // `.prose th/td` colours ship unmeasured without it. "One representative per template" holds
+      // only while every template's elements appear on the representative, and on 2026-08-24 the
+      // table rules broke that (miley). Add a route here whenever a rule paints something no
+      // listed route renders.
+      '/docs/spec',
       '/blog',
       '/blog/launch',
       '/office-preview',

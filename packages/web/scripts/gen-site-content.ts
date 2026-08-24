@@ -26,12 +26,31 @@ export function parsePostFilename(name: string): { slug: string; date: string } 
   return m ? { date: m[1]!, slug: m[2]! } : null;
 }
 
+/**
+ * Wide content scrolls inside its own box, never the body. The spec's tables are wider than a
+ * phone, and Prose.css had no `table` rule at all, so on 2026-08-24 /docs/spec measured a
+ * scrollWidth of 686 against a 375px viewport — the whole document slid sideways. Found by
+ * opening the page; the contrast sweep and every curl had been green on it for three days.
+ *
+ * The wrapper rather than `display:block` on the table itself: that would fix the overflow and
+ * silently drop the table's semantics, which is the one thing a spec's tables need to keep.
+ * `tabindex="0"` because a scroll box no keyboard can reach is a WCAG trap, and `role="region"`
+ * with a name so that focus stop announces itself instead of arriving as a mystery.
+ */
+function wrapTables(html: string): string {
+  return html.replace(
+    /<table>[\s\S]*?<\/table>/g,
+    (table) =>
+      `<div class="prose__scroll" role="region" aria-label="Table" tabindex="0">${table}</div>`,
+  );
+}
+
 export function renderPage(md: string): { title: string; html: string } {
   const m = /^#\s+(.+)$/m.exec(md);
   if (!m) throw new Error('page has no # heading to use as title');
   const title = m[1]!.trim();
   const html = (marked.parse(md.replace(m[0], ''), { async: false }) as string).trim();
-  return { title, html };
+  return { title, html: wrapTables(html) };
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

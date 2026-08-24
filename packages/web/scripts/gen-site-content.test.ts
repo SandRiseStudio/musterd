@@ -41,6 +41,35 @@ describe('excerpt', () => {
   });
 });
 
+describe('renderPage — wide content scrolls in its own box', () => {
+  const TABLE_MD = '# T\n\n| act | meaning |\n| --- | --- |\n| handoff | pass work |\n';
+
+  it('wraps a table in a scroll region, so a phone scrolls the table and not the page', () => {
+    const { html } = renderPage(TABLE_MD);
+    expect(html).toContain('<div class="prose__scroll"');
+    expect(html.indexOf('<div class="prose__scroll"')).toBeLessThan(html.indexOf('<table>'));
+    expect(html).toContain('</table></div>');
+  });
+
+  it('makes that region keyboard-reachable, because a scroll box with no focus is a WCAG trap', () => {
+    const { html } = renderPage(TABLE_MD);
+    expect(html).toContain('tabindex="0"');
+    expect(html).toContain('role="region"');
+  });
+
+  it('leaves the table element itself intact, so it keeps its table semantics', () => {
+    const { html } = renderPage(TABLE_MD);
+    expect(html).toContain('<table>');
+    expect(html).toContain('<th>act</th>');
+    expect(html).not.toContain('display:block');
+  });
+
+  it('leaves a page with no table untouched', () => {
+    const { html } = renderPage('# T\n\nJust a paragraph.');
+    expect(html).not.toContain('prose__scroll');
+  });
+});
+
 describe('renderRoadmap', () => {
   it('emits one section per status, in STATUS_ORDER, each with items', () => {
     const sections = renderRoadmap();
