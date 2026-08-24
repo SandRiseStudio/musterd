@@ -96,7 +96,7 @@ const totalJs = jsSizes.reduce((s, c) => s + c.gzip, 0);
 const totalFont = fonts.reduce((s, f) => s + statSync(f).size, 0);
 
 /*
- * CSS is budgeted per surface, not as one number (ADR 310): musterd.io and the daemon app share
+ * CSS is budgeted per surface, not as one number (ADR 313): musterd.io and the daemon app share
  * this build but not a fate, and one shared ceiling meant a site-only change could be blocked by
  * office bytes (and vice versa — it happened, 2026-08-24, 6 bytes free). Bundles are classified by
  * pre-hash basename against budgets.cssBundles; an unlisted bundle is a FAILURE, not a silent
@@ -190,7 +190,7 @@ for (const chunk of jsSizes) {
 for (const c of cssSizes) {
   if (!c.group) {
     failures.push(
-      `css bundle ${c.file} (basename \`${c.base}\`) is not classified in budgets.cssBundles — a new stylesheet must be assigned to app, site, or shared deliberately (ADR 310), not budgeted by accident`,
+      `css bundle ${c.file} (basename \`${c.base}\`) is not classified in budgets.cssBundles — a new stylesheet must be assigned to app, site, or shared deliberately (ADR 313), not budgeted by accident`,
     );
   }
 }
@@ -205,7 +205,7 @@ for (const group of Object.keys(cssGroupBudget) as CssGroup[]) {
       .join('\n');
     failures.push(
       `${group} CSS gzip ${kb(total)} > budget ${kb(cssGroupBudget[group])}; its bundles:\n${own}\n` +
-        `    → trim this surface's own stylesheets, or raise ${group}CssGzipBytes deliberately (ADR 183/310) — the other surfaces' budgets are not this failure's remedy.`,
+        `    → trim this surface's own stylesheets, or raise ${group}CssGzipBytes deliberately (ADR 183/313) — the other surfaces' budgets are not this failure's remedy.`,
     );
   }
 }

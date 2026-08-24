@@ -1,4 +1,4 @@
-# 310 — The CSS budget splits by surface, and the canvas does not buy the runway
+# 313 — The CSS budget splits by surface, and the canvas does not buy the runway
 
 - Status: accepted
 - Date: 2026-08-24
