@@ -7,9 +7,62 @@ import {
   createLane,
   fetchReport,
   fetchRoster,
+  fetchSeeds,
   isStaleCredential,
   updateLane,
 } from './client';
+
+describe('fetchSeeds', () => {
+  const cfg = { team: 'revive', as: 'watcher', token: 'mscr_watch' };
+  const row = {
+    id: '01SEED00000000000000000000',
+    team: 'revive',
+    relay_id: 'relay-1',
+    source: 'slack',
+    body: 'Try a shared Seed tray',
+    captured_at: 1,
+    slack_user_id: 'U123',
+    submitted_by: 'nick',
+    state: 'open',
+    explorer: null,
+    thread: [],
+    final_brief: null,
+    conclusion: null,
+    linked_lane_id: null,
+    promotion: null,
+    completed_at: null,
+    created_at: 1,
+    updated_at: 1,
+  };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('GETs the authenticated Team projection and parses every Seed', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ seeds: [row] }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(fetchSeeds(cfg)).resolves.toEqual([row]);
+    expect(fetchMock).toHaveBeenCalledWith('/teams/revive/seeds', {
+      headers: { authorization: 'Bearer mscr_watch', 'x-musterd-surface': 'web' },
+    });
+  });
+
+  it('rejects a malformed Seed instead of trusting the daemon body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ seeds: [{ id: 'only-an-id' }] }),
+      })),
+    );
+    await expect(fetchSeeds(cfg)).rejects.toThrow();
+  });
+});
 
 describe('isStaleCredential', () => {
   it('is true for a 401 LiveFetchError (the stale/invalid observer credential the daemon 401s)', () => {

@@ -12,6 +12,7 @@ import {
   LaneResultSchema,
   MemberSummarySchema,
   ReportSchema,
+  SeedListSchema,
   type Report,
   makeEnvelope,
   PROTOCOL_VERSION,
@@ -22,6 +23,7 @@ import {
   type MemberSummary,
   type OpenLane,
   type Request,
+  type Seed,
   type UpdateLane,
   type WorkingHours,
   WorkingHoursSchema,
@@ -145,6 +147,12 @@ export async function fetchHistory(
     `/teams/${encodeURIComponent(cfg.team)}/messages${qs ? `?${qs}` : ''}`,
   );
   return r.messages;
+}
+
+/** Shared Seed projection for the read-only `/live` tray (ADR 314). */
+export async function fetchSeeds(cfg: LiveConfig): Promise<Seed[]> {
+  const raw = await apiGet<unknown>(cfg, `/teams/${encodeURIComponent(cfg.team)}/seeds`);
+  return SeedListSchema.parse(raw).seeds;
 }
 
 /** A fetch error that carries the daemon's HTTP status + error code, so a caller can tell a stale-observer
