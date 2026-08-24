@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { parseRoleFile } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
-import { userProfilesDir } from '../onboard/profile.js';
+import { userToolkitsDir } from '../onboard/profile.js';
 import { roleCommand } from './role.js';
 
 let cwd: string;
@@ -234,7 +234,7 @@ describe('role create in a roster home (registry thin slice)', () => {
     // Round-trips through the daemon's own parser — reconcile will accept it as written.
     expect(() => parseRoleFile(text)).not.toThrow();
     // The legacy profile path must NOT have been written — this is a role, not a toolkit.
-    expect(() => readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8')).toThrow();
+    expect(() => readFileSync(join(userToolkitsDir(cwd), 'qa.json'), 'utf8')).toThrow();
   });
 
   it('instantiates a built-in role template with --from, structural capabilities included', async () => {
@@ -273,8 +273,8 @@ describe('role create in a roster home (registry thin slice)', () => {
   it('keeps the legacy profile scaffold reachable in a roster home via --profile', async () => {
     writeRosterHome();
     expect(await roleCommand(parsed(['create', 'qa'], { profile: true }))).toBe(0);
-    const written = JSON.parse(readFileSync(join(userProfilesDir(cwd), 'qa.json'), 'utf8'));
-    expect(written.profile).toBe('qa');
+    const written = JSON.parse(readFileSync(join(userToolkitsDir(cwd), 'qa.json'), 'utf8'));
+    expect(written.toolkit).toBe('qa');
     expect(() => readFileSync(join(cwd, '.musterd', 'roles', 'qa.toml'), 'utf8')).toThrow();
   });
 
@@ -322,10 +322,10 @@ describe('role is roster-only after the toolkit split (ADR 296)', () => {
   });
 
   it('role show on a name that is only a toolkit points at toolkit show, not renders it', async () => {
-    mkdirSync(userProfilesDir(cwd), { recursive: true });
+    mkdirSync(userToolkitsDir(cwd), { recursive: true });
     writeFileSync(
-      join(userProfilesDir(cwd), 'writer.json'),
-      JSON.stringify({ profile: 'writer', charter: 'writes', tools: {} }),
+      join(userToolkitsDir(cwd), 'writer.json'),
+      JSON.stringify({ toolkit: 'writer', charter: 'writes', tools: {} }),
       'utf8',
     );
     await expect(
@@ -341,7 +341,7 @@ describe('role is roster-only after the toolkit split (ADR 296)', () => {
 
   it('role create --profile still scaffolds a workspace toolkit (quiet alias, no flag day)', async () => {
     expect(await roleCommand(parsed(['create', 'writer'], { profile: true }))).toBe(0);
-    expect(existsSync(join(userProfilesDir(cwd), 'writer.json'))).toBe(true);
+    expect(existsSync(join(userToolkitsDir(cwd), 'writer.json'))).toBe(true);
   });
 
   it('role create in a roster home authors a team role and prints the one-release pointer', async () => {

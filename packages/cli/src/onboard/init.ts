@@ -745,7 +745,7 @@ export async function runInit(): Promise<number> {
       version: 2,
       // The provisioned PROFILE (workspace configuration), never the roster label — the two are
       // independent since ADR 272 inc 2.
-      profile: template?.profile ?? '',
+      profile: template?.toolkit ?? '',
       desired,
       contributions: {},
       provisionedAt: new Date().toISOString(),
@@ -960,7 +960,7 @@ async function waitForPresence(
 
 /**
  * Step 4 — pick the workspace profile *before* the member is minted (ADR 038). Lists the built-in
- * seed library plus any user profiles (`.musterd/profiles/*.json`, legacy `.musterd/roles/*.json`);
+ * seed library plus any user profiles (`.musterd/toolkits/*.json`, legacy `.musterd/profiles/` and `.musterd/roles/`);
  * `generalist` is the default and means "no profile" (returns undefined). For a richer pick the
  * profile is loaded and returned so its tools can be provisioned later (§5a) and its name recorded
  * on the guidance-path manifest. A load failure degrades to no-profile (warn, return undefined) so
@@ -1052,18 +1052,18 @@ async function provisionProfileTools(
 
   const { mcp_servers: servers, permissions } = profile.tools;
   if (servers.length === 0 && !hasPermissions(permissions)) {
-    p.log.info(pc.dim(`${profile.profile} adds no tools — nothing to provision.`));
+    p.log.info(pc.dim(`${profile.toolkit} adds no tools — nothing to provision.`));
     return;
   }
   if (!harness.provision) {
     p.log.warn(
-      `Tool provisioning isn't supported for ${harness.label} yet — skipping ${profile.profile}.`,
+      `Tool provisioning isn't supported for ${harness.label} yet — skipping ${profile.toolkit}.`,
     );
     return;
   }
 
   const sp = p.spinner();
-  sp.start(`Provisioning ${profile.profile} tools into ${harness.label}`);
+  sp.start(`Provisioning ${profile.toolkit} tools into ${harness.label}`);
   try {
     const result = await harness.provision({ servers, permissions }, 'local');
     const permCount =
@@ -1099,7 +1099,7 @@ async function provisionProfileTools(
       ),
     );
   } catch (err) {
-    sp.stop(pc.yellow(`Couldn't provision ${profile.profile} tools: ${(err as Error).message}`));
+    sp.stop(pc.yellow(`Couldn't provision ${profile.toolkit} tools: ${(err as Error).message}`));
   }
 }
 

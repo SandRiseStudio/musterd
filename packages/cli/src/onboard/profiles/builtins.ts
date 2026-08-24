@@ -2,14 +2,14 @@
  * The built-in profile library — a *seed of examples, not a catalog* (ADR 028,
  * provisioning-recipe.md §3; "role templates" pre-ADR-272-rename). musterd ships a small set of
  * archetypes to teach the profile shape and give a one-command start; users author their own in
- * `.musterd/profiles/*.json` (legacy `.musterd/roles/*.json` files still load).
+ * `.musterd/toolkits/*.json` (legacy `.musterd/profiles/` and `.musterd/roles/` files still load).
  *
  * These are expressed in-source as raw data (validated through the same schema as user files by
  * {@link import('../profile.js').parseProfile}) rather than shipped as JSON assets: the package
  * builds with plain `tsc`, which does not copy non-TS files into `dist/`, so file-based built-ins
  * would need a bundler/copy step — a new build dependency we decline (ADR 029). User-authored
- * profiles remain JSON. `role create` round-tripping a built-in into an editable
- * `.musterd/profiles/<name>.json` is the bridge (recipe "Settled vs open").
+ * profiles remain JSON. `musterd toolkit create` round-tripping a built-in into an editable
+ * `.musterd/toolkits/<name>.json` is the bridge (recipe "Settled vs open").
  *
  * Charters stay lens-not-résumé and minimal. MCP entries are *referenced, not owned* — musterd
  * points at ecosystem servers (npx-launched) and never hosts or version-manages them. Secrets are
@@ -20,14 +20,14 @@
  */
 export const BUILTIN_PROFILE_TEMPLATES: Record<string, unknown> = {
   generalist: {
-    profile: 'generalist',
+    toolkit: 'generalist',
     charter:
       'General contributor. Pick up work across the codebase; coordinate through the team acts.',
     // Nothing extra — only the musterd server + this bare charter (ADR 028).
   },
 
   reviewer: {
-    profile: 'reviewer',
+    toolkit: 'reviewer',
     charter: [
       'Review teammates’ changes for correctness and clarity. Read widely; edit narrowly.',
       'status_update when you start and finish a review; resolve the thread once the change lands.',
@@ -44,7 +44,7 @@ export const BUILTIN_PROFILE_TEMPLATES: Record<string, unknown> = {
   },
 
   backend: {
-    profile: 'backend',
+    toolkit: 'backend',
     capacity: 2,
     charter: [
       'Own the server + data layer. Small, tested changes.',
@@ -65,7 +65,7 @@ export const BUILTIN_PROFILE_TEMPLATES: Record<string, unknown> = {
   },
 
   frontend: {
-    profile: 'frontend',
+    toolkit: 'frontend',
     capacity: 2,
     charter: [
       'Own the UI layer. Keep components small and accessible; match the existing design system.',
@@ -91,7 +91,7 @@ export const BUILTIN_PROFILE_TEMPLATES: Record<string, unknown> = {
   // Bash stays allowed but only through read-shaped prefixes; the deny on the edit tools is the
   // profile. (Observer members, ADR 063, are the coordination-layer precedent.)
   'read-only': {
-    profile: 'read-only',
+    toolkit: 'read-only',
     charter: [
       'Read, review, and report — never write. Surface findings through the team acts.',
       'status_update when you start and finish; request_help instead of working around a limit.',
@@ -116,7 +116,7 @@ export const BUILTIN_PROFILE_TEMPLATES: Record<string, unknown> = {
   },
 
   docs: {
-    profile: 'docs',
+    toolkit: 'docs',
     charter: [
       'Own the docs. Keep them accurate and in sync with the code; one fact, one home.',
       'status_update at task start/finish; resolve threads you finish.',

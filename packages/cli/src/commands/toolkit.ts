@@ -6,10 +6,10 @@ import {
   BUILTIN_PROFILES,
   GENERALIST,
   isBuiltin,
-  legacyUserRolesDir,
+  toolkitHomes,
   listProfileNames,
   loadProfile,
-  userProfilesDir,
+  userToolkitsDir,
   type Profile,
 } from '../onboard/profile.js';
 import { theme } from '../render/theme.js';
@@ -36,9 +36,7 @@ export function toolkitCommand(parsed: Parsed): number {
 
 /** Where a name came from: a user file shadowing a built-in is an *override* (loadProfile prefers it). */
 function originOf(dir: string, name: string): 'built-in' | 'override' | 'user' {
-  const userFile =
-    existsSync(join(userProfilesDir(dir), `${name}.json`)) ||
-    existsSync(join(legacyUserRolesDir(dir), `${name}.json`));
+  const userFile = toolkitHomes(dir).some((home) => existsSync(join(home, `${name}.json`)));
   if (!userFile) return 'built-in';
   return isBuiltin(name) ? 'override' : 'user';
 }
@@ -87,7 +85,7 @@ function toolkitShow(parsed: Parsed): number {
   }
   const origin = originOf(process.cwd(), name);
   process.stdout.write(
-    `${theme.accent(toolkit.profile)} ${theme.meta(
+    `${theme.accent(toolkit.toolkit)} ${theme.meta(
       origin === 'override'
         ? '(user file, overrides the built-in)'
         : origin === 'built-in'
@@ -124,7 +122,7 @@ export function toolkitCreate(parsed: Parsed): number {
     );
   }
   const dir = process.cwd();
-  const path = join(userProfilesDir(dir), `${name}.json`);
+  const path = join(userToolkitsDir(dir), `${name}.json`);
   if (existsSync(path) && !parsed.flags['force']) {
     throw new CliError(`${path} already exists — pass --force to overwrite`, 1);
   }
@@ -132,7 +130,7 @@ export function toolkitCreate(parsed: Parsed): number {
   const from = typeof parsed.flags['from'] === 'string' ? parsed.flags['from'] : undefined;
   const template = from ? fromBuiltin(from, name) : skeleton(name);
 
-  mkdirSync(userProfilesDir(dir), { recursive: true });
+  mkdirSync(userToolkitsDir(dir), { recursive: true });
   writeFileSync(path, JSON.stringify(template, null, 2) + '\n', 'utf8');
 
   if (parsed.flags['json']) {
@@ -160,12 +158,12 @@ function fromBuiltin(from: string, name: string): Profile {
       2,
     );
   }
-  return { ...structuredClone(base), profile: name };
+  return { ...structuredClone(base), toolkit: name };
 }
 
 function skeleton(name: string): Profile {
   return {
-    profile: name,
+    toolkit: name,
     charter: `TODO: one or two lines of lens-not-résumé charter for ${name}.`,
     tools: {
       mcp_servers: [],
