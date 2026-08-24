@@ -35,8 +35,9 @@ States and transitions:
 | `completed` | research concludes no Lane is warranted | manual promotion → `promoted` |
 | `promoted` | an ordinary Lane was created and linked | terminal |
 
-Clearly underspecified captures begin at `needs_clarification`; no agent spends research capacity
-on them. The source body is immutable in every state.
+Every accepted capture begins `open`; ingest never interprets the raw body (ADR 312). An agent claims
+the Seed, then may post one precise blocking question to create an answerable
+`needs_clarification` state. The source body is immutable in every state.
 
 ## Public thread and permissions
 
@@ -92,8 +93,8 @@ unchanged. The server, not a client, enforces explorer ownership and submitter-o
 - An unmapped signed Slack sender is acknowledged but creates no Seed.
 - All Members can list/read Seeds and their threads; only the active explorer asks, and only the
   submitter answers.
-- A vague Seed enters `needs_clarification` without an exploration claim; an answer makes it
-  claimable again.
+- A vague Seed starts `open`; its active explorer's precise question moves it to
+  `needs_clarification`, and the submitter's answer makes it claimable again.
 - A second agent cannot claim an exploring Seed.
 - A final viable brief creates exactly one linked Lane across retries; a conclusion creates none.
 - Manual promotion works from each non-promoted state and records skipped research when applicable.

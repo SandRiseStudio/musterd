@@ -118,7 +118,8 @@ by immutable `(team_id, relay_id)`, and a narrow public Seed-thread table. Each 
 Slack user id and resolved submitting Member beside its immutable raw body, source, and capture time.
 Mutable columns hold lifecycle state, explorer, exhaustive final brief, conclusion, promotion metadata,
 completion time, and a nullable linked Lane id. The relay cursor remains separate. Promotion creates
-the ordinary Lane and links it in the same SQLite transaction (ADR 291/311).
+the ordinary Lane and links it in the same SQLite transaction. Every accepted capture starts `open`;
+only an active explorer's posted question creates `needs_clarification` (ADR 291/311/312).
 
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.

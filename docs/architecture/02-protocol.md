@@ -119,6 +119,8 @@ Slack relay provenance (`relay_id`, `source: "slack"`, raw `body`, `captured_at`
 `submitted_by`) and mutable lifecycle state, explorer, narrow public thread, exhaustive final brief,
 conclusion, promotion metadata, completion time, and linked Lane id. `SeedStateSchema` accepts only
 `open`, `exploring`, `needs_clarification`, `clarified`, `completed`, and `promoted`.
+Every accepted relay capture starts `open`; ingest does not classify body semantics. Only an active
+explorer's parsed clarification request creates the answerable `needs_clarification` state (ADR 312).
 
 `RelaySeedSchema` and `RelaySeedListSchema` reject every non-Slack or unattributed relay record at the
 HTTP boundary (ADR 311). `SubmitSeedBriefSchema` requires problem/context, evidence, at least one
