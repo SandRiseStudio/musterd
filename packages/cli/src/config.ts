@@ -157,6 +157,23 @@ export function loadBinding(dir: string): LocalLoad<Binding> {
   });
 }
 
+/**
+ * The team whose roster home this identity file sits in, or null.
+ *
+ * `config.rosterHome` is the registry the daemon and CLI already share (ADR 058) — this only asks
+ * it. Wrapped in a try: a diagnostic must never become the failure it was explaining, so an
+ * unreadable config falls back to the general wording rather than throwing over it.
+ */
+function rosterHomeTeamFor(identityPath: string): string | null {
+  try {
+    const dir = resolve(dirname(dirname(identityPath)));
+    const entry = Object.entries(loadConfig().rosterHome).find(([, home]) => resolve(home) === dir);
+    return entry ? entry[0] : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The repair diagnostic for a `legacy`/`invalid` local identity file — kind and schema issues
  *  only, never file contents or secrets (ADR 282). Exported so the strict identity consumers
  *  ({@link requireUsableBinding}, claim) refuse with the same words the advisory warning uses. */
@@ -166,6 +183,18 @@ export function identityRepairError(
   fileKind: string,
 ): Error {
   if (kind === 'legacy') {
+    // A roster home is not an agent worktree and runs no harnesses. Measured 2026-08-24 on the live
+    // revive roster home: the general wording called it "this workspace" and asked it to confirm a
+    // harness set, while `rosterHome` already named the folder for what it is. The repair is the
+    // same command with the answer supplied, because the empty set is the only right answer there.
+    const rosterTeam = rosterHomeTeamFor(path);
+    if (rosterTeam !== null) {
+      return new Error(
+        `${path} is a version-1 ${fileKind} (pre-ADR-281, it still carries "surface") — this ` +
+          `folder is ${rosterTeam}'s roster home, not an agent worktree, so it runs no harnesses. ` +
+          "Convert it with `musterd harness configure --select '' --yes` (the empty set).",
+      );
+    }
     return new Error(
       `${path} is a version-1 ${fileKind} (pre-ADR-281, it still carries "surface") — this ` +
         'workspace has no usable identity until it is converted. Run `musterd harness configure` ' +
