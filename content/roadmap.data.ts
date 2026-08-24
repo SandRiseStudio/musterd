@@ -846,6 +846,28 @@ const RAW: RawItem[] = [
     ],
   },
   {
+    id: 'office-delight',
+    unfrozen: 'design spec 2026-08-20, approved in conversation; no ADR of its own',
+    wave: 6,
+    title: 'The office earns being watched — /live and /broadcast stop misinforming, then delight',
+    plan: 'near-term',
+    category: 'surfaces',
+    blurb:
+      'A stranger who lands on the stream mid-flow can tell what they are watching, trust what the room shows them, and want to keep looking. Decomposed into increments that can each be accepted \u2014 credibility first, beauty last.',
+    detail:
+      'The office is built and watched; what it has never had is a viewer who is not us. "Make it magical, warm, delightful" is a direction, not a task \u2014 adjectives do not decompose, and a single lane pointed at all nine words would sprawl until abandoned. The 2026-08-20 design spec splits the ambition by WHAT BREAKS WHEN THIS IS MISSING, not by which adjective it serves. Increment 0 buys byte runway (the program cannot add a kilobyte: measured 2026-08-24, CSS gzip sat six bytes under its ceiling after a single table rule landed, and the shared budget is now contested by musterd.io as well as /live \u2014 that decision is increment 0\u2019s whole output). A is the room refusing to misinform: A1 shipped (a directed act names its recipient), A2 is presence honesty (the office cannot show idle and deletes offline members from the room), A3 is the envelope that still reads as machine syntax over a person\u2019s head. B is the first five seconds \u2014 there is no legend anywhere in the UI, so a stranger sees figures walking between desks and cannot learn what a lane is or whether any of it is real. C is feel: motion craft that survives 25fps capture with reduced-motion parity. D is beauty, ranked deliberately LAST \u2014 the claim being that the office has a credibility problem before it has a beauty problem. E is ambient life; E1 (seeded idle life) is blocked on which of three readings is meant, and E2 (work-tracking sound) is unspecified. Ordering is 0 \u2192 A \u2192 B \u2192 C/D/E, and it exists to resist the instinct to start at D because it is the fun one.',
+    refs: [
+      doc(
+        'docs/superpowers/specs/2026-08-20-office-delight-program-design.md',
+        'office-delight-program-design.md',
+      ),
+      adr(79, 'ADR 079'),
+      adr(86, 'ADR 086'),
+      adr(151, 'ADR 151'),
+    ],
+    dependsOn: ['live-office'],
+  },
+  {
     id: 'live-office',
     frozenBy: 79,
     title: 'Live isometric office',
