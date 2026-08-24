@@ -33,9 +33,9 @@ function Roadmap() {
       <article className="prose">
         <h1>Roadmap</h1>
         <p>
-          Generated from the same source of truth as{' '}
-          <a href="https://github.com/SandRiseStudio/musterd/blob/main/ROADMAP.md">ROADMAP.md</a>,
-          which carries the full build sequence and per-item references.
+          What has shipped, what is next, and what musterd has ruled out on principle. The full
+          build sequence, with per-item references, is in{' '}
+          <a href="https://github.com/SandRiseStudio/musterd/blob/main/ROADMAP.md">ROADMAP.md</a>.
         </p>
         {sections.map((s) => (
           <section key={s.status}>
