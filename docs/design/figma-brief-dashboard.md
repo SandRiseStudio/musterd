@@ -6,7 +6,7 @@
 
 ---
 
-> **Status: EXECUTED — designed, not built** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Dashboard](https://figma.com/design/NeT7zIOz78OvGcWemE3Bji). 7 components, all 4 screens in light + dark, and the 3 journeys on the `Flows` page (visual strips; clickable prototype wiring deferred to the dashboard milestone). Data-model pressure-test passed — every field maps to a column, no schema gaps.
+> **Status: EXECUTED — designed, not built** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Dashboard](https://figma.com/design/NeT7zIOz78OvGcWemE3Bji). 7 components, all 4 screens in light + dark, and the 3 journeys on the `Flows` page (visual strips; clickable prototype wiring deferred to the dashboard build on `ROADMAP.md`). Data-model pressure-test passed — every field maps to a column, no schema gaps.
 
 ## File
 
@@ -59,4 +59,4 @@ Build as connected frames (prototype links) telling each story:
 1. Components first → screenshot → sign-off.
 2. Screens (light first, then dark) → per-screen screenshots.
 3. Flows last → record a short prototype walkthrough.
-4. Revisions named per screen/component only. When green, mark done; note that no build happens until the dashboard milestone on `ROADMAP.md`.
+4. Revisions named per screen/component only. When green, mark done; note that no build happens until the dashboard item on `ROADMAP.md`.
