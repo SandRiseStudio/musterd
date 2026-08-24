@@ -113,10 +113,12 @@ CREATE TABLE schema_meta (
 
 ### Shared Seeds (unreleased — ADR 291)
 
-The live schema will add Seed rows keyed by immutable `(team_id, relay_id)`, a narrow public Seed-thread
-table, and a nullable linked Lane id. The relay cursor remains a separate ingest concern. Mutable state
-records the lifecycle and one explorer; raw source fields are never updated. Promotion creates the
-ordinary Lane and links it in the same SQLite transaction.
+Migration v43 adds an optional, Team-unique `members.slack_user_id` for human Members, Seed rows keyed
+by immutable `(team_id, relay_id)`, and a narrow public Seed-thread table. Each Seed snapshots the
+Slack user id and resolved submitting Member beside its immutable raw body, source, and capture time.
+Mutable columns hold lifecycle state, explorer, exhaustive final brief, conclusion, promotion metadata,
+completion time, and a nullable linked Lane id. The relay cursor remains separate. Promotion creates
+the ordinary Lane and links it in the same SQLite transaction (ADR 291/311).
 
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.

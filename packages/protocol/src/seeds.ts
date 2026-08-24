@@ -11,8 +11,21 @@ export const SeedStateSchema = z.enum([
 ]);
 export type SeedState = z.infer<typeof SeedStateSchema>;
 
-export const SeedSourceSchema = z.enum(['slack', 'sms']);
+export const SeedSourceSchema = z.literal('slack');
 export type SeedSource = z.infer<typeof SeedSourceSchema>;
+
+/** Raw relay boundary accepted by shared-Seed ingest (ADR 311). */
+export const RelaySeedSchema = z.object({
+  id: z.string().min(1),
+  body: z.string().trim().min(1),
+  ts: z.number().int().nonnegative(),
+  source: SeedSourceSchema,
+  meta: z.object({ user: z.string().min(1) }).passthrough(),
+});
+export type RelaySeed = z.infer<typeof RelaySeedSchema>;
+
+export const RelaySeedListSchema = z.object({ seeds: z.array(RelaySeedSchema) });
+export type RelaySeedList = z.infer<typeof RelaySeedListSchema>;
 
 export const SeedThreadEntryKindSchema = z.enum(['clarification', 'answer', 'brief', 'conclusion']);
 export type SeedThreadEntryKind = z.infer<typeof SeedThreadEntryKindSchema>;
@@ -27,6 +40,29 @@ export const SeedThreadEntrySchema = z.object({
 });
 export type SeedThreadEntry = z.infer<typeof SeedThreadEntrySchema>;
 
+export const SeedBriefSchema = z.object({
+  problem: z.string().trim().min(1),
+  context: z.string().trim().min(1),
+  external_evidence: z.array(z.string().trim().min(1)),
+  approaches: z
+    .array(
+      z.object({
+        approach: z.string().trim().min(1),
+        tradeoffs: z.string().trim().min(1),
+      }),
+    )
+    .min(1),
+  constraints: z.array(z.string().trim().min(1)),
+  risks: z.array(z.string().trim().min(1)),
+  unknowns: z.array(z.string().trim().min(1)),
+  recommendation: z.string().trim().min(1),
+  proposed_lane: z.object({
+    title: z.string().trim().min(1),
+    detail: z.string().trim().min(1),
+  }),
+});
+export type SeedBrief = z.infer<typeof SeedBriefSchema>;
+
 export const SeedSchema = z.object({
   id: z.string().min(1),
   team: z.string().min(1),
@@ -34,12 +70,22 @@ export const SeedSchema = z.object({
   source: SeedSourceSchema,
   body: z.string(),
   captured_at: z.number().int().nonnegative(),
+  slack_user_id: z.string().min(1),
   submitted_by: z.string().min(1),
   state: SeedStateSchema,
   explorer: z.string().min(1).nullable(),
   thread: z.array(SeedThreadEntrySchema),
+  final_brief: SeedBriefSchema.nullable(),
   conclusion: z.string().nullable(),
   linked_lane_id: z.string().min(1).nullable(),
+  promotion: z
+    .object({
+      kind: z.enum(['automatic', 'manual']),
+      research_skipped: z.boolean(),
+      at: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  completed_at: z.number().int().nonnegative().nullable(),
   created_at: z.number().int().nonnegative(),
   updated_at: z.number().int().nonnegative(),
 });
@@ -57,9 +103,19 @@ export type AnswerSeedClarification = z.infer<typeof AnswerSeedClarificationSche
 export const ConcludeSeedSchema = z.object({ conclusion: z.string().trim().min(1) });
 export type ConcludeSeed = z.infer<typeof ConcludeSeedSchema>;
 
+export const SubmitSeedBriefSchema = z.discriminatedUnion('result', [
+  z.object({ result: z.literal('promote'), brief: SeedBriefSchema }),
+  z.object({
+    result: z.literal('complete'),
+    brief: SeedBriefSchema,
+    conclusion: z.string().trim().min(1),
+  }),
+]);
+export type SubmitSeedBrief = z.infer<typeof SubmitSeedBriefSchema>;
+
 export const PromoteSeedSchema = z.object({
-  title: z.string().trim().min(1),
-  detail: z.string().trim().min(1),
+  title: z.string().trim().min(1).optional(),
+  detail: z.string().trim().min(1).optional(),
 });
 export type PromoteSeed = z.infer<typeof PromoteSeedSchema>;
 

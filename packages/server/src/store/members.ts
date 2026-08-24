@@ -138,6 +138,7 @@ export interface AddMemberInput {
   lifecycleUntil?: number | null;
   availability?: Record<string, unknown> | null;
   workingHours?: WorkingHours | null;
+  slackUserId?: string | null;
   /** Provision a read-only observer seat (ADR 063): hidden from roster/counts/presence, can't send. */
   observer?: boolean;
   /** Observer grade (ADR 136): `'public'` sees only team/broadcast traffic — what a shared watch-link
@@ -175,6 +176,8 @@ export function addMember(
       role: input.role ?? '',
       lifecycle,
       lifecycleUntil: input.lifecycleUntil ?? null,
+      workingHours: input.workingHours ?? null,
+      slackUserId: input.slackUserId ?? null,
     });
     const row = getMemberById(db, existing.id)!;
     return { row, token };
@@ -194,6 +197,7 @@ export function addMember(
     lifecycle_until: input.lifecycleUntil ?? null,
     availability: input.availability ? JSON.stringify(input.availability) : null,
     working_hours: input.workingHours ? JSON.stringify(input.workingHours) : null,
+    slack_user_id: input.slackUserId ?? null,
     token_hash: hashToken(token),
     // A freshly minted seat is *declared*, not yet *held* — bound_at is stamped on first auth touch
     // (ADR 058). The INSERT omits the column, so it defaults to NULL; kept here for the typed row.
@@ -214,9 +218,9 @@ export function addMember(
   };
   db.prepare(
     `INSERT INTO members
-       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, working_hours, token_hash, observer, observer_scope, account_status, capabilities, left_at, created_at, updated_at)
+       (id, team_id, name, kind, role, lifecycle, lifecycle_until, availability, working_hours, slack_user_id, token_hash, observer, observer_scope, account_status, capabilities, left_at, created_at, updated_at)
      VALUES
-       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @working_hours, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
+       (@id, @team_id, @name, @kind, @role, @lifecycle, @lifecycle_until, @availability, @working_hours, @slack_user_id, @token_hash, @observer, @observer_scope, @account_status, @capabilities, @left_at, @created_at, @updated_at)`,
   ).run(row);
   return { row, token };
 }
@@ -471,6 +475,7 @@ export interface MemberIdentityFields {
   lifecycle: Lifecycle;
   lifecycleUntil: number | null;
   workingHours?: WorkingHours | null;
+  slackUserId?: string | null;
 }
 
 /**
@@ -480,13 +485,14 @@ export interface MemberIdentityFields {
  */
 export function updateMemberIdentity(db: Database, id: string, f: MemberIdentityFields): void {
   db.prepare(
-    'UPDATE members SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?, working_hours = ?, updated_at = ? WHERE id = ?',
+    'UPDATE members SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?, working_hours = ?, slack_user_id = ?, updated_at = ? WHERE id = ?',
   ).run(
     f.kind,
     f.role,
     f.lifecycle,
     f.lifecycleUntil,
     f.workingHours ? JSON.stringify(f.workingHours) : null,
+    f.slackUserId ?? null,
     Date.now(),
     id,
   );
@@ -502,7 +508,7 @@ export function reviveMember(db: Database, id: string, f: MemberIdentityFields):
   db.prepare(
     `UPDATE members
        SET kind = ?, role = ?, lifecycle = ?, lifecycle_until = ?,
-           working_hours = ?, token_hash = ?, bound_at = NULL, left_at = NULL, updated_at = ?
+           working_hours = ?, slack_user_id = ?, token_hash = ?, bound_at = NULL, left_at = NULL, updated_at = ?
      WHERE id = ?`,
   ).run(
     f.kind,
@@ -510,6 +516,7 @@ export function reviveMember(db: Database, id: string, f: MemberIdentityFields):
     f.lifecycle,
     f.lifecycleUntil,
     f.workingHours ? JSON.stringify(f.workingHours) : null,
+    f.slackUserId ?? null,
     hashToken(token),
     Date.now(),
     id,

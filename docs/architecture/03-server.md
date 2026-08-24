@@ -48,6 +48,7 @@ src/
     delivery.ts       // the per-recipient delivery ledger, derived from log + cursors + audit: actDelivery + openDirectedLedger (ADR 090) + handoffNamedLaneOutOfPlay (#745: named-lane out of play — shared with orientation why)
     mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     memory.ts         // seat memory: saveMemory/getMemory/memoryEnvelope/clearMemory — daemon-private continuity blob, LWW, caps (ADR 093)
+    seeds.ts          // shared Seed persistence + authorized lifecycle transitions; atomic retry-safe promotion to one ordinary Lane (ADR 291/311)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
     signinHandoff.ts  // sign-in handoff relay: stageHandoff/redeemHandoff — memory-only, single-use 60s nonces so `musterd board` hands the browser a handle, never a credential (ADR 170)
     gateAsk.ts        // Gate B (ADR 150) ask-lifecycle reads: findGateAsk (fingerprint dedup — one ask per re-attempted costly action) + gateAskHumanAnswer (human-only accept/decline release); pure reads over the ADR 147 ask-stream log
@@ -78,7 +79,7 @@ src/
     sampler.ts        // setInterval tick (60s default): scan → classify → insertFootprintTick + retention prune; any throw = one skipped tick, never a crashed daemon
     reap.ts           // reapOrphans: the daemon's only kill path — per-pid re-verification at kill time (allowlist + still orphaned), SIGTERM→grace→SIGKILL, footprint.reaped audit row
   seeds/
-    ingest.ts         // setInterval poll (60s): pull raw seeds from the policy-named relay, deterministic title/detail cleanup, one unowned open lane per seed + seed.ingested audit; cursor advanced transactionally with the lane insert (ADR 248)
+    ingest.ts         // setInterval poll (60s): parse Slack-only relay records, resolve human Member attribution, persist shared Seeds, and advance the cursor atomically; never opens a Lane (ADR 291/311)
   projection/
     load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
     reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files

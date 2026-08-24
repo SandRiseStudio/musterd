@@ -77,6 +77,9 @@ work, and makes an exploratory agent look as though it has committed the Team to
   lifecycles and permissions.
 - ADR 248's Worker/KV capture, pull cursor, raw-data boundary, and delivery diagnostics stay in
   force. Its immediate-Lane ingest decision is superseded by this ADR.
+- **2026-08-24:** [ADR 311](311-shared-seeds-are-slack-only.md) narrows the first shared-Seed ingest
+  boundary to attributed Slack records. SMS remains outside this domain until it has an explicit
+  identity mapping.
 
 ## Observability & Evaluation
 

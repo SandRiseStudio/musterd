@@ -195,6 +195,20 @@ end = "12:00"
 });
 
 describe('reconcile — guard 1: db projection round-trips to the files', () => {
+  it('preserves a human Slack identity through files → db → files', () => {
+    writeRoster('slug = "alpha"\n', {
+      nick: 'kind = "human"\nslack_user_id = "U123"\n',
+    });
+    reconcile();
+
+    const team = getTeamBySlug(db, 'alpha')!;
+    expect(getMemberByName(db, team.id, 'nick')?.slack_user_id).toBe('U123');
+
+    const projected = projectTeamToFiles(db, 'alpha')!;
+    const { seatFiles } = serializeProjectedTeam(projected);
+    expect(parseSeatFile(seatFiles['nick.toml']!, 'nick').slack_user_id).toBe('U123');
+  });
+
   it('projectTeamToFiles → serialize → parse deep-equals the on-disk spec', () => {
     writeRoster('slug = "alpha"\ndisplay = "Team Alpha"\n', {
       olive: 'kind = "agent"\nrole = "reviewer"\n',

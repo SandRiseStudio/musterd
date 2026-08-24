@@ -115,13 +115,16 @@ The WS `send` and HTTP `POST …/messages` share one validation+route path on th
 ## Shared Seeds (ADR 291, unreleased)
 
 `SeedSchema` is the contract for a captured Team idea before it becomes a Lane. It carries immutable
-relay provenance (`relay_id`, `source`, raw `body`, `captured_at`, `submitted_by`) and mutable lifecycle
-state, explorer, narrow public thread, conclusion, and linked Lane id. `SeedStateSchema` accepts only
+Slack relay provenance (`relay_id`, `source: "slack"`, raw `body`, `captured_at`, `slack_user_id`,
+`submitted_by`) and mutable lifecycle state, explorer, narrow public thread, exhaustive final brief,
+conclusion, promotion metadata, completion time, and linked Lane id. `SeedStateSchema` accepts only
 `open`, `exploring`, `needs_clarification`, `clarified`, `completed`, and `promoted`.
 
-The protocol exports parsed bodies for claim, clarification, answer, conclusion, and promotion, plus
-single-Seed and list results. HTTP clients use those schemas at the boundary; promotion is the only
-operation that creates a Lane.
+`RelaySeedSchema` and `RelaySeedListSchema` reject every non-Slack or unattributed relay record at the
+HTTP boundary (ADR 311). `SubmitSeedBriefSchema` requires problem/context, evidence, at least one
+approach with trade-offs, constraints, risks, unknowns, recommendation, and proposed Lane framing.
+The protocol also exports parsed bodies for claim, clarification, answer, and manual promotion, plus
+single-Seed and list results. Promotion is the only operation that creates a Lane.
 
 ### Portable wake context (ADR 209)
 

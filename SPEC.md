@@ -369,13 +369,23 @@ occupied.
 
 ## A.11 Shared Seeds before Lanes (unreleased — ADR 291)
 
-A **Seed** is a captured Team idea, distinct from a Lane. Its `relay_id`, `source`, raw `body`,
-`captured_at`, and submitting Member are immutable. Its lifecycle is
+A **Seed** is a captured Team idea, distinct from a Lane. Shared-Seed ingest accepts only
+`source: "slack"` with a non-empty `meta.user`; a human Member's optional `slack_user_id` resolves
+that identity (ADR 311). Its `relay_id`, Slack source, raw `body`, `captured_at`, Slack user id, and
+resolved submitting Member are immutable. An unknown Slack user creates no Seed and advances the
+cursor after a body-free `unknown_submitter` diagnostic; an unsupported source fails parsing and does
+not advance the cursor. Its lifecycle is
 `open|exploring|needs_clarification|clarified|completed|promoted`. A Seed may have one active
 agent explorer and a narrow public thread of clarification, answer, brief, or conclusion entries.
 
+An exploration result carries one exhaustive final brief: problem and context, external evidence,
+viable approaches and trade-offs, constraints, risks, unknowns, recommendation, and proposed Lane
+title/detail. A non-actionable result also carries a conclusion and completion time. Promotion records
+automatic/manual provenance, whether research was skipped, and its timestamp.
+
 The additive HTTP surface is `GET /teams/:slug/seeds`, `GET /teams/:slug/seeds/:id`, and authenticated
-claim, clarification, answer, conclusion, and promotion operations. The server validates every body
-with the corresponding Seed schema. Only an agent may claim/explore; only the active explorer asks or
-finalizes; only the submitting Member answers. Promotion atomically creates one ordinary, unowned Lane
-and links it to the Seed. No raw body or thread body appears in logs, telemetry, or audit details.
+claim, clarification, answer, final-brief, and manual-promotion operations. The server validates every
+body with the corresponding Seed schema. Only an agent may claim/explore; only the active explorer asks
+or finalizes; only the submitting Member answers. Promotion atomically creates one ordinary, unowned
+Lane and links it to the Seed; retries return the existing linked Lane. No raw body, Slack user id, or
+thread body appears in logs, telemetry, or audit details.
