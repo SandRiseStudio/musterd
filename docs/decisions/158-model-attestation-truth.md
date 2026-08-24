@@ -12,7 +12,7 @@ workspace.json` ladder whose top rung was the defect), [ADR 119](119-ambient-mod
   [ADR 131](131-harness-residency.md) §5–6 (the SessionStart capture seam this rides, and newest-wins
   re-attestation), [ADR 135](135-build-provenance.md) (a separate field per attested fact),
   [ADR 143](143-seat-identity-workspace-anchor.md) (local MCP config keyed by repo root — how a
-  sibling seat's provisioning overwrites this one's entry), [ADR 056](056-correlated-failure.md) (the
+  sibling seat's provisioning overwrites this one's entry), [ADR 056](056-research-as-first-class-practice.md) (the
   diversity research a wrong model poisons).
 
 ## Context

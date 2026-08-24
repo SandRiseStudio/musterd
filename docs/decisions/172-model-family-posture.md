@@ -7,7 +7,7 @@
   `no_candidate` close reason this enriches — PR #450/#453 are the immediate ancestors),
   [ADR 101](101-model-as-a-variable.md) / [ADR 158](158-model-attestation-truth.md) (attestation:
   observed-over-declared, `unknown` is legal and never blocks),
-  [ADR 056](../design/musterd-evaluation.md) (correlated models make correlated mistakes — the
+  [ADR 056](056-research-as-first-class-practice.md) (correlated models make correlated mistakes — the
   family boundary is the decorrelation line), [ADR 145](145-human-role-refounded.md) (humans are
   peers with an authority overlay, not a diversity ingredient).
 
