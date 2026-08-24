@@ -34,6 +34,46 @@ function shuffle<T>(a: T[], seed: number): T[] {
   return out;
 }
 
+describe('assignSeats — owned desks (presence-honesty §4)', () => {
+  const offline = (name: string, over: Partial<Seatable> = {}): Seatable => ({
+    ...member(name, { presence: 'offline', activity: 'offline' }),
+    posture: 'offline',
+    ...over,
+  });
+
+  it('an offline member keeps an owned desk — the room never empties', () => {
+    const seats = assignSeats([member('busy'), offline('sleeper')]);
+    expect(seats.get('sleeper')).toMatchObject({ kind: 'desk', owned: true });
+    expect(seats.get('busy')).toMatchObject({ kind: 'desk' });
+    expect((seats.get('busy') as { owned?: boolean }).owned).toBeUndefined();
+  });
+
+  it('left_team members leave the room entirely — left_at is the line, not presence', () => {
+    const seats = assignSeats([offline('quit', { offline_reason: 'left_team' })]);
+    expect(seats.get('quit')).toEqual({ kind: 'gone' });
+  });
+
+  it('legacy signed_off reads as a release, not a departure — the desk stays owned', () => {
+    const seats = assignSeats([offline('old', { offline_reason: 'signed_off' })]);
+    expect(seats.get('old')).toMatchObject({ kind: 'desk', owned: true });
+  });
+
+  it('present members claim desks first; when desks run out, longest-gone lose theirs first', () => {
+    const now = Date.now();
+    const roster = [
+      ...Array.from({ length: DESK_SLOTS.length - 1 }, (_, i) => member(`w${i}`)),
+      offline('fresh', { last_seen_at: now - 60_000 }),
+      offline('ancient', { last_seen_at: now - 7 * 24 * 3_600_000 }),
+    ];
+    const seats = assignSeats(roster);
+    for (let i = 0; i < DESK_SLOTS.length - 1; i++)
+      expect(seats.get(`w${i}`)!.kind).toBe('desk');
+    // One desk left for two owners: the freshest-gone keeps it, the longest-gone loses theirs.
+    expect(seats.get('fresh')).toMatchObject({ kind: 'desk', owned: true });
+    expect(seats.get('ancient')).toEqual({ kind: 'gone' });
+  });
+});
+
 describe('assignSeats', () => {
   it('is deterministic regardless of roster array order', () => {
     const roster = ['ada', 'ben', 'cy', 'dee', 'ez', 'fin'].map((n) => member(n));
@@ -71,13 +111,16 @@ describe('assignSeats', () => {
       member('here'),
       member('resting', { presence: 'away' }),
       member('dnd', { availability: { status: 'dnd' } }),
-      member('left', { presence: 'offline' }),
+      member('left', { presence: 'offline', offline_reason: 'left_team' }),
+      member('dark', { presence: 'offline' }),
     ];
     const seats = assignSeats(roster);
     expect(seats.get('here')?.kind).toBe('desk');
     expect(seats.get('resting')?.kind).toBe('nook');
     expect(seats.get('dnd')?.kind).toBe('nook');
     expect(seats.get('left')?.kind).toBe('gone');
+    // An offline member who has not left keeps an owned desk (presence-honesty §4).
+    expect(seats.get('dark')).toMatchObject({ kind: 'desk', owned: true });
   });
 
   it('sends idle members to the leisure furniture, not to a desk', () => {

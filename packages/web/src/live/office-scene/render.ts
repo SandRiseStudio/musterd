@@ -1575,6 +1575,8 @@ const RECEPTIONIST_NODE: OfficeNode = {
   workSource: null,
   laneState: null,
   moreLanes: 0,
+  offline_reason: null,
+  last_seen_at: null,
 };
 
 function drawReceptionist(ctx: CanvasRenderingContext2D, fit: Fit, r: ReceptionistState, t: number): void {
@@ -3589,6 +3591,10 @@ function drawWorkstation(
   // onto a desk, or a stale member still carrying `activity: working`, gets a dark screen like any empty desk.
   const working = node?.posture === 'working';
   const mood = node ? deskMoodStyle(deskMoodFor(teamName, node.name)) : null;
+  // Owned empty desk (presence-honesty §4): the offline owner keeps the desk — chair in, monitor
+  // dark, their name baked on a small plate. The lamp is off (nobody switched it on), a warm screen
+  // glow fades over the first hour since they left, and a disconnected seat gets an amber glint.
+  const ownedEmpty = node != null && node.presence === 'offline';
 
   for (const [sx, sy] of [
     [-1, -1],
@@ -3622,7 +3628,7 @@ function drawWorkstation(
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
   // The desk lamp is work gear, not a hashed personality prop: every OCCUPIED desk has one (the
   // sitter brought it), no empty desk ever does — see deskLamp for the #304 story. Lit only after dark.
-  if (node) at(LAMP_ALONG, LAMP_ACROSS, (ix, iy) => deskLamp(ctx, fit, ix, iy, up, lampsLit));
+  if (node) at(LAMP_ALONG, LAMP_ACROSS, (ix, iy) => deskLamp(ctx, fit, ix, iy, up, lampsLit && !ownedEmpty));
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
@@ -3645,8 +3651,76 @@ function drawWorkstation(
     });
   }
 
+  // The owned-desk plate + texture ride the same prop pipeline so they depth-sort with the desk.
+  if (ownedEmpty && node) {
+    // Warm desk: a faint screen afterglow fading over the first hour since last_seen_at.
+    const age = node.last_seen_at != null ? Date.now() - node.last_seen_at : Infinity;
+    const warmth = Math.max(0, 1 - age / 3_600_000);
+    if (warmth > 0)
+      at(Df / 2 - 12, 0, (ix, iy) => monitorAfterglow(ctx, fit, ix, iy, dir, up, warmth));
+    // The plate sits at the desk's front edge, toward the viewer side of the slab.
+    at(-Df / 2 + 12, sn ? -wx / 2 + 22 : wx / 2 - 22, (ix, iy) =>
+      deskNameplate(ctx, fit, ix, iy, up, node.name, node.offline_reason === 'disconnected'),
+    );
+  }
+
   props.sort((a, b) => a.sum - b.sum);
   for (const pr of props) pr.fn();
+}
+
+/**
+ * A small baked nameplate on an owned empty desk (presence-honesty §4): static paint keyed to data
+ * refreshes, so it costs nothing per frame and survives still mode by construction. The amber glint
+ * marks `disconnected` — the one alarming offline flavor (ADR 315). Type floor: 13px at fit scale 1
+ * (the reel floor), so the name bakes legibly at stream scale.
+ */
+function deskNameplate(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  up: number,
+  name: string,
+  disconnected: boolean,
+): void {
+  const b = project(lx, ly, fit);
+  const y = b.y - up * fit.scale;
+  const px = Math.max(13, Math.round(13 * fit.scale));
+  ctx.font = canvasFont(px, '--font-mono', 700);
+  const w = Math.max(34, ctx.measureText(name).width + 12);
+  const h = px + 8;
+  ctx.fillStyle = 'rgba(46, 42, 36, 0.88)'; // the scene's paper-dark plate, matte
+  ctx.fillRect(b.x - w / 2, y - h, w, h);
+  ctx.fillStyle = 'rgba(233, 226, 214, 0.92)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(name, b.x, y - h / 2);
+  if (disconnected) {
+    // A small amber warning glint on the plate's corner — read as "dropped", not merely away.
+    ctx.fillStyle = '#d9a13c';
+    ctx.beginPath();
+    ctx.arc(b.x + w / 2 - 4, y - h + 4, Math.max(2, 2.4 * fit.scale), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** The warm-desk afterglow: the screen's residual light, scaled by freshness (1 → just left). */
+function monitorAfterglow(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  dir: Dir,
+  up: number,
+  warmth: number,
+): void {
+  const b = project(lx, ly, fit);
+  const y = b.y - (up + 14) * fit.scale;
+  const w = 30 * fit.scale;
+  const h = 18 * fit.scale;
+  void dir;
+  ctx.fillStyle = `rgba(122, 148, 156, ${(0.18 * warmth).toFixed(3)})`;
+  ctx.fillRect(b.x - w / 2, y - h / 2, w, h);
 }
 
 /**
