@@ -18,7 +18,7 @@ The general form: **cause an event you know happened, and confirm the instrument
 
 Removing a channel integration in Slack's UI does two things it does not announce: it drops the **bot's membership** of that channel, so `message.channels` goes silent, and it **revokes that webhook's URL**. Every surface in the Slack UI stays green throughout. Re-invite the bot AND re-copy the _current_ webhook URL — the old one in your secret store is dead.
 
-Related: with **Socket Mode on**, the Request URL is never called no matter how many times the console says `Verified ✓`. The checkmark describes a past handshake, not the live delivery path.
+Related: with **Socket Mode on**, the Request URL is never called no matter how many times the console says `Verified ✓` (2026-08-06; falsify: with Socket Mode on, post to the channel and tail the Request URL worker's logs — if a request arrives there, the checkmark was describing the live path after all). The checkmark describes a past handshake, not the live delivery path.
 
 ## `gh pr edit` is broken on this repo (2026-08-06; falsify: run `gh pr edit <n> --body x`)
 

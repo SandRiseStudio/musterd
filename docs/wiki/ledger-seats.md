@@ -30,7 +30,7 @@ Both are `kind = "service"` with `role = "platform"` and nothing else (2026-08-2
 - the daemon's reconcile drops it and, since #988, says so in the log;
 - `fmt --check` names it as data loss rather than a tidy-up, since #985.
 
-Three mechanisms now *report* the drop. None of them preserve the prose — which is the point. It was 587 authored characters reaching no reader.
+Three mechanisms now *report* the drop. None of them preserve the prose — which is the point. It was 587 authored characters reaching no reader (2026-08-24; falsify: `OccupiedFrame.charter` is declared at `claim-handshake.ts:143` and populated by none of the five sites that build the frame — four in `http.ts`, one in `ws.ts`. If any site sets it, a seat charter does have a delivery path and the key belongs in `SeatFileSchema` after all).
 
 **Measured population, not a sample** (2026-08-24; falsify: `grep -hoE '^[a-z_]+ *=' .musterd/seats/*.toml | sort -u`): across all 15 seat files the only key outside the schema is `charter`, and it appears in exactly one file. This measurement exists because the claim it replaces was wrong for the opposite reason — see the correction below.
 
