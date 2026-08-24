@@ -1,6 +1,6 @@
 # 291 — Shared Seeds before Lanes
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-08-19
 - Deciders: nick, gptbot
 - Supersedes: ADR 248 decision 3, which made every ingested Seed an immediate Lane
