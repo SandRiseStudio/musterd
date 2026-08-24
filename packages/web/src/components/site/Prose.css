@@ -26,7 +26,8 @@
 }
 
 .prose p,
-.prose li {
+.prose li,
+.prose td {
   color: var(--text-dim);
 }
 
@@ -50,6 +51,30 @@
 .prose ul {
   padding-left: 1.2rem;
 }
+
+/* The scroll box gen-site-content.ts wraps every table in. It, not the page, takes the overflow.
+   No focus-ring rule here on purpose: the wrapper carries tabindex="0", so the UA already draws
+   one, and the CSS budget had 95 bytes of headroom (measured 2026-08-24) — not the place to spend
+   them restating a default. */
+.prose__scroll {
+  overflow-x: auto;
+}
+
+/* The spec's cells hold whole sentences, so they must wrap. `min-width` is what makes the box
+   above scroll rather than crushing four columns into one word per line on a phone. */
+.prose table {
+  border-collapse: collapse;
+  min-width: 34rem;
+}
+
+.prose th,
+.prose td {
+  border-bottom: 1px solid var(--mustard-100);
+  padding: 0.45rem 1rem 0.45rem 0;
+  text-align: left;
+  vertical-align: top;
+}
+
 
 .prose__date {
   color: var(--text-faint);
