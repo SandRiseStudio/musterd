@@ -420,15 +420,22 @@ export const CONTROLS: Control[] = [
     counterfactual:
       'Yes for new introductions of the lintable synonyms (profile/kit/template/worktree) — the fixture fails on the exact word. No for the semantic half of the Not column (agent-as-generic-noun, surface-as-lane-paths): a regex cannot catch those, and claiming it would is the decoration this registry exists to refuse. Those stay a review job against the regenerated glossary.',
     lastExercised: '2026-08-24',
-    everTripped: false,
+    // ADR 299 (#972) landed minutes before the gate (#973) with an unquoted "worktree" in its
+    // frozen Decision — the gate turned main red on its first day; #978 moved the boundary to 300
+    // rather than editing a frozen ADR. A real catch, in anger. Full eval record:
+    // docs/wiki/adr-296-terminology-eval.md.
+    everTripped: true,
+    lastTripped: '2026-08-21',
     staleAfterDays: 45,
     refs: [
       'ADR 296',
       'scripts/check-vocab.ts',
       'scripts/check-vocab.test.ts',
       'docs/glossary/terms.ts',
+      'docs/wiki/adr-296-terminology-eval.md',
       'lane 01M0JT3RTC',
       'lane 01M0K5YCCQ',
+      'lane 01M0K5ZPRJ',
     ],
   },
   {

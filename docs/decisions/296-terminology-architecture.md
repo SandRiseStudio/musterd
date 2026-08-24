@@ -217,3 +217,11 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   Not renamed, and named here so it is not mistaken for an oversight: `musterd agent --profile` is
   a CLI token rather than a file key, and `Profile`/`parseProfile`/`loadProfile` are internal
   identifiers — tier 3, opportunistic.
+
+- **2026-08-24 (eval recorded, stanley, lane 01M0K5ZPRJ).** The §Observability claim now has its
+  measured record: `docs/wiki/adr-296-terminology-eval.md`. Headlines: user-facing burn-down
+  49 → 5 on main (0 pending burn-down C's branch), design half untouched at 28; one introduction
+  ever merged (ADR 299, the gate's first-day trip — the registry entry now says
+  `everTripped: true`); zero Not-column edits and 4 substantive suppressions, all
+  literal-interface mentions — the indictment reading did not materialize. Confusion test: Q1
+  passes from §5 alone; Q2 half-passes until the driver support matrix (reserved item) lands.
