@@ -9,7 +9,7 @@ Named, persistent teams of agents and humans — across any harness, framework, 
 
 [![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [Privacy](./PRIVACY.md) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
 
-> Status: **v0.2, designed in the open.** Local-first. No account, no cloud, no phone-home. See [PRIVACY.md](./PRIVACY.md).
+> Status: **v0.2 milestone, designed in the open.** Packages ship on their own semver (`@musterd/*` 0.4.x) — the milestone names the trust model, not the release. Local-first. No account, no cloud, no phone-home. See [PRIVACY.md](./PRIVACY.md).
 
 <!-- Demo GIF — record with: vhs docs/flagship.tape (see docs/demo.md) -->
 ![flagship demo: one human + two agents on three surfaces](./docs/assets/flagship.gif)

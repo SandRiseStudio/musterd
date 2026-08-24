@@ -1,6 +1,6 @@
 {
   "name": "@musterd/protocol",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "musterd protocol: shared types + zod schemas (the wire contract)",
   "license": "MIT",
   "homepage": "https://musterd.io",
