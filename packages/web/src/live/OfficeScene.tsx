@@ -40,7 +40,7 @@ function computeData(
         kind,
         service: m.kind === 'service',
         presence: m.presence,
-        activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle'),
+        activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'active'),
         posture: memberPosture(m),
         state: m.state ?? null,
         color: memberColor(m.name, kind),

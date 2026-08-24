@@ -21,7 +21,7 @@ export interface OfficeNode {
    */
   service: boolean;
   presence: 'online' | 'away' | 'offline';
-  activity: 'offline' | 'idle' | 'working';
+  activity: 'offline' | 'active' | 'working';
   /**
    * The composed roster posture (ADR 138) — resolved **once, by the same `memberPosture` the roster rail
    * uses**, and carried here so the floor can't drift from the chip. It decides both where the member is

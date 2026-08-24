@@ -295,14 +295,14 @@ describe('messages + inbox', () => {
 });
 
 describe('activity (two-clocks)', () => {
-  it('resolveActivity: offline when not live; idle when live with no status; working with a status', () => {
+  it('resolveActivity: offline when not live; active when live with no status; working with a status', () => {
     expect(resolveActivity(false, { state: 'x', ts: 1 })).toEqual({
       activity: 'offline',
       state: null,
       last_status_at: null,
     });
     expect(resolveActivity(true, null)).toEqual({
-      activity: 'idle',
+      activity: 'active',
       state: null,
       last_status_at: null,
     });
@@ -345,10 +345,10 @@ describe('activity (two-clocks)', () => {
       last_status_at: 42,
     });
     // steering defaults false — the existing two-clocks behaviour is untouched.
-    expect(resolveActivity(true, null).activity).toBe('idle');
+    expect(resolveActivity(true, null).activity).toBe('active');
   });
 
-  it('resolveActivity: the idle window decays a stale working label to idle (ADR 155 Inc 3)', () => {
+  it('resolveActivity: the decay window turns a stale working label into active — claim kept with its age (ADR 155 Inc 3, presence-honesty \u00a72.1)', () => {
     const fresh = { state: 'reviewing asks', ts: Date.now() - 1_000 };
     const stale = { state: 'reviewing asks', ts: Date.now() - 46_000 };
     // Within the window the status is a live task label.
@@ -357,16 +357,16 @@ describe('activity (two-clocks)', () => {
       state: 'reviewing asks',
       last_status_at: fresh.ts,
     });
-    // Past it the read decays to idle — the stale text is not worn as a task, but when they last
-    // reported stays true (last_status_at kept).
+    // Past it the read decays to active, but the claim is KEPT with its age — the renderer shows
+    // `last: "<status>" \u00b7 20m ago`, never an erased history.
     expect(resolveActivity(true, stale, false, 45_000)).toEqual({
-      activity: 'idle',
-      state: null,
+      activity: 'active',
+      state: 'reviewing asks',
       last_status_at: stale.ts,
     });
     // Steering outranks the decay — a live driver link is a current action, not a stale report.
     expect(resolveActivity(true, stale, true, 45_000).activity).toBe('working');
-    // No window (the agent path) keeps the ADR 010 never-silently-revert read.
+    // No window keeps the ADR 010 never-silently-revert read (callers now always pass one).
     expect(resolveActivity(true, stale)).toEqual({
       activity: 'working',
       state: 'reviewing asks',

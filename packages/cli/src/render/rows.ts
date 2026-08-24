@@ -417,7 +417,7 @@ function shortTs(ms: number): string {
 
 /** Activity, falling back to a presence-derived value for older rosters that predate the field. */
 function activityOf(m: MemberSummary): Activity {
-  return m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle');
+  return m.activity ?? (m.presence === 'offline' ? 'offline' : 'active');
 }
 
 /** Coarse human age: `18m` / `2h` / `3d`. */

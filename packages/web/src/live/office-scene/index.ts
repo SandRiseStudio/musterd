@@ -61,7 +61,7 @@ const CUE_SECS = 1.5;
 /** Posture → the name label's dot modifier. One green: only `working` earns it. */
 const DOT_STATE: Record<Posture, 'on' | 'idle' | 'away' | 'off'> = {
   working: 'on',
-  idle: 'idle',
+  active: 'idle', // the dot's visual state keeps its CSS name; the wire token is `active`
   away: 'away',
   offline: 'off',
 };

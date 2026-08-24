@@ -77,9 +77,13 @@ export const PresenceStatusSchema = z.enum(PRESENCE_STATUSES);
  * (two-clocks rule). Was `online` for the idle state — renamed to avoid colliding with presence
  * `online`.
  */
-export const ACTIVITIES = ['offline', 'idle', 'working'] as const;
+// `active` renamed from `idle` (presence-honesty §2.1): connected, between claims. Legacy `idle`
+// from an old daemon is accepted on read and normalized.
+export const ACTIVITIES = ['offline', 'active', 'working'] as const;
 export type Activity = (typeof ACTIVITIES)[number];
-export const ActivitySchema = z.enum(ACTIVITIES);
+export const ActivitySchema = z
+  .enum([...ACTIVITIES, 'idle'])
+  .transform((a): Activity => (a === 'idle' ? 'active' : a));
 
 /**
  * Provenance (musterd/0.2): *why* a presence exists, captured as a fact at attach time — never

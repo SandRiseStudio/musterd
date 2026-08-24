@@ -39,15 +39,15 @@ const POOL: Mock[] = [
   { name: 'Ada', kind: 'human', activity: 'working', state: 'reviewing the isometric office' },
   { name: 'Bo', kind: 'agent', activity: 'working', state: 'porting the floor renderer' },
   { name: 'Cy', kind: 'human', activity: 'working', state: 'wiring the firehose subscribe' },
-  { name: 'Dev', kind: 'agent', activity: 'idle', state: null },
+  { name: 'Dev', kind: 'agent', activity: 'active', state: null },
   { name: 'Eli', kind: 'human', activity: 'working', state: 'writing the seating tests' },
   { name: 'Fen', kind: 'agent', activity: 'working', state: 'watching the deploy' },
-  { name: 'Gus', kind: 'human', activity: 'idle', state: null },
+  { name: 'Gus', kind: 'human', activity: 'active', state: null },
   { name: 'Hana', kind: 'agent', activity: 'working', state: 'profiling the render loop' },
   { name: 'Ivy', kind: 'human', activity: 'working', state: 'designing the character rig' },
   // The service seat — the nameplate's "service" tag can only be eyeballed (and contrast-measured)
   // here if the fixture actually seats one (same argument as the varied FIXTURE_IDENTITY above).
-  { name: 'Jib', kind: 'agent', service: true, activity: 'idle', state: null },
+  { name: 'Jib', kind: 'agent', service: true, activity: 'active', state: null },
 ];
 
 /**
@@ -228,7 +228,7 @@ const REEL: RoomEntry[] = [
     name: 'Dev',
     kind: 'agent',
     color: memberColor('Dev', 'agent'),
-    posture: 'idle',
+    posture: 'active',
     title: null,
     source: null,
     laneState: null,
@@ -275,7 +275,7 @@ function OfficePreviewPage() {
     return new Set(raw.split(',').map((s) => s.trim()));
   });
 
-  // `?stale=<names>` reproduces a *stale* seat (ADR 135): posture projected to `idle` while its last-known
+  // `?stale=<names>` reproduces a *stale* seat (ADR 135): posture projected to `active` while its last-known
   // `activity` still reads `working`. That split is the only case where the typing animation and placement
   // could disagree, so it's the one worth being able to summon — the live floor reaches it on its own.
   const [stale] = useState<Set<string>>(() => {
@@ -301,12 +301,12 @@ function OfficePreviewPage() {
       nodes: POOL.filter((m) => present.has(m.name)).map((m) => {
         const isAway = away.has(m.name);
         const isStale = stale.has(m.name);
-        // A stale seat keeps `activity: working` but is placed by its projected `idle` posture.
-        const activity = isAway || (idle.has(m.name) && !isStale) ? 'idle' : m.activity;
+        // A stale seat keeps `activity: working` but is placed by its projected `active` posture.
+        const activity = isAway || (idle.has(m.name) && !isStale) ? 'active' : m.activity;
         const posture = isAway
           ? ('away' as const)
           : isStale || idle.has(m.name)
-            ? ('idle' as const)
+            ? ('active' as const)
             : activity;
         return {
           name: m.name,

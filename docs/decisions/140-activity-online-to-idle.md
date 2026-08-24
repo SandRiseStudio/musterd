@@ -1,6 +1,6 @@
 # 140 — Activity wire rename: `online` → `idle`
 
-- Status: accepted
+- Status: accepted; superseded on the token 2026-08-24 by ADR 316 — `idle` renamed `active` on the wire (this ADR’s online→idle split itself stands)
 - Date: 2026-07-13
 - Related: ADR 010 (two-clocks), ADR 138 (roster posture)
 

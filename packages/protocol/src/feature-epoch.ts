@@ -64,5 +64,9 @@
 // gains `left_team` / `seat_released` / `session_ended`; `signed_off` is legacy — accepted on read,
 // resolved as `seat_released`, never newly stamped. An older web bundle drops the row it cannot
 // parse (per-row tolerance, ADR 232's lesson) and the roster's `behind` hint is the cue.
-export const FEATURE_EPOCH = 12 as const;
+// Epoch 13 — ADR 316: `idle` → `active` on the wire (activity + posture), and the working→active
+// decay now applies to agents (agentIdleMs, default 15 min). Legacy `idle` accepted on read and
+// normalized; decayed reads keep state + last_status_at so the claim renders aged, never erased.
+// An older seat renders what it receives and the roster's `behind` hint is the cue.
+export const FEATURE_EPOCH = 13 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

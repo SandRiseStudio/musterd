@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { MemberSummary } from '@musterd/protocol';
 import { toneColor } from './office-scene/render';
 import {
+  activeClaimLine,
   accountStatusException,
   accountStatusMeta,
   actLabel,
@@ -198,7 +199,7 @@ describe('toneColor — office palette mirrors the CSS tokens', () => {
 describe('postureMeta — roster posture pill (ADR 138)', () => {
   it('renders wire posture tokens with tones', () => {
     expect(postureMeta('working')).toEqual({ label: 'working', tone: 'ok', quiet: false });
-    expect(postureMeta('idle')).toEqual({ label: 'idle', tone: 'ok', quiet: true });
+    expect(postureMeta('active')).toEqual({ label: 'active', tone: 'ok', quiet: true });
     expect(postureMeta('away')).toEqual({ label: 'away', tone: 'pending', quiet: false });
     expect(postureMeta('offline')).toEqual({ label: 'offline', tone: 'muted', quiet: true });
   });
@@ -208,11 +209,11 @@ describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
   it('shows idle/working from posture when live', () => {
     expect(
       rosterPrimaryChip({
-        posture: 'idle',
+        posture: 'active',
         presence: 'online',
-        activity: 'idle',
+        activity: 'active',
       } as MemberSummary).label,
-    ).toBe('idle');
+    ).toBe('active');
     expect(
       rosterPrimaryChip({
         posture: 'working',
@@ -295,22 +296,22 @@ describe('isFeatureBehind — feature-skew hint (ADR 148)', () => {
 
 describe('rosterOrder — active seats lead the rail', () => {
   const seat = (name: string, over: Partial<MemberSummary>): MemberSummary =>
-    ({ name, kind: 'agent', presence: 'online', activity: 'idle', ...over }) as MemberSummary;
+    ({ name, kind: 'agent', presence: 'online', activity: 'active', ...over }) as MemberSummary;
 
-  it('orders working → idle → away → offline, whatever the input order', () => {
+  it('orders working → active → away → offline, whatever the input order', () => {
     const roster = [
       seat('off', { posture: 'offline', presence: 'offline', activity: 'offline' }),
-      seat('idle', { posture: 'idle', activity: 'idle' }),
-      seat('away', { posture: 'away', activity: 'idle' }),
+      seat('lounging', { posture: 'active', activity: 'active' }),
+      seat('away', { posture: 'away', activity: 'active' }),
       seat('work', { posture: 'working', activity: 'working' }),
     ];
-    expect([...roster].sort(rosterOrder).map((m) => m.name)).toEqual(['work', 'idle', 'away', 'off']);
+    expect([...roster].sort(rosterOrder).map((m) => m.name)).toEqual(['work', 'lounging', 'away', 'off']);
   });
 
-  it('puts a working agent above an idle one (the reported case)', () => {
+  it('puts a working agent above an active one (the reported case)', () => {
     const working = seat('stanley', { posture: 'working', activity: 'working' });
-    const idle = seat('gptbot', { posture: 'idle', activity: 'working' }); // stale: activity lags posture
-    expect([idle, working].sort(rosterOrder).map((m) => m.name)).toEqual(['stanley', 'gptbot']);
+    const lounging = seat('gptbot', { posture: 'active', activity: 'working' }); // stale: activity lags posture
+    expect([lounging, working].sort(rosterOrder).map((m) => m.name)).toEqual(['stanley', 'gptbot']);
   });
 
   it('breaks ties within a posture by human-before-agent, then name', () => {
@@ -318,6 +319,25 @@ describe('rosterOrder — active seats lead the rail', () => {
     const b = seat('abe', { posture: 'working', activity: 'working', kind: 'agent' });
     const c = seat('cy', { posture: 'working', activity: 'working', kind: 'agent' });
     expect([b, c, a].sort(rosterOrder).map((m) => m.name)).toEqual(['zeb', 'abe', 'cy']);
+  });
+});
+
+describe('activeClaimLine — the kept claim, aged (presence-honesty \u00a72.1/\u00a73)', () => {
+  const m = (over: Partial<MemberSummary>): MemberSummary =>
+    ({ name: 'ada', kind: 'agent', presence: 'online', activity: 'active', ...over }) as MemberSummary;
+
+  it('renders last claim with a coarse age', () => {
+    expect(activeClaimLine(m({ state: 'shipping inc 3', last_status_at: Date.now() - 20 * 60_000 }))).toBe(
+      'last: \u201cshipping inc 3\u201d \u00b7 20m ago',
+    );
+  });
+
+  it('says no status yet when there is no claim to age', () => {
+    expect(activeClaimLine(m({ state: null, last_status_at: null }))).toBe('no status yet');
+  });
+
+  it('is null off the active posture — working wears its status as a live label', () => {
+    expect(activeClaimLine(m({ activity: 'working', posture: 'working', state: 'x' }))).toBeNull();
   });
 });
 

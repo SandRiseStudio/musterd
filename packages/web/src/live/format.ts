@@ -412,7 +412,7 @@ export function memberInk(name: string, kind: Kind): string {
 }
 
 /* ─── roster posture + governance projection (ADR 138 / 073 / 070) ────────────────────────────────
- * Primary chip = server-projected `posture` (working|idle|away|offline). Account-status chips are
+ * Primary chip = server-projected `posture` (working|active|away|offline). Account-status chips are
  * exceptions only (disabled/banned/archived). Capability badges still show deviations from the
  * generalist default. Nothing is enforced here — this is the observable surface. */
 
@@ -421,8 +421,8 @@ export function postureMeta(posture: Posture): StatusMeta {
   switch (posture) {
     case 'working':
       return { label: 'working', tone: 'ok', quiet: false };
-    case 'idle':
-      return { label: 'idle', tone: 'ok', quiet: true };
+    case 'active':
+      return { label: 'active', tone: 'ok', quiet: true };
     case 'away':
       return { label: 'away', tone: 'pending', quiet: false };
     case 'offline':
@@ -434,10 +434,30 @@ export function postureMeta(posture: Posture): StatusMeta {
   }
 }
 
+/**
+ * The kept claim, aged (presence-honesty \u00a72.1/\u00a73): an `active` seat never erases its history —
+ * the last status renders as `last: \u201c<status>\u201d \u00b7 20m ago`, or `no status yet` when there is
+ * none. Null off the active posture: `working` wears its status as a live label instead.
+ */
+export function activeClaimLine(m: MemberSummary): string | null {
+  if (memberPosture(m) !== 'active') return null;
+  if (!m.state || m.last_status_at == null) return 'no status yet';
+  return `last: \u201c${m.state}\u201d \u00b7 ${coarseAge(Date.now() - m.last_status_at)} ago`;
+}
+
+/** Coarse age crumb (3d / 4h / 20m / now) — precision stays on hover, not in the chip. */
+export function coarseAge(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s >= 86_400) return `${Math.floor(s / 86_400)}d`;
+  if (s >= 3_600) return `${Math.floor(s / 3_600)}h`;
+  if (s >= 60) return `${Math.floor(s / 60)}m`;
+  return 'now';
+}
+
 /** Resolve the chip posture from a summary — prefer the server field; fall back for pre-138 daemons. */
 export function memberPosture(m: MemberSummary): Posture {
   if (m.posture) return m.posture;
-  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'idle');
+  const activity = m.activity ?? (m.presence === 'offline' ? 'offline' : 'active');
   return resolvePosture({
     activity,
     availability: m.availability ?? null,
@@ -657,14 +677,14 @@ export function formatClock(d: Date): { time: string; meridiem: string; zone: st
 }
 
 /** Rank postures by how active the seat is, so the rail leads with who's actually running. Working first,
- * then idle (present, no task), then away (stepped out), then offline (gone) — the same order the chips
+ * then active (present, between claims), then away (stepped out), then offline (gone) — the same order the chips
  * read top to bottom. This subsumes the old online-before-offline split: offline simply ranks last. */
-const POSTURE_RANK: Record<Posture, number> = { working: 0, idle: 1, away: 2, offline: 3 };
+const POSTURE_RANK: Record<Posture, number> = { working: 0, active: 1, away: 2, offline: 3 };
 
 /**
- * Roster sort for the rail: by posture (working → idle → away → offline), then humans before agents, then
+ * Roster sort for the rail: by posture (working → active → away → offline), then humans before agents, then
  * by name. Sorting on the composed `posture` — the same value each row's chip shows — means the list order
- * matches what the eye reads down the chips: the working seats cluster at the top, idle below them.
+ * matches what the eye reads down the chips: the working seats cluster at the top, active below them.
  */
 export function rosterOrder(a: MemberSummary, b: MemberSummary): number {
   const pA = POSTURE_RANK[memberPosture(a)];
