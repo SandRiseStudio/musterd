@@ -77,6 +77,8 @@ The route choice was nick's, made 2026-08-24 on the numbers above (spec §10).
 - The office delight program's byte-adding increments (A2, B, C, D, E1, E2) unblock against
   `appCssGzipBytes` with ~3.2 KB of measured headroom.
 - Re-baselines now happen per budget, and each may still only tighten.
+- 2026-08-24 implementation note: classification matches a declared basename prefix rather than
+  parsing the hash with a delimiter regex; Vite's URL-safe hash may itself contain `-`.
 - **Falsifier:** if within two re-baseline cycles the split budgets accumulate raises at the same
   cadence the single budget did (two in eight days), the split fixed nothing and this ADR should be
   revisited as having been a raise wearing structure.

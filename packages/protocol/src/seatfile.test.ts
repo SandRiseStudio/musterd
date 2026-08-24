@@ -52,6 +52,14 @@ describe('seat file — guard 2: canonical byte-equality + idempotence', () => {
     }
   });
 
+  it('round-trips a Slack id on a human seat and refuses one on an agent seat', () => {
+    const text = 'kind = "human"\nrole = "admin"\nslack_user_id = "U123"\n';
+    expect(serializeSeat(parseSeatFile(text, 'nick'))).toBe(text);
+    expect(() =>
+      parseSeatFile('kind = "agent"\nrole = ""\nslack_user_id = "U123"\n', 'bot'),
+    ).toThrow();
+  });
+
   it('fmt is idempotent (serialize∘parse∘serialize = serialize)', () => {
     for (const [name, text] of canonicalSeats) {
       const once = serializeSeat(parseSeatFile(text, name));

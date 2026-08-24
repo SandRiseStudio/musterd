@@ -59,7 +59,7 @@ export const GROUPS: readonly CommandGroup[] = [
   {
     id: 'work',
     title: 'Work & lanes',
-    blurb: 'own a unit of work, orient, hand off, close it out',
+    blurb: 'explore shared Seeds; own, hand off, and close Lanes',
   },
   { id: 'insight', title: 'Insight', blurb: 'the roster, flow metrics, and the governance trail' },
   {
@@ -447,6 +447,24 @@ export const CATALOG: readonly CommandEntry[] = [
   },
 
   // ── Work & lanes ───────────────────────────────────────────────────────────────────────────
+  {
+    name: 'seed',
+    signature:
+      'list [--history] [--json]  |  show <id>  |  claim <id>  |  ask|answer <id> "<text>"  |  brief|conclude <id> --file <path>  |  promote <id>',
+    summary: 'explore a shared idea before it becomes a Lane',
+    group: 'work',
+    primary: true,
+    detail:
+      'A Seed is a Team idea captured before it becomes a Lane (ADR 291/317).\n' +
+      '  list [--history]              show the active tray or its full history\n' +
+      '  show <id>                     read the source and public exploration thread\n' +
+      '  claim <id>                    become its explorer\n' +
+      '  ask|answer <id> "<text>"      run one attributed clarification edge\n' +
+      '  brief <id> --file <path>      submit an exhaustive brief and open its Lane\n' +
+      '  conclude <id> --file <path> "<conclusion>"   finish without a Lane\n' +
+      '  promote <id>                  deliberately skip research and open a Lane',
+    examples: ['musterd seed list', 'musterd seed claim 01SEED…'],
+  },
   {
     name: 'lane',
     signature:

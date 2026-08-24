@@ -39,6 +39,7 @@ const BOOLEAN_FLAGS = new Set([
   'refresh-hooks',
   'prune-bindings',
   'apply',
+  'history',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {

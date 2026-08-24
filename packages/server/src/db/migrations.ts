@@ -634,7 +634,8 @@ export const MIGRATIONS: Migration[] = [
           observer_scope TEXT,
           last_offline_reason TEXT,
           working_hours TEXT,
-          roles TEXT
+          roles TEXT,
+          slack_user_id TEXT
         );
         INSERT INTO members_new (${colList}) SELECT ${colList} FROM members;
         DROP TABLE members;
@@ -870,6 +871,52 @@ export const MIGRATIONS: Migration[] = [
       const reqCols = db.prepare("SELECT name FROM pragma_table_info('requests')").pluck().all();
       if (!reqCols.includes('model_source'))
         db.exec('ALTER TABLE requests ADD COLUMN model_source TEXT');
+    },
+  },
+  {
+    // ADR 291: the durable shared-Seed projection. Relay capture stays outside the database; this
+    // table owns the Team-visible lifecycle and is keyed by immutable relay provenance.
+    version: 43,
+    up: (db) => {
+      const memberCols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
+      if (!memberCols.includes('slack_user_id'))
+        db.exec('ALTER TABLE members ADD COLUMN slack_user_id TEXT');
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_members_team_slack_user
+          ON members(team_id, slack_user_id) WHERE slack_user_id IS NOT NULL;
+        CREATE TABLE IF NOT EXISTS seeds (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          relay_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          body TEXT NOT NULL,
+          captured_at INTEGER NOT NULL,
+          slack_user_id TEXT NOT NULL,
+          submitted_by TEXT NOT NULL REFERENCES members(id),
+          state TEXT NOT NULL,
+          explorer_id TEXT REFERENCES members(id),
+          final_brief TEXT,
+          conclusion TEXT,
+          linked_lane_id TEXT REFERENCES lanes(id),
+          promotion_kind TEXT,
+          research_skipped INTEGER,
+          promoted_at INTEGER,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(team_id, relay_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_seeds_team_state ON seeds(team_id, state, updated_at);
+        CREATE TABLE IF NOT EXISTS seed_thread_entries (
+          id TEXT PRIMARY KEY,
+          seed_id TEXT NOT NULL REFERENCES seeds(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          body TEXT NOT NULL,
+          member_id TEXT NOT NULL REFERENCES members(id),
+          created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_seed_thread_entries_seed ON seed_thread_entries(seed_id, created_at);
+      `);
     },
   },
 ];

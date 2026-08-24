@@ -83,6 +83,18 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
     exit **1** (wire exits **6** when no selection exists at all:
     `✗ no harness selection here — run musterd harness configure (or musterd init for a fresh folder)`).
 
+### Shared Seed frames (ADR 317)
+
+11. `cmd/seed-list` — `$ musterd seed list` → one active tray row per Seed, using the exact
+    `<id> <state>[ — <explorer>] · <body>` shape. Sample:
+    `01SEED00000000000000000000 open · Try a shared Seed tray`. IDs are dim; `completed` is green;
+    `needs_clarification` is mustard.
+12. `cmd/seed-claim` — `$ musterd seed claim 01SEED00000000000000000000` → exact success line
+    `✓ Seed 01SEED00000000000000000000 — exploring as Ada`, with the checkmark green.
+13. `cmd/seed-promote` — `$ musterd seed promote 01SEED00000000000000000000` → exact success line
+    `✓ Seed 01SEED00000000000000000000 — promoted to Lane 01LANE00000000000000000000`, with the
+    checkmark green.
+
 ## Page: States (empty + error)
 
 1. `state/empty-inbox` — `inbox empty — nobody's mustered anything yet` (dim). (Exact string; the CLI uses it verbatim.)
@@ -90,6 +102,7 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
 3. `state/unknown-member` — `✗ no member "Bob" in dawn` (red) + dim hint `musterd status to list members`.
 4. `state/server-down` — `✗ can't reach team server at ws://localhost:4849 — is the daemon running?` (red).
 5. `state/not-permitted` / generic error — `✗ <message>` red, exit code shown in a side annotation (errors exit non-zero; see `04-cli.md` exit-code table).
+6. `state/empty-seeds` — `no active Seeds — send an idea through the Team's Slack capture` (dim).
 
 For every error frame, annotate the **exit code** in a Figma comment/sticky so the CLI brief and implementation agree.
 
@@ -97,8 +110,8 @@ For every error frame, annotate the **exit code** in a Figma comment/sticky so t
 
 - [ ] `terminal/frame` plus all 7 components exist with the listed variants.
 - [ ] ANSI color styles exist and match `brand.md` §2 exactly.
-- [ ] All 7 `cmd/*` frames exist, 80-col aligned, using the shared components and the canonical sample data.
-- [ ] All 5 `state/*` frames exist; each error frame annotates its exit code and uses the verbatim strings above.
+- [ ] All 13 `cmd/*` frames exist, 80-col aligned, using the shared components and the canonical sample data.
+- [ ] All 6 `state/*` frames exist; each error frame annotates its exit code and uses the verbatim strings above.
 - [ ] No glyph or color is used that the CLI can't reproduce in a 16-color ANSI terminal.
 - [ ] Every literal string a frame shows is reproducible character-for-character (these are the spec for CLI copy).
 

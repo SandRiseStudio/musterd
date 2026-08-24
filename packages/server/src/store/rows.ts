@@ -40,6 +40,8 @@ export interface MemberRow {
   availability: string | null;
   /** Recurring Member schedule, JSON-encoded; null inherits the Team default (ADR 206). */
   working_hours: string | null;
+  /** ADR 311: Slack identity used only to attribute shared Seeds; human seats only. */
+  slack_user_id: string | null;
   token_hash: string | null;
   /** Held-since (ADR 058): set on first authenticated touch, cleared on rotation/reclaim. Null ⇒
    * declared-but-unheld (a stray `claim` may rotate it); non-null ⇒ held, only adoptable. */
@@ -205,6 +207,7 @@ export function toMember(row: MemberRow, teamSlug: string): Member {
       ? (AvailabilitySchema.safeParse(JSON.parse(row.availability)).data ?? null)
       : null,
     working_hours: parseWorkingHours(row.working_hours),
+    slack_user_id: row.slack_user_id ?? null,
     account_status: resolveAccountStatus(row),
     capabilities: resolveCapabilities(row),
     created_at: row.created_at,

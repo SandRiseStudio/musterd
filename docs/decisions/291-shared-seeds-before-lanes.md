@@ -1,6 +1,6 @@
 # 291 — Shared Seeds before Lanes
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-08-19
 - Deciders: nick, gptbot
 - Supersedes: ADR 248 decision 3, which made every ingested Seed an immediate Lane
@@ -77,6 +77,12 @@ work, and makes an exploratory agent look as though it has committed the Team to
   lifecycles and permissions.
 - ADR 248's Worker/KV capture, pull cursor, raw-data boundary, and delivery diagnostics stay in
   force. Its immediate-Lane ingest decision is superseded by this ADR.
+- **2026-08-24:** [ADR 311](311-shared-seeds-are-slack-only.md) narrows the first shared-Seed ingest
+  boundary to attributed Slack records. SMS remains outside this domain until it has an explicit
+  identity mapping.
+- **2026-08-24:** [ADR 312](312-shared-seeds-start-open.md) resolves the previously unspecified
+  vagueness judgement: every capture starts `open`; only an active explorer's posted question creates
+  the answerable `needs_clarification` state.
 
 ## Observability & Evaluation
 
@@ -90,6 +96,6 @@ or a completed conclusion before manual Lane creation, plus the fraction of prom
 that receive a human Act or reach a terminal Lane state. Compare against ADR 248's baseline: every
 captured Seed immediately created an unowned Lane and had no Seed-level exploration record.
 
-**Experiment.** Dogfood the first cohort with the immediate-vagueness guard and three-day completed
-tray window. Review the audit-derived distribution of clarification, completion, promotion, and
-manual-promotion outcomes before changing either threshold.
+**Experiment.** Dogfood the first cohort with ADR 312's explorer-authored clarification transition
+and the three-day completed tray window. Review the audit-derived distribution of clarification,
+completion, promotion, and manual-promotion outcomes before changing either behavior.

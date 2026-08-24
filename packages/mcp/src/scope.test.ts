@@ -69,14 +69,12 @@ describe('scopedToolNames (ADR 144 inc 5)', () => {
     for (const w of WRITE_TOOLS) expect(TOOL_NAMES).toContain(w);
   });
 
-  it('cuts the surface materially for an observer — the increment-5 headline', () => {
-    // Measured 2026-08-03 against the built server: 22 tools, including the read-only ADR 209
-    // context index; of the original surface the acting
-    // tools are 9,876 (77%). The exact byte count belongs to the telemetry attestation, not here;
-    // what this pins is that scoping removes at least half, so a regression that quietly stops dropping
-    // tools fails loudly.
+  it('removes at least ten acting tools for an observer — bytes are pinned end to end', () => {
+    // Consolidating several acting operations into one tool can shrink both the numerator and the
+    // denominator without weakening scoping. Pin a material absolute cut here; scopeSurface.test.ts
+    // pins the user-facing byte reduction through the real SDK listing.
     const full = scopedToolNames(GENERALIST_CAPABILITIES).length;
     const scoped = scopedToolNames(muted).length;
-    expect(scoped).toBeLessThanOrEqual(full / 2);
+    expect(full - scoped).toBeGreaterThanOrEqual(10);
   });
 });

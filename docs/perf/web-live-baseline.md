@@ -388,3 +388,27 @@ Branch `miley/delight0-css-budget-split`, measured on main @ 6bcc8c4a the way th
 - **Classification is closed**: `check-budgets.ts` fails on any CSS bundle not named in
   `budgets.cssBundles` (exercised: a stray `Mystery-abc123.css` fails; an over-budget group fails
   naming only its own bundles as the remedy).
+
+## 2026-08-24 — Shared Seeds drawer (total-JS raise)
+
+Measured on main @ `5d63094d` and PR #1025 after rebasing to that commit, using `gzipSync` over the
+same production build that `perf:check` reads:
+
+| build | `/live` eager JS | total JS | chunks |
+| --- | ---: | ---: | ---: |
+| main | 154,479 B | 240,813 B | 35 |
+| Shared Seeds, eager drawer | 156,242 B | 242,341 B | 35 |
+| Shared Seeds, lazy drawer + Seed client | **155,194 B** | **243,065 B** | 36 |
+
+The read-only drawer is an opt-in interaction, so its component and Seed schema now load only when
+opened. That keeps initial JS within the unchanged 156,000 B ceiling (806 B free). The boundary adds
+724 B to total JS versus the eager shape, but removes 1,048 B from every `/live` initial load; this
+is the intended ADR 183 tradeoff. No dependency was added and no superseded feature code exists to
+delete. `totalJsGzipBytes` is therefore **RAISED 241,000 → 246,000**: measured 243,065 B plus ~1.2%
+headroom, matching the 2026-08-12/21 raise shape. App CSS measures ~21.7 KB against its ADR 313
+24.1 KB surface budget, so CSS is unchanged.
+
+The same build exposed an ADR 313 checker defect: Vite emitted `Live-Cs78-rix.css`, and the checker
+treated the legal hyphen inside the hash as part of the pre-hash basename. Classification now
+matches the closed declared basename prefix and has a regression test for hyphenated hashes; no CSS
+bundle was added or reclassified.

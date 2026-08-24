@@ -58,7 +58,7 @@ export function wsUrl(): string {
   return `${proto}//${window.location.host}/ws`;
 }
 
-async function apiGet<T>(cfg: LiveConfig, path: string): Promise<T> {
+export async function apiGet<T>(cfg: LiveConfig, path: string): Promise<T> {
   const res = await fetch(path, {
     headers: {
       authorization: `Bearer ${cfg.token}`,

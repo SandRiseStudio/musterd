@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter } from '@tanstack/react-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Clock } from '../live/Clock';
 import liveCss from '../live/Live.css?url';
 import brandCss from '../brand/brand.css?url';
@@ -33,6 +33,10 @@ import { officeRoom } from '../live/officeRoom';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { useReport } from '../live/useReport';
 import { roomEntries } from '../live/workingOn';
+
+const LazySeedsTray = lazy(() =>
+  import('../live/SeedsTray').then((module) => ({ default: module.SeedsTray })),
+);
 
 export const Route = createFileRoute('/live')({
   head: () => ({
@@ -71,6 +75,7 @@ function LivePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Collapsed>(NO_COLLAPSE);
   const [companion, setCompanion] = useState(false);
+  const [seedsOpen, setSeedsOpen] = useState(false);
 
   const toggleCollapse = (id: PanelId) => {
     setCollapsed((prev) => {
@@ -418,6 +423,19 @@ function LivePage() {
             them a few inches above was the duplication nick asked us to drop (2026-07-24). */}
         <MusterdWord />
         <span className="lc__spacer" />
+        {connected && (
+          <button
+            type="button"
+            className={`lc__pbtn${seedsOpen ? ' lc__pbtn--on' : ''}`}
+            onClick={() => setSeedsOpen(true)}
+            aria-pressed={seedsOpen}
+            title="Shared Seeds — Team ideas before they become Lanes"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 13V7M8 8C5.4 8 3.4 6.6 3 4c2.7-.2 4.7 1 5 4ZM8 10c2.6 0 4.6-1.4 5-4-2.7-.2-4.7 1-5 4Z" />
+            </svg>
+          </button>
+        )}
         {connected && <WatchLinkButton cfg={cfg!} />}
         {connected && <CompanionToggle on={companion} onToggle={toggleCompanion} />}
         {connected && <RoomToneToggle />}
@@ -451,7 +469,7 @@ function LivePage() {
             }
             // A modal means it: while the board overlay is up, the room behind it takes no focus and
             // no clicks (the AsksStrip inert precedent, promoted to page scope).
-            inert={boardOpen}
+            inert={boardOpen || seedsOpen}
           >
             <OfficeScene
               {...officeRoom(team, stream, { entries, board })}
@@ -504,6 +522,15 @@ function LivePage() {
               focusLane={boardLane}
               onClose={closeBoard}
             />
+          )}
+          {seedsOpen && (
+            <Suspense fallback={null}>
+              <LazySeedsTray
+                cfg={cfg!}
+                activityKey={envelopes[envelopes.length - 1]?.id}
+                onClose={() => setSeedsOpen(false)}
+              />
+            </Suspense>
           )}
         </>
       )}

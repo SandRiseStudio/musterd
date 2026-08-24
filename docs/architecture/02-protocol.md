@@ -112,6 +112,24 @@ informational—no Presence or schedule enforcement is performed (ADR 206).
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 
+## Shared Seeds (ADR 291, unreleased)
+
+`SeedSchema` is the contract for a captured Team idea before it becomes a Lane. It carries immutable
+Slack relay provenance (`relay_id`, `source: "slack"`, raw `body`, `captured_at`, `slack_user_id`,
+`submitted_by`) and mutable lifecycle state, explorer, narrow public thread, exhaustive final brief,
+conclusion, promotion metadata, completion time, and linked Lane id. `SeedStateSchema` accepts only
+`open`, `exploring`, `needs_clarification`, `clarified`, `completed`, and `promoted`.
+Every accepted relay capture starts `open`; ingest does not classify body semantics. Only an active
+explorer's parsed clarification request creates the answerable `needs_clarification` state (ADR 312).
+
+`RelaySeedSchema` and `RelaySeedListSchema` reject every non-Slack or unattributed relay record at the
+HTTP boundary (ADR 311). `SubmitSeedBriefSchema` requires problem/context, evidence, at least one
+approach with trade-offs, constraints, risks, unknowns, recommendation, and proposed Lane framing.
+`SeedMcpUpdateSchema` (ADR 318) parses the compact MCP `{action, id, input?}` lifecycle envelope and
+then applies the existing action-specific claim, clarification, brief, or promotion schema.
+The protocol also exports parsed bodies for claim, clarification, answer, and manual promotion, plus
+single-Seed and list results. Promotion is the only operation that creates a Lane.
+
 ### Portable wake context (ADR 209)
 
 `WakeContextRequestSchema` is a strict `{ act_id? , lane_id? }` body that requires exactly one

@@ -114,6 +114,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       lifecycle,
       lifecycleUntil,
       workingHours: seat.working_hours ?? null,
+      slackUserId: seat.slack_user_id ?? null,
     };
     const existing = getMemberByName(db, team.id, name); // includes tombstoned rows
     if (!existing) {
@@ -125,6 +126,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
         lifecycle: fields.lifecycle,
         lifecycleUntil: fields.lifecycleUntil,
         workingHours: fields.workingHours ?? null,
+        slackUserId: fields.slackUserId ?? null,
       });
       result.added.push(name);
       result.minted[name] = token;
@@ -138,7 +140,9 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       existing.role !== fields.role ||
       existing.lifecycle !== fields.lifecycle ||
       existing.lifecycle_until !== fields.lifecycleUntil ||
-      existing.working_hours !== (fields.workingHours ? JSON.stringify(fields.workingHours) : null)
+      existing.working_hours !==
+        (fields.workingHours ? JSON.stringify(fields.workingHours) : null) ||
+      existing.slack_user_id !== fields.slackUserId
     ) {
       // UPDATE in place — id, token_hash, bound_at preserved (live session unaffected).
       updateMemberIdentity(db, existing.id, fields);

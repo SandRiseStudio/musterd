@@ -111,6 +111,16 @@ CREATE TABLE schema_meta (
 
 ## Migrations
 
+### Shared Seeds (unreleased — ADR 291)
+
+Migration v43 adds an optional, Team-unique `members.slack_user_id` for human Members, Seed rows keyed
+by immutable `(team_id, relay_id)`, and a narrow public Seed-thread table. Each Seed snapshots the
+Slack user id and resolved submitting Member beside its immutable raw body, source, and capture time.
+Mutable columns hold lifecycle state, explorer, exhaustive final brief, conclusion, promotion metadata,
+completion time, and a nullable linked Lane id. The relay cursor remains separate. Promotion creates
+the ordinary Lane and links it in the same SQLite transaction. Every accepted capture starts `open`;
+only an active explorer's posted question creates `needs_clarification` (ADR 291/311/312).
+
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.
 - **v29 (`musterd/0.3`, ADR 206):** `ALTER TABLE teams ADD COLUMN working_hours TEXT` + `ALTER TABLE members ADD COLUMN working_hours TEXT`. The nullable JSON value stores a validated recurring schedule (`timezone`, weekday list, `start`, `end`); a Member value replaces the Team value for that Member, and missing values inherit. It is informational and never enforces Presence.

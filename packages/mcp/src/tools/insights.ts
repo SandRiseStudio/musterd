@@ -203,9 +203,7 @@ export function registerInsights(server: McpServer, client: MusterdClient): void
     'team_report',
     {
       description:
-        'The insight report over lanes + the act log at three altitudes: ic (the Goal board), ' +
-        'team (flow, steering, waiting-on — the default), exec (milestones + exceptions). ' +
-        'Derived, never stored; measures outcomes and queues, not message volume.',
+        'Read Team coordination at ic, team, or exec altitude. Derived from Lanes and Acts; measures outcomes and queues.',
       inputSchema: {
         altitude: z
           .enum(['ic', 'team', 'exec'])

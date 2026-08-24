@@ -48,6 +48,7 @@ src/
     delivery.ts       // the per-recipient delivery ledger, derived from log + cursors + audit: actDelivery + openDirectedLedger (ADR 090) + handoffNamedLaneOutOfPlay (#745: named-lane out of play — shared with orientation why)
     mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     memory.ts         // seat memory: saveMemory/getMemory/memoryEnvelope/clearMemory — daemon-private continuity blob, LWW, caps (ADR 093)
+    seeds.ts          // shared Seed persistence + authorized lifecycle transitions; atomic retry-safe promotion to one ordinary Lane (ADR 291/311)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
     signinHandoff.ts  // sign-in handoff relay: stageHandoff/redeemHandoff — memory-only, single-use 60s nonces so `musterd board` hands the browser a handle, never a credential (ADR 170)
     gateAsk.ts        // Gate B (ADR 150) ask-lifecycle reads: findGateAsk (fingerprint dedup — one ask per re-attempted costly action) + gateAskHumanAnswer (human-only accept/decline release); pure reads over the ADR 147 ask-stream log
@@ -78,7 +79,7 @@ src/
     sampler.ts        // setInterval tick (60s default): scan → classify → insertFootprintTick + retention prune; any throw = one skipped tick, never a crashed daemon
     reap.ts           // reapOrphans: the daemon's only kill path — per-pid re-verification at kill time (allowlist + still orphaned), SIGTERM→grace→SIGKILL, footprint.reaped audit row
   seeds/
-    ingest.ts         // setInterval poll (60s): pull raw seeds from the policy-named relay, deterministic title/detail cleanup, one unowned open lane per seed + seed.ingested audit; cursor advanced transactionally with the lane insert (ADR 248)
+    ingest.ts         // setInterval poll (60s): parse Slack-only relay records, resolve human Member attribution, persist shared Seeds, and advance the cursor atomically; never opens a Lane (ADR 291/311)
   projection/
     load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
     reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files
@@ -192,6 +193,23 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - **HTTP surface — seat-authenticated, own-seat only.** `PUT /teams/:slug/memory` (`{ headline, body? }` → `saveMemory` → `204`), `GET …/memory` (`200 { headline, body, saved_at }` or `404` when none; `?envelope=1` returns the headline-only envelope instead — the `musterd status` one-liner read, never the body), `DELETE …/memory` (`clearMemory` → `204`, idempotent). All three resolve the seat from the presented token (`authMember`), apply the banned-=-inert gate (`assertSeatCanRead` — a `disabled`/`banned`/`archived` seat can't touch memory either), and act on **the caller's own seat** — the URL carries no member name, so there is deliberately **no cross-seat read path** (team admins included, ADR 093 §4): an admin hitting `/memory` reads its _own_ note, never another's. The save schema (`MemorySaveBody`) shapes types only; the caps live in `saveMemory` so the 400 names the exact limit.
 - **Envelope on occupy.** All five occupied-frame sites (WS; HTTP admin-approve, grant, credential self-authorize, and standing reseat) emit `memory: memoryEnvelope(db, member.id)` and the Member's Team Role `charter` when the role library declares one. A returning occupant's join frame carries the memory headline/age/size line plus authenticated Role context; the memory body travels only over the explicit `GET`.
 - **Audit sizes-only.** `memory.save`/`memory.clear` audit actions carry `size_bytes`/`headline_len` in `detail`, never the headline or body text (hard rule 5).
+
+## Shared Seeds (ADR 291/311/312, unreleased)
+
+- **Authenticated Team reads.** `GET /teams/:slug/seeds` returns every Team Seed and
+  `GET /teams/:slug/seeds/:id` returns one. Both use `authTouch`; an unauthenticated caller learns
+  nothing about Seed existence. Responses are parsed through `SeedListSchema` / `SeedResultSchema`.
+- **Parsed lifecycle mutations.** `POST …/seeds/:id/claim`, `/clarification`, `/answer`, `/brief`,
+  and `/promote` parse their bodies through the corresponding protocol schemas before calling the
+  store. Only agents claim, only the active explorer asks or submits the final brief, only the
+  submitting Member answers, and any Member may manually promote. Store transitions return the
+  existing `forbidden`, `not_found`, or `conflict` errors.
+- **Promotion activity.** The first automatic or manual promotion emits the normal Team
+  `lane_open` message with `seed_id` and `brainstorm_recommended:true`. A retry returns the same linked
+  Lane and emits no duplicate audit or activity row.
+- **Content boundary.** Lifecycle audit rows carry only actor, Seed/Lane ids, state edges, result
+  kind, and skipped-research metadata. Raw Seed bodies, Slack user ids, clarification/answer text,
+  final briefs, and conclusions appear in neither audit details nor HTTP request logs.
 
 ## Inbox delivery semantics
 

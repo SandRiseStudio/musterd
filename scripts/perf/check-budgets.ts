@@ -32,6 +32,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
+import { classifyCssBundle } from './css-bundles.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..', '..');
@@ -109,13 +110,7 @@ const cssGroupBudget: Record<CssGroup, number> = {
 };
 const cssSizes = css.map((f) => {
   const name = relative(distClient, f);
-  const base = name
-    .split('/')
-    .pop()!
-    .replace(/-[^-.]+\.css$/, '');
-  const group = (Object.keys(budgets.cssBundles) as CssGroup[]).find((g) =>
-    budgets.cssBundles[g].includes(base),
-  );
+  const { base, group } = classifyCssBundle(name, budgets.cssBundles);
   return { file: name, base, group, gzip: gzipSize(f) };
 });
 const cssGroupTotal = (g: CssGroup) =>

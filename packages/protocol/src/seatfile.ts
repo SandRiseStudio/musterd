@@ -61,9 +61,16 @@ export const SeatFileSchema = z
      *  defaults, never widen (enforced by the daemon's projection via `clampNarrow`). */
     capabilities: PartialCapabilitiesSchema.optional(),
     working_hours: WorkingHoursSchema.optional(),
+    /** ADR 311: Slack identity join for human-submitted Seeds; never valid on an agent seat. */
+    slack_user_id: z.string().min(1).optional(),
   })
-  .refine((s) => s.lifecycle !== 'until' || Boolean(s.until), {
-    message: 'lifecycle "until" requires an `until` timestamp',
+  .superRefine((s, ctx) => {
+    if (s.slack_user_id !== undefined && s.kind !== 'human') {
+      ctx.addIssue({ code: 'custom', message: '`slack_user_id` is valid only on a human seat' });
+    }
+    if (s.lifecycle === 'until' && !s.until) {
+      ctx.addIssue({ code: 'custom', message: 'lifecycle "until" requires an `until` timestamp' });
+    }
   });
 export type SeatFile = z.infer<typeof SeatFileSchema>;
 
@@ -302,6 +309,7 @@ export function serializeSeat(seat: SeatFile): string {
   // Admin-set account status (top-level key — must precede any table). Omitted when unset (the common
   // active/provisioned case is derived, never written).
   if (seat.account_status) out += line('account_status', seat.account_status);
+  if (seat.slack_user_id) out += line('slack_user_id', seat.slack_user_id);
   if (seat.working_hours) out += serializeWorkingHours(seat.working_hours, out);
   // Per-seat capability narrowing as a trailing `[capabilities]` table (TOML requires tables after
   // top-level keys). Omitted entirely when the override is absent or empty (a known normalization).

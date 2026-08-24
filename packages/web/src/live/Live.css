@@ -214,6 +214,216 @@
   fill: none;
   stroke: currentColor;
 }
+
+/* ─── Shared Seeds tray (ADR 317) ───────────────────────────────────── */
+.lc-seeds {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--lc-z-overlay) + 3);
+  display: flex;
+  justify-content: flex-end;
+  background: color-mix(in srgb, var(--lc-ground) 58%, transparent);
+  backdrop-filter: blur(3px);
+  animation: lc-fade 180ms var(--lc-ease) both;
+}
+.lc-seeds__panel {
+  display: flex;
+  flex-direction: column;
+  width: min(460px, 92vw);
+  height: 100%;
+  background: var(--lc-ground-2);
+  border-left: 1px solid var(--lc-border-2);
+  box-shadow: -24px 0 70px -40px rgba(42, 33, 24, 0.55);
+  outline: none;
+  animation: lc-seeds-in 280ms var(--lc-ease) both;
+}
+@keyframes lc-seeds-in {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+}
+.lc-seeds__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--lc-8) var(--lc-7) var(--lc-5);
+  border-bottom: 1px solid var(--lc-border);
+}
+.lc-seeds__eyebrow {
+  color: var(--lc-accent-ink);
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+.lc-seeds__head h2 {
+  margin: 3px 0 0;
+  font-size: 22px;
+  line-height: 1.1;
+}
+.lc-seeds__close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--lc-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lc-dim);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lc-seeds__tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--lc-3);
+  padding: var(--lc-4) var(--lc-7);
+  border-bottom: 1px solid var(--lc-border);
+}
+.lc-seeds__tabs button {
+  padding: 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lc-dim);
+  font: 700 11px/1 var(--font-mono, monospace);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.lc-seeds__tabs button.is-on {
+  border-color: color-mix(in srgb, var(--lc-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--lc-accent) 12%, transparent);
+  color: var(--lc-accent-ink);
+}
+.lc-seeds__tabs > span {
+  margin-left: auto;
+  color: var(--lc-muted);
+  font: 11px/1 var(--font-mono, monospace);
+}
+.lc-seeds__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--lc-5) var(--lc-6) var(--lc-8);
+}
+.lc-seeds__empty,
+.lc-seeds__error {
+  margin: var(--lc-8) var(--lc-3);
+  color: var(--lc-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.lc-seeds__error {
+  color: var(--lc-danger-ink);
+}
+.lc-seed {
+  margin-bottom: var(--lc-4);
+  padding: var(--lc-5);
+  border: 1px solid var(--lc-border);
+  border-left: 3px solid var(--lc-accent);
+  border-radius: var(--lc-r-md);
+  background: var(--lc-surface);
+}
+.lc-seed--completed,
+.lc-seed--promoted {
+  border-left-color: var(--lc-success);
+}
+.lc-seed--needs_clarification {
+  border-left-color: var(--lc-warn-ink);
+}
+.lc-seed__meta,
+.lc-seed__byline {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--lc-4);
+  color: var(--lc-muted);
+  font: 10px/1.3 var(--font-mono, monospace);
+}
+.lc-seed__state {
+  color: var(--lc-accent-ink);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.lc-seed--completed .lc-seed__state,
+.lc-seed--promoted .lc-seed__state {
+  color: var(--lc-success-ink);
+}
+.lc-seed__idea {
+  margin: var(--lc-4) 0;
+  color: var(--lc-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.lc-seed__thread {
+  margin-top: var(--lc-4);
+  padding: var(--lc-4) var(--lc-5);
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-surface-2);
+}
+.lc-seed__thread p,
+.lc-seed__conclusion {
+  margin: 0 0 var(--lc-3);
+  color: var(--lc-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.lc-seed__thread p:last-child {
+  margin-bottom: 0;
+}
+.lc-seed__result {
+  margin-top: var(--lc-4);
+  color: var(--lc-dim);
+  font-size: 12px;
+}
+.lc-seed__result summary {
+  color: var(--lc-accent-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+.lc-seed__result > div {
+  margin-top: var(--lc-3);
+}
+.lc-seed__result b {
+  font: 700 10px/1.3 var(--font-mono, monospace);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.lc-seed__result p {
+  margin: 2px 0 0;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.lc-seed__promotion {
+  margin: var(--lc-4) 0 0;
+  color: var(--lc-muted);
+  font: 10px/1.3 var(--font-mono, monospace);
+  text-transform: uppercase;
+}
+.lc-seed__lane {
+  display: inline-block;
+  margin-top: var(--lc-4);
+  color: var(--lc-lane-ink);
+  font: 700 11px/1.3 var(--font-mono, monospace);
+  text-decoration: none;
+}
+.lc-seed__lane:hover {
+  text-decoration: underline;
+}
+.lc-seeds__foot {
+  padding: var(--lc-4) var(--lc-7);
+  border-top: 1px solid var(--lc-border);
+  color: var(--lc-muted);
+  font-size: 11px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-seeds,
+  .lc-seeds__panel {
+    animation: none;
+  }
+}
 /* ─── office clock ────────────────────────────────────────────────────────
  * Wall time as a glass pill: tabular digits, each in a fixed-width slot that a changed glyph rolls
  * up through (the seconds column moves every tick, the hour once an hour). A sheen sweeps the pill on
