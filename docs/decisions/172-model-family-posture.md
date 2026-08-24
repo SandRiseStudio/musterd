@@ -46,7 +46,7 @@ one.
 - **Family comes from live attestation only, never the seat name.** The ADR 101/158 ladder is the
   sole source; a seat's name is a label someone chose optimistically.
 - **A live agent attesting `unknown` counts as `unattested`, not in the denominator.** It cannot
-  prove diversity, and a wrong guess poisons the posture the way a wrong attestation poisons ADR 314
+  prove diversity, and a wrong guess poisons the posture the way a wrong attestation poisons ADR 056
   conclusions. This is the picker's per-seat rule, applied to the aggregate.
 - **Humans ride beside the posture (`humans_live`), never inside it.** Human review is its own
   requirement class — the ADR 169 risk route (user-facing, expensive, destructive, prod-touching
@@ -159,6 +159,10 @@ inc 5 toward attestation coverage before reviewer spin-up.
 
 ## Consequences
 
+- _Dated note (2026-08-24):_ the Decision's citations of "ADR 056 conclusions" resolve to
+  [ADR 314](314-correlated-models-correlated-mistakes.md), the diversity charter — ADR 056 never
+  stated the thesis (its acceptance amendment records this); the Decision text is frozen, so the
+  repoint lives here.
 - The `no_candidate` degradation stops being a shrug: it names the team's shape and who could be
   woken to change it, in the worker's own context at the moment of degradation.
 - ADR 056 analyses gain a team-level series to condition on — "these chains were scored under

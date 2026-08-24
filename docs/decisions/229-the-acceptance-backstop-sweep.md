@@ -67,7 +67,7 @@ all (ADR 225's own Context, since marked provisional), so a promise-derived dead
 
 `recordLaneClose` derives `verified = done && closer.name !== ownerAtClose`. A system closer satisfies
 that predicate trivially, so **the naive implementation would record every swept lane as
-`counterpart_confirm`** — a genuine cross-seat review that never happened, feeding the ADR 314
+`counterpart_confirm`** — a genuine cross-seat review that never happened, feeding the ADR 056
 diversity conclusions that read off exactly this field.
 
 So the closer gains an explicit `kind: 'system'`, and verified-ness requires a non-system closer.
@@ -96,6 +96,9 @@ human-accepted ones. The sweep therefore reads, and writes only when it closes.
 
 ## Consequences
 
+- _Dated note (2026-08-24):_ the Decision's "ADR 056 diversity conclusions" resolves to
+  [ADR 314](314-correlated-models-correlated-mistakes.md), the diversity charter — ADR 056 never
+  stated the thesis; the Decision text is frozen, so the repoint lives here.
 - Protocol: `LoopsPolicy` gains `sweep`. No wire change for a team that does not set it.
 - A team that arms it trades "a stranded lane waits forever" for "a stranded lane closes, unverified
   and labelled, after a day". That is a real loss of information — an acceptance that would have
