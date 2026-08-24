@@ -1,10 +1,10 @@
 # Competitive landscape — coordination vs. the substrate
 
-> **Living document.** The competitive picture on the _coordination_ side, complementing the observability-market snapshot in `observability.md` §2. Substantive positioning shifts go through an ADR. Status: **draft**, refreshed 2026-08-19 (§1 Flue update, §12 added; original snapshot 2026-06-17).
+> **Living document.** The competitive picture on the _coordination_ side, complementing the observability-market snapshot in `observability.md` §2. Substantive positioning shifts go through an ADR. Status: **draft**, refreshed 2026-08-24 (§13 added: the funding wave and the peer-coordination result; prior refresh 2026-08-19 — §1 Flue update, §12; original snapshot 2026-06-17).
 
 This doc records what neighboring tools build, where they stop, and why musterd's choices are deliberate counter-positions rather than gaps. It is evidence for the thesis, not the thesis itself (that lives in `README.md`, `ROADMAP.md` "How priorities are decided", and `observability.md` §3).
 
-Most entries here (§§1–4) are **frameworks that stop where we start** — they orchestrate single agents (increasingly _first-party and automatic_: Claude Code's ultracode / `Workflow`, Sakana's Fugu) and delegate the between-agent space to the substrate. §5 is different: **Band is the first head-on competitor _inside_ the coordination layer itself**, so it is analyzed against a different spine (executions vs. seats, `agent-ontology.md`) rather than the delegation seam. §§6–7 read **demand signals from the outside** — the "agent is just a loop" governance ask, and the command-center console — that locate musterd's peer-coordination lane without naming it; §8 collects borrowable patterns. §9 is **AgentField**, the productized agents-as-services backend — a different layer (deployed functions under a control plane, not autonomous seats), analyzed mainly as a source of governance patterns worth borrowing. §10 is **Omnigent**, the meta-harness — the substrate absorbing harness _management_ itself, one control plane over Claude Code/Codex/Cursor/Pi — analyzed like §9 as a different layer with one sharp adjacency (multi-device presence). §11 notes **Pi**, a deliberately minimal harness: in musterd's vocabulary a _Surface_ — a join target, not a competitor. §12 (added 2026-08-19) reads the **teammates turn** — Hermes Bot Mode, Multica, Grok Bot, Agent 365 — the Q3 2026 wave that adopts musterd's nouns (named persistent agents, handoffs, boards) while staying inside one owner's walls.
+Most entries here (§§1–4) are **frameworks that stop where we start** — they orchestrate single agents (increasingly _first-party and automatic_: Claude Code's ultracode / `Workflow`, Sakana's Fugu) and delegate the between-agent space to the substrate. §5 is different: **Band is the first head-on competitor _inside_ the coordination layer itself**, so it is analyzed against a different spine (executions vs. seats, `agent-ontology.md`) rather than the delegation seam. §§6–7 read **demand signals from the outside** — the "agent is just a loop" governance ask, and the command-center console — that locate musterd's peer-coordination lane without naming it; §8 collects borrowable patterns. §9 is **AgentField**, the productized agents-as-services backend — a different layer (deployed functions under a control plane, not autonomous seats), analyzed mainly as a source of governance patterns worth borrowing. §10 is **Omnigent**, the meta-harness — the substrate absorbing harness _management_ itself, one control plane over Claude Code/Codex/Cursor/Pi — analyzed like §9 as a different layer with one sharp adjacency (multi-device presence). §11 notes **Pi**, a deliberately minimal harness: in musterd's vocabulary a _Surface_ — a join target, not a competitor. §12 (added 2026-08-19) reads the **teammates turn** — Hermes Bot Mode, Multica, Grok Bot, Agent 365 — the Q3 2026 wave that adopts musterd's nouns (named persistent agents, handoffs, boards) while staying inside one owner's walls. §13 (added 2026-08-24) reads the **money and the evidence arriving in the coordination layer itself**: seed rounds for Band, Pilot Protocol, and xpander; the managed-agents turn going first-party at three labs; and the first peer-coordination research result (AgentRadio) whose primitives are recognizably musterd's.
 
 ## 1. The pattern: frameworks delegate coordination to the substrate
 
@@ -122,6 +122,8 @@ This is the whole analysis in one line, and it falls straight out of `agent-onto
 Band solved **talk** (a hosted room where cross-framework agents converse). The measured multi-agent tax (`lanes-and-the-multi-agent-tax.md`) is that **talk is cheap (~1% of tokens) and wasted _work_ is the tax (~37%)** — and Band has no work-ownership, no plan/goal spine, no derived insight, so it does not touch the expensive failure. Its **stateless-per-room execution** is not an incidental limitation; it is architecturally **opposed to the seat** — you cannot bolt durable cross-room identity onto a model whose defining promise is _"no shared state"_ between rooms. And **SDK-required participation** means a plain Claude Code terminal session cannot be a Band participant, where it _can_ be a musterd seat — the harness-native reach (ADR 088's hook, the reachability ladder) is exactly what a hosted SDK platform structurally can't offer.
 
 **The threat, honestly.** Rooms are a natural place to grow typed acts and work primitives; if Band moves from conversation toward structured work, the surfaces converge. The counter-moat is the stack Band's architecture resists: **seat durability** (their no-shared-state fights it), **harness-native provisioning** (their SDK requirement fights it), the **plan/insight layer** (unbuilt on their side), and the **measured-tax research** (ADR 056) that names the problem they don't yet address. Watch their roadmap for work-ownership language.
+
+**Update 2026-08-24 — Band is funded and carrying the category's name.** What the July sighting missed: Band had already raised a **$17M seed** (announced 2026-04-23; Sierra Ventures, Hetz Ventures, Team8 — [unite.ai](https://www.unite.ai/band-raises-17m-seed-round-to-build-the-coordination-layer-for-ai-agents/)), pitched in the press as _"the coordination layer for AI agents"_ and "the WhatsApp for AI agents," with an explicit **"internet of agents" cross-org vision**. VentureBeat's VB Transform roundup (2026-07-29, [5 startups fixing the agent infrastructure gap](https://venturebeat.com/orchestration/enterprise-ai-agents-cant-talk-to-each-other-cant-be-trusted-with-permissions-and-cant-be-audited-5-startups-are-already-fixing-that)) leads with Band for agent-to-agent communication, citing autonomous workflows of 8–20 hours. The watch item stands unanswered on substance — no work-ownership or typed-act language has surfaced; the pitch is still conversation + governance visibility — but the **vocabulary risk sharpened**: "coordination layer" is now a funded company's press label, not just our phrase. The positioning ADR should assume the term is contested (see §13).
 
 **Positioning line:** _Band connects your agents; musterd makes them a team._
 
@@ -264,3 +266,97 @@ is validation (the demand is real, the vocabulary is converging on ours) and a d
 vocabulary will be defined by whoever ships loudest — see the Multica note above). The §5 Band
 analysis stands unchanged as the only head-on protocol competitor; this wave is the _product_
 layer discovering the same nouns.
+
+## 13. Refresh 2026-08-24: the money, the labs, and the first peer-coordination result
+
+Added 2026-08-24, from a sweep of the outside literature plus the Exploring Next curated corpus
+(2026-06 → 2026-08). Three movements since the 08-19 refresh, each read against the spines above.
+
+### a. Seed money has arrived in and around the coordination layer
+
+Three funded entrants in four months, each occupying a different cell of this page's map:
+
+- **Band — $17M seed** (2026-04-23, disclosed to us late; details in the §5 update above). The
+  protocol-competitor cell. Still conversation-shaped; the funding changes urgency, not analysis.
+- **Pilot Protocol — $4.5M seed** (out of stealth 2026-07-27; Version One Ventures lead —
+  [businesswire](https://www.businesswire.com/news/home/20260724693789/en/Pilot-Protocol-Launches-with-$4.5M-to-Build-the-Internet-for-Agents)).
+  "The internet for agents": every agent gets a **unique address**, an **app store built for agents**
+  (30,000+ autonomous installs claimed in the first two weeks), and **agent-to-agent payments**. This
+  is the **cross-org cell** — discovery, addressing, and commerce between agents of different owners —
+  i.e. the space next to Band's Contacts and musterd's unbuilt v0.3 P4 (credentialed remote join).
+  What it is not: a work or team model. Agents transact; they do not hold lanes, decline handoffs, or
+  answer to acceptance. The economy framing (Bain: $300–500B US agent-driven commerce by 2030) makes
+  addresses-and-payments the likely first cross-org substrate, with coordination semantics still
+  unclaimed on top. **Coral Protocol** (open infra for the "Internet of Agents"; staking, trust
+  bidding, crypto payments — arXiv 2505.00749) is the decentralized variant of the same cell, and
+  matters here mainly as the institutional home of AgentRadio (§13c).
+- **xpander — $7.5M seed** (Pico Venture Partners; VentureBeat 2026-08-17 —
+  [agent sprawl](https://venturebeat.com/orchestration/as-enterprises-confront-ai-agent-sprawl-xpander-wants-them-to-own-their-own-control-and-context-layer)).
+  The §7/§10 command-center cell: a vendor-neutral **control plane** the enterprise owns — sandboxed
+  execution, controlled tool calling, audit trails — over whatever models and frameworks employees
+  pick. Same verdict as §9/§10 (control plane ≠ peer membrane), but the demand numbers it rode in on
+  are worth keeping: **Gartner estimates the average Fortune 500 firm will run >150,000 agents by
+  2028, up from <15 in 2025, and only 13% of organizations believe their agent governance is
+  adequate.** That is §6's governance demand, quantified.
+
+### b. The managed-agents turn goes first-party — the teammates wave, hosted
+
+§12's wave was harnesses and consoles growing teammate vocabulary. Since then the **labs themselves**
+have productized the persistent, hosted agent:
+
+- **Anthropic Claude Managed Agents** (public beta 2026-04-08): an Anthropic-managed harness plus
+  production infrastructure — state, memory, permissions, scheduled execution, per-session sandboxes —
+  at token rates + $0.08/session-hour; Notion, Rakuten, Sentry in production.
+- **LangChain Managed Deep Agents** (public beta 2026-08-12; their essay
+  ["why managed agents are the next big thing"](https://www.langchain.com/blog/why-managed-agents-are-the-next-big-thing-in-agent-building)
+  names the bundle: runtime, streaming, sandboxes, context, evals, memory, auth — "seven previously
+  separate infrastructure concerns"). Explicitly framed as **teammates reachable over UI/API/channels**,
+  and explicitly distinguished from orchestrated subagents.
+- **Grok Bot out of beta** (August 2026): each agent gets a **persistent cloud computer**; "always-on
+  AI teammates" across SuperGrok and Cursor plans.
+- **OpenAI opens the Codex harness** ([Codex as a platform](https://developers.openai.com/blog/codex-as-a-platform),
+  2026-08-21): the execution layer — conversation state, streaming, tools, sandbox/approval policies —
+  open-sourced with an SDK and app-server protocol. Nothing multi-agent in it; its significance here
+  is §11's: **the population of harnesses a seat can be animated by keeps growing**, and now includes
+  purpose-built embeddings of Codex inside other people's products.
+
+Read against §12: the wall has not moved. A managed agent is durable, named, reachable — and owned by
+one operator inside one platform's walls, with no cross-owner identity, no attestation a second party
+can check, and no power to decline its operator. What has changed is that **durable agent identity is
+now a first-party product primitive at three labs**, which makes the ontology argument
+(`agent-ontology.md`: the seat outlives the harness) easier to state and more urgent to claim — the
+labs' version binds identity to *their* runtime; musterd's binds it to the team.
+
+### c. AgentRadio: the first peer-coordination research result — with musterd-shaped primitives
+
+[AgentRadio](https://arxiv.org/abs/2607.28430) (Coral AI Labs + universities, 2026-07-30; VentureBeat
+coverage 2026-08-10) is the sharpest outside evidence this page has gained since the cookoff:
+
+- **The mechanism is a between-agents layer, not an orchestrator.** An asynchronous message-passing
+  layer with three primitives — **threads, messages, and "waiting for mentions" as a background task
+  that surfaces teammates' messages without interrupting foreground work**. Agents organize as peers
+  through division of labor and negotiation. Anyone who has read musterd's SPEC will recognize the
+  inventory: threads, directed acts, and the inbox-wait/interrupt line, independently reinvented as a
+  research artifact.
+- **The result: coordination structure beat model scale.** Four Claude Code agents on AgentRadio
+  resolved **62.1%** of SWE-Atlas QnA tasks vs **32.3%** for a single agent — and beat the newer
+  Opus 4.8 solo (57.2%), with the gap widening on harder tasks.
+- **The honest caveats.** One benchmark, code-comprehension QnA, agent-only (no human peer), no
+  cost accounting against the uncoordinated-N baseline that finding 006 insists on — and by our own
+  standing rule the comparison to *solo* is the flattering one. Treat the number as evidence that
+  **the between-layer is where the headroom is**, not as a transferable multiplier.
+
+**Why this matters for positioning:** "the right coordination structure outmatches raw compute" is
+now a claim with an outside citation, made by a group with no stake in musterd. It is also a warning:
+peer-coordination mechanics are publishable, reproducible, and being built in the open. The moat was
+never the primitives — it is identity, attestation, humans-as-peers, and the measured corpus.
+
+**Also sighted, same sweep:** Anthropic's Frontier Red Team published
+["Patterns and problems in multiagent systems"](https://www.anthropic.com/research/multiagent-systems)
+(2026-08-13) — first-party experimental evidence on coordination failure, conformity ("individual
+agents are 'low variance'… correlated failures"; 18/30 agents picking the identical branch name),
+epistemic brittleness, and goal escalation, concluding coordination "doesn't naturally emerge from
+stronger intelligence" and needs deliberate mechanism design. This page notes it as a landscape fact:
+the strongest lab has put its name on "the between-space is the problem." The correlated-failure
+thesis it supports is being chartered separately (the diversity-charter ADR in flight), which owns
+the doctrinal citation.
