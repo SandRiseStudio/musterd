@@ -776,6 +776,8 @@ const RAW: RawItem[] = [
   {
     id: 'research-intake',
     frozenBy: 56,
+    building:
+      'M1–M3 landed (#359/#360) and hand-run; what remains is M4–M5 — the weekly digest emit + seen.json append + notify, then the scheduled routine. ADR 056 accepted 2026-08-24 with this named as a seam, not a promise.',
     wave: 'later',
     title: 'Research radar (ingest)',
     plan: 'reserved',
@@ -1208,6 +1210,8 @@ const RAW: RawItem[] = [
   {
     id: 'coordination-dataset',
     frozenBy: 56,
+    building:
+      'the export path shipped 2026-08-19 (`pnpm dataset:export`, structural-only per ADR 184); what remains is the first authorised HuggingFace release (per-release human sign-off) and the MAST detectors as a shipped view. ADR 056 accepted 2026-08-24; the ladder above the dataset rung stays direction, not delivery.',
     wave: 6,
     title: 'Coordination-traces dataset & MAST-in-the-wild',
     plan: 'near-term',

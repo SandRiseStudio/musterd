@@ -1,6 +1,6 @@
 # 056 — Research as a first-class practice: produce and ingest
 
-- Status: proposed
+- Status: accepted (2026-08-24, nick; amended on acceptance — see below)
 - Date: 2026-06-25
 
 ## Context
@@ -75,6 +75,37 @@ external research into musterd decisions.
   (baselines), telemetry-l2 + coordination-density (the MAST detectors), and the tiny-model dogfood
   track.
 - The open-data release is **gated** on ADR 184 — a hard precondition, not a later nicety.
+
+## Amendment on acceptance (2026-08-24)
+
+Accepted after two months operating as de-facto practice. A full audit of the 49 citing files
+(lane 01M091HZWA) reconstructed what was actually relied on; this section records that evidence
+rather than rewriting the decision.
+
+**Exercised and proven load-bearing:**
+
+- The **produce/ingest split** — `research-foundation.md` (ingest), `docs/research/` (produce),
+  and `docs/wiki/research-corpus.md` all structure themselves on it.
+- The **lab notebook** — `docs/research/` holds nine findings under this charter's convention.
+- The **artifact-ladder ordering** — the sole basis for
+  [ADR 110](110-track-b-tiny-model-lab-re-evaluation.md)'s Stage 2 NO-GO and the "first rung"
+  framing in ADRs 122/184. Build down the ladder stands.
+- The **ADR 184 gate** on any open-data release — reaffirmed as a hard precondition.
+
+**Partially delivered:** the research radar exists as a hand-run practice (M1–M3,
+`docs/research/radar/`); the automated weekly digest this ADR sketches (M4–M5) is not built and
+remains a named seam, not a promise.
+
+**Accepted but not yet exercised:** the whitepaper-grade → peer-reviewed escalation bar (no
+whitepaper exists); the benchmark/leaderboard and judge-model rungs (cited by eight ADRs only as
+future homes). These stay in the decision as direction, with no delivery implied.
+
+**Not in this ADR:** a cluster of eleven documents (ADRs 158, 163, 169, 172, 187, 246,
+`landscape.md`, `the-standing-acceptor.md`, among others) cites "ADR 056 diversity conclusions"
+and "correlated models make correlated mistakes." This ADR contains no such claim — three of
+those citations link to files that never existed under other titles. That correlated-failure /
+model-diversity thesis is real and load-bearing, and it gets its own charter (follow-up lane
+opened at acceptance); it is not retro-written into this one.
 
 ## Observability & Evaluation
 
