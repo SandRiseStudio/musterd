@@ -448,11 +448,43 @@ export function registerLanes(
     },
     async (args) => {
       try {
-        const merged = {
+        // Same merge verification as lane_submit, for the same reason: `done` MEANS landed when an
+        // attestation is carried. This was the unverified path — resolve wrote the same merged
+        // object submit refuses, and two lanes sat done-but-unmerged for 3 days while the team
+        // cited the unlanded page by name (2026-08-24, the #997/#998 instance of
+        // docs/wiki/cannot-separate-two-causes.md). An attestation-LESS resolve is untouched:
+        // counterpart accepts and design-lane closes carry no merged object (ADR 305).
+        if (args.sha !== undefined && !SHA_FORMAT.test(args.sha)) {
+          return textResult(
+            `"${args.sha}" is not a git SHA — pass the squash-merge SHA from origin/main ` +
+              `(git log --oneline -1 after the merge lands).`,
+          );
+        }
+        if (args.pr !== undefined && args.sha === undefined) {
+          return textResult(
+            `a PR number without a landed SHA is an open PR — nothing has landed, so this lane ` +
+              `is not done. Arm auto-merge (gh pr merge --squash --auto ${args.pr}), wait for ` +
+              `the merge, then resolve with the squash SHA.`,
+          );
+        }
+        const verification = args.sha !== undefined ? await verify({ sha: args.sha, cwd: process.cwd() }) : undefined;
+        if (verification === 'not_ancestor') {
+          return textResult(
+            `SHA ${args.sha} is not on origin/main — nothing landed, and marking this done would ` +
+              `record a merge that never happened. If the PR is still open, arm auto-merge and ` +
+              `resolve with the real squash SHA once it lands.`,
+          );
+        }
+        const attested = {
           ...(args.pr !== undefined ? { pr: args.pr } : {}),
           ...(args.sha !== undefined ? { sha: args.sha } : {}),
           ...(args.authorized_by !== undefined ? { authorized_by: args.authorized_by } : {}),
         };
+        // A sha carries its checked tier; an attestation without one is honestly `unattested`
+        // (same semantics as submit). No attestation at all sends no merged object (ADR 305).
+        const merged = Object.keys(attested).length
+          ? { ...attested, verification: verification ?? ('unattested' as const) }
+          : {};
         const { lane, warnings, notices, closed } = await client.updateLane(args.id, {
           state: 'done',
           ...(Object.keys(merged).length ? { merged } : {}),
