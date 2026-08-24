@@ -208,6 +208,21 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   walks. That is a separate increment, and it should not be started while the v1→v2 migration is
   still live.
 
+  **2026-08-24 — that separate increment landed.** `provisioned.json` is version 3 with `toolkit`;
+  a well-formed v2 file classifies as `legacy` (its `profile` value and its contributions carry
+  across — v2 contributions were recorded by the same reconciler under the same ledger rules, so
+  unlike v1's name-only records they remain evidence), and only a confirmed `musterd harness
+  configure` converts it. A legacy manifest alone now triggers the configure confirmation, which it
+  previously did not (only legacy identity did). The "one migration at a time" condition was
+  checked before starting rather than assumed: two v1 manifests remained on the dev machine
+  (`agents-compo`, `agents-grokbot`), so v1 recognition is untouched — a v1 file still classifies
+  and converts exactly as before, and configure now converts either legacy shape straight to v3 in
+  one step, so no worktree can hold an intermediate state. No feature-epoch bump: the epoch signals
+  daemon/wire capabilities (its own module's contract), and this file never crosses the wire — the
+  protection for an older sibling checkout is the version literal itself, which classifies a v3
+  file as `invalid` on a pre-v3 build only until that checkout updates, and files stay v2 until
+  their operator confirms conversion.
+
   Also fixed here: `docs/architecture/04-cli.md` still documented `musterd role` doing the
   workspace-equipment job it stopped doing in the split three days earlier — the doc described
   behaviour that no longer existed, under the exact word this ADR is disambiguating. Two hand-rolled

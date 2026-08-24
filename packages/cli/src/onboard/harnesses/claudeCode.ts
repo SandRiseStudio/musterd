@@ -957,11 +957,11 @@ function patchHooks(
   return next;
 }
 
-/** The desired permission entries: the ADR 261 floor plus the provisioned role's profile. */
+/** The desired permission entries: the ADR 261 floor plus the provisioned toolkit's permissions. */
 function permissionsPayload(ctx: HarnessContext): ProvisionPermissions {
   let role: Profile | undefined;
   const provisioning = loadProvisioning(ctx.worktreeRoot, ctx.fs);
-  const roleName = provisioning.kind === 'valid' ? provisioning.value.profile : '';
+  const roleName = provisioning.kind === 'valid' ? provisioning.value.toolkit : '';
   if (roleName !== '') {
     for (const dir of toolkitHomes(ctx.worktreeRoot)) {
       const raw = ctx.fs.readFile(join(dir, `${roleName}.json`));

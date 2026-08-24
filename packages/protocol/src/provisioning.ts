@@ -51,19 +51,26 @@ export type LocalLoad<T> =
 const uniqueStrings = (values: string[]): boolean => new Set(values).size === values.length;
 
 /**
- * The ignored `.musterd/provisioned.json`, version 2 (ADR 281): what THIS worktree wants
+ * The ignored `.musterd/provisioned.json`, version 3 (ADR 281/296): what THIS worktree wants
  * (`desired`, unique harness ids) and which ledger fragments it contributes to. Shape and
  * uniqueness only — canonical registry ordering of `desired` belongs to CLI serialization, and
  * `contributions` is participation evidence, never a physical receipt that could authorize
  * removal on its own. Stores no key, grant, credential, config body, or environment value.
+ *
+ * Version 3 renames v2's `profile` to `toolkit` (ADR 296 tier 2). A strict schema cannot
+ * dual-write a rename — an older reader would classify the extra key as `invalid`, not `legacy` —
+ * so the field moves with a version bump: v2 stays a RECOGNIZED legacy shape
+ * ({@link WorktreeProvisioningV2Schema}), converted only by a confirmed `musterd harness
+ * configure`. No feature-epoch bump: the epoch signals daemon/wire capabilities, and this file
+ * never crosses the wire — the version literal is what protects an older sibling checkout.
  */
 export const WorktreeProvisioningSchema = z
   .object({
-    version: z.literal(2),
-    /** The provisioned workspace profile (né role-template projection — the ADR 272 revision
-     *  renames the local concept to "profile"; v2 mints the field under its final name so the
-     *  strict schema never needs a field migration). Empty string means generalist. */
-    profile: z.string(),
+    version: z.literal(3),
+    /** The provisioned workspace toolkit (né profile, né role-template projection — ADR 296's
+     *  vocabulary: a toolkit is Workspace equipment, never Team identity). Empty string means
+     *  generalist. */
+    toolkit: z.string(),
     desired: z
       .array(HarnessIdSchema)
       .refine(uniqueStrings, { message: 'desired ids must be unique' }),
@@ -74,6 +81,23 @@ export const WorktreeProvisioningSchema = z
   .strict();
 
 export type WorktreeProvisioning = z.infer<typeof WorktreeProvisioningSchema>;
+
+/**
+ * The FROZEN version-2 shape (ADR 281), kept only so readers can classify a v2 file as `legacy`
+ * rather than `invalid`. Never written; never widened. Its `profile` value is what a confirmed
+ * conversion carries across as v3 `toolkit`.
+ */
+export const WorktreeProvisioningV2Schema = z
+  .object({
+    version: z.literal(2),
+    profile: z.string(),
+    desired: z
+      .array(HarnessIdSchema)
+      .refine(uniqueStrings, { message: 'desired ids must be unique' }),
+    contributions: z.record(HarnessIdSchema, z.array(z.string())),
+    provisionedAt: z.string().min(1),
+  })
+  .strict();
 
 /** Where a fragment physically lives — decides its resource-key discriminator and lock container. */
 export const FragmentScopeSchema = z.enum(['folder', 'repo-shared', 'machine']);

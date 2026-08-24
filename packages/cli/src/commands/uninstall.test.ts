@@ -148,8 +148,8 @@ describe('uninstallCommand — v2 reconcile-to-empty (ADR 282)', () => {
     writeFileSync(
       join(cwd, '.musterd', 'provisioned.json'),
       JSON.stringify({
-        version: 2,
-        profile: '',
+        version: 3,
+        toolkit: '',
         desired,
         contributions,
         provisionedAt: '2026-08-19T00:00:00.000Z',

@@ -83,8 +83,8 @@ function seedProvisioning(
   contributions: Record<string, string[]> = {},
 ) {
   const provisioning: WorktreeProvisioning = {
-    version: 2,
-    profile: '',
+    version: 3,
+    toolkit: '',
     desired,
     contributions,
     provisionedAt: '2026-08-19T00:00:00.000Z',

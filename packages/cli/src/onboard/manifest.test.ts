@@ -110,12 +110,19 @@ describe('provision manifest', () => {
   });
 });
 
-describe('loadProvisioning — classified v2 loads (ADR 281/282)', () => {
+describe('loadProvisioning — classified v3 loads (ADR 281/282/296)', () => {
   let dir: string;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'musterd-prov-'));
   });
 
+  const v3 = {
+    version: 3,
+    toolkit: 'backend',
+    desired: ['claude-code', 'musterd'],
+    contributions: { 'claude-code': ['folder:/w#hooks'] },
+    provisionedAt: '2026-08-19T12:00:00.000Z',
+  };
   const v2 = {
     version: 2,
     profile: 'backend',
@@ -143,11 +150,14 @@ describe('loadProvisioning — classified v2 loads (ADR 281/282)', () => {
     expect(loadProvisioning(dir).kind).toBe('missing');
   });
 
-  it('strict v2 → valid; saveProvisioning round-trips it', () => {
-    saveProvisioning(dir, v2 as Parameters<typeof saveProvisioning>[1]);
+  it('strict v3 → valid; saveProvisioning round-trips it', () => {
+    saveProvisioning(dir, v3 as Parameters<typeof saveProvisioning>[1]);
     const got = loadProvisioning(dir);
     expect(got.kind).toBe('valid');
-    if (got.kind === 'valid') expect(got.value.desired).toEqual(['claude-code', 'musterd']);
+    if (got.kind === 'valid') {
+      expect(got.value.toolkit).toBe('backend');
+      expect(got.value.desired).toEqual(['claude-code', 'musterd']);
+    }
   });
 
   it('a well-formed version-1 manifest → legacy (recognized, never consumed)', () => {
@@ -155,23 +165,35 @@ describe('loadProvisioning — classified v2 loads (ADR 281/282)', () => {
     expect(loadProvisioning(dir).kind).toBe('legacy');
   });
 
+  it('a well-formed version-2 manifest → legacy, never invalid (ADR 296 tier 2)', () => {
+    writeRaw(v2);
+    const got = loadProvisioning(dir);
+    expect(got.kind).toBe('legacy');
+    if (got.kind === 'legacy') {
+      expect((got.value as Record<string, unknown>)['profile']).toBe('backend');
+    }
+  });
+
   it('unknown versions, invalid JSON, and unknown keys → invalid, never legacy', () => {
-    writeRaw({ ...v2, version: 3 });
+    writeRaw({ ...v3, version: 4 });
     expect(loadProvisioning(dir).kind).toBe('invalid');
     writeRaw('{ nope');
     expect(loadProvisioning(dir).kind).toBe('invalid');
+    writeRaw({ ...v3, extra: 1 });
+    expect(loadProvisioning(dir).kind).toBe('invalid');
+    // A malformed v2 is invalid too — legacy is reserved for the RECOGNIZED previous shapes.
     writeRaw({ ...v2, extra: 1 });
     expect(loadProvisioning(dir).kind).toBe('invalid');
     // Duplicate desired ids violate the uniqueness refinement.
-    writeRaw({ ...v2, desired: ['codex', 'codex'] });
+    writeRaw({ ...v3, desired: ['codex', 'codex'] });
     expect(loadProvisioning(dir).kind).toBe('invalid');
   });
 
   it('saveProvisioning refuses an invalid object before any byte moves', () => {
-    saveProvisioning(dir, v2 as Parameters<typeof saveProvisioning>[1]);
+    saveProvisioning(dir, v3 as Parameters<typeof saveProvisioning>[1]);
     const before = readFileSync(join(dir, '.musterd', 'provisioned.json'), 'utf8');
     expect(() =>
-      saveProvisioning(dir, { ...v2, desired: ['Not An Id'] } as Parameters<
+      saveProvisioning(dir, { ...v3, desired: ['Not An Id'] } as Parameters<
         typeof saveProvisioning
       >[1]),
     ).toThrow(/worktree-provisioning/);
