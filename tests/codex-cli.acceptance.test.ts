@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { makeEnvelope } from '@musterd/protocol';
+import { BindingSchema, bindingSeat, makeEnvelope } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { resolveCodexBin } from '../packages/cli/src/codexBin.js';
 import { parseCodexThreadLine } from '../packages/cli/src/host/backends/codex.js';
@@ -160,11 +160,12 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
         join(workspace, '.musterd', 'binding.json'),
         JSON.stringify(
           {
+            // Strict v2 identity (ADR 281): `version` required, no `surface`, unknown keys reject.
+            version: 2,
             server: base,
             team: 'codex-real',
             agent_key: team.agent_key,
             grant: grant.token,
-            surface: 'codex',
             claim: { mode: 'seat', name: 'Ada' },
           },
           null,
@@ -175,7 +176,9 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
       mkdirSync(join(workspace, '.codex'), { recursive: true });
       writeFileSync(
         join(workspace, '.codex', 'config.toml'),
-        `[mcp_servers.musterd]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(join(repo, 'packages', 'mcp', 'dist', 'index.js'))}]\n`,
+        // The launch-Surface marker (ADR 286) mirrors what `musterd harness configure` writes;
+        // without it the adapter refuses Presence attachment at boot.
+        `[mcp_servers.musterd]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(join(repo, 'packages', 'mcp', 'dist', 'index.js'))}]\n\n[mcp_servers.musterd.env]\nMUSTERD_LAUNCH_SURFACE = "codex"\n`,
         { mode: 0o600 },
       );
       await api(
@@ -208,9 +211,12 @@ describe('Codex CLI real acceptance (owner-gated)', () => {
       );
       expect(first.code, first.stderr).toBe(0);
       expect(first.threadId, first.stdout).toBeTruthy();
-      expect(
-        JSON.parse(readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8')).member,
-      ).toBe('Ada');
+      // v0.3 identity persists the seat inside `claim`, not a scalar `member` (ADR 075 / ADR 281).
+      // Parsing through the strict schema proves the adapter's write-back is still readable.
+      const binding = BindingSchema.parse(
+        JSON.parse(readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8')),
+      );
+      expect(bindingSeat(binding)).toBe('Ada');
       const unread = await api(
         base,
         'GET',
