@@ -17,7 +17,7 @@ import {
   SKILL_CLI_COMMANDS,
   SKILL_MCP_TOOLS,
 } from './guidance.js';
-import { renderPrimer } from './primer.js';
+import { renderRepositoryPrimer } from './primer.js';
 
 describe('renderSkillBody', () => {
   const body = renderSkillBody({ team: 'dawn' });
@@ -117,7 +117,7 @@ describe('version-bump discipline (ADR 085)', () => {
 });
 
 describe('primer is the loop kernel (ADR 085)', () => {
-  const primer = renderPrimer({ member: 'Ada', team: 'dawn' });
+  const primer = renderRepositoryPrimer({ team: 'dawn' });
 
   it('stays short and points at the skill for depth', () => {
     // The always-loaded block should be a kernel, not a manual.
