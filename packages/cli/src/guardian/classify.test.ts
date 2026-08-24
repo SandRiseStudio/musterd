@@ -185,6 +185,28 @@ describe('the raise reports the confirming probe rather than prescribing it', ()
     expect(refused).not.toEqual(classify(wedged)[0]!.evidence);
   });
 
+  it('a first-observation clean-exit down is marked defer, not raised', () => {
+    // 2026-08-24, 16:10:13: a 77 s event-loop stall outlasted the 2 s probes AND the 10 s confirm,
+    // against a daemon that had answered /health 200 in 1.8 ms minutes later. No single-tick bound
+    // outwaits an arbitrary stall; only the NEXT tick (~120 s away) can. First sighting defers.
+    const out = classify(wedged);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.class).toBe('daemon_down');
+    expect(out[0]!.defer).toBe(true);
+  });
+
+  it('a clean-exit down already seen by a previous tick raises, with the persistence in evidence', () => {
+    const out = classify({ ...wedged, firstUnreachableAt: wedged.now - 120_000 });
+    expect(out[0]!.defer).toBeUndefined();
+    expect(out[0]!.evidence).toMatch(/120\s?s|two ticks|persisted/i);
+  });
+
+  it('a nonzero last exit never defers — launchd witnessed a real exit', () => {
+    const out = classify({ ...wedged, launchd: { lastExit: 1, runs: 15 } });
+    expect(out[0]!.class).toBe('daemon_down');
+    expect(out[0]!.defer).toBeUndefined();
+  });
+
   it('an old signal with no confirm recorded still classifies and still says what it saw', () => {
     // Forward-compat: a tick from a build before the confirming probe existed must not lose its
     // evidence or throw — it simply cannot report a bound it never applied.

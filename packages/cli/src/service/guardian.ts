@@ -53,10 +53,30 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
   let stamp = loadStamp(d.stampPath);
 
   const signals = await d.collect();
+  // Cross-tick outage confirmation (ADR 274 amendment): the stamp remembers a clean-exit
+  // unreachable sighting so the classifier can tell "first sighting" (defer one tick — a stall
+  // recovers before the next tick, an outage does not) from "persisted" (raise). A pending
+  // sighting older than the freshness window is the guardian's OWN silence, not evidence about
+  // the daemon — two observations that far apart are not one incident, so it re-arms.
+  const pendingFresh =
+    stamp.pendingDownSince != null && now - stamp.pendingDownSince <= PENDING_DOWN_MAX_AGE_MS
+      ? stamp.pendingDownSince
+      : null;
+  signals.firstUnreachableAt = pendingFresh;
   const handoverDeferred =
     signals.health === null && signals.handover !== null && signals.handover !== undefined;
-  const incidents = handoverDeferred ? [] : classify(signals);
+  const classified = handoverDeferred ? [] : classify(signals);
   if (handoverDeferred) d.log('guardian.handover_deferred');
+
+  const deferred = classified.filter((i) => i.defer === true);
+  const incidents = classified.filter((i) => i.defer !== true);
+  if (deferred.length > 0) {
+    stamp = { ...stamp, pendingDownSince: pendingFresh ?? now };
+    d.log(`guardian.down_deferred {"first_unreachable_at":${stamp.pendingDownSince}}`);
+  } else if (signals.health !== null && stamp.pendingDownSince != null) {
+    d.log(`guardian.stall_recovered {"unreachable_for_ms":${now - stamp.pendingDownSince}}`);
+    stamp = { ...stamp, pendingDownSince: null };
+  }
 
   let tiers: Record<GuardianClass, GuardianTier>;
   try {
@@ -96,6 +116,13 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
   saveStamp(d.stampPath, recordTick(stamp, now));
   return 0;
 }
+
+/**
+ * A pending clean-exit down sighting older than this is stale — the guardian was quiet in between,
+ * so the next unreachable tick counts as a fresh first sighting rather than a confirmation.
+ * 15 minutes ≈ 7 missed 2-minute ticks: generous against tick jitter, far below any real outage.
+ */
+export const PENDING_DOWN_MAX_AGE_MS = 15 * 60_000;
 
 /** Stamp staleness past this is loud in `service status` — 5 missed 2-minute ticks. */
 export const GUARDIAN_STALE_MS = 10 * 60_000;
