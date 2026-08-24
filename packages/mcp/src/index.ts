@@ -31,6 +31,7 @@ import { registerLeave } from './tools/leave.js';
 import { registerMembers } from './tools/members.js';
 import { registerMemory } from './tools/memory.js';
 import { registerSend } from './tools/send.js';
+import { registerSeeds } from './tools/seeds.js';
 import { registerStatus } from './tools/status.js';
 import { registerWakeContext } from './tools/wakeContext.js';
 import {
@@ -257,6 +258,7 @@ export function buildMcpServer(
   registerMembers(server, client);
   registerMemory(server, client);
   registerWakeContext(server, client);
+  registerSeeds(server, client);
   registerLanes(server, client);
   registerGoals(server, client);
   registerInsights(server, client);

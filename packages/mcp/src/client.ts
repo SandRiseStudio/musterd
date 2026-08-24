@@ -1,5 +1,7 @@
 import {
   ErrorBodySchema,
+  SeedListSchema,
+  SeedResultSchema,
   PROTOCOL_VERSION,
   type AskContract,
   type DeliveryHint,
@@ -13,6 +15,9 @@ import {
   type MemoryEnvelope,
   type NextBrief,
   type Report,
+  type Seed,
+  type SubmitSeedBrief,
+  type PromoteSeed,
   type ToolTelemetryReport,
   type WakeContextPacket,
   type WakeContextRequest,
@@ -460,6 +465,68 @@ export class MusterdClient {
     if (q.goal) params.set('goal', q.goal);
     const qs = params.toString();
     return this.request('GET', `/teams/${this.config.team}/lanes${qs ? `?${qs}` : ''}`);
+  }
+
+  // ── Shared Seeds (ADR 314). Parse every daemon response at this wire boundary.
+  async seeds(): Promise<Seed[]> {
+    return SeedListSchema.parse(await this.request('GET', `/teams/${this.config.team}/seeds`))
+      .seeds;
+  }
+
+  async seed(id: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request('GET', `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}`),
+    ).seed;
+  }
+
+  async claimSeed(id: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/claim`,
+        {},
+      ),
+    ).seed;
+  }
+
+  async askSeed(id: string, body: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/clarification`,
+        { body },
+      ),
+    ).seed;
+  }
+
+  async answerSeed(id: string, body: string): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/answer`,
+        { body },
+      ),
+    ).seed;
+  }
+
+  async submitSeed(id: string, body: SubmitSeedBrief): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/brief`,
+        body,
+      ),
+    ).seed;
+  }
+
+  async promoteSeed(id: string, body: PromoteSeed): Promise<Seed> {
+    return SeedResultSchema.parse(
+      await this.request(
+        'POST',
+        `/teams/${this.config.team}/seeds/${encodeURIComponent(id)}/promote`,
+        body,
+      ),
+    ).seed;
   }
 
   /** The orientation brief (ADR 049/084) — one server-side projection, rendered by CLI + MCP alike. */
