@@ -98,10 +98,17 @@ export type AuditAction =
   // assumed this row existed — it did not, and its absence is why a 2026-08-01 double-claim left
   // nothing in the audit log but the release that undid it.
   | 'lane.claimed'
-  // ADR 291 / 311: a buffered Slack record became a shared Seed, or was denied because its Slack
-  // user had no human Member mapping. Raw content and Slack identity never enter this ledger.
-  // Ingest state lives in `seeds_ingest_cursor`, never read back from this row (ADR 247).
+  // ADR 291 / 311 / 312: shared-Seed ingest and lifecycle decisions. Details carry only Seed/Lane
+  // ids, state edges, result kind, and skipped-research metadata — never raw content, Slack identity,
+  // clarification text, briefs, or conclusions. Ingest state lives in `seeds_ingest_cursor`, never
+  // read back from this row (ADR 247).
   | 'seed.ingested'
+  | 'seed.claimed'
+  | 'seed.clarification_asked'
+  | 'seed.clarification_answered'
+  | 'seed.brief_submitted'
+  | 'seed.completed'
+  | 'seed.promoted'
   // ADR 231: a `handoff` act named no lane, so the daemon looked at the lanes the sender actually
   // holds. `handoff.lane_derived` = exactly one, attached (detail: { message, lane, branch }).
   // `handoff.lane_ambiguous` = two or more, so nothing was attached and the sender was warned

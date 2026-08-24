@@ -194,6 +194,23 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - **Envelope on occupy.** All five occupied-frame sites (WS; HTTP admin-approve, grant, credential self-authorize, and standing reseat) emit `memory: memoryEnvelope(db, member.id)` and the Member's Team Role `charter` when the role library declares one. A returning occupant's join frame carries the memory headline/age/size line plus authenticated Role context; the memory body travels only over the explicit `GET`.
 - **Audit sizes-only.** `memory.save`/`memory.clear` audit actions carry `size_bytes`/`headline_len` in `detail`, never the headline or body text (hard rule 5).
 
+## Shared Seeds (ADR 291/311/312, unreleased)
+
+- **Authenticated Team reads.** `GET /teams/:slug/seeds` returns every Team Seed and
+  `GET /teams/:slug/seeds/:id` returns one. Both use `authTouch`; an unauthenticated caller learns
+  nothing about Seed existence. Responses are parsed through `SeedListSchema` / `SeedResultSchema`.
+- **Parsed lifecycle mutations.** `POST …/seeds/:id/claim`, `/clarification`, `/answer`, `/brief`,
+  and `/promote` parse their bodies through the corresponding protocol schemas before calling the
+  store. Only agents claim, only the active explorer asks or submits the final brief, only the
+  submitting Member answers, and any Member may manually promote. Store transitions return the
+  existing `forbidden`, `not_found`, or `conflict` errors.
+- **Promotion activity.** The first automatic or manual promotion emits the normal Team
+  `lane_open` message with `seed_id` and `brainstorm_recommended:true`. A retry returns the same linked
+  Lane and emits no duplicate audit or activity row.
+- **Content boundary.** Lifecycle audit rows carry only actor, Seed/Lane ids, state edges, result
+  kind, and skipped-research metadata. Raw Seed bodies, Slack user ids, clarification/answer text,
+  final briefs, and conclusions appear in neither audit details nor HTTP request logs.
+
 ## Inbox delivery semantics
 
 - **At-least-once, cursor-based, no per-recipient copies.** The `messages` table is the single log. A member's inbox is a _query_ (see `listInbox`) filtered by their `inbox_cursors.last_read_ts`. "Mark read" advances the cursor.
