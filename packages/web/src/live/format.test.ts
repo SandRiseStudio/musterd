@@ -240,6 +240,23 @@ describe('rosterPrimaryChip — posture + offline reason (ADR 138/141)', () => {
       } as MemberSummary).label,
     ).toBe('offline');
   });
+
+  it('renders the deliberate-exit reasons calmly (presence-honesty §2.3)', () => {
+    const chip = (offline_reason: string) =>
+      rosterPrimaryChip({
+        posture: 'offline',
+        presence: 'offline',
+        activity: 'offline',
+        offline_reason,
+      } as MemberSummary);
+    expect(chip('left_team').label).toBe('left team');
+    expect(chip('seat_released').label).toBe('seat released');
+    expect(chip('session_ended').label).toBe('session ended');
+    // Legacy rows from an old daemon still render as a deliberate release, not a crash.
+    expect(chip('signed_off').label).toBe('seat released');
+    // disconnected is now the only alarming flavor, and means it.
+    expect(chip('session_ended').quiet).toBe(true);
+  });
 });
 
 describe('isFeatureBehind — feature-skew hint (ADR 148)', () => {

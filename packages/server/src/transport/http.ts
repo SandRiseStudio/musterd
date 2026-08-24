@@ -50,6 +50,7 @@ import {
   describeFamilyPosture,
   resolvePosture,
   resolveOfflineReason,
+  STICKY_OFFLINE_REASONS,
   type OfflineReason,
   isRailCandidate,
 } from '@musterd/protocol';
@@ -117,7 +118,8 @@ import {
   leaveMember,
   listMembers,
   markBound,
-  markSignedOff,
+  markSeatReleased,
+  markSessionEnded,
   mintCredential,
   rotateToken,
   setAvailability,
@@ -1178,8 +1180,9 @@ function summarize(
       live,
       reclaimable: isReclaimable,
       availability: member.availability ?? null,
-      lastOfflineReason:
-        sticky === 'disconnected' || sticky === 'signed_off' ? (sticky as OfflineReason) : null,
+      lastOfflineReason: STICKY_OFFLINE_REASONS.has(sticky ?? '')
+        ? (sticky as OfflineReason)
+        : null,
     });
     return {
       ...(seesCaps ? member : needToKnow),
@@ -2235,6 +2238,10 @@ export async function handleHttp(
           body.event === 'start'
             ? recordSessionAttestation(ctx.db, team.id, target.id, body.harness)
             : getResidency(ctx.db, team.id, target.id) !== null;
+        // Presence-honesty §2.3 carve-out: `end` is the daemon's only clean-exit goodbye, so it
+        // stamps the sticky reason — nothing else here moves; presence rows stay untouched, so
+        // the route's presence-neutrality (comment above) holds.
+        if (body.event === 'end') markSessionEnded(ctx.db, target.id);
         appendAudit(ctx.db, team.id, {
           actor: null,
           action: body.event === 'start' ? 'residency.session_captured' : 'residency.session_ended',
@@ -3913,7 +3920,7 @@ export async function handleHttp(
           ctx.hub.remove(old.connId);
         }
         clearMemberPresence(ctx.db, member.id);
-        markSignedOff(ctx.db, member.id);
+        markSeatReleased(ctx.db, member.id);
         clearBound(ctx.db, member.id);
         ctx.hub.broadcastTeam(team.id, {
           type: 'presence',

@@ -117,6 +117,34 @@ describe('POST /teams/:slug/residency/session — the resumable attestation', ()
     }
   });
 
+  // Presence-honesty §2.3: a clean session exit is the one goodbye the daemon actually hears, so
+  // `end` stamps the sticky reason — a normally-finished session must not wear crash clothing.
+  // The route stays presence-neutral: only the sticky member stamp moves, no presence row.
+  it('end stamps session_ended as the sticky offline reason; start does not', async () => {
+    await enrollAda();
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const ada = () => getMemberByName(server.db, team.id, 'Ada')!;
+
+    await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'start' },
+      agentKey,
+    );
+    expect(ada().last_offline_reason).toBeNull();
+
+    await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'end' },
+      agentKey,
+    );
+    expect(ada().last_offline_reason).toBe('session_ended');
+
+    const roster = await get('/teams/dawn/members', nickCred);
+    expect(roster.json.members.find((m: any) => m.name === 'Ada').offline_reason).toBe(
+      'session_ended',
+    );
+  });
+
   // ADR 252: the identity join between a wake and the session it paid for. `wake_cost` exists only
   // on the report path, so without this token a lease that spawns a session and then expires is
   // free as far as the ledger can tell.

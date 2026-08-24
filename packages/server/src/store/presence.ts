@@ -95,8 +95,11 @@ export function release(db: Database, presenceId: string, graceMs: number): void
     'UPDATE presence SET conn_id = NULL, last_seen_at = ?, held_until = ? WHERE id = ?',
   ).run(now, now + graceMs, presenceId);
   if (member) {
+    // `disconnected` means "ended without a goodbye", so it only fills an empty slot (attach
+    // cleared it). A deliberate-exit stamp already placed this session (session_ended via the
+    // SessionEnd hook, seat_released via unbind) must survive the socket closing moments later.
     db.prepare(
-      "UPDATE members SET last_offline_reason = 'disconnected', updated_at = ? WHERE id = ?",
+      "UPDATE members SET last_offline_reason = 'disconnected', updated_at = ? WHERE id = ? AND last_offline_reason IS NULL",
     ).run(now, member.member_id);
   }
 }

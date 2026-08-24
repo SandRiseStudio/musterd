@@ -1,8 +1,9 @@
 # 141 — Offline reason on the roster (`reconnecting` · `disconnected` · `signed_off` · `off_hours`)
 
-- Status: accepted
+- Status: accepted; amended 2026-08-24 by ADR 315 — `signed_off` split into
+  `left_team` · `seat_released` · `session_ended` (legacy `signed_off` accepted on read)
 - Date: 2026-07-13
-- Related: ADR 010 (reclaim grace), ADR 044 (availability), ADR 138 (posture)
+- Related: ADR 010 (reclaim grace), ADR 044 (availability), ADR 138 (posture), ADR 315 (split)
 
 ## Context
 
