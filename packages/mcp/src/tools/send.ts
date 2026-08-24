@@ -19,7 +19,7 @@ import type { McpConfig } from '../config.js';
 import { withTraceContext } from '../otel.js';
 import { errorResult, notReadyMessage, textResult } from './format.js';
 
-// ADR 316: keep the Act vocabulary and ask's conditionally-required fields in standing context;
+// ADR 318: keep the Act vocabulary and ask's conditionally-required fields in standing context;
 // examples, rationale, and plan-epoch mechanics are retrievable from the musterd skill.
 const DESCRIPTION =
   'Send a coordination Act. Use status_update for progress, request_help when blocked, handoff to ' +

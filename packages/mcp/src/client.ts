@@ -467,7 +467,7 @@ export class MusterdClient {
     return this.request('GET', `/teams/${this.config.team}/lanes${qs ? `?${qs}` : ''}`);
   }
 
-  // ── Shared Seeds (ADR 314). Parse every daemon response at this wire boundary.
+  // ── Shared Seeds (ADR 317). Parse every daemon response at this wire boundary.
   async seeds(): Promise<Seed[]> {
     return SeedListSchema.parse(await this.request('GET', `/teams/${this.config.team}/seeds`))
       .seeds;

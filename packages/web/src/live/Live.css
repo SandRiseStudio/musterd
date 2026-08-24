@@ -215,7 +215,7 @@
   stroke: currentColor;
 }
 
-/* ─── Shared Seeds tray (ADR 314) ───────────────────────────────────── */
+/* ─── Shared Seeds tray (ADR 317) ───────────────────────────────────── */
 .lc-seeds {
   position: fixed;
   inset: 0;

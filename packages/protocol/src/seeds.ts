@@ -93,7 +93,7 @@ export const SeedSchema = z.object({
 });
 export type Seed = z.infer<typeof SeedSchema>;
 
-/** ADR 314: one shared rule for the default Seed tray on every Surface. */
+/** ADR 317: one shared rule for the default Seed tray on every Surface. */
 export const COMPLETED_SEED_TRAY_MS = 3 * 24 * 60 * 60 * 1_000;
 
 export function seedInActiveTray(
@@ -143,7 +143,7 @@ export const PromoteSeedSchema = z.object({
 });
 export type PromoteSeed = z.infer<typeof PromoteSeedSchema>;
 
-/** ADR 316: compact MCP discovery envelope; each action still parses its full protocol input. */
+/** ADR 318: compact MCP discovery envelope; each action still parses its full protocol input. */
 export const SeedMcpUpdateSchema = z.discriminatedUnion('action', [
   z
     .object({

@@ -455,7 +455,7 @@ export const CATALOG: readonly CommandEntry[] = [
     group: 'work',
     primary: true,
     detail:
-      'A Seed is a Team idea captured before it becomes a Lane (ADR 291/314).\n' +
+      'A Seed is a Team idea captured before it becomes a Lane (ADR 291/317).\n' +
       '  list [--history]              show the active tray or its full history\n' +
       '  show <id>                     read the source and public exploration thread\n' +
       '  claim <id>                    become its explorer\n' +

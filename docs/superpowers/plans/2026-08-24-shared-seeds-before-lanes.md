@@ -161,7 +161,7 @@ git commit -m "server: expose authorized Seed lifecycle routes" -m "Refs ADR-291
 - Create: `packages/cli/src/commands/seed.test.ts`, `packages/mcp/src/tools/seeds.test.ts`, focused web Seed tests
 - Modify: `docs/architecture/04-cli.md`, `docs/architecture/05-mcp.md`, `docs/architecture/06-testing.md`, `docs/architecture/08-web.md`, terminal frames
 
-**Interfaces:** Consume Task 1 schemas and Task 3 endpoints. Produce `musterd seed` commands, the compact ADR 316 `team_seed_*` MCP Surface, the active Seed tray, and Seed history with linked-Lane provenance.
+**Interfaces:** Consume Task 1 schemas and Task 3 endpoints. Produce `musterd seed` commands, the compact ADR 318 `team_seed_*` MCP Surface, the active Seed tray, and Seed history with linked-Lane provenance.
 
 - [ ] **Step 1: Write failing Surface tests**
 

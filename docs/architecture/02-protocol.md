@@ -125,7 +125,7 @@ explorer's parsed clarification request creates the answerable `needs_clarificat
 `RelaySeedSchema` and `RelaySeedListSchema` reject every non-Slack or unattributed relay record at the
 HTTP boundary (ADR 311). `SubmitSeedBriefSchema` requires problem/context, evidence, at least one
 approach with trade-offs, constraints, risks, unknowns, recommendation, and proposed Lane framing.
-`SeedMcpUpdateSchema` (ADR 316) parses the compact MCP `{action, id, input?}` lifecycle envelope and
+`SeedMcpUpdateSchema` (ADR 318) parses the compact MCP `{action, id, input?}` lifecycle envelope and
 then applies the existing action-specific claim, clarification, brief, or promotion schema.
 The protocol also exports parsed bodies for claim, clarification, answer, and manual promotion, plus
 single-Seed and list results. Promotion is the only operation that creates a Lane.
