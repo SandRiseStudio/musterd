@@ -41,10 +41,15 @@ interface Budgets {
   initialJsGzipBytes: number;
   totalJsGzipBytes: number;
   maxChunkGzipBytes: number;
-  totalCssGzipBytes: number;
+  appCssGzipBytes: number;
+  siteCssGzipBytes: number;
+  sharedCssGzipBytes: number;
+  cssBundles: Record<CssGroup, string[]>;
   totalFontBytes: number;
   allowedFontFamilies: string[];
 }
+
+type CssGroup = 'app' | 'site' | 'shared';
 
 const budgets: Budgets = JSON.parse(
   readFileSync(join(repoRoot, 'docs', 'perf', 'budgets.json'), 'utf8'),
@@ -88,8 +93,33 @@ const fonts = files.filter((f) => /\.(woff2?|ttf|otf)$/.test(f));
 
 const jsSizes = js.map((f) => ({ file: relative(distClient, f), gzip: gzipSize(f) }));
 const totalJs = jsSizes.reduce((s, c) => s + c.gzip, 0);
-const totalCss = css.reduce((s, f) => s + gzipSize(f), 0);
 const totalFont = fonts.reduce((s, f) => s + statSync(f).size, 0);
+
+/*
+ * CSS is budgeted per surface, not as one number (ADR 313): musterd.io and the daemon app share
+ * this build but not a fate, and one shared ceiling meant a site-only change could be blocked by
+ * office bytes (and vice versa — it happened, 2026-08-24, 6 bytes free). Bundles are classified by
+ * pre-hash basename against budgets.cssBundles; an unlisted bundle is a FAILURE, not a silent
+ * bucket, for the same reason the font allowlist exists — a new stylesheet is a deliberate act.
+ */
+const cssGroupBudget: Record<CssGroup, number> = {
+  app: budgets.appCssGzipBytes,
+  site: budgets.siteCssGzipBytes,
+  shared: budgets.sharedCssGzipBytes,
+};
+const cssSizes = css.map((f) => {
+  const name = relative(distClient, f);
+  const base = name
+    .split('/')
+    .pop()!
+    .replace(/-[^-.]+\.css$/, '');
+  const group = (Object.keys(budgets.cssBundles) as CssGroup[]).find((g) =>
+    budgets.cssBundles[g].includes(base),
+  );
+  return { file: name, base, group, gzip: gzipSize(f) };
+});
+const cssGroupTotal = (g: CssGroup) =>
+  cssSizes.filter((c) => c.group === g).reduce((s, c) => s + c.gzip, 0);
 
 /*
  * Each prerendered route ships an index.html naming its own eager graph: the entry <script> plus a
@@ -157,8 +187,27 @@ for (const chunk of jsSizes) {
   }
 }
 
-if (totalCss > budgets.totalCssGzipBytes) {
-  failures.push(`total CSS gzip ${kb(totalCss)} > budget ${kb(budgets.totalCssGzipBytes)}`);
+for (const c of cssSizes) {
+  if (!c.group) {
+    failures.push(
+      `css bundle ${c.file} (basename \`${c.base}\`) is not classified in budgets.cssBundles — a new stylesheet must be assigned to app, site, or shared deliberately (ADR 313), not budgeted by accident`,
+    );
+  }
+}
+
+for (const group of Object.keys(cssGroupBudget) as CssGroup[]) {
+  const total = cssGroupTotal(group);
+  if (total > cssGroupBudget[group]) {
+    const own = cssSizes
+      .filter((c) => c.group === group)
+      .sort((a, b) => b.gzip - a.gzip)
+      .map((c) => `    ${kb(c.gzip)}  ${c.file}`)
+      .join('\n');
+    failures.push(
+      `${group} CSS gzip ${kb(total)} > budget ${kb(cssGroupBudget[group])}; its bundles:\n${own}\n` +
+        `    → trim this surface's own stylesheets, or raise ${group}CssGzipBytes deliberately (ADR 183/313) — the other surfaces' budgets are not this failure's remedy.`,
+    );
+  }
 }
 
 if (totalFont > budgets.totalFontBytes) {
@@ -179,7 +228,7 @@ const initialSummary = worst
   ? `initial JS gzip ${kb(worst.gzip)}/${kb(budgets.initialJsGzipBytes)} (worst route ${worst.route}, ${worst.chunks.length} eager chunks)`
   : 'initial JS gzip UNMEASURED';
 console.log(
-  `perf:check — ${initialSummary} · total JS gzip ${kb(totalJs)}/${kb(budgets.totalJsGzipBytes)} (${jsSizes.length} chunks) · CSS gzip ${kb(totalCss)}/${kb(budgets.totalCssGzipBytes)} · fonts ${kb(totalFont)}/${kb(budgets.totalFontBytes)} (${fonts.length} files) · largest chunk ${kb(Math.max(...jsSizes.map((c) => c.gzip)))}/${kb(budgets.maxChunkGzipBytes)}`,
+  `perf:check — ${initialSummary} · total JS gzip ${kb(totalJs)}/${kb(budgets.totalJsGzipBytes)} (${jsSizes.length} chunks) · CSS gzip app ${kb(cssGroupTotal('app'))}/${kb(budgets.appCssGzipBytes)} · site ${kb(cssGroupTotal('site'))}/${kb(budgets.siteCssGzipBytes)} · shared ${kb(cssGroupTotal('shared'))}/${kb(budgets.sharedCssGzipBytes)} · fonts ${kb(totalFont)}/${kb(budgets.totalFontBytes)} (${fonts.length} files) · largest chunk ${kb(Math.max(...jsSizes.map((c) => c.gzip)))}/${kb(budgets.maxChunkGzipBytes)}`,
 );
 
 if (failures.length > 0) {
