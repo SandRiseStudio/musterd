@@ -38,6 +38,7 @@ import {
   release,
 } from '../store/presence.js';
 import { createRequest } from '../store/requests.js';
+import { getRoleCharter } from '../store/roles.js';
 import {
   hasFullMessageVisibility,
   resolveAccountStatus,
@@ -609,6 +610,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             seat: toMember(targetMember, team.slug),
             presence_id: presence.id,
             server_time: Date.now(),
+            charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
           if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);

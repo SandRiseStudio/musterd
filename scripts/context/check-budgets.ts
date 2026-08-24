@@ -42,7 +42,8 @@ const distUrl = (rel: string) => pathToFileURL(join(repoRoot, rel)).href;
 
 // Workspace dists — resolved as file URLs because the repo root has no workspace dependencies.
 let measureToolSurface: (caps?: unknown) => Promise<{ bytes: number }>;
-let renderPrimer: (opts: { member?: string; team: string }) => string;
+let renderRepositoryPrimer: (opts: { team: string }) => string;
+let renderRuntimePrimer: (opts: { member?: string; team: string }) => string;
 let GENERALIST_CAPABILITIES: Record<string, unknown>;
 let HOOK_NUDGE_TEXTS: Record<string, string>;
 let LABEL_NUDGE_TEXT: string;
@@ -50,7 +51,7 @@ try {
   // Straight at the measurement module, not the package root: it pulls a devDependency, so keeping
   // it out of `dist/index.js`'s runtime graph is what makes the published package loadable.
   ({ measureToolSurface } = await import(distUrl('packages/mcp/dist/surfaceMeasure.js')));
-  ({ renderPrimer, GENERALIST_CAPABILITIES } = await import(
+  ({ renderRepositoryPrimer, renderRuntimePrimer, GENERALIST_CAPABILITIES } = await import(
     distUrl('packages/protocol/dist/index.js')
   ));
   ({ HOOK_NUDGE_TEXTS } = await import(
@@ -69,7 +70,13 @@ const bytes = (s: string) => Buffer.byteLength(s, 'utf8');
 const toolsDefault = (await measureToolSurface(GENERALIST_CAPABILITIES)).bytes;
 const toolsMuted = (await measureToolSurface({ ...GENERALIST_CAPABILITIES, can_message: 'none' }))
   .bytes;
-const primer = bytes(renderPrimer({ member: 'seat', team: 'team' }));
+// A session receives the repository or runtime delivery (and some harnesses may surface both). Keep
+// the existing single-primer budget honest by measuring the larger variant rather than whichever
+// delivery happened to exist when the gate was introduced.
+const primer = Math.max(
+  bytes(renderRepositoryPrimer({ team: 'team' })),
+  bytes(renderRuntimePrimer({ member: 'seat', team: 'team' })),
+);
 const sessionStart =
   bytes(HOOK_NUDGE_TEXTS['orientation_joined'] ?? '') +
   bytes(HOOK_NUDGE_TEXTS['orientation_wire_fix'] ?? '') +

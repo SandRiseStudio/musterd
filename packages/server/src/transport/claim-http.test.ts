@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
+import { upsertRole } from '../store/roles.js';
 import { getTeamBySlug } from '../store/teams.js';
 
 /**
@@ -43,7 +44,9 @@ beforeEach(async () => {
   const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
   agentKey = team.json.agent_key;
   nickCred = team.json.human_credential;
-  await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+  await post('/teams/dawn/members', { name: 'Ada', kind: 'agent', role: 'backend' }, nickCred);
+  const teamRow = getTeamBySlug(server.db, 'dawn')!;
+  upsertRole(server.db, teamRow.id, 'backend', {}, 'Own the rails.', null);
 });
 
 afterEach(async () => {
@@ -143,7 +146,7 @@ describe('POST /claim — occupancy', () => {
       model: 'claude-opus-4-8',
     });
     expect(r.status).toBe(200);
-    expect(r.json).toMatchObject({ type: 'occupied' });
+    expect(r.json).toMatchObject({ type: 'occupied', charter: 'Own the rails.' });
     expect(r.json.seat.name).toBe('Ada');
     expect(r.json.presence_id).toBeTruthy();
 

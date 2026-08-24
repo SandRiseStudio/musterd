@@ -1265,12 +1265,14 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
       {
         joined: true,
         holdsSeat: true,
+        charter: 'Own the rails.',
         memory: { headline: 'mid-refactor', saved_at: Date.now() - 60_000, size_bytes: 7 },
       },
       config,
     );
     const out = text(await handler({}));
     expect(out).toContain('Already joined dawn as Ada');
+    expect(out).toContain('Your Team Role charter:\nOwn the rails.');
     expect(out).toContain('Saved memory from 1m ago: "mid-refactor"');
   });
 
@@ -1280,6 +1282,21 @@ describe('team_join handler (claim-on-first-use overload, ADR 032)', () => {
     const out = text(await handler({ as: 'Ada' }));
     expect(out).toContain('Joined dawn as Ada (claude-code)');
     expect(out).toContain('team_inbox_check');
+  });
+
+  it('surfaces the Team Role charter delivered by authenticated occupancy', async () => {
+    const cfg = { ...config, member: undefined };
+    const handler = capture(
+      registerJoin,
+      pendingClient(cfg, { charter: 'Own the rails. Ask before changing deployment.' } as never),
+      cfg,
+    );
+
+    const out = text(await handler({ as: 'Ada' }));
+
+    expect(out).toContain('Your Team Role charter:');
+    expect(out).toContain('Own the rails. Ask before changing deployment.');
+    expect(out).not.toContain('charter + the team working-loop are in AGENTS.md');
   });
 
   it('renders the saved-memory one-liner when the occupy delivered an envelope (ADR 093)', async () => {
