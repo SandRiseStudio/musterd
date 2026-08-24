@@ -81,13 +81,7 @@ const SUPPRESS = '<!-- vocab:ok -->';
 const USER_FACING_ROOTS = ['README.md', 'ROADMAP.md', 'AGENTS.md', 'PRODUCT.md', 'PRIVACY.md'];
 
 /** Frozen at gate landing — the tier-1 burn-down. New files under the same globs are gated. */
-export const USER_FACING_BASELINE = new Set([
-  'AGENTS.md',
-  'PRIVACY.md',
-  'PRODUCT.md',
-  'README.md',
-  'ROADMAP.md',
-]);
+export const USER_FACING_BASELINE = new Set([]);
 
 export interface VocabCheckOptions {
   /** Override the frozen user-facing baseline (tests). */
