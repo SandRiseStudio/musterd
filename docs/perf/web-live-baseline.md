@@ -412,3 +412,20 @@ The same build exposed an ADR 313 checker defect: Vite emitted `Live-Cs78-rix.cs
 treated the legal hyphen inside the hash as part of the pre-hash basename. Classification now
 matches the closed declared basename prefix and has a regression test for hyphenated hashes; no CSS
 bundle was added or reclassified.
+## 2026-08-24 — surface_globs → scope: +157 B of skew compat on the pre-Seeds ceiling
+
+Branch `stanley/scope-rename` (PR #1041), measured the way the gate measures over `dist/client`:
+main @ b08cc251 total JS 240,175 / 241,000 (**825 bytes free locally**); branch 240,332 — the
+rename's whole cost is **+157 gzip bytes** (LaneSchema preprocess adoption of the legacy key, the
+`surface_globs` mirror on the full Lane shape, `mirrorLegacyScopeOnSend`). CI's toolchain gzips the
+same tree ~0.7 KB higher than a local build (both invocations are `gzipSync`; the delta is the
+minified output, not the measurement — same class as the gzip-CLI-vs-zlib trap logged 2026-08-04),
+so on CI the 241,000 budget was already fully consumed before this change and the gate failed twice
+on `235.4 KB > 235.4 KB`.
+
+- A raise to 242,000 was prepared under ADR 183's ritual, then **superseded before it landed**: the
+  Shared Seeds raise above (241,000 → 246,000, PR #1025) merged first and absorbs these bytes with
+  room. No budget change ships from this lane; the measurement stands as the record of the compat
+  contract's cost — the bytes drop with the mirror in a later epoch.
+- Falsify: build the branch and `pnpm perf:check`; delete `mirrorLegacyScopeOnSend` and the
+  mirror lines and the total returns to within ~40 B of main's.
