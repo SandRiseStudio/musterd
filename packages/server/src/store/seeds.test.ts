@@ -1,9 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Database } from 'better-sqlite3';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { createTeam } from './teams.js';
-import { addMember } from './members.js';
 import { listLanes } from './lanes.js';
+import { addMember } from './members.js';
 import {
   answerSeedClarification,
   askSeedClarification,
@@ -13,6 +12,7 @@ import {
   promoteSeed,
   submitSeedBrief,
 } from './seeds.js';
+import { createTeam } from './teams.js';
 
 const brief = {
   problem: 'A problem',

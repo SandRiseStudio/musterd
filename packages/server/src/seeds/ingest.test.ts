@@ -1,9 +1,9 @@
+import type { RelaySeed } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '../config.js';
 import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
-import type { RelaySeed } from '@musterd/protocol';
 import { listLanes } from '../store/lanes.js';
 import { addMember } from '../store/members.js';
 import { listSeeds } from '../store/seeds.js';

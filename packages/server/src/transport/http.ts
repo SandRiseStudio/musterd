@@ -136,15 +136,6 @@ import {
 } from '../store/members.js';
 import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
 import {
-  answerSeedClarification,
-  askSeedClarification,
-  claimSeed,
-  getSeed,
-  listSeeds,
-  promoteSeed,
-  submitSeedBrief,
-} from '../store/seeds.js';
-import {
   countInbox,
   countUnread,
   latestStatusUpdate,
@@ -210,6 +201,15 @@ import {
   resolveCapabilities,
   toMember,
 } from '../store/rows.js';
+import {
+  answerSeedClarification,
+  askSeedClarification,
+  claimSeed,
+  getSeed,
+  listSeeds,
+  promoteSeed,
+  submitSeedBrief,
+} from '../store/seeds.js';
 import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
 import { staleLaneWarnings } from '../store/staleness.js';
 import {
