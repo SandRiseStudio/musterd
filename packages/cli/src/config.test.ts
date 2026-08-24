@@ -585,6 +585,52 @@ describe('classified identity loads (ADR 281/282)', () => {
     }
   });
 
+  /**
+   * A roster home is not an agent worktree and runs no harnesses. Measured 2026-08-24: the live
+   * `/Users/nick/musterd/revive` — `.git`, `.gitignore`, `.musterd`, zero harness artifacts — was
+   * told "this WORKSPACE has no usable identity … confirm the desired HARNESS SET", while
+   * `~/.musterd/config.json` already carried `rosterHome: {"revive": "/Users/nick/musterd/revive"}`.
+   * The registry that names the folder correctly was on disk the whole time.
+   */
+  const registerRosterHome = (slug: string, home: string): void => {
+    const config = loadConfig();
+    config.rosterHome[slug] = resolve(home);
+    saveConfig(config);
+  };
+
+  it('a registered roster home is named as one, and never asked for a harness set', () => {
+    registerRosterHome('dawn', dir);
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    let message = '';
+    try {
+      requireUsableBinding(dir, {});
+      expect.unreachable();
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain("dawn's roster home");
+    expect(message).toContain("--select ''");
+    // The two words that were wrong for this folder.
+    expect(message).not.toContain('this workspace has no usable identity');
+    expect(message).not.toContain('confirm the desired harness set');
+  });
+
+  it('leaves the wording of every other folder exactly as it was', () => {
+    registerRosterHome('dawn', join(dir, 'elsewhere'));
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    expect(() => requireUsableBinding(dir, {})).toThrow(
+      /this workspace has no usable identity until it is converted/,
+    );
+    expect(() => requireUsableBinding(dir, {})).toThrow(/confirm the desired harness set/);
+  });
+
+  it('an unreadable config never turns a diagnostic into the failure', () => {
+    writeFileSync(join(dir, 'config.json'), '{ not json');
+    writeBindingFile({ ...v1spec, agent_key: 'mskey_x' });
+    // Still the repair, not a JSON parse error escaping from the diagnostic path.
+    expect(() => requireUsableBinding(dir, {})).toThrow(/musterd harness configure/);
+  });
+
   it('saveBinding refuses to write the version-1 shape at all', () => {
     expect(() =>
       saveBinding(dir, { ...v1spec, agent_key: 'mskey_x' } as unknown as Parameters<
