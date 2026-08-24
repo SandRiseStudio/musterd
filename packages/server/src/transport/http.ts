@@ -59,6 +59,7 @@ import {
   PromoteSeedSchema,
   SeedListSchema,
   SeedResultSchema,
+  SeedSchema,
   SubmitSeedBriefSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
@@ -468,6 +469,16 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   } catch {
     throw new MusterdError('bad_request', 'invalid JSON body');
   }
+}
+
+function parseSeedPathId(segment: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    throw new MusterdError('bad_request', 'Seed id has invalid URL encoding');
+  }
+  return parseOrBadRequest(SeedSchema.shape.id, decoded);
 }
 
 /**
@@ -2763,7 +2774,7 @@ export async function handleHttp(
       const seedReadMatch = rest.match(/^\/seeds\/([^/]+)$/);
       if (method === 'GET' && seedReadMatch) {
         const { team } = authTouch(ctx, slug, req);
-        const seedId = decodeURIComponent(seedReadMatch[1]!);
+        const seedId = parseSeedPathId(seedReadMatch[1]!);
         const seed = getSeed(ctx.db, team.id, seedId);
         if (!seed) throw new MusterdError('not_found', `Seed "${seedId}" not found`);
         return sendJson(res, 200, SeedResultSchema.parse({ seed }));
@@ -2774,7 +2785,7 @@ export async function handleHttp(
       );
       if (method === 'POST' && seedMutationMatch) {
         const { team, member } = authTouch(ctx, slug, req);
-        const seedId = decodeURIComponent(seedMutationMatch[1]!);
+        const seedId = parseSeedPathId(seedMutationMatch[1]!);
         const operation = seedMutationMatch[2]!;
         const raw = await readJson(req);
         const before = getSeed(ctx.db, team.id, seedId);

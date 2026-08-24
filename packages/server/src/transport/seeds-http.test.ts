@@ -130,7 +130,10 @@ describe('Seed lifecycle HTTP authorization', () => {
     expect(read.json.seed.id).toBe(seedId);
   });
 
-  it('parses mutation bodies and refuses a human exploration claim', async () => {
+  it('parses path ids and mutation bodies, then refuses a human exploration claim', async () => {
+    const malformedId = await request('GET', '/teams/bravo/seeds/%', undefined, nickCredential);
+    expect(malformedId.status).toBe(400);
+
     const malformed = await request(
       'POST',
       `/teams/bravo/seeds/${seedId}/clarification`,
