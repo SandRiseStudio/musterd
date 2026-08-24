@@ -1,5 +1,7 @@
 # musterd protocol — SPEC
 
+The musterd wire protocol: the Envelope every message travels in, the acts Members exchange, and the rules any conforming server or client MUST follow.
+
 **Version:** `musterd/0.3` (draft)
 **Status:** v0.3 draft — designed in the open, versioned from the first commit. v0.3 adds the terminal **`resolve` act** (thread-close — the open-vs-done axis, ADR 025) over v0.2; it is a backward-compatible MINOR (one new act, no change to existing fields). v0.2 added the **minimal trust model** (single-active Members + reclaim grace) and **roster activity** over v0.1. The full shared-teams governance model is otherwise **designed but not yet specified** — it activates when the daemon stops being localhost-only. Its wire-level design lives in **Appendix A (Unreleased)** below; the rationale is in `docs/design/membership-model.md` + `docs/design/security.md`.
 **License:** MIT (same as the implementation).
