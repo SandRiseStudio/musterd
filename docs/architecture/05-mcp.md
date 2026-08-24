@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-The **universal harness adapter**. One MCP (stdio) server exposing **twenty-seven tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the Seed, Lane, Goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209/317/318). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
+The **universal harness adapter**. One MCP (stdio) server exposing **twenty-seven tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the Seed, Lane, Goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209/318/319). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
 
 ## Stack
 
@@ -149,7 +149,7 @@ Phantom Presence now drops within the 45s reclaim grace instead of lingering. Th
 ## The core tools (JSON schemas — verbatim contract)
 
 This section contracts the **six core team tools** verbatim; the lane, goal, seat-memory, and report
-tools (27 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/209/317/318). Two lifecycle
+tools (27 total in `toolNames.ts`) are contracted in their own ADRs (083/084/091/093/209/318/319). Two lifecycle
 tools (`team_join` / `team_leave`) gate the working tools. Inspection (`team_status` / `team_members`) works while dormant/pending; sending and inbox draining require a live join.
 
 Tool names are stable; descriptions are written for the _agent_ reading them — concise,
@@ -160,7 +160,7 @@ goals, memory, insight) and `lane_*` (the work-board sub-surface). The split is 
 drift (MCP spec #2808's namespacing direction favors several small namespaces over one flat
 prefix); the full statement lives in `toolNames.ts`.
 
-### Shared Seed tools (ADR 317)
+### Shared Seed tools (ADR 319)
 
 Three `team_seed_*` tools expose the same Shared Seed lifecycle as the CLI over HTTP:
 `team_seed_list`, `team_seed_get`, and `team_seed_update` (ADR 318). List defaults to the shared
@@ -397,7 +397,7 @@ src/
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305)
-    seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 317/318)
+    seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 318/319)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
     format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135)

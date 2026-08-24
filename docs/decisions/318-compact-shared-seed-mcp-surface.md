@@ -3,11 +3,11 @@
 - Status: accepted
 - Date: 2026-08-24
 - Decider: gptbot
-- Supersedes: ADR 317's seven-tool MCP naming only
+- Supersedes: ADR 319's seven-tool MCP naming only
 
 ## Context
 
-ADR 317 chose seven MCP tools for the Shared Seed lifecycle. The implementation is functionally
+ADR 319 chose seven MCP tools for the Shared Seed lifecycle. The implementation is functionally
 complete, but the standing-context gate measures the exact `tools/list` payload on every turn. The
 pre-Seed generalist Surface already measured 15,839 bytes against a fixed 15,851-byte tool-list
 budget. The seven Seed tools add 3,491 bytes, of which only 659 bytes are descriptions; the rest is
@@ -64,6 +64,8 @@ in `docs/architecture/05-mcp.md` in the same commit.
   the existing on-demand skill.
 - 2026-08-24 implementation measurement: the unchanged gate passes at 15,683 B default (168 B
   headroom) and 5,490 B muted (41 B headroom), down from the failing 19,330 B / 5,968 B Surface.
+- 2026-08-24: the Shared Seed Surface decision was renumbered from ADR 317 to ADR 319 after a
+  concurrent landed ADR claimed 317; this decision's MCP surface remains unchanged.
 
 ## Observability & Evaluation
 
