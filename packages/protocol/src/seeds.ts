@@ -17,7 +17,9 @@ export type SeedSource = z.infer<typeof SeedSourceSchema>;
 /** Raw relay boundary accepted by shared-Seed ingest (ADR 311). */
 export const RelaySeedSchema = z.object({
   id: z.string().min(1),
-  body: z.string().trim().min(1),
+  body: z
+    .string()
+    .refine((body) => body.trim().length > 0, 'body must contain non-whitespace text'),
   ts: z.number().int().nonnegative(),
   source: SeedSourceSchema,
   meta: z.object({ user: z.string().min(1) }).passthrough(),

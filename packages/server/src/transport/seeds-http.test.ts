@@ -130,6 +130,18 @@ describe('Seed lifecycle HTTP authorization', () => {
     expect(read.json.seed.id).toBe(seedId);
   });
 
+  it('keeps an inert seat from reading or mutating Seeds', async () => {
+    const team = getTeamBySlug(server.db, 'bravo')!;
+    server.db
+      .prepare("UPDATE members SET account_status = 'disabled' WHERE team_id = ? AND name = 'Ada'")
+      .run(team.id);
+    const ada = { key: agentKey, seat: 'Ada' };
+
+    expect((await request('GET', '/teams/bravo/seeds', undefined, ada)).status).toBe(403);
+    expect((await request('GET', `/teams/bravo/seeds/${seedId}`, undefined, ada)).status).toBe(403);
+    expect((await request('POST', `/teams/bravo/seeds/${seedId}/claim`, {}, ada)).status).toBe(403);
+  });
+
   it('parses path ids and mutation bodies, then refuses a human exploration claim', async () => {
     const malformedId = await request('GET', '/teams/bravo/seeds/%', undefined, nickCredential);
     expect(malformedId.status).toBe(400);
@@ -207,6 +219,39 @@ describe('Seed lifecycle HTTP authorization', () => {
       },
     });
     expect(activity[0]!.body).toContain('human brainstorm recommended');
+  });
+
+  it('rolls promotion back when its Lane-open activity cannot persist, then retries cleanly', async () => {
+    const ada = { key: agentKey, seat: 'Ada' };
+    await request('POST', `/teams/bravo/seeds/${seedId}/claim`, {}, ada);
+    server.db.exec(`
+      CREATE TRIGGER refuse_seed_lane_activity BEFORE INSERT ON messages
+      WHEN json_extract(NEW.meta, '$.lane_open.seed_id') IS NOT NULL
+      BEGIN SELECT RAISE(ABORT, 'seed lane activity refused'); END;
+    `);
+
+    const failed = await request(
+      'POST',
+      `/teams/bravo/seeds/${seedId}/brief`,
+      { result: 'promote', brief },
+      ada,
+    );
+    expect(failed.status).toBe(500);
+    const team = getTeamBySlug(server.db, 'bravo')!;
+    expect(listLanes(server.db, team.id, team.slug)).toHaveLength(0);
+    expect(
+      (await request('GET', `/teams/bravo/seeds/${seedId}`, undefined, ada)).json.seed,
+    ).toMatchObject({ state: 'exploring', linked_lane_id: null });
+
+    server.db.exec('DROP TRIGGER refuse_seed_lane_activity');
+    const retried = await request(
+      'POST',
+      `/teams/bravo/seeds/${seedId}/brief`,
+      { result: 'promote', brief },
+      ada,
+    );
+    expect(retried.status).toBe(200);
+    expect(listLanes(server.db, team.id, team.slug)).toHaveLength(1);
   });
 
   it('lets the submitting Member manually promote an open Seed', async () => {

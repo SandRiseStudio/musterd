@@ -2767,13 +2767,15 @@ export async function handleHttp(
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All
       // member-authed; every mutation returns { lane, warnings } (warn-only, never a rejection).
       if (method === 'GET' && rest === '/seeds') {
-        const { team } = authTouch(ctx, slug, req);
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
         return sendJson(res, 200, SeedListSchema.parse({ seeds: listSeeds(ctx.db, team.id) }));
       }
 
       const seedReadMatch = rest.match(/^\/seeds\/([^/]+)$/);
       if (method === 'GET' && seedReadMatch) {
-        const { team } = authTouch(ctx, slug, req);
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
         const seedId = parseSeedPathId(seedReadMatch[1]!);
         const seed = getSeed(ctx.db, team.id, seedId);
         if (!seed) throw new MusterdError('not_found', `Seed "${seedId}" not found`);
@@ -2785,6 +2787,7 @@ export async function handleHttp(
       );
       if (method === 'POST' && seedMutationMatch) {
         const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
         const seedId = parseSeedPathId(seedMutationMatch[1]!);
         const operation = seedMutationMatch[2]!;
         const raw = await readJson(req);
@@ -2822,50 +2825,57 @@ export async function handleHttp(
           });
         } else if (operation === 'brief') {
           const body = parseOrBadRequest(SubmitSeedBriefSchema, raw);
-          seed = submitSeedBrief(ctx.db, team.id, team.slug, seedId, member, body);
-          if (before?.state !== 'promoted') {
-            appendAudit(ctx.db, team.id, {
-              actor: member.name,
-              action: 'seed.brief_submitted',
-              target: seed.id,
-              result: 'allow',
-              detail: { seed_id: seed.id, result: body.result },
-            });
-            appendAudit(ctx.db, team.id, {
-              actor: member.name,
-              action: body.result === 'promote' ? 'seed.promoted' : 'seed.completed',
-              target: seed.id,
-              result: 'allow',
-              detail: {
-                seed_id: seed.id,
-                from: before?.state ?? null,
-                to: seed.state,
-                ...(seed.linked_lane_id ? { lane_id: seed.linked_lane_id } : {}),
-                ...(seed.promotion ? { promotion: seed.promotion.kind } : {}),
-              },
-            });
-            if (seed.state === 'promoted') deliverSeedPromotion(ctx, team, member, seed);
-          }
+          seed = ctx.db.transaction(() => {
+            const transitioned = submitSeedBrief(ctx.db, team.id, team.slug, seedId, member, body);
+            if (before?.state !== 'promoted') {
+              appendAudit(ctx.db, team.id, {
+                actor: member.name,
+                action: 'seed.brief_submitted',
+                target: transitioned.id,
+                result: 'allow',
+                detail: { seed_id: transitioned.id, result: body.result },
+              });
+              appendAudit(ctx.db, team.id, {
+                actor: member.name,
+                action: body.result === 'promote' ? 'seed.promoted' : 'seed.completed',
+                target: transitioned.id,
+                result: 'allow',
+                detail: {
+                  seed_id: transitioned.id,
+                  from: before?.state ?? null,
+                  to: transitioned.state,
+                  ...(transitioned.linked_lane_id ? { lane_id: transitioned.linked_lane_id } : {}),
+                  ...(transitioned.promotion ? { promotion: transitioned.promotion.kind } : {}),
+                },
+              });
+              if (transitioned.state === 'promoted')
+                deliverSeedPromotion(ctx, team, member, transitioned);
+            }
+            return transitioned;
+          })();
         } else {
           const body = parseOrBadRequest(PromoteSeedSchema, raw);
-          seed = promoteSeed(ctx.db, team.id, team.slug, seedId, member, body);
-          if (before?.state !== 'promoted') {
-            appendAudit(ctx.db, team.id, {
-              actor: member.name,
-              action: 'seed.promoted',
-              target: seed.id,
-              result: 'allow',
-              detail: {
-                seed_id: seed.id,
-                from: before?.state ?? null,
-                to: seed.state,
-                lane_id: seed.linked_lane_id,
-                promotion: 'manual',
-                research_skipped: seed.promotion?.research_skipped ?? false,
-              },
-            });
-            deliverSeedPromotion(ctx, team, member, seed);
-          }
+          seed = ctx.db.transaction(() => {
+            const transitioned = promoteSeed(ctx.db, team.id, team.slug, seedId, member, body);
+            if (before?.state !== 'promoted') {
+              appendAudit(ctx.db, team.id, {
+                actor: member.name,
+                action: 'seed.promoted',
+                target: transitioned.id,
+                result: 'allow',
+                detail: {
+                  seed_id: transitioned.id,
+                  from: before?.state ?? null,
+                  to: transitioned.state,
+                  lane_id: transitioned.linked_lane_id,
+                  promotion: 'manual',
+                  research_skipped: transitioned.promotion?.research_skipped ?? false,
+                },
+              });
+              deliverSeedPromotion(ctx, team, member, transitioned);
+            }
+            return transitioned;
+          })();
         }
         return sendJson(res, 200, SeedResultSchema.parse({ seed }));
       }

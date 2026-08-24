@@ -56,6 +56,28 @@ describe('shared Seeds (ADR 291)', () => {
     ).toBe(false);
   });
 
+  it('validates a substantive relay body without changing the raw capture', () => {
+    const body = '  idea with source whitespace\n';
+    expect(
+      RelaySeedSchema.parse({
+        id: 'relay-verbatim',
+        body,
+        ts: 1,
+        source: 'slack',
+        meta: { user: 'U123' },
+      }).body,
+    ).toBe(body);
+    expect(
+      RelaySeedSchema.safeParse({
+        id: 'relay-empty',
+        body: ' \n ',
+        ts: 1,
+        source: 'slack',
+        meta: { user: 'U123' },
+      }).success,
+    ).toBe(false);
+  });
+
   it('requires every section of an exhaustive exploration brief', () => {
     const incomplete = {
       result: 'promote',

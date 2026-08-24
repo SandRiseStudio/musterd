@@ -13,7 +13,7 @@ function captureAll(client: Partial<MusterdClient>): Record<string, Handler> {
         handlers[name] = handler;
       },
     } as any,
-    client as MusterdClient,
+    { holdsSeat: true, ...client } as MusterdClient,
   );
   return handlers;
 }
@@ -97,5 +97,37 @@ describe('Shared Seed MCP tools', () => {
       conclusion: 'Not now',
     });
     expect(result.structuredContent).toEqual({ seed: completed });
+  });
+
+  it('refuses every mutation when this adapter no longer holds its seat', async () => {
+    const client = {
+      holdsSeat: false,
+      claimed: true,
+      lastJoinError: 'session replaced by a newer session',
+      claimCode: 'AB12',
+      claimSeed: vi.fn(),
+      askSeed: vi.fn(),
+      answerSeed: vi.fn(),
+      submitSeed: vi.fn(),
+      promoteSeed: vi.fn(),
+    };
+    const handlers = captureAll(client);
+    const id = '01SEED00000000000000000000';
+    const calls = [
+      handlers['team_seed_claim']!({ id }),
+      handlers['team_seed_ask']!({ id, body: 'question' }),
+      handlers['team_seed_answer']!({ id, body: 'answer' }),
+      handlers['team_seed_submit']!({ id, result: 'complete', brief: {}, conclusion: 'done' }),
+      handlers['team_seed_promote']!({ id }),
+    ];
+
+    for (const result of await Promise.all(calls)) {
+      expect(result.content[0]!.text).toContain('this session was evicted from its seat');
+    }
+    expect(client.claimSeed).not.toHaveBeenCalled();
+    expect(client.askSeed).not.toHaveBeenCalled();
+    expect(client.answerSeed).not.toHaveBeenCalled();
+    expect(client.submitSeed).not.toHaveBeenCalled();
+    expect(client.promoteSeed).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,11 @@ export function classifyCssBundle<Group extends string>(
   const filename = file.split('/').pop()!;
   for (const group of Object.keys(bundles) as Group[]) {
     const base = bundles[group].find(
-      (candidate) => filename === `${candidate}.css` || filename.startsWith(`${candidate}-`),
+      (candidate) =>
+        filename === `${candidate}.css` ||
+        new RegExp(
+          `^${candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-[A-Za-z0-9_-]{8}\\.css$`,
+        ).test(filename),
     );
     if (base && filename.endsWith('.css')) return { base, group };
   }

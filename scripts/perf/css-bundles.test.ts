@@ -20,5 +20,9 @@ describe('classifyCssBundle', () => {
       base: 'Mystery-abc123',
       group: undefined,
     });
+    expect(classifyCssBundle('assets/Live-Settings-hash.css', bundles)).toEqual({
+      base: 'Live-Settings-hash',
+      group: undefined,
+    });
   });
 });

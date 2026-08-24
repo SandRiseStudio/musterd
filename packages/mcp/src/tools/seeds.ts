@@ -10,7 +10,7 @@ import {
 } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
-import { errorResult } from './format.js';
+import { errorResult, notReadyMessage, textResult } from './format.js';
 
 const IdSchema = z.string().min(1).describe('Seed id');
 // MCP SDK consumes Zod v4 fields; protocol currently ships Zod v3 schemas. This describes the same
@@ -109,6 +109,7 @@ export function registerSeeds(server: McpServer, client: MusterdClient): void {
       inputSchema: { id: IdSchema },
     },
     async (args) => {
+      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'claim a Seed'));
       try {
         ClaimSeedSchema.parse({});
         const seed = await client.claimSeed(IdSchema.parse(args.id));
@@ -127,6 +128,7 @@ export function registerSeeds(server: McpServer, client: MusterdClient): void {
       inputSchema: { id: IdSchema, body: z.string().trim().min(1) },
     },
     async (args) => {
+      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'ask a Seed clarification'));
       try {
         const input = AskSeedClarificationSchema.parse({ body: args.body });
         const seed = await client.askSeed(IdSchema.parse(args.id), input.body);
@@ -144,6 +146,8 @@ export function registerSeeds(server: McpServer, client: MusterdClient): void {
       inputSchema: { id: IdSchema, body: z.string().trim().min(1) },
     },
     async (args) => {
+      if (!client.holdsSeat)
+        return textResult(notReadyMessage(client, 'answer a Seed clarification'));
       try {
         const input = AnswerSeedClarificationSchema.parse({ body: args.body });
         const seed = await client.answerSeed(IdSchema.parse(args.id), input.body);
@@ -167,6 +171,7 @@ export function registerSeeds(server: McpServer, client: MusterdClient): void {
       },
     },
     async (args) => {
+      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'submit a Seed result'));
       try {
         const id = IdSchema.parse(args.id);
         const body = SubmitSeedBriefSchema.parse(args);
@@ -194,6 +199,7 @@ export function registerSeeds(server: McpServer, client: MusterdClient): void {
       },
     },
     async (args) => {
+      if (!client.holdsSeat) return textResult(notReadyMessage(client, 'promote a Seed'));
       try {
         const body = PromoteSeedSchema.parse({ title: args.title, detail: args.detail });
         const seed = await client.promoteSeed(IdSchema.parse(args.id), body);
