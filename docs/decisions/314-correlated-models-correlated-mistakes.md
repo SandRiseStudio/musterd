@@ -67,9 +67,15 @@ against *this* section, not against a research citation.
 
 ## What this is not
 
-- **Not a measured result.** The supporting evidence is the field's (MAST, the monoculture
-  literature) plus one small-N in-house anecdote (the P3 dogfood, where model mattered more than
-  seat). In musterd's own data the thesis is a presumption awaiting the correlation experiment.
+- **Not a measured result — in musterd's own data.** The supporting evidence is the field's —
+  MAST, the monoculture literature, and Anthropic's Frontier Red Team report "Patterns and
+  problems in multiagent systems" (2026-08-13, anthropic.com/research/multiagent-systems), which
+  is first-party experimental evidence for exactly this thesis: low-variance individual agents
+  producing correlated failures in identical contexts (18/30 agents choosing the identical git
+  branch name; simultaneous defection; consensus-preserving dismissal of private dissenting
+  information) — plus one small-N in-house anecdote (the P3 dogfood, where model mattered more
+  than seat). On musterd's own traces the thesis is a presumption awaiting the correlation
+  experiment.
 - **Not a claim that cross-family review catches more defects.** It claims same-family agreement
   is weaker *evidence*, which is a statement about how to count approvals, not about defect yield.
 - **Not retro-written into ADR 056.** ADR 056 charters the research *practice*; this ADR charters
