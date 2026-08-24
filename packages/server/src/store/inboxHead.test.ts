@@ -116,3 +116,60 @@ describe('listInbox headLimit — a bounded read that cannot skip a message', ()
     expect(tail[0]).toBe('m40');
   });
 });
+
+/**
+ * `?limit=` is the newest tail. That is right for team chatter and wrong for a waiting handoff:
+ * MCP always sends `limit` (default 50), so an old directed act sits behind the newest broadcasts
+ * and `team_inbox_check` reports nothing waiting while the CLI banner, which reads with no limit,
+ * counts it. Pin action-needed unread into the limited page. Directed `message` stays newest-N so
+ * a mailbox of DMs does not explode the bound.
+ */
+describe('listInbox limit — pin action-needed unread into the newest tail', () => {
+  it('keeps an old unread handoff on a page of newer team broadcasts', () => {
+    const db = openDb(':memory:');
+    const team = createTeam(db, { slug: 'revive' });
+    const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' }).row;
+    insertMessage(
+      db,
+      team.id,
+      nick.id,
+      ada.id,
+      makeEnvelope({
+        id: 'handoff-old',
+        team: team.slug,
+        from: 'nick',
+        to: { kind: 'member', name: 'Ada' },
+        act: 'handoff',
+        body: 'take this',
+        thread: null,
+        meta: null,
+        ts: 1,
+      }),
+    );
+    for (let i = 0; i < 100; i++) {
+      insertMessage(
+        db,
+        team.id,
+        nick.id,
+        null,
+        makeEnvelope({
+          id: `t${String(i).padStart(3, '0')}`,
+          team: team.slug,
+          from: 'nick',
+          to: { kind: 'team' },
+          act: 'message',
+          body: 'noise',
+          thread: null,
+          meta: null,
+          ts: 1_000 + i,
+        }),
+      );
+    }
+    const page = listInbox(db, ada, { unreadOnly: true, cursorTs: 0, limit: 50 });
+    const ids = page.map((r) => r.id);
+    expect(ids).toContain('handoff-old');
+    expect(ids).toContain('t099');
+    expect(ids).not.toContain('t000');
+  });
+});

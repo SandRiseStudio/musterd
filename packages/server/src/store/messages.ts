@@ -187,13 +187,32 @@ export function listInbox(
   // inbox is read most-recent-first, so a bounded view must keep the recent tail, not the oldest N
   // (the `ts ASC LIMIT` bug that returned the wrong end; mirrors listTeamMessages' backfill).
   if (opts.limit) {
-    params.push(opts.limit);
-    return db
+    const newest = db
       .prepare<
         unknown[],
         MessageRow
       >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`)
+      .all(...params, opts.limit);
+    // MCP always sends `limit`, so the newest tail is team broadcasts and an old waiting handoff
+    // never appears. The CLI banner reads with no limit and counts it. Pin action-needed unread
+    // (request_help / ask / directed non-message) into the page. Directed `message` stays newest-N
+    // so a mailbox of DMs does not explode the bound.
+    if (!opts.unreadOnly) return newest;
+    const pinned = db
+      .prepare<unknown[], MessageRow>(
+        `SELECT * FROM messages ${where} AND (
+           act IN ('request_help', 'ask')
+           OR (to_kind = 'member' AND act NOT IN ('message', 'resolve'))
+         ) ORDER BY ts ASC, id ASC`,
+      )
       .all(...params);
+    if (pinned.length === 0) return newest;
+    const byId = new Map<string, MessageRow>();
+    for (const row of newest) byId.set(row.id, row);
+    for (const row of pinned) byId.set(row.id, row);
+    return [...byId.values()].sort(
+      (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
   }
   // The prefix read: same order as the unbounded query, simply stopped early — except that it never
   // stops in the MIDDLE OF A TIE. A page cut between two rows sharing a millisecond cannot be walked

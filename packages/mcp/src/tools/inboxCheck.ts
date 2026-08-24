@@ -21,12 +21,14 @@ const DESCRIPTION =
 
 /** What one `team_inbox_check` should display, and how far the read cursor may move (ADR 287). */
 export interface InboxCheckPlan {
-  /** The messages to render — the newest `limit`, so relevance is unchanged. */
+  /** The messages to render — pinned waiting acts plus the newest fill, so relevance is unchanged. */
   shown: Envelope[];
   /** Unread this call could not show. Non-zero means the cursor must not move. */
   elided: number;
   /** Message id to advance the read cursor to, or `null` to leave the cursor exactly where it is. */
   advanceTo: string | null;
+  /** `limit` that would show everything this call knows about (shown + elided). */
+  drainLimit: number;
 }
 
 /**
@@ -50,6 +52,16 @@ export interface InboxCheckPlan {
  * mode becomes seeing something twice, which costs a moment, instead of never seeing it, which
  * costs the work. The caller names `limit` as the way out, so a backlog still drains in one call.
  */
+/**
+ * Waiting acts the newest-N slice must not bury. Matches the CLI banner's `isActionNeeded`, minus
+ * directed `message` — those stay newest-N so a mailbox of DMs does not explode the bound.
+ */
+function isPinnedNeed(env: Envelope): boolean {
+  if (env.act === 'resolve') return false;
+  if (env.act === 'request_help' || env.act === 'ask') return true;
+  return env.to?.kind === 'member' && env.act !== 'message';
+}
+
 export function planInboxCheck(
   ordered: Envelope[],
   limit: number,
@@ -61,13 +73,20 @@ export function planInboxCheck(
    */
   unreachable = 0,
 ): InboxCheckPlan {
-  // Keep the NEWEST `limit` (an inbox is read most-recent-first), not the OLDEST N that a bare
-  // `.sort().slice(0, limit)` would keep once the inbox exceeds the cap.
-  const shown = ordered.slice(Math.max(0, ordered.length - limit));
+  const pinned = ordered.filter(isPinnedNeed);
+  const rest = ordered.filter((e) => !isPinnedNeed(e));
+  // Newest fill of the non-pinned tail, union the waiting acts. If the server already pinned, this
+  // keeps the handoff when a second slice would otherwise drop it as the oldest of 51.
+  const newest = rest.slice(Math.max(0, rest.length - limit));
+  const byId = new Map<string, Envelope>();
+  for (const e of newest) byId.set(e.id, e);
+  for (const e of pinned) byId.set(e.id, e);
+  const shown = [...byId.values()].sort((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
   const elided = ordered.length - shown.length + unreachable;
   return {
     shown,
     elided,
+    drainLimit: shown.length + elided,
     // `null` on an elision AND on an empty inbox — there is no id to advance to in either case, and
     // inventing one is exactly how a watermark passes something nobody read.
     advanceTo: elided > 0 || shown.length === 0 ? null : shown[shown.length - 1]!.id,
@@ -98,7 +117,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const plan = planInboxCheck(ordered, args.limit ?? 50, fetched.unread_remaining ?? 0);
         const messages = plan.shown;
 
-        if (messages.length === 0) {
+        if (messages.length === 0 && plan.elided === 0) {
           // ADR 287 stopped the cursor consuming what a call never rendered. A message it DID
           // render is the other case: the cursor passes it legitimately, and the only way back is
           // `unread_only: false` — a flag whose existence nothing advertised, so a seat could not
@@ -147,8 +166,8 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const notice =
           plan.elided > 0
             ? `⚠ ${plan.elided} older unread not shown (limit ${args.limit ?? 50}). Nothing was ` +
-              `marked read — they are still waiting. Call again with limit: ${ordered.length} to ` +
-              `see all ${ordered.length}.\n\n`
+              `marked read — they are still waiting. Call again with limit: ${plan.drainLimit} to ` +
+              `see all ${plan.drainLimit}.\n\n`
             : '';
         const text = notice + messages.map(line).join('\n') + (await buildSkewWarning(client));
         return {

@@ -669,6 +669,51 @@ describe('team_inbox_check handler', () => {
     );
   });
 
+  it('does not say the inbox is empty when unread remain behind the fetch bound', async () => {
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({
+        fetchInbox: (async () => ({
+          messages: [],
+          cursor: null,
+          unread_remaining: 12,
+        })) as any,
+      }),
+    );
+    const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).not.toContain('nothing waiting on you');
+    expect(text(r)).toContain('12 older unread not shown');
+    expect(text(r)).toContain('limit: 12');
+  });
+
+  it('names a drain limit that covers elided unread, not the fetched slice', async () => {
+    const mk = (id: string, ts: number) =>
+      makeEnvelope({
+        id,
+        team: 'dawn',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'message',
+        body: id,
+        ts,
+      });
+    const messages = Array.from({ length: 50 }, (_, i) => mk(`n${i}`, 1000 + i));
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({
+        fetchInbox: (async () => ({
+          messages,
+          cursor: null,
+          unread_remaining: 100,
+        })) as any,
+      }),
+    );
+    const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).toContain('100 older unread not shown');
+    expect(text(r)).toContain('Call again with limit: 150');
+    expect(text(r)).not.toContain('Call again with limit: 50 to');
+  });
+
   it('merges buffered + fetched, dedups by id, sorts by ts, and advances the cursor', async () => {
     const mk = (id: string, ts: number) =>
       makeEnvelope({
