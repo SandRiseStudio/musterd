@@ -240,3 +240,17 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   `everTripped: true`); zero Not-column edits and 4 substantive suppressions, all
   literal-interface mentions — the indictment reading did not materialize. Confusion test: Q1
   passes from §5 alone; Q2 half-passes until the driver support matrix (reserved item) lands.
+
+- **2026-08-24 (tier 2 wire rename landed, stanley, lane 01M0K5YKAD, PR #1041).**
+  `surface_globs` → `scope` on the wire, the `adoptLegacyRoleKey` pattern applied as this ADR
+  directed: `LaneSchema`/`OpenLaneSchema`/`UpdateLaneSchema` adopt the legacy key on read
+  (preprocess), and — the part the worked examples did not need — **both skew directions are
+  mirrored**, because a lane list is read by clients whose frozen schemas *require* the old key
+  (the full Lane shape carries both, `scope` wins) and written by new clients to daemons whose
+  schemas would silently *drop* the new one (`mirrorLegacyScopeOnSend` dual-sends — the
+  empty-surface trap the MCP coercion layer measured on 2026-07-27). Feature epoch 14. The DB
+  column and the `surface_overlap` warning kind keep their names (internal / wire enum member —
+  renaming an enum member is a different compatibility problem than renaming a key, and is left
+  where it was found). Mirror and fallbacks drop in a later epoch, on-touch. Measured cost:
+  +157 gzip bytes on the web bundle — measurement in `docs/perf/web-live-baseline.md` (a prepared
+  budget raise was superseded by the Shared Seeds raise, #1025, landing first).
