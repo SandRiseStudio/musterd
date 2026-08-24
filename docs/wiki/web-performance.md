@@ -45,7 +45,9 @@ Two things this cost that are worth carrying:
 - **The CSS budget is effectively full.** Baseline 26,305 bytes gzip against a 26,400 budget — 95
   bytes of headroom, and `totalCssGzipBytes` has been raised twice since the last re-baseline. A
   30-line stylesheet addition did not fit; it took four trims to land at 26,394. **Six bytes is not
-  headroom** — the next web change should re-baseline rather than shave.
+  headroom** — the next web change should re-baseline rather than shave. Resolved 2026-08-24: a
+  re-baseline could not loosen (ADR 183), so `totalCssGzipBytes` was split into per-surface budgets
+  instead — app / site / shared, each measured + 15% (ADR 310).
 - **Measure the way the gate measures.** A first reading said 156 bytes UNDER budget while the gate
   said over: `scripts/perf/check-budgets.ts` calls `gzipSync` at the DEFAULT level, and the reading
   had used level 9. Same family as the gzip-CLI-vs-zlib trap already recorded in `budgets.json`.

@@ -364,3 +364,27 @@ Measured (this box, `perf:check` after `pnpm --filter @musterd/web build`; main 
 - **CSS: 26,406 B vs 26,400 — 6 bytes over; trimmed** (two redundant declarations in the new site
   CSS) rather than raised.
 - Dead code removed in passing: `LiquidGlass/` (no consumers), `lenis`, `@fontsource/fraunces`.
+
+## 2026-08-24 — Delight 0: the CSS budget splits by surface (ADR 310)
+
+Branch `miley/delight0-css-budget-split`, measured on main @ 6bcc8c4a the way the gate measures
+(`gzipSync` default level over `dist/client`): CSS 26,394 / 26,400 (**6 bytes free**), initial JS
+154,372 / 156,000, total JS 240,456 / 241,000.
+
+- **The canvas-substitutability question the delight spec asked is answered, by rebuild rather than
+  arithmetic** (sections deleted from `Live.css`, package rebuilt, shipped bundle re-gzipped):
+  pure decoration over the canvas (Tier-A ambient FX, watermark, one dead section) is **−832 gzip
+  bytes = 5.3%** of Live.css's 15,810; adding the interactive over-canvas chrome (nameplates,
+  speech bubbles + rich tokens + hover-expand, board hotspot, work stack) reaches **−4,143 gzip
+  bytes = 26.2%**. The spec's 15% falsifier passes only by counting the interactive tier, whose
+  canvas rewrite would spend JS bytes the JS budgets (1,628 / 544 B free) do not have. Route 2
+  rejected as runway; evidence and decision in ADR 310.
+- **`totalCssGzipBytes` (26,400) replaced by per-surface budgets**, each measured + 15%:
+  `appCssGzipBytes` 24,700 (measured 21,492), `siteCssGzipBytes` 2,900 (measured 2,538),
+  `sharedCssGzipBytes` 2,700 (measured 2,364). A deliberate loosening under ADR 183's ritual —
+  implied total 26,400 → 30,300 — justified by the structural defect it removes: the office and the
+  eight-route public site shared one ceiling set when the site was one page, and on 2026-08-23 a
+  site-only table rule was blocked by office bytes.
+- **Classification is closed**: `check-budgets.ts` fails on any CSS bundle not named in
+  `budgets.cssBundles` (exercised: a stray `Mystery-abc123.css` fails; an over-budget group fails
+  naming only its own bundles as the remedy).

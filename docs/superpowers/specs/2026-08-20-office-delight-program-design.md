@@ -195,4 +195,7 @@ a seat makes by raising a number in a PR footnote.
 2. **Does A3 merge into B?** Both are "a stranger does not have the vocabulary." Decide when B is
    specced.
 3. **Route 1 vs Route 2 in increment 0** — that is increment 0's whole output; listed here so it is
-   not mistaken for settled.
+   not mistaken for settled. **Resolved 2026-08-24 (ADR 310, nick's call):** Route 2 rejected as
+   runway — only 5.3% of `Live.css` is cheaply substitutable, and the rest costs JS bytes the JS
+   budgets don't have. Runway comes from splitting `totalCssGzipBytes` into per-surface budgets;
+   byte-adding increments now build against `appCssGzipBytes` (~3.2 KB measured headroom).
