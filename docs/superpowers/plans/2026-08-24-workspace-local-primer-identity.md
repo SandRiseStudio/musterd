@@ -159,6 +159,7 @@ Co-authored-by: gptbot <gptbot@revive.musterd>"
 - Modify: `packages/cli/src/onboard/init.test.ts`
 - Modify: `packages/mcp/src/index.ts`
 - Modify: `packages/mcp/src/mcp.test.ts`
+- Modify: `scripts/context/check-budgets.ts`
 
 **Interfaces:**
 - Consumes: `renderRepositoryPrimer({ team })` and `renderRuntimePrimer({ team, member? })` from Task 1.
@@ -273,6 +274,10 @@ return renderRuntimePrimer({ team: config.team, ...(seat ? { member: seat } : {}
 
 Update the nearby comment to state that MCP instructions are process-local and authenticated occupancy supplies the Team Role and charter.
 
+Update `scripts/context/check-budgets.ts` to import both public renderers and set `primerBytes` to the
+larger of the repository and named-runtime variants. This keeps the existing single-primer budget
+conservative without adding a second budget item for two mutually exclusive delivery variants.
+
 - [ ] **Step 8: Run the focused MCP test and verify GREEN**
 
 Run:
@@ -286,7 +291,7 @@ Expected: PASS for named, seat-targeted, and unresolved runtime variants.
 - [ ] **Step 9: Commit the consumer boundary**
 
 ```bash
-git add packages/cli/src/onboard/primer.ts packages/cli/src/onboard/onboard.test.ts packages/cli/src/onboard/init.ts packages/cli/src/onboard/init.test.ts packages/mcp/src/index.ts packages/mcp/src/mcp.test.ts
+git add packages/cli/src/onboard/primer.ts packages/cli/src/onboard/onboard.test.ts packages/cli/src/onboard/init.ts packages/cli/src/onboard/init.test.ts packages/mcp/src/index.ts packages/mcp/src/mcp.test.ts scripts/context/check-budgets.ts docs/superpowers/plans/2026-08-24-workspace-local-primer-identity.md
 git commit -m "fix: keep Member identity out of repository primers
 
 Refs ADR-307

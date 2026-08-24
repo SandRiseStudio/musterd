@@ -6,10 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cachedTeamLive,
   missingGitignoreEntries,
+  printManual,
   runInit,
   runPruneBindings,
   runRefreshGuidance,
 } from './init.js';
+import { renderRepositoryPrimer } from './primer.js';
 
 // Shared, hoisted test doubles the mock factories below close over.
 const h = vi.hoisted(() => {
@@ -301,6 +303,30 @@ function happyAnswers() {
 }
 
 describe('runInit — guards and exits', () => {
+  it('prints repository-neutral manual setup for the selected Team', () => {
+    const manual = printManual(
+      h.harness as never,
+      {
+        command: 'musterd-mcp',
+        args: [],
+        env: {
+          MUSTERD_MEMBER: 'Ada',
+          MUSTERD_TEAM: 'wrong-team',
+          MUSTERD_ROLE: 'backend',
+          MUSTERD_CHARTER: 'own the data layer',
+          MUSTERD_TOOLKIT: 'supabase',
+        },
+      },
+      'dawn',
+    );
+
+    expect(manual).toContain(renderRepositoryPrimer({ team: 'dawn' }));
+    const primer = manual.slice(manual.indexOf('<!-- musterd:start'));
+    for (const localFact of ['Ada', 'wrong-team', 'backend', 'own the data layer', 'supabase']) {
+      expect(primer).not.toContain(localFact);
+    }
+  });
+
   it('refuses outside a TTY with exit code 2', async () => {
     Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
     const errSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
@@ -732,7 +758,11 @@ describe('runInit — add-agent happy path', () => {
     // The selected harness's fragments were reconciled into place (ADR 282).
     expect(h.adapters['claude-code']!.apply).toHaveBeenCalled();
     // primer written to AGENTS.md in the (temp) cwd
-    expect(readFileSync(join(cwd, 'AGENTS.md'), 'utf8')).toContain('## Your musterd team');
+    const primer = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
+    expect(primer).toContain('## Your musterd team');
+    expect(primer).toContain('musterd whoami');
+    expect(primer).not.toContain('Ada');
+    expect(primer).not.toContain('backend');
     // The strict v2 manifest records the selection before reconciliation ran.
     const manifest = JSON.parse(
       readFileSync(join(cwd, '.musterd', 'provisioned.json'), 'utf8'),
@@ -832,7 +862,7 @@ describe('runInit — add-agent happy path', () => {
     expect(h.harness.provision).toHaveBeenCalled();
   });
 
-  it("the primer's charter comes from the team role library, not the profile (ADR 272 inc 2)", async () => {
+  it('keeps the Team Role and charter out of committed primer content', async () => {
     h.http.roster.mockResolvedValue({
       members: [{ name: 'Ada', presence: 'online' }],
       roles: [{ name: 'platform', summary: 'infra toucher', charter: 'You touch infra.' }],
@@ -843,9 +873,9 @@ describe('runInit — add-agent happy path', () => {
     h.confirmQueue.push(true, true, true); // autojoin, wire, primer
     expect(await runInit()).toBe(0);
     const agents = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
-    expect(agents).toContain('## Your charter (platform)');
-    expect(agents).toContain('You touch infra.');
-    // the backend PROFILE's charter must not be the source
+    expect(agents).not.toContain('## Your charter');
+    expect(agents).not.toContain('platform');
+    expect(agents).not.toContain('You touch infra.');
     expect(agents).not.toContain('Own the server + data layer');
   });
 

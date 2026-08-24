@@ -714,8 +714,19 @@ describe('MCP adapter', () => {
     // A provisioned session names its seat.
     const named = primerInstructions(adaConfig());
     expect(named).toContain('## Your musterd team');
-    expect(named).toContain('**Ada** on the **dawn** team');
+    expect(named).toContain('**Ada** on the **dawn** Team');
     expect(named).toContain('team_inbox_check');
+
+    // Before occupancy, a fixed seat policy is still a process-local Member target.
+    const targeted = primerInstructions({
+      server: base,
+      team: 'dawn',
+      claim: { mode: 'seat', name: 'Lin' },
+    });
+    expect(targeted).toContain('**Lin** on the **dawn** Team');
+    for (const forbidden of ['backend', 'own the data layer', 'supabase']) {
+      expect(targeted).not.toContain(forbidden);
+    }
 
     // An unclaimed session (no member) is told to claim a seat first.
     const unclaimed = primerInstructions({ server: base, team: 'dawn' });

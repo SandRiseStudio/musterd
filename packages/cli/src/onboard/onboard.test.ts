@@ -7,7 +7,12 @@ import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
 import { buildEntry, buildMcpEnv } from './mcpEntry.js';
-import { classifyPrimerTarget, removePrimer, renderPrimer, upsertPrimer } from './primer.js';
+import {
+  classifyPrimerTarget,
+  removePrimer,
+  renderRepositoryPrimer,
+  upsertPrimer,
+} from './primer.js';
 
 const binding = {
   version: 2 as const,
@@ -151,38 +156,27 @@ describe('agent primer', () => {
     cwd = mkdtempSync(join(tmpdir(), 'musterd-primer-'));
   });
 
-  it('renders identity + the working-loop, with the role clause only when present', () => {
-    const withRole = renderPrimer({ member: 'Ada', team: 'dawn', role: 'backend' });
-    expect(withRole).toContain('**Ada**, the backend, on the **dawn** team');
-    expect(withRole).toContain('team_join');
-    expect(withRole).toContain('team_inbox_check');
+  it('renders repository-stable Team context plus the working loop', () => {
+    const primer = renderRepositoryPrimer({ team: 'dawn' });
+    expect(primer).toContain('**dawn** Team');
+    expect(primer).toContain('musterd whoami');
+    expect(primer).toContain('team_join');
+    expect(primer).toContain('team_inbox_check');
     // channel-aware: the CLI form is documented alongside the team_* tools (ADR 012 follow-up)
-    expect(withRole).toContain('musterd inbox');
-    expect(withRole).toContain('musterd help');
+    expect(primer).toContain('musterd inbox');
+    expect(primer).toContain('musterd help');
     // status reporting is emphasized (flips the roster to `working`)
-    expect(withRole).toContain('status_update');
-    expect(withRole).toContain('working');
-    expect(withRole).toContain('<!-- musterd:start');
-    expect(withRole).toContain('<!-- musterd:end -->');
-
-    const noRole = renderPrimer({ member: 'Lin', team: 'dawn', role: '   ' });
-    expect(noRole).toContain('**Lin** on the **dawn** team');
-    expect(noRole).not.toContain(', the ');
-  });
-
-  it('renders a self-claim primer when no seat is assigned (the fresh, unprovisioned agent)', () => {
-    const unprovisioned = renderPrimer({ team: 'alpha' });
-    expect(unprovisioned).toContain('claim your seat first');
-    expect(unprovisioned).toContain('musterd claim');
-    // still the full working-loop, both channels
-    expect(unprovisioned).toContain('team_inbox_check');
-    expect(unprovisioned).toContain('musterd inbox');
-    // no fixed-seat identity line when there's no member
-    expect(unprovisioned).not.toContain('You are **');
+    expect(primer).toContain('status_update');
+    expect(primer).toContain('working');
+    expect(primer).toContain('<!-- musterd:start');
+    expect(primer).toContain('<!-- musterd:end -->');
+    for (const localFact of ['Ada', 'backend', 'own the data layer', 'supabase']) {
+      expect(primer).not.toContain(localFact);
+    }
   });
 
   it('creates AGENTS.md when absent', () => {
-    const block = renderPrimer({ member: 'Ada', team: 'dawn' });
+    const block = renderRepositoryPrimer({ team: 'dawn' });
     const { path, action } = upsertPrimer(cwd, block);
     expect(action).toBe('created');
     expect(path).toBe(join(cwd, 'AGENTS.md'));
@@ -192,7 +186,7 @@ describe('agent primer', () => {
   it('appends below existing prose without clobbering it', () => {
     const agents = join(cwd, 'AGENTS.md');
     writeFileSync(agents, '# My project\n\nBuild with care.\n');
-    const { action } = upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    const { action } = upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     expect(action).toBe('appended');
     const out = readFileSync(agents, 'utf8');
     expect(out).toContain('# My project');
@@ -201,66 +195,64 @@ describe('agent primer', () => {
   });
 
   it('updates the managed block in place and is idempotent', () => {
-    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn', role: 'backend' }));
+    upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     const once = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
-    // Re-run with a changed role: only the managed block changes; exactly one block remains.
-    const { action } = upsertPrimer(
-      cwd,
-      renderPrimer({ member: 'Ada', team: 'dawn', role: 'platform' }),
-    );
+    // Re-run with the same repository intent: exactly one block remains and its bytes are stable.
+    const { action } = upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     expect(action).toBe('updated');
     const twice = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
     expect(twice.match(/musterd:start/g)).toHaveLength(1);
     expect(twice.match(/musterd:end/g)).toHaveLength(1);
-    expect(twice).toContain('the platform,');
-    expect(twice).not.toContain('the backend,');
-    expect(twice.length).not.toBe(once.length);
+    expect(twice).toBe(once);
   });
 
   it('does not touch text outside the markers on update', () => {
     const agents = join(cwd, 'AGENTS.md');
-    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     // User adds their own prose after the block.
     const withUser = readFileSync(agents, 'utf8') + '\n## My own notes\nkeep me\n';
     writeFileSync(agents, withUser);
-    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     expect(readFileSync(agents, 'utf8')).toContain('## My own notes\nkeep me');
   });
 
   // classifyPrimerTarget drives the honest init confirm; each value maps to upsertPrimer's action.
   it('classifies an absent AGENTS.md as `none` (the prompt offers to write a fresh file)', () => {
     expect(classifyPrimerTarget(cwd)).toBe('none');
-    expect(upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' })).action).toBe('created');
+    expect(upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' })).action).toBe('created');
   });
 
   it('classifies an existing unmarked AGENTS.md as `unmarked` (the prompt says append)', () => {
     writeFileSync(join(cwd, 'AGENTS.md'), '# My project\n\nBuild with care.\n');
     expect(classifyPrimerTarget(cwd)).toBe('unmarked');
-    expect(upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' })).action).toBe(
-      'appended',
-    );
+    expect(upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' })).action).toBe('appended');
   });
 
   it('classifies an already-managed AGENTS.md as `managed` (the prompt says update)', () => {
-    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     expect(classifyPrimerTarget(cwd)).toBe('managed');
-    expect(upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' })).action).toBe('updated');
+    expect(upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' })).action).toBe('updated');
   });
 
-  it('injects a role charter inside the managed block when provided', () => {
-    const block = renderPrimer({
-      member: 'Ada',
-      team: 'dawn',
-      role: 'backend',
-      charter: 'own the data layer',
-    });
-    expect(block).toContain('## Your charter (backend)');
-    expect(block).toContain('own the data layer');
+  it('migrates a Member-specific managed block to repository-neutral bytes', () => {
+    const agents = join(cwd, 'AGENTS.md');
+    writeFileSync(
+      agents,
+      '# Project rules\n\n<!-- musterd:start -->\nYou are **Stanley** on the **dawn** Team.\n<!-- musterd:end -->\n\n## Keep me\n',
+    );
+
+    upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
+
+    const written = readFileSync(agents, 'utf8');
+    expect(written).not.toContain('Stanley');
+    expect(written).toContain('musterd whoami');
+    expect(written).toContain('# Project rules');
+    expect(written).toContain('## Keep me');
   });
 
   it('removePrimer strips the managed block, keeping the user’s prose', () => {
     writeFileSync(join(cwd, 'AGENTS.md'), '# My project\n\nBuild with care.\n');
-    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     expect(removePrimer(cwd).action).toBe('removed');
     const out = readFileSync(join(cwd, 'AGENTS.md'), 'utf8');
     expect(out).toContain('# My project');
@@ -314,7 +306,7 @@ describe('init target guard', () => {
   });
 
   it('does NOT trip on an AGENTS.md that already has the musterd primer', () => {
-    upsertPrimer(cwd, renderPrimer({ member: 'Ada', team: 'dawn' }));
+    upsertPrimer(cwd, renderRepositoryPrimer({ team: 'dawn' }));
     expect(inspectInitTarget(cwd).warnings).toEqual([]);
   });
 

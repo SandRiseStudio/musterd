@@ -27,7 +27,7 @@ import { HARNESSES, harnessAdapters } from './harnesses/index.js';
 import { loadProvisioning, saveProvisioning } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { installSeatPermissions } from './permissions.js';
-import { classifyPrimerTarget, renderPrimer, upsertPrimer } from './primer.js';
+import { classifyPrimerTarget, renderRepositoryPrimer, upsertPrimer } from './primer.js';
 import { GENERALIST, isBuiltin, listProfileNames, loadProfile, type Profile } from './profile.js';
 import { defaultHarnessContext } from './reconcile/context.js';
 import { reconcileHarnesses } from './reconcile/engine.js';
@@ -761,7 +761,7 @@ export async function runInit(): Promise<number> {
     }),
   );
   if (!write) {
-    if (chosen && entry) p.note(printManual(chosen, entry), 'Manual setup');
+    if (chosen && entry) p.note(printManual(chosen, entry, team), 'Manual setup');
     p.outro(
       'Configure when ready with `musterd wire` (headless, uses this saved selection), then `musterd inbox --watch`.',
     );
@@ -788,7 +788,7 @@ export async function runInit(): Promise<number> {
     }
   }
   if (!report.ok) {
-    if (chosen && entry) p.note(printManual(chosen, entry), 'Configure it manually');
+    if (chosen && entry) p.note(printManual(chosen, entry, team), 'Configure it manually');
     return 1;
   }
   const activation = activationFor(desired);
@@ -801,13 +801,7 @@ export async function runInit(): Promise<number> {
   // are the reconciler's. This is Universe-2 only — nothing here touches the roster.
   if (chosen) await provisionProfileTools(chosen, template);
 
-  // The primer's charter is the ROLE layer's (ADR 272 inc 2): when the label names a role in the
-  // team's durable library, its charter rides into the primer. A profile's own charter field is
-  // legacy-descriptive and never injected. Best-effort — an older daemon (no roles on the wire) or
-  // an unreachable roster degrades to no charter.
-  const charter = await teamRoleCharter(http, team, role);
-
-  // 5b) Seed the agent primer so the agent knows the team working-loop (ADR 012) ----------
+  // 5b) Seed the repository primer so every Workspace knows the Team working-loop (ADR 307) -----
   // The prompt is honest about what writing does *at the decision point*: against an existing,
   // unmarked AGENTS.md the primer is appended (your content is kept), not overwritten — saying
   // "Write an AGENTS.md?" there reads like a clobber (2026-06-18 dogfood).
@@ -817,18 +811,15 @@ export async function runInit(): Promise<number> {
       ? `Append a musterd primer to the ${pc.bold('AGENTS.md')} already here? ${pc.dim('(your content is kept — the block goes at the end)')}`
       : primerTarget === 'managed'
         ? `Update the musterd primer in this folder's ${pc.bold('AGENTS.md')}?`
-        : `Write an ${pc.bold('AGENTS.md')} primer so ${pc.cyan(name)} knows how to use musterd?`;
+        : `Write an ${pc.bold('AGENTS.md')} primer so agents here know how to use musterd?`;
   const writePrimer = guard(await p.confirm({ message: primerPrompt, initialValue: true }));
   if (writePrimer) {
     try {
-      const { path, action } = upsertPrimer(
-        process.cwd(),
-        renderPrimer({ member: name, team, role, ...(charter ? { charter } : {}) }),
-      );
+      const { path, action } = upsertPrimer(process.cwd(), renderRepositoryPrimer({ team }));
       const verb =
         action === 'created' ? 'Wrote' : action === 'appended' ? 'Added the primer to' : 'Updated';
       p.log.success(
-        `${verb} ${pc.bold('AGENTS.md')} ${pc.dim(`(${path})`)} — ${pc.cyan(name)} now has the team playbook.`,
+        `${verb} ${pc.bold('AGENTS.md')} ${pc.dim(`(${path})`)} — agents here now have the Team playbook.`,
       );
     } catch (err) {
       p.log.warn(
@@ -1008,29 +999,6 @@ async function askRoleLabel(): Promise<string> {
   return guard(
     await p.text({ message: 'Role (optional)', placeholder: 'backend', defaultValue: '' }),
   ).trim();
-}
-
-/**
- * The charter for `label`, read from the team's durable role library off the daemon roster
- * (ADR 227; ADR 272 inc 2 made this the primer's only charter source). Best-effort: no label, an
- * older daemon without roles on the wire, an unknown label, or an unreachable roster all return
- * undefined — init never wedges on a charter.
- */
-async function teamRoleCharter(
-  http: {
-    roster(slug: string): Promise<{ roles?: Array<{ name: string; charter?: string | null }> }>;
-  },
-  team: string,
-  label: string,
-): Promise<string | undefined> {
-  if (!label) return undefined;
-  try {
-    const { roles } = await http.roster(team);
-    const charter = roles?.find((r) => r.name === label)?.charter?.trim();
-    return charter || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -1220,18 +1188,16 @@ export function missingGitignoreEntries(gitignoreBody: string, rels: string[]): 
  * missing lines surgically under a comment. `relFiles` are relative to cwd. Best-effort — never throws.
  */
 
-function printManual(
+export function printManual(
   harness: Harness,
   entry: { command: string; args: string[]; env: Record<string, string> },
+  team: string,
 ): string {
   const envLines = Object.entries(entry.env)
     .map(([k, v]) => `  ${k}=${v}`)
     .join('\n');
   // Also surface the primer so the manual path isn't worse off — the agent still needs to know the playbook.
-  const primer = renderPrimer({
-    member: entry.env['MUSTERD_MEMBER'] ?? 'your agent',
-    team: entry.env['MUSTERD_TEAM'] ?? 'your team',
-  });
+  const primer = renderRepositoryPrimer({ team });
   const primerNote = `\n\nThen add this to ${pc.bold('AGENTS.md')} in this folder so the agent knows the playbook:\n${primer}`;
   if (harness.id === 'claude-code') {
     const e = Object.entries(entry.env)

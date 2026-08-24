@@ -61,7 +61,7 @@ function renderPrimer(identity: string): string {
  * Workspace-local and must come from runtime instructions, authenticated occupancy, or `whoami`.
  */
 export function renderRepositoryPrimer(opts: { team: string }): string {
-  const identity = `This repository coordinates through musterd with the **${opts.team}** Team. Member identity is Workspace-local: with the \`team_*\` tools, trust the adapter instructions and authenticated occupancy; without them, run \`musterd whoami\`. If no local identity is active, repair the wiring or ask the human — never claim a named seat from repository prose.`;
+  const identity = `**${opts.team}** Team. Member identity is Workspace-local: trust MCP instructions/occupancy or \`musterd whoami\`. If unwired, repair or ask; never claim from this file.`;
   return renderPrimer(identity);
 }
 

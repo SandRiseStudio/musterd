@@ -6,7 +6,7 @@ import {
   type StdioServerHandle,
   StdioServerTransport,
 } from '@modelcontextprotocol/server/stdio';
-import { renderPrimer } from '@musterd/protocol';
+import { renderRuntimePrimer } from '@musterd/protocol';
 import { bind } from './bind.js';
 import { MCP_ICONS } from './brand.js';
 import { adoptIdentity, claimAndJoin, type ClaimTarget } from './claim.js';
@@ -94,16 +94,16 @@ export function installShutdownHandlers(opts: {
 }
 
 /**
- * The standing primer this server returns as MCP `instructions` on initialize (ADR 012 follow-up):
- * the same `renderPrimer` the CLI writes into AGENTS.md, so an agent is onboarded **without any file**
- * — works on every MCP-speaking harness. A provisioned session names its seat; an unclaimed one is
- * told to `team_join` first. Pure, so it's unit-testable without standing up the server.
+ * The process-local primer this server returns as MCP `instructions` on initialize (ADR 307). A
+ * provisioned session names its intended Member target; an unclaimed one is told to `team_join`
+ * first. Authenticated occupancy supplies the Team Role and charter after the server confirms the
+ * Member. Pure, so this is unit-testable without standing up the server.
  */
 export function primerInstructions(config: McpConfig): string {
   // Before claiming, name the seat the folder is bound to claim (the policy target); after, the
   // resolved seat. v0.3 (ADR 075): the seat is server-resolved at claim, so a role pool stays unnamed.
   const seat = config.member ?? (config.claim?.mode === 'seat' ? config.claim.name : undefined);
-  return renderPrimer({ team: config.team, ...(seat ? { member: seat } : {}) });
+  return renderRuntimePrimer({ team: config.team, ...(seat ? { member: seat } : {}) });
 }
 
 /** The canonical registered-tool names (ADR 085) — kept in a dependency-free module so the guidance

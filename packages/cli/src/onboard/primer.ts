@@ -4,14 +4,13 @@ import { PRIMER_END_MARKER, PRIMER_START_PREFIX } from '@musterd/protocol';
 
 /**
  * AGENTS.md file I/O for the agent primer (ADR 012 / docs/design/agent-primer.md). The **pure
- * renderer** lives in `@musterd/protocol` (`renderPrimer`, re-exported below) so the CLI and the MCP
- * server share one source of truth; this module adds the idempotent create/append/update + uninstall
- * against the binding folder's `AGENTS.md` (the cross-tool agent-context file harnesses read each
- * session). Without it, a fresh agent doesn't know it's on a team or how to coordinate (2026-06-12).
+ * repository renderer** lives in `@musterd/protocol` (`renderRepositoryPrimer`, re-exported below)
+ * so the CLI cannot write Workspace-local Member identity into Git. This module adds the idempotent
+ * create/append/update + uninstall behavior against the binding folder's `AGENTS.md`.
  */
 
 // The shared renderer, re-exported so existing call sites keep importing it from here.
-export { renderPrimer } from '@musterd/protocol';
+export { renderRepositoryPrimer } from '@musterd/protocol';
 
 // Stable prefixes used for matching, so a hand-edited start line still re-anchors on re-run.
 const START_PREFIX = PRIMER_START_PREFIX;
