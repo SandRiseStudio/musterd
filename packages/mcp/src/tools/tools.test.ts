@@ -1464,7 +1464,12 @@ describe('lane_resolve handler (branch cleanup hint, ADR 106)', () => {
       (s: any, c: any) => registerLanes(s, c, async () => 'ancestor' as any),
       { updateLane } as Partial<MusterdClient>,
     );
-    await handlers['lane_resolve']!({ id: 'lane1', pr: 167, sha: 'abc123f', authorized_by: 'nick' });
+    await handlers['lane_resolve']!({
+      id: 'lane1',
+      pr: 167,
+      sha: 'abc123f',
+      authorized_by: 'nick',
+    });
     expect(updateLane).toHaveBeenCalledWith('lane1', {
       state: 'done',
       merged: { pr: 167, sha: 'abc123f', authorized_by: 'nick', verification: 'ancestor' },

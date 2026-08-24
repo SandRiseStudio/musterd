@@ -467,7 +467,8 @@ export function registerLanes(
               `the merge, then resolve with the squash SHA.`,
           );
         }
-        const verification = args.sha !== undefined ? await verify({ sha: args.sha, cwd: process.cwd() }) : undefined;
+        const verification =
+          args.sha !== undefined ? await verify({ sha: args.sha, cwd: process.cwd() }) : undefined;
         if (verification === 'not_ancestor') {
           return textResult(
             `SHA ${args.sha} is not on origin/main — nothing landed, and marking this done would ` +
