@@ -24,7 +24,7 @@ Four places had it, found in sequence, each by fixing the one before:
 3. **`seen` in the ADR 090 delivery ledger** — `cursor.last_read_ts >= msg.ts` called a tied act *seen* while `listInbox` called the same act *unread*. One message, two surfaces, opposite answers. [#949](https://github.com/SandRiseStudio/musterd/pull/949).
 4. **`slowestInboxLagMs`** — the backlog gauge dropped tied rows from its join, so it could report `0`, the caught-up value, while a message waited. Same PR.
 
-The tell was available the whole time: `inbox_cursors` has stored `last_read_message_id` since it was written. The tiebreak was persisted and simply never read.
+The tell was available the whole time: `inbox_cursors` has stored `last_read_message_id` since it was written. The tiebreak was persisted and simply never read (2026-08-24; falsify: `git grep -n last_read_message_id '#946~1' -- 'packages/server/src/**.ts'` — every reader outside `store/cursors.ts`, which only writes it, arrived with #946/#949. If one predates them, the column was being read and this claim is wrong).
 
 **Reachable, not theoretical.** Fan-out sends land sub-millisecond apart — `lane_warning`/`lane_open` pairs are observed 1 ms apart in live inboxes. It had not bitten yet: izzo measured 0 exact `ts` collisions in 205 rows of a live inbox (2026-08-20).
 

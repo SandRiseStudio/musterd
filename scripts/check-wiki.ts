@@ -11,9 +11,47 @@ import { fileURLToPath } from 'node:url';
 import { renderIndex, WIKI_DIR } from './wiki-index.ts';
 
 /** The dangerous shape: an assertion that something is broken/absent. Deliberately narrow — a
- *  looser net lints ordinary prose; widen only with a failing example in hand. */
-const DEFECT_RE =
-  /\b(?:is broken|is missing|never (?:fires|runs|installs|happens|works|comes)|does not (?:work|exist|fire|run|install)|cannot (?:be|reach|see|tell)|no way to)\b/i;
+ *  looser net lints ordinary prose; widen only with a failing example in hand.
+ *
+ *  THIS LIST IS A DENYLIST, AND A DENYLIST OF DEFECT VOCABULARY GOES STALE THE WAY A BASELINE DOES:
+ *  it polices the defects we used to find, not the one we currently find most. It has gone stale
+ *  once already. Measured 2026-08-24 against `checkWiki` itself (falsify: revert this widening and
+ *  re-run `defect-shaped claims` in wiki.test.ts — the ten `reaches nobody` cases go green), the
+ *  whole "reaches nobody" family passed undated: "read by nothing", "populated by nothing",
+ *  "computed and never used", "served to nobody", "has never been read", "stored but never served".
+ *  That is the family this team found four instances of in one night — config.modelDrift,
+ *  neverExercised, ReconcileResult.errors, OccupiedFrame.charter — and wrote a principle about
+ *  (deliver it or delete it). Every one of those pages could have carried an undated claim.
+ *
+ *  So: widening buys coverage, it does not buy a gate that notices its own blind spots. What the
+ *  list cannot see, nothing reports. Rule 2 in README.md now says which subset is enforced rather
+ *  than implying the whole rule is, and `wiki.test.ts` pins the corpus of shapes — when the next
+ *  family shows up, add it there WITH its failing example, and expect this comment to be wrong
+ *  again. */
+const DEFECT_RE = new RegExp(
+  [
+    // Intransitive — unambiguous wherever they appear.
+    /\b(?:is broken|is missing|never (?:fires|runs|installs|happens|works|comes))\b/,
+    /\b(?:does not (?:work|exist|fire|run|install)|cannot (?:be|reach|see|tell)|no way to)\b/,
+    // The "reaches nobody" family: the thing exists, and no reader consumes it.
+    /\b(?:by (?:nothing|nobody|none of)|to nobody|reach(?:es|ing) (?:nobody|no one|no reader))\b/,
+    /\b(?:nothing (?:counts|reads|consumes|calls)|silently (?:dropped|discarded|deleted|ignored))\b/,
+    /\bdiscarded by every\b/,
+    // Transitive verbs are ambiguous: "persisted and simply never read." asserts a defect, while
+    // "— never read CLI-bounded latency as transport latency" is IMPERATIVE ADVICE. Measured
+    // 2026-08-24 on web-performance.md:20, which the first draft of this widening flagged wrongly.
+    // The discriminator is what comes BEFORE: the imperative opens its clause, the assertion has a
+    // subject in front of it ("is never called", "simply never read"). Requiring a clause end
+    // AFTER instead was the first fix and it was worse — it dropped a true positive,
+    // instrument-silence.md:21 "is never called no matter how many times". Falsify either half:
+    // delete the lookbehind and web-performance.md:20 goes red; swap it for `(?=[.,;:)\]]|$)` and
+    // instrument-silence.md:21 goes green.
+    /(?<=[\w`)\]]\s)never (?:been )?(?:read|used|called|served|delivered|counted|inspected|consumed)\b/,
+  ]
+    .map((r) => r.source)
+    .join('|'),
+  'i',
+);
 const DATED_RE = /\(20\d\d-\d\d(?:-\d\d)?/;
 /** A heading with nothing under it — a section left dangling by a partial edit.
  *
@@ -189,6 +227,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   process.stdout.write(
-    `✓ wiki clean — index in sync, claims dated, links live, sections whole${diffChecked ? `, none eaten since ${baseRef}` : ''}\n`,
+    `✓ wiki clean — index in sync, defect claims in known shapes dated, links live, sections whole${diffChecked ? `, none eaten since ${baseRef}` : ''}\n`,
   );
 }
