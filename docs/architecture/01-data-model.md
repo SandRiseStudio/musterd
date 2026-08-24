@@ -111,6 +111,13 @@ CREATE TABLE schema_meta (
 
 ## Migrations
 
+### Shared Seeds (unreleased — ADR 291)
+
+The live schema will add Seed rows keyed by immutable `(team_id, relay_id)`, a narrow public Seed-thread
+table, and a nullable linked Lane id. The relay cursor remains a separate ingest concern. Mutable state
+records the lifecycle and one explorer; raw source fields are never updated. Promotion creates the
+ordinary Lane and links it in the same SQLite transaction.
+
 - Single forward-only migration runner. `schema_meta.schema_version` gates it. v1 ships version `1` = the DDL above. A migration is a `(version, up(db))` pair in `packages/server/src/db/migrations.ts`; the runner applies any with version > current inside a transaction, then bumps `schema_version`.
 - No down-migrations in v1.
 - **v29 (`musterd/0.3`, ADR 206):** `ALTER TABLE teams ADD COLUMN working_hours TEXT` + `ALTER TABLE members ADD COLUMN working_hours TEXT`. The nullable JSON value stores a validated recurring schedule (`timezone`, weekday list, `start`, `end`); a Member value replaces the Team value for that Member, and missing values inherit. It is informational and never enforces Presence.

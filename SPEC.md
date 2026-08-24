@@ -366,3 +366,16 @@ Wake reports MAY add `delivery_outcome: "fresh"|"resumed"|"fresh_fallback"`, plu
 measurements `transcript_bytes` and `transcript_age_ms`. No report carries a session ID or transcript
 path. A `fresh_fallback` outcome means a resume attempt failed and the fallback fresh session
 occupied.
+
+## A.11 Shared Seeds before Lanes (unreleased — ADR 291)
+
+A **Seed** is a captured Team idea, distinct from a Lane. Its `relay_id`, `source`, raw `body`,
+`captured_at`, and submitting Member are immutable. Its lifecycle is
+`open|exploring|needs_clarification|clarified|completed|promoted`. A Seed may have one active
+agent explorer and a narrow public thread of clarification, answer, brief, or conclusion entries.
+
+The additive HTTP surface is `GET /teams/:slug/seeds`, `GET /teams/:slug/seeds/:id`, and authenticated
+claim, clarification, answer, conclusion, and promotion operations. The server validates every body
+with the corresponding Seed schema. Only an agent may claim/explore; only the active explorer asks or
+finalizes; only the submitting Member answers. Promotion atomically creates one ordinary, unowned Lane
+and links it to the Seed. No raw body or thread body appears in logs, telemetry, or audit details.

@@ -112,6 +112,17 @@ informational—no Presence or schedule enforcement is performed (ADR 206).
 
 The WS `send` and HTTP `POST …/messages` share one validation+route path on the server (`03-server.md`).
 
+## Shared Seeds (ADR 291, unreleased)
+
+`SeedSchema` is the contract for a captured Team idea before it becomes a Lane. It carries immutable
+relay provenance (`relay_id`, `source`, raw `body`, `captured_at`, `submitted_by`) and mutable lifecycle
+state, explorer, narrow public thread, conclusion, and linked Lane id. `SeedStateSchema` accepts only
+`open`, `exploring`, `needs_clarification`, `clarified`, `completed`, and `promoted`.
+
+The protocol exports parsed bodies for claim, clarification, answer, conclusion, and promotion, plus
+single-Seed and list results. HTTP clients use those schemas at the boundary; promotion is the only
+operation that creates a Lane.
+
 ### Portable wake context (ADR 209)
 
 `WakeContextRequestSchema` is a strict `{ act_id? , lane_id? }` body that requires exactly one
