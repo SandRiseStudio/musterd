@@ -6,7 +6,7 @@ import { infraTouchWarning } from '../infra-gate.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { buildEntry } from '../onboard/mcpEntry.js';
 import { installSeatPermissions } from '../onboard/permissions.js';
-import { loadProfile } from '../onboard/profile.js';
+import { loadToolkit } from '../onboard/toolkit.js';
 import { provisionWorkspace } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
@@ -171,7 +171,7 @@ export async function agentCommand(
   // broken tool (the 2026-08-13 ryder incident). Best-effort like hook install: a permissions
   // hiccup never fails seat creation. Dir-aware — ws.dir is never cwd().
   try {
-    const template = profileName ? loadProfile(ws.dir, profileName) : undefined;
+    const template = profileName ? loadToolkit(ws.dir, profileName) : undefined;
     installSeatPermissions(ws.dir, template);
   } catch {
     /* an unknown profile name or a broken settings file must not block the seat — init --check

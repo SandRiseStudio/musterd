@@ -106,8 +106,8 @@ src/
     pending.ts        // client-side pending-presence markers (ADR 033)
     permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact
     primer.ts         // renderRepositoryPrimer + idempotent upsertPrimer → Team-only AGENTS.md primer (ADR 307)
-    profile.ts        // Profile = harness-agnostic provisioning template ("role template" pre-ADR-272); resolve/apply (ADR 026/029/038)
-    profiles/builtins.ts // the shipped built-in profile seed library
+    toolkit.ts        // Toolkit = harness-agnostic provisioning template ("profile" pre-ADR-296, "role template" pre-ADR-272); resolve/apply (ADR 026/029/038)
+    toolkits/builtins.ts // the shipped built-in toolkit seed library
     harnesses/        // per-harness feature differences (labeling, hooks, skills discovery) are observed environment facts — documented in docs/wiki/driver-support-matrix.md, not modelled (ADR 296)
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)

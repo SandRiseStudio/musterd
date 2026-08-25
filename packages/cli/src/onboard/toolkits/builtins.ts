@@ -1,24 +1,24 @@
 /**
- * The built-in profile library — a *seed of examples, not a catalog* (ADR 028,
+ * The built-in toolkit library — a *seed of examples, not a catalog* (ADR 028,
  * provisioning-recipe.md §3; "role templates" pre-ADR-272-rename). musterd ships a small set of
- * archetypes to teach the profile shape and give a one-command start; users author their own in
+ * archetypes to teach the toolkit shape and give a one-command start; users author their own in
  * `.musterd/toolkits/*.json` (legacy `.musterd/profiles/` and `.musterd/roles/` files still load).
  *
  * These are expressed in-source as raw data (validated through the same schema as user files by
- * {@link import('../profile.js').parseProfile}) rather than shipped as JSON assets: the package
+ * {@link import('../toolkit.js').parseToolkit}) rather than shipped as JSON assets: the package
  * builds with plain `tsc`, which does not copy non-TS files into `dist/`, so file-based built-ins
  * would need a bundler/copy step — a new build dependency we decline (ADR 029). User-authored
- * profiles remain JSON. `musterd toolkit create` round-tripping a built-in into an editable
+ * toolkits remain JSON. `musterd toolkit create` round-tripping a built-in into an editable
  * `.musterd/toolkits/<name>.json` is the bridge (recipe "Settled vs open").
  *
  * Charters stay lens-not-résumé and minimal. MCP entries are *referenced, not owned* — musterd
  * points at ecosystem servers (npx-launched) and never hosts or version-manages them. Secrets are
  * `${ENV}` references, never inline. `generalist` gets nothing extra.
  *
- * Exported as raw `unknown` (not yet parsed) so this module has no import cycle with `profile.ts`,
- * which validates these into the typed `BUILTIN_PROFILES` map at its own module-eval time.
+ * Exported as raw `unknown` (not yet parsed) so this module has no import cycle with `toolkit.ts`,
+ * which validates these into the typed `BUILTIN_TOOLKITS` map at its own module-eval time.
  */
-export const BUILTIN_PROFILE_TEMPLATES: Record<string, unknown> = {
+export const BUILTIN_TOOLKIT_TEMPLATES: Record<string, unknown> = {
   generalist: {
     toolkit: 'generalist',
     charter:

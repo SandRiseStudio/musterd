@@ -12,7 +12,7 @@ import type { Parsed } from '../args.js';
 import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { installSeatPermissions } from '../onboard/permissions.js';
-import { isBuiltin, loadProfile, toolkitHomes, type Profile } from '../onboard/profile.js';
+import { isBuiltin, loadToolkit, toolkitHomes, type Toolkit } from '../onboard/toolkit.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { BUILTIN_ROLE_TEMPLATES, listRoleTemplateNames } from '../roster-roles/templates.js';
@@ -176,7 +176,7 @@ async function roleAssign(
  *    ceiling in force. Exact reversal is the ADR 030 manifest's job and is not wired to this path
  *    yet, so `--remove` says so instead of implying a lifted ceiling.
  *
- * A roster role with no provisioning template of the same name has no profile to compile — the
+ * A roster role with no provisioning template of the same name has no toolkit to compile — the
  * common case (`platform`, `designer` are labels, not ceilings) — and is silently skipped, because
  * inventing a ceiling for a label would be worse than doing nothing.
  */
@@ -186,11 +186,11 @@ function recompileSeatPermissions(
   remove: boolean,
   seatWorkspace: (seat: string) => string | undefined,
 ): { lines: string[]; json: string } {
-  let template: Profile | undefined;
+  let template: Toolkit | undefined;
   try {
-    template = loadProfile(process.cwd(), roleName);
+    template = loadToolkit(process.cwd(), roleName);
   } catch {
-    return { lines: [], json: 'no-template' }; // a roster label with no profile — nothing to compile
+    return { lines: [], json: 'no-template' }; // a roster label with no toolkit — nothing to compile
   }
   const perms = template.tools.permissions;
   if (perms.allow.length + perms.ask.length + perms.deny.length === 0) {
@@ -409,10 +409,10 @@ function createRosterRole(dir: string, name: string, parsed: Parsed): number {
 
 /**
  * Round-trip a built-in into an editable starting point (recipe "Settled vs open"). Serializes the
- * already-validated built-in profile, renamed to `<name>` so a customized copy is distinct.
+ * already-validated built-in toolkit, renamed to `<name>` so a customized copy is distinct.
  */
 
-/** A minimal valid profile to fill in (charter is required; tools default empty). */
+/** A minimal valid toolkit to fill in (charter is required; tools default empty). */
 
 function indent(text: string, n: number): string {
   const pad = ' '.repeat(n);

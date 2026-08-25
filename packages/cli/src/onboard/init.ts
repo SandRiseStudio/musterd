@@ -28,9 +28,9 @@ import { loadProvisioning, saveProvisioning } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { installSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget, renderRepositoryPrimer, upsertPrimer } from './primer.js';
-import { GENERALIST, isBuiltin, listProfileNames, loadProfile, type Profile } from './profile.js';
 import { defaultHarnessContext } from './reconcile/context.js';
 import { reconcileHarnesses } from './reconcile/engine.js';
+import { GENERALIST, isBuiltin, listToolkitNames, loadToolkit, type Toolkit } from './toolkit.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -644,7 +644,7 @@ export async function runInit(): Promise<number> {
   // label-from-template derivation): a profile is workspace configuration and mints no team fact,
   // so the roster label comes only from the free-text prompt. Provisioning the profile's tools
   // happens later (§5a), once the harness is wired.
-  const template = await selectProfile(name);
+  const template = await selectToolkit(name);
   const role = await askRoleLabel();
 
   // 4b) Cross-folder name-reuse guard (ADR 020) -----------------------------
@@ -796,10 +796,10 @@ export async function runInit(): Promise<number> {
   // 5a) Provision the chosen profile's tools (ADR 026 Universe-2; additive/reversible/local, ADR 027)
   // The profile was picked in §4; now that the musterd set is wired, provision its MCP servers into
   // the primary external harness. `generalist`/no profile provisions nothing extra — only the
-  // musterd server + the standard playbook (ADR 028). Profile MCP-server tools ride this legacy
+  // musterd server + the standard playbook (ADR 028). Toolkit MCP-server tools ride this legacy
   // provision path until they are fragment-modeled; the musterd entry/hooks/permissions/guidance
   // are the reconciler's. This is Universe-2 only — nothing here touches the roster.
-  if (chosen) await provisionProfileTools(chosen, template);
+  if (chosen) await provisionToolkitTools(chosen, template);
 
   // 5b) Seed the repository primer so every Workspace knows the Team working-loop (ADR 307) -----
   // The prompt is honest about what writing does *at the decision point*: against an existing,
@@ -962,8 +962,8 @@ async function waitForPresence(
  * the label "via resolveRoleLabel" — the symbol was deleted with the coupling, and the sentence
  * outlived it long enough for ryder to find it while accepting the lane that removed it.
  */
-async function selectProfile(member: string): Promise<Profile | undefined> {
-  const names = listProfileNames(process.cwd());
+async function selectToolkit(member: string): Promise<Toolkit | undefined> {
+  const names = listToolkitNames(process.cwd());
   const pick = guard(
     await p.select({
       message: `Provision a profile for ${pc.cyan(member)}? ${pc.dim('(adds tools + a charter; generalist adds nothing extra)')}`,
@@ -981,7 +981,7 @@ async function selectProfile(member: string): Promise<Profile | undefined> {
   );
   if (pick === GENERALIST) return undefined;
   try {
-    return loadProfile(process.cwd(), pick);
+    return loadToolkit(process.cwd(), pick);
   } catch (err) {
     p.log.warn(
       `Couldn't load profile "${pick}" (${(err as Error).message}) — skipping provisioning.`,
@@ -1012,26 +1012,26 @@ function hasPermissions(p: { allow: string[]; ask: string[]; deny: string[] }): 
   return p.allow.length + p.ask.length + p.deny.length > 0;
 }
 
-async function provisionProfileTools(
+async function provisionToolkitTools(
   harness: Harness,
-  profile: Profile | undefined,
+  toolkit: Toolkit | undefined,
 ): Promise<void> {
-  if (!profile) return;
+  if (!toolkit) return;
 
-  const { mcp_servers: servers, permissions } = profile.tools;
+  const { mcp_servers: servers, permissions } = toolkit.tools;
   if (servers.length === 0 && !hasPermissions(permissions)) {
-    p.log.info(pc.dim(`${profile.toolkit} adds no tools — nothing to provision.`));
+    p.log.info(pc.dim(`${toolkit.toolkit} adds no tools — nothing to provision.`));
     return;
   }
   if (!harness.provision) {
     p.log.warn(
-      `Tool provisioning isn't supported for ${harness.label} yet — skipping ${profile.toolkit}.`,
+      `Tool provisioning isn't supported for ${harness.label} yet — skipping ${toolkit.toolkit}.`,
     );
     return;
   }
 
   const sp = p.spinner();
-  sp.start(`Provisioning ${profile.toolkit} tools into ${harness.label}`);
+  sp.start(`Provisioning ${toolkit.toolkit} tools into ${harness.label}`);
   try {
     const result = await harness.provision({ servers, permissions }, 'local');
     const permCount =
@@ -1067,7 +1067,7 @@ async function provisionProfileTools(
       ),
     );
   } catch (err) {
-    sp.stop(pc.yellow(`Couldn't provision ${profile.toolkit} tools: ${(err as Error).message}`));
+    sp.stop(pc.yellow(`Couldn't provision ${toolkit.toolkit} tools: ${(err as Error).message}`));
   }
 }
 

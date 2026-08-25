@@ -3,15 +3,15 @@ import { join } from 'node:path';
 import type { Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import {
-  BUILTIN_PROFILES,
+  BUILTIN_TOOLKITS,
   GENERALIST,
   isBuiltin,
   toolkitHomes,
-  listProfileNames,
-  loadProfile,
+  listToolkitNames,
+  loadToolkit,
   userToolkitsDir,
-  type Profile,
-} from '../onboard/profile.js';
+  type Toolkit,
+} from '../onboard/toolkit.js';
 import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 
@@ -34,7 +34,7 @@ export function toolkitCommand(parsed: Parsed): number {
   throw new CliError('usage: musterd toolkit <list|show|create> ...', 2);
 }
 
-/** Where a name came from: a user file shadowing a built-in is an *override* (loadProfile prefers it). */
+/** Where a name came from: a user file shadowing a built-in is an *override* (loadToolkit prefers it). */
 function originOf(dir: string, name: string): 'built-in' | 'override' | 'user' {
   const userFile = toolkitHomes(dir).some((home) => existsSync(join(home, `${name}.json`)));
   if (!userFile) return 'built-in';
@@ -43,7 +43,7 @@ function originOf(dir: string, name: string): 'built-in' | 'override' | 'user' {
 
 function toolkitList(parsed: Parsed): number {
   const dir = process.cwd();
-  const rows = listProfileNames(dir).map((name) => ({ name, origin: originOf(dir, name) }));
+  const rows = listToolkitNames(dir).map((name) => ({ name, origin: originOf(dir, name) }));
 
   if (parsed.flags['json']) {
     process.stdout.write(JSON.stringify({ toolkits: rows }) + '\n');
@@ -72,9 +72,9 @@ function toolkitShow(parsed: Parsed): number {
   const name = parsed.positionals[1];
   if (!name) throw new CliError('usage: musterd toolkit show <name>', 2);
 
-  let toolkit: Profile;
+  let toolkit: Toolkit;
   try {
-    toolkit = loadProfile(process.cwd(), name);
+    toolkit = loadToolkit(process.cwd(), name);
   } catch (err) {
     throw new CliError((err as Error).message, 4);
   }
@@ -150,18 +150,18 @@ export function toolkitCreate(parsed: Parsed): number {
   return 0;
 }
 
-function fromBuiltin(from: string, name: string): Profile {
-  const base = BUILTIN_PROFILES[from];
+function fromBuiltin(from: string, name: string): Toolkit {
+  const base = BUILTIN_TOOLKITS[from];
   if (!base) {
     throw new CliError(
-      `unknown built-in "${from}" — one of: ${Object.keys(BUILTIN_PROFILES).join(', ')}`,
+      `unknown built-in "${from}" — one of: ${Object.keys(BUILTIN_TOOLKITS).join(', ')}`,
       2,
     );
   }
   return { ...structuredClone(base), toolkit: name };
 }
 
-function skeleton(name: string): Profile {
+function skeleton(name: string): Toolkit {
   return {
     toolkit: name,
     charter: `TODO: one or two lines of lens-not-résumé charter for ${name}.`,

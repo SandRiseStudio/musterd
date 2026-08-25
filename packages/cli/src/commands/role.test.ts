@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { parseRoleFile } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
-import { userToolkitsDir } from '../onboard/profile.js';
+import { userToolkitsDir } from '../onboard/toolkit.js';
 import { roleCommand } from './role.js';
 
 let cwd: string;
