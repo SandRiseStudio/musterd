@@ -184,6 +184,20 @@ export interface OfficeHandle {
    * were equal (full rAF waste). Two integer increments per frame; not gated, because gating costs
    * more than it saves. */
   stats: () => OfficeStats;
+  /** The shared ambient beat log (E1 spec §5): one entry per fired slot — slot number, whose beat,
+   * and whether this browser played it. Two visible viewers of the same team over the same interval
+   * must agree on everything but `played`. Capped at the last 200 entries. */
+  ambientLog: () => AmbientLogEntry[];
+}
+
+/** @see OfficeHandle.ambientLog */
+export interface AmbientLogEntry {
+  slot: number;
+  kind: 'pet' | 'pair' | 'member';
+  who?: string;
+  pair?: [string, string];
+  /** Whether THIS browser's local guards let the beat run — the one honest per-viewer field. */
+  played: boolean;
 }
 
 /** @see OfficeHandle.stats */

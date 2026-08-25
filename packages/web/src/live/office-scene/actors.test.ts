@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createActors, homePoses, travelDir } from './actors';
+import { createActors, deskNeighbourPairs, homePoses, travelDir } from './actors';
 import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_RUG_R, STRIP_CAP } from './layout';
 import { GESTURE } from './skeleton';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
+import { slotRng } from './ambientSeed';
 
 function node(name: string, presence: OfficeNode['presence'] = 'online'): OfficeNode {
   return {
@@ -834,5 +835,88 @@ describe('the check-in beat', () => {
     const w2 = world([node('Ada'), node('Bo', 'away')]);
     actors.setHomes(w2.placements, w2.byName, true);
     expect(actors.pendingCheckIns()).toHaveLength(0);
+  });
+});
+
+describe('deskNeighbourPairs — the shared pair pool (E1 spec §2)', () => {
+  /** Same roster as fullRoom, but keeping the shared inputs to compare pure vs scene-state pools. */
+  function fullWorld() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    const { placements, byName } = world(nodes);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    return { placements, byName, actors };
+  }
+
+  it('matches the scene-state pool exactly when nobody is busy', () => {
+    const { placements, byName, actors } = fullWorld();
+    expect(deskNeighbourPairs(placements, byName)).toEqual(actors.deskNeighbours());
+  });
+
+  it('is pure over roster inputs: local busy-state cannot shrink it', () => {
+    const { placements, byName, actors } = fullWorld();
+    const before = deskNeighbourPairs(placements, byName);
+    const [a, b] = before[0]!;
+    actors.deskChat(a, b); // one browser has a chat in flight; the shared pool must not know
+    expect(deskNeighbourPairs(placements, byName)).toEqual(before);
+    expect(actors.deskNeighbours().some(([x, y]) => x === a || y === a)).toBe(false);
+  });
+
+  it('returns pairs in canonical order — same value on every viewer regardless of Map history', () => {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    const forward = world(nodes);
+    const reversed = world([...nodes].reverse());
+    const rebuilt = deskNeighbourPairs(
+      new Map([...reversed.placements].sort(() => -1)),
+      reversed.byName,
+    );
+    expect(rebuilt).toEqual(deskNeighbourPairs(forward.placements, forward.byName));
+  });
+});
+
+describe('ambient beats under an injected rng (E1 spec §2)', () => {
+  /** Two independent scene instances over the same roster — stand-ins for two browsers. */
+  function twoViewers() {
+    const nodes = Array.from({ length: 12 }, (_, i) => node('N' + String(i).padStart(2, '0')));
+    const make = () => {
+      const { placements, byName } = world(nodes);
+      const actors = createActors();
+      actors.setHomes(placements, byName, true);
+      return actors;
+    };
+    return [make(), make()] as const;
+  }
+
+  it('two viewers play the same phone errand identically from the same slot rng', () => {
+    const [a, b] = twoViewers();
+    expect(a.errandPhone('N03', slotRng('revive', 7, 'phone'))).toBe(true);
+    expect(b.errandPhone('N03', slotRng('revive', 7, 'phone'))).toBe(true);
+    let guard = 0;
+    while ((a.active() || b.active()) && guard++ < 4000) {
+      a.step(0.05);
+      b.step(0.05);
+      expect(a.poses().get('N03')).toEqual(b.poses().get('N03'));
+    }
+    expect(guard).toBeLessThan(4000);
+  });
+
+  it('two viewers play the same desk chat for the same length', () => {
+    const [a, b] = twoViewers();
+    const [x, y] = a.deskNeighbours()[0]!;
+    expect(a.deskChat(x, y, slotRng('revive', 9, 'chat'))).toBe(true);
+    expect(b.deskChat(x, y, slotRng('revive', 9, 'chat'))).toBe(true);
+    let aTicks = 0;
+    let bTicks = 0;
+    for (let i = 0; i < 4000 && a.active(); i++, aTicks++) a.step(0.05);
+    for (let i = 0; i < 4000 && b.active(); i++, bTicks++) b.step(0.05);
+    expect(aTicks).toBe(bTicks);
+  });
+
+  it('two viewers send the same member to the same lounge seat', () => {
+    const [a, b] = twoViewers();
+    const seatA = a.errandFridge('N05', slotRng('revive', 4, 'fridge'));
+    const seatB = b.errandFridge('N05', slotRng('revive', 4, 'fridge'));
+    expect(seatA).not.toBeNull();
+    expect(seatA).toEqual(seatB);
   });
 });

@@ -10,7 +10,7 @@ import {
   shortWorkTitle,
 } from '../presenceLabel';
 import { stillMode } from '../stillMode';
-import { createActors, type Actors } from './actors';
+import { createActors, deskNeighbourPairs, type Actors } from './actors';
 import {
   ambientFrameBudgetMs,
   DEFAULT_CAPTURE_FPS,
@@ -19,6 +19,7 @@ import {
   shouldCoalesceDraw,
   suspendIgnored,
 } from './broadcast';
+import { AMBIENT_SLOT_MS, decideAmbient, roll, slotAt, slotRng } from './ambientSeed';
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { createReceptionist, stepReceptionist } from './receptionist';
 import { fitFloor, project, type Fit, type Pt } from './iso';
@@ -53,7 +54,7 @@ import {
   type Addressee,
   type SpeechToken,
 } from './speech';
-import type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
+import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
 
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, OfficeStats } from './types';
 
@@ -81,13 +82,13 @@ const SPEECH_LIFT = 26;
 /** After a real act, keep the loop alive this long so the Rive character settles into idle rather than
  * freezing mid-gesture (ADR 086 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
 const AFTERGLOW_MS = 2600;
-/** Ambient micro-choreography (ADR 086 Phase 2): when the room is quiet, inject one idle beat (a seated
- * micro-gesture — scratch, sip, swivel… — or a stroll) every ~30–70s. Timer-based (not RAF), one beat at
- * a time, always preempted by a real act. This is the whole-room cadence — on a small present roster it
- * divides down to each person. 90–180s read as a frozen room once the beat variety grew (nick's call,
- * 2026-07); the old 15–25s water-cooler parade is still the floor to stay well above. */
-const AMBIENT_MIN_MS = 30000;
-const AMBIENT_MAX_MS = 70000;
+/** Ambient micro-choreography (ADR 086 Phase 2, seeded by E1): when the room is quiet, inject one idle
+ * beat (a seated micro-gesture — scratch, sip, swivel… — or a stroll) at the old ~30–70s cadence, now
+ * drawn per 20s wall-clock slot (`ambientSeed.AMBIENT_FIRE_P` keeps the rate) so every viewer of the
+ * same team sees the same beats. Timer-based (not RAF), one beat at a time, always preempted by a real
+ * act. This is the whole-room cadence — on a small present roster it divides down to each person.
+ * 90–180s read as a frozen room once the beat variety grew (nick's call, 2026-07); the old 15–25s
+ * water-cooler parade is still the floor to stay well above. */
 /** While Tier B is awake for an *ambient-only* beat, coalesce toward ~20fps: only advance+redraw once
  * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
  * acts keep 60fps because their motion is not `ambientOnly`. */
@@ -1126,7 +1127,7 @@ export function mountOffice(
     // The receptionist wakes for a present member and looks up while any check-in beat holds. Like
     // the pet, she never keeps an empty room awake: asleep returns false and the room bakes still.
     const anyonePresent = [...actors.nodes().values()].some((n) => n.presence !== 'offline');
-    const recepActive = stepReceptionist(recep, dt, anyonePresent, actors.checkInHolds() > 0);
+    const recepActive = stepReceptionist(recep, dt, anyonePresent, actors.checkInHolds() > 0, { team: teamName, nowMs: Date.now() });
     pushOccupancy(now);
     for (let i = cues.length - 1; i >= 0; i--) {
       const c = cues[i]!;
@@ -1267,14 +1268,23 @@ export function mountOffice(
    * pour. Whether the dog comes is *its* business: the stroll's own success is what's reported back, so a
    * dog that stays put can never cost a member their walk.
    */
-  function coffeeStroll(who: string): boolean {
+  function coffeeStroll(who: string, slot: number): boolean {
     if (!actors.ambientWalk(who)) return false;
-    if (Math.random() < 0.5) petFollow(pet, COFFEE_STAND);
+    if (roll(teamName, slot, 'pet-follow') < 0.5) petFollow(pet, COFFEE_STAND, slotRng(teamName, slot, 'pet-follow-walk'));
     return true;
   }
 
   function quiet(): boolean {
     return !actors.active() && cues.length === 0 && !(lastActive > 0 && performance.now() - lastActive < AFTERGLOW_MS);
+  }
+  /** The shared beat log — the E1 falsifier: what the slot lattice decided, and whether this browser
+   * could play it. Two visible viewers over the same interval must log the same slots, actors, and
+   * beats in the same order; `played` is the one honest per-browser field (a locally busy room skips
+   * a beat, bounded to that one slot). Read from CDP via the `window.__office` handle. */
+  const ambientLog: AmbientLogEntry[] = [];
+  function logAmbient(e: AmbientLogEntry): void {
+    ambientLog.push(e);
+    if (ambientLog.length > 200) ambientLog.shift();
   }
   function scheduleAmbient() {
     /* `STILL` sits beside `reduced` rather than inside `fireAmbient`: the point is that no timer is
@@ -1283,37 +1293,51 @@ export function mountOffice(
        a "held" room has a pending callback. Same reason `disposed` is checked here. */
     if (reduced || disposed || STILL) return;
     if (ambientTimer) clearTimeout(ambientTimer);
-    const delay = AMBIENT_MIN_MS + Math.random() * (AMBIENT_MAX_MS - AMBIENT_MIN_MS);
-    ambientTimer = setTimeout(fireAmbient, delay);
+    // Armed to the next slot boundary, not a random delay: the wall-clock lattice is the scheduling
+    // quantum (E1 spec §2), so every viewer of this team wakes at the same instants. The +5ms nudge
+    // keeps a timer that fires a hair early from landing in the old slot and drawing stale rolls.
+    ambientTimer = setTimeout(fireAmbient, AMBIENT_SLOT_MS - (Date.now() % AMBIENT_SLOT_MS) + 5);
   }
   function fireAmbient() {
     ambientTimer = null;
     if (disposed) return; // office torn down between the timer arming and firing — don't re-arm or wake
 
-    // Only stir a calm, visible room; otherwise let this slot pass and wait for the next one.
+    // Only stir a calm, visible room; otherwise let this slot pass and wait for the next one. The
+    // decision itself is pure over roster-derived inputs (stanley's E1 review item): local scene
+    // state may veto PLAYING a beat, but it can never change WHICH beat every viewer chose.
     if (!reduced && !suspended && VISIBLE() && quiet()) {
-      // Sometimes the beat is the pet's: it wakes, stretches, pads to a fresh nap spot (a sunbeam by
-      // day, a rug by night, occasionally a working member's side) and curls back up.
-      if (Math.random() < 0.35 && petBeat(pet, { daylight: lightEnv.daylight, workSpots: workingSideSpots() })) {
-        ensureLoop();
-        scheduleAmbient();
-        return;
+      const slot = slotAt(Date.now());
+      const nodes = actors.nodes();
+      const members: string[] = [];
+      // Mirrors `homePoses`'s desk test exactly: present desk members, minus owned (empty) desks.
+      for (const [name, pl] of placements) {
+        if (pl.kind === 'desk' && !pl.owned && nodes.has(name)) members.push(name);
       }
-      // Sometimes the beat belongs to a *pair* rather than a person: two neighbours turn and talk. It
-      // has to be chosen here, above the per-member pick, because it is the one beat with two subjects
-      // — routed through `playAmbientBeat` it could only ever move one of them.
-      const pairs = actors.deskNeighbours();
-      if (pairs.length && Math.random() < 0.22) {
-        const [a, b] = pairs[Math.floor(Math.random() * pairs.length)]!;
-        if (actors.deskChat(a, b)) {
-          ensureLoop();
-          scheduleAmbient();
-          return;
-        }
+      const decision = decideAmbient(teamName, slot, {
+        members,
+        pairs: deskNeighbourPairs(placements, nodes),
+      });
+      if (decision.kind === 'pet') {
+        // The pet's beat: it wakes, stretches, pads to a fresh nap spot (a sunbeam by day, a rug by
+        // night, occasionally a working member's side) and curls back up.
+        const played = petBeat(pet, {
+          daylight: lightEnv.daylight,
+          workSpots: workingSideSpots(),
+          rng: slotRng(teamName, slot, 'pet-beat'),
+        });
+        logAmbient({ slot, kind: 'pet', played });
+        if (played) ensureLoop();
+      } else if (decision.kind === 'pair') {
+        // The pair beat: two neighbours turn and talk — the one beat with two subjects, so it is
+        // decided above the per-member pick.
+        const played = actors.deskChat(decision.a, decision.b, slotRng(teamName, slot, 'chat'));
+        logAmbient({ slot, kind: 'pair', pair: [decision.a, decision.b], played });
+        if (played) ensureLoop();
+      } else if (decision.kind === 'member') {
+        const played = playAmbientBeat(decision.who, slot);
+        logAmbient({ slot, kind: 'member', who: decision.who, played });
+        if (played) ensureLoop();
       }
-      const idle = actors.idleDeskMembers();
-      const who = idle.length ? idle[Math.floor(Math.random() * idle.length)]! : null;
-      if (who && playAmbientBeat(who)) ensureLoop();
     }
     scheduleAmbient();
   }
@@ -1324,12 +1348,12 @@ export function mountOffice(
    * coffee-stroll staying in the mix at ~1 in 5. Weighted rather than uniform so the broad, always-valid
    * beats (stretch/glance/scratch/chin/lean) carry the room and the chair theatrics stay occasional.
    */
-  function playAmbientBeat(who: string): boolean {
+  function playAmbientBeat(who: string, slot: number): boolean {
     const pl = placements.get(who);
-    const slot = pl?.kind === 'desk' ? pl.slot : null;
-    const casters = slot !== null && chairKindFor(slot) !== 'stool';
-    const mug = slot !== null && deskHasProp(slot, 'coffee');
-    const water = slot !== null && deskHasProp(slot, 'water');
+    const deskSlot = pl?.kind === 'desk' ? pl.slot : null;
+    const casters = deskSlot !== null && chairKindFor(deskSlot) !== 'stool';
+    const mug = deskSlot !== null && deskHasProp(deskSlot, 'coffee');
+    const water = deskSlot !== null && deskHasProp(deskSlot, 'water');
     const beats: Array<[number, () => boolean]> = [
       [15, () => actors.gestureBeat(who, GESTURE.stretch)],
       [15, () => actors.gestureBeat(who, GESTURE.glance)],
@@ -1337,17 +1361,17 @@ export function mountOffice(
       [14, () => actors.gestureBeat(who, GESTURE.chin)],
       [14, () => actors.gestureBeat(who, GESTURE.lean)],
       // The errands — real trips with a point to them, so they stay the occasional highlight:
-      [15, () => coffeeStroll(who)],
-      [9, () => actors.errandPhone(who)], // gets up, takes a call, paces, comes back
+      [15, () => coffeeStroll(who, slot)],
+      [9, () => actors.errandPhone(who, slotRng(teamName, slot, 'phone'))], // gets up, takes a call, paces, comes back
       // A meal is the one errand the dog cares about: it drops whatever it was doing and follows the
       // plate to the lounge to sit and stare at it. Not every time — a dog that never misses a meal is
       // a mechanism, and the beat reads better when you notice it happening rather than expect it.
       [
         7,
         () => {
-          const seat = actors.errandFridge(who);
+          const seat = actors.errandFridge(who, slotRng(teamName, slot, 'fridge'));
           if (!seat) return actors.gestureBeat(who, GESTURE.glance); // lounge full → cheap fallback
-          if (Math.random() < 0.65) petBeg(pet, seat);
+          if (roll(teamName, slot, 'pet-beg') < 0.65) petBeg(pet, seat, slotRng(teamName, slot, 'pet-beg-walk'));
           return true;
         },
       ],
@@ -1357,7 +1381,7 @@ export function mountOffice(
     if (casters) beats.push([9, () => actors.gestureBeat(who, GESTURE.swivel)], [5, () => actors.gestureBeat(who, GESTURE.roll)]);
     let total = 0;
     for (const [w] of beats) total += w;
-    let r = Math.random() * total;
+    let r = roll(teamName, slot, 'beat') * total;
     for (const [w, play] of beats) {
       r -= w;
       if (r <= 0) return play();
@@ -1583,6 +1607,7 @@ export function mountOffice(
     update,
     emit,
     stats: () => ({ ticks, draws, since }),
+    ambientLog: () => [...ambientLog],
     setSuspended: (on: boolean) => {
       // A stream never parks (ADR 157). The broadcast route has no collapse control, so this only ever
       // fires from a host surface that shouldn't be able to freeze the outgoing frame anyway.
@@ -1633,7 +1658,7 @@ export function mountOffice(
               ? actors.errandWater(who)
               : kind === 'phone'
                 ? actors.errandPhone(who)
-                : coffeeStroll(who);
+                : coffeeStroll(who, slotAt(Date.now()));
         if (played) {
           ensureLoop();
           return who;
