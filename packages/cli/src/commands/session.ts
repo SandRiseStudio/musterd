@@ -24,7 +24,12 @@ import {
   localSessionLiveness,
   type LocalSessionLiveness,
 } from '../session/liveness.js';
-import { findWorkspaceDir } from './helpers.js';
+import { findWorkspaceDir, resolveRead } from './helpers.js';
+import { openActionNeeded } from '../render/rows.js';
+import {
+  composeSessionOrientation,
+  type SessionOrientationInput,
+} from './sessionOrientation.js';
 
 /**
  * `musterd session start|end --stdin | show` (ADR 131 §5, increment 4) — session capture. The
@@ -135,7 +140,65 @@ async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<n
     );
   }
   await captureSession(event, parseHookPayload(await readStdin()));
+  if (event === 'start') {
+    const orientation = await emitSessionOrientation();
+    if (orientation) process.stdout.write(orientation + '\n');
+  }
   return 0;
+}
+
+type OrientationFetcher = () => Promise<SessionOrientationInput | null>;
+
+/** The default fetcher: three read-only GETs under the folder's bound-seat identity. Only an
+ *  explicit actor (a bound seat / env) has an orientation — never an ambient global-config read
+ *  (ADR 036), the same gate `musterd nudge` applies. */
+async function defaultOrientationFetcher(): Promise<SessionOrientationInput | null> {
+  const { http, team, identity, explicit } = resolveRead({});
+  if (!explicit || !identity) return null;
+  const [inboxRes, brief, memory] = await Promise.all([
+    http.inbox(team, { unread: true }),
+    http.next(team),
+    http.getMemoryEnvelope(team).catch(() => undefined), // absent memory is a normal state
+  ]);
+  const waiting = openActionNeeded(inboxRes.messages, identity.name, inboxRes.answered ?? []).map(
+    (m) => ({ act: m.act, from: m.from, id: m.id }),
+  );
+  const now = Date.now();
+  return {
+    seat: identity.name,
+    team,
+    ...(memory
+      ? {
+          memory: {
+            headline: memory.headline,
+            saved_at: memory.saved_at,
+            size_bytes: memory.size_bytes,
+          },
+        }
+      : {}),
+    waiting,
+    incidents: (brief.incidents ?? []).map((i) => ({ id: i.lane })),
+    owed: (brief.owed_reviews ?? []).map((r) => ({ laneId: r.lane.id, waitedMs: now - r.ts })),
+    carrying: brief.in_flight.length,
+  };
+}
+
+/**
+ * Spec 2026-08-25 (session orientation) §A: the one deliberate exception to "capture adds zero
+ * context". Read-only, bounded, wake-suppressed, silent on ANY failure — it rides the SessionStart
+ * hook, whose stdout lands in model context. The composable-only bar lives in
+ * {@link composeSessionOrientation}; this layer only decides silence.
+ */
+export async function emitSessionOrientation(
+  fetch: OrientationFetcher = defaultOrientationFetcher,
+): Promise<string | null> {
+  if (process.env['MUSTERD_PROVENANCE'] === 'wake') return null;
+  try {
+    const input = await fetch();
+    return input ? composeSessionOrientation(input) : null;
+  } catch {
+    return null; // hook contract: a failing orientation must never disturb the session it rides
+  }
 }
 
 async function observeCommand(parsed: Parsed): Promise<number> {

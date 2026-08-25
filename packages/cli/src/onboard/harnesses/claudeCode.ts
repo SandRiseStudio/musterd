@@ -138,8 +138,10 @@ function removePermissions(perms: ProvisionPermissions): void {
  *   gitignored `binding.json` so a wake can `--resume` the seat's transcript instead of starting
  *   cold. Project-local (unlike the orientation SessionStart): capture is a per-seat-workspace
  *   fact, drift-checkable per folder, and a wake spawn runs with cwd = the workspace so the local
- *   hook fires and captures the minted session — capture is self-maintaining. Both are `>/dev/null`
- *   silent: SessionStart hook stdout is injected into model context, and capture must add zero.
+ *   hook fires and captures the minted session — capture is self-maintaining. SessionEnd stays
+ *   `>/dev/null` silent; the capture hook lets stdout through, because SessionStart hook stdout is
+ *   injected into model context and that seam now carries the orientation block (spec 2026-08-25):
+ *   capture itself still adds zero — the orientation is the one deliberate, bounded emission.
  */
 export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
@@ -303,11 +305,14 @@ function sessionCaptureHookCommand(): string {
   // Session capture (ADR 131 §5): pipe this hook's stdin JSON through to `musterd session start`,
   // which anchors its write to the payload's cwd (never bare process.cwd() — the ADR 018 clobber).
   // The cd is belt-and-braces with that anchor; `cd`/`command -v` consume no stdin, so the JSON
-  // flows through untouched. Fully silent (`>/dev/null`): SessionStart stdout lands in model
-  // context, and capture must add zero tokens. Best-effort + never-failing, like every musterd hook.
+  // flows through untouched. Stdout is deliberately NOT redirected: SessionStart hook stdout lands
+  // in model context, and `session start` uses exactly that seam for the orientation block
+  // (spec 2026-08-25-session-orientation-design.md §A) — capture itself still prints zero tokens,
+  // and the orientation is bounded, wake-suppressed, and silent on any failure. Stderr stays
+  // silenced; best-effort + never-failing, like every musterd hook.
   return (
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
-    'command -v musterd >/dev/null 2>&1 && musterd session start --stdin >/dev/null 2>&1 || true ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session start --stdin 2>/dev/null || true ' +
     `# ${SESSION_CAPTURE_HOOK_MARKER}`
   );
 }
