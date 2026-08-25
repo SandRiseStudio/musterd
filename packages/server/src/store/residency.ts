@@ -593,7 +593,7 @@ function laneMovedSinceLastWoke(
         WHERE team_id = ? AND action = 'residency.woke'
           AND json_extract(detail, '$.lane_id') = ?
           AND json_extract(detail, '$.edge') = ?
-        ORDER BY ts DESC, rowid DESC LIMIT 1`,
+        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId, edge);
   if (!last) return true;
@@ -619,7 +619,7 @@ function workOrderEdgeStillTrue(
         WHERE team_id = ? AND action = 'residency.wake_failed'
           AND json_extract(detail, '$.lane_id') = ?
           AND json_extract(detail, '$.edge') = ?
-        ORDER BY ts DESC, rowid DESC LIMIT 1`,
+        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId, edge);
   if (!row) return false;

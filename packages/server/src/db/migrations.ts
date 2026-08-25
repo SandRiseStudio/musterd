@@ -1,5 +1,6 @@
 import { sparsifyPolicy } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { monotonicFactory as monotonicUlid } from 'ulid';
 import { SCHEMA_V1_SQL } from './schema.js';
 
 export interface Migration {
@@ -960,6 +961,58 @@ export const MIGRATIONS: Migration[] = [
         ALTER TABLE presence_new RENAME TO presence;
         CREATE INDEX idx_presence_member ON presence(member_id);
         CREATE INDEX idx_presence_last_seen ON presence(last_seen_at);
+      `);
+    },
+  },
+  {
+    // ADR 325 prereq: `incident_reports.id` was the schema's only INTEGER AUTOINCREMENT id — an
+    // ordering that exists only in this database file, which collides the moment rows originate on
+    // more than one machine. Rebuild on ULID TEXT ids (the convention every other table follows).
+    // New ids are minted in old-integer-id order through a monotonic factory seeded per-row at
+    // created_at: the pool's `ORDER BY id` promise (= arrival order) survives the rebuild even for
+    // rows whose created_at disagrees with their arrival, and the new ids still carry an honest
+    // timestamp prefix.
+    version: 45,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE incident_reports_new (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL,
+          gate TEXT NOT NULL,
+          seat TEXT NOT NULL,
+          sig TEXT,
+          ref TEXT,
+          message_id TEXT,
+          lane_id TEXT,
+          created_at INTEGER NOT NULL
+        );
+      `);
+      const mint = monotonicUlid();
+      const rows = db
+        .prepare<
+          [],
+          {
+            id: number;
+            team_id: string;
+            gate: string;
+            seat: string;
+            sig: string | null;
+            ref: string | null;
+            message_id: string | null;
+            lane_id: string | null;
+            created_at: number;
+          }
+        >('SELECT * FROM incident_reports ORDER BY id')
+        .all();
+      const ins = db.prepare(
+        `INSERT INTO incident_reports_new (id, team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
+         VALUES (@id, @team_id, @gate, @seat, @sig, @ref, @message_id, @lane_id, @created_at)`,
+      );
+      for (const row of rows) ins.run({ ...row, id: mint(row.created_at) });
+      db.exec(`
+        DROP TABLE incident_reports;
+        ALTER TABLE incident_reports_new RENAME TO incident_reports;
+        CREATE INDEX idx_incident_reports_team_gate ON incident_reports(team_id, gate);
       `);
     },
   },

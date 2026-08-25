@@ -8,6 +8,7 @@ import {
   deriveHandoffLane,
   getLane,
   globsOverlap,
+  LaneConflictError,
   laneWarnings,
   lanesForGoal,
   listLanes,
@@ -743,5 +744,102 @@ describe('lane kind (incident convergence inc 1)', () => {
     // kind is immutable: a routine patch must not touch it
     const patched = updateLane(db, team.id, lane.id, 'bravo', { detail: 'more' });
     expect(patched?.kind).toBe('incident');
+  });
+});
+
+/**
+ * ADR 325 prereqs. The claim edge was a read-then-write with no guard on the write: the DB would
+ * happily overwrite an ownership that changed between the caller's read and its UPDATE, leaving
+ * correctness to the accident that nothing awaits between the two. The guard makes the write
+ * itself refuse a stale expectation — the shape every hub-authoritative CAS needs.
+ */
+describe('guarded lane updates (ADR 325 prereq: the write carries the claim guard)', () => {
+  it('refuses when ownership moved since the expectation was formed, and changes nothing', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'contended' });
+    // A reads the lane open+unowned, then B claims it before A's write lands.
+    updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'B' });
+
+    expect(() =>
+      updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'A' }, Date.now(), {
+        owner_seat: null,
+        state: 'open',
+      }),
+    ).toThrow(LaneConflictError);
+    // The loser's write must not have landed in any column.
+    const after = getLane(db, team.id, lane.id, 'bravo');
+    expect(after?.owner_seat).toBe('B');
+    expect(after?.state).toBe('claimed');
+  });
+
+  it('goes through when the expectation still holds', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'uncontended' });
+    const claimed = updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'A' }, Date.now(), {
+      owner_seat: null,
+      state: 'open',
+    });
+    expect(claimed?.owner_seat).toBe('A');
+    expect(claimed?.state).toBe('claimed');
+  });
+
+  it('carries what it actually found, so the caller can say who holds the lane', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'contended' });
+    updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'B' });
+    try {
+      updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'A' }, Date.now(), {
+        owner_seat: null,
+      });
+      expect.unreachable('expected a LaneConflictError');
+    } catch (err) {
+      if (!(err instanceof LaneConflictError)) throw err;
+      expect(err.actual.owner_seat).toBe('B');
+    }
+  });
+});
+
+/**
+ * ADR 325 prereq: the UPDATE assigns only the columns the patch actually changes. A full-row
+ * overwrite makes every patch a blind LWW of every field — two writers patching unrelated fields
+ * clobber each other the moment writes can interleave. `UPDATE OF <col>` triggers fire exactly
+ * when a column appears in the SET list, so they observe the contract directly.
+ */
+describe('per-field lane updates (ADR 325 prereq: untouched columns stay out of the SET list)', () => {
+  function titleWriteCount(db: ReturnType<typeof openDb>): number {
+    const row = db.prepare<[], { n: number }>('SELECT COUNT(*) n FROM title_writes').get();
+    return row?.n ?? 0;
+  }
+
+  it('a branch-only patch never assigns the title column', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'as opened' });
+    db.exec(`
+      CREATE TEMP TABLE title_writes (at INTEGER);
+      CREATE TEMP TRIGGER observe_title_writes AFTER UPDATE OF title ON lanes
+        BEGIN INSERT INTO title_writes VALUES (1); END;
+    `);
+
+    const patched = updateLane(db, team.id, lane.id, 'bravo', { branch: 'june/branch-only' });
+    expect(patched?.branch).toBe('june/branch-only');
+    expect(titleWriteCount(db)).toBe(0);
+
+    // The complement: a patch that does change the title assigns it.
+    updateLane(db, team.id, lane.id, 'bravo', { title: 'renamed' });
+    expect(titleWriteCount(db)).toBe(1);
+  });
+
+  it('a no-op patch still stamps updated_at and nothing else', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'as opened' }, Date.now() - 1000);
+    db.exec(`
+      CREATE TEMP TABLE title_writes (at INTEGER);
+      CREATE TEMP TRIGGER observe_title_writes AFTER UPDATE OF title ON lanes
+        BEGIN INSERT INTO title_writes VALUES (1); END;
+    `);
+    const before = getLane(db, team.id, lane.id, 'bravo')!;
+    const patched = updateLane(db, team.id, lane.id, 'bravo', {});
+    expect(titleWriteCount(db)).toBe(0);
+    expect(patched?.updated_at).toBeGreaterThan(before.updated_at);
   });
 });

@@ -932,6 +932,43 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     });
   });
 
+  // ADR 325 prereq: the "last failure on this edge" pick tie-broke on local `rowid`, an ordering
+  // that exists only on this machine's file. Today appendAudit's ULIDs land in rowid order, so the
+  // two agree — but a replicated log has no shared rowid, and the ULID id is the ordering the
+  // schema actually promises. The tie is constructed raw (same ts, ids opposed to insertion
+  // order): id-order says the still-true failure was superseded; rowid-order says it stands.
+  it("breaks a same-ts tie on the ULID id, not on this file's rowid (ADR 325 prereq)", async () => {
+    const { openLane, updateLane } = await import('./lanes.js');
+    const { db, team, nick, ada } = seed();
+    setPolicy(db, team.id, { loops: { dispatch: true } });
+    enroll(db, team, ada, HOST, { flow: 'auto' });
+    // The continuation edge: Ada owns a claimed lane and there is no triggering act, so the ONLY
+    // candidate is (lane, 'dispatch_continuation') — the injected failures decide everything.
+    const lane = openLane(db, team.id, team.slug, nick.name, { title: 'tied', claim: true });
+    updateLane(db, team.id, lane.id, team.slug, { owner_seat: ada.name, state: 'claimed' });
+
+    const failRow = (id: string, wakeability: string) =>
+      db
+        .prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+           VALUES (?, ?, 1000, NULL, 'residency.wake_failed', 'Ada', 'deny', ?, 1000)`,
+        )
+        .run(
+          id,
+          team.id,
+          JSON.stringify({ lane_id: lane.id, edge: 'dispatch_continuation', wakeability }),
+        );
+    // Later-by-id row first: the failure that SUPERSEDED the still-true one (not in the closed set).
+    failRow('01ZZZZZZZZZZZZZZZZZZZZZZZZ', 'host_asleep');
+    // Earlier-by-id row second, so rowid points at it: the stale still-true failure.
+    failRow('01AAAAAAAAAAAAAAAAAAAAAAAA', 'not_enrolled');
+
+    // The latest failure by the schema's ordering is not still-true, so the edge leases again.
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({ seat: 'Ada', derivation: 'work_order', lane_id: lane.id });
+  });
+
   it('keeps ordinary inbox wakes on the legacy ladder until the portable reply cohort is enabled', () => {
     const { db, team, nick, ada } = seed();
     enroll(db, team, ada);
