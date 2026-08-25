@@ -84,3 +84,7 @@ transport the credentials will later ride, not the credentials.
 - Cross-references: `docs/design/deployment-topology.md`, `docs/design/security.md` (Principle 7,
   off-loopback line), `docs/design/membership-model.md`, ADR 007 (v0.3 scope cut), ADR 017
   (newest-wins single-active).
+- **Amended 2026-08-25 by [ADR 325](325-multi-machine-federation.md):** the "federation —
+  explicitly out of scope" line above is no longer the standing decision. The invariant survives
+  relocated — one team, one *authority* (a per-team hub); machine daemons federate as replicas.
+  Topologies A/B remain the right answer for teams that fit on one daemon.
