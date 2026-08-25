@@ -99,7 +99,9 @@ process.on('uncaughtException', (err) => {
 });
 
 let targets;
-for (let i = 0; i < 50; i++) {
+// 30 s, not the 10 s the other harnesses use: several of these run concurrently by design
+// (one per arm), and a cold Chrome on a loaded laptop takes longer than a lone one.
+for (let i = 0; i < 150; i++) {
   try {
     targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
     if (targets.some((t) => t.type === 'page')) break;
