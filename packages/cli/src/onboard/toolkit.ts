@@ -23,10 +23,10 @@ import { BUILTIN_TOOLKIT_TEMPLATES } from './toolkits/builtins.js';
  * Toolkit is not (yet) a wire type — these types live in the CLI until the v0.3 governance gate
  * lands.
  *
- * Back-compat (each rename is read-compatible, never write-legacy). The concept has been named
- * three times, and all three on-disk shapes still load: `role`-keyed in `.musterd/roles/` (pre-ADR
- * 272), `profile`-keyed in `.musterd/profiles/` (pre-ADR 296), and the canonical `toolkit`-keyed
- * file in `.musterd/toolkits/`, which is the only shape ever written (ADR 296 tier 2).
+ * History: the concept was named three times (`role` pre-ADR-272, `profile` pre-ADR-296,
+ * `toolkit`). The legacy on-disk shapes were accepted on read through the transition and dropped
+ * once no legacy file remained on any machine (ADR 324): only the canonical `toolkit`-keyed file
+ * in `.musterd/toolkits/` loads.
  */
 
 /** A concrete MCP server entry inside a toolkit's `tools.mcp_servers`. Secrets are `${ENV}` refs. */
@@ -74,33 +74,12 @@ const CharterSchema = z
   .transform((v) => (Array.isArray(v) ? v.join('\n') : v))
   .refine((v) => v.trim().length > 0, { message: 'charter must not be empty' });
 
-/**
- * The name key has been renamed twice, and both older spellings still load (ADR 296 tier 2 —
- * legacy accepted on read, never written): `role` pre-ADR-272, `profile` pre-ADR-296. A file
- * carrying more than one wins on the newest it has, so a hand-merged file never silently adopts
- * the oldest name.
- */
-function adoptLegacyToolkitKey(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object' || 'toolkit' in raw) return raw;
-  const rec = raw as Record<string, unknown>;
-  for (const legacy of ['profile', 'role'] as const) {
-    if (legacy in rec) {
-      const { [legacy]: value, ...rest } = rec;
-      return { ...rest, toolkit: value };
-    }
-  }
-  return raw;
-}
-
-export const ToolkitSchema = z.preprocess(
-  adoptLegacyToolkitKey,
-  z.object({
-    toolkit: z.string().min(1),
-    capacity: z.number().int().positive().optional(),
-    charter: CharterSchema,
-    tools: ToolkitToolsSchema,
-  }),
-);
+export const ToolkitSchema = z.object({
+  toolkit: z.string().min(1),
+  capacity: z.number().int().positive().optional(),
+  charter: CharterSchema,
+  tools: ToolkitToolsSchema,
+});
 export type Toolkit = z.infer<typeof ToolkitSchema>;
 
 /** The no-extra-tooling default: only the musterd server + a bare charter (ADR 028). */
@@ -122,33 +101,17 @@ export function userToolkitsDir(dir: string): string {
 }
 
 /**
- * The ADR 272 home, `.musterd/profiles/` — still read, never written, like the `roles/` home
- * before it. Only `*.json` files here are toolkits.
+ * Where a toolkit may live: the canonical `.musterd/toolkits/` only. The two legacy homes
+ * (`.musterd/profiles/` pre-ADR-296, `.musterd/roles/*.json` pre-ADR-272) stopped being read in
+ * ADR 324 — `.musterd/roles/` now belongs solely to the roster-role TOML library. One list, so
+ * the loader and the lister can never disagree about which files exist.
  */
-export function legacyUserProfilesDir(dir: string): string {
-  return join(dir, BINDING_DIR, 'profiles');
-}
+const TOOLKIT_HOMES = [userToolkitsDir] as const;
 
 /**
- * The pre-rename home, `.musterd/roles/` — still read (never written) so existing setups keep
- * working. The dir is shared with the roster-role TOML library (`roles/<name>.toml`), which is a
- * different concept and untouched by toolkits: only `*.json` files here are toolkits.
- */
-export function legacyUserRolesDir(dir: string): string {
-  return join(dir, BINDING_DIR, 'roles');
-}
-
-/**
- * Where a toolkit may live, newest home first: the canonical `.musterd/toolkits/`, then the two
- * older homes, which are read and never written. One list, so the loader and the lister can never
- * disagree about which files exist.
- */
-const TOOLKIT_HOMES = [userToolkitsDir, legacyUserProfilesDir, legacyUserRolesDir] as const;
-
-/**
- * The toolkit search path for `dir`, newest home first — the one list every reader walks. Callers
- * outside this module use it instead of naming the homes themselves, so adding or retiring a home
- * is one edit and no caller silently keeps the old set.
+ * The toolkit search path for `dir` — the one list every reader walks. Callers outside this
+ * module use it instead of naming the homes themselves, so adding or retiring a home is one edit
+ * and no caller silently keeps the old set.
  */
 export function toolkitHomes(dir: string): string[] {
   return TOOLKIT_HOMES.map((home) => home(dir));
@@ -156,8 +119,7 @@ export function toolkitHomes(dir: string): string[] {
 
 /**
  * Load a toolkit by name for `dir`. A user file wins over a built-in of the same name
- * (customization), and the newest home wins over the older ones ({@link toolkitHomes}).
- * Throws a friendly Error if the file is missing or invalid.
+ * (customization). Throws a friendly Error if the file is missing or invalid.
  */
 export function loadToolkit(dir: string, name: string): Toolkit {
   for (const home of toolkitHomes(dir)) {
@@ -177,9 +139,7 @@ export function loadToolkit(dir: string, name: string): Toolkit {
   }
   const builtin = BUILTIN_TOOLKITS[name];
   if (builtin) return builtin;
-  throw new Error(
-    `unknown toolkit "${name}" (no built-in and no .musterd/toolkits/${name}.json — nor a legacy .musterd/profiles/ or .musterd/roles/ file of that name)`,
-  );
+  throw new Error(`unknown toolkit "${name}" (no built-in and no .musterd/toolkits/${name}.json)`);
 }
 
 /**

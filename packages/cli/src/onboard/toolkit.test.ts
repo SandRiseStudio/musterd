@@ -8,12 +8,10 @@ import {
   BUILTIN_TOOLKITS,
   GENERALIST,
   isBuiltin,
-  legacyUserRolesDir,
   listToolkitNames,
   loadToolkit,
   parseToolkit,
   userToolkitsDir,
-  legacyUserProfilesDir,
 } from './toolkit.js';
 
 describe('parseToolkit', () => {
@@ -25,34 +23,9 @@ describe('parseToolkit', () => {
     expect(toolkit.tools.permissions).toEqual({ allow: [], ask: [], deny: [] });
   });
 
-  it('accepts the legacy `role` key as the profile name (pre-rename files)', () => {
-    const toolkit = parseToolkit({ role: 'x', charter: 'do x' });
-    expect(toolkit.toolkit).toBe('x');
-  });
-
-  it('accepts the ADR 272 `profile` key as the toolkit name (pre-296 files)', () => {
-    expect(parseToolkit({ profile: 'x', charter: 'do x' }).toolkit).toBe('x');
-  });
-
-  it('prefers the newest key a hand-merged file carries (toolkit > profile > role)', () => {
-    expect(
-      parseToolkit({ toolkit: 'new', profile: 'mid', role: 'old', charter: 'c' }).toolkit,
-    ).toBe('new');
-    expect(parseToolkit({ profile: 'mid', role: 'old', charter: 'c' }).toolkit).toBe('mid');
-  });
-
-  it('a legacy role-keyed value parses identically to its profile-keyed form', () => {
-    const legacy = parseToolkit({
-      role: 'x',
-      charter: ['a', 'b'],
-      tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
-    });
-    const renamed = parseToolkit({
-      toolkit: 'x',
-      charter: ['a', 'b'],
-      tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
-    });
-    expect(legacy).toEqual(renamed);
+  it('rejects the legacy `role` and `profile` name keys (dropped, ADR 324)', () => {
+    expect(() => parseToolkit({ role: 'x', charter: 'do x' })).toThrow();
+    expect(() => parseToolkit({ profile: 'x', charter: 'do x' })).toThrow();
   });
 
   it('joins an array charter into a single string (multi-line friendliness)', () => {
@@ -142,7 +115,7 @@ describe('loadToolkit / listToolkitNames', () => {
     expect(() => loadToolkit(tmp(), 'nope')).toThrow(/unknown toolkit/);
   });
 
-  it('loads a user file from .musterd/profiles/<name>.json', () => {
+  it('loads a user file from .musterd/toolkits/<name>.json', () => {
     const dir = tmp();
     mkdirSync(userToolkitsDir(dir), { recursive: true });
     writeFileSync(
@@ -153,30 +126,17 @@ describe('loadToolkit / listToolkitNames', () => {
     expect(isBuiltin('data')).toBe(false);
   });
 
-  it('still loads a pre-rename user file from .musterd/roles/<name>.json (role-keyed)', () => {
+  it('no longer reads the legacy homes: a .musterd/roles/ or /profiles/ file is invisible (ADR 324)', () => {
     const dir = tmp();
-    mkdirSync(legacyUserRolesDir(dir), { recursive: true });
-    writeFileSync(
-      join(legacyUserRolesDir(dir), 'data.json'),
-      JSON.stringify({ role: 'data', charter: 'own the warehouse' }),
-    );
-    expect(loadToolkit(dir, 'data').toolkit).toBe('data');
-    expect(loadToolkit(dir, 'data').charter).toBe('own the warehouse');
-  });
-
-  it('.musterd/profiles/ wins over the legacy .musterd/roles/ for the same name', () => {
-    const dir = tmp();
-    mkdirSync(userToolkitsDir(dir), { recursive: true });
-    mkdirSync(legacyUserRolesDir(dir), { recursive: true });
-    writeFileSync(
-      join(userToolkitsDir(dir), 'data.json'),
-      JSON.stringify({ toolkit: 'data', charter: 'new home' }),
-    );
-    writeFileSync(
-      join(legacyUserRolesDir(dir), 'data.json'),
-      JSON.stringify({ role: 'data', charter: 'old home' }),
-    );
-    expect(loadToolkit(dir, 'data').charter).toBe('new home');
+    for (const legacyHome of [join(dir, '.musterd', 'roles'), join(dir, '.musterd', 'profiles')]) {
+      mkdirSync(legacyHome, { recursive: true });
+      writeFileSync(
+        join(legacyHome, 'data.json'),
+        JSON.stringify({ toolkit: 'data', charter: 'stale home' }),
+      );
+    }
+    expect(() => loadToolkit(dir, 'data')).toThrow(/unknown toolkit/);
+    expect(listToolkitNames(dir)).not.toContain('data');
   });
 
   it('a user file overrides a built-in of the same name', () => {
@@ -189,14 +149,15 @@ describe('loadToolkit / listToolkitNames', () => {
     expect(loadToolkit(dir, 'backend').charter).toBe('custom backend');
   });
 
-  it('a legacy user file also overrides a built-in of the same name (unchanged behavior)', () => {
+  it('a legacy-home file no longer shadows a built-in — the built-in wins (ADR 324)', () => {
     const dir = tmp();
-    mkdirSync(legacyUserRolesDir(dir), { recursive: true });
+    const legacyHome = join(dir, '.musterd', 'roles');
+    mkdirSync(legacyHome, { recursive: true });
     writeFileSync(
-      join(legacyUserRolesDir(dir), 'backend.json'),
-      JSON.stringify({ role: 'backend', charter: 'custom backend' }),
+      join(legacyHome, 'backend.json'),
+      JSON.stringify({ toolkit: 'backend', charter: 'custom backend' }),
     );
-    expect(loadToolkit(dir, 'backend').charter).toBe('custom backend');
+    expect(loadToolkit(dir, 'backend').charter).not.toBe('custom backend');
   });
 
   it('throws a friendly error for an invalid user file', () => {
@@ -208,72 +169,19 @@ describe('loadToolkit / listToolkitNames', () => {
     expect(() => loadToolkit(dir, 'bad2')).toThrow(/is invalid/);
   });
 
-  it('lists built-ins ∪ user toolkit files (all homes) with generalist first', () => {
+  it('lists built-ins ∪ user toolkit files with generalist first', () => {
     const dir = tmp();
     mkdirSync(userToolkitsDir(dir), { recursive: true });
-    mkdirSync(legacyUserRolesDir(dir), { recursive: true });
     writeFileSync(
       join(userToolkitsDir(dir), 'data.json'),
       JSON.stringify({ toolkit: 'data', charter: 'c' }),
     );
-    writeFileSync(
-      join(legacyUserRolesDir(dir), 'olddata.json'),
-      JSON.stringify({ role: 'olddata', charter: 'c' }),
-    );
     const names = listToolkitNames(dir);
     expect(names[0]).toBe(GENERALIST);
     expect(names).toContain('data');
-    expect(names).toContain('olddata');
     expect(names).toContain('backend');
     // de-duplicated
     expect(names.filter((n) => n === 'backend')).toHaveLength(1);
-  });
-
-  it('does not list the roster-role TOML files that share .musterd/roles/', () => {
-    const dir = tmp();
-    mkdirSync(legacyUserRolesDir(dir), { recursive: true });
-    writeFileSync(join(legacyUserRolesDir(dir), 'platform.toml'), 'summary = "a roster role"\n');
-    expect(listToolkitNames(dir)).not.toContain('platform');
-  });
-
-  it('still loads an ADR 272 user file from .musterd/profiles/<name>.json (profile-keyed)', () => {
-    const dir = tmp();
-    mkdirSync(legacyUserProfilesDir(dir), { recursive: true });
-    writeFileSync(
-      join(legacyUserProfilesDir(dir), 'data.json'),
-      JSON.stringify({ profile: 'data', charter: 'own the warehouse' }),
-    );
-    expect(loadToolkit(dir, 'data').toolkit).toBe('data');
-    expect(loadToolkit(dir, 'data').charter).toBe('own the warehouse');
-  });
-
-  it('walks the homes newest-first: toolkits/ beats profiles/ beats roles/', () => {
-    const dir = tmp();
-    for (const [home, key, charter] of [
-      [userToolkitsDir(dir), 'toolkit', 'newest home'],
-      [legacyUserProfilesDir(dir), 'profile', 'middle home'],
-      [legacyUserRolesDir(dir), 'role', 'oldest home'],
-    ] as const) {
-      mkdirSync(home, { recursive: true });
-      writeFileSync(join(home, 'data.json'), JSON.stringify({ [key]: 'data', charter }));
-    }
-    expect(loadToolkit(dir, 'data').charter).toBe('newest home');
-  });
-
-  it('lists user files from all three homes', () => {
-    const dir = tmp();
-    for (const [home, key, name] of [
-      [userToolkitsDir(dir), 'toolkit', 'newdata'],
-      [legacyUserProfilesDir(dir), 'profile', 'middata'],
-      [legacyUserRolesDir(dir), 'role', 'olddata'],
-    ] as const) {
-      mkdirSync(home, { recursive: true });
-      writeFileSync(join(home, `${name}.json`), JSON.stringify({ [key]: name, charter: 'c' }));
-    }
-    const names = listToolkitNames(dir);
-    expect(names).toContain('newdata');
-    expect(names).toContain('middata');
-    expect(names).toContain('olddata');
   });
 
   it('lists only built-ins when there is no user dir at all', () => {
@@ -355,40 +263,6 @@ describe('round-trip: built-ins render the identical workspace', () => {
       expect(readProvisionManifest(dir)?.profile).toBe(toolkit.toolkit);
     });
   }
-
-  it('a legacy role-keyed user file renders the same workspace as its profile-keyed twin', () => {
-    const raw = {
-      charter: ['own the data layer'],
-      capacity: 2,
-      tools: {
-        resource_scopes: ['packages/db/**'],
-        mcp_servers: [{ name: 's', command: 'npx', args: ['-y', 'x'], env: { K: '${K}' } }],
-        permissions: { allow: ['Read'], ask: ['Bash'], deny: ['Write'] },
-      },
-    };
-    const dirLegacy = mkdtempSync(join(tmpdir(), 'musterd-legacy-'));
-    const dirNew = mkdtempSync(join(tmpdir(), 'musterd-new-'));
-    mkdirSync(legacyUserRolesDir(dirLegacy), { recursive: true });
-    mkdirSync(userToolkitsDir(dirNew), { recursive: true });
-    writeFileSync(
-      join(legacyUserRolesDir(dirLegacy), 'data.json'),
-      JSON.stringify({ role: 'data', ...raw }),
-    );
-    writeFileSync(
-      join(userToolkitsDir(dirNew), 'data.json'),
-      JSON.stringify({ toolkit: 'data', ...raw }),
-    );
-    const fromLegacy = loadToolkit(dirLegacy, 'data');
-    const fromNew = loadToolkit(dirNew, 'data');
-    expect(fromLegacy).toEqual(fromNew);
-
-    const addedLegacy = installSeatPermissions(dirLegacy, fromLegacy);
-    const addedNew = installSeatPermissions(dirNew, fromNew);
-    expect(addedLegacy).toEqual(addedNew);
-    expect(
-      JSON.parse(readFileSync(join(dirLegacy, '.claude', 'settings.local.json'), 'utf8')),
-    ).toEqual(JSON.parse(readFileSync(join(dirNew, '.claude', 'settings.local.json'), 'utf8')));
-  });
 });
 
 /** Legacy manifest read: a pre-rename provisioned.json (role-keyed) still parses. */
