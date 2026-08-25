@@ -36,7 +36,8 @@ import { join } from 'node:path';
 const CHROME =
   process.env.CHROME_BIN ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const args = process.argv.slice(2);
-const url = args.find((a) => !a.startsWith('--')) ?? 'http://127.0.0.1:5173/office-preview?quiet';
+// `localhost`, not 127.0.0.1: vite dev binds [::1] only, and 127.0.0.1 connection-refuses.
+const url = args.find((a) => !a.startsWith('--')) ?? 'http://localhost:5173/office-preview?quiet';
 const flag = (name) => {
   const i = args.indexOf(`--${name}`);
   return i >= 0 ? args[i + 1] : undefined;
@@ -44,6 +45,9 @@ const flag = (name) => {
 const MINUTES = Number(flag('minutes') ?? 30);
 const JSON_OUT = flag('json');
 const PORT = Number(flag('port') ?? 9366);
+// E1b moved the lattice from 20 s to 10 s; the baseline build still runs 20 s slots, so the
+// denominator has to travel with the arm rather than being pinned here.
+const SLOT_MS = Number(flag('slot-ms') ?? 10_000);
 
 const profile = mkdtempSync(join(tmpdir(), 'ambient-density-'));
 const chrome = spawn(
@@ -185,7 +189,7 @@ const minutes = elapsedMs / 60_000;
 // Slots that elapsed in the window, from the lattice itself — the denominator the fire probability
 // is defined against. Fires below this ratio mean slots were skipped before the roll: a busy room
 // (an errand still running) never reaches `decideAmbient` at all.
-const slotsElapsed = Math.round(elapsedMs / 20_000);
+const slotsElapsed = Math.round(elapsedMs / SLOT_MS);
 const out = {
   url,
   minutes: Number(minutes.toFixed(2)),
