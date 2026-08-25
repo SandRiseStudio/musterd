@@ -22,11 +22,12 @@ import {
 import { createPet, petBeat, petBeg, petFollow, petGreet, petNotice, stepPet } from './pet';
 import { createReceptionist, stepReceptionist } from './receptionist';
 import { fitFloor, project, type Fit, type Pt } from './iso';
-import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS } from './layout';
+import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS , RECEPTIONIST } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
 import { isWithinWorkingHours } from './workingHours';
 import { assignSeats, type Placement } from './seating';
 import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type CaptionRail } from '../captions';
+import { createWelcome, stepWelcome } from './welcome';
 import {
   animatedDeskAnchors,
   chairKindFor,
@@ -287,6 +288,15 @@ export function mountOffice(
   let railTimer: ReturnType<typeof setInterval> | null = null;
   let railEl: HTMLDivElement | null = null;
   let onlineNames = new Set<string>();
+  // The receptionist welcome (first-five-seconds §4) — stepped on a coarse timer; her bubble rides
+  // the ordinary speech machinery via the synthetic 'receptionist' head injected each bake.
+  const welcome = createWelcome(broadcast, typeof localStorage === 'undefined' ? null : localStorage);
+  const welcomeTimer = setInterval(() => {
+    if (STILL) return; // deterministic measurement mode: nothing transient may start
+    if (!broadcast && (suspended || !VISIBLE())) return;
+    const line = stepWelcome(welcome, Date.now(), actors.active());
+    if (line) showSpeech('receptionist', line, 'info');
+  }, 5_000);
   function renderRail() {
     if (rail.current && !railEl) {
       railEl = document.createElement('div');
@@ -490,6 +500,10 @@ export function mountOffice(
       teamWorkingHours,
     );
     heads = anchors.heads;
+    // The receptionist's bubble anchor — synthetic head above her desk. syncLabels skips names
+    // without a node, so she gains a voice without gaining a nameplate or a roster row.
+    const rp = project(RECEPTIONIST.lx, RECEPTIONIST.ly, fit);
+    heads.set('receptionist', { x: rp.x, y: rp.y - 58 * fit.scale });
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
     positionBoardSpot();
@@ -1632,6 +1646,7 @@ export function mountOffice(
       cancelAnimationFrame(raf);
       clearInterval(lightTimer); // stop the PST lighting clock
       if (railTimer) clearInterval(railTimer); // stop the caption rail
+      clearInterval(welcomeTimer); // stop the receptionist welcome
       railEl?.remove();
       if (ambientTimer) clearTimeout(ambientTimer); // stop the idle-beat scheduler
       window.removeEventListener('resize', onResize);
