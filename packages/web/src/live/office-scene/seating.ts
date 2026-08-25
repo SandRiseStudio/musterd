@@ -31,13 +31,20 @@ function hash(name: string): number {
   return h;
 }
 
-/** A member reads as "away" from the composed posture, explicit presence, or a self-set away/dnd. */
+/** dnd means *working, don't interrupt* (presence-honesty §4) — they keep their desk and chair. */
+export function isDnd(m: Seatable): boolean {
+  return m.availability?.status === 'dnd';
+}
+
+/**
+ * A member reads as "stepped away" — declared absence. Their body leaves the floor; the desk stays
+ * theirs (jacket over the chair, `stepped away` on the plate). dnd is deliberately NOT this: dnd
+ * folds into posture `away` on the wire (ADR 044), but on the floor it is presence at a desk.
+ */
 export function isAway(m: Seatable): boolean {
   return (
-    m.posture === 'away' ||
-    m.presence === 'away' ||
-    m.availability?.status === 'away' ||
-    m.availability?.status === 'dnd'
+    !isDnd(m) &&
+    (m.posture === 'away' || m.presence === 'away' || m.availability?.status === 'away')
   );
 }
 
@@ -88,9 +95,10 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
   const away = present.filter((m) => isAway(m));
   const rest = present.filter((m) => !isAway(m));
 
-  // Active (between claims) first — they have first call on the leisure furniture, and the desks they'd otherwise hold.
+  // Active (between claims) first — they have first call on the leisure furniture, and the desks
+  // they'd otherwise hold. dnd never lounges: away-posture from a dnd fold still means at-desk.
   const spilled: Seatable[] = [];
-  for (const m of rest.filter((m) => m.posture === 'active')) {
+  for (const m of rest.filter((m) => m.posture === 'active' && !isDnd(m))) {
     const spot = probe(m.name, spots);
     if (spot >= 0) out.set(m.name, { kind: 'leisure', spot });
     else spilled.push(m); // lounge full — they wait it out at a desk, below
@@ -102,10 +110,16 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
     if (slot >= 0) out.set(m.name, { kind: 'desk', slot });
     else out.set(m.name, { kind: 'strip', index: overflow++ });
   };
-  for (const m of rest) if (m.posture !== 'active') toDesk(m);
+  for (const m of rest) if (m.posture !== 'active' || isDnd(m)) toDesk(m);
   for (const m of spilled) toDesk(m);
 
-  for (const m of away) out.set(m.name, { kind: 'nook' });
+  // Stepped-away members keep their desk without a body (jacket over the chair): the same
+  // owned-desk shape offline owners get, claimed before them — an away member is still present.
+  for (const m of away) {
+    const slot = probe(m.name, desks);
+    if (slot >= 0) out.set(m.name, { kind: 'desk', slot, owned: true });
+    else out.set(m.name, { kind: 'nook' }); // desks exhausted — the old nook keeps them visible
+  }
 
   // Owned empty desks (presence-honesty §4): every offline member except `left_team` keeps a desk —
   // the room must not empty when the team sleeps. Present members claimed desks above (zero

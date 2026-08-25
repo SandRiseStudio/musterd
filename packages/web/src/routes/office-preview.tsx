@@ -290,6 +290,13 @@ function OfficePreviewPage() {
     return raw ? new Set(raw.split(',').map((s) => s.trim())) : new Set(['Fen']);
   });
 
+  // `?dnd=<names>` marks members do-not-disturb (headphones, dnd pill) — default one so the a11y
+  // sweep and an eyeball can always reach the state.
+  const [dndSet] = useState<Set<string>>(() => {
+    const raw = previewSearch().get('dnd');
+    return raw ? new Set(raw.split(',').map((s) => s.trim())) : new Set(['Ivy']);
+  });
+
   // `?reel=<0..6>` sizes the overlay's reel — 1 is the no-rail/no-nav case, 0 the empty room.
   const [reelCount] = useState(() => {
     const raw = previewSearch().get('reel');
@@ -345,6 +352,7 @@ function OfficePreviewPage() {
           workSource: null,
           laneState: null,
           moreLanes: 0,
+          dnd: dndSet.has(m.name) && !isOffline,
           // The first offline fixture wears the amber `disconnected` glint; the rest read released.
           offline_reason: isOffline
             ? [...offlineSet][0] === m.name
@@ -355,7 +363,7 @@ function OfficePreviewPage() {
         };
       }),
     }),
-    [present, away, idle, stale, offlineSet],
+    [present, away, idle, stale, offlineSet, dndSet],
   );
   const dataRef = useRef(buildData);
   // Synced in an effect, not during render — see OfficeScene: the mount effect subscribes once and

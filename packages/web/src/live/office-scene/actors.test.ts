@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createActors, homePoses, travelDir } from './actors';
-import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_CAP, NOOK_RUG_R, STRIP_CAP } from './layout';
+import { COFFEE_STAND, DESK_SLOTS, ENTRANCE, NOOK, NOOK_RUG_R, STRIP_CAP } from './layout';
 import { GESTURE } from './skeleton';
 import { assignSeats } from './seating';
 import type { OfficeNode } from './types';
@@ -22,6 +22,7 @@ function node(name: string, presence: OfficeNode['presence'] = 'online'): Office
     workSource: null,
     laneState: null,
     moreLanes: 0,
+    dnd: false,
     offline_reason: null,
     last_seen_at: null,
   };
@@ -52,11 +53,13 @@ describe('homePoses', () => {
     for (const [name, pose] of a) expect(b.get(name)).toEqual(pose);
   });
 
-  it('seats present members full-size and sends away members to the nook (small)', () => {
+  it('seats present members full-size; an away member leaves the floor, desk kept (§4 lane 4)', () => {
     const { placements, byName } = world([node('Ada'), node('Bo', 'away')]);
     const poses = homePoses(placements, byName);
     expect(poses.get('Ada')!.small).toBe(false);
-    expect(poses.get('Bo')!.small).toBe(true);
+    // Away is declared absence: jacket over the chair, no body — the pose map omits them.
+    expect(poses.has('Bo')).toBe(false);
+    expect(placements.get('Bo')).toMatchObject({ kind: 'desk', owned: true });
   });
 
   it('omits offline (gone) members', () => {
@@ -98,22 +101,21 @@ describe('homePoses', () => {
     expect(stripDrawn.length).toBe(STRIP_CAP); // only the cap is drawn
   });
 
-  it('caps the nook avatars past NOOK_CAP', () => {
-    const nodes = Array.from({ length: NOOK_CAP + 3 }, (_, i) => node('A' + String(i).padStart(2, '0'), 'away'));
+  it('away members hold desks without bodies; the nook is only their overflow past every desk', () => {
+    const nodes = Array.from({ length: DESK_SLOTS.length + 3 }, (_, i) =>
+      node('A' + String(i).padStart(2, '0'), 'away'),
+    );
     const { placements, byName } = world(nodes);
     const poses = homePoses(placements, byName);
-    const drawn = nodes.filter((n) => poses.has(n.name));
-    expect(drawn.length).toBe(NOOK_CAP);
-  });
-
-  it('clusters away members compactly on the nook rug', () => {
-    const nodes = ['A', 'B', 'C', 'D', 'E'].map((n) => node(n, 'away'));
-    const { placements, byName } = world(nodes);
-    const poses = homePoses(placements, byName);
-    for (const n of nodes) {
+    const desks = nodes.filter((n) => placements.get(n.name)?.kind === 'desk');
+    const nook = nodes.filter((n) => placements.get(n.name)?.kind === 'nook');
+    expect(desks.length).toBe(DESK_SLOTS.length);
+    expect(nook.length).toBe(3);
+    // Desk-holding away members draw no body; the nook overflow still draws small.
+    for (const n of desks) expect(poses.has(n.name)).toBe(false);
+    for (const n of nook) {
       const p = poses.get(n.name)!;
       expect(p.small).toBe(true);
-      // inside the nook rug (an iso diamond about the nook anchor)
       expect(Math.abs(p.lx - NOOK.lx) + Math.abs(p.ly - NOOK.ly)).toBeLessThan(NOOK_RUG_R);
     }
   });
@@ -144,6 +146,15 @@ describe('walk choreography', () => {
     expect(back.ly).toBeCloseTo(home.ly, 5);
     expect(back.carry).toBeNull();
     expect(back.bubble).toBeNull();
+  });
+
+  it("won't walk to a dnd member — do-not-interrupt is honoured by the choreography (\u00a74 lane 4)", () => {
+    const focused = { ...node('Bo'), dnd: true };
+    const { placements, byName } = world([node('Ada'), focused]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(false);
+    expect(actors.active()).toBe(false);
   });
 
   it("won't play a walk when the target isn't present", () => {
@@ -597,20 +608,16 @@ describe('presence transitions', () => {
     expect(actors.poses().has('Bo')).toBe(false);
   });
 
-  it('drifts to the nook (small) when a member goes away', () => {
+  it('a member going away walks off the floor — the body leaves, the desk stays theirs', () => {
     const actors = createActors();
     const present = world([node('Ada'), node('Bo')]);
     actors.setHomes(present.placements, present.byName, true);
     const away = world([node('Ada'), node('Bo', 'away')]);
-    const nookHome = homePoses(away.placements, away.byName).get('Bo')!;
     actors.setHomes(away.placements, away.byName, true);
 
-    expect(actors.active()).toBe(true);
     settle(actors);
-    const end = actors.poses().get('Bo')!;
-    expect(end.lx).toBeCloseTo(nookHome.lx, 3);
-    expect(end.ly).toBeCloseTo(nookHome.ly, 3);
-    expect(end.small).toBe(true); // nook avatars are small
+    expect(actors.poses().has('Bo')).toBe(false);
+    expect(away.placements.get('Bo')).toMatchObject({ kind: 'desk', owned: true });
   });
 
   it('snaps without animating when animate=false (reduced motion)', () => {

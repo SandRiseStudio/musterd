@@ -108,6 +108,7 @@ function CharacterSheet() {
               workSource: null,
               laneState: null,
               moreLanes: 0,
+              dnd: false,
               offline_reason: null,
               last_seen_at: null,
             };

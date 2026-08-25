@@ -51,6 +51,7 @@ function computeData(
         workSource: entry?.source ?? null,
         laneState: entry?.laneState ?? null,
         moreLanes: entry?.moreLanes ?? 0,
+        dnd: m.availability?.status === 'dnd',
         offline_reason: m.offline_reason ?? null,
         last_seen_at: m.presences?.length
           ? Math.max(...m.presences.map((p) => p.last_seen_at))

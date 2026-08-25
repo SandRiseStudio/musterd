@@ -41,6 +41,8 @@ export interface OfficeNode {
   workSource: 'lane' | 'status' | null;
   laneState: LaneState | null;
   moreLanes: number;
+  /** Self-set do-not-disturb (ADR 044) — at their desk, headphones on, never walked to (§4). */
+  dnd: boolean;
   /** Why the seat is dark (ADR 141/315) — drives the owned-desk texture and the left_team exit. */
   offline_reason: string | null;
   /** Last seen (wire fact) — the warm-desk fade and the desk-capacity tiebreak read it. */

@@ -1575,6 +1575,7 @@ const RECEPTIONIST_NODE: OfficeNode = {
   workSource: null,
   laneState: null,
   moreLanes: 0,
+  dnd: false,
   offline_reason: null,
   last_seen_at: null,
 };
@@ -3569,6 +3570,8 @@ function drawWorkstation(
   slot: { lx: number; ly: number; dir: Dir; id: number },
   node: OfficeNode | null,
   teamName: string,
+  /** This desk is a kept, bodiless desk — an offline owner's or a stepped-away member's (§4). */
+  owned = false,
   t = 0,
   /** Props to skip this frame — a prop currently "in the owner's hand" (sip mug) isn't on the desk. */
   hide?: Set<PropKind>,
@@ -3594,7 +3597,9 @@ function drawWorkstation(
   // Owned empty desk (presence-honesty §4): the offline owner keeps the desk — chair in, monitor
   // dark, their name baked on a small plate. The lamp is off (nobody switched it on), a warm screen
   // glow fades over the first hour since they left, and a disconnected seat gets an amber glint.
-  const ownedEmpty = node != null && node.presence === 'offline';
+  const ownedEmpty = node != null && owned;
+  // A stepped-away owner is present-but-absent (declared): same bodiless desk, different words.
+  const steppedAway = ownedEmpty && node.presence !== 'offline';
 
   for (const [sx, sy] of [
     [-1, -1],
@@ -3655,7 +3660,8 @@ function drawWorkstation(
   // depth-sort with the desk. All static paint keyed to data refreshes — no new rAF.
   if (ownedEmpty && node) {
     const age = node.last_seen_at != null ? Date.now() - node.last_seen_at : Infinity;
-    const warmth = Math.max(0, 1 - age / 3_600_000); // warm desk: screen afterglow fades over ~1h
+    // warm desk: screen afterglow fades over ~1h; a stepped-away desk keeps it (they just left)
+    const warmth = steppedAway ? 0.6 : Math.max(0, 1 - age / 3_600_000);
     if (warmth > 0)
       at(Df / 2 - 12, 0, (ix, iy) => {
         const b = project(ix, iy, fit);
@@ -3677,7 +3683,13 @@ function drawWorkstation(
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(node.name, b.x, y - h / 2);
-      if (node.offline_reason === 'disconnected') {
+      if (steppedAway) {
+        // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
+        ctx.font = canvasFont(Math.max(11, Math.round(11 * fit.scale)), '--font-mono', 400);
+        ctx.fillStyle = 'rgba(233, 226, 214, 0.72)';
+        ctx.fillText('stepped away', b.x, y + Math.max(7, 7 * fit.scale));
+      }
+      if (!steppedAway && node.offline_reason === 'disconnected') {
         ctx.fillStyle = '#d9a13c';
         ctx.beginPath();
         ctx.arc(b.x + w / 2 - 4, y - h + 4, Math.max(2, 2.4 * fit.scale), 0, Math.PI * 2);
@@ -3956,6 +3968,8 @@ export function renderScene(
   for (const [slotIndex, slot] of DESK_SLOTS.entries()) {
     const name = slotMember.get(slotIndex) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
+    const deskPl = name ? placements.get(name) : undefined;
+    const deskOwned = deskPl?.kind === 'desk' && deskPl.owned === true;
     const ownerPose = name ? poses.get(name) : undefined;
     // Sip beat: while the owner's mug is in their hand, the desk copy vanishes — one mug, not two.
     const sipping =
@@ -3974,7 +3988,7 @@ export function renderScene(
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
       items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t) });
     } else {
-      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, t, hide, env.lampsOn) });
+      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn) });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
@@ -3996,6 +4010,30 @@ export function renderScene(
     const chairStyle = chairStyleFor(slot.id);
     items.push({ d: depth(cx, cy) - 0.2, fn: () => chairBase(ctx, fit, cx, cy, slot.dir, chairColor, chairStyle) });
     items.push({ d: depth(bx, by), fn: () => chairBack(ctx, fit, bx, by, slot.dir, chairColor, chairStyle) });
+    // Stepped-away texture (§4 lane 4): a jacket in the owner's colour draped over the chair back —
+    // the visual half of the plate's "stepped away"; offline owners get no jacket (they went home).
+    if (deskOwned && node && node.presence !== 'offline') {
+      const jx = bx;
+      const jy = by;
+      const jc = hslL(node.color, 0.42);
+      items.push({
+        d: depth(jx, jy) + 0.01,
+        fn: () => {
+          const b = project(jx, jy, fit);
+          const wJ = 16 * fit.scale;
+          const hJ = 13 * fit.scale;
+          const top = b.y - 30 * fit.scale;
+          ctx.fillStyle = jc;
+          ctx.beginPath();
+          ctx.moveTo(b.x - wJ / 2, top);
+          ctx.lineTo(b.x + wJ / 2, top);
+          ctx.lineTo(b.x + wJ / 2 - 2 * fit.scale, top + hJ);
+          ctx.lineTo(b.x - wJ / 2 + 2 * fit.scale, top + hJ);
+          ctx.closePath();
+          ctx.fill();
+        },
+      });
+    }
   }
 
   // Queue lane: a faint pad under each overflow (strip) member so the entrance line reads as a designated

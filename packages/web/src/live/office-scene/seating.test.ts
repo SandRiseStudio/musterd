@@ -34,6 +34,24 @@ function shuffle<T>(a: T[], seed: number): T[] {
   return out;
 }
 
+describe('assignSeats — away/dnd floor split (presence-honesty §4 lane 4)', () => {
+  it('dnd sits at their own desk — working, do not interrupt', () => {
+    const seats = assignSeats([member('focused', { availability: { status: 'dnd' } })]);
+    expect(seats.get('focused')).toMatchObject({ kind: 'desk' });
+    expect((seats.get('focused') as { owned?: boolean }).owned).toBeUndefined();
+  });
+
+  it('away leaves the floor: their desk stays theirs, jacket not body', () => {
+    const seats = assignSeats([member('stepped', { availability: { status: 'away' } })]);
+    expect(seats.get('stepped')).toMatchObject({ kind: 'desk', owned: true });
+  });
+
+  it('presence away reads the same as declared away', () => {
+    const seats = assignSeats([member('gone-a-min', { presence: 'away' })]);
+    expect(seats.get('gone-a-min')).toMatchObject({ kind: 'desk', owned: true });
+  });
+});
+
 describe('assignSeats — owned desks (presence-honesty §4)', () => {
   const offline = (name: string, over: Partial<Seatable> = {}): Seatable => ({
     ...member(name, { presence: 'offline', activity: 'offline' }),
@@ -106,7 +124,7 @@ describe('assignSeats', () => {
     expect(strip).toHaveLength(3);
   });
 
-  it('sends away members to the nook and offline members away', () => {
+  it('splits the non-working ways to be present: away keeps a bodiless desk, dnd sits at theirs, offline owns theirs', () => {
     const roster = [
       member('here'),
       member('resting', { presence: 'away' }),
@@ -116,8 +134,11 @@ describe('assignSeats', () => {
     ];
     const seats = assignSeats(roster);
     expect(seats.get('here')?.kind).toBe('desk');
-    expect(seats.get('resting')?.kind).toBe('nook');
-    expect(seats.get('dnd')?.kind).toBe('nook');
+    // Away is declared absence: desk kept, body off the floor (presence-honesty §4 lane 4).
+    expect(seats.get('resting')).toMatchObject({ kind: 'desk', owned: true });
+    // dnd is working-don't-interrupt: at their own desk, body present.
+    expect(seats.get('dnd')).toMatchObject({ kind: 'desk' });
+    expect((seats.get('dnd') as { owned?: boolean }).owned).toBeUndefined();
     expect(seats.get('left')?.kind).toBe('gone');
     // An offline member who has not left keeps an owned desk (presence-honesty §4).
     expect(seats.get('dark')).toMatchObject({ kind: 'desk', owned: true });
