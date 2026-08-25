@@ -162,6 +162,11 @@ at once.
 
 ## Consequences
 
+- **The claim CAS is exact; its policy input is not.** The hub arbitrates displacement using the
+  presence summaries daemons report upward, and presence is a heartbeat (15s refresh, 45s reap):
+  the ownership decision is linearizable, but the liveness it consults is stale by up to the
+  heartbeat/reap window plus sync lag. Displacement policy must tolerate that staleness explicitly
+  — the build inherits this question rather than rediscovering it (ryder, #1069 acceptance).
 - **ADR 039 is amended, not repudiated.** Topologies A/B remain the right answer below the
   federation threshold; `docs/design/deployment-topology.md` §8's "what this is explicitly NOT"
   unfreezes into a federation section when the build starts (that edit rides the build, per
