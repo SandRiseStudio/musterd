@@ -96,7 +96,7 @@ describe('version-bump discipline (ADR 085)', () => {
     14: '8c1b079d28c39788', // + shared blockers: blocked_by report-and-park + incident convergence (spec 2026-08-14 inc 1)
     15: 'bab60b1f09b5234b', // lane-close step 3 follows ADR 235: backstop armed ⇒ no self-close on silence; self-close stays sanctioned only for nobody-asked / acceptance-exempt (ADR 234)
     16: 'fc1472575867804e', // ADR 296 tier 2: lane_open teaches `scope` (was `surface_globs`)
-    17: '858e80e9da6fad21', // + musterd-orient skill unit (session-orientation spec 2026-08-25)
+    17: '0fe7e98a513e636e', // + musterd-orient skill unit + team_wake_context in the tool reference (session-orientation spec 2026-08-25)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

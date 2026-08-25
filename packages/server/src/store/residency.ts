@@ -508,7 +508,8 @@ function isExhausted(db: Database, teamId: string, actId: string): boolean {
 function composeWakeLine(seat: string, teamSlug: string, act: string, sender: string): string {
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": a ${act} from "${sender}" is ` +
-    `waiting. Read it now via team_inbox_check (or 'musterd inbox') and respond.`
+    `waiting. Orient via team_wake_context, read it via team_inbox_check (or 'musterd inbox'), ` +
+    `and respond.`
   );
 }
 
@@ -522,12 +523,12 @@ function composeWorkOrderLine(
   if (kind === 'review') {
     return (
       `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
-      `review. Orient via team_next / team_inbox_check and begin.`
+      `review. Orient via team_wake_context (then team_next) and begin.`
     );
   }
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
-    `orient via team_next and begin.`
+    `orient via team_wake_context (then team_next) and begin.`
   );
 }
 

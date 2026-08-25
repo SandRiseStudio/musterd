@@ -31,6 +31,9 @@ export const SKILL_MCP_TOOLS = [
   'team_memory_save',
   'team_memory_read',
   'team_next',
+  // ADR 209, wired by the session-orientation spec 2026-08-25 §C: the wake templates name it, so
+  // a woken session must find it in the skill's tool reference.
+  'team_wake_context',
   'lane_open',
   'lane_claim',
   'lane_release',
