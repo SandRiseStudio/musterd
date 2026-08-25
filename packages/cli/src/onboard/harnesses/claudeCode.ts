@@ -17,7 +17,6 @@ import {
   RETIRED_SURFACE_ENV,
 } from '../mcpEntry.js';
 import { STANDARD_FLOOR } from '../permissions.js';
-import { BUILTIN_TOOLKITS, parseToolkit, toolkitHomes, type Toolkit } from '../toolkit.js';
 import { nodeExec, type ExecSeam, type FsSeam, type HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
@@ -26,6 +25,7 @@ import {
   repoSharedResourceKey,
   type HarnessAdapter,
 } from '../reconcile/fragments.js';
+import { BUILTIN_TOOLKITS, parseToolkit, toolkitHomes, type Toolkit } from '../toolkit.js';
 
 const exec = promisify(execFile);
 

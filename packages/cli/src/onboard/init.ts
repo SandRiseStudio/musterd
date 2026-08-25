@@ -28,9 +28,9 @@ import { loadProvisioning, saveProvisioning } from './manifest.js';
 import { buildEntry } from './mcpEntry.js';
 import { installSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget, renderRepositoryPrimer, upsertPrimer } from './primer.js';
-import { GENERALIST, isBuiltin, listToolkitNames, loadToolkit, type Toolkit } from './toolkit.js';
 import { defaultHarnessContext } from './reconcile/context.js';
 import { reconcileHarnesses } from './reconcile/engine.js';
+import { GENERALIST, isBuiltin, listToolkitNames, loadToolkit, type Toolkit } from './toolkit.js';
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
