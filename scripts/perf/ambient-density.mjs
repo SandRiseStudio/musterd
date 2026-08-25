@@ -5,7 +5,7 @@
  * The E1 spec (docs/superpowers/specs/2026-08-25-seeded-idle-life-design.md §3) states density as
  * beats per idle minute. That is not the fire probability: a slot can fire, pick a beat, and the
  * browser can still decline to play it (the chosen member is mid-walk, the lounge is full, the pet
- * is already up). `AMBIENT_FIRE_P` is what the lattice DECIDES; this script measures what the room
+ * is already up). `ambientFireP` is what the lattice DECIDES; this script measures what the room
  * DOES, which is the only number the reading in §3 is about.
  *
  * Why the distinction is load-bearing here, and not pedantry (stanley, on #1060): the pre-E1a

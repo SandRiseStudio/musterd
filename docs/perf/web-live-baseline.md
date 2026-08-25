@@ -458,3 +458,25 @@ totalJsGzipBytes 246,000 → 249,000 (measured 246,229 + ~1.2%, the Shared Seeds
 
 - Falsify: build main and the branch and run the byte walk in this entry's method; delete
   `ambientSeed.ts` and revert the call sites and the total returns to within ~50 B of main's.
+## 2026-08-25 — seeded idle life E1b: occupancy-scaled density, constants pinned (no byte change worth logging)
+
+Branch `miley/e1b-density` (lane 01M0GVPFKT, PR #1066). The measured table the `ambientSeed.ts`
+docblock and `scripts/perf/ambient-density.mjs` header point here for — three sequential 8-minute
+arms, one headless Chrome at a time, against `/office-preview?quiet&team=revive` on a vite dev
+server (method at the top of the harness):
+
+| arm            | fire obs/exp | beats/idle-min | playRate |
+| -------------- | ------------ | -------------- | -------- |
+| E1a floor n=2  | 0.25 / 0.40  | 0.75           | 1.00     |
+| E1b n=2        | 0.23 / 0.27  | 1.12           | 0.82     |
+| E1b n=8        | 0.50 / 0.70  | 2.50           | 0.83     |
+
+`AMBIENT_P_FULL = 0.7` is pinned by the saturation argument, not the point estimate: the n=8
+observed fire rate ceilings at ~0.5 (3σ below p) because a playing beat holds `quiet()` false, so
+raising p buys almost nothing. `AMBIENT_P_QUIET = 0.27` reproduces the analytic pre-E1a delivered
+rate (0.4 per 20 s slot × fallthrough playRate ≈ 1 → 1.2/min; E1b n=2 measures 1.12, within 7%).
+8-minute arms put ±0.55 on the n=8 point.
+
+- Falsify: re-run the harness per its header (`--slot-ms 20000` for pre-E1b builds); if n=8
+  delivered density moves materially above 2.5/idle-min without a code change, the saturation
+  argument was wrong and P_FULL wants re-deriving.
