@@ -1267,6 +1267,13 @@
   --lc-paper-drop: rgba(58, 34, 12, 0.42);
   --lc-paper-seat: rgba(58, 34, 12, 0.26);
   --lc-paper-sheen: rgba(255, 251, 240, 0.72);
+
+  /* Harness inks — one per glyph in surfaceGlyph.ts (the harnesses a provider pin cannot
+     distinguish). -ink because they colour text and glyph; there is no fill twin until something
+     actually fills with them. Measured on --lc-paper (#f3e2c3), the lightest stock they land on. */
+  --lc-hz-codex-ink: #0f6b52; /* 5.08:1 */
+  --lc-hz-cursor-ink: #4f46b8; /* 5.68:1 */
+  --lc-hz-opencode-ink: #a03d00; /* 5.21:1 */
 }
 
 .lc-gl-labels {
@@ -1579,6 +1586,27 @@
   letter-spacing: 0.02em;
   text-transform: lowercase;
   color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
+}
+/* The harness glyph + its ink (surfaceGlyph.ts): the seg carries the colour, the inline SVG
+   tints via currentColor, so glyph and text can never disagree. */
+.lc-gl-label__seg--hz-codex {
+  color: var(--lc-hz-codex-ink);
+}
+.lc-gl-label__seg--hz-cursor {
+  color: var(--lc-hz-cursor-ink);
+}
+.lc-gl-label__seg--hz-opencode {
+  color: var(--lc-hz-opencode-ink);
+}
+.lc-gl-label__hz {
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 3px;
+}
+.lc-gl-label__hz svg {
+  width: 8px;
+  height: 8px;
+  display: block;
 }
 /* Broadcast: always show the compact model crumb after the icon — nothing to click out there. */
 .lc-gl-label.is-broadcast .lc-gl-label__detail {
