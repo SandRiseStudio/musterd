@@ -53,6 +53,7 @@ describe('musterd toolkit owns workspace equipment (ADR 296)', () => {
   it('toolkit show renders a built-in toolkit', () => {
     expect(toolkitCommand(parsed(['show', 'generalist']))).toBe(0);
     expect(out).toContain('charter');
+    expect(out).toContain('codex plugins');
   });
 
   it('toolkit show --json emits the toolkit object', () => {

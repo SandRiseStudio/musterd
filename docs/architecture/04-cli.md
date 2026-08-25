@@ -108,16 +108,16 @@ src/
     pending.ts        // client-side pending-presence markers (ADR 033)
     permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact
     primer.ts         // renderRepositoryPrimer + idempotent upsertPrimer → Team-only AGENTS.md primer (ADR 307)
-    toolkit.ts        // Toolkit = harness-agnostic provisioning template ("profile" pre-ADR-296, "role template" pre-ADR-272); resolve/apply (ADR 026/029/038)
+    toolkit.ts        // Toolkit = harness-agnostic provisioning template ("profile" pre-ADR-296, "role template" pre-ADR-272); resolve/apply (ADR 026/029/038); tools.codex_plugins declared for the Codex adapter (ADR 323)
     toolkits/builtins.ts // the shipped built-in toolkit seed library
     harnesses/        // per-harness feature differences (labeling, hooks, skills discovery) are observed environment facts — documented in docs/wiki/driver-support-matrix.md, not modelled (ADR 296)
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
       cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks for model_id observe (ADR 198); CLI also wires afterShellExecution + afterMCPExecution (ADR 265)
-      codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249)
+      codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249); toolkit-declared plugin fragments write [plugins."id"] enable tables in the same file (ADR 323)
       opencode.ts     // detect/configure via project-local .opencode/opencode.json (`mcp.musterd`, McpLocalConfig shape); plain JSON only — an opencode.jsonc sibling is refused, never raced (ADR 321 §3/§4); no hooks, guidance rides the AGENTS.md primer opencode reads natively
       codexHooks.ts   // reversible .codex/hooks.json renderer: marker-owned SessionStart/SessionEnd/PostToolUse only (ADR 249)
-      codexToml.ts    // TOML read/merge helper for the codex adapter
+      codexToml.ts    // TOML read/merge helper for the Codex adapter — [mcp_servers.*] and [plugins.*] tables only (ADR 031/323)
   archaeology/        // cookoff wasted-work reference collector — git-only, no daemon (ADR 122/123)
     engine.ts         // pure predicate-set-v1 classifier: W3 dup → W1 abandoned → W2 clobbered → W4 churn
     git.ts            // RepoFacts extractor over git plumbing; actor identity = ADR 109 attribution
@@ -407,7 +407,7 @@ The **localhost notification down-payment** (ADR 035) — an opt-in, headless, c
 
 ### `musterd toolkit <list|show|create> [<name>] [--from <builtin>] [--force]`
 
-Manage **workspace toolkits** — the ADR 026/029/038 provisioning templates, named *role template* then *profile* then, by ADR 296, **toolkit** — a pure local-file + built-in-library command that **never touches the daemon or the server roster** (Universe-2 only; identity unchanged). `toolkit list` shows the shipped built-ins plus any user files; `toolkit show <name>` prints a fully-resolved toolkit (built-in or user); `toolkit create <name> [--from <builtin>]` scaffolds an editable user file (refuses to overwrite without `--force`). A toolkit renders local setup only — MCP servers + the permission lists `init`/`musterd agent --profile` write (that flag still carries the old word — a CLI token, not a file key, and not renamed here). It mints no team fact: the roster role label is independent of the toolkit pick, and the primer's charter comes from the team role library, never from a toolkit (ADR 272 increment 2 removed ADR 038's label-from-template derivation). A toolkit carries no authority (ADR 272).
+Manage **workspace toolkits** — the ADR 026/029/038 provisioning templates, named *role template* then *profile* then, by ADR 296, **toolkit** — a pure local-file + built-in-library command that **never touches the daemon or the server roster** (Universe-2 only; identity unchanged). `toolkit list` shows the shipped built-ins plus any user files; `toolkit show <name>` prints a fully-resolved toolkit (built-in or user); `toolkit create <name> [--from <builtin>]` scaffolds an editable user file (refuses to overwrite without `--force`). A toolkit renders local setup only — MCP servers, the permission lists `init`/`musterd agent --profile` write (that flag still carries the old word — a CLI token, not a file key, and not renamed here), and `tools.codex_plugins` (Codex adapter writes project-local `[plugins."id"]` enable tables on `harness configure`; never `~/.codex/config.toml` — ADR 323 / ADR 031). It mints no team fact: the roster role label is independent of the toolkit pick, and the primer's charter comes from the team role library, never from a toolkit (ADR 272 increment 2 removed ADR 038's label-from-template derivation). A toolkit carries no authority (ADR 272).
 
 **On disk**, canonical files are `toolkit`-keyed JSON under `.musterd/toolkits/`, which is the only shape ever written. Two older shapes are still **read, never written** (ADR 296 tier 2 — legacy accepted on read, no flag day): `profile`-keyed files in `.musterd/profiles/` (ADR 272) and `role`-keyed files in `.musterd/roles/` (pre-272). The homes are searched newest-first, so a file in `.musterd/toolkits/` wins over an older copy of the same name, and a file carrying more than one name key resolves on the newest it has.
 

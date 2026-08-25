@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { BINDING_DIR, WorktreeProvisioningSchema } from '@musterd/protocol';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
 import {
   registeredFromEnv,
@@ -10,12 +11,14 @@ import {
 } from '../harness.js';
 import type { McpServerEntry } from '../mcpEntry.js';
 import { launchEntryEnv, markerGenerationOfEnv, resolveMcpLaunch } from '../mcpEntry.js';
-import type { FsSeam } from '../reconcile/context.js';
+import type { FsSeam, HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
+  type FragmentIntent,
   type HarnessAdapter,
 } from '../reconcile/fragments.js';
+import { BUILTIN_TOOLKITS, parseToolkit } from '../toolkit.js';
 import {
   CODEX_HOOK_MARKER,
   codexHookCommands,
@@ -26,10 +29,14 @@ import {
 } from './codexHooks.js';
 import {
   hasServer,
+  readPlugin,
   readServer,
   readServerEnv,
+  removePlugins,
   removeServers,
+  upsertPlugin,
   upsertServer,
+  type CodexPlugin,
   type CodexServer,
 } from './codexToml.js';
 
@@ -239,6 +246,52 @@ function musterdCodexHandlers(file: CodexHooksJson): { event: string; command: s
   return out.sort((a, b) => (a.event < b.event ? -1 : 1));
 }
 
+function pluginFragmentKey(id: string): string {
+  return `plugin.${id}`;
+}
+
+function pluginIdFromFragmentKey(fragmentKey: string): string | null {
+  return fragmentKey.startsWith('plugin.') ? fragmentKey.slice('plugin.'.length) : null;
+}
+
+/** Toolkit-declared Codex plugins for this worktree (ADR 323). Missing/invalid state is none. */
+function declaredCodexPlugins(ctx: HarnessContext): string[] {
+  const raw = ctx.fs.readFile(join(ctx.worktreeRoot, BINDING_DIR, 'provisioned.json'));
+  if (raw === null) return [];
+  let name: string;
+  try {
+    const parsed = WorktreeProvisioningSchema.safeParse(JSON.parse(raw) as unknown);
+    if (!parsed.success) return [];
+    name = parsed.data.toolkit;
+  } catch {
+    return [];
+  }
+  if (!name) return [];
+  const file = ctx.fs.readFile(join(ctx.worktreeRoot, BINDING_DIR, 'toolkits', `${name}.json`));
+  if (file !== null) {
+    try {
+      return parseToolkit(JSON.parse(file) as unknown).tools.codex_plugins;
+    } catch {
+      return [];
+    }
+  }
+  return BUILTIN_TOOLKITS[name]?.tools.codex_plugins ?? [];
+}
+
+function pluginIntent(ctx: HarnessContext, id: string): FragmentIntent {
+  const payload: CodexPlugin & { plugin: string } = { plugin: id, enabled: true };
+  const fragmentKey = pluginFragmentKey(id);
+  return {
+    harness: 'codex',
+    resourceKey: folderResourceKey(ctx.worktreeRoot, 'codex', fragmentKey),
+    containerKey: `folder ${ctx.worktreeRoot} .codex/config.toml`,
+    fragmentKey,
+    scope: 'folder',
+    fingerprint: canonicalFingerprint(payload),
+    payload,
+  };
+}
+
 export const codexAdapter: HarnessAdapter = {
   id: 'codex',
   surface: 'codex',
@@ -277,6 +330,7 @@ export const codexAdapter: HarnessAdapter = {
       env: launchEntryEnv(CODEX_SURFACE),
     };
     const hooks = [...codexHookCommands()].sort((a, b) => (a.event < b.event ? -1 : 1));
+    const plugins = declaredCodexPlugins(ctx).map((id) => pluginIntent(ctx, id));
     return [
       {
         harness: 'codex',
@@ -296,6 +350,7 @@ export const codexAdapter: HarnessAdapter = {
         fingerprint: canonicalFingerprint(hooks),
         payload: hooks,
       },
+      ...plugins,
     ];
   },
 
@@ -329,8 +384,16 @@ export const codexAdapter: HarnessAdapter = {
         if (observed.length === 0) return { state: 'absent' };
         return { state: 'present', fingerprint: canonicalFingerprint(observed) };
       }
-      default:
-        return { state: 'absent' };
+      default: {
+        const id = pluginIdFromFragmentKey(intent.fragmentKey);
+        if (!id) return { state: 'absent' };
+        const toml = ctx.fs.readFile(join(ctx.worktreeRoot, '.codex', 'config.toml'));
+        if (toml === null) return { state: 'absent' };
+        const plugin = readPlugin(toml, id);
+        if (!plugin) return { state: 'absent' };
+        const payload = { plugin: id, ...plugin };
+        return { state: 'present', fingerprint: canonicalFingerprint(payload) };
+      }
     }
   },
 
@@ -394,8 +457,19 @@ export const codexAdapter: HarnessAdapter = {
         ctx.fs.writeFile(path, `${JSON.stringify(next, null, 2)}\n`, 0o644);
         return;
       }
-      default:
-        throw new Error(`unknown codex fragment ${intent.fragmentKey}`);
+      default: {
+        const id = pluginIdFromFragmentKey(intent.fragmentKey);
+        if (!id) throw new Error(`unknown codex fragment ${intent.fragmentKey}`);
+        const path = join(ctx.worktreeRoot, '.codex', 'config.toml');
+        const toml = ctx.fs.readFile(path) ?? '';
+        const next =
+          mutation.kind === 'remove'
+            ? removePlugins(toml, [id])
+            : upsertPlugin(toml, id, { enabled: true });
+        ctx.fs.mkdirp(dirname(path));
+        ctx.fs.writeFile(path, next.endsWith('\n') ? next : `${next}\n`, 0o644);
+        return;
+      }
     }
   },
 };

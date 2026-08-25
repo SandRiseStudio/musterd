@@ -69,6 +69,29 @@ describe('parseToolkit', () => {
     expect(toolkit.tools.mcp_servers[0]).toEqual({ name: 's', command: 'npx', args: [], env: {} });
   });
 
+  it('defaults tools.codex_plugins to []', () => {
+    expect(parseToolkit({ toolkit: 'x', charter: 'c' }).tools.codex_plugins).toEqual([]);
+  });
+
+  it('parses tools.codex_plugins as PLUGIN@MARKETPLACE ids', () => {
+    const toolkit = parseToolkit({
+      toolkit: 'security',
+      charter: 'own appsec evidence',
+      tools: { codex_plugins: ['codex-security@openai-curated'] },
+    });
+    expect(toolkit.tools.codex_plugins).toEqual(['codex-security@openai-curated']);
+  });
+
+  it('rejects a Codex plugin id that is not PLUGIN@MARKETPLACE', () => {
+    expect(() =>
+      parseToolkit({
+        toolkit: 'x',
+        charter: 'c',
+        tools: { codex_plugins: ['codex-security'] },
+      }),
+    ).toThrow();
+  });
+
   it('rejects an empty charter', () => {
     expect(() => parseToolkit({ toolkit: 'x', charter: '   ' })).toThrow();
   });

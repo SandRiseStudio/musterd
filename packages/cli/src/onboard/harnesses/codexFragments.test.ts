@@ -179,4 +179,59 @@ describe('codexAdapter — managed fragments', () => {
     expect(parsed.hooks.PostToolUse).toBeUndefined();
     expect(await codexAdapter.observe(ctx, hooks)).toEqual({ state: 'absent' });
   });
+
+  it('emits no plugin fragments for a generalist / empty toolkit', async () => {
+    const intents = await intentsOf(ctxOf(memoryFs()));
+    expect(intents.filter((i) => i.fragmentKey.startsWith('plugin.'))).toEqual([]);
+  });
+
+  it('writes a project-local plugin table from the workspace toolkit and removes only that table', async () => {
+    const fs = memoryFs();
+    fs.writeFile(TOML, THEIR_TOML, 0o600);
+    fs.writeFile(
+      '/w/a/.musterd/provisioned.json',
+      `${JSON.stringify({
+        version: 3,
+        toolkit: 'security',
+        desired: ['codex'],
+        contributions: {},
+        provisionedAt: '2026-08-25T00:00:00.000Z',
+      })}\n`,
+      0o644,
+    );
+    fs.writeFile(
+      '/w/a/.musterd/toolkits/security.json',
+      `${JSON.stringify({
+        toolkit: 'security',
+        charter: 'own appsec evidence',
+        tools: { codex_plugins: ['codex-security@openai-curated'] },
+      })}\n`,
+      0o644,
+    );
+    const ctx = ctxOf(fs);
+    const intents = await intentsOf(ctx);
+    const plugin = intents.find((i) => i.fragmentKey === 'plugin.codex-security@openai-curated');
+    expect(plugin).toBeDefined();
+    expect(plugin!.containerKey).toContain('.codex/config.toml');
+    expect(plugin!.payload).toEqual({
+      plugin: 'codex-security@openai-curated',
+      enabled: true,
+    });
+
+    expect(await codexAdapter.observe(ctx, plugin!)).toEqual({ state: 'absent' });
+    await codexAdapter.apply(ctx, { kind: 'write', intent: plugin! });
+    const after = fs.readFile(TOML)!;
+    expect(after).toContain('[plugins."codex-security@openai-curated"]');
+    expect(after).toContain('enabled = true');
+    expect(after).toContain('[mcp_servers.figma]');
+    expect(await codexAdapter.observe(ctx, plugin!)).toEqual({
+      state: 'present',
+      fingerprint: plugin!.fingerprint,
+    });
+
+    await codexAdapter.apply(ctx, { kind: 'remove', intent: plugin! });
+    const removed = fs.readFile(TOML)!;
+    expect(removed).not.toContain('codex-security@openai-curated');
+    expect(removed).toContain('[mcp_servers.figma]');
+  });
 });

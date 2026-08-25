@@ -108,6 +108,10 @@ function toolkitShow(parsed: Parsed): number {
   process.stdout.write(
     `  permissions: ${permParts.length ? permParts.join('  ') : theme.meta('none')}\n`,
   );
+  const plugins = toolkit.tools.codex_plugins;
+  process.stdout.write(
+    `  codex plugins: ${plugins.length ? plugins.join(', ') : theme.meta('none')} ${theme.meta('(project-local enable — ADR 323)')}\n`,
+  );
   return 0;
 }
 
@@ -169,6 +173,7 @@ function skeleton(name: string): Toolkit {
       mcp_servers: [],
       resource_scopes: [],
       permissions: { allow: [], ask: [], deny: [] },
+      codex_plugins: [],
     },
   };
 }

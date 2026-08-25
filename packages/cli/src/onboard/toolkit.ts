@@ -15,9 +15,10 @@ import { BUILTIN_TOOLKIT_TEMPLATES } from './toolkits/builtins.js';
  * different domain, the label is never derived from a toolkit, and a toolkit's `charter` field is
  * legacy-descriptive: the primer's charter comes from the team role library (ADR 272 inc 2).
  *
- * What provisioning acts on: `tools.mcp_servers` (provisioned via the harness's own CLI) and
- * `tools.permissions` (compiled into the harness permission layer, ADR 261). `resource_scopes` are
- * DECLARED-only (coordination, not a sandbox — ADR 026 §1/§4).
+ * What provisioning acts on: `tools.mcp_servers` (provisioned via the harness's own CLI),
+ * `tools.permissions` (compiled into the harness permission layer, ADR 261), and
+ * `tools.codex_plugins` (Codex adapter writes project-local enable tables, ADR 323).
+ * `resource_scopes` are DECLARED-only (coordination, not a sandbox — ADR 026 §1/§4).
  *
  * Toolkit is not (yet) a wire type — these types live in the CLI until the v0.3 governance gate
  * lands.
@@ -46,11 +47,21 @@ export const ToolkitPermissionsSchema = z
   })
   .default({ allow: [], ask: [], deny: [] });
 
+/** A Codex plugin id: `PLUGIN@MARKETPLACE` (ADR 323). Other harnesses ignore the field. */
+export const CodexPluginIdSchema = z
+  .string()
+  .regex(
+    /^[a-z0-9][a-z0-9._-]*@[a-z0-9][a-z0-9._-]*$/,
+    'codex plugin id must be PLUGIN@MARKETPLACE',
+  );
+
 export const ToolkitToolsSchema = z
   .object({
     mcp_servers: z.array(ToolkitMcpServerSchema).default([]),
     resource_scopes: z.array(z.string()).default([]),
     permissions: ToolkitPermissionsSchema,
+    /** Declared Codex plugins; the Codex adapter writes project-local enable tables (ADR 323). */
+    codex_plugins: z.array(CodexPluginIdSchema).default([]),
   })
   .default({});
 
