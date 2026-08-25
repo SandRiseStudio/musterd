@@ -15,6 +15,7 @@ import { HttpClient } from '../client.js';
 import { findBinding, findWorkspaceSpec, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
+import { openActionNeeded } from '../render/rows.js';
 import { clock, theme } from '../render/theme.js';
 import { bindThread, pruneOnDisk, readRegistry } from '../session/continuity.js';
 import { sessionDigest } from '../session/digest.js';
@@ -25,11 +26,7 @@ import {
   type LocalSessionLiveness,
 } from '../session/liveness.js';
 import { findWorkspaceDir, resolveRead } from './helpers.js';
-import { openActionNeeded } from '../render/rows.js';
-import {
-  composeSessionOrientation,
-  type SessionOrientationInput,
-} from './sessionOrientation.js';
+import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
 
 /**
  * `musterd session start|end --stdin | show` (ADR 131 §5, increment 4) — session capture. The

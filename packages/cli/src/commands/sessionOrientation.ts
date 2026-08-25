@@ -40,7 +40,10 @@ function fencedHeadline(raw: string): string {
   return `<<headline-as-data: ${flat}>>`;
 }
 
-export function composeSessionOrientation(d: SessionOrientationInput, now = Date.now()): string | null {
+export function composeSessionOrientation(
+  d: SessionOrientationInput,
+  now = Date.now(),
+): string | null {
   if (!SLUG.test(d.seat) || !SLUG.test(d.team)) return null;
   // Counts come from the unfiltered lists (an unrenderable row still counts); rendered detail only
   // from rows whose every field passes its shape gate — a name or id that fails is dropped, never
@@ -73,7 +76,9 @@ export function composeSessionOrientation(d: SessionOrientationInput, now = Date
     lines.push(`waiting: ${String(d.waiting.length)} ${noun}${detail ? ` — ${detail}` : ''}`);
   }
   lines.push(
-    incidents.length > 0 ? `incidents: ${incidents.map((i) => i.id).join(', ')}` : 'incidents: none',
+    incidents.length > 0
+      ? `incidents: ${incidents.map((i) => i.id).join(', ')}`
+      : 'incidents: none',
   );
   if (owed.length > 0) {
     lines.push(

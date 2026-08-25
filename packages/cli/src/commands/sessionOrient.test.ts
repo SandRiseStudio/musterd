@@ -3,11 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Binding } from '../config.js';
-import {
-  ORIENT_NUDGE_TEXT,
-  orientNudgeDue,
-  writeOrientStamp,
-} from './session.js';
+import { ORIENT_NUDGE_TEXT, orientNudgeDue, writeOrientStamp } from './session.js';
 
 /** Mirrors the capture suite's temp-workspace idiom: never a real binding.json. */
 describe('session orient stamp/nudge', () => {
@@ -46,9 +42,10 @@ describe('session orient stamp/nudge', () => {
 
   it('stamp writes {session_id, oriented_at} keyed to the captured slot id, and quiets the nudge', () => {
     writeOrientStamp(ws);
-    const rec = JSON.parse(
-      readFileSync(join(ws, '.musterd', 'orient-stamp.json'), 'utf8'),
-    ) as { session_id: string; oriented_at: number };
+    const rec = JSON.parse(readFileSync(join(ws, '.musterd', 'orient-stamp.json'), 'utf8')) as {
+      session_id: string;
+      oriented_at: number;
+    };
     expect(rec.session_id).toBe('sess-1');
     expect(typeof rec.oriented_at).toBe('number');
     expect(orientNudgeDue(ws)).toBe(false);
