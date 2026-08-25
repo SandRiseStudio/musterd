@@ -155,7 +155,8 @@ for (let i = 0; i < 100; i++) {
   if (ready) break;
   await new Promise((r) => setTimeout(r, 200));
 }
-if (!ready) throw new Error('window.__office.ambientLog never appeared — wrong route, or a stale build');
+if (!ready)
+  throw new Error('window.__office.ambientLog never appeared — wrong route, or a stale build');
 
 // Occupancy is the independent variable, so record it from the fixture rather than the caller's
 // intent: `?n` sizes the pool, but away/offline/dnd members are seated too and the ambient pool is
