@@ -136,7 +136,7 @@ The original five stay. The load-bearing set grew in [ADR 296](../decisions/296-
 | **Workspace** | The folder a seat is bound to. | not "worktree" (git implementation detail) |
 | **Harness** | The agent runtime family: Claude Code, Cursor, Codex. | not "surface"; not "platform" |
 | **Driver** | How a harness session runs: desktop, terminal, IDE, headless. Already the wire field (`presence.driver`). | not a harness; not a surface |
-| **Scope** | The paths a lane may touch. The wire token since 2026-08-24 (ADR 296 tier 2, epoch 12); legacy `surface_globs` accepted on read. | not "surface" |
+| **Scope** | The paths a lane may touch. The wire token since 2026-08-24 (ADR 296 tier 2, epoch 14); legacy `surface_globs` accepted on read. | not "surface" |
 | **Permissions** | The harness-native allow/ask/deny rules musterd compiles into the workspace (ADR 261). | not "capabilities" |
 | **Capability** | Team-granted authority on a member, enforced by musterd itself (`is_admin`, MCP tool scoping). Internal/protocol vocabulary; user-facing prose says what it means instead. | not tool wiring; not harness rules |
 

@@ -112,7 +112,7 @@ export const GLOSSARY: GlossaryTerm[] = [
     term: 'scope',
     status: 'canonical',
     definition:
-      'The paths a lane may touch. The wire token since 2026-08-24 (epoch 12); legacy surface_globs accepted on read.',
+      'The paths a lane may touch. The wire token since 2026-08-24 (epoch 14); legacy surface_globs accepted on read.',
     not: [],
   },
   {

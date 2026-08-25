@@ -5,49 +5,49 @@ import { describe, expect, it } from 'vitest';
 import { readProvisionManifest, writeProvisionManifest } from './manifest.js';
 import { installSeatPermissions } from './permissions.js';
 import {
-  BUILTIN_PROFILES,
+  BUILTIN_TOOLKITS,
   GENERALIST,
   isBuiltin,
   legacyUserRolesDir,
-  listProfileNames,
-  loadProfile,
-  parseProfile,
+  listToolkitNames,
+  loadToolkit,
+  parseToolkit,
   userToolkitsDir,
   legacyUserProfilesDir,
-} from './profile.js';
+} from './toolkit.js';
 
-describe('parseProfile', () => {
-  it('parses a minimal profile and applies tool defaults', () => {
-    const profile = parseProfile({ toolkit: 'x', charter: 'do x' });
-    expect(profile.toolkit).toBe('x');
-    expect(profile.tools.mcp_servers).toEqual([]);
-    expect(profile.tools.resource_scopes).toEqual([]);
-    expect(profile.tools.permissions).toEqual({ allow: [], ask: [], deny: [] });
+describe('parseToolkit', () => {
+  it('parses a minimal toolkit and applies tool defaults', () => {
+    const toolkit = parseToolkit({ toolkit: 'x', charter: 'do x' });
+    expect(toolkit.toolkit).toBe('x');
+    expect(toolkit.tools.mcp_servers).toEqual([]);
+    expect(toolkit.tools.resource_scopes).toEqual([]);
+    expect(toolkit.tools.permissions).toEqual({ allow: [], ask: [], deny: [] });
   });
 
   it('accepts the legacy `role` key as the profile name (pre-rename files)', () => {
-    const profile = parseProfile({ role: 'x', charter: 'do x' });
-    expect(profile.toolkit).toBe('x');
+    const toolkit = parseToolkit({ role: 'x', charter: 'do x' });
+    expect(toolkit.toolkit).toBe('x');
   });
 
   it('accepts the ADR 272 `profile` key as the toolkit name (pre-296 files)', () => {
-    expect(parseProfile({ profile: 'x', charter: 'do x' }).toolkit).toBe('x');
+    expect(parseToolkit({ profile: 'x', charter: 'do x' }).toolkit).toBe('x');
   });
 
   it('prefers the newest key a hand-merged file carries (toolkit > profile > role)', () => {
     expect(
-      parseProfile({ toolkit: 'new', profile: 'mid', role: 'old', charter: 'c' }).toolkit,
+      parseToolkit({ toolkit: 'new', profile: 'mid', role: 'old', charter: 'c' }).toolkit,
     ).toBe('new');
-    expect(parseProfile({ profile: 'mid', role: 'old', charter: 'c' }).toolkit).toBe('mid');
+    expect(parseToolkit({ profile: 'mid', role: 'old', charter: 'c' }).toolkit).toBe('mid');
   });
 
   it('a legacy role-keyed value parses identically to its profile-keyed form', () => {
-    const legacy = parseProfile({
+    const legacy = parseToolkit({
       role: 'x',
       charter: ['a', 'b'],
       tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
     });
-    const renamed = parseProfile({
+    const renamed = parseToolkit({
       toolkit: 'x',
       charter: ['a', 'b'],
       tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
@@ -56,35 +56,35 @@ describe('parseProfile', () => {
   });
 
   it('joins an array charter into a single string (multi-line friendliness)', () => {
-    const profile = parseProfile({ toolkit: 'x', charter: ['line one', 'line two'] });
-    expect(profile.charter).toBe('line one\nline two');
+    const toolkit = parseToolkit({ toolkit: 'x', charter: ['line one', 'line two'] });
+    expect(toolkit.charter).toBe('line one\nline two');
   });
 
   it('defaults mcp_server args/env', () => {
-    const profile = parseProfile({
+    const toolkit = parseToolkit({
       toolkit: 'x',
       charter: 'c',
       tools: { mcp_servers: [{ name: 's', command: 'npx' }] },
     });
-    expect(profile.tools.mcp_servers[0]).toEqual({ name: 's', command: 'npx', args: [], env: {} });
+    expect(toolkit.tools.mcp_servers[0]).toEqual({ name: 's', command: 'npx', args: [], env: {} });
   });
 
   it('rejects an empty charter', () => {
-    expect(() => parseProfile({ toolkit: 'x', charter: '   ' })).toThrow();
+    expect(() => parseToolkit({ toolkit: 'x', charter: '   ' })).toThrow();
   });
 
-  it('rejects a missing profile name', () => {
-    expect(() => parseProfile({ charter: 'c' })).toThrow();
+  it('rejects a missing toolkit name', () => {
+    expect(() => parseToolkit({ charter: 'c' })).toThrow();
   });
 
   it('rejects a non-positive capacity', () => {
-    expect(() => parseProfile({ toolkit: 'x', charter: 'c', capacity: 0 })).toThrow();
+    expect(() => parseToolkit({ toolkit: 'x', charter: 'c', capacity: 0 })).toThrow();
   });
 });
 
 describe('built-in library', () => {
   it('ships the six seed archetypes, all valid', () => {
-    expect(Object.keys(BUILTIN_PROFILES).sort()).toEqual([
+    expect(Object.keys(BUILTIN_TOOLKITS).sort()).toEqual([
       'backend',
       'docs',
       'frontend',
@@ -95,28 +95,28 @@ describe('built-in library', () => {
   });
 
   it('generalist gets nothing extra — only a bare charter', () => {
-    expect(BUILTIN_PROFILES[GENERALIST]!.tools.mcp_servers).toEqual([]);
-    expect(BUILTIN_PROFILES[GENERALIST]!.charter.length).toBeGreaterThan(0);
+    expect(BUILTIN_TOOLKITS[GENERALIST]!.tools.mcp_servers).toEqual([]);
+    expect(BUILTIN_TOOLKITS[GENERALIST]!.charter.length).toBeGreaterThan(0);
   });
 
   it('backend references the supabase server with an ${ENV} secret, never inline', () => {
-    const s = BUILTIN_PROFILES['backend']!.tools.mcp_servers[0]!;
+    const s = BUILTIN_TOOLKITS['backend']!.tools.mcp_servers[0]!;
     expect(s.name).toBe('supabase');
     expect(Object.values(s.env)[0]).toMatch(/^\$\{[A-Z_]+\}$/);
   });
 });
 
-describe('loadProfile / listProfileNames', () => {
+describe('loadToolkit / listToolkitNames', () => {
   function tmp(): string {
     return mkdtempSync(join(tmpdir(), 'musterd-profile-'));
   }
 
   it('loads a built-in by name', () => {
-    expect(loadProfile(tmp(), 'reviewer').toolkit).toBe('reviewer');
+    expect(loadToolkit(tmp(), 'reviewer').toolkit).toBe('reviewer');
   });
 
   it('throws a friendly error for an unknown toolkit', () => {
-    expect(() => loadProfile(tmp(), 'nope')).toThrow(/unknown toolkit/);
+    expect(() => loadToolkit(tmp(), 'nope')).toThrow(/unknown toolkit/);
   });
 
   it('loads a user file from .musterd/profiles/<name>.json', () => {
@@ -126,7 +126,7 @@ describe('loadProfile / listProfileNames', () => {
       join(userToolkitsDir(dir), 'data.json'),
       JSON.stringify({ toolkit: 'data', charter: 'own the warehouse' }),
     );
-    expect(loadProfile(dir, 'data').charter).toBe('own the warehouse');
+    expect(loadToolkit(dir, 'data').charter).toBe('own the warehouse');
     expect(isBuiltin('data')).toBe(false);
   });
 
@@ -137,8 +137,8 @@ describe('loadProfile / listProfileNames', () => {
       join(legacyUserRolesDir(dir), 'data.json'),
       JSON.stringify({ role: 'data', charter: 'own the warehouse' }),
     );
-    expect(loadProfile(dir, 'data').toolkit).toBe('data');
-    expect(loadProfile(dir, 'data').charter).toBe('own the warehouse');
+    expect(loadToolkit(dir, 'data').toolkit).toBe('data');
+    expect(loadToolkit(dir, 'data').charter).toBe('own the warehouse');
   });
 
   it('.musterd/profiles/ wins over the legacy .musterd/roles/ for the same name', () => {
@@ -153,7 +153,7 @@ describe('loadProfile / listProfileNames', () => {
       join(legacyUserRolesDir(dir), 'data.json'),
       JSON.stringify({ role: 'data', charter: 'old home' }),
     );
-    expect(loadProfile(dir, 'data').charter).toBe('new home');
+    expect(loadToolkit(dir, 'data').charter).toBe('new home');
   });
 
   it('a user file overrides a built-in of the same name', () => {
@@ -163,7 +163,7 @@ describe('loadProfile / listProfileNames', () => {
       join(userToolkitsDir(dir), 'backend.json'),
       JSON.stringify({ toolkit: 'backend', charter: 'custom backend' }),
     );
-    expect(loadProfile(dir, 'backend').charter).toBe('custom backend');
+    expect(loadToolkit(dir, 'backend').charter).toBe('custom backend');
   });
 
   it('a legacy user file also overrides a built-in of the same name (unchanged behavior)', () => {
@@ -173,19 +173,19 @@ describe('loadProfile / listProfileNames', () => {
       join(legacyUserRolesDir(dir), 'backend.json'),
       JSON.stringify({ role: 'backend', charter: 'custom backend' }),
     );
-    expect(loadProfile(dir, 'backend').charter).toBe('custom backend');
+    expect(loadToolkit(dir, 'backend').charter).toBe('custom backend');
   });
 
   it('throws a friendly error for an invalid user file', () => {
     const dir = tmp();
     mkdirSync(userToolkitsDir(dir), { recursive: true });
     writeFileSync(join(userToolkitsDir(dir), 'bad.json'), '{ not json');
-    expect(() => loadProfile(dir, 'bad')).toThrow(/could not read toolkit/);
+    expect(() => loadToolkit(dir, 'bad')).toThrow(/could not read toolkit/);
     writeFileSync(join(userToolkitsDir(dir), 'bad2.json'), JSON.stringify({ toolkit: 'bad2' }));
-    expect(() => loadProfile(dir, 'bad2')).toThrow(/is invalid/);
+    expect(() => loadToolkit(dir, 'bad2')).toThrow(/is invalid/);
   });
 
-  it('lists built-ins ∪ user profiles (both dirs) with generalist first', () => {
+  it('lists built-ins ∪ user toolkit files (all homes) with generalist first', () => {
     const dir = tmp();
     mkdirSync(userToolkitsDir(dir), { recursive: true });
     mkdirSync(legacyUserRolesDir(dir), { recursive: true });
@@ -197,7 +197,7 @@ describe('loadProfile / listProfileNames', () => {
       join(legacyUserRolesDir(dir), 'olddata.json'),
       JSON.stringify({ role: 'olddata', charter: 'c' }),
     );
-    const names = listProfileNames(dir);
+    const names = listToolkitNames(dir);
     expect(names[0]).toBe(GENERALIST);
     expect(names).toContain('data');
     expect(names).toContain('olddata');
@@ -210,7 +210,7 @@ describe('loadProfile / listProfileNames', () => {
     const dir = tmp();
     mkdirSync(legacyUserRolesDir(dir), { recursive: true });
     writeFileSync(join(legacyUserRolesDir(dir), 'platform.toml'), 'summary = "a roster role"\n');
-    expect(listProfileNames(dir)).not.toContain('platform');
+    expect(listToolkitNames(dir)).not.toContain('platform');
   });
 
   it('still loads an ADR 272 user file from .musterd/profiles/<name>.json (profile-keyed)', () => {
@@ -220,8 +220,8 @@ describe('loadProfile / listProfileNames', () => {
       join(legacyUserProfilesDir(dir), 'data.json'),
       JSON.stringify({ profile: 'data', charter: 'own the warehouse' }),
     );
-    expect(loadProfile(dir, 'data').toolkit).toBe('data');
-    expect(loadProfile(dir, 'data').charter).toBe('own the warehouse');
+    expect(loadToolkit(dir, 'data').toolkit).toBe('data');
+    expect(loadToolkit(dir, 'data').charter).toBe('own the warehouse');
   });
 
   it('walks the homes newest-first: toolkits/ beats profiles/ beats roles/', () => {
@@ -234,7 +234,7 @@ describe('loadProfile / listProfileNames', () => {
       mkdirSync(home, { recursive: true });
       writeFileSync(join(home, 'data.json'), JSON.stringify({ [key]: 'data', charter }));
     }
-    expect(loadProfile(dir, 'data').charter).toBe('newest home');
+    expect(loadToolkit(dir, 'data').charter).toBe('newest home');
   });
 
   it('lists user files from all three homes', () => {
@@ -247,14 +247,14 @@ describe('loadProfile / listProfileNames', () => {
       mkdirSync(home, { recursive: true });
       writeFileSync(join(home, `${name}.json`), JSON.stringify({ [key]: name, charter: 'c' }));
     }
-    const names = listProfileNames(dir);
+    const names = listToolkitNames(dir);
     expect(names).toContain('newdata');
     expect(names).toContain('middata');
     expect(names).toContain('olddata');
   });
 
   it('lists only built-ins when there is no user dir at all', () => {
-    const names = listProfileNames(tmp());
+    const names = listToolkitNames(tmp());
     expect(names).toContain(GENERALIST);
     expect(names).not.toContain('data');
   });
@@ -284,7 +284,7 @@ describe('round-trip: built-ins render the identical workspace', () => {
   >;
 
   it('covers exactly the shipped built-ins', () => {
-    expect(Object.keys(fixture).sort()).toEqual(Object.keys(BUILTIN_PROFILES).sort());
+    expect(Object.keys(fixture).sort()).toEqual(Object.keys(BUILTIN_TOOLKITS).sort());
   });
 
   for (const name of [
@@ -297,14 +297,14 @@ describe('round-trip: built-ins render the identical workspace', () => {
   ] as const) {
     it(`${name}: identical settings, manifest, charter, and tool set`, () => {
       const expected = fixture[name]!;
-      const profile = BUILTIN_PROFILES[name]!;
-      expect(profile.charter).toBe(expected.charter);
-      expect(profile.capacity ?? null).toBe(expected.capacity);
-      expect(profile.tools.mcp_servers).toEqual(expected.mcpServers);
-      expect(profile.tools.resource_scopes).toEqual(expected.resourceScopes);
+      const toolkit = BUILTIN_TOOLKITS[name]!;
+      expect(toolkit.charter).toBe(expected.charter);
+      expect(toolkit.capacity ?? null).toBe(expected.capacity);
+      expect(toolkit.tools.mcp_servers).toEqual(expected.mcpServers);
+      expect(toolkit.tools.resource_scopes).toEqual(expected.resourceScopes);
 
       const dir = mkdtempSync(join(tmpdir(), `musterd-roundtrip-${name}-`));
-      const added = installSeatPermissions(dir, profile);
+      const added = installSeatPermissions(dir, toolkit);
       expect(added).toEqual(expected.addedPermissions);
       const settings = JSON.parse(
         readFileSync(join(dir, '.claude', 'settings.local.json'), 'utf8'),
@@ -312,9 +312,9 @@ describe('round-trip: built-ins render the identical workspace', () => {
       expect(settings).toEqual(expected.settings);
 
       writeProvisionManifest(dir, {
-        profile: profile.toolkit,
+        profile: toolkit.toolkit,
         harness: 'claude-code',
-        mcpServers: profile.tools.mcp_servers.map((s) => s.name),
+        mcpServers: toolkit.tools.mcp_servers.map((s) => s.name),
         permissions: added,
       });
       const rawManifest = JSON.parse(
@@ -329,7 +329,7 @@ describe('round-trip: built-ins render the identical workspace', () => {
       expect(compat).toEqual(expected.manifest);
 
       // And the typed reader surfaces the new field.
-      expect(readProvisionManifest(dir)?.profile).toBe(profile.toolkit);
+      expect(readProvisionManifest(dir)?.profile).toBe(toolkit.toolkit);
     });
   }
 
@@ -355,8 +355,8 @@ describe('round-trip: built-ins render the identical workspace', () => {
       join(userToolkitsDir(dirNew), 'data.json'),
       JSON.stringify({ toolkit: 'data', ...raw }),
     );
-    const fromLegacy = loadProfile(dirLegacy, 'data');
-    const fromNew = loadProfile(dirNew, 'data');
+    const fromLegacy = loadToolkit(dirLegacy, 'data');
+    const fromNew = loadToolkit(dirNew, 'data');
     expect(fromLegacy).toEqual(fromNew);
 
     const addedLegacy = installSeatPermissions(dirLegacy, fromLegacy);

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { inspectSeatPermissions, installSeatPermissions, STANDARD_FLOOR } from './permissions.js';
-import { BUILTIN_PROFILES } from './profile.js';
+import { BUILTIN_TOOLKITS } from './toolkit.js';
 
 /**
  * ADR 261 — role permission profiles. Three claims under test:
@@ -25,7 +25,7 @@ const CANONICAL_RULE =
 
 describe('canonical rule syntax (ADR 261 decision 1)', () => {
   it('every builtin role permission entry is a canonical Claude Code rule', () => {
-    for (const [name, role] of Object.entries(BUILTIN_PROFILES)) {
+    for (const [name, role] of Object.entries(BUILTIN_TOOLKITS)) {
       const p = role.tools.permissions;
       for (const entry of [...p.allow, ...p.ask, ...p.deny]) {
         expect(entry, `${name}: '${entry}' is not a canonical Claude Code rule`).toMatch(
@@ -59,7 +59,7 @@ describe('the standard floor (ADR 261 decision 2)', () => {
 
 describe('the read-only ceiling (ADR 261 decision 3)', () => {
   it('read-only is a builtin whose ceiling is made of deny entries', () => {
-    const ro = BUILTIN_PROFILES['read-only'];
+    const ro = BUILTIN_TOOLKITS['read-only'];
     expect(ro).toBeDefined();
     const deny = ro!.tools.permissions.deny;
     for (const tool of ['Edit', 'Write', 'NotebookEdit']) {
@@ -133,7 +133,7 @@ describe('installSeatPermissions (ADR 261 decision 4)', () => {
   });
 
   it('layers a role ceiling over the floor: read-only deny entries land alongside the floor allows', () => {
-    const added = installSeatPermissions(dir, BUILTIN_PROFILES['read-only']);
+    const added = installSeatPermissions(dir, BUILTIN_TOOLKITS['read-only']);
     const s = readSettings();
     expect(s.permissions?.deny).toEqual(expect.arrayContaining(['Edit', 'Write']));
     // Deny-wins-allows-kept (nick, 2026-08-13): the floor allows stay present and inert.
@@ -217,7 +217,7 @@ describe('inspectSeatPermissions (ADR 261 increment 2)', () => {
   });
 
   it('reports a surplus allow that the file own deny already makes inert — never strips it', () => {
-    installSeatPermissions(dir, BUILTIN_PROFILES['read-only']);
+    installSeatPermissions(dir, BUILTIN_TOOLKITS['read-only']);
     // A human approved Write at a prompt before the ceiling arrived. Decision 5: it stays, and it
     // is reported for a human to resolve — deleting approved state on a schedule nobody chose is
     // the same silent misattribution this ADR exists to end.

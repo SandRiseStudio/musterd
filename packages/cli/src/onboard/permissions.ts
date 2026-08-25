@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { Profile } from './profile.js';
+import type { Toolkit } from './toolkit.js';
 
 /**
  * ADR 261 — the standard floor and the seat-dir permission installer.
@@ -93,12 +93,12 @@ interface SeatSettings {
 const LISTS: (keyof PermissionLists)[] = ['allow', 'ask', 'deny'];
 
 /**
- * Merge the standard floor — plus a profile's permission lists, when the seat has one — into
+ * Merge the standard floor — plus a toolkit's permission lists, when the seat has one — into
  * `<dir>/.claude/settings.local.json`. Dir-aware because `musterd agent` provisions a worktree
  * that is never `process.cwd()`.
  *
  * Merge-never-clobber (the ADR 255 posture): hooks, unknown keys, and every entry outside the
- * profile's own vocabulary survive verbatim — the shape of the 2026-08-13 manual unblock (scoped
+ * toolkit's own vocabulary survive verbatim — the shape of the 2026-08-13 manual unblock (scoped
  * allow added, five hook groups preserved) is what this must produce mechanically. Deny is
  * authoritative and always written; surplus user allows are kept, not stripped (deny outranks
  * allow, so they are inert — nick's call, 2026-08-13).
@@ -106,7 +106,7 @@ const LISTS: (keyof PermissionLists)[] = ['allow', 'ask', 'deny'];
  * Returns only the entries NEWLY added per list, so the ADR 030 manifest can record an exact
  * reversal — and so idempotence is observable: a second run returns empty lists.
  */
-export function installSeatPermissions(dir: string, profile?: Profile): PermissionLists {
+export function installSeatPermissions(dir: string, toolkit?: Toolkit): PermissionLists {
   const path = join(dir, '.claude', 'settings.local.json');
   let settings: SeatSettings = {};
   if (existsSync(path)) {
@@ -119,9 +119,9 @@ export function installSeatPermissions(dir: string, profile?: Profile): Permissi
     }
   }
   const wanted: PermissionLists = {
-    allow: [...STANDARD_FLOOR.allow, ...(profile?.tools.permissions.allow ?? [])],
-    ask: [...(profile?.tools.permissions.ask ?? [])],
-    deny: [...(profile?.tools.permissions.deny ?? [])],
+    allow: [...STANDARD_FLOOR.allow, ...(toolkit?.tools.permissions.allow ?? [])],
+    ask: [...(toolkit?.tools.permissions.ask ?? [])],
+    deny: [...(toolkit?.tools.permissions.deny ?? [])],
   };
   settings.permissions ??= {};
   const added: PermissionLists = { allow: [], ask: [], deny: [] };

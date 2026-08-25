@@ -17,7 +17,7 @@ import {
   RETIRED_SURFACE_ENV,
 } from '../mcpEntry.js';
 import { STANDARD_FLOOR } from '../permissions.js';
-import { BUILTIN_PROFILES, parseProfile, toolkitHomes, type Profile } from '../profile.js';
+import { BUILTIN_TOOLKITS, parseToolkit, toolkitHomes, type Toolkit } from '../toolkit.js';
 import { nodeExec, type ExecSeam, type FsSeam, type HarnessContext } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
@@ -959,26 +959,28 @@ function patchHooks(
 
 /** The desired permission entries: the ADR 261 floor plus the provisioned toolkit's permissions. */
 function permissionsPayload(ctx: HarnessContext): ProvisionPermissions {
-  let role: Profile | undefined;
+  let toolkit: Toolkit | undefined;
   const provisioning = loadProvisioning(ctx.worktreeRoot, ctx.fs);
-  const roleName = provisioning.kind === 'valid' ? provisioning.value.toolkit : '';
-  if (roleName !== '') {
+  const toolkitName = provisioning.kind === 'valid' ? provisioning.value.toolkit : '';
+  if (toolkitName !== '') {
     for (const dir of toolkitHomes(ctx.worktreeRoot)) {
-      const raw = ctx.fs.readFile(join(dir, `${roleName}.json`));
+      const raw = ctx.fs.readFile(join(dir, `${toolkitName}.json`));
       if (raw === null) continue;
       try {
-        role = parseProfile(JSON.parse(raw));
+        toolkit = parseToolkit(JSON.parse(raw));
         break;
       } catch {
-        role = undefined; // an unreadable profile never blocks the floor
+        toolkit = undefined; // an unreadable toolkit never blocks the floor
       }
     }
-    role ??= BUILTIN_PROFILES[roleName];
+    toolkit ??= BUILTIN_TOOLKITS[toolkitName];
   }
   return {
-    allow: [...new Set([...STANDARD_FLOOR.allow, ...(role?.tools.permissions.allow ?? [])])].sort(),
-    ask: [...new Set([...STANDARD_FLOOR.ask, ...(role?.tools.permissions.ask ?? [])])].sort(),
-    deny: [...new Set([...STANDARD_FLOOR.deny, ...(role?.tools.permissions.deny ?? [])])].sort(),
+    allow: [
+      ...new Set([...STANDARD_FLOOR.allow, ...(toolkit?.tools.permissions.allow ?? [])]),
+    ].sort(),
+    ask: [...new Set([...STANDARD_FLOOR.ask, ...(toolkit?.tools.permissions.ask ?? [])])].sort(),
+    deny: [...new Set([...STANDARD_FLOOR.deny, ...(toolkit?.tools.permissions.deny ?? [])])].sort(),
   };
 }
 

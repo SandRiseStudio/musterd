@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
-import { legacyUserProfilesDir, legacyUserRolesDir, userToolkitsDir } from '../onboard/profile.js';
+import { legacyUserProfilesDir, legacyUserRolesDir, userToolkitsDir } from '../onboard/toolkit.js';
 import { toolkitCommand } from './toolkit.js';
 
 let cwd: string;
