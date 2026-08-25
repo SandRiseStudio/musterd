@@ -763,6 +763,8 @@ export function createActors(): Actors {
     },
     walk(from, req) {
       if (!homes.has(from) || !homes.has(req.to) || from === req.to || exiting.has(from)) return false;
+      // dnd is do-not-interrupt made physical (§4 lane 4): nobody walks over to them.
+      if (live.get(req.to)?.dnd) return false;
       const inflight = walks.get(from);
       if (inflight && (inflight.ambient || inflight.yield)) {
         // A real act preempts a low-priority stroll (or its yield-home) *instantly* — it must never queue

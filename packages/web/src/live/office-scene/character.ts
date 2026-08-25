@@ -140,7 +140,9 @@ export function drawCharacter(
   const { skel: k, node, dir, size } = o;
   const px = projector(o.lx, o.ly, dir, fit, size, o.heading);
   const u = fit.scale * size; // one logical unit, in screen px, at this character's size
-  const look = o.look ?? appearanceOf(node);
+  // dnd wears the headphones whatever their hashed accessory is — the room-readable signal (§4).
+  const look =
+    o.look ?? (node.dnd ? { ...appearanceOf(node), accessory: 'headphones' as const } : appearanceOf(node));
   const acc = node.color; // the identity hue — the top, and only the top
   const accDark = hslL(acc, 0.72);
 

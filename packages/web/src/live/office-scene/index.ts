@@ -562,6 +562,14 @@ export function mountOffice(
         plateRule.setAttribute('aria-hidden', 'true');
         plate.appendChild(plateRule);
 
+        if (node.dnd) {
+          // dnd is prominent on the COLLAPSED plate (presence-honesty §3): same slot grammar as the
+          // service tag, filled pill in the warn ink — visible at both scales without expanding.
+          const dndTag = document.createElement('span');
+          dndTag.className = 'lc-gl-label__dnd';
+          dndTag.textContent = 'dnd';
+          plate.appendChild(dndTag);
+        }
         if (node.service) {
           // A service seat has no model to attest (ADR 232 — it is pure code), so the provider
           // slot would render the unknown-"?" mark and read as a broken attestation. Say what it

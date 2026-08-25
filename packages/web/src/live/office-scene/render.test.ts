@@ -70,6 +70,7 @@ function node(name: string, activity: OfficeNode['activity']): OfficeNode {
     workSource: null,
     laneState: null,
     moreLanes: 0,
+    dnd: false,
     offline_reason: null,
     last_seen_at: null,
   };
@@ -214,6 +215,16 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
 
   it('a left_team member leaves no desk and no plate', () => {
     expect(bakeTexts(offlineNode({ offline_reason: 'left_team' }))).not.toContain('sleeper');
+  });
+
+  it('an away member\'s desk says stepped away — declared absence, desk kept (\u00a74 lane 4)', () => {
+    const texts = bakeTexts({ ...node('sleeper', 'working'), presence: 'away', posture: 'away' });
+    expect(texts).toContain('sleeper');
+    expect(texts).toContain('stepped away');
+  });
+
+  it('an offline owner\'s plate does not claim stepped away', () => {
+    expect(bakeTexts(offlineNode())).not.toContain('stepped away');
   });
 
   it('a present member\'s desk carries no baked plate — floating labels stay present-only', () => {
