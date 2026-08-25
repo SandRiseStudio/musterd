@@ -12,7 +12,7 @@ import {
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
-import { findBinding, findWorkspaceSpec, saveBinding } from '../config.js';
+import { findBinding, findWorkspaceSpec, requireUsableBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
 import { openActionNeeded } from '../render/rows.js';
@@ -25,7 +25,7 @@ import {
   localSessionLiveness,
   type LocalSessionLiveness,
 } from '../session/liveness.js';
-import { findWorkspaceDir, resolveRead } from './helpers.js';
+import { findWorkspaceDir } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
 
 /**
@@ -138,33 +138,61 @@ async function captureCommand(event: 'start' | 'end', parsed: Parsed): Promise<n
       2,
     );
   }
-  await captureSession(event, parseHookPayload(await readStdin()));
+  const payload = parseHookPayload(await readStdin());
+  await captureSession(event, payload);
   if (event === 'start') {
-    const orientation = await emitSessionOrientation();
+    // The orientation resolves from the SAME anchored dir capture writes to — never bare
+    // process.cwd() (miley's #1072 review: the ADR 018 clobber shape, read edition — a mis-cwd'd
+    // hook must not emit another seat's inbox and memory headline into this session's context).
+    const orientation = await emitSessionOrientation(resolveCaptureDir(payload));
     if (orientation) process.stdout.write(orientation + '\n');
   }
   return 0;
 }
 
-type OrientationFetcher = () => Promise<SessionOrientationInput | null>;
+/** The one derivation of "which workspace does this hook payload belong to": explicit
+ *  MUSTERD_BINDING wins, else walk up from the hook-reported cwd. Shared by capture (write side)
+ *  and the orientation (read side) so the two can never disagree. */
+function resolveCaptureDir(payload: HookPayload): string | null {
+  const explicit = process.env['MUSTERD_BINDING'];
+  return explicit
+    ? dirname(dirname(explicit))
+    : (findWorkspaceDir(payload.cwd ?? process.cwd()) ?? null);
+}
 
-/** The default fetcher: three read-only GETs under the folder's bound-seat identity. Only an
- *  explicit actor (a bound seat / env) has an orientation — never an ambient global-config read
- *  (ADR 036), the same gate `musterd nudge` applies. */
-async function defaultOrientationFetcher(): Promise<SessionOrientationInput | null> {
-  const { http, team, identity, explicit } = resolveRead({});
-  if (!explicit || !identity) return null;
+type OrientationFetcher = (dir: string | null) => Promise<SessionOrientationInput | null>;
+
+/** The default fetcher: three read-only GETs under the ANCHORED workspace's bound-seat identity —
+ *  the binding at `dir`, never the ambient cwd's (ADR 018/036). A folder without a seat-pinned,
+ *  keyed binding has no orientation. */
+async function defaultOrientationFetcher(
+  dir: string | null,
+): Promise<SessionOrientationInput | null> {
+  const binding = dir ? requireUsableBinding(dir) : null;
+  const seat = binding ? bindingSeat(binding) : undefined;
+  if (!binding || !seat || !binding.agent_key) return null;
+  const team = binding.team;
+  // A CLI act is intrinsically `cli` (ADR 286), matching gather()'s binding branch.
+  const http = new HttpClient({
+    server: binding.server,
+    key: binding.agent_key,
+    seat,
+    surface: 'cli',
+    ...(binding.model !== undefined ? { model: binding.model } : {}),
+  });
   const [inboxRes, brief, memory] = await Promise.all([
     http.inbox(team, { unread: true }),
     http.next(team),
     http.getMemoryEnvelope(team).catch(() => undefined), // absent memory is a normal state
   ]);
-  const waiting = openActionNeeded(inboxRes.messages, identity.name, inboxRes.answered ?? []).map(
-    (m) => ({ act: m.act, from: m.from, id: m.id }),
-  );
+  const waiting = openActionNeeded(inboxRes.messages, seat, inboxRes.answered ?? []).map((m) => ({
+    act: m.act,
+    from: m.from,
+    id: m.id,
+  }));
   const now = Date.now();
   return {
-    seat: identity.name,
+    seat,
     team,
     ...(memory
       ? {
@@ -189,11 +217,12 @@ async function defaultOrientationFetcher(): Promise<SessionOrientationInput | nu
  * {@link composeSessionOrientation}; this layer only decides silence.
  */
 export async function emitSessionOrientation(
+  dir: string | null,
   fetch: OrientationFetcher = defaultOrientationFetcher,
 ): Promise<string | null> {
   if (process.env['MUSTERD_PROVENANCE'] === 'wake') return null;
   try {
-    const input = await fetch();
+    const input = await fetch(dir);
     return input ? composeSessionOrientation(input) : null;
   } catch {
     return null; // hook contract: a failing orientation must never disturb the session it rides
@@ -321,10 +350,7 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // Resolve the workspace: an explicit MUSTERD_BINDING (the harness env rides through the hook)
   // wins, else walk up from the hook-reported cwd. Bare process.cwd() is only the last resort —
   // the hook one-liner cd's to CLAUDE_PROJECT_DIR, so it agrees with `payload.cwd` anyway.
-  const explicit = process.env['MUSTERD_BINDING'];
-  const dir = explicit
-    ? dirname(dirname(explicit))
-    : findWorkspaceDir(payload.cwd ?? process.cwd());
+  const dir = resolveCaptureDir(payload);
   if (!dir) return; // not a musterd workspace — nothing to capture
 
   const binding = findBinding(dir, {});
@@ -1005,7 +1031,13 @@ function orientStampPath(dir: string): string {
   return join(dir, '.musterd', 'orient-stamp.json');
 }
 
-/** Due iff this is a seat workspace with a captured session the stamp does not name. */
+/** Due iff this is a seat workspace with a captured session the stamp does not name.
+ *
+ *  Known first-turn race (miley's #1072 review note): at SessionStart the nudge hook and the
+ *  capture hook are unordered — if the nudge reads first, it compares the stamp against the
+ *  PREVIOUS session's capture and can stay quiet on turn 0. Deliberately left: the per-turn
+ *  UserPromptSubmit repeat self-heals on the next prompt, which is exactly why the repeat exists
+ *  (the label-nudge lesson). The stamp key is race-free from turn 1 onward. */
 export function orientNudgeDue(dir: string | null): boolean {
   if (!dir) return false;
   const binding = findBinding(dir, {});

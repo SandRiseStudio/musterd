@@ -65,7 +65,7 @@ describe('composeSessionOrientation', () => {
         from: 'stanley',
         id: `01M0X4012RJ3C84QJN9GBKAH${String(i % 10)}T`,
       })),
-      incidents: [{ id: '01M0X4012RJ3C84QJN9GBKAH2T' }],
+      incidents: Array.from({ length: 40 }, () => ({ id: '01M0X4012RJ3C84QJN9GBKAH2T' })),
       owed: Array.from({ length: 9 }, () => ({
         laneId: '01M0GVP2DP46R38R5X1FG1YCN1',
         waitedMs: 3_600_000,
@@ -74,6 +74,10 @@ describe('composeSessionOrientation', () => {
     const out = composeSessionOrientation(many);
     expect(out).not.toBeNull();
     expect(out!.split('\n').length).toBeLessThanOrEqual(15);
+    // miley's #1072 note: the per-item axis is bounded too — incidents slice to 4 with a count.
+    const incLine = out!.split('\n').find((l) => l.startsWith('incidents:'))!;
+    expect(incLine).toContain('incidents: 40 —');
+    expect(incLine.length).toBeLessThan(200);
   });
 
   it('returns null when there is nothing to say', () => {

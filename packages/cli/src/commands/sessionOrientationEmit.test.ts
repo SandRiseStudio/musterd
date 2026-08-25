@@ -9,18 +9,18 @@ describe('emitSessionOrientation', () => {
   it('is silent under wake provenance — the fetcher is never even called', async () => {
     process.env['MUSTERD_PROVENANCE'] = 'wake';
     expect(
-      await emitSessionOrientation(() => {
+      await emitSessionOrientation('/tmp/ws-a', () => {
         throw new Error('must not fetch');
       }),
     ).toBeNull();
   });
 
   it('is silent when the folder has no bound seat (fetcher resolves null)', async () => {
-    expect(await emitSessionOrientation(() => Promise.resolve(null))).toBeNull();
+    expect(await emitSessionOrientation('/tmp/ws-a', () => Promise.resolve(null))).toBeNull();
   });
 
   it('renders the orientation from fetched parts', async () => {
-    const out = await emitSessionOrientation(() =>
+    const out = await emitSessionOrientation('/tmp/ws-a', () =>
       Promise.resolve({
         seat: 'dolly',
         team: 'revive',
@@ -36,6 +36,17 @@ describe('emitSessionOrientation', () => {
   });
 
   it('swallows fetcher failure (hook contract: never fail, never noise)', async () => {
-    expect(await emitSessionOrientation(() => Promise.reject(new Error('daemon down')))).toBeNull();
+    expect(
+      await emitSessionOrientation('/tmp/ws-a', () => Promise.reject(new Error('daemon down'))),
+    ).toBeNull();
+  });
+
+  it("threads the ANCHORED workspace dir into the fetcher — never bare cwd (miley's #1072 review: a mis-cwd'd hook must not read another seat's inbox)", async () => {
+    let seen: string | null = 'unset' as string | null;
+    await emitSessionOrientation('/tmp/anchored-ws', (dir) => {
+      seen = dir;
+      return Promise.resolve(null);
+    });
+    expect(seen).toBe('/tmp/anchored-ws');
   });
 });

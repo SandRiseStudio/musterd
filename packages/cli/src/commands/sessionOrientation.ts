@@ -76,8 +76,13 @@ export function composeSessionOrientation(
     lines.push(`waiting: ${String(d.waiting.length)} ${noun}${detail ? ` — ${detail}` : ''}`);
   }
   lines.push(
+    // Sliced like waiting/owed (miley's #1072 review note): the 15-line cap bounds the wrong
+    // axis — a joined id list grows per ITEM, so 40 unsliced incidents is one ~1.1k-char line.
     incidents.length > 0
-      ? `incidents: ${incidents.map((i) => i.id).join(', ')}`
+      ? `incidents: ${String(incidents.length)} — ${incidents
+          .slice(0, 4)
+          .map((i) => i.id)
+          .join(', ')}`
       : 'incidents: none',
   );
   if (owed.length > 0) {
