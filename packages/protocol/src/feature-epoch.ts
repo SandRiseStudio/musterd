@@ -72,5 +72,10 @@
 // Legacy accepted on read everywhere (schema preprocess), and the full Lane shape mirrors the old
 // key so an epoch-13 client parses a new daemon's lanes unchanged; it simply keeps writing the
 // legacy token, which the daemon adopts. The mirror drops in a later epoch, on-touch.
-export const FEATURE_EPOCH = 14 as const;
+// Epoch 15 — ADR 321: `opencode` joins the Surface enum as a first-class harness. The daemon at
+// this epoch stores opencode presences (migration 44 widens the CHECK); an older daemon refuses
+// the presence INSERT server-side — the exact enum-vs-storage drift shape migration 39 closed for
+// `musterd` — so an opencode seat must not attest that surface against one. An older web bundle
+// renders the row under the generic label.
+export const FEATURE_EPOCH = 15 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

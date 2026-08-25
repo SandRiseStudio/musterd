@@ -126,19 +126,26 @@ an opencode workspace stop degrading through the `other` path; existing ledgers 
 
 `enumerateOpencodeSessions` (`packages/cli/src/session/enumerate.ts`) shells
 `opencode session list --format json` and parses the output through a strict
-`OpencodeSessionSchema = { id, title, updated, created, directory }` (hard rule 4 — external
-input parsed at the boundary, exactly like codex rollouts per ADR 216). Attribution matches
-`directory` against the workspace root by path equality/prefix — no slug decoding, because
-opencode hands us the absolute path directly. Liveness inherits the ADR 166 window semantics
-unchanged (`LOCAL_SESSION_LIVE_MS`); the scanner-selection branch in `liveness.ts:120-128` gains
-its `opencode` case and **loses its Claude fallback for unknown harnesses becoming wrong-by-
-default** — unknown harnesses keep slot liveness, which is honest, instead of borrowing Claude
-transcripts, which is not.
+`OpencodeSessionSchema = { id, updated, directory }` (hard rule 4 — external input parsed at the
+boundary, exactly like codex rollouts per ADR 216; `title`/`projectId`/`created` are display
+data and never parsed). Attribution matches `directory` against the workspace root via
+`findWorkspaceDir`'s walk-up — no slug decoding, because opencode hands us the absolute
+path directly. Liveness inherits the ADR 166 window semantics unchanged
+(`LOCAL_SESSION_LIVE_MS`); the scanner-selection branch in `liveness.ts` gains its `opencode`
+case so an opencode seat's verdicts come from its own harness's rows, never another harness's
+transcripts.
 
 We deliberately do **not** read opencode's storage directly (`~/.local/share/opencode/
-opencode.db`): the schema is private, WAL-contended with live sessions, and version-coupled to
-the harness release. The CLI JSON surface is slower and coarser but is the stable public contract;
+opencode.db`): the schema is private, WAL-contended with live sessions, and version-coupled
+to the harness release. The CLI JSON surface is slower and coarser but is the stable public contract;
 the codex precedent (ADR 216) chose the same trade and never regretted it.
+
+One boundary drawn deliberately narrower than first drafted: the selection chain's terminal
+**Claude fallback stays for genuinely unknown harnesses**, because "unknown" there includes the
+legacy pre-ADR-281 captures that declare no harness at all — for those, the Claude scanner is the
+best available evidence, and the fallback is the documented historical contract (`liveness.ts`).
+Opencode seats stop paying for it the moment their harness name routes to §6's scanner; fixing
+the fallback itself for every future harness is its own decision, not smuggled into this one.
 
 ### 7. Wake backend: fresh and resume rows
 
@@ -180,8 +187,17 @@ heartbeat-side reconciliation proves too coarse in practice, and then as its own
   examples need no edit (they cite concrete surfaces, not the closed list).
 - An opencode seat that never runs `musterd onboard` behaves exactly as today — `other`,
   slot-liveness, unwakeable. First-class status is opt-in like every harness's.
-- _Implementation note (dated): to be appended here when the code lands, per the ADR 251
-  convention._
+- _Implementation note (dated 2026-08-25): all six seams landed on this branch._ The protocol enum
+  widened (epoch 15), migration 44 rebuilt the presence CHECK with `model_source` riding the
+  enumerated column list, and the adapter / fragment slot / enumerator / wake backend shipped with
+  31 new unit tests (fixture-binary injection for the CLI boundary, memory-Fs containers for the
+  reconciler). Two decisions moved during implementation, both recorded here rather than silently:
+  §6's Claude-fallback clause was narrowed to what the code actually needed — the fallback stays
+  for genuinely unknown harnesses because "unknown" includes legacy pre-ADR-281 captures that
+  declare no harness, for whom the Claude scanner is the best available evidence; and residency enrollment gained
+  an opencode capability preflight (`opencodeBin.ts`, mirroring codex's) that §7 did not name but
+  whose absence would have enrolled un-wakeable seats — the exact failure the codex probe exists
+  to prevent.
 
 ## Observability & Evaluation
 

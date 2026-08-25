@@ -919,6 +919,50 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 321 §2: `opencode` joins the Surface enum as a first-class harness. Same drift shape
+    // migration 39 closed for `musterd`: the protocol enum widened (zod accepts the value) while
+    // this table's CHECK still refused it, so an opencode claim would throw inside the WS handler —
+    // loud since the ADR 251 fix, but still broken. SQLite cannot ALTER a CHECK, so: copy-drop-
+    // rename rebuild, columns enumerated because positional copy transposes silently (v39's rule).
+    // `model_source` (migration 42) postdates v39's column list and must ride along.
+    version: 44,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE presence_new (
+          id            TEXT PRIMARY KEY,
+          member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          surface       TEXT NOT NULL CHECK (surface IN
+                          ('cli','claude-code','codex','opencode','cursor','web','ios','slack',
+                           'other','musterd')),
+          status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
+          conn_id       TEXT,
+          last_seen_at  INTEGER NOT NULL,
+          created_at    INTEGER NOT NULL,
+          held_until    INTEGER,
+          provenance    TEXT,
+          workspace     TEXT,
+          driver        TEXT,
+          model         TEXT,
+          build         TEXT,
+          epoch         INTEGER,
+          wake_lease    TEXT,
+          model_source  TEXT
+        );
+        INSERT INTO presence_new (id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                                  held_until, provenance, workspace, driver, model, build, epoch,
+                                  wake_lease, model_source)
+          SELECT id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                 held_until, provenance, workspace, driver, model, build, epoch,
+                 wake_lease, model_source
+          FROM presence;
+        DROP TABLE presence;
+        ALTER TABLE presence_new RENAME TO presence;
+        CREATE INDEX idx_presence_member ON presence(member_id);
+        CREATE INDEX idx_presence_last_seen ON presence(last_seen_at);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

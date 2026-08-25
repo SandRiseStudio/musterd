@@ -13,6 +13,7 @@ import {
 import { flagStr, fmtBytes, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { resolveClaudeBin } from '../claudeBin.js';
 import { codexCapability, resolveCodexBin } from '../codexBin.js';
+import { opencodeCapability } from '../opencodeBin.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
@@ -276,6 +277,15 @@ async function onCommand(parsed: Parsed): Promise<number> {
     if (!capability.supported) {
       throw new CliError(
         `Codex can coordinate manually but cannot enroll for daemon wake: ${capability.reason}`,
+        2,
+      );
+    }
+  }
+  if (harness === 'opencode') {
+    const capability = await opencodeCapability();
+    if (!capability.supported) {
+      throw new CliError(
+        `OpenCode can coordinate manually but cannot enroll for daemon wake: ${capability.reason}`,
         2,
       );
     }
