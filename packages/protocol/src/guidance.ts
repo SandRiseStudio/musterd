@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 16;
+export const GUIDANCE_CONTENT_VERSION = 17;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -31,6 +31,9 @@ export const SKILL_MCP_TOOLS = [
   'team_memory_save',
   'team_memory_read',
   'team_next',
+  // ADR 209, wired by the session-orientation spec 2026-08-25 §C: the wake templates name it, so
+  // a woken session must find it in the skill's tool reference.
+  'team_wake_context',
   'lane_open',
   'lane_claim',
   'lane_release',
@@ -450,6 +453,47 @@ export function renderNudgeRelayFrontmatter(): string {
       'returns a delivery_hint (recipient live on this machine). Use immediately after any ' +
       'team_send whose result carries a delivery_hint; sends the hinted one-liner verbatim over ' +
       'the harness session-messaging tools.',
+    '---',
+  ].join('\n');
+}
+
+/**
+ * The orient skill (spec 2026-08-25-session-orientation-design.md §B): what a seat session does
+ * when the injected orientation block or the per-turn orient nudge says "orient now". Tier 1
+ * (directed acts, incidents) is HANDLED unprompted; tier 2 (owed reviews and the rest) is
+ * surfaced to the human — the autonomy line is deliberate and the spec's §E owns moving it.
+ */
+export function renderOrientSkill(): string {
+  return [
+    '# Orient this seat session',
+    '',
+    'Run at session start in a seat worktree when the orient nudge (or the injected orientation',
+    'block) says so. Orientation ends with a stamp; the nudge repeats every turn until then.',
+    '',
+    '1. `team_inbox_check` — your first team_* call; it claims the seat and shows what waits.',
+    '2. If the orientation block showed a memory headline, `team_memory_read` and pick up where',
+    '   the previous session left off.',
+    '3. **Handle now (tier 1):** every directed ask / request_help / steer waiting on this seat —',
+    '   answer it (`team_send` accept/decline/reply as the act demands). Open incident lanes:',
+    '   read the lane, post one status_update with what you found. Do not start other work into',
+    '   a shared red.',
+    '4. **Surface, do not handle (tier 2):** owed reviews, carried lanes, up-next — one compact',
+    '   readout for the human. Do not claim new work.',
+    "5. `team_send {act:'status_update'}` — one line — then run `musterd session orient-stamp`.",
+    '6. Stop and wait for direction. Autonomous pickup of new work is deliberately NOT this',
+    '   skill (session-orientation spec §E).',
+    '',
+  ].join('\n');
+}
+
+/** Frontmatter for {@link renderOrientSkill} on a harness that gates skills on a description. */
+export function renderOrientFrontmatter(): string {
+  return [
+    '---',
+    'name: musterd-orient',
+    'description: Orient a seat session at start: inbox, seat memory, handle directed asks and ' +
+      'incidents unprompted, surface the rest, then stamp oriented. Use when the injected ' +
+      'orientation block or the orient nudge appears, before other work.',
     '---',
   ].join('\n');
 }

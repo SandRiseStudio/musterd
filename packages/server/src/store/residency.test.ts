@@ -208,6 +208,7 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     expect(order.composed_line).toContain('"nick"');
     expect(order.composed_line).toContain('"Ada"');
     expect(order.composed_line).not.toContain(' x ');
+    expect(order.composed_line).toContain('team_wake_context');
     expect(order.expires_at).toBeGreaterThan(Date.now());
 
     // The lease decision is audited (actor null — a machine decision).
@@ -808,6 +809,7 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
     expect(orders[0]!.bounds?.timeout_ms).toBe(WAKE_POLICY_DEFAULTS.work_timeout_ms);
     expect(orders[0]!.composed_line).toContain(lane.id);
     expect(orders[0]!.composed_line).not.toContain(lane.title);
+    expect(orders[0]!.composed_line).toContain('team_wake_context');
     const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
     expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
       derivation: 'work_order',
@@ -886,6 +888,7 @@ describe('claimWakeLeases — work_order derivation (ADR 199 dispatch loop)', ()
     expect(orders[0]!.composed_line).toContain(lane.id);
     expect(orders[0]!.composed_line).toContain('is yours');
     expect(orders[0]!.composed_line).not.toContain('secret title');
+    expect(orders[0]!.composed_line).toContain('team_wake_context');
   });
 
   it('does not promote handoff to work_order when loops.dispatch is off (reply doorbell remains)', async () => {

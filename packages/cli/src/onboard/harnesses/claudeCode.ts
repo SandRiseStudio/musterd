@@ -138,8 +138,10 @@ function removePermissions(perms: ProvisionPermissions): void {
  *   gitignored `binding.json` so a wake can `--resume` the seat's transcript instead of starting
  *   cold. Project-local (unlike the orientation SessionStart): capture is a per-seat-workspace
  *   fact, drift-checkable per folder, and a wake spawn runs with cwd = the workspace so the local
- *   hook fires and captures the minted session — capture is self-maintaining. Both are `>/dev/null`
- *   silent: SessionStart hook stdout is injected into model context, and capture must add zero.
+ *   hook fires and captures the minted session — capture is self-maintaining. SessionEnd stays
+ *   `>/dev/null` silent; the capture hook lets stdout through, because SessionStart hook stdout is
+ *   injected into model context and that seam now carries the orientation block (spec 2026-08-25):
+ *   capture itself still adds zero — the orientation is the one deliberate, bounded emission.
  */
 export const NOTIFICATION_HOOK_MARKER = 'musterd-notify-hook';
 export const SESSIONSTART_HOOK_MARKER = 'musterd-sessionstart-hook';
@@ -258,8 +260,11 @@ function sessionStartHookCommand(): string {
     // The label-sweep nudge rides the same guard: due-gated (silent once any seat swept in the last
     // 4h), replacing the old always-on "run the label-sessions skill" clause that agents measurably
     // skipped — the per-turn UserPromptSubmit repeat below is what actually gets it run.
+    // The orient nudge rides here too (session-orientation spec 2026-08-25 §B): due-gated per
+    // session (quiet once `musterd session orient-stamp` names the captured session), so a seat
+    // session that starts un-oriented is told to run the musterd-orient skill from minute 0.
     'command -v musterd >/dev/null 2>&1 && { musterd init --check-build 2>/dev/null; ' +
-    'musterd session label-nudge 2>/dev/null; } || true ' +
+    'musterd session label-nudge 2>/dev/null; musterd session orient-nudge 2>/dev/null; } || true ' +
     // ADR 168: the epoch stamp. This hook is ONE machine-wide entry, so whichever checkout runs
     // `init` last writes it for every folder — and until this stamp, an older checkout's rewrite was
     // indistinguishable from the current text. The stamp makes the generation readable, so a writer
@@ -280,7 +285,10 @@ function promptSubmitHookCommand(): string {
   return (
     'f="${CLAUDE_PROJECT_DIR:-.}/AGENTS.md"; test -f "$f" && grep -q musterd:start "$f" || exit 0; ' +
     `echo '${HOOK_NUDGE_TEXTS.prompt_submit_ritual}'; ` +
-    'command -v musterd >/dev/null 2>&1 && musterd session label-nudge 2>/dev/null || true ' +
+    // orient-nudge repeats per turn on the same measured grounds as the label clause above —
+    // one-shot session-start asks get skipped; a repeat that a stamp quiets actually lands.
+    'command -v musterd >/dev/null 2>&1 && { musterd session label-nudge 2>/dev/null; ' +
+    'musterd session orient-nudge 2>/dev/null; } || true ' +
     `# ${PROMPTSUBMIT_HOOK_MARKER} ${epochTag(FEATURE_EPOCH)}`
   );
 }
@@ -303,11 +311,14 @@ function sessionCaptureHookCommand(): string {
   // Session capture (ADR 131 §5): pipe this hook's stdin JSON through to `musterd session start`,
   // which anchors its write to the payload's cwd (never bare process.cwd() — the ADR 018 clobber).
   // The cd is belt-and-braces with that anchor; `cd`/`command -v` consume no stdin, so the JSON
-  // flows through untouched. Fully silent (`>/dev/null`): SessionStart stdout lands in model
-  // context, and capture must add zero tokens. Best-effort + never-failing, like every musterd hook.
+  // flows through untouched. Stdout is deliberately NOT redirected: SessionStart hook stdout lands
+  // in model context, and `session start` uses exactly that seam for the orientation block
+  // (spec 2026-08-25-session-orientation-design.md §A) — capture itself still prints zero tokens,
+  // and the orientation is bounded, wake-suppressed, and silent on any failure. Stderr stays
+  // silenced; best-effort + never-failing, like every musterd hook.
   return (
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
-    'command -v musterd >/dev/null 2>&1 && musterd session start --stdin >/dev/null 2>&1 || true ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session start --stdin 2>/dev/null || true ' +
     `# ${SESSION_CAPTURE_HOOK_MARKER}`
   );
 }
@@ -692,6 +703,9 @@ export const claudeCode: Harness = {
     // session-management tools), so only this harness carries the label-sessions skill.
     sessionsSkillPath: '.claude/skills/musterd-label-sessions/SKILL.md',
     nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+    // Session-orientation spec 2026-08-25 §B/§D: only this harness has the hook seams that emit
+    // the orientation block and the orient nudge, so only it carries the skill they name.
+    orientSkillPath: '.claude/skills/musterd-orient/SKILL.md',
   },
 
   // Claude Code hands its hooks a `transcript_path`, and the newest assistant turn in that file
