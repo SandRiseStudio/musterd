@@ -18,7 +18,7 @@ rename.
 
 ## Decision
 
-The fleet is past the rename: on 2026-08-25 every seat worktree dist attested
+The fleet is past the rename: on 2026-08-25 every seat workspace dist attested
 `FEATURE_EPOCH = 14` (dolly/gptbot self-rebuilt; izzo/ryder/sloane/grokbot advanced to main and
 rebuilt). So the mirror drops, in full:
 
@@ -42,7 +42,7 @@ Deliberately kept, because they were never the wire mirror:
 
 - **Traces:** the drop is observable on the wire — a lane fetched from an epoch-15 daemon
   carries no `surface_globs` key, and the roster's `behind` hint (ADR 148) marks any seat still
-  attesting epoch 14. Fleet attestation was verified per-worktree
+  attesting epoch 14. Fleet attestation was verified per-workspace
   (`packages/protocol/dist/feature-epoch.js`) before the drop landed, recorded on lane
   01M0X0QQ09PZ5R12VY58JHZF52.
 - **Eval:** `lanes.scope.test.ts` pins the dropped shape (canonical-only parse, no mirror key on
