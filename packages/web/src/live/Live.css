@@ -1397,16 +1397,16 @@
   text-transform: lowercase;
   color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
 }
-/* The dnd pill (presence-honesty §3): the one plate tag that is a state, not an identity — filled
-   with the warn ink's paper mix so it reads as a flag, --lc-warn-ink as the text (the FILL amber is
-   never text; see AGENTS.md). Same slot grammar as the service tag. */
+/* The dnd pill (presence-honesty §3): the one plate tag that is a state, not an identity — the
+   warn ink as border + text on the plate's own paper (--lc-warn-ink measures 4.92 worst case; the
+   14% amber fill this first shipped with lightened the ground to 4.35 and failed the gate). The
+   FILL amber is never text; see AGENTS.md. Same slot grammar as the service tag. */
 .lc-gl-label__dnd {
   flex: none;
   margin-left: 4px;
   padding: 1px 4px;
   border-radius: 4px;
   border: 1px solid color-mix(in srgb, var(--lc-warn-ink) 55%, transparent);
-  background: color-mix(in srgb, var(--lc-warn-ink) 14%, transparent);
   font-family: var(--font-mono, monospace);
   font-size: 7.5px;
   font-weight: 600;
