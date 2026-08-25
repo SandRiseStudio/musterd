@@ -48,10 +48,12 @@ describe('stripNoise', () => {
   it('drops leading list bullets and blockquotes', () => {
     expect(stripNoise('- one\n- two\n> quoted')).toBe('one two quoted');
   });
-  it('unwraps a lane envelope into a speakable clause', () => {
+  it('unwraps a lane envelope into a plain-language clause (first-five-seconds §3)', () => {
     expect(stripNoise('[lane] resolved "Re-font body: Fraunces → Inter"')).toBe(
-      'resolved: Re-font body: Fraunces → Inter',
+      'finished: Re-font body: Fraunces → Inter',
     );
+    expect(stripNoise('[lane] claimed "Delight B"')).toBe('took on: Delight B');
+    expect(stripNoise('[lane] handed "Delight B"')).toBe('handing over: Delight B');
   });
   it('unwraps a goal envelope the same way', () => {
     expect(stripNoise('[goal] declared "Work items, board & insight layer (web)"')).toBe(
@@ -60,11 +62,19 @@ describe('stripNoise', () => {
   });
   it('keeps content trailing the quoted title', () => {
     expect(stripNoise('[lane] surface overlaps "Daemon refresh" (owner miley): ROADMAP.md ∩ ROADMAP.md')).toBe(
-      'surface overlaps: Daemon refresh (owner miley): ROADMAP.md ∩ ROADMAP.md',
+      'overlaps with: Daemon refresh (owner miley): ROADMAP.md ∩ ROADMAP.md',
     );
   });
-  it('drops a bare envelope tag even with no known verb', () => {
-    expect(stripNoise('[lane] "cookoff run ladder" → active')).toBe('"cookoff run ladder" → active');
+  it('unwraps a state-transition envelope into plain language', () => {
+    expect(stripNoise('[lane] "cookoff run ladder" → active')).toBe('working on: cookoff run ladder');
+    expect(stripNoise('[lane] "cookoff run ladder" → awaiting_acceptance')).toBe(
+      'ready for review: cookoff run ladder',
+    );
+    expect(stripNoise('[lane] "cookoff run ladder" → done')).toBe('finished: cookoff run ladder');
+  });
+
+  it('still drops a bare envelope tag before an unknown shape', () => {
+    expect(stripNoise('[lane] something unusual entirely')).toBe('something unusual entirely');
   });
   it('unwraps a whole-line quoted title with no verb', () => {
     expect(stripNoise('"just a quoted title"')).toBe('just a quoted title');
@@ -76,10 +86,12 @@ describe('stripNoise', () => {
 });
 
 describe('speechTokens', () => {
-  it('emits a lead token for an unwrapped lane/goal verb', () => {
-    const t = speechTokens('resolved: Re-font body — calmer UI');
-    expect(t[0]).toEqual({ kind: 'lead', text: 'resolved' });
+  it('emits a lead token for an unwrapped plain-language verb', () => {
+    const t = speechTokens('finished: Re-font body — calmer UI');
+    expect(t[0]).toEqual({ kind: 'lead', text: 'finished' });
     expect(t[1]).toEqual({ kind: 'text', text: 'Re-font body — calmer UI' });
+    expect(speechTokens('working on: X')[0]).toEqual({ kind: 'lead', text: 'working on' });
+    expect(speechTokens('ready for review: X')[0]).toEqual({ kind: 'lead', text: 'ready for review' });
   });
   it('passes plain prose through as a single text token', () => {
     expect(speechTokens('on it — checking the deploy')).toEqual([

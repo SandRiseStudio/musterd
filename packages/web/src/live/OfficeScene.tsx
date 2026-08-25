@@ -6,6 +6,7 @@ import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent, speechEventFor } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import { OfficeOverlay } from './OfficeOverlay';
+import { captionFor } from './captions';
 import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
 import type { OfficeRoomProps } from './officeRoom';
@@ -126,6 +127,7 @@ export function OfficeScene({
   const handleRef = useRef<OfficeHandle | null>(null);
   const emittedRef = useRef<Set<string>>(new Set());
 
+
   const data = useMemo(
     () => computeData(teamName, teamWorkingHours, roster, entries, board),
     [teamName, teamWorkingHours, roster, entries, board],
@@ -218,6 +220,10 @@ export function OfficeScene({
       emittedRef.current.add(e.id);
       const ev = actToEvent(e);
       if (ev) h.emit(ev);
+      // The caption rail (first-five-seconds §2): the lazy scene owns scheduling + DOM; only the
+      // plain-sentence projection is computed here (keeps the entry chunk out of the rail's bytes).
+      const caption = captionFor(e);
+      if (caption) h.emit({ kind: 'caption', text: caption });
       // EVERY act also speaks over the sender's head — constructed in mapping.ts (speechEventFor),
       // where the passthrough of text/tone/addressee is pinned by tests this component can't carry.
       h.emit(speechEventFor(e));

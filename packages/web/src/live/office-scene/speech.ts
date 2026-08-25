@@ -29,6 +29,32 @@ export interface ShapedSpeech {
  * (e.g. `(owner miley): globs…`) is preserved. */
 const ENVELOPE_TAG = /^\[(?:lane|goal)\]\s+/i;
 const ENVELOPE_VERB = /^(resolved|opened|claimed|declared|handed|surface overlaps)\s+"([^"]+)"/i;
+/** `[lane] "Title" → state` — the transition form the verb regex can't see. */
+const ENVELOPE_STATE = /^"([^"]+)"\s+→\s+([a-z_]+)$/i;
+
+/**
+ * One vocabulary (first-five-seconds §3): the single place wire verbs and lane states become plain
+ * language. Bubbles and the caption rail both read through here, so the room never contradicts its
+ * own narrator. Unknown tokens pass through unchanged — honest beats pretty.
+ */
+export const PLAIN_VERBS: Record<string, string> = {
+  resolved: 'finished',
+  claimed: 'took on',
+  handed: 'handing over',
+  'surface overlaps': 'overlaps with',
+  opened: 'opened',
+  declared: 'declared',
+};
+export const PLAIN_STATES: Record<string, string> = {
+  active: 'working on',
+  claimed: 'took on',
+  awaiting_acceptance: 'ready for review',
+  ready_for_review: 'ready for review',
+  done: 'finished',
+  open: 'opened',
+  blocked: 'blocked on',
+  abandoned: 'set aside',
+};
 
 /** Flatten an act body into speakable prose: markdown chrome off, code fences and URLs collapsed to
  * compact tokens, the lane/goal envelope unwrapped, whitespace collapsed. A bubble is a spoken line,
@@ -44,7 +70,13 @@ export function stripNoise(raw: string): string {
   // lane/goal envelope: `[lane] resolved "Title"` → `resolved: Title` (do this before emphasis-strip
   // so the surrounding quotes are still balanced). The tag comes off even when no known verb follows.
   t = t.replace(ENVELOPE_TAG, '');
-  t = t.replace(ENVELOPE_VERB, '$1: $2');
+  t = t.replace(ENVELOPE_VERB, (_, verb: string, title: string) => {
+    return `${PLAIN_VERBS[verb.toLowerCase()] ?? verb.toLowerCase()}: ${title}`;
+  });
+  t = t.replace(ENVELOPE_STATE, (m, title: string, state: string) => {
+    const plain = PLAIN_STATES[state.toLowerCase()];
+    return plain ? `${plain}: ${title}` : m;
+  });
   // markdown chrome: headers, single-char emphasis, blockquotes, list bullets. `**strong**` and
   // `` `code` `` markers are deliberately KEPT — the bubble's token renderer (speechTokens) turns
   // them into styled spans, matching the stream's rich-text vocabulary.
@@ -66,7 +98,8 @@ export function stripNoise(raw: string): string {
 
 export type SpeechToken = RichToken | { kind: 'lead'; text: string };
 
-const LEAD_RE = /^(resolved|opened|claimed|declared|handed|surface overlaps):\s+/i;
+const LEAD_RE =
+  /^(finished|opened|took on|declared|handing over|overlaps with|working on|ready for review|blocked on|set aside):\s+/i;
 
 /** Tokenize a shaped (post-stripNoise) bubble line for rich rendering. */
 export function speechTokens(text: string): SpeechToken[] {
