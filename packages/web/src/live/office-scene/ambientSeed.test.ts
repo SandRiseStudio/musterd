@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { AMBIENT_SLOT_MS, decideAmbient, roll, slotAt, slotRng } from './ambientSeed';
+import {
+  AMBIENT_FULL_ROOM,
+  AMBIENT_P_FULL,
+  AMBIENT_P_QUIET,
+  AMBIENT_QUIET_ROOM,
+  AMBIENT_SLOT_MS,
+  ambientFireP,
+  decideAmbient,
+  roll,
+  slotAt,
+  slotRng,
+} from './ambientSeed';
 
 /**
  * The shared-seed contract (E1 spec §2): every ambient decision is a pure function of inputs every
@@ -8,7 +19,7 @@ import { AMBIENT_SLOT_MS, decideAmbient, roll, slotAt, slotRng } from './ambient
  * independent draws, and a distribution healthy enough to weight beats with.
  */
 
-describe('slotAt — the 20 s lattice', () => {
+describe('slotAt — the 10 s lattice', () => {
   it('floors wall-clock time into fixed slots', () => {
     expect(slotAt(0)).toBe(0);
     expect(slotAt(AMBIENT_SLOT_MS - 1)).toBe(0);
@@ -18,7 +29,7 @@ describe('slotAt — the 20 s lattice', () => {
 
   it('two viewers with skewed clocks inside one slot agree on the slot', () => {
     const t = 1_756_000_000_000; // an arbitrary real epoch ms
-    const skewMs = 4_000; // ordinary NTP-grade skew, well under the 20 s slot
+    const skewMs = 2_000; // ordinary NTP-grade skew, well under the 10 s slot
     expect(slotAt(t)).toBe(slotAt(t + skewMs - (t % AMBIENT_SLOT_MS > AMBIENT_SLOT_MS - skewMs ? skewMs : 0)));
   });
 });
@@ -89,6 +100,30 @@ describe('slotRng — a slot-scoped sequence for beat interiors', () => {
   });
 });
 
+describe('ambientFireP — the occupancy curve (E1b)', () => {
+  it('is flat at both ends, so an arriving twelfth member changes nothing', () => {
+    expect(ambientFireP(0)).toBe(AMBIENT_P_QUIET);
+    expect(ambientFireP(AMBIENT_QUIET_ROOM)).toBe(AMBIENT_P_QUIET);
+    expect(ambientFireP(AMBIENT_FULL_ROOM)).toBe(AMBIENT_P_FULL);
+    expect(ambientFireP(40)).toBe(AMBIENT_P_FULL);
+  });
+
+  it('rises monotonically through the middle — no step a viewer could read as the room reacting to them', () => {
+    for (let n = 0; n < 20; n++) expect(ambientFireP(n + 1)).toBeGreaterThanOrEqual(ambientFireP(n));
+    // Mid-ramp really is between the ends, not snapped to one of them.
+    const mid = ambientFireP((AMBIENT_QUIET_ROOM + AMBIENT_FULL_ROOM) / 2);
+    expect(mid).toBeGreaterThan(AMBIENT_P_QUIET);
+    expect(mid).toBeLessThan(AMBIENT_P_FULL);
+  });
+
+  it('never leaves the room metronomic — a probability of 1 would delete the randomness entirely', () => {
+    for (let n = 0; n < 40; n++) {
+      expect(ambientFireP(n)).toBeGreaterThan(0);
+      expect(ambientFireP(n)).toBeLessThan(0.9);
+    }
+  });
+});
+
 describe('decideAmbient — the per-slot decision, pure over the shared pool', () => {
   const pool = {
     members: ['ada', 'bo', 'cy', 'dev', 'eli', 'fen'],
@@ -114,11 +149,25 @@ describe('decideAmbient — the per-slot decision, pure over the shared pool', (
     }
   });
 
-  it('fires at the rate the 30-70 s timer averaged: ~0.4 per 20 s slot (mean one per 50 s)', () => {
+  it('fires at the occupancy curve\'s rate — the six-member pool sits mid-ramp', () => {
     let fired = 0;
     for (let s = 0; s < 5000; s++) if (decideAmbient('revive', s, pool).kind !== 'none') fired++;
-    expect(fired / 5000).toBeGreaterThan(0.36);
-    expect(fired / 5000).toBeLessThan(0.44);
+    const want = ambientFireP(pool.members.length);
+    expect(fired / 5000).toBeGreaterThan(want - 0.03);
+    expect(fired / 5000).toBeLessThan(want + 0.03);
+  });
+
+  it('a fuller room fires more often than a room of two — the whole point of E1b', () => {
+    const rate = (n: number) => {
+      const members = Array.from({ length: n }, (_, i) => `m${i}`);
+      let fired = 0;
+      for (let s = 0; s < 5000; s++) if (decideAmbient('revive', s, { members, pairs: [] }).kind !== 'none') fired++;
+      return fired / 5000;
+    };
+    const two = rate(2);
+    const full = rate(AMBIENT_FULL_ROOM);
+    expect(full).toBeGreaterThan(two * 2);
+    expect(two).toBeLessThan(0.32);
   });
 
   it('keeps the category split: ~35% pet, then ~22% pair among the rest, else a member', () => {

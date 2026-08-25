@@ -304,8 +304,16 @@ function OfficePreviewPage() {
     return raw !== null && Number.isFinite(n) ? Math.max(0, Math.min(REEL.length, n)) : REEL.length;
   });
 
+  /* `?team=<slug>` — the ambient seed's key material (E1). The room's idle life is a pure function
+     of (team, wall-clock slot), so two tabs on the same team play the SAME beats at the same instants
+     and two different teams play independent ones: this param is how that is checked by eye on the
+     one route that can render the room without a daemon, and how `scripts/perf/ambient-density.mjs`
+     samples several independent rooms at once instead of waiting out one of them. */
+  const [teamName] = useState(() => previewSearch().get('team') ?? 'revive');
+
   const buildData = useCallback(
     (): OfficeData => ({
+      teamName,
       teamWorkingHours: {
         timezone: 'America/Los_Angeles',
         days: ['mon', 'tue', 'wed', 'thu', 'fri'],
@@ -363,7 +371,7 @@ function OfficePreviewPage() {
         };
       }),
     }),
-    [present, away, idle, stale, offlineSet, dndSet],
+    [teamName, present, away, idle, stale, offlineSet, dndSet],
   );
   const dataRef = useRef(buildData);
   // Synced in an effect, not during render — see OfficeScene: the mount effect subscribes once and

@@ -84,12 +84,13 @@ const SPEECH_LIFT = 26;
  * freezing mid-gesture (ADR 086 #5 afterglow) — a brief, bounded post-act tail, not a continuous loop. */
 const AFTERGLOW_MS = 2600;
 /** Ambient micro-choreography (ADR 086 Phase 2, seeded by E1): when the room is quiet, inject one idle
- * beat (a seated micro-gesture — scratch, sip, swivel… — or a stroll) at the old ~30–70s cadence, now
- * drawn per 20s wall-clock slot (`ambientSeed.AMBIENT_FIRE_P` keeps the rate) so every viewer of the
- * same team sees the same beats. Timer-based (not RAF), one beat at a time, always preempted by a real
- * act. This is the whole-room cadence — on a small present roster it divides down to each person.
- * 90–180s read as a frozen room once the beat variety grew (nick's call, 2026-07); the old 15–25s
- * water-cooler parade is still the floor to stay well above. */
+ * beat (a seated micro-gesture — scratch, sip, swivel… — or a stroll), drawn per 10s wall-clock slot so
+ * every viewer of the same team sees the same beats. How OFTEN is `ambientSeed.ambientFireP`, which
+ * scales with how many people are in the room (E1b): a populated floor reads at ~2.5–3 beats/idle-min,
+ * a room of two stays near the old ~30–70s cadence so a near-empty office does not read as twitchy.
+ * Timer-based (not RAF), one beat at a time, always preempted by a real act. 90–180s read as a frozen
+ * room once the beat variety grew (nick's call, 2026-07); the old 15–25s water-cooler parade is still
+ * the floor to stay well above. */
 /** While Tier B is awake for an *ambient-only* beat, coalesce toward ~20fps: only advance+redraw once
  * this much wall time has built up. A coffee stroll is visually identical at 20fps and ~3× cheaper; real
  * acts keep 60fps because their motion is not `ambientOnly`. */
