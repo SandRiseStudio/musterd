@@ -1,4 +1,4 @@
-# 317 — Positioning: the value prop argued and decided
+# 320 — Positioning: the value prop argued and decided
 
 - Status: accepted (2026-08-24, nick)
 - Date: 2026-08-24
