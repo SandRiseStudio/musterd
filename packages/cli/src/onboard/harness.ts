@@ -197,6 +197,10 @@ export interface HarnessGuidance {
    * message each other through agent-side tools (Claude Code Desktop today, the same surface test as
    * `sessionsSkillPath`). Omit elsewhere; a `delivery_hint` an agent can't act on is simply inert. */
   nudgeSkillPath?: string;
+  /** Path for the **orient** skill (session-orientation spec 2026-08-25 §B) — declared by harnesses
+   * whose SessionStart/UserPromptSubmit seams carry the orientation block and the orient nudge
+   * (Claude Code today). Omit elsewhere; the nudge that names the skill never fires there. */
+  orientSkillPath?: string;
 }
 
 /** What a harness gets to work with when observing its own session's model. */

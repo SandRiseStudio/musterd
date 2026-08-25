@@ -9,6 +9,8 @@ import {
   renderLabelSessionsSkill,
   renderNudgeRelayFrontmatter,
   renderNudgeRelaySkill,
+  renderOrientFrontmatter,
+  renderOrientSkill,
   renderSelfLabelSessionFrontmatter,
   renderSelfLabelSessionSkill,
   renderSkillBody,
@@ -171,6 +173,18 @@ export function writeGuidance(
         skipped,
       );
     }
+    if (g.orientSkillPath) {
+      // Session-orientation spec 2026-08-25 §B: the orient skill — only where the hook seams that
+      // name it exist (same per-surface split as the units above).
+      writeOne(
+        dir,
+        g.orientSkillPath,
+        `${renderOrientFrontmatter()}\n\n${renderOrientSkill()}`,
+        force,
+        written,
+        skipped,
+      );
+    }
     if (g.commandsDir) {
       for (const name of SLASH_COMMANDS) {
         writeOne(
@@ -280,6 +294,9 @@ export function guidanceFileMap(g: HarnessGuidance, team: string): Record<string
     out[g.nudgeSkillPath] = stamped(
       `${renderNudgeRelayFrontmatter()}\n\n${renderNudgeRelaySkill()}`,
     );
+  }
+  if (g.orientSkillPath) {
+    out[g.orientSkillPath] = stamped(`${renderOrientFrontmatter()}\n\n${renderOrientSkill()}`);
   }
   if (g.commandsDir) {
     for (const name of SLASH_COMMANDS) {

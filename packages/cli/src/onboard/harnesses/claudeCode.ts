@@ -697,6 +697,9 @@ export const claudeCode: Harness = {
     // session-management tools), so only this harness carries the label-sessions skill.
     sessionsSkillPath: '.claude/skills/musterd-label-sessions/SKILL.md',
     nudgeSkillPath: '.claude/skills/musterd-nudge-relay/SKILL.md',
+    // Session-orientation spec 2026-08-25 §B/§D: only this harness has the hook seams that emit
+    // the orientation block and the orient nudge, so only it carries the skill they name.
+    orientSkillPath: '.claude/skills/musterd-orient/SKILL.md',
   },
 
   // Claude Code hands its hooks a `transcript_path`, and the newest assistant turn in that file
