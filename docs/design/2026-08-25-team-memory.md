@@ -3,7 +3,8 @@
 An exploration of nick's 2026-08-22 capture ("cross team memory"), clarified 2026-08-25: agents re-hit
 traps a teammate already recorded privately; findings should be savable so the whole team can access
 them. Exploratory design for lane `01M0KNQR70MZTAAENJ2N33S4F6`; freezes once its decisions land in
-ADRs. Status: **draft — coordinating with stanley's multi-machine work before any decision is drawn.**
+ADRs. Status: **explored 2026-08-25, multi-machine interaction confirmed against ADR 325** — the
+decision itself graduates via a follow-up implementation ADR (a typed act is a SPEC change, hard rule 1).
 
 ## The problem, sharpened
 
@@ -81,12 +82,27 @@ team-visible on purpose).
 Rejected: ADR 093 §4's reasoning applies verbatim — half-done notes and pasted secrets in repo
 history, drift between writers, review friction identical to the wiki's.
 
-## Open question: multi-machine topology (blocking the decision)
+## Multi-machine interaction (resolved against ADR 325)
 
-Stanley is designing multi-machine support (in flight, unspecified here). Where the log lives and
-whether a team may span daemons determines whether option C's index is per-daemon trivially or needs
-a distribution story. This section is intentionally left open until that design lands; no Decision
-section is written yet.
+Stanley's multi-machine design (ADR 325, PR #1069; census in
+`docs/wiki/federation-data-census.md`) keeps "one team, one **authority**" but splits state into
+three residences: (1) hub-authoritative linearizable CAS for exclusive facts; (2) locally-appended,
+replicated events — every daemon pushes origin-stamped (`origin_node`, `origin_seq`) events and pulls
+the merged log with a cursor, the seeds-relay pattern generalized; (3) host-local never-replicated
+ephemera (presence, wake leases).
+
+Option C lands entirely in residence 2:
+
+- The `insight` act is an ordinary append-only message-log event — origin-stamped and replicated
+  across machines for free once federation lands. A trap recorded on the laptop is findable from the
+  studio daemon without any new mechanism.
+- The FTS index is a residence-2 *fold*: each daemon rebuilds it locally from its own copy of the
+  merged log. It must stay rebuildable-from-the-log — never a source of truth — or it would become
+  the first residence-2 object that cannot survive a rebuild (stanley's one explicit warning).
+- No hub CAS is needed: insights are append-only facts about having learned something, not exclusive
+  claims like lane ownership.
+
+This closes the only open dependency. The design survives multi-machine unchanged.
 
 ## What would change the answer
 
