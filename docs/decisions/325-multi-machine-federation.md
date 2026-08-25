@@ -1,6 +1,7 @@
 # 325 — multi-machine teams: one team, one authority; daemons federate as replicas
 
-- Status: proposed
+- Status: accepted — 2026-08-25 (ryder PASS on lane 01M0XDVE7S, all four census falsifiers
+  independently re-run; landed #1069, 0110e65f)
 - Date: 2026-08-25
 - Supersedes (in part): [ADR 039](039-cross-network-topology.md) — its "federation explicitly out
   of scope" line and the identification of the invariant with a single *daemon*. Its invariant
