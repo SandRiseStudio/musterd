@@ -113,5 +113,6 @@
   "- **The claim's arbitration input is host-local** (2026-08-25; falsify: read ADR 203's guard —": "other",
   "- **`updateLane` is a blind full-row overwrite** (2026-08-25; falsify: read the UPDATE at": "defect",
   "- **`audit` cannot be a correctness log** (2026-08-25; falsify: read `appendAudit`,": "other",
-  "FSL-licensed, Node SDK in beta (2026-08-25; falsify: an independent production report of the": "other"
+  "FSL-licensed, Node SDK in beta (2026-08-25; falsify: an independent production report of the": "other",
+  "- **Not yet built, worth remembering**: per-call correlation ids threaded through delegated acts (our audit ledger records acts, but delegation chains inside one outcome are not linked end-to-end), and plan-minted idempotency keys on retried side-effecting tool calls. Neither is a defect today (2026-08-25; falsify: find a wake/retry path that re-fires a non-idempotent external call — the wake ledger's deferred/failed taxonomy suggests retries are lease-bound, [ADR 241](../decisions/241-a-wake-verifies-against-its-own-lease.md)).": "other"
 }
