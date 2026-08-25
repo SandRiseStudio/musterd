@@ -254,3 +254,12 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   where it was found). Mirror and fallbacks drop in a later epoch, on-touch. Measured cost:
   +157 gzip bytes on the web bundle — measurement in `docs/perf/web-live-baseline.md` (a prepared
   budget raise was superseded by the Shared Seeds raise, #1025, landing first).
+
+- **2026-08-25 (tier-2 residue dropped, stanley, lanes 01M0X0QQ09 + 01M0XA5RCE).** Both on-touch
+  drops the tier-2 renames left behind landed the same day, closing the tier: the wire mirror
+  (`surface_globs` dual-send/dual-populate) dropped at feature epoch 16 (ADR 322, PR #1061), and
+  the legacy toolkit file-key reads (`.musterd/profiles/`, `.musterd/roles/*.json`, in-file
+  `profile`/`role` name keys) dropped with a vacuously-verified precondition — zero legacy files
+  on any workspace (ADR 324). `.musterd/roles/` now belongs solely to the roster-role TOML
+  library. Kept, as different seams: the provisioned-manifest legacy `role` read and the MCP
+  coercion input aliases.

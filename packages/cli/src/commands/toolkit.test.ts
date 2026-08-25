@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CliError } from '../errors.js';
-import { legacyUserProfilesDir, legacyUserRolesDir, userToolkitsDir } from '../onboard/toolkit.js';
+import { userToolkitsDir } from '../onboard/toolkit.js';
 import { toolkitCommand } from './toolkit.js';
 
 let cwd: string;
@@ -98,15 +98,15 @@ describe('coverage carried over from role (ADR 296 split — same behaviour, new
     expect(out).toContain('backend');
   });
 
-  it('marks a legacy role-keyed file in .musterd/roles/ as user, and a same-named one as override', () => {
-    mkdirSync(legacyUserRolesDir(cwd), { recursive: true });
+  it('marks a user file in .musterd/toolkits/ as user, and a same-named one as override', () => {
+    mkdirSync(userToolkitsDir(cwd), { recursive: true });
     writeFileSync(
-      join(legacyUserRolesDir(cwd), 'data.json'),
-      JSON.stringify({ role: 'data', charter: 'c' }),
+      join(userToolkitsDir(cwd), 'data.json'),
+      JSON.stringify({ toolkit: 'data', charter: 'c' }),
     );
     writeFileSync(
-      join(legacyUserRolesDir(cwd), 'backend.json'),
-      JSON.stringify({ role: 'backend', charter: 'mine' }),
+      join(userToolkitsDir(cwd), 'backend.json'),
+      JSON.stringify({ toolkit: 'backend', charter: 'mine' }),
     );
     toolkitCommand(parsed(['list'], { json: true }));
     const { toolkits } = JSON.parse(out);
@@ -150,22 +150,20 @@ describe('coverage carried over from role (ADR 296 split — same behaviour, new
   });
 });
 
-describe('toolkit origin across the legacy homes', () => {
-  it('a user file in any of the three homes reads as user, never built-in', () => {
-    for (const [home, key] of [
-      [userToolkitsDir(cwd), 'toolkit'],
-      [legacyUserProfilesDir(cwd), 'profile'],
-      [legacyUserRolesDir(cwd), 'role'],
-    ] as const) {
-      mkdirSync(home, { recursive: true });
+describe('legacy homes are dropped (ADR 324)', () => {
+  it('a file in .musterd/profiles/ or .musterd/roles/ is invisible to show', () => {
+    for (const legacyHome of [
+      join(cwd, '.musterd', 'profiles'),
+      join(cwd, '.musterd', 'roles'),
+    ]) {
+      mkdirSync(legacyHome, { recursive: true });
       writeFileSync(
-        join(home, `mine-${key}.json`),
-        JSON.stringify({ [key]: `mine-${key}`, charter: 'c' }),
+        join(legacyHome, 'stale.json'),
+        JSON.stringify({ toolkit: 'stale', charter: 'c' }),
       );
-      out = '';
-      expect(toolkitCommand(parsed(['show', `mine-${key}`]))).toBe(0);
-      expect(out).toContain('(user)');
-      expect(out).not.toContain('(built-in)');
     }
+    expect(() => toolkitCommand(parsed(['show', 'stale']))).toThrow(
+      expect.objectContaining({ exitCode: 4 }),
+    );
   });
 });
