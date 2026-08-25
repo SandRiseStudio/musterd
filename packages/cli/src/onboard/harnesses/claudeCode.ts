@@ -260,8 +260,11 @@ function sessionStartHookCommand(): string {
     // The label-sweep nudge rides the same guard: due-gated (silent once any seat swept in the last
     // 4h), replacing the old always-on "run the label-sessions skill" clause that agents measurably
     // skipped — the per-turn UserPromptSubmit repeat below is what actually gets it run.
+    // The orient nudge rides here too (session-orientation spec 2026-08-25 §B): due-gated per
+    // session (quiet once `musterd session orient-stamp` names the captured session), so a seat
+    // session that starts un-oriented is told to run the musterd-orient skill from minute 0.
     'command -v musterd >/dev/null 2>&1 && { musterd init --check-build 2>/dev/null; ' +
-    'musterd session label-nudge 2>/dev/null; } || true ' +
+    'musterd session label-nudge 2>/dev/null; musterd session orient-nudge 2>/dev/null; } || true ' +
     // ADR 168: the epoch stamp. This hook is ONE machine-wide entry, so whichever checkout runs
     // `init` last writes it for every folder — and until this stamp, an older checkout's rewrite was
     // indistinguishable from the current text. The stamp makes the generation readable, so a writer
@@ -282,7 +285,10 @@ function promptSubmitHookCommand(): string {
   return (
     'f="${CLAUDE_PROJECT_DIR:-.}/AGENTS.md"; test -f "$f" && grep -q musterd:start "$f" || exit 0; ' +
     `echo '${HOOK_NUDGE_TEXTS.prompt_submit_ritual}'; ` +
-    'command -v musterd >/dev/null 2>&1 && musterd session label-nudge 2>/dev/null || true ' +
+    // orient-nudge repeats per turn on the same measured grounds as the label clause above —
+    // one-shot session-start asks get skipped; a repeat that a stamp quiets actually lands.
+    'command -v musterd >/dev/null 2>&1 && { musterd session label-nudge 2>/dev/null; ' +
+    'musterd session orient-nudge 2>/dev/null; } || true ' +
     `# ${PROMPTSUBMIT_HOOK_MARKER} ${epochTag(FEATURE_EPOCH)}`
   );
 }
