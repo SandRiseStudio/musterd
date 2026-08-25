@@ -190,6 +190,38 @@ export function homePoses(
   return out;
 }
 
+/**
+ * Row-mate desk pairs, pure over roster inputs (E1 spec §2): two present desk members are
+ * neighbours when their desks face the same way exactly one desk apart across the pod — the same
+ * geometry `deskNeighbours()` reads off the homes, but with no eligibility filter. This is the
+ * *shared* pair pool every viewer computes identically; whether a chosen pair can actually chat
+ * (`chatReady`) stays a local execution guard, so local busy-state can skip a beat but never
+ * change what was chosen. Output is canonically ordered — Map history never leaks in.
+ */
+export function deskNeighbourPairs(
+  placements: Map<string, Placement>,
+  byName: Map<string, OfficeNode>,
+): Array<[string, string]> {
+  const seated: Array<{ name: string; lx: number; ly: number; dir: string }> = [];
+  for (const [name, pl] of placements) {
+    if (pl.kind !== 'desk' || pl.owned || !byName.has(name)) continue;
+    const slot = DESK_SLOTS[pl.slot];
+    if (slot) seated.push({ name, lx: slot.lx, ly: slot.ly, dir: slot.dir });
+  }
+  seated.sort((a, b) => (a.name < b.name ? -1 : 1));
+  const out: Array<[string, string]> = [];
+  for (let i = 0; i < seated.length; i++) {
+    for (let j = i + 1; j < seated.length; j++) {
+      const a = seated[i]!;
+      const b = seated[j]!;
+      if (a.dir !== b.dir) continue;
+      if (Math.abs(Math.hypot(a.lx - b.lx, a.ly - b.ly) - ROW_GAP) > 12) continue;
+      out.push([a.name, b.name]);
+    }
+  }
+  return out;
+}
+
 interface Leg {
   fx: number;
   fy: number;
@@ -341,7 +373,7 @@ export interface Actors {
    * the empty plate at the counter sink, return. False when ineligible or the lounge is full. */
   /** Returns the lounge seat the meal is headed for (so the dog knows where to go beg), or null if the
    * errand couldn't start — the lounge is full, or this member isn't a seated desk member. */
-  errandFridge(from: string): Spot | null;
+  errandFridge(from: string, rng?: () => number): Spot | null;
   /** Scene effects derived from the walks' *current* legs (never stored): whether the fridge door
    * stands open, and whose desk water bottle is in their hand (so the desk copy hides). */
   sceneFx(): { fridgeOpen: boolean; bottleCarriers: Set<string> };
@@ -350,13 +382,13 @@ export interface Actors {
    * back down. The one errand with **no destination** — the aimlessness is what makes it read as a call
    * rather than a trip to fetch something. False when the member is ineligible (see `ambientWalk`).
    */
-  errandPhone(from: string): boolean;
+  errandPhone(from: string, rng?: () => number): boolean;
   /**
    * Two desk neighbours turn and talk to each other for a few seconds, then go back to their monitors.
    * Both stay seated throughout; the swivel is the whole beat. False unless both are seated desk
    * members, free, and actually next to each other.
    */
-  deskChat(a: string, b: string): boolean;
+  deskChat(a: string, b: string, rng?: () => number): boolean;
   /** Pairs of seated, free desk members sitting side by side in the same pod row — the candidates for
    * `deskChat`. Empty when nobody has a neighbour to turn to. */
   deskNeighbours(): Array<[string, string]>;
@@ -622,7 +654,7 @@ export function createActors(): Actors {
 
   /** A free lounge seat (couch cushion / armchair) for an errand meal: not a member's home, and not
    * already the target of another in-flight errand's sit leg. Null when the lounge is full. */
-  function freeLoungeSpot(): Spot | null {
+  function freeLoungeSpot(rng: () => number): Spot | null {
     const open = LEISURE_SPOTS.filter((s) => {
       if (s.zone !== 'lounge') return false;
       for (const h of homes.values()) {
@@ -635,7 +667,7 @@ export function createActors(): Actors {
       }
       return true;
     });
-    return open.length ? open[Math.floor(Math.random() * open.length)]! : null;
+    return open.length ? open[Math.floor(rng() * open.length)]! : null;
   }
 
   /** Where the sit blend is heading for this member: 1 seated (home seat, or an errand's sit leg). */
@@ -834,11 +866,11 @@ export function createActors(): Actors {
       });
       return true;
     },
-    errandFridge(from) {
+    errandFridge(from, rng = Math.random) {
       const trip = errandStart(from);
       if (!trip) return null;
       const { home, avoid } = trip;
-      const spot = freeLoungeSpot();
+      const spot = freeLoungeSpot(rng);
       if (!spot) return null; // every lounge seat taken — the scheduler picks another beat
       // The full meal arc: open the fridge, browse, take a plate to the lounge, eat, leave the empty
       // plate at the counter sink, come home. Every scene effect (open door, the plate) is derived from
@@ -882,7 +914,7 @@ export function createActors(): Actors {
       }
       return { fridgeOpen, bottleCarriers };
     },
-    errandPhone(from) {
+    errandPhone(from, rng = Math.random) {
       const trip = errandStart(from);
       if (!trip) return false;
       const { home, avoid } = trip;
@@ -892,11 +924,11 @@ export function createActors(): Actors {
       // still on a call is unbearable, and that is exactly the read.
       const stops: P[] = [];
       let cur = at;
-      const hops = 3 + Math.floor(Math.random() * 3);
+      const hops = 3 + Math.floor(rng() * 3);
       for (let i = 0; i < hops; i++) {
         let next: P | null = null;
         for (let tries = 0; tries < 24 && !next; tries++) {
-          const p = { lx: Math.random() * FLOOR, ly: Math.random() * FLOOR };
+          const p = { lx: rng() * FLOOR, ly: rng() * FLOOR };
           if (walkable(p.lx, p.ly) && Math.hypot(p.lx - cur.lx, p.ly - cur.ly) > PACE_MIN_LEG) next = p;
         }
         if (!next) break;
@@ -915,7 +947,7 @@ export function createActors(): Actors {
         legs.push(...run);
         from2 = endOf(run);
         // A pause at each stop: the bit of the call where you are listening rather than moving.
-        legs.push(hold(from2, travelDir(from2.lx, from2.ly, at.lx, at.ly), 2.2 + Math.random() * 2.4, {
+        legs.push(hold(from2, travelDir(from2.lx, from2.ly, at.lx, at.ly), 2.2 + rng() * 2.4, {
           carry: 'phone',
           overlay: GESTURE.call,
         }));
@@ -943,11 +975,11 @@ export function createActors(): Actors {
       }
       return out;
     },
-    deskChat(a, b) {
+    deskChat(a, b, rng = Math.random) {
       const ha = homes.get(a);
       const hb = homes.get(b);
       if (!ha || !hb || !chatReady(a) || !chatReady(b)) return false;
-      const dur = CHAT_S[0] + Math.random() * (CHAT_S[1] - CHAT_S[0]);
+      const dur = CHAT_S[0] + rng() * (CHAT_S[1] - CHAT_S[0]);
       // Each turns toward the other and stays seated. `sitAt` is what holds the sit blend at 1 through a
       // walk that never goes anywhere; the facing comes from the leg's `dir`, which the actor system
       // eases into rather than snapping — so this reads as two people swivelling to talk.

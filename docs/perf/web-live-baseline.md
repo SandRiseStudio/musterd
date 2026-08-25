@@ -438,3 +438,23 @@ build && pnpm perf:check`): total JS gzip 241,0xx locally / 241,4xx in CI agains
 ceiling had ~0.5 KB free before the change. The helpers were inlined into the prop pipeline first
 (−~0.3 KB); no dead JS was found to trade. A 241,000→242,000 raise was prepared, then dropped in rebase: the Shared Seeds raise to 246,000 landed first and covers it. Trap re-paid in this change: `perf:check` reads the last build — run
 the build in the same breath or the number you defend is the previous commit's.
+## 2026-08-25 — seeded idle life E1a: +698 B total JS for the shared ambient seam (raise 246,000 → 249,000)
+
+Branch `miley/seeded-idle-life-e1a` (lane 01M0GVPFKT, spec #1058), measured the way the gate
+measures over `dist/client` after a fresh build on both sides:
+
+- main @ b53cb94a: **245,531 B** gate-style (`gzipSync` default level; the level-9 CLI-style number
+  is 245,159 — same ~0.3% trap logged 2026-08-04).
+- branch: **246,229 B** — the feature's whole cost is **+698 B**, inside the spec §4 estimate
+  (≤1.0 KB), all of it in the lazy `office-scene` chunk plus its call-site threading. Initial JS is
+  untouched: 151.9 KB against 152.3 KB, `/live`'s eager graph does not import the seed module
+  eagerly beyond what `index.ts` already carried.
+
+The ceiling had 469 B free locally and effectively none on CI (CI's toolchain gzips the same tree
+~0.7 KB higher — the 2026-08-24 `stanley/scope-rename` measurement), so the gate fails on exactly
+this feature's bytes. No trim was available inside the change: the module is 90 lines of hash +
+decision logic and the threading replaces `Math.random()` call sites one-for-one. Raised
+totalJsGzipBytes 246,000 → 249,000 (measured 246,229 + ~1.2%, the Shared Seeds precedent).
+
+- Falsify: build main and the branch and run the byte walk in this entry's method; delete
+  `ambientSeed.ts` and revert the call sites and the total returns to within ~50 B of main's.

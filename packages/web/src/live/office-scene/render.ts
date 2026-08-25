@@ -1652,7 +1652,7 @@ const SLEEPING_RECEPTIONIST: ReceptionistState = {
   mode: 'asleep',
   modeT: 0,
   aloneT: 0,
-  nextBeat: 0,
+  lastSlot: -1,
   beatLen: 0,
 };
 
