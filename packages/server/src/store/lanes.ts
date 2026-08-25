@@ -70,10 +70,9 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     kind: (row.kind as Lane['kind']) ?? null,
     owner_seat: row.owner_seat,
     role: row.role,
+    // The DB column keeps its historical `surface_globs` name (internal, ADR 296 tier 3); the
+    // epoch-14 wire mirror of that key dropped at epoch 15.
     scope: JSON.parse(row.surface_globs) as string[],
-    // Legacy wire mirror (ADR 296 tier 2): an epoch-13 client's schema still REQUIRES this key, so
-    // every projected lane carries it until the mirror drops in a later epoch.
-    surface_globs: JSON.parse(row.surface_globs) as string[],
     depends_on: JSON.parse(row.depends_on) as string[],
     branch: row.branch,
     goal_id: row.goal_id,

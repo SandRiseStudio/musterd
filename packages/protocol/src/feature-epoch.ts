@@ -77,5 +77,10 @@
 // the presence INSERT server-side — the exact enum-vs-storage drift shape migration 39 closed for
 // `musterd` — so an opencode seat must not attest that surface against one. An older web bundle
 // renders the row under the generic label.
-export const FEATURE_EPOCH = 15 as const;
+// Epoch 16 — ADR 322 (ADR 296 tier 2 mirror drop): `surface_globs` leaves the wire entirely
+// (dual-send, dual-populate, and legacy read adoption all removed). The binding precondition was
+// the RENAME epoch, not the previous number: the fleet was verified at 14+ on 2026-08-25, and any
+// epoch-14+ counterpart already reads and writes canonical `scope` (14 dual-sends it), so both
+// skew directions hold regardless of the ADR 321 epoch landing in between.
+export const FEATURE_EPOCH = 16 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

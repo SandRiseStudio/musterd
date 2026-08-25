@@ -53,7 +53,7 @@ describe('incident clustering (spec 2026-08-14 inc 1)', () => {
     expect(lane.kind).toBe('incident');
     expect(lane.stakes).toBe('high');
     expect(lane.owner_seat).toBeNull();
-    expect(lane.surface_globs).toEqual([]);
+    expect(lane.scope).toEqual([]);
     expect(lane.title).toBe('incident: ' + GATE);
     expect(lane.detail).toContain('izzo: lc 2.83 [pr#828]');
     expect(lane.detail).toContain('dolly: lc 2.85 [pr#829]');

@@ -22,28 +22,25 @@ const base = {
   updated_at: 1,
 };
 
-describe('surface_globs → scope (ADR 296 tier 2)', () => {
-  it('parses a legacy lane (surface_globs only) and adopts it as scope', () => {
-    const lane = LaneSchema.parse({ ...base, surface_globs: ['packages/web/**'] });
-    expect(lane.scope).toEqual(['packages/web/**']);
-  });
-
-  it('parses a current lane (scope only) and mirrors the legacy key for one-epoch skew', () => {
+describe('scope is the only wire token (ADR 296 tier 2 mirror dropped, epoch 15)', () => {
+  it('parses a lane on the canonical token', () => {
     const lane = LaneSchema.parse({ ...base, scope: ['packages/server/**'] });
     expect(lane.scope).toEqual(['packages/server/**']);
-    // A client one epoch behind still requires `surface_globs`; the parsed shape carries it so a
-    // daemon serializing this lane never strands that client.
-    expect(lane.surface_globs).toEqual(['packages/server/**']);
   });
 
-  it('scope wins when both keys arrive, and the mirror is normalized to it', () => {
+  it('does not populate the dropped mirror key on the parsed shape', () => {
+    const lane = LaneSchema.parse({ ...base, scope: ['packages/server/**'] });
+    expect('surface_globs' in lane).toBe(false);
+  });
+
+  it('ignores a stray legacy key rather than rejecting (unknown keys strip)', () => {
     const lane = LaneSchema.parse({
       ...base,
       scope: ['docs/**'],
       surface_globs: ['packages/web/**'],
     });
     expect(lane.scope).toEqual(['docs/**']);
-    expect(lane.surface_globs).toEqual(['docs/**']);
+    expect('surface_globs' in lane).toBe(false);
   });
 
   it('OpenLane accepts the canonical token', () => {
@@ -51,17 +48,12 @@ describe('surface_globs → scope (ADR 296 tier 2)', () => {
     expect(open.scope).toEqual(['docs/**']);
   });
 
-  it('OpenLane adopts the legacy token from an old client', () => {
+  it('OpenLane no longer adopts the legacy token — a legacy-only body reads as scopeless', () => {
     const open = OpenLaneSchema.parse({ title: 't', surface_globs: ['docs/**'] });
-    expect(open.scope).toEqual(['docs/**']);
+    expect(open.scope).toBeUndefined();
   });
 
-  it('UpdateLane adopts the legacy token from an old client', () => {
-    const patch = UpdateLaneSchema.parse({ surface_globs: ['docs/**'] });
-    expect(patch.scope).toEqual(['docs/**']);
-  });
-
-  it('UpdateLane leaves scope absent when neither key is sent (no accidental clearing)', () => {
+  it('UpdateLane leaves scope absent when the key is not sent (no accidental clearing)', () => {
     const patch = UpdateLaneSchema.parse({ state: 'active' });
     expect(patch.scope).toBeUndefined();
   });

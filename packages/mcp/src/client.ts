@@ -11,7 +11,6 @@ import {
   type Lane,
   isWireAttestationSource,
   type LaneWarning,
-  mirrorLegacyScopeOnSend,
   type MemberSummary,
   type MemoryEnvelope,
   type NextBrief,
@@ -409,7 +408,7 @@ export class MusterdClient {
 
   // ── Coordination lanes, Phase 1 (ADR 083). Every mutation returns { lane, warnings } — warn-only.
   openLane(body: unknown): Promise<{ lane: Lane; warnings: LaneWarning[] }> {
-    return this.request('POST', `/teams/${this.config.team}/lanes`, mirrorLegacyScopeOnSend(body));
+    return this.request('POST', `/teams/${this.config.team}/lanes`, body);
   }
 
   updateLane(
@@ -447,7 +446,7 @@ export class MusterdClient {
     return this.request(
       'PATCH',
       `/teams/${this.config.team}/lanes/${encodeURIComponent(id)}`,
-      mirrorLegacyScopeOnSend(patch),
+      patch,
     );
   }
 
