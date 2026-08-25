@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('44');
+    expect(ver?.value).toBe('45');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -247,7 +247,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(44); // runs v18…v44 (including the shared Seed store)
+    expect(runMigrations(db)).toBe(45); // runs v18…v45 (including the shared Seed store)
 
     const scope = (id: string) =>
       db
@@ -311,7 +311,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(44);
+    expect(runMigrations(db)).toBe(45);
 
     const policy = (id: string) =>
       db
@@ -430,5 +430,60 @@ describe('v41 — incident convergence (spec 2026-08-14)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * ADR 325 prereq: `incident_reports.id` was the schema's only INTEGER AUTOINCREMENT — an ordering
+ * that exists only in this file and collides the moment rows originate on two machines. v45
+ * rebuilds it on ULID TEXT ids, minted in old-id order so the pool's arrival order survives even
+ * where created_at disagrees with it.
+ */
+describe('v45 — incident_reports ids become ULIDs (ADR 325 prereq)', () => {
+  it('rebuilds a populated integer-id table, preserving arrival order in the new ids', () => {
+    const db = openDb(':memory:');
+    db.exec(`
+      DROP TABLE incident_reports;
+      CREATE TABLE incident_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        team_id TEXT NOT NULL,
+        gate TEXT NOT NULL,
+        seat TEXT NOT NULL,
+        sig TEXT,
+        ref TEXT,
+        message_id TEXT,
+        lane_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_incident_reports_team_gate ON incident_reports(team_id, gate);
+    `);
+    const ins = db.prepare(
+      "INSERT INTO incident_reports (team_id, gate, seat, created_at) VALUES ('t', 'g', ?, ?)",
+    );
+    // Arrival order a, b, c — with created_at deliberately OUT of that order: the old pool
+    // ordering was ORDER BY (integer) id, i.e. arrival, and the rebuild must keep that promise.
+    ins.run('a', 3_000);
+    ins.run('b', 1_000);
+    ins.run('c', 1_000);
+    db.prepare("UPDATE schema_meta SET value = '44' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    const cols = db
+      .prepare<
+        [],
+        { name: string; type: string }
+      >("SELECT name, type FROM pragma_table_info('incident_reports')")
+      .all();
+    expect(cols.find((c) => c.name === 'id')?.type).toBe('TEXT');
+    const rows = db
+      .prepare<
+        [],
+        { id: string | number; seat: string }
+      >('SELECT id, seat FROM incident_reports ORDER BY id')
+      .all();
+    expect(rows).toHaveLength(3);
+    for (const r of rows) expect(String(r.id)).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(rows.map((r) => r.seat)).toEqual(['a', 'b', 'c']);
+    db.close();
   });
 });

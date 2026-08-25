@@ -98,6 +98,13 @@ export type AuditAction =
   // assumed this row existed — it did not, and its absence is why a 2026-08-01 double-claim left
   // nothing in the audit log but the release that undid it.
   | 'lane.claimed'
+  // ADR 325 prereq: the transitions the four rows above do NOT cover, so a lane's whole history
+  // folds back out of the log. `lane.updated` is any field edit (detail: { lane, fields }) —
+  // branch/scope/title/… changes previously wrote nothing at all. `lane.state_changed` is a state
+  // move not already recorded as claimed/released/ready_for_review/closed (detail: { lane, from,
+  // to }) — e.g. active↔blocked, or acceptance sent back by its owner.
+  | 'lane.updated'
+  | 'lane.state_changed'
   // ADR 291 / 311 / 312: shared-Seed ingest and lifecycle decisions. Details carry only Seed/Lane
   // ids, state edges, result kind, and skipped-research metadata — never raw content, Slack identity,
   // clarification text, briefs, or conclusions. Ingest state lives in `seeds_ingest_cursor`, never

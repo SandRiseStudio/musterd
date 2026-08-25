@@ -3602,6 +3602,63 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     expect(claimedRows().filter((r) => r.target === born.json.lane.id)).toHaveLength(2);
   });
 
+  // ADR 325 prereq: EVERY lane transition leaves a durable row, not just the ownership edges. A
+  // branch/scope/title edit wrote nothing at all, and a non-terminal state move (active↔blocked)
+  // broadcast to the live stream but left no record — so a lane's history could not be folded
+  // back out of the logs, which is exactly what a replicating daemon has to do.
+  it('audits field edits and non-terminal state moves (ADR 325 prereq)', async () => {
+    const team = await post('/teams', { slug: 'ledgr2', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const teamId = getTeamBySlug(server.db, 'ledgr2')!.id;
+    const rows = (action: string) =>
+      listAudit(server.db, teamId)
+        .filter((r) => r.action === action)
+        .map((r) => ({
+          target: r.target,
+          detail: JSON.parse(r.detail!) as { fields?: string[]; from?: string; to?: string },
+        }));
+    const patch = (laneId: string, body: unknown) =>
+      fetch(base + `/teams/ledgr2/lanes/${laneId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...authHeaders(nickTok) },
+        body: JSON.stringify(body),
+      });
+
+    const lane = await post('/teams/ledgr2/lanes', { title: 'edited', claim: true }, nickTok);
+    const id = lane.json.lane.id as string;
+
+    // A field edit writes lane.updated naming exactly what changed.
+    await patch(id, { branch: 'nick/branch', detail: 'now with detail' });
+    const edit = rows('lane.updated').find((r) => r.target === id);
+    expect(edit).toBeDefined();
+    expect(edit!.detail.fields?.sort()).toEqual(['branch', 'detail']);
+
+    // A no-change patch writes nothing.
+    await patch(id, { branch: 'nick/branch' });
+    expect(rows('lane.updated').filter((r) => r.target === id)).toHaveLength(1);
+
+    // A non-terminal state move writes lane.state_changed with the edge.
+    await patch(id, { state: 'active' });
+    const move = rows('lane.state_changed').find((r) => r.target === id);
+    expect(move).toBeDefined();
+    expect(move!.detail.from).toBe('claimed');
+    expect(move!.detail.to).toBe('active');
+
+    // The already-audited edges stay single-rowed: a claim is lane.claimed (no state_changed
+    // double-write), a release is lane.released only.
+    const open = await post('/teams/ledgr2/lanes', { title: 'claim edge' }, nickTok);
+    const openId = open.json.lane.id as string;
+    await patch(openId, { owner_seat: 'nick' });
+    expect(rows('lane.state_changed').filter((r) => r.target === openId)).toHaveLength(0);
+    await patch(openId, { state: 'open' }); // the release verb
+    expect(rows('lane.state_changed').filter((r) => r.target === openId)).toHaveLength(0);
+    expect(
+      listAudit(server.db, teamId).filter(
+        (r) => r.action === 'lane.released' && r.target === openId,
+      ),
+    ).toHaveLength(1);
+  });
+
   it('warns inline + wakes the affected owner exactly once; board reflects live state', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

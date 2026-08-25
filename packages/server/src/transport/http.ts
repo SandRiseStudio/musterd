@@ -44,6 +44,7 @@ import {
   isAwaitingAcceptance,
   makeEnvelope,
   type Envelope,
+  type Lane,
   type LaneWarning,
   type MemberSummary,
   type Provenance,
@@ -105,6 +106,8 @@ import {
   boardWarnings,
   deriveGoalStatus,
   getLane,
+  LaneConflictError,
+  laneFieldChanges,
   laneWarnings,
   lanesForGoal,
   noGoalWarning,
@@ -3179,7 +3182,28 @@ export async function handleHttp(
           before.owner_seat !== null &&
           member.name !== before.owner_seat;
         const patch = counterpartTerminal ? { ...body, merged: undefined } : body;
-        const lane = updateLane(ctx.db, team.id, laneId, team.slug, patch)!;
+        // ADR 325 prereq: the policy above was decided against `before`, so the write carries that
+        // expectation — an ownership/state patch refuses if the lane moved in between, instead of
+        // blindly overwriting. Inert while this handler stays synchronous end-to-end; load-bearing
+        // the moment an await (or a second writer) lands between the read and here.
+        const guard =
+          body.owner_seat !== undefined || body.state !== undefined
+            ? { owner_seat: before.owner_seat, state: before.state }
+            : undefined;
+        let lane: Lane;
+        try {
+          lane = updateLane(ctx.db, team.id, laneId, team.slug, patch, Date.now(), guard)!;
+        } catch (err) {
+          if (err instanceof LaneConflictError) {
+            throw new MusterdError(
+              'conflict',
+              `lane "${laneId}" changed while this update was being decided — it is now ` +
+                `${err.actual.owner_seat ? `owned by ${err.actual.owner_seat}` : 'unowned'} ` +
+                `(${err.actual.state}). Re-read the lane and retry.`,
+            );
+          }
+          throw err;
+        }
         // The claim edge is the one that decides who owns work, and it was the only lane edge
         // writing no audit row at all — which is why reconstructing the collision above from the
         // audit log turned up nothing but the release. Record every ownership acquisition.
@@ -3202,6 +3226,45 @@ export async function handleHttp(
               kind: lane.owner_seat === member.name ? 'claim' : 'handoff',
               ...(before.owner_seat ? { takeover_of_offline_owner: true } : {}),
             },
+          });
+        }
+        // ADR 325 prereq: the transitions with no verb of their own. A field edit writes
+        // `lane.updated` naming exactly what changed; a state move not covered by
+        // claimed/released/ready_for_review/closed writes `lane.state_changed`. Together with
+        // those four, every lane transition now leaves a durable row — the property a replicating
+        // daemon folds history back out of.
+        const changedFields = laneFieldChanges(before, lane);
+        if (changedFields.length > 0) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.updated',
+            target: lane.id,
+            result: 'allow',
+            detail: { lane: lane.id, fields: changedFields },
+          });
+        }
+        if (
+          lane.state !== before.state &&
+          !LANE_TERMINAL_STATES.has(lane.state) && // lane.closed owns terminal edges
+          !(lane.state === 'open' && before.owner_seat !== null) && // lane.released owns this edge
+          !(isAwaitingAcceptance(lane.state) && !isAwaitingAcceptance(before.state)) && // lane.ready_for_review
+          // Mirror the lane.claimed emit above EXACTLY (owner must be non-null): an ownership
+          // change that produced no acquisition row must not also be swallowed here, or the
+          // transition writes nothing at all (ryder, #1071 acceptance). Unreachable via this
+          // handler today — UpdateLaneSchema's owner_seat rejects null — but the two predicates
+          // must not be able to drift apart.
+          !(
+            body.owner_seat !== undefined &&
+            lane.owner_seat !== null &&
+            lane.owner_seat !== before.owner_seat
+          ) // lane.claimed
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'lane.state_changed',
+            target: lane.id,
+            result: 'allow',
+            detail: { lane: lane.id, from: before.state, to: lane.state },
           });
         }
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);

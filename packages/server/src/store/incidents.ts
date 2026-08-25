@@ -6,6 +6,7 @@ import {
   type Lane,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { monotonicFactory as monotonicUlid } from 'ulid';
 import { appendAudit } from './audit.js';
 import { getLane, listLanes, openLane, updateLane } from './lanes.js';
 import { getMemberByRole } from './members.js';
@@ -29,6 +30,10 @@ import { getPolicy } from './teams.js';
  * policy default cannot drift apart. Read the policy (`getPolicy(db, teamId).incident`), never this.
  */
 export const CLUSTER_THRESHOLD = IncidentPolicySchema.parse({}).cluster_threshold;
+
+/** Same promise as the v45 migration mint: two same-millisecond reports still get ascending ids,
+ *  so the pool's `ORDER BY id` is arrival order — exactly what AUTOINCREMENT used to guarantee. */
+const mintReportId = monotonicUlid();
 
 export type IncidentOutcome =
   | { kind: 'disabled' } // the team opted out (policy incident.enabled = false)
@@ -180,10 +185,11 @@ export function recordBlockedReport(
   const insert = (laneId: string | null) =>
     db
       .prepare(
-        `INSERT INTO incident_reports (team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO incident_reports (id, team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
+        mintReportId(),
         teamId,
         report.gate,
         seat,
@@ -221,7 +227,7 @@ export function recordBlockedReport(
   const rows = db
     .prepare<
       [string, string],
-      { id: number; seat: string; sig: string | null; ref: string | null }
+      { id: string; seat: string; sig: string | null; ref: string | null }
     >('SELECT id, seat, sig, ref FROM incident_reports WHERE team_id = ? AND gate = ? AND lane_id IS NULL ORDER BY id')
     .all(teamId, report.gate);
   const lane = openLane(

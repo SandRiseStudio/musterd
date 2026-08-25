@@ -163,8 +163,41 @@ export function getLane(db: Database, teamId: string, id: string, teamSlug: stri
 }
 
 /**
+ * The caller's expectation about a lane at write time (ADR 325 prereq). A claim decision is made
+ * against a read; the write refuses if the lane no longer matches, instead of blindly overwriting
+ * whatever landed in between. `undefined` fields are unchecked; `owner_seat: null` means
+ * "expected unowned".
+ */
+export interface LaneExpectation {
+  owner_seat?: string | null;
+  state?: string;
+}
+
+/** A guarded lane write found the lane changed since the caller's read (ADR 325 prereq). */
+export class LaneConflictError extends Error {
+  constructor(
+    readonly laneId: string,
+    readonly expected: LaneExpectation,
+    readonly actual: { owner_seat: string | null; state: string },
+  ) {
+    super(
+      `lane "${laneId}" changed since it was read — expected ` +
+        `owner=${expected.owner_seat === undefined ? '(any)' : String(expected.owner_seat)}/` +
+        `state=${expected.state ?? '(any)'}, found ` +
+        `owner=${String(actual.owner_seat)}/state=${actual.state}`,
+    );
+    this.name = 'LaneConflictError';
+  }
+}
+
+/**
  * Apply a partial update (lane_update / claim / handoff / resolve are all this seam). Stamps
  * claimed_at on first ownership and resolved_at on done/abandoned. Returns null when unknown.
+ *
+ * The read, the decision, and the write run inside one transaction, the UPDATE assigns only the
+ * columns that actually change, and an `expect` makes the write a guarded CAS — three ADR 325
+ * prerequisites, each also correct under today's single daemon (a future `await` between a
+ * caller's read and this write must not silently reintroduce the blind overwrite).
  */
 export function updateLane(
   db: Database,
@@ -173,9 +206,33 @@ export function updateLane(
   teamSlug: string,
   patch: UpdateLane,
   now: number = Date.now(),
+  expect?: LaneExpectation,
+): Lane | null {
+  return db.transaction(() => updateLaneInTx(db, teamId, id, teamSlug, patch, now, expect))();
+}
+
+function updateLaneInTx(
+  db: Database,
+  teamId: string,
+  id: string,
+  teamSlug: string,
+  patch: UpdateLane,
+  now: number,
+  expect?: LaneExpectation,
 ): Lane | null {
   const existing = getLane(db, teamId, id, teamSlug);
   if (!existing) return null;
+  if (expect) {
+    const ownerMismatch =
+      expect.owner_seat !== undefined && existing.owner_seat !== expect.owner_seat;
+    const stateMismatch = expect.state !== undefined && existing.state !== expect.state;
+    if (ownerMismatch || stateMismatch) {
+      throw new LaneConflictError(id, expect, {
+        owner_seat: existing.owner_seat,
+        state: existing.state,
+      });
+    }
+  }
   const owned = patch.owner_seat !== undefined ? patch.owner_seat : existing.owner_seat;
   // Taking ownership of an `open` lane implies `claimed` unless the patch names a state itself.
   let state: LaneState =
@@ -239,13 +296,59 @@ export function updateLane(
       : null,
     updated_at: now,
   };
+  // Per-field write (ADR 325 prereq): assign only the columns that actually change, so a patch's
+  // blast radius is its own fields — never a blind LWW of the whole row. Diffed against the raw
+  // row, not the parsed Lane, so JSON-serialization round-trips cannot fake a change.
+  const rawRow = db
+    .prepare<[string, string], LaneRow>('SELECT * FROM lanes WHERE team_id = ? AND id = ?')
+    .get(teamId, id)!;
+  const columns = [
+    'project',
+    'title',
+    'detail',
+    'owner_seat',
+    'surface_globs',
+    'depends_on',
+    'branch',
+    'goal_id',
+    'risk',
+    'stakes',
+    'stakes_provenance',
+    'merged_json',
+    'state',
+    'claimed_at',
+    'resolved_at',
+  ] as const;
+  const changed = columns.filter((c) => next[c] !== rawRow[c]);
+  const bind: Record<string, unknown> = { team_id: teamId, id, updated_at: now };
+  for (const c of changed) bind[c] = next[c];
   db.prepare(
-    `UPDATE lanes SET project=@project, title=@title, detail=@detail, owner_seat=@owner_seat, surface_globs=@surface_globs,
-       depends_on=@depends_on, branch=@branch, goal_id=@goal_id, risk=@risk, stakes=@stakes, stakes_provenance=@stakes_provenance, merged_json=@merged_json,
-       state=@state, claimed_at=@claimed_at, resolved_at=@resolved_at, updated_at=@updated_at
+    `UPDATE lanes SET ${[...changed.map((c) => `${c}=@${c}`), 'updated_at=@updated_at'].join(', ')}
      WHERE team_id=@team_id AND id=@id`,
-  ).run(next);
+  ).run(bind);
   return getLane(db, teamId, id, teamSlug);
+}
+
+/** Fields a `lane.updated` audit row reports (ADR 325 prereq). Ownership and state are excluded —
+ *  those edges have their own audit verbs — as are derived stamps (claimed_at &c.). */
+const AUDITED_LANE_FIELDS = [
+  'project',
+  'title',
+  'detail',
+  'branch',
+  'goal_id',
+  'scope',
+  'depends_on',
+  'risk',
+  'stakes',
+  'merged',
+] as const;
+
+/** Which auditable fields differ between two reads of a lane (arrays/objects by value). */
+export function laneFieldChanges(before: Lane, after: Lane): string[] {
+  return AUDITED_LANE_FIELDS.filter(
+    (f) => JSON.stringify(before[f] ?? null) !== JSON.stringify(after[f] ?? null),
+  );
 }
 
 export interface LaneFilter {
