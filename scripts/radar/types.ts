@@ -1,9 +1,9 @@
-/** Normalized paper candidate from arXiv or Hugging Face Papers. */
-export type RadarSource = 'arxiv' | 'hf';
+/** Normalized candidate from arXiv, Hugging Face Papers, or the Exploring Next feed (exn). */
+export type RadarSource = 'arxiv' | 'hf' | 'exn';
 
 export interface RadarCandidate {
   source: RadarSource;
-  /** Stable id: arXiv id (e.g. 2503.13657) or HF paper id (usually the same arXiv id). */
+  /** Stable id: arXiv id (e.g. 2503.13657), HF paper id (usually the same), or exn row uuid. */
   id: string;
   title: string;
   url: string;
@@ -16,6 +16,8 @@ export interface RadarCandidate {
 export interface SeenLedger {
   arxiv: string[];
   hf: string[];
+  /** Exploring Next feed row uuids (source added 2026-08-24; legacy files default to []). */
+  exn: string[];
 }
 
 export type TriageVerdict = 'ignore' | 'record-as-evidence' | 'consider-ADR';
