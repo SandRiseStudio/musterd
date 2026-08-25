@@ -11,7 +11,7 @@
  * holds only the composition so the injection surface is testable without a daemon.
  */
 
-export type SessionDigestInput = {
+export type SessionOrientationInput = {
   seat: string;
   team: string;
   memory?: { headline: string; saved_at: number; size_bytes: number } | undefined;
@@ -40,7 +40,7 @@ function fencedHeadline(raw: string): string {
   return `<<headline-as-data: ${flat}>>`;
 }
 
-export function composeSessionDigest(d: SessionDigestInput, now = Date.now()): string | null {
+export function composeSessionOrientation(d: SessionOrientationInput, now = Date.now()): string | null {
   if (!SLUG.test(d.seat) || !SLUG.test(d.team)) return null;
   // Counts come from the unfiltered lists (an unrenderable row still counts); rendered detail only
   // from rows whose every field passes its shape gate — a name or id that fails is dropped, never
@@ -57,7 +57,7 @@ export function composeSessionDigest(d: SessionDigestInput, now = Date.now()): s
   if (empty) return null;
 
   const lines: string[] = [
-    `musterd digest — seat "${d.seat}" on team "${d.team}" (read-only; nothing marked read, seat not claimed)`,
+    `musterd orientation — seat "${d.seat}" on team "${d.team}" (read-only; nothing marked read, seat not claimed)`,
   ];
   if (d.memory) {
     lines.push(
