@@ -3614,7 +3614,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
       {
         title: 'P3.1 schema',
         project: 'musterd',
-        surface_globs: ['packages/server/src/store/**'],
+        scope: ['packages/server/src/store/**'],
         claim: true,
       },
       nickTok,
@@ -3633,7 +3633,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
       {
         title: 'P3.2 handshake',
         project: 'musterd',
-        surface_globs: ['packages/server/**'],
+        scope: ['packages/server/**'],
         depends_on: [l1.json.lane.id],
         claim: true,
       },
@@ -3833,12 +3833,12 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     // nick claims a surface; bo claims one that overlaps it → nick gets the advisory.
     await post(
       '/teams/dawn/lanes',
-      { title: 'store', surface_globs: ['packages/server/src/store/**'], claim: true },
+      { title: 'store', scope: ['packages/server/src/store/**'], claim: true },
       nickTok,
     );
     await post(
       '/teams/dawn/lanes',
-      { title: 'store too', surface_globs: ['packages/server/src/store/delivery.ts'], claim: true },
+      { title: 'store too', scope: ['packages/server/src/store/delivery.ts'], claim: true },
       boTok,
     );
 
@@ -4231,7 +4231,7 @@ describe('two-stage close (ADR 169)', () => {
       // (a) policy fired — defaulted.
       const auto = await post(
         '/teams/dawn/lanes',
-        { title: 'a web tweak', claim: true, surface_globs: ['packages/web/src/x.ts'] },
+        { title: 'a web tweak', claim: true, scope: ['packages/web/src/x.ts'] },
         ada,
       );
       expect(auto.json.lane.stakes).toBe('low');
@@ -4244,7 +4244,7 @@ describe('two-stage close (ADR 169)', () => {
         {
           title: 'a web change that asserts a fact',
           claim: true,
-          surface_globs: ['packages/web/src/y.ts'],
+          scope: ['packages/web/src/y.ts'],
           stakes: 'normal',
         },
         ada,
@@ -5465,13 +5465,13 @@ describe('two-stage close (ADR 169)', () => {
     const { nickTok, ada } = await setup();
     const l1 = await post(
       '/teams/dawn/lanes',
-      { title: 'store work', project: 'p', surface_globs: ['packages/server/**'], claim: true },
+      { title: 'store work', project: 'p', scope: ['packages/server/**'], claim: true },
       ada,
     );
     await patchLane(l1.json.lane.id, { state: 'ready_for_review' }, ada);
     const l2 = await post(
       '/teams/dawn/lanes',
-      { title: 'also store', project: 'p', surface_globs: ['packages/server/src/**'], claim: true },
+      { title: 'also store', project: 'p', scope: ['packages/server/src/**'], claim: true },
       nickTok,
     );
     expect(l2.json.warnings.map((w: { kind: string }) => w.kind)).toContain('surface_overlap');
@@ -5583,12 +5583,12 @@ describe('releasing a lane — open ⟺ unowned', () => {
     // gee holds an overlapping surface, so the board has something to contend with.
     await post(
       '/teams/dusk/lanes',
-      { title: 'geeʼs work', surface_globs: ['packages/server/**'], claim: true },
+      { title: 'geeʼs work', scope: ['packages/server/**'], claim: true },
       gee,
     );
     const mine = await post(
       '/teams/dusk/lanes',
-      { title: 'parked work', surface_globs: ['packages/server/src/store/**'], claim: true },
+      { title: 'parked work', scope: ['packages/server/src/store/**'], claim: true },
       ada,
     );
     const id = mine.json.lane.id as string;

@@ -23,9 +23,7 @@ import { errorResult, textResult } from './format.js';
 
 function fmtLane(l: Lane): string {
   const owner = l.owner_seat ?? 'unowned';
-  // This client renders daemon JSON unparsed, so an epoch-13 daemon's lanes carry only the legacy
-  // key — read both (ADR 296 skew posture; the fallback drops with the mirror).
-  const scopeGlobs = l.scope ?? l.surface_globs ?? [];
+  const scopeGlobs = l.scope ?? [];
   const scope = scopeGlobs.length ? ` scope=[${scopeGlobs.join(', ')}]` : '';
   const deps = l.depends_on.length ? ` deps=[${l.depends_on.join(', ')}]` : '';
   const branch = l.branch ? ` branch=${l.branch}` : '';

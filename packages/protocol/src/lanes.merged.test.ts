@@ -9,7 +9,7 @@ const base = {
   detail: '',
   owner_seat: null,
   role: null,
-  surface_globs: [],
+  scope: [],
   depends_on: [],
   branch: null,
   goal_id: null,

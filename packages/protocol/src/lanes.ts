@@ -207,184 +207,140 @@ export const LANE_CONTENDING_STATES: ReadonlySet<LaneState> = new Set([
 ]);
 export const LANE_TERMINAL_STATES: ReadonlySet<LaneState> = new Set(['done', 'abandoned']);
 
-/**
- * ADR 296 tier 2: a lane's paths are its **scope**; `surface_globs` is the pre-rename wire token
- * (ADR 296 §1 narrows `surface` to where a member touches the team). Adopt the legacy key on read,
- * and keep BOTH keys populated on the full Lane shape: a client one epoch behind still requires
- * `surface_globs`, so a daemon serializing a parsed lane never strands it (the ADR 138 skew
- * posture). `scope` wins when both arrive and the mirror is normalized to it. The mirror drops in
- * a later epoch, on-touch — no calendar bound.
- */
-function adoptLegacyScopeKey(raw: unknown): unknown {
-  if (!raw || typeof raw !== 'object') return raw;
-  const rec = raw as Record<string, unknown>;
-  if ('scope' in rec) return { ...rec, surface_globs: rec.scope };
-  if ('surface_globs' in rec) return { ...rec, scope: rec.surface_globs };
-  return raw;
-}
+// ADR 296 tier 2's `surface_globs` wire mirror (dual-send + dual-populate for one-epoch skew) was
+// dropped at epoch 16, on-touch, with the fleet verified at 14 — `scope` is the only wire token.
 
-/**
- * Client-side skew guard for the same rename: an epoch-13 daemon's request schema silently DROPS
- * the unknown `scope` key — the call succeeds with an empty scope, the exact empty-surface trap the
- * MCP coercion layer documents. A new client therefore dual-sends the legacy mirror alongside
- * `scope` until the fleet is past the rename; a new daemon adopts `scope` (it wins on read), an old
- * one reads the mirror. Drops with the mirror, on-touch.
- */
-export function mirrorLegacyScopeOnSend<T>(body: T): T {
-  if (body && typeof body === 'object' && 'scope' in body) {
-    const rec = body as Record<string, unknown>;
-    if (rec.scope !== undefined) return { ...rec, surface_globs: rec.scope } as T;
-  }
-  return body;
-}
-
-/** Request-body variant of {@link adoptLegacyScopeKey}: canonical `scope` only, no mirror — the
- *  daemon is the only reader of these bodies and it is never behind its own build. */
-function adoptLegacyScopeInput(raw: unknown): unknown {
-  if (raw && typeof raw === 'object' && 'surface_globs' in raw && !('scope' in raw)) {
-    const { surface_globs, ...rest } = raw as Record<string, unknown>;
-    return { ...rest, scope: surface_globs };
-  }
-  return raw;
-}
-
-export const LaneSchema = z.preprocess(
-  adoptLegacyScopeKey,
-  z.object({
-    id: z.string(),
-    team: z.string(),
-    /** Surface-space scope — contention is checked within a project, never across (ADR 068 workspace). */
-    project: z.string(),
-    title: z.string(),
-    detail: z.string().nullable(),
-    /**
-     * What sort of lane this is. `null` = ordinary work lane; `'incident'` = daemon-opened
-     * shared-blocker lane (spec 2026-08-14). Immutable after open on purpose — it is deliberately
-     * absent from `UpdateLaneSchema`: an incident that stops being one is resolved, never relabeled.
-     * Optional (not defaulted) so pre-v41 fixtures and older daemons stay assignable — consumers only
-     * ever ask `kind === 'incident'`, and absence answers that correctly.
-     */
-    kind: z.enum(['incident']).nullable().optional(),
-    /**
-     * Owning seat name; null = open/unowned. The two are one fact, not two: `state === 'open'` ⟺
-     * `owner_seat === null`, enforced on every transition (`updateLane`) — claiming an open lane
-     * moves it to `claimed`, and moving one back to `open` releases it. A lane that names an owner
-     * while sitting open would let the board assert that someone holds work nobody is doing.
-     */
-    owner_seat: z.string().nullable(),
-    /** Assignment hint (backend/frontend/…); advisory only in P1. */
-    role: z.string().nullable(),
-    /** Declared scope, e.g. ["packages/server/src/store/**"] — the paths this lane touches, and the
-     *  overlap-check input. Canonical token (ADR 296; was `surface_globs`). */
-    scope: z.array(z.string()),
-    /** Deprecated mirror of {@link scope} — the pre-ADR-296 wire token. The schema keeps it populated
-     *  (see {@link adoptLegacyScopeKey}) so epoch-13 clients parse; consumers must read `scope`. */
-    surface_globs: z.array(z.string()).optional(),
-    /** Lane ids this lane builds on. The unmet-dependency-check input. */
-    depends_on: z.array(z.string()),
-    /** The git branch/artifact carrying the work — what `lane_handoff` transfers. */
-    branch: z.string().nullable(),
-    /** Optional link up to a declared Goal (ADR 084). null = ungrouped; the join is flat, never a tree. */
-    goal_id: z.string().nullable(),
-    /**
-     * Declared risk tags (ADR 169), e.g. ["user-facing", "production", "cost"]. Any tag routes the
-     * review ask human-first. Declared at open/update, never inferred from surfaces. Defaulted so a
-     * newer client parses an older daemon's lanes (skew-tolerant, the ADR 148 posture).
-     */
-    risk: z.array(z.string()).default([]),
-    /**
-     * Declared **stakes** for acceptance (ADR 234) — how much this change is worth someone's eyes.
-     *
-     * Deliberately NOT `risk`. `risk` already has a consumer that routes the ask human-first on any
-     * tag, and a second consumer with opposite needs on one value is the shared-predicate trap named
-     * in ADR 225: "low stakes" cannot be said in `risk` without either colliding with its empty
-     * default or accidentally demanding a human. Each consumer states its own need.
-     *
-     * Declared, never inferred from the surface — the counterpoint ryder insisted on carrying with
-     * nick's proposal is that surface complexity predicts review COST, not review VALUE (the two most
-     * valuable acceptance reviews of 2026-08-04 were both on docs, and each changed the artifact). So
-     * a filetype rule is the wrong knife; the worker declares.
-     *
-     * Defaults to `normal` on purpose. An opt-IN-to-acceptance design fails silent — forgetting to
-     * declare would drop a lane below the line by inaction. Forgetting must cost an ask, never a
-     * review.
-     *
-     * **Increment 1 records this and changes nothing else.** No routing consumes it yet; the flip is
-     * gated on what the label measures.
-     */
-    stakes: LaneStakesSchema.default('normal'),
-    /**
-     * WHO put that value there (ADR 244) — `declared` when a person or seat said it, `defaulted` when
-     * a team policy wrote it at `lane_open`.
-     *
-     * This exists to protect ADR 234's rollback test, which asks whether **declared** stakes predict
-     * the answer rate. Once an admin policy can write `stakes: 'low'`, a single `low` bucket pools two
-     * completely different claims — "the worker judged this small" and "policy assumed this class is
-     * small" — and the Eval could no longer tell them apart. It would fail silently and permanently,
-     * which is the same confound class as the acceptor monoculture except arriving through a feature
-     * instead of an accident. So the two are separated at the source, and the Eval splits on it.
-     *
-     * `declared` is the honest default for everything else, including a lane that declared nothing:
-     * ADR 234 §2 already ruled that absence IS the declaration, so an unstated `normal` is the
-     * worker's answer, not a policy's. `defaulted` is written ONLY where a policy actually fired.
-     */
-    stakes_provenance: LaneStakesProvenanceSchema.default('declared'),
-    /**
-     * The worker's merge attestation, captured at `awaiting_acceptance` (ADR 192 / formerly
-     * `ready_for_review`) so the acceptor's close carries the *worker's* claim verbatim into
-     * `git.pr_merged`. Null until `lane_submit`; defaulted for older-daemon skew.
-     */
-    merged: z
-      .object({
-        pr: z.number().int().optional(),
-        sha: z.string().optional(),
-        authorized_by: z.string().optional(),
-        /**
-         * Seat-side verification tier stamped by `lane_submit` (merge-verified submit):
-         * `ancestor` (SHA reachable from origin/main — landed), `unknown_object` (SHA not in the
-         * submitting worktree's repo — cross-repo lane), `fetch_failed` (could not refresh
-         * origin/main — abstained), `unattested` (no SHA given). `not_ancestor` never appears
-         * here: it is refused at submit, before any lane mutation. A z.string rather than an
-         * enum so a newer client's tier parses instead of rejecting; consumers compare against
-         * {@link MERGE_VERIFICATION_TIERS} and say nothing on values they don't know.
-         */
-        verification: z.string().optional(),
-      })
-      .nullable()
-      .default(null),
-    state: LaneStateSchema,
-    /**
-     * Board-projection annotation (ADR 169/191), never stored: for a `done` lane, whether the close
-     * was a counterpart *acceptance* (derived from the `lane.closed` audit row's closer vs
-     * owner-at-close). Wire name stays `verified`; UI copy is accepted / unconfirmed (ADR 192).
-     * Absent on non-terminal lanes, on older daemons, and on lanes closed before the audit existed —
-     * absent means "unknown", and the UI says nothing rather than guessing.
-     */
-    verified: z.boolean().optional(),
-    /**
-     * Board-projection annotation (ADR 283), never stored: for a `done` lane, WHY it closed the way
-     * it did — read from the same `lane.closed` audit row `verified` is derived from.
-     *
-     * `verified: false` is two opposite situations wearing one word, and the response to each is the
-     * response the other one would waste. `review_timeout` / `review_unanswered` / `review_cut_short`
-     * mean a counterpart was asked and did not answer — go find a person. `no_candidate` /
-     * `human_review_missed` mean no ask was ever sent because the roster held nobody eligible — a
-     * degradation nobody is at fault for, answered by looking at who is on the team. Measured
-     * 2026-08-19 over 344 closes, both halves are populous (40 + 9 against 23 + 16 + 2) and neither
-     * reached a reader.
-     *
-     * Absent means unknown, exactly as `verified` does: a close predating the reason, a lane that
-     * never closed, an older daemon, or a value this build does not recognise. A consumer that
-     * defaults the absent case to any particular reason re-creates the defect this field fixes.
-     */
-    close_reason: CloseReasonSchema.optional(),
-    created_by: z.string(),
-    created_at: z.number().int(),
-    claimed_at: z.number().int().nullable(),
-    resolved_at: z.number().int().nullable(),
-    updated_at: z.number().int(),
-  }),
-);
+export const LaneSchema = z.object({
+  id: z.string(),
+  team: z.string(),
+  /** Surface-space scope — contention is checked within a project, never across (ADR 068 workspace). */
+  project: z.string(),
+  title: z.string(),
+  detail: z.string().nullable(),
+  /**
+   * What sort of lane this is. `null` = ordinary work lane; `'incident'` = daemon-opened
+   * shared-blocker lane (spec 2026-08-14). Immutable after open on purpose — it is deliberately
+   * absent from `UpdateLaneSchema`: an incident that stops being one is resolved, never relabeled.
+   * Optional (not defaulted) so pre-v41 fixtures and older daemons stay assignable — consumers only
+   * ever ask `kind === 'incident'`, and absence answers that correctly.
+   */
+  kind: z.enum(['incident']).nullable().optional(),
+  /**
+   * Owning seat name; null = open/unowned. The two are one fact, not two: `state === 'open'` ⟺
+   * `owner_seat === null`, enforced on every transition (`updateLane`) — claiming an open lane
+   * moves it to `claimed`, and moving one back to `open` releases it. A lane that names an owner
+   * while sitting open would let the board assert that someone holds work nobody is doing.
+   */
+  owner_seat: z.string().nullable(),
+  /** Assignment hint (backend/frontend/…); advisory only in P1. */
+  role: z.string().nullable(),
+  /** Declared scope, e.g. ["packages/server/src/store/**"] — the paths this lane touches, and the
+   *  overlap-check input. Canonical token (ADR 296; was `surface_globs`). */
+  scope: z.array(z.string()),
+  /** Lane ids this lane builds on. The unmet-dependency-check input. */
+  depends_on: z.array(z.string()),
+  /** The git branch/artifact carrying the work — what `lane_handoff` transfers. */
+  branch: z.string().nullable(),
+  /** Optional link up to a declared Goal (ADR 084). null = ungrouped; the join is flat, never a tree. */
+  goal_id: z.string().nullable(),
+  /**
+   * Declared risk tags (ADR 169), e.g. ["user-facing", "production", "cost"]. Any tag routes the
+   * review ask human-first. Declared at open/update, never inferred from surfaces. Defaulted so a
+   * newer client parses an older daemon's lanes (skew-tolerant, the ADR 148 posture).
+   */
+  risk: z.array(z.string()).default([]),
+  /**
+   * Declared **stakes** for acceptance (ADR 234) — how much this change is worth someone's eyes.
+   *
+   * Deliberately NOT `risk`. `risk` already has a consumer that routes the ask human-first on any
+   * tag, and a second consumer with opposite needs on one value is the shared-predicate trap named
+   * in ADR 225: "low stakes" cannot be said in `risk` without either colliding with its empty
+   * default or accidentally demanding a human. Each consumer states its own need.
+   *
+   * Declared, never inferred from the surface — the counterpoint ryder insisted on carrying with
+   * nick's proposal is that surface complexity predicts review COST, not review VALUE (the two most
+   * valuable acceptance reviews of 2026-08-04 were both on docs, and each changed the artifact). So
+   * a filetype rule is the wrong knife; the worker declares.
+   *
+   * Defaults to `normal` on purpose. An opt-IN-to-acceptance design fails silent — forgetting to
+   * declare would drop a lane below the line by inaction. Forgetting must cost an ask, never a
+   * review.
+   *
+   * **Increment 1 records this and changes nothing else.** No routing consumes it yet; the flip is
+   * gated on what the label measures.
+   */
+  stakes: LaneStakesSchema.default('normal'),
+  /**
+   * WHO put that value there (ADR 244) — `declared` when a person or seat said it, `defaulted` when
+   * a team policy wrote it at `lane_open`.
+   *
+   * This exists to protect ADR 234's rollback test, which asks whether **declared** stakes predict
+   * the answer rate. Once an admin policy can write `stakes: 'low'`, a single `low` bucket pools two
+   * completely different claims — "the worker judged this small" and "policy assumed this class is
+   * small" — and the Eval could no longer tell them apart. It would fail silently and permanently,
+   * which is the same confound class as the acceptor monoculture except arriving through a feature
+   * instead of an accident. So the two are separated at the source, and the Eval splits on it.
+   *
+   * `declared` is the honest default for everything else, including a lane that declared nothing:
+   * ADR 234 §2 already ruled that absence IS the declaration, so an unstated `normal` is the
+   * worker's answer, not a policy's. `defaulted` is written ONLY where a policy actually fired.
+   */
+  stakes_provenance: LaneStakesProvenanceSchema.default('declared'),
+  /**
+   * The worker's merge attestation, captured at `awaiting_acceptance` (ADR 192 / formerly
+   * `ready_for_review`) so the acceptor's close carries the *worker's* claim verbatim into
+   * `git.pr_merged`. Null until `lane_submit`; defaulted for older-daemon skew.
+   */
+  merged: z
+    .object({
+      pr: z.number().int().optional(),
+      sha: z.string().optional(),
+      authorized_by: z.string().optional(),
+      /**
+       * Seat-side verification tier stamped by `lane_submit` (merge-verified submit):
+       * `ancestor` (SHA reachable from origin/main — landed), `unknown_object` (SHA not in the
+       * submitting worktree's repo — cross-repo lane), `fetch_failed` (could not refresh
+       * origin/main — abstained), `unattested` (no SHA given). `not_ancestor` never appears
+       * here: it is refused at submit, before any lane mutation. A z.string rather than an
+       * enum so a newer client's tier parses instead of rejecting; consumers compare against
+       * {@link MERGE_VERIFICATION_TIERS} and say nothing on values they don't know.
+       */
+      verification: z.string().optional(),
+    })
+    .nullable()
+    .default(null),
+  state: LaneStateSchema,
+  /**
+   * Board-projection annotation (ADR 169/191), never stored: for a `done` lane, whether the close
+   * was a counterpart *acceptance* (derived from the `lane.closed` audit row's closer vs
+   * owner-at-close). Wire name stays `verified`; UI copy is accepted / unconfirmed (ADR 192).
+   * Absent on non-terminal lanes, on older daemons, and on lanes closed before the audit existed —
+   * absent means "unknown", and the UI says nothing rather than guessing.
+   */
+  verified: z.boolean().optional(),
+  /**
+   * Board-projection annotation (ADR 283), never stored: for a `done` lane, WHY it closed the way
+   * it did — read from the same `lane.closed` audit row `verified` is derived from.
+   *
+   * `verified: false` is two opposite situations wearing one word, and the response to each is the
+   * response the other one would waste. `review_timeout` / `review_unanswered` / `review_cut_short`
+   * mean a counterpart was asked and did not answer — go find a person. `no_candidate` /
+   * `human_review_missed` mean no ask was ever sent because the roster held nobody eligible — a
+   * degradation nobody is at fault for, answered by looking at who is on the team. Measured
+   * 2026-08-19 over 344 closes, both halves are populous (40 + 9 against 23 + 16 + 2) and neither
+   * reached a reader.
+   *
+   * Absent means unknown, exactly as `verified` does: a close predating the reason, a lane that
+   * never closed, an older daemon, or a value this build does not recognise. A consumer that
+   * defaults the absent case to any particular reason re-creates the defect this field fixes.
+   */
+  close_reason: CloseReasonSchema.optional(),
+  created_by: z.string(),
+  created_at: z.number().int(),
+  claimed_at: z.number().int().nullable(),
+  resolved_at: z.number().int().nullable(),
+  updated_at: z.number().int(),
+});
 export type Lane = z.infer<typeof LaneSchema>;
 
 /**
@@ -418,94 +374,88 @@ export const LaneWarningSchema = z.object({
 export type LaneWarning = z.infer<typeof LaneWarningSchema>;
 
 /** Body for `POST /teams/:slug/lanes` (lane_open). `claim` self-owns at create (opt-in, ADR 083). */
-export const OpenLaneSchema = z.preprocess(
-  adoptLegacyScopeInput,
-  z.object({
-    title: z.string().min(1),
-    detail: z.string().optional(),
-    project: z.string().optional(),
-    role: z.string().optional(),
-    /** The paths this lane touches (ADR 296; legacy `surface_globs` adopted on read). */
-    scope: z.array(z.string()).optional(),
-    depends_on: z.array(z.string()).optional(),
-    branch: z.string().optional(),
-    /** Link this lane to a Goal at open (ADR 084) — the id `musterd next` groups + derives status by. */
-    goal_id: z.string().optional(),
-    /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
-    risk: z.array(z.string()).optional(),
-    /** Declared acceptance stakes (ADR 234). Omitted ⇒ `normal`; nothing routes on it yet. */
-    stakes: LaneStakesSchema.optional(),
-    /** Lane kind (spec 2026-08-14): only the daemon sets 'incident'; omitted ⇒ ordinary lane. */
-    kind: z.enum(['incident']).optional(),
-    claim: z.boolean().optional(),
-  }),
-);
+export const OpenLaneSchema = z.object({
+  title: z.string().min(1),
+  detail: z.string().optional(),
+  project: z.string().optional(),
+  role: z.string().optional(),
+  /** The paths this lane touches (ADR 296). */
+  scope: z.array(z.string()).optional(),
+  depends_on: z.array(z.string()).optional(),
+  branch: z.string().optional(),
+  /** Link this lane to a Goal at open (ADR 084) — the id `musterd next` groups + derives status by. */
+  goal_id: z.string().optional(),
+  /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
+  risk: z.array(z.string()).optional(),
+  /** Declared acceptance stakes (ADR 234). Omitted ⇒ `normal`; nothing routes on it yet. */
+  stakes: LaneStakesSchema.optional(),
+  /** Lane kind (spec 2026-08-14): only the daemon sets 'incident'; omitted ⇒ ordinary lane. */
+  kind: z.enum(['incident']).optional(),
+  claim: z.boolean().optional(),
+});
 export type OpenLane = z.infer<typeof OpenLaneSchema>;
 
 /** Body for `PATCH /teams/:slug/lanes/:id` (lane_update / claim / handoff / resolve — one seam). */
-export const UpdateLaneSchema = z.preprocess(
-  adoptLegacyScopeInput,
-  z.object({
-    state: LaneStateSchema.optional(),
-    /**
-     * Correct the title (ADR 240). Same reasoning as `project` below, applied to the field a reader
-     * sees FIRST: a lane opened with a title that misstates the work had no way back, and the only
-     * available correction was a note inside the detail — which reaches nobody who decides, from the
-     * board, not to open the lane. Forward-only: notification bodies already sent keep the title they
-     * were sent with, because they are history. `min(1)` — an empty title is worse than a wrong one.
-     */
-    title: z.string().min(1).optional(),
-    detail: z.string().optional(),
-    /**
-     * Re-scope this lane's surface-space. `project` is stamped at open from the opener's workspace, so
-     * a lane opened from the wrong checkout (or before derivation existed) had no way back — and an
-     * immutable field with no escape hatch makes a mis-stamp permanent.
-     */
-    project: z.string().optional(),
-    /** Re-declare the paths this lane touches (ADR 296; legacy `surface_globs` adopted on read). */
-    scope: z.array(z.string()).optional(),
-    depends_on: z.array(z.string()).optional(),
-    branch: z.string().optional(),
-    /** Re-link (or clear, with null) this lane's Goal (ADR 084). */
-    goal_id: z.string().nullable().optional(),
-    /** Transfer ownership to this seat (lane_handoff / lane_claim sets it to the caller). */
-    owner_seat: z.string().optional(),
-    /**
-     * Why this handoff (ADR 243) — carried into the body of the `handoff` act the transfer already
-     * emits, never stored on the lane. `lane_handoff` had no way to say anything, so explaining a
-     * handoff took a SECOND act, and that act named no lane and had to derive one from the lanes the
-     * sender still held — which is precisely the set the transfer just removed the right answer from.
-     * The note exists so the explanation and the correct lane travel in one act instead of two.
-     *
-     * Meaningful only alongside an `owner_seat` that moves the lane to someone else; ignored
-     * otherwise rather than rejected, so a client that always sends it is not punished for it.
-     */
-    handoff_note: z.string().max(4000).optional(),
-    /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
-    risk: z.array(z.string()).optional(),
-    /**
-     * Re-declare acceptance stakes (ADR 234). Editable after open on purpose: what a change is worth
-     * someone's eyes is often only clear once the work exists, and a declaration you cannot revise is
-     * one people learn to set defensively.
-     */
-    stakes: LaneStakesSchema.optional(),
-    /**
-     * Merge attestation (ADR 109), meaningful on a terminal move of a branch-carrying lane — or, under
-     * two-stage close (ADR 192), captured at `awaiting_acceptance` (the worker's claim) and persisted
-     * on the lane so a counterpart's later accept carries it. Attested, never verified — recorded to
-     * the audit log as `git.pr_merged`.
-     */
-    merged: z
-      .object({
-        pr: z.number().int().optional(),
-        sha: z.string().optional(),
-        authorized_by: z.string().optional(),
-        /** Seat-side verification tier — see the field's doc on {@link LaneSchema}. */
-        verification: z.string().optional(),
-      })
-      .optional(),
-  }),
-);
+export const UpdateLaneSchema = z.object({
+  state: LaneStateSchema.optional(),
+  /**
+   * Correct the title (ADR 240). Same reasoning as `project` below, applied to the field a reader
+   * sees FIRST: a lane opened with a title that misstates the work had no way back, and the only
+   * available correction was a note inside the detail — which reaches nobody who decides, from the
+   * board, not to open the lane. Forward-only: notification bodies already sent keep the title they
+   * were sent with, because they are history. `min(1)` — an empty title is worse than a wrong one.
+   */
+  title: z.string().min(1).optional(),
+  detail: z.string().optional(),
+  /**
+   * Re-scope this lane's surface-space. `project` is stamped at open from the opener's workspace, so
+   * a lane opened from the wrong checkout (or before derivation existed) had no way back — and an
+   * immutable field with no escape hatch makes a mis-stamp permanent.
+   */
+  project: z.string().optional(),
+  /** Re-declare the paths this lane touches (ADR 296). */
+  scope: z.array(z.string()).optional(),
+  depends_on: z.array(z.string()).optional(),
+  branch: z.string().optional(),
+  /** Re-link (or clear, with null) this lane's Goal (ADR 084). */
+  goal_id: z.string().nullable().optional(),
+  /** Transfer ownership to this seat (lane_handoff / lane_claim sets it to the caller). */
+  owner_seat: z.string().optional(),
+  /**
+   * Why this handoff (ADR 243) — carried into the body of the `handoff` act the transfer already
+   * emits, never stored on the lane. `lane_handoff` had no way to say anything, so explaining a
+   * handoff took a SECOND act, and that act named no lane and had to derive one from the lanes the
+   * sender still held — which is precisely the set the transfer just removed the right answer from.
+   * The note exists so the explanation and the correct lane travel in one act instead of two.
+   *
+   * Meaningful only alongside an `owner_seat` that moves the lane to someone else; ignored
+   * otherwise rather than rejected, so a client that always sends it is not punished for it.
+   */
+  handoff_note: z.string().max(4000).optional(),
+  /** Declared risk tags (ADR 169) — any tag routes the review ask human-first. */
+  risk: z.array(z.string()).optional(),
+  /**
+   * Re-declare acceptance stakes (ADR 234). Editable after open on purpose: what a change is worth
+   * someone's eyes is often only clear once the work exists, and a declaration you cannot revise is
+   * one people learn to set defensively.
+   */
+  stakes: LaneStakesSchema.optional(),
+  /**
+   * Merge attestation (ADR 109), meaningful on a terminal move of a branch-carrying lane — or, under
+   * two-stage close (ADR 192), captured at `awaiting_acceptance` (the worker's claim) and persisted
+   * on the lane so a counterpart's later accept carries it. Attested, never verified — recorded to
+   * the audit log as `git.pr_merged`.
+   */
+  merged: z
+    .object({
+      pr: z.number().int().optional(),
+      sha: z.string().optional(),
+      authorized_by: z.string().optional(),
+      /** Seat-side verification tier — see the field's doc on {@link LaneSchema}. */
+      verification: z.string().optional(),
+    })
+    .optional(),
+});
 export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
 
 /**
