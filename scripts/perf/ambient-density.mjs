@@ -57,17 +57,42 @@ const chrome = spawn(
     '--window-size=1440,900',
     'about:blank',
   ],
-  { stdio: 'ignore' },
+  // Own process group, so cleanup can take the renderer and GPU children down with the parent:
+  // `chrome.kill()` signals only the top process, and headless Chrome's helpers outlive it.
+  { stdio: 'ignore', detached: true },
 );
+let cleaned = false;
 const cleanup = () => {
-  chrome.kill();
+  if (cleaned) return;
+  cleaned = true;
+  try {
+    // Negative pid = the whole group. SIGKILL, not SIGTERM: this is a throwaway profile with
+    // nothing to flush, and a graceful stop we cannot await is a stop we cannot guarantee.
+    process.kill(-chrome.pid, 'SIGKILL');
+  } catch {
+    // already gone
+  }
   try {
     rmSync(profile, { recursive: true, force: true });
   } catch {
     // best-effort: Chrome may still be flushing its profile as we exit
   }
 };
+// `exit` alone is not enough — it does not fire on a signal, which is exactly how a 30-minute run
+// ends when the caller gives up. Without the signal hooks Chrome is reparented to PID 1 and spins
+// its render loop forever; several arms running concurrently is enough to stall the machine.
 process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT']) {
+  process.on(sig, () => {
+    cleanup();
+    process.exit(130);
+  });
+}
+process.on('uncaughtException', (err) => {
+  cleanup();
+  process.stderr.write(`${err?.stack ?? err}\n`);
+  process.exit(1);
+});
 
 let targets;
 for (let i = 0; i < 50; i++) {
