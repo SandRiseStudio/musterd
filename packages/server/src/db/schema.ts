@@ -1,7 +1,9 @@
 /**
- * v1 DDL — authoritative copy is docs/architecture/01-data-model.md.
+ * v1 DDL — the frozen baseline migration 1 executes on a fresh DB; never edit it.
  * Stored as a TS constant rather than a .sql asset to avoid build asset-copying (ADR 003).
- * Must stay character-equivalent to the doc; a divergence is a bug.
+ * docs/architecture/01-data-model.md once mirrored this file character-for-character, but the doc
+ * tracks the CURRENT schema (post-migration CHECKs, e.g. v39/v44 surface rebuilds) while this
+ * constant stays v1 history — they diverge by design (#1065).
  */
 export const SCHEMA_V1_SQL = `
 CREATE TABLE teams (
