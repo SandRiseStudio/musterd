@@ -139,9 +139,7 @@ export function loadToolkit(dir: string, name: string): Toolkit {
   }
   const builtin = BUILTIN_TOOLKITS[name];
   if (builtin) return builtin;
-  throw new Error(
-    `unknown toolkit "${name}" (no built-in and no .musterd/toolkits/${name}.json)`,
-  );
+  throw new Error(`unknown toolkit "${name}" (no built-in and no .musterd/toolkits/${name}.json)`);
 }
 
 /**

@@ -263,7 +263,6 @@ describe('round-trip: built-ins render the identical workspace', () => {
       expect(readProvisionManifest(dir)?.profile).toBe(toolkit.toolkit);
     });
   }
-
 });
 
 /** Legacy manifest read: a pre-rename provisioned.json (role-keyed) still parses. */

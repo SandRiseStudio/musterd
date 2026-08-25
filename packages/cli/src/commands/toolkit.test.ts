@@ -152,10 +152,7 @@ describe('coverage carried over from role (ADR 296 split — same behaviour, new
 
 describe('legacy homes are dropped (ADR 324)', () => {
   it('a file in .musterd/profiles/ or .musterd/roles/ is invisible to show', () => {
-    for (const legacyHome of [
-      join(cwd, '.musterd', 'profiles'),
-      join(cwd, '.musterd', 'roles'),
-    ]) {
+    for (const legacyHome of [join(cwd, '.musterd', 'profiles'), join(cwd, '.musterd', 'roles')]) {
       mkdirSync(legacyHome, { recursive: true });
       writeFileSync(
         join(legacyHome, 'stale.json'),
