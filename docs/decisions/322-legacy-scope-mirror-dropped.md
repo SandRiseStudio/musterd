@@ -1,4 +1,4 @@
-# 322 — `surface_globs` leaves the wire: the ADR 296 tier-2 mirror drops at epoch 15
+# 322 — `surface_globs` leaves the wire: the ADR 296 tier-2 mirror drops at epoch 16
 
 - Status: accepted
 - Date: 2026-08-25
@@ -29,8 +29,10 @@ rebuilt). So the mirror drops, in full:
    `surface_globs`; a legacy-only body reads as scopeless rather than erroring (zod strips unknown
    keys — the ADR 138 fail-toward-tolerance posture, and an epoch-14 client never sends
    legacy-only anyway: it dual-sends, so `scope` is always present).
-4. **Feature epoch 15** as the capability marker. Skew holds in both directions without the
-   mirror: an epoch-14 counterpart already reads and writes canonical `scope`.
+4. **Feature epoch 16** as the capability marker (ADR 321 took 15 while this was in review; the
+   binding precondition was always the rename epoch, not the previous number). Skew holds in both
+   directions without the mirror: any epoch-14+ counterpart already reads and writes canonical
+   `scope` — 14 dual-sends it, 15 sends it canonically.
 
 Deliberately kept, because they were never the wire mirror:
 
@@ -40,15 +42,15 @@ Deliberately kept, because they were never the wire mirror:
 
 ## Observability & Evaluation
 
-- **Traces:** the drop is observable on the wire — a lane fetched from an epoch-15 daemon
+- **Traces:** the drop is observable on the wire — a lane fetched from an epoch-16 daemon
   carries no `surface_globs` key, and the roster's `behind` hint (ADR 148) marks any seat still
-  attesting epoch 14. Fleet attestation was verified per-workspace
+  attesting an older epoch. Fleet attestation was verified per-workspace
   (`packages/protocol/dist/feature-epoch.js`) before the drop landed, recorded on lane
   01M0X0QQ09PZ5R12VY58JHZF52.
 - **Eval:** `lanes.scope.test.ts` pins the dropped shape (canonical-only parse, no mirror key on
   the parsed Lane, legacy-only bodies read scopeless), and the integration suite exercises
-  canonical `scope` in both directions. Falsifier: an epoch-14 client failing to open a scoped
-  lane against an epoch-15 daemon (or vice versa) within the one-epoch window invalidates the
+  canonical `scope` in both directions. Falsifier: an epoch-14+ client failing to open a scoped
+  lane against an epoch-16 daemon (or vice versa) within the one-epoch window invalidates the
   skew claim above.
 - **Experiment:** n/a — a mirror removal has no behavior to A/B; the falsifier is binary and the
   tests carry it.
