@@ -59,10 +59,12 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   if (sub === 'observe') return observeCommand(parsed);
   if (sub === 'resolve-labels') return resolveLabelsCommand(parsed);
   if (sub === 'label-nudge') return labelNudgeCommand();
+  if (sub === 'orient-nudge') return orientNudgeCommand();
+  if (sub === 'orient-stamp') return orientStampCommand();
   if (sub === 'bind') return bindCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | bind --thread <id> | show  ' +
+    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | bind --thread <id> | show  ' +
       '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -987,6 +989,69 @@ function labelNudgeCommand(): number {
     }
   } catch {
     // hook contract: never fail, never noise
+  }
+  return 0;
+}
+
+/**
+ * The orient nudge (spec 2026-08-25-session-orientation-design.md §B) — the label-nudge pattern
+ * applied to orientation: a per-turn line that repeats until a stamp lands, because the one-shot
+ * SessionStart ask was measured to fail (see the label-nudge history above). Unlike the label
+ * sweep, orientation is a property of THIS session, not this machine, so the stamp is
+ * workspace-local and keyed by the captured session id — a new capture makes the old stamp stale
+ * and the nudge fires again.
+ */
+export const ORIENT_NUDGE_TEXT =
+  'musterd: unoriented seat session — run the musterd-orient skill now.';
+
+function orientStampPath(dir: string): string {
+  return join(dir, '.musterd', 'orient-stamp.json');
+}
+
+/** Due iff this is a seat workspace with a captured session the stamp does not name. */
+export function orientNudgeDue(dir: string | null): boolean {
+  if (!dir) return false;
+  const binding = findBinding(dir, {});
+  const sessionId = binding?.session?.id;
+  if (!binding || binding.claim?.mode !== 'seat' || sessionId === undefined) return false;
+  try {
+    const rec = JSON.parse(readFileSync(orientStampPath(dir), 'utf8')) as {
+      session_id?: unknown;
+    };
+    return rec.session_id !== sessionId; // stamped for a previous session ⇒ due again
+  } catch {
+    return true; // no stamp (or unreadable) ⇒ due
+  }
+}
+
+/** Stamp the CAPTURED session oriented (exported for tests; `orient-stamp` is the CLI face). */
+export function writeOrientStamp(dir: string | null, now = Date.now()): void {
+  const sessionId = dir ? findBinding(dir, {})?.session?.id : undefined;
+  if (!dir || sessionId === undefined) return;
+  writeFileSync(
+    orientStampPath(dir),
+    JSON.stringify({ session_id: sessionId, oriented_at: now }) + '\n',
+  );
+}
+
+/** `session orient-nudge` — hook-driven, hence silent-or-one-line and never failing. */
+function orientNudgeCommand(): number {
+  try {
+    if (process.env['MUSTERD_PROVENANCE'] === 'wake') return 0; // a wake's errand IS its orientation
+    if (orientNudgeDue(findWorkspaceDir())) process.stdout.write(`${ORIENT_NUDGE_TEXT}\n`);
+  } catch {
+    // hook contract: never fail, never noise
+  }
+  return 0;
+}
+
+/** `session orient-stamp` — the musterd-orient skill's final step. Best-effort: on any failure
+ *  the stamp is simply absent and the nudge repeats, which is the correct failure direction. */
+function orientStampCommand(): number {
+  try {
+    writeOrientStamp(findWorkspaceDir());
+  } catch {
+    // best-effort; the nudge simply repeats
   }
   return 0;
 }
