@@ -100,3 +100,32 @@ failed tier read followed by recovery.
   liveness line.
 - Implementation detail and test cases are in
   `docs/superpowers/specs/2026-08-14-guardian-confirmed-outage-design.md`.
+
+## Amendment (2026-08-24): the rejected alternative was half right — one tick cannot outwait a stall
+
+At 16:10:13 on 2026-08-24 the guardian raised `daemon_down` — three 2 s probes AND the 10 s
+confirming probe all timed out — against a daemon that booted 16:05:44, never restarted, held 7
+live connections, and answered `/health` 200 in 1.8 ms when probed minutes later. The event-loop
+stall it caught (`quietest_busy_ms` 77 150; the #903/#909/#911 starvation arc) was ~77 s long:
+longer than any bound a 120 s tick can afford. The 2026-08-21 note's repair — a fourth probe on a
+different bound — assumed stalls shorter than that bound, and this stall falsified the
+assumption. The wiki's own falsifier for the 10 s bound ("a raise whose confirming probe failed,
+on a daemon later shown healthy throughout") has now been seen, and its prescribed remedy ("raise
+the bound") does not scale: no within-tick bound outwaits an arbitrary stall.
+
+The only observation that separates a stall from an outage is one separated in TIME: a stall
+recovers before the next tick (~120 s away, longer than any stall yet measured); an outage does
+not. So the alternative this ADR rejected — "wait for the next scheduled tick before confirming"
+— is now adopted, **narrowly**, for exactly one shape: unreachable `/health` with a clean launchd
+exit and no restart, the shape every false positive to date has worn (~25 raises: 2026-08-19 ×4,
+2026-08-21 ×6, 2026-08-24, and their damped repeats). The first sighting defers
+(`guardian.down_deferred`, `pendingDownSince` in the stamp); the next tick still unreachable
+raises with the persistence in its evidence; a healthy tick logs `guardian.stall_recovered` with
+the measured span and clears. A pending sighting older than 15 minutes re-arms rather than
+confirms — two observations that far apart are the guardian's own gap, not one incident.
+
+What the rejection protected is preserved: `lastExit != 0` (launchd witnessed a real exit) and
+crashloop still raise in the same tick, so the added latency — at most one tick, ~2 minutes —
+is paid only by the shape that has been wrong every time it fired. Falsify: a real outage
+presenting with a clean launchd exit now pages ~2 minutes later than before; if such an outage is
+ever found where those 2 minutes mattered, revisit the deferral rather than the evidence text.

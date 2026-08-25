@@ -127,6 +127,72 @@ describe('guardianTick', () => {
     expect(lines.some((line) => line.startsWith('acted:'))).toBe(false);
   });
 
+  /**
+   * Cross-tick outage confirmation (ADR 274 amendment): a clean-exit unreachable /health defers on
+   * its first sighting — the 2026-08-24 77 s stall outlasted every single-tick bound — and raises
+   * only when the NEXT tick still cannot reach it. A stall that recovers leaves a measured span in
+   * the log instead of a page.
+   */
+  const unreachableCleanExit =
+    (over: Record<string, unknown> = {}) =>
+    async () => ({
+      now: NOW,
+      health: null,
+      healthProbe: {
+        attempts: 3,
+        lastError: 'The operation was aborted due to timeout',
+        confirmMs: 10_000,
+        confirmError: 'The operation was aborted due to timeout',
+      },
+      launchd: { lastExit: 0, runs: 15 },
+      publisherLog: { freshFailure: false },
+      errLinesSinceBoot: 0,
+      httpErrorRateSinceBoot: 0,
+      reaperStormSinceBoot: false,
+      lastRefreshAt: null,
+      ...over,
+    });
+
+  it('first clean-exit unreachable tick defers: no act, pendingDownSince stamped', async () => {
+    const { d, lines } = tickDeps({ collect: unreachableCleanExit() });
+    await guardianTick(d);
+    expect(lines.some((l) => l.startsWith('guardian.down_deferred'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('acted:'))).toBe(false);
+    expect(loadStamp(d.stampPath).pendingDownSince).toBe(NOW);
+  });
+
+  it('second unreachable tick raises daemon_down, evidence carrying the persistence', async () => {
+    const { d, lines } = tickDeps({ collect: unreachableCleanExit() });
+    saveStamp(d.stampPath, { ...emptyStamp(), pendingDownSince: NOW - 120_000 });
+    await guardianTick(d);
+    expect(lines).toContain('acted:daemon_down');
+  });
+
+  it('a healthy tick after a pending down logs the measured stall and clears it', async () => {
+    const { d, lines } = tickDeps();
+    saveStamp(d.stampPath, { ...emptyStamp(), pendingDownSince: NOW - 120_000 });
+    await guardianTick(d);
+    expect(lines.some((l) => l.startsWith('guardian.stall_recovered'))).toBe(true);
+    expect(loadStamp(d.stampPath).pendingDownSince).toBeNull();
+  });
+
+  it('a stale pending down (guardian itself was quiet) re-arms instead of raising on old memory', async () => {
+    const { d, lines } = tickDeps({ collect: unreachableCleanExit() });
+    saveStamp(d.stampPath, { ...emptyStamp(), pendingDownSince: NOW - 3_600_000 });
+    await guardianTick(d);
+    expect(lines.some((l) => l.startsWith('guardian.down_deferred'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('acted:'))).toBe(false);
+    expect(loadStamp(d.stampPath).pendingDownSince).toBe(NOW);
+  });
+
+  it('a nonzero-exit down raises immediately — deferral is only for the maybe-just-slow shape', async () => {
+    const { d, lines } = tickDeps({
+      collect: unreachableCleanExit({ launchd: { lastExit: 1, runs: 3 } }),
+    });
+    await guardianTick(d);
+    expect(lines).toContain('acted:daemon_down');
+  });
+
   it('daily heartbeat fires once and stamps lastHeartbeatAt', async () => {
     const { d, lines } = tickDeps();
     await guardianTick(d);

@@ -55,6 +55,12 @@ export interface GuardianStamp {
   lastIncident: { class: GuardianClass; at: number } | null;
   /** `/health.build` from the newest HEALTHY tick — the crashloop rollback target (`refresh --pin`). */
   lastGoodBuild: string | null;
+  /**
+   * When a tick first found /health unreachable with a clean launchd exit — the maybe-just-stalled
+   * shape. Held here so the NEXT tick can confirm before anything raises; cleared by any healthy
+   * tick. Absent from stamps written before this existed — treated as null.
+   */
+  pendingDownSince?: number | null;
   /** The last successfully observed policy source, never its secret-bearing body. */
   policySource: GuardianPolicySource;
   lastPolicyReadAt: number | null;
@@ -69,6 +75,7 @@ export function emptyStamp(): GuardianStamp {
     lastHeartbeatAt: null,
     lastIncident: null,
     lastGoodBuild: null,
+    pendingDownSince: null,
     policySource: 'shipped_default_unprovisioned',
     lastPolicyReadAt: null,
     lastPolicyErrorAt: null,

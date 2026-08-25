@@ -22,6 +22,11 @@ export interface Incident {
    * to clear it on sight, which is precisely what makes the one real outage dangerous.
    */
   evidence?: string;
+  /**
+   * Do not act yet: hold this incident for the next tick to confirm. Only the clean-exit
+   * daemon_down shape sets it — the shape a merely-stalled daemon presents (see below).
+   */
+  defer?: true;
 }
 
 export interface GuardianSignals {
@@ -47,6 +52,11 @@ export interface GuardianSignals {
   reaperStormSinceBoot: boolean;
   /** Newest refresh/restart the guardian or autorefresh performed; null if none known. */
   lastRefreshAt: number | null;
+  /**
+   * When a PREVIOUS tick first found /health unreachable with a clean launchd exit — injected by
+   * the tick from its stamp, never by the collector. Absent/null = this tick is the first sighting.
+   */
+  firstUnreachableAt?: number | null;
 }
 
 /** A crashloop is only attributed to a refresh that happened inside this window. */
@@ -112,18 +122,45 @@ export function classify(s: GuardianSignals): Incident[] {
       // The old text ended "Check /health directly and compare booted_at before treating this as
       // an outage" — homework for a human, on a check the guardian can run. It now HAS run: the
       // confirming probe on a longer bound is exactly that check, so this says what it found.
-      alert.push({
-        class: 'daemon_down',
-        evidence:
-          `${probe}, but launchd reports a clean exit and ${s.launchd.runs} run(s) — the process was ` +
-          `never restarted. ` +
-          (s.healthProbe?.confirmMs !== undefined
-            ? `Slow-but-alive was tested and ruled out: it answered neither bound. Either it is ` +
-              `wedged with the socket still held, or it went away without launchd noticing — the ` +
-              `two probe errors above tell which.`
-            : `It may still be running and merely too slow to answer; this build recorded no ` +
-              `confirming probe, so compare booted_at before treating this as an outage.`),
-      });
+      //
+      // And one bound was still not enough. 2026-08-24, 16:10:13: a 77 s event-loop stall outlasted
+      // the 2 s probes AND the 10 s confirm, against a daemon that never restarted and was
+      // answering /health in 1.8 ms minutes later. No bound a single tick can afford outwaits an
+      // arbitrary stall; the only observation that separates a stall from an outage is the NEXT
+      // tick, ~120 s away — longer than any stall yet measured. So the first sighting defers
+      // (`defer`), and only a sighting a previous tick already made raises. launchd's clean-exit
+      // word is what earns the deferral: when it reports a real exit, the branch above still
+      // raises immediately.
+      const persisted =
+        s.firstUnreachableAt !== undefined && s.firstUnreachableAt !== null
+          ? s.now - s.firstUnreachableAt
+          : null;
+      const base =
+        `${probe}, but launchd reports a clean exit and ${s.launchd.runs} run(s) — the process was ` +
+        `never restarted. ` +
+        (s.healthProbe?.confirmMs !== undefined
+          ? `Slow-but-alive within this tick was tested: it answered neither bound. `
+          : `This build recorded no confirming probe. `);
+      if (persisted === null) {
+        alert.push({
+          class: 'daemon_down',
+          defer: true,
+          evidence:
+            base +
+            `First sighting — held one tick to separate a transient stall from an outage ` +
+            `(a stall recovers before the next tick; an outage does not).`,
+        });
+      } else {
+        alert.push({
+          class: 'daemon_down',
+          evidence:
+            base +
+            `Persisted across ticks: still unreachable ${Math.round(persisted / 1000)}s after the ` +
+            `first sighting, so a transient stall is ruled out. Either it is wedged with the ` +
+            `socket still held, or it went away without launchd noticing — the probe errors ` +
+            `above tell which.`,
+        });
+      }
     }
   } else {
     if (!s.health.schemaOk) alert.push({ class: 'schema_drift' });
