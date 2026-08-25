@@ -9,11 +9,15 @@ export interface Seatable {
    * the rail can never disagree about who is working. Callers resolve it once (`memberPosture`). */
   posture: Posture;
   availability?: { status: 'available' | 'away' | 'dnd' | 'off_hours' } | null | undefined;
+  /** Why the seat is dark (ADR 141/315) — `left_team` is the one reason that empties the desk. */
+  offline_reason?: string | null | undefined;
+  /** When the seat was last seen — decides who loses a desk when owners outnumber slots. */
+  last_seen_at?: number | null | undefined;
 }
 
 /** Where a member is rendered this frame. */
 export type Placement =
-  | { kind: 'desk'; slot: number }
+  | { kind: 'desk'; slot: number; owned?: true }
   /** An idle member, on the room's leisure furniture — index into `LEISURE_SPOTS`. */
   | { kind: 'leisure'; spot: number }
   | { kind: 'nook' }
@@ -37,9 +41,14 @@ export function isAway(m: Seatable): boolean {
   );
 }
 
-/** A member is out of the room entirely — gone from the floor, not merely resting on it. */
+/** A member is dark on the roster — their desk stays owned unless they left the team. */
 function isGone(m: Seatable): boolean {
   return m.presence === 'offline' || m.posture === 'offline';
+}
+
+/** Out of the room entirely: leaving the team is the line, not presence (presence-honesty §4). */
+function leftTeam(m: Seatable): boolean {
+  return m.offline_reason === 'left_team';
 }
 
 /** Hash → linear-probe to the first free index of a fixed-size zone. `-1` when the zone is full. */
@@ -97,6 +106,19 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
   for (const m of spilled) toDesk(m);
 
   for (const m of away) out.set(m.name, { kind: 'nook' });
-  for (const m of sorted) if (isGone(m)) out.set(m.name, { kind: 'gone' });
+
+  // Owned empty desks (presence-honesty §4): every offline member except `left_team` keeps a desk —
+  // the room must not empty when the team sleeps. Present members claimed desks above (zero
+  // regression); owners fill what remains by the same name-hash probe, freshest-gone first, so when
+  // desks run out it is the longest-gone who lose theirs. Deterministic; normal rosters keep every desk.
+  const owners = sorted
+    .filter((m) => isGone(m) && !leftTeam(m))
+    .sort((a, b) => (b.last_seen_at ?? 0) - (a.last_seen_at ?? 0) || a.name.localeCompare(b.name));
+  for (const m of owners) {
+    const slot = probe(m.name, desks);
+    if (slot >= 0) out.set(m.name, { kind: 'desk', slot, owned: true });
+    else out.set(m.name, { kind: 'gone' }); // desks exhausted — the longest-gone wait outside
+  }
+  for (const m of sorted) if (isGone(m) && leftTeam(m)) out.set(m.name, { kind: 'gone' });
   return out;
 }

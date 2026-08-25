@@ -429,3 +429,12 @@ on `235.4 KB > 235.4 KB`.
   contract's cost — the bytes drop with the mirror in a later epoch.
 - Falsify: build the branch and `pnpm perf:check`; delete `mirrorLegacyScopeOnSend` and the
   mirror lines and the total returns to within ~40 B of main's.
+## 2026-08-24 — owned empty desks (+~0.6 KB total JS; rode the Seeds raise, no raise of its own)
+
+Presence-honesty §4 (lane 01M0GVNXHC, PR #1046) adds the owned-desk pass to the office canvas:
+offline owners keep desks in `assignSeats`, and `drawWorkstation` bakes a nameplate, a fading
+screen afterglow and the `disconnected` glint. Measured on the branch (`pnpm --filter @musterd/web
+build && pnpm perf:check`): total JS gzip 241,0xx locally / 241,4xx in CI against 241,000 — the
+ceiling had ~0.5 KB free before the change. The helpers were inlined into the prop pipeline first
+(−~0.3 KB); no dead JS was found to trade. A 241,000→242,000 raise was prepared, then dropped in rebase: the Shared Seeds raise to 246,000 landed first and covers it. Trap re-paid in this change: `perf:check` reads the last build — run
+the build in the same breath or the number you defend is the previous commit's.

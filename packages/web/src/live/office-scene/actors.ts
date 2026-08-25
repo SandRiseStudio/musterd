@@ -120,6 +120,9 @@ export function homePoses(
     .sort();
   for (const [name, pl] of placements) {
     if (!byName.has(name)) continue;
+    // An owned desk is furniture-with-a-name (presence-honesty §4): the offline owner keeps the
+    // desk but has no body on the floor — the desk itself renders the ownership.
+    if (pl.kind === 'desk' && pl.owned) continue;
     if (pl.kind === 'desk') {
       const slot = DESK_SLOTS[pl.slot];
       if (!slot) continue;

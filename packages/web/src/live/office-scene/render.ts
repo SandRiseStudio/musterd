@@ -1575,6 +1575,8 @@ const RECEPTIONIST_NODE: OfficeNode = {
   workSource: null,
   laneState: null,
   moreLanes: 0,
+  offline_reason: null,
+  last_seen_at: null,
 };
 
 function drawReceptionist(ctx: CanvasRenderingContext2D, fit: Fit, r: ReceptionistState, t: number): void {
@@ -3589,6 +3591,10 @@ function drawWorkstation(
   // onto a desk, or a stale member still carrying `activity: working`, gets a dark screen like any empty desk.
   const working = node?.posture === 'working';
   const mood = node ? deskMoodStyle(deskMoodFor(teamName, node.name)) : null;
+  // Owned empty desk (presence-honesty §4): the offline owner keeps the desk — chair in, monitor
+  // dark, their name baked on a small plate. The lamp is off (nobody switched it on), a warm screen
+  // glow fades over the first hour since they left, and a disconnected seat gets an amber glint.
+  const ownedEmpty = node != null && node.presence === 'offline';
 
   for (const [sx, sy] of [
     [-1, -1],
@@ -3622,7 +3628,7 @@ function drawWorkstation(
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
   // The desk lamp is work gear, not a hashed personality prop: every OCCUPIED desk has one (the
   // sitter brought it), no empty desk ever does — see deskLamp for the #304 story. Lit only after dark.
-  if (node) at(LAMP_ALONG, LAMP_ACROSS, (ix, iy) => deskLamp(ctx, fit, ix, iy, up, lampsLit));
+  if (node) at(LAMP_ALONG, LAMP_ACROSS, (ix, iy) => deskLamp(ctx, fit, ix, iy, up, lampsLit && !ownedEmpty));
 
   // optional personal props — each present-or-not per desk by a stable hash, at its own station
   for (const kind of PROP_KINDS) {
@@ -3641,6 +3647,41 @@ function drawWorkstation(
           return deskPhoto(ctx, fit, ix, iy, sn, up, PHOTOS[Math.floor(deskRnd(id, 41) * PHOTOS.length)]!);
         case 'fan':
           return deskFan(ctx, fit, ix, iy, up);
+      }
+    });
+  }
+
+  // The owned-desk plate + texture (presence-honesty §4) ride the same prop pipeline so they
+  // depth-sort with the desk. All static paint keyed to data refreshes — no new rAF.
+  if (ownedEmpty && node) {
+    const age = node.last_seen_at != null ? Date.now() - node.last_seen_at : Infinity;
+    const warmth = Math.max(0, 1 - age / 3_600_000); // warm desk: screen afterglow fades over ~1h
+    if (warmth > 0)
+      at(Df / 2 - 12, 0, (ix, iy) => {
+        const b = project(ix, iy, fit);
+        ctx.fillStyle = `rgba(122, 148, 156, ${(0.18 * warmth).toFixed(3)})`;
+        ctx.fillRect(b.x - 15 * fit.scale, b.y - (up + 23) * fit.scale, 30 * fit.scale, 18 * fit.scale);
+      });
+    // A small baked nameplate at the desk's front edge: static, and ≥13px so it bakes legibly at
+    // stream scale. The amber corner glint marks `disconnected` — the one alarming flavor (ADR 315).
+    at(-Df / 2 + 12, sn ? -wx / 2 + 22 : wx / 2 - 22, (ix, iy) => {
+      const b = project(ix, iy, fit);
+      const y = b.y - up * fit.scale;
+      const px = Math.max(13, Math.round(13 * fit.scale));
+      ctx.font = canvasFont(px, '--font-mono', 700);
+      const w = Math.max(34, ctx.measureText(node.name).width + 12);
+      const h = px + 8;
+      ctx.fillStyle = 'rgba(46, 42, 36, 0.88)';
+      ctx.fillRect(b.x - w / 2, y - h, w, h);
+      ctx.fillStyle = 'rgba(233, 226, 214, 0.92)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(node.name, b.x, y - h / 2);
+      if (node.offline_reason === 'disconnected') {
+        ctx.fillStyle = '#d9a13c';
+        ctx.beginPath();
+        ctx.arc(b.x + w / 2 - 4, y - h + 4, Math.max(2, 2.4 * fit.scale), 0, Math.PI * 2);
+        ctx.fill();
       }
     });
   }

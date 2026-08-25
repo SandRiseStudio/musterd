@@ -283,6 +283,13 @@ function OfficePreviewPage() {
     return raw ? new Set(raw.split(',').map((s) => s.trim())) : new Set();
   });
 
+  // `?offline=<names>` marks members offline (owned desks, presence-honesty §4) — `off=<name>:disconnected`
+  // shape is not supported; the first name gets `disconnected` so the amber glint is visible in preview.
+  const [offlineSet] = useState<Set<string>>(() => {
+    const raw = previewSearch().get('offline');
+    return raw ? new Set(raw.split(',').map((s) => s.trim())) : new Set(['Fen']);
+  });
+
   // `?reel=<0..6>` sizes the overlay's reel — 1 is the no-rail/no-nav case, 0 the empty room.
   const [reelCount] = useState(() => {
     const raw = previewSearch().get('reel');
@@ -299,20 +306,27 @@ function OfficePreviewPage() {
         end: '15:00',
       },
       nodes: POOL.filter((m) => present.has(m.name)).map((m) => {
-        const isAway = away.has(m.name);
+        const isOffline = offlineSet.has(m.name);
+        const isAway = !isOffline && away.has(m.name);
         const isStale = stale.has(m.name);
         // A stale seat keeps `activity: working` but is placed by its projected `active` posture.
-        const activity = isAway || (idle.has(m.name) && !isStale) ? 'active' : m.activity;
-        const posture = isAway
-          ? ('away' as const)
-          : isStale || idle.has(m.name)
+        const activity = isOffline
+          ? ('offline' as const)
+          : isAway || (idle.has(m.name) && !isStale)
             ? ('active' as const)
-            : activity;
+            : m.activity;
+        const posture = isOffline
+          ? ('offline' as const)
+          : isAway
+            ? ('away' as const)
+            : isStale || idle.has(m.name)
+              ? ('active' as const)
+              : activity;
         return {
           name: m.name,
           kind: m.kind,
           service: m.service === true,
-          presence: isAway ? 'away' : 'online',
+          presence: isOffline ? ('offline' as const) : isAway ? ('away' as const) : ('online' as const),
           activity,
           // The fixture has no availability axis, so posture composes straight off presence + activity —
           // except a `?stale` seat, which pins posture idle while activity lags at working.
@@ -331,10 +345,17 @@ function OfficePreviewPage() {
           workSource: null,
           laneState: null,
           moreLanes: 0,
+          // The first offline fixture wears the amber `disconnected` glint; the rest read released.
+          offline_reason: isOffline
+            ? [...offlineSet][0] === m.name
+              ? 'disconnected'
+              : 'seat_released'
+            : null,
+          last_seen_at: isOffline ? Date.now() - 20 * 60_000 : null,
         };
       }),
     }),
-    [present, away, idle, stale],
+    [present, away, idle, stale, offlineSet],
   );
   const dataRef = useRef(buildData);
   // Synced in an effect, not during render — see OfficeScene: the mount effect subscribes once and
