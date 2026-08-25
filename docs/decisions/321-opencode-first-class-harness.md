@@ -1,6 +1,6 @@
 # 321 — OpenCode as a first-class harness
 
-- Status: proposed
+- Status: accepted — 2026-08-25 (stanley PASS on lane 01M0WYHNM0; landed #1059, e698eaa3)
 - Date: 2026-08-25
 - Builds on: [ADR 281](281-multi-harness-worktree-selection.md) (whose "a novel harness uses <!-- vocab:ok -->(slug predates ADR 296 vocabulary)
   surface `other` **until a separate protocol ADR adds the Surface**" clause this ADR is),
