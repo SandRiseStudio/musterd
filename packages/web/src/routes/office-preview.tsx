@@ -63,7 +63,7 @@ const FIXTURE_IDENTITY: Record<string, { surface: string; model: string | null; 
   Eli: { surface: 'claude-code', model: 'gemini-3.2-pro' },
   Fen: { surface: 'web', model: 'grok-4.5' },
   Gus: { surface: 'slack', model: 'llama-4-maverick' },
-  Hana: { surface: 'claude-code', model: 'deepseek-v4-pro' },
+  Hana: { surface: 'opencode', model: 'deepseek-v4-pro' },
   Ivy: { surface: 'cursor', model: 'mistral-large-3', role: 'design' },
   // The service seat: no model BY KIND (pure code, nothing to attest) — distinct from Dev's
   // null-model agent, which is a seat that merely has nothing to report.

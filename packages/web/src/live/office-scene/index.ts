@@ -10,6 +10,7 @@ import {
   shortWorkTitle,
 } from '../presenceLabel';
 import { stillMode } from '../stillMode';
+import { surfaceGlyph } from '../surfaceGlyph';
 import { createActors, deskNeighbourPairs, type Actors } from './actors';
 import {
   ambientFrameBudgetMs,
@@ -670,7 +671,20 @@ export function mountOffice(
           }
           const segEl = document.createElement('span');
           segEl.className = `lc-gl-label__seg lc-gl-label__seg--${part.kind}`;
-          segEl.textContent = part.text;
+          // The three harnesses whose seats a provider pin cannot distinguish (a cursor seat's pin
+          // says Claude) get a glyph + their own ink; everything else stays bare text.
+          const glyph = part.kind === 'harness' ? surfaceGlyph(node.surface) : null;
+          if (glyph) {
+            segEl.classList.add(`lc-gl-label__seg--hz-${glyph.id}`);
+            const mark = document.createElement('span');
+            mark.className = 'lc-gl-label__hz';
+            mark.setAttribute('aria-hidden', 'true');
+            mark.innerHTML = glyph.svg;
+            segEl.appendChild(mark);
+            segEl.appendChild(document.createTextNode(part.text));
+          } else {
+            segEl.textContent = part.text;
+          }
           detailIn.appendChild(segEl);
         }
         // Each child carries its own position so ONE css rule can stagger them. Five nth-child rules
