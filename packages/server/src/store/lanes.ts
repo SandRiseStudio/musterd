@@ -22,7 +22,8 @@ import { getPolicy } from './teams.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — store CRUD + the two warn-only contention checks.
- * Declarations only: `surface_globs` ∩ and `depends_on` state are the whole engine. Checks are
+ * Declarations only: `scope` ∩ and `depends_on` state are the whole engine (wire token `scope`, ADR 296;
+ * the DB column keeps its historical `surface_globs` name — internal, tier 3). Checks are
  * computed live (the board always reflects current state); the *delivery* dedup — warn once until the
  * condition clears or changes — falls out of diffing warnings before/after a mutation (route layer).
  */
@@ -69,6 +70,9 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     kind: (row.kind as Lane['kind']) ?? null,
     owner_seat: row.owner_seat,
     role: row.role,
+    scope: JSON.parse(row.surface_globs) as string[],
+    // Legacy wire mirror (ADR 296 tier 2): an epoch-13 client's schema still REQUIRES this key, so
+    // every projected lane carries it until the mirror drops in a later epoch.
     surface_globs: JSON.parse(row.surface_globs) as string[],
     depends_on: JSON.parse(row.depends_on) as string[],
     branch: row.branch,
@@ -107,7 +111,7 @@ export function openLane(
   // An explicit declaration always wins, in EITHER direction: a seat that thinks its web change
   // deserves eyes must be able to say so without an admin, and a seat that says `low` on a lane
   // policy would have left `normal` has still declared it themselves.
-  const surfaces = input.surface_globs ?? [];
+  const surfaces = input.scope ?? [];
   const rule =
     input.stakes === undefined
       ? resolveStakesDefault(getPolicy(db, teamId).stakes_defaults, surfaces)
@@ -122,7 +126,7 @@ export function openLane(
     kind: input.kind ?? null,
     owner_seat: claim ? createdBy : null,
     role: input.role ?? null,
-    surface_globs: JSON.stringify(input.surface_globs ?? []),
+    surface_globs: JSON.stringify(input.scope ?? []),
     depends_on: JSON.stringify(input.depends_on ?? []),
     branch: input.branch ?? null,
     goal_id: input.goal_id ?? null,
@@ -207,7 +211,7 @@ export function updateLane(
     title: patch.title !== undefined ? patch.title : existing.title,
     detail: patch.detail !== undefined ? patch.detail : existing.detail,
     owner_seat: ownerSeat,
-    surface_globs: JSON.stringify(patch.surface_globs ?? existing.surface_globs),
+    surface_globs: JSON.stringify(patch.scope ?? existing.scope),
     depends_on: JSON.stringify(patch.depends_on ?? existing.depends_on),
     branch: patch.branch !== undefined ? patch.branch : existing.branch,
     goal_id: patch.goal_id !== undefined ? patch.goal_id : existing.goal_id,
@@ -431,7 +435,7 @@ export function globsOverlap(a: string, b: string): boolean {
 }
 
 /**
- * The first **contending** lane (claimed/active/blocked) whose declared `surface_globs` cover the given
+ * The first **contending** lane (claimed/active/blocked) whose declared `scope` covers the given
  * concrete path — path-vs-glob (a real match of one file against the lane's globs, `globToRegExp` in
  * `path` flavor), NOT the cheap glob-vs-glob prefix `globsOverlap` uses. This is the read behind ADR 150
  * Gate A: "does <seat> own a claimed lane covering this edit?" (pass `owner`), and its blocked cousin
@@ -449,7 +453,7 @@ export function laneCoveringPath(
     ...(opts.owner ? { owner: opts.owner } : {}),
   }).filter((l) => CONTENDING.has(l.state));
   for (const lane of lanes) {
-    for (const glob of lane.surface_globs) {
+    for (const glob of lane.scope) {
       if (globToRegExp(glob, 'path').test(path)) return lane;
     }
   }
@@ -576,12 +580,12 @@ export function laneWarnings(
       detail: `building on "${dep.title}" (owner ${dep.owner_seat ?? 'unowned'}), still ${dep.state}`,
     });
   }
-  if (lane.surface_globs.length > 0 && CONTENDING.has(lane.state)) {
+  if (lane.scope.length > 0 && CONTENDING.has(lane.state)) {
     for (const other of listLanes(db, teamId, teamSlug)) {
       if (other.id === lane.id || !CONTENDING.has(other.state)) continue;
       if (!projectsContend(lane.project, other.project)) continue;
-      const shared = lane.surface_globs.flatMap((g) =>
-        other.surface_globs.filter((og) => globsOverlap(g, og)).map((og) => `${g} ∩ ${og}`),
+      const shared = lane.scope.flatMap((g) =>
+        other.scope.filter((og) => globsOverlap(g, og)).map((og) => `${g} ∩ ${og}`),
       );
       if (shared.length > 0) {
         warnings.push({

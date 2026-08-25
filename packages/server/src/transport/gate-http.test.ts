@@ -173,7 +173,7 @@ describe('Gate A — lane-ownership (ADR 150)', () => {
   it('owns a claimed lane covering the path → allow, quietly (no nag), under block', async () => {
     openLane(server.db, team().id, 'dawn', 'Ada', {
       title: 'tariff work',
-      surface_globs: ['src/**'],
+      scope: ['src/**'],
       claim: true,
     });
     const r = await gateA('block', 'src/tariff.ts');
@@ -196,7 +196,7 @@ describe('Gate A — lane-ownership (ADR 150)', () => {
     await post('/teams/dawn/members', { name: 'Bo', kind: 'agent' }, bearer(nickCred));
     openLane(server.db, team().id, 'dawn', 'Bo', {
       title: 'bo tariff',
-      surface_globs: ['src/tariff.ts'],
+      scope: ['src/tariff.ts'],
       claim: true,
     });
     const r = await gateA('block', 'src/tariff.ts');
@@ -213,7 +213,7 @@ describe('Gate A — lane-ownership (ADR 150)', () => {
   it('owns the lane, warn → quiet allow (ownership means no advisory either)', async () => {
     openLane(server.db, team().id, 'dawn', 'Ada', {
       title: 'ada tariff',
-      surface_globs: ['src/tariff.ts'],
+      scope: ['src/tariff.ts'],
       claim: true,
     });
     const r = await gateA('warn', 'src/tariff.ts');
@@ -223,7 +223,7 @@ describe('Gate A — lane-ownership (ADR 150)', () => {
   it('a resolved (done) lane does not count as ownership — only contending lanes cover', async () => {
     const lane = openLane(server.db, team().id, 'dawn', 'Ada', {
       title: 'old tariff',
-      surface_globs: ['src/**'],
+      scope: ['src/**'],
       claim: true,
     });
     server.db.prepare('UPDATE lanes SET state = ? WHERE id = ?').run('done', lane.id);

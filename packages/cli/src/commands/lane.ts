@@ -60,7 +60,7 @@ function renderLane(l: Lane): string {
   const owner = l.owner_seat ? theme.memberName(l.owner_seat, 'agent') : theme.meta('unowned');
   const state =
     l.state === 'done' ? theme.ok(l.state) : l.state === 'blocked' ? theme.warn(l.state) : l.state;
-  const surface = l.surface_globs.length ? theme.meta(` [${l.surface_globs.join(', ')}]`) : '';
+  const surface = l.scope.length ? theme.meta(` [${l.scope.join(', ')}]`) : '';
   const deps = l.depends_on.length ? theme.meta(` deps:${l.depends_on.length}`) : '';
   const branch = l.branch ? theme.meta(` ⎇ ${l.branch}`) : '';
   const goal = l.goal_id ? theme.meta(` ◆ ${l.goal_id}`) : '';
@@ -122,7 +122,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         ? { goal_id: flagStr(parsed.flags, 'goal')! }
         : {}),
       ...(list(parsed.flags, 'surface') !== undefined
-        ? { surface_globs: list(parsed.flags, 'surface')! }
+        ? { scope: list(parsed.flags, 'surface')! }
         : {}),
       ...(list(parsed.flags, 'depends') !== undefined
         ? { depends_on: list(parsed.flags, 'depends')! }
@@ -314,7 +314,7 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
         ? { project: flagStr(parsed.flags, 'project')! }
         : {}),
       ...(list(parsed.flags, 'surface') !== undefined
-        ? { surface_globs: list(parsed.flags, 'surface')! }
+        ? { scope: list(parsed.flags, 'surface')! }
         : {}),
       ...(list(parsed.flags, 'depends') !== undefined
         ? { depends_on: list(parsed.flags, 'depends')! }
