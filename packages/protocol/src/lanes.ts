@@ -208,7 +208,7 @@ export const LANE_CONTENDING_STATES: ReadonlySet<LaneState> = new Set([
 export const LANE_TERMINAL_STATES: ReadonlySet<LaneState> = new Set(['done', 'abandoned']);
 
 // ADR 296 tier 2's `surface_globs` wire mirror (dual-send + dual-populate for one-epoch skew) was
-// dropped at epoch 15, on-touch, with the fleet verified at 14 — `scope` is the only wire token.
+// dropped at epoch 16, on-touch, with the fleet verified at 14 — `scope` is the only wire token.
 
 export const LaneSchema = z.object({
   id: z.string(),

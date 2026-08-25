@@ -71,7 +71,7 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
     owner_seat: row.owner_seat,
     role: row.role,
     // The DB column keeps its historical `surface_globs` name (internal, ADR 296 tier 3); the
-    // epoch-14 wire mirror of that key dropped at epoch 15.
+    // epoch-14 wire mirror of that key dropped at epoch 16.
     scope: JSON.parse(row.surface_globs) as string[],
     depends_on: JSON.parse(row.depends_on) as string[],
     branch: row.branch,

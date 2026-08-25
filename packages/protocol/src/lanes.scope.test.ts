@@ -22,7 +22,7 @@ const base = {
   updated_at: 1,
 };
 
-describe('scope is the only wire token (ADR 296 tier 2 mirror dropped, epoch 15)', () => {
+describe('scope is the only wire token (ADR 296 tier 2 mirror dropped, epoch 16)', () => {
   it('parses a lane on the canonical token', () => {
     const lane = LaneSchema.parse({ ...base, scope: ['packages/server/**'] });
     expect(lane.scope).toEqual(['packages/server/**']);
