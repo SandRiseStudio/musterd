@@ -3248,7 +3248,16 @@ export async function handleHttp(
           !LANE_TERMINAL_STATES.has(lane.state) && // lane.closed owns terminal edges
           !(lane.state === 'open' && before.owner_seat !== null) && // lane.released owns this edge
           !(isAwaitingAcceptance(lane.state) && !isAwaitingAcceptance(before.state)) && // lane.ready_for_review
-          !(body.owner_seat !== undefined && lane.owner_seat !== before.owner_seat) // lane.claimed
+          // Mirror the lane.claimed emit above EXACTLY (owner must be non-null): an ownership
+          // change that produced no acquisition row must not also be swallowed here, or the
+          // transition writes nothing at all (ryder, #1071 acceptance). Unreachable via this
+          // handler today — UpdateLaneSchema's owner_seat rejects null — but the two predicates
+          // must not be able to drift apart.
+          !(
+            body.owner_seat !== undefined &&
+            lane.owner_seat !== null &&
+            lane.owner_seat !== before.owner_seat
+          ) // lane.claimed
         ) {
           appendAudit(ctx.db, team.id, {
             actor: member.name,

@@ -120,3 +120,29 @@ describe('incident clustering (spec 2026-08-14 inc 1)', () => {
     expect(out.lane.detail).toContain('izzo: (no sig)');
   });
 });
+
+/**
+ * ADR 325 prereq follow-up (ryder, #1071 acceptance): the v45 migration mints ULIDs through a
+ * monotonic factory to preserve arrival order, and the runtime insert must keep the same promise —
+ * plain ulid() gives two same-millisecond reports independent random suffixes, so the pool's
+ * `ORDER BY id` could invert them where AUTOINCREMENT never did.
+ */
+describe('incident report ids preserve arrival order (ADR 325 prereq)', () => {
+  it('same-timestamp reports sort by id in insertion order, every time', () => {
+    const { db, team } = seed();
+    const now = Date.now();
+    // Same `now` for every insert; many pairs so a random-suffix inversion cannot hide.
+    for (let i = 0; i < 50; i++) {
+      recordBlockedReport(db, team.id, 'revive', `seat-${i}-a`, report(), `m${i}a`, now);
+      recordBlockedReport(db, team.id, 'revive', `seat-${i}-b`, report(), `m${i}b`, now);
+    }
+    const seats = db
+      .prepare<[string], { seat: string }>(
+        'SELECT seat FROM incident_reports WHERE team_id = ? ORDER BY id',
+      )
+      .all(team.id)
+      .map((r) => r.seat);
+    const inserted = Array.from({ length: 50 }, (_, i) => [`seat-${i}-a`, `seat-${i}-b`]).flat();
+    expect(seats).toEqual(inserted);
+  });
+});
