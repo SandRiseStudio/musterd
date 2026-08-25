@@ -26,6 +26,7 @@ import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS } fro
 import { computeLightEnv, type LightEnv } from './lighting';
 import { isWithinWorkingHours } from './workingHours';
 import { assignSeats, type Placement } from './seating';
+import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type CaptionRail } from '../captions';
 import {
   animatedDeskAnchors,
   chairKindFor,
@@ -280,6 +281,45 @@ export function mountOffice(
    * reads it, so it advances only while the loop runs and a rested office holds its frame. */
   let clock = 0;
   let placements = new Map<string, Placement>();
+  // The caption rail (first-five-seconds §2): one transient plain-language line, lower third.
+  // Owned here in the lazy chunk so its bytes never ride the entry. DOM in the label layer.
+  let rail: CaptionRail = { current: null, shownAt: 0, queue: [] };
+  let railTimer: ReturnType<typeof setInterval> | null = null;
+  let railEl: HTMLDivElement | null = null;
+  let onlineNames = new Set<string>();
+  function renderRail() {
+    if (rail.current && !railEl) {
+      railEl = document.createElement('div');
+      railEl.className = 'lc-captions';
+      railEl.setAttribute('aria-live', 'polite');
+      const line = document.createElement('span');
+      line.className = 'lc-captions__line';
+      railEl.appendChild(line);
+      labelHost.appendChild(railEl);
+    }
+    if (railEl) {
+      if (!rail.current) {
+        railEl.remove();
+        railEl = null;
+      } else {
+        railEl.firstChild!.textContent = rail.current;
+      }
+    }
+    if (rail.current === null && rail.queue.length === 0) {
+      if (railTimer) clearInterval(railTimer);
+      railTimer = null;
+    } else if (!railTimer) {
+      // Tick only while something shows or waits — no standing interval on an idle rail.
+      railTimer = setInterval(() => {
+        rail = tickCaption(rail, Date.now());
+        renderRail();
+      }, CAPTION_HOLD_MS / 4);
+    }
+  }
+  function pushRail(text: string) {
+    rail = pushCaption(rail, text, Date.now());
+    renderRail();
+  }
   let teamName = 'revive';
   let teamWorkingHours: OfficeData['teamWorkingHours'] = null;
   let wallBoard: WallBoard | null = null; // the wall's agile board (bake-time data)
@@ -1312,6 +1352,12 @@ export function mountOffice(
   }
 
   function update(next: OfficeData) {
+    const nextOnline = new Set(next.nodes.filter((n) => n.presence === 'online').map((n) => n.name));
+    if (onlineNames.size > 0) {
+      const line = captionForPresence(onlineNames, nextOnline);
+      if (line) pushRail(line);
+    }
+    onlineNames = nextOnline;
     teamName = next.teamName ?? 'revive';
     teamWorkingHours = next.teamWorkingHours ?? null;
     wallBoard = next.wallBoard ?? null;
@@ -1394,6 +1440,10 @@ export function mountOffice(
     if (!reduced) {
       actors.cancelAmbient();
       scheduleAmbient();
+    }
+    if (ev.kind === 'caption') {
+      pushRail(ev.text);
+      return;
     }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
@@ -1581,6 +1631,8 @@ export function mountOffice(
       disposed = true;
       cancelAnimationFrame(raf);
       clearInterval(lightTimer); // stop the PST lighting clock
+      if (railTimer) clearInterval(railTimer); // stop the caption rail
+      railEl?.remove();
       if (ambientTimer) clearTimeout(ambientTimer); // stop the idle-beat scheduler
       window.removeEventListener('resize', onResize);
       ro?.disconnect();

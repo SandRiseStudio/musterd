@@ -144,6 +144,8 @@ export type OfficeEvent =
   | { kind: 'steer'; from: string; to: string | null; urgent: boolean }
   | { kind: 'challenge'; from: string; to: string | null; urgent: boolean }
   | { kind: 'defer'; who: string }
+  /** A plain-language caption line for the lower-third rail (first-five-seconds §2). */
+  | { kind: 'caption'; text: string }
   // An act, typed out over the sender's head then faded — the body when it has one, else the act label.
   // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
   // the bubble a click-through to the same act in the stream panel.

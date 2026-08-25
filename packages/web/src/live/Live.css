@@ -1397,6 +1397,36 @@
   text-transform: lowercase;
   color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
 }
+/* The caption rail (first-five-seconds §2): one transient plain-language line, lower third. Text
+   only — its appear/dissolve is a plain opacity transition, so reduced-motion needs no branch and
+   25fps capture has nothing new to judder. */
+.lc-captions {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.lc-captions__line {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-surface-1) 82%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--lc-paper-ink);
+  animation: lc-caption-in 240ms ease-out;
+}
+@keyframes lc-caption-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-captions__line { animation: none; }
+}
+
 /* The dnd pill (presence-honesty §3): the one plate tag that is a state, not an identity — the
    warn ink as border + text on the plate's own paper (--lc-warn-ink measures 4.92 worst case; the
    14% amber fill this first shipped with lightened the ground to 4.35 and failed the gate). The
