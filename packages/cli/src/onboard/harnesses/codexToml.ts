@@ -185,6 +185,73 @@ export function assertWritableServer(name: string, s: unknown): CodexServer {
   );
 }
 
+export interface CodexPlugin {
+  enabled: boolean;
+}
+
+export const CodexPluginSchema = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .strict();
+
+export function assertWritablePlugin(id: string, plugin: unknown): CodexPlugin {
+  const parsed = CodexPluginSchema.safeParse(plugin);
+  if (parsed.success) return parsed.data;
+  const detail = parsed.error.issues
+    .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+    .join('; ');
+  throw new Error(
+    `refusing to write an invalid Codex plugins.${id} table — ${detail}. The prior TOML ` +
+      'bytes are left unchanged (ADR 286 §3).',
+  );
+}
+
+function pluginTableName(id: string): string {
+  return `plugins.${JSON.stringify(id)}`;
+}
+
+export function renderPlugin(id: string, plugin: CodexPlugin): string {
+  return `[${pluginTableName(id)}]\nenabled = ${plugin.enabled ? 'true' : 'false'}\n`;
+}
+
+export function hasPlugin(toml: string, id: string): boolean {
+  const want = pluginTableName(id);
+  return sectionHeaders(toml).some((h) => h === want);
+}
+
+export function readPlugin(toml: string, id: string): CodexPlugin | null {
+  const want = pluginTableName(id);
+  for (const section of splitSections(toml)) {
+    if (sectionHeader(section) !== want) continue;
+    for (const line of section.split('\n').slice(1)) {
+      const m = /^\s*enabled\s*=\s*(true|false)\s*$/.exec(line);
+      if (m) return { enabled: m[1] === 'true' };
+    }
+    return null;
+  }
+  return null;
+}
+
+export function upsertPlugin(toml: string, id: string, plugin: CodexPlugin): string {
+  const valid = assertWritablePlugin(id, plugin);
+  const stripped = removePlugins(toml, [id]).replace(/\s+$/, '');
+  const block = renderPlugin(id, valid);
+  return stripped.length === 0 ? block : stripped + '\n\n' + block;
+}
+
+export function removePlugins(toml: string, ids: string[]): string {
+  if (toml.trim().length === 0) return toml;
+  const drop = new Set(ids.map(pluginTableName));
+  const sections = splitSections(toml);
+  const kept = sections.filter((sec) => {
+    const h = sectionHeader(sec);
+    if (h === null) return true;
+    return !drop.has(h);
+  });
+  return normalizeBlankRuns(kept.join(''));
+}
+
 /**
  * Read one server's complete table back as a {@link CodexServer}, or null when absent/unreadable.
  * The read-back half {@link renderServer} writes — command, args, and the `.env` subtable — so a
