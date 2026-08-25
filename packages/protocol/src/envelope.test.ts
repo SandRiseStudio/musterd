@@ -350,3 +350,48 @@ describe('meta.eligible (the eligible set)', () => {
     expect([...ELIGIBLE_ACTS].sort()).toEqual(['challenge', 'message', 'request_help']);
   });
 });
+
+describe('insight act meta rules (ADR 327)', () => {
+  const insight = (meta: Record<string, unknown>, body = 'the daemon crashloops from node 20') =>
+    EnvelopeSchema.safeParse({
+      ...base,
+      v: PROTOCOL_VERSION,
+      act: 'insight',
+      to: { kind: 'team' },
+      body,
+      meta,
+    });
+
+  it('accepts a well-formed insight', () => {
+    expect(
+      insight({
+        headline: 'daemon install needs node >= 22',
+        tags: ['daemon', 'node'],
+        repo: 'musterd',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('requires meta.headline', () => {
+    expect(insight({}).success).toBe(false);
+    expect(insight({ headline: '' }).success).toBe(false);
+    expect(insight({ headline: 'x'.repeat(121) }).success).toBe(false);
+  });
+
+  it('caps headline at 120 chars exactly', () => {
+    expect(insight({ headline: 'x'.repeat(120) }).success).toBe(true);
+  });
+
+  it('rejects more than 8 tags or a non-string tag', () => {
+    expect(
+      insight({ headline: 'h', tags: Array.from({ length: 9 }, (_, i) => `t${i}`) }).success,
+    ).toBe(false);
+    expect(insight({ headline: 'h', tags: ['ok', 3] }).success).toBe(false);
+    expect(insight({ headline: 'h', tags: [] }).success).toBe(true);
+  });
+
+  it('rejects an empty meta.repo when present, accepts a slug', () => {
+    expect(insight({ headline: 'h', repo: '' }).success).toBe(false);
+    expect(insight({ headline: 'h', repo: 'musterd' }).success).toBe(true);
+  });
+});
