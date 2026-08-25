@@ -109,9 +109,15 @@ export type AmbientDecision =
 export const AMBIENT_QUIET_ROOM = 2;
 /** At or above this many, the room is "populated" and density is at the spec's target. */
 export const AMBIENT_FULL_ROOM = 8;
-/** Fire probability per slot at `AMBIENT_QUIET_ROOM` — measured to deliver ~1.2 beats/idle-min. */
+/** Fire probability per slot at `AMBIENT_QUIET_ROOM`. Measured 2026-08-25 (ambient-density.mjs,
+ * 8 min, n=2): 1.12 beats/idle-min — within 7% of the pre-E1a analytic rate of 1.2 (0.4/20 s slot
+ * with the old same-firing category fallthrough ≈ playRate 1), which is the "today's calm" the
+ * spec pins the quiet room to. */
 export const AMBIENT_P_QUIET = 0.27;
-/** Fire probability per slot at `AMBIENT_FULL_ROOM` — measured to deliver ~2.6 beats/idle-min. */
+/** Fire probability per slot at `AMBIENT_FULL_ROOM`. Measured 2026-08-25 (8 min, n=8):
+ * 2.5 beats/idle-min — the bottom of the spec's 2.5–3 target band. Observed fire rate saturates at
+ * ~0.5 here (3σ below p: a playing beat holds `quiet()` false, so following slots never reach the
+ * roll), so raising this buys almost nothing — self-contention, not the roll, is the ceiling. */
 export const AMBIENT_P_FULL = 0.7;
 
 /** The curve: flat below `AMBIENT_QUIET_ROOM`, linear through the middle, flat above `AMBIENT_FULL_ROOM`. */
