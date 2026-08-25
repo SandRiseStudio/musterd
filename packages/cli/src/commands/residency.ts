@@ -13,7 +13,6 @@ import {
 import { flagStr, fmtBytes, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { resolveClaudeBin } from '../claudeBin.js';
 import { codexCapability, resolveCodexBin } from '../codexBin.js';
-import { opencodeCapability } from '../opencodeBin.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import {
@@ -23,6 +22,7 @@ import {
   removeHostEntry,
   upsertHostEntry,
 } from '../host/registry.js';
+import { opencodeCapability } from '../opencodeBin.js';
 import { clock, theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
