@@ -40,15 +40,18 @@ Deliberately kept, because they were never the wire mirror:
 
 ## Observability & Evaluation
 
-- The drop is observable on the wire: a lane fetched from an epoch-15 daemon carries no
-  `surface_globs` key, and `lanes.scope.test.ts` pins that shape (no mirror key on the parsed
-  Lane; legacy-only request bodies read scopeless).
-- Skew evidence: the roster's `behind` hint (ADR 148) marks any seat still attesting epoch 14;
-  fleet attestation was verified per-worktree (`packages/protocol/dist/feature-epoch.js`) before
-  the drop landed, recorded on lane 01M0X0QQ09PZ5R12VY58JHZF52.
-- Falsifier: an epoch-14 client that fails to open a scoped lane against an epoch-15 daemon (or
-  vice versa) within the one-epoch window would invalidate the skew claim in this ADR — the
-  integration suite exercises canonical `scope` in both directions.
+- **Traces:** the drop is observable on the wire — a lane fetched from an epoch-15 daemon
+  carries no `surface_globs` key, and the roster's `behind` hint (ADR 148) marks any seat still
+  attesting epoch 14. Fleet attestation was verified per-worktree
+  (`packages/protocol/dist/feature-epoch.js`) before the drop landed, recorded on lane
+  01M0X0QQ09PZ5R12VY58JHZF52.
+- **Eval:** `lanes.scope.test.ts` pins the dropped shape (canonical-only parse, no mirror key on
+  the parsed Lane, legacy-only bodies read scopeless), and the integration suite exercises
+  canonical `scope` in both directions. Falsifier: an epoch-14 client failing to open a scoped
+  lane against an epoch-15 daemon (or vice versa) within the one-epoch window invalidates the
+  skew claim above.
+- **Experiment:** n/a — a mirror removal has no behavior to A/B; the falsifier is binary and the
+  tests carry it.
 
 ## Consequences
 
