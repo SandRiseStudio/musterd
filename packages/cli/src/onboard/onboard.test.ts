@@ -6,6 +6,7 @@ import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
+import { opencode } from './harnesses/opencode.js';
 import { buildEntry, buildMcpEnv } from './mcpEntry.js';
 import {
   classifyPrimerTarget,
@@ -359,9 +360,15 @@ describe('cross-folder name-reuse (nameBoundElsewhere)', () => {
 
 describe('harness registry', () => {
   it('exposes claude-code and cursor with distinct surfaces', () => {
-    expect(HARNESSES.map((h) => h.id).sort()).toEqual(['claude-code', 'codex', 'cursor']);
+    expect(HARNESSES.map((h) => h.id).sort()).toEqual([
+      'claude-code',
+      'codex',
+      'cursor',
+      'opencode',
+    ]);
     expect(claudeCode.surface).toBe('claude-code');
     expect(cursor.surface).toBe('cursor');
+    expect(opencode.surface).toBe('opencode');
   });
 
   // Non-hermetic: shells out to the real `claude` CLI (can take ~4–8s), so give it a generous

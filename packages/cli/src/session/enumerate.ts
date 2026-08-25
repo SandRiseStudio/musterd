@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { openSync, readdirSync, readFileSync, readSync, closeSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -127,12 +128,14 @@ const MEMO_MS = 1_000;
 let memo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 let codexMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 let cursorMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
+let opencodeMemo: { at: number; rows: ScannedTranscript[] | undefined } | null = null;
 
 /** Drop the scan memo — tests and long-lived processes that need a guaranteed-fresh read. */
 export function resetSessionScan(): void {
   memo = null;
   codexMemo = null;
   cursorMemo = null;
+  opencodeMemo = null;
 }
 
 /**
@@ -352,6 +355,71 @@ export function enumerateCursorSessions(
   }
   const target = resolve(workspace);
   return cursorMemo.rows
+    .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
+    .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+/** The only OpenCode CLI row fields that establish resume identity, liveness, and workspace
+ *  ownership (ADR 321 §6). `title`/`projectId`/`created` are display data and never parsed. */
+const OpencodeSessionSchema = z
+  .object({
+    id: z.string().min(1),
+    updated: z.number(),
+    directory: z.string().min(1),
+  })
+  .passthrough();
+
+/**
+ * Read-only OpenCode session enumeration (ADR 321 §6): the harness's own CLI JSON surface,
+ * `opencode session list --format json`, parsed at the boundary like every other external input.
+ * The CLI — not the private storage database — is the evidence boundary (the ADR 216 rule): the
+ * schema is stable public contract, the sqlite file is neither. Attribution needs no slug
+ * decoding: each row carries its working directory outright, walked up with
+ * {@link findWorkspaceDir} like every sibling. A missing binary, a non-zero exit, or unparseable
+ * output is "cannot tell" (`undefined`), never "no sessions".
+ */
+export function enumerateOpencodeSessions(
+  workspace: string,
+  now = Date.now(),
+): SessionFile[] | undefined {
+  if (!opencodeMemo || now - opencodeMemo.at > MEMO_MS) {
+    let rows: ScannedTranscript[] | undefined;
+    try {
+      const res = spawnSync(
+        process.env['OPENCODE_BIN'] ?? 'opencode',
+        ['session', 'list', '--format', 'json'],
+        {
+          encoding: 'utf8',
+          timeout: 10_000,
+          maxBuffer: 16 * 1024 * 1024,
+        },
+      );
+      const raw: unknown = res.status === 0 && !res.error ? JSON.parse(res.stdout) : undefined;
+      if (Array.isArray(raw)) {
+        rows = [];
+        for (const item of raw) {
+          const parsed = OpencodeSessionSchema.safeParse(item);
+          if (!parsed.success) continue;
+          rows.push({
+            id: parsed.data.id,
+            // The CLI JSON names no transcript file; liveness reads `updated` (the same signal
+            // opencode's own UI sorts by), and nothing downstream stats an opencode path.
+            path: '',
+            mtime: parsed.data.updated,
+            bytes: 0,
+            workspace: findWorkspaceDir(parsed.data.directory),
+          });
+        }
+      }
+    } catch {
+      rows = undefined; // binary absent, spawn failed, output unparseable — cannot tell
+    }
+    opencodeMemo = { at: now, rows };
+  }
+  if (opencodeMemo.rows === undefined) return undefined;
+  const target = resolve(workspace);
+  return opencodeMemo.rows
     .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
     .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
     .sort((a, b) => b.mtime - a.mtime);

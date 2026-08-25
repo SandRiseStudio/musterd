@@ -22,6 +22,7 @@ import {
   removeHostEntry,
   upsertHostEntry,
 } from '../host/registry.js';
+import { opencodeCapability } from '../opencodeBin.js';
 import { clock, theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 import { findWorkspaceDir, resolve, resolveRead } from './helpers.js';
@@ -276,6 +277,15 @@ async function onCommand(parsed: Parsed): Promise<number> {
     if (!capability.supported) {
       throw new CliError(
         `Codex can coordinate manually but cannot enroll for daemon wake: ${capability.reason}`,
+        2,
+      );
+    }
+  }
+  if (harness === 'opencode') {
+    const capability = await opencodeCapability();
+    if (!capability.supported) {
+      throw new CliError(
+        `OpenCode can coordinate manually but cannot enroll for daemon wake: ${capability.reason}`,
         2,
       );
     }

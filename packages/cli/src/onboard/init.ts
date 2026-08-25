@@ -1208,5 +1208,8 @@ export function printManual(
   if (harness.id === 'codex') {
     return `Add to .codex/config.toml (this folder must be a trusted Codex project):\n  [mcp_servers.musterd]\n  command = "${entry.command}"\n  args = ${JSON.stringify(entry.args)}\n  [mcp_servers.musterd.env]\n${envLines}${primerNote}`;
   }
+  if (harness.id === 'opencode') {
+    return `Add to .opencode/opencode.json under "mcp" (schema: McpLocalConfig — command is one array, env is "environment"):\n  "musterd": {\n    "type": "local",\n    "command": ${JSON.stringify([entry.command, ...entry.args])},\n    "enabled": true,\n    "environment": { …see below… }\n  }\n${envLines}${primerNote}`;
+  }
   return `Add to .cursor/mcp.json under "mcpServers":\n  "musterd": {\n    "command": "${entry.command}",\n    "args": ${JSON.stringify(entry.args)},\n    "env": { …see below… }\n  }\n${envLines}${primerNote}`;
 }

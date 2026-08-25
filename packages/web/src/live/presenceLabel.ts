@@ -5,6 +5,7 @@ const SURFACE_SHORT: Record<string, string> = {
   'claude-code': 'claude code',
   cursor: 'cursor',
   codex: 'codex',
+  opencode: 'opencode',
   cli: 'cli',
   web: 'web',
   ios: 'ios',

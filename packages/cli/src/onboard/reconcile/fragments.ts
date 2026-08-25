@@ -121,7 +121,7 @@ export function machineResourceKey(harness: HarnessId, fragmentKey: string): str
 }
 
 /** The shipped selection order. Future adapters sort after, alphabetically — stable and total. */
-const REGISTRY_ORDER: readonly string[] = ['claude-code', 'cursor', 'codex', 'musterd'];
+const REGISTRY_ORDER: readonly string[] = ['claude-code', 'cursor', 'codex', 'opencode', 'musterd'];
 
 export function registryOrder(adapters: HarnessAdapter[]): HarnessAdapter[] {
   return [...adapters].sort((a, b) => {

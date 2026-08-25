@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('43');
+    expect(ver?.value).toBe('44');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -247,7 +247,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(43); // runs v18…v43 (including the shared Seed store)
+    expect(runMigrations(db)).toBe(44); // runs v18…v44 (including the shared Seed store)
 
     const scope = (id: string) =>
       db
@@ -311,7 +311,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(43);
+    expect(runMigrations(db)).toBe(44);
 
     const policy = (id: string) =>
       db
@@ -353,6 +353,36 @@ describe('v39 — the presence surface CHECK admits `musterd` (ADR 251 §2)', ()
     expect(() => insert('claude-code')).not.toThrow();
     // The constraint must stay a constraint — widening is not opening.
     expect(() => insert('definitely-not-a-surface')).toThrow();
+    db.close();
+  });
+});
+
+describe('v44 — the presence surface CHECK admits `opencode` (ADR 321 §2)', () => {
+  it('accepts an opencode presence, and still refuses an unknown surface', () => {
+    const db = openDb(':memory:');
+    db.prepare(
+      "INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t1','dawn',1,1)",
+    ).run();
+    db.prepare(
+      `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+       VALUES ('m1','t1','ghost','agent','','forever',0,1,1)`,
+    ).run();
+    const insert = (surface: string) =>
+      db
+        .prepare(
+          `INSERT INTO presence (id, member_id, surface, status, last_seen_at, created_at)
+           VALUES (?, 'm1', ?, 'online', 1, 1)`,
+        )
+        .run(`p-${surface}`, surface);
+
+    expect(() => insert('opencode')).not.toThrow();
+    expect(() => insert('codex')).not.toThrow();
+    // The constraint must stay a constraint — widening is not opening.
+    expect(() => insert('definitely-not-a-surface')).toThrow();
+    // model_source (migration 42) postdates v39's rebuilt column list; the enumerated copy must
+    // have carried it or this read comes back empty (and openDb itself would have thrown).
+    const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+    expect(cols).toContain('model_source');
     db.close();
   });
 });

@@ -36,11 +36,12 @@ const futureHarness: HarnessAdapter = {
 };
 
 describe('adapter registry (ADR 281)', () => {
-  it('shipped registry order is exactly claude-code, cursor, codex, musterd', () => {
+  it('shipped registry order is exactly claude-code, cursor, codex, opencode, musterd', () => {
     expect(harnessAdapters().map((a) => a.id)).toEqual([
       'claude-code',
       'cursor',
       'codex',
+      'opencode',
       'musterd',
     ]);
   });
@@ -51,6 +52,7 @@ describe('adapter registry (ADR 281)', () => {
       'claude-code',
       'cursor',
       'codex',
+      'opencode',
       'musterd',
       'future.harness',
     ]);
