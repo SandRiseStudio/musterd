@@ -32,6 +32,8 @@ coverage/
 **/.musterd/session-start-*
 # musterd provisioning state — regenerated per-workspace by `musterd init` (ADR 060/085), never committed.
 **/.musterd/provisioned.json
+# ADR 326 orient stamp — per-session orientation marker, machine-local, never committed.
+**/.musterd/orient-stamp.json
 **/.musterd/skill/
 # Claude Code local settings + the musterd-provisioned skill/slash-commands (`.claude/skills`,
 # `.claude/commands`) — per-workspace + personal, written by `musterd init` / the harness, never committed.
