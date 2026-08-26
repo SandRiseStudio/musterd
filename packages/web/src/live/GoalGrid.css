@@ -127,8 +127,8 @@
   border: 1px solid #f0e4cd;
   box-shadow: 0 2px 6px rgba(90, 70, 40, 0.07);
   transition:
-    transform 0.18s ease,
-    box-shadow 0.18s ease;
+    transform var(--lc-dur-2) var(--lc-ease-out),
+    box-shadow var(--lc-dur-2) var(--lc-ease-out);
   cursor: pointer;
   position: relative;
 }
@@ -150,7 +150,7 @@
   color: #a37b36;
   opacity: 0;
   transform: translateX(-4px);
-  transition: all 0.18s ease;
+  transition: all var(--lc-dur-2) var(--lc-ease-out);
   font-weight: 600;
 }
 .gg-trow {
@@ -483,7 +483,7 @@
   border-left: 3px solid #4a9d7f;
   border-radius: 8px;
   padding: 5px 9px 6px;
-  transition: background 0.16s ease;
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .gg-slip:hover,
 .gg-slip:focus-visible {

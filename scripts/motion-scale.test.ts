@@ -64,6 +64,63 @@ describe('rawMotionLiterals', () => {
       ['240ms', '380ms', 'cubic-bezier(0.22, 1, 0.36, 1)'].sort(),
     );
   });
+
+  // ryder's REQUIRED 1 on #1079: LITERAL matched only `\d+ms`, so a duration written in SECONDS
+  // was invisible and three real violations passed a green gate on main — including
+  // `all 0.18s` (180ms = 4.5 frames), which is precisely rule 3's defect class.
+  it('flags a duration written in seconds — the unit is not the point, the number is', () => {
+    expect(rawMotionLiterals('.a { transition: all 0.18s ease; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '0.18s' },
+    ]);
+  });
+
+  it('flags a whole-second duration', () => {
+    expect(rawMotionLiterals('.a { transition: width 1s linear; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '1s' },
+    ]);
+  });
+
+  it('still exempts an ambient loop written in seconds', () => {
+    expect(rawMotionLiterals('.a { animation: drift 2.4s ease-in-out infinite; }')).toEqual([]);
+  });
+
+  // stanley's finding: the `infinite` exemption applied to the WHOLE declaration, so a
+  // comma-separated shorthand mixing an ambient loop with a finite animation smuggled the finite
+  // one past the gate.
+  it('exempts only the infinite animation in a comma-separated shorthand, not its finite sibling', () => {
+    const css = '.a { animation: sheen 3s linear infinite, card-in 200ms ease; }';
+    expect(rawMotionLiterals(css)).toEqual([{ kind: 'raw', line: 1, detail: '200ms' }]);
+  });
+
+  // ryder's non-blocking (a): longhands never opened a declaration, so the standing falsifier's
+  // promise ("a reintroduced bare 240ms fails CI") was false for `transition-duration: 240ms`.
+  it('sees duration longhands, which never used to open a declaration', () => {
+    expect(rawMotionLiterals('.a { transition-duration: 240ms; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '240ms' },
+    ]);
+    expect(rawMotionLiterals('.a { animation-duration: 3.6s; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '3.6s' },
+    ]);
+  });
+
+  // A delay is not a duration: it shifts WHEN motion starts, so the whole-frame rule does not
+  // apply to it. This is ryder's REQUIRED 2 encoded as a test so the distinction cannot rot.
+  it('never flags a delay — a delay is not motion', () => {
+    expect(rawMotionLiterals('.a { transition-delay: calc(90ms + var(--i, 0) * 50ms); }')).toEqual(
+      [],
+    );
+    expect(rawMotionLiterals('.a { animation-delay: calc(min(var(--i, 0), 8) * 45ms); }')).toEqual(
+      [],
+    );
+  });
+
+  // ryder's non-blocking (c): the declaration used to close on the first `;` on its opening line.
+  it('assembles a transition whose OPENING line already carries a semicolon', () => {
+    // The declaration used to close on the first `;` seen on the opening line — which here is the
+    // `color: red;` *before* `transition:`, so every continuation line was dropped.
+    const css = ['.a { color: red; transition:', '    opacity 240ms ease;', '}'].join('\n');
+    expect(rawMotionLiterals(css)).toEqual([{ kind: 'raw', line: 2, detail: '240ms' }]);
+  });
 });
 
 describe('offFrameDurations', () => {

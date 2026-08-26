@@ -5,11 +5,12 @@
  * reads files and calls process.exit, so logic living inside it cannot be tested. These are pure
  * text→findings functions; the script wires them to the filesystem and the exit code.
  *
- * Four rules:
+ * Five rules:
  *   1. DISAGREE  — a motion token in CSS whose value differs from `motion.ts`.
- *   2. RAW       — a cubic-bezier() or bare ms literal in a transition/animation outside :root.
+ *   2. RAW       — a cubic-bezier() or a bare duration (ms OR s) in a motion declaration.
  *   3. OFF-FRAME — a duration that is not a whole frame at the 720p25 capture rate.
  *   4. REDUCED   — a rung used in a transition with no prefers-reduced-motion answer in the file.
+ *   5. PHANTOM   — a motion var() in a transition that no stylesheet declares.
  *
  * EXEMPT BY RULE, not by list: an `infinite` animation is ambient life (clock sheen, breathing,
  * drift), not interaction feedback, and is not on the same scale as a hover transition. A rule the
@@ -28,8 +29,10 @@
  * judged, and each literal is still reported against the line it physically sits on.
  */
 
-/** One frame at 720p25. Mirrors `FRAME_MS` in office-scene/motion.ts. */
-export const FRAME_MS = 40;
+/** One frame at 720p25 — imported, not mirrored. It was a copy with a "mirrors motion.ts" comment
+ *  and no gate: the one ungated mirror in a change whose whole thesis is that mirrors get gates. */
+export { FRAME_MS } from '../packages/web/src/live/office-scene/motion.ts';
+import { FRAME_MS } from '../packages/web/src/live/office-scene/motion.ts';
 
 export type MotionFinding = {
   kind: 'disagree' | 'raw' | 'off-frame' | 'reduced' | 'phantom';
@@ -40,7 +43,18 @@ export type MotionToken = { token: string; value: string; line: number };
 
 /** `--lc-dur-*` and `--lc-ease*` are the motion namespace. Deliberately not `--lc-r-*`/`--lc-z-*`. */
 const MOTION_TOKEN = /(--lc-(?:dur-[\w-]+|ease[\w-]*))\s*:\s*([^;]+)/;
-const LITERAL = /cubic-bezier\([^)]*\)|\b\d+ms\b/g;
+
+/**
+ * A raw timing literal: a bezier, or a duration in EITHER unit.
+ *
+ * The `s` half is ryder's REQUIRED 1 on #1079. This was `\b\d+ms\b`, which made a duration written
+ * in seconds invisible — and three real violations rode a green gate onto main, including
+ * `transition: all 0.18s` (180ms, 4.5 frames), which is exactly rule 3's defect class. The unit a
+ * duration is spelled in was never the point; the number of frames it occupies is.
+ *
+ * The lookbehind keeps it off identifiers and off the tail of a longer number.
+ */
+const LITERAL = /cubic-bezier\([^)]*\)|(?<![\w.-])(?:\d+(?:\.\d+)?|\.\d+)m?s\b/g;
 
 /** Custom properties whose name marks them as motion. Line numbers are 1-indexed. */
 export function declaredMotionTokens(css: string): MotionToken[] {
@@ -55,43 +69,143 @@ export function declaredMotionTokens(css: string): MotionToken[] {
   return out;
 }
 
-type MotionDecl = { text: string; lines: { text: string; line: number }[] };
+type MotionSegment = { text: string; start: number };
+type MotionDecl = { property: string; text: string; start: number; segments: MotionSegment[] };
 
 /**
- * Every `transition:` / `animation:` declaration, assembled across the lines it spans.
- * `transition-duration:` and friends deliberately do not open one — the regex requires the colon to
- * follow the property name directly.
+ * The properties that carry motion. `-duration` and `-timing-function` longhands are included:
+ * without them the standing falsifier's promise — "a reintroduced bare 240ms fails CI" — was simply
+ * false for `transition-duration: 240ms` (ryder's non-blocking (a) on #1079).
+ *
+ * `-delay` is deliberately absent, and that is a claim rather than an omission: a delay shifts WHEN
+ * motion starts, it is not motion, so no whole-frame requirement applies to it. Getting this
+ * backwards is what made ADR 329 call three stagger delays "defects" (ryder's REQUIRED 2).
+ */
+const OPENER = /(?:^|[;{}\s])((?:transition|animation)(?:-duration|-timing-function)?)\s*:/g;
+
+/** Offset → 1-indexed line, by binary search over line starts. */
+function lineIndexer(css: string): (offset: number) => number {
+  const starts = [0];
+  for (let i = 0; i < css.length; i++) if (css[i] === '\n') starts.push(i + 1);
+  return (offset) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (starts[mid]! <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo + 1;
+  };
+}
+
+/** Split a shorthand value on TOP-LEVEL commas — one segment per animation, parens protected. */
+function topLevelSegments(text: string, start: number): MotionSegment[] {
+  const segs: MotionSegment[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    else if (ch === ',' && depth === 0) {
+      segs.push({ text: text.slice(from, i), start: start + from });
+      from = i + 1;
+    }
+  }
+  segs.push({ text: text.slice(from), start: start + from });
+  return segs;
+}
+
+/**
+ * Every motion declaration, from its property to the `;` (or `}`) that ends it.
+ *
+ * Scanned over the whole text by offset rather than line-by-line. The line-based version closed a
+ * declaration on the first `;` it saw on the OPENING line — so `.a { color: red; transition:` ended
+ * the declaration before its value began and dropped every continuation line (ryder's
+ * non-blocking (c)).
  */
 function motionDeclarations(css: string): MotionDecl[] {
   const out: MotionDecl[] = [];
-  let cur: MotionDecl | null = null;
-  css.split('\n').forEach((text, i) => {
-    if (!cur && /(?:^|[;{\s])(?:transition|animation)\s*:/.test(text)) {
-      cur = { text: '', lines: [] };
-    }
-    if (cur) {
-      cur.text += ` ${text}`;
-      cur.lines.push({ text, line: i + 1 });
-      if (text.includes(';')) {
-        out.push(cur);
-        cur = null;
-      }
-    }
-  });
-  if (cur) out.push(cur);
+  for (const m of css.matchAll(OPENER)) {
+    const valueStart = (m.index ?? 0) + m[0].length;
+    const semi = css.indexOf(';', valueStart);
+    const brace = css.indexOf('}', valueStart);
+    let stop = semi === -1 ? css.length : semi;
+    if (brace !== -1 && brace < stop) stop = brace; // an unterminated final declaration
+    const text = css.slice(valueStart, stop);
+    out.push({
+      property: m[1] ?? '',
+      text,
+      start: valueStart,
+      segments: topLevelSegments(text, valueStart),
+    });
+  }
   return out;
 }
 
-/** Rule 2 — inline bezier / bare ms inside a transition. `infinite` declarations are exempt (§5). */
-export function rawMotionLiterals(css: string): MotionFinding[] {
+/**
+ * Rule 2 — a raw bezier or duration inside a motion declaration.
+ *
+ * The `infinite` exemption applies PER ANIMATION, not per declaration. Applying it to the whole
+ * declaration let a comma-separated shorthand smuggle a finite animation past the gate behind an
+ * ambient sibling — `animation: sheen 3s linear infinite, card-in 200ms ease` (stanley's finding on
+ * the Delight C acceptance).
+ */
+export function rawMotionLiterals(css: string, file = ''): MotionFinding[] {
+  const lineAt = lineIndexer(css);
   const out: MotionFinding[] = [];
   for (const decl of motionDeclarations(css)) {
-    if (/\binfinite\b/.test(decl.text)) continue; // ambient loop, exempt by rule
-    for (const { text, line } of decl.lines) {
-      for (const m of text.matchAll(LITERAL)) out.push({ kind: 'raw', line, detail: m[0] });
+    for (const seg of decl.segments) {
+      if (/\binfinite\b/.test(seg.text)) continue; // ambient loop, exempt by rule
+      for (const m of seg.text.matchAll(LITERAL)) {
+        const literal = m[0];
+        if (isZeroDuration(literal)) continue;
+        if (isAllowedLong(literal, file)) continue;
+        out.push({ kind: 'raw', line: lineAt(seg.start + (m.index ?? 0)), detail: literal });
+      }
     }
   }
   return out;
+}
+
+/**
+ * `0s` / `0ms` is never a scale violation — a zero duration means "no transition". It is the
+ * reduced-motion neutralisation idiom, and it is also how `transition: visibility 0s linear <delay>`
+ * toggles visibility without animating it (Live.css:4826). Flagging zero would demand the
+ * reduced-motion answers be broken to satisfy the rule that requires them.
+ */
+function isZeroDuration(literal: string): boolean {
+  return /^0(?:\.0+)?m?s$/.test(literal);
+}
+
+/**
+ * The deliberate one-shot outliers the spec (§5) promised an allowlist for and never got one,
+ * because rule 2 could not see `s` units at all — the blindness hid the need.
+ *
+ * Every entry costs a sentence. That is the point: an exception should be cheap to read and
+ * annoying to add. These are keyframe one-shots and a countdown, none of which are interaction
+ * feedback, so none of them belong on a scale built for interaction feedback.
+ */
+const ALLOWED_LONG: { value: string; file: string; reason: string }[] = [
+  {
+    value: '1s',
+    file: 'ApprovalCard.css',
+    reason: 'the expiry bar is a countdown driven by a per-second tick; a rung would desync it',
+  },
+  { value: '0.42s', file: 'Live.css', reason: 'lc-enter one-shot entrance, tuned with the scene' },
+  {
+    value: '1.7s',
+    file: 'Live.css',
+    reason: 'lc-settle one-shot, deliberately slower than any UI rung',
+  },
+  { value: '1.5s', file: 'Live.css', reason: 'lc-flash one-shot attention beat' },
+  { value: '0.5s', file: 'Live.css', reason: 'lc-rise one-shot entrance' },
+  { value: '3.6s', file: 'Live.css', reason: 'ambient duration longhand on a looping keyframe' },
+];
+
+function isAllowedLong(literal: string, file: string): boolean {
+  return ALLOWED_LONG.some((a) => a.value === literal && file.endsWith(a.file));
 }
 
 /** Rule 3 — a declared duration that is not a whole frame at 25fps. */
@@ -154,18 +268,17 @@ export function disagreeingTokens(
  * motion namespace is judged; an unknown `--x-other` belongs to some other system.
  */
 export function phantomMotionRefs(css: string, known: ReadonlySet<string>): MotionFinding[] {
+  const lineAt = lineIndexer(css);
   const out: MotionFinding[] = [];
   for (const decl of motionDeclarations(css)) {
-    for (const { text, line } of decl.lines) {
-      for (const m of text.matchAll(/var\((--lc-(?:dur-[\w-]+|ease[\w-]*|fast|med))\)/g)) {
-        const token = m[1];
-        if (token && !known.has(token)) {
-          out.push({
-            kind: 'phantom',
-            line,
-            detail: `var(${token}) is used in a transition but declared nowhere`,
-          });
-        }
+    for (const m of decl.text.matchAll(/var\((--lc-(?:dur-[\w-]+|ease[\w-]*|fast|med))\)/g)) {
+      const token = m[1];
+      if (token && !known.has(token)) {
+        out.push({
+          kind: 'phantom',
+          line: lineAt(decl.start + (m.index ?? 0)),
+          detail: `var(${token}) is used in a transition but declared nowhere`,
+        });
       }
     }
   }
@@ -183,8 +296,10 @@ export function phantomMotionRefs(css: string, known: ReadonlySet<string>): Moti
 export function rungsWithoutReducedAnswer(css: string): string[] {
   const used = new Set<string>();
   for (const decl of motionDeclarations(css)) {
-    if (/\binfinite\b/.test(decl.text)) continue;
-    for (const m of decl.text.matchAll(/var\((--lc-dur-[\w-]+)\)/g)) if (m[1]) used.add(m[1]);
+    for (const seg of decl.segments) {
+      if (/\binfinite\b/.test(seg.text)) continue; // per animation, not per declaration
+      for (const m of seg.text.matchAll(/var\((--lc-dur-[\w-]+)\)/g)) if (m[1]) used.add(m[1]);
+    }
   }
   if (used.size === 0) return [];
   const answered =
