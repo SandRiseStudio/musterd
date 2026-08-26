@@ -86,8 +86,11 @@ export const DUR = { d1: 120, d2: 200, d3: 280, d4: 400, d5: 600 } as const;
 export const EASE = { out: [0.16, 1, 0.3, 1], inOut: [0.4, 0, 0.2, 1], pop: [...] } as const;
 ```
 
-It exports numbers (the canvas needs ms, not CSS strings) plus sampling functions. `actors.ts`'s
-three quadratics and the inline expression in `render.ts` re-point at it.
+It exports durations as numbers (the canvas needs ms, not CSS strings), the easing roles as control
+points for the CSS mirror, and the canvas's quadratic approximations of the same three roles. It
+deliberately does **not** sample the beziers: a solver in the initial bundle would cost the bytes
+Delight 0 bought, for a difference no viewer can name. **The engines share durations, not curve
+math.** `actors.ts`'s three quadratics and the inline expression in `render.ts` re-point at it.
 
 `Live.css` **mirrors** the same values as custom properties. The two are kept honest by a check
 rather than by a build step or a runtime read — this is how every other invariant in this repo is
