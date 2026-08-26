@@ -99,13 +99,13 @@
     inset 0 0 22px -10px color-mix(in srgb, var(--lc-accent) 24%, transparent),
     0 3px 10px -2px var(--lc-paper-drop),
     0 0 20px -6px color-mix(in srgb, var(--lc-accent) 30%, transparent);
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 /* Loud breathes AMBER, exactly like /live's strip — urgency in this room is mustard, not red. */
 .bc-reel--loud {
   border-color: color-mix(in srgb, var(--lc-accent) 55%, var(--lc-paper-rim));
   animation:
-    lc-fade var(--lc-med) var(--lc-ease) both,
+    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
     bc-reel-breathe 2.4s ease-in-out infinite;
 }
 @keyframes bc-reel-breathe {
@@ -178,7 +178,7 @@
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
-  animation: bc-reel-in 420ms var(--lc-ease, ease-out) both;
+  animation: bc-reel-in var(--lc-dur-4) var(--lc-ease, ease-out) both;
 }
 .bc-reel__row--quiet {
   color: var(--lc-paper-dim);

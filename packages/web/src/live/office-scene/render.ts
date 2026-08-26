@@ -51,6 +51,7 @@ import {
 } from './layout';
 import { STICKY_CAP, type WallBoard } from './wallboard';
 import { DAY_ENV, type LightEnv } from './lighting';
+import { CANVAS_EASE } from './motion';
 import { deskMoodFor, deskMoodStyle } from './moods';
 import type { Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, handsInLap, seedOf, solveSkeleton, typingBurst } from './skeleton';
@@ -4195,7 +4196,7 @@ export function drawCue(ctx: CanvasRenderingContext2D, cue: Cue, scale: number):
       x: at.x + dx / 2,
       y: at.y + dy / 2 - lift * scale,
     };
-    const eased = 1 - Math.pow(1 - t, 2);
+    const eased = CANVAS_EASE.out(t);
     ctx.globalAlpha = (1 - t) * 0.58;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2 * scale;
