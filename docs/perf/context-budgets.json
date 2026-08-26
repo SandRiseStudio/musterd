@@ -26,7 +26,7 @@
       "justification": "post-trim 2026-08-03 (98 B) + 5% headroom"
     },
     "perTurnTotalBytes": {
-      "budget": 17943,
+      "budget": 17942,
       "justification": "2026-08-26 (17087 B, +team_insight_save/team_memory_search \u2014 team memory ADR 327: the write/read pair nick chartered so traps stop being re-derived privately) + 5% headroom. Raised deliberately: the insight surface pays rent via ADR 327 eval (trap-recurrence down, promotions up), reviewed at the next re-baseline."
     },
     "perSessionTotalBytes": {
