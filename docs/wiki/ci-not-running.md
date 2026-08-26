@@ -22,6 +22,14 @@ The instinct is to force a re-trigger — push an empty commit, or close and reo
 
 Roughly twenty minutes went into close/reopen cycles before anyone ran the status check. The ordering above is the whole lesson: **diagnose the provider before you touch the branch.**
 
+## A green check earned before the outage still merges — so do not push (2026-08-26; falsify: push any commit to a PR showing CLEAN during an outage and watch `mergeStateStatus` fall to UNKNOWN)
+
+The gate is satisfied by a check **on the head SHA**, not by Actions being up. A PR whose run landed before the incident stays mergeable straight through it: `#1080` merged at `16:17:10Z`, an hour into a critical outage, on a check from `04:43Z`.
+
+The corollary is the one that costs you: **any push to such a PR moves the head and throws that check away**, and no new one can be issued until Actions returns. `#1076` went from mergeable to stranded exactly this way when its head moved to `111ce178`. During an outage, a rebase "to be tidy" is not free — it converts a landable PR into a blocked one.
+
+If you must push (a genuine conflict, as `#1081` hit when `#1080` landed under it), do it knowing the cost and land it after recovery. If you do not have to push, do not.
+
 ## What is NOT worth ruling out first
 
 These all look plausible and were all wrong on 2026-08-26. Checking them cost time; the repo-wide run list would have answered in one call.
