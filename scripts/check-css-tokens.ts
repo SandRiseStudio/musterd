@@ -37,6 +37,7 @@ import {
   offFrameDurations,
   phantomMotionRefs,
   rawMotionLiterals,
+  rungsWithoutReducedAnswer,
   type MotionFinding,
 } from './motion-scale.ts';
 
@@ -218,6 +219,17 @@ for (const file of files) {
     ...offFrameDurations(css),
     ...rawMotionLiterals(css),
     ...phantomMotionRefs(css, knownMotion),
+    // Rule 4. /broadcast is exempt by design (spec §6): it is a capture surface, and the harness
+    // rather than a person decides what it renders — there is no viewer there to hold a preference.
+    ...(rel.endsWith('Broadcast.css')
+      ? []
+      : rungsWithoutReducedAnswer(css).map(
+          (t): MotionFinding => ({
+            kind: 'reduced',
+            line: 1,
+            detail: `${t} animates here with no prefers-reduced-motion answer in this file`,
+          }),
+        )),
   ]) {
     motionFindings.push({ ...f, file: rel });
   }

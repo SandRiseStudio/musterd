@@ -282,3 +282,18 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+/* Reduced-motion parity (motion scale, spec 2026-08-25 §6). This file animated three things and
+   answered for none of them — the gate's rule 4 found it on its first run.
+
+   The expiry bar is a countdown: under reduced motion it steps to each new width instead of sliding,
+   which is the honest reading of "reduce" for a progress indicator. The button and deny-link
+   feedback resolves instantly. Nothing here carries information through motion alone, so removing
+   the motion removes nothing a reader needs. */
+@media (prefers-reduced-motion: reduce) {
+  .ac__expiry-fill,
+  .ac__btn,
+  .ac__deny {
+    transition: none;
+  }
+}

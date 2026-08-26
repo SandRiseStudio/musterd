@@ -5,6 +5,7 @@ import {
   offFrameDurations,
   phantomMotionRefs,
   rawMotionLiterals,
+  rungsWithoutReducedAnswer,
 } from './motion-scale.ts';
 
 describe('declaredMotionTokens', () => {
@@ -118,6 +119,33 @@ describe('phantomMotionRefs', () => {
   it('ignores non-motion custom properties it knows nothing about', () => {
     expect(
       phantomMotionRefs('.a { transition: color var(--lc-dur-1) var(--x-other); }', known),
+    ).toEqual([]);
+  });
+});
+
+describe('rungsWithoutReducedAnswer', () => {
+  it('flags a rung used in a transition that no reduced-motion block answers', () => {
+    const css = '.a { transition: opacity var(--lc-dur-2) var(--lc-ease-out); }';
+    expect(rungsWithoutReducedAnswer(css)).toEqual(['--lc-dur-2']);
+  });
+
+  it('accepts a rung the reduced block neutralises', () => {
+    const css = [
+      '.a { transition: opacity var(--lc-dur-2) var(--lc-ease-out); }',
+      '@media (prefers-reduced-motion: reduce) {',
+      '  .a { transition-duration: 0s; }',
+      '}',
+    ].join('\n');
+    expect(rungsWithoutReducedAnswer(css)).toEqual([]);
+  });
+
+  it('says nothing about a stylesheet that animates nothing', () => {
+    expect(rungsWithoutReducedAnswer('.a { color: red; }')).toEqual([]);
+  });
+
+  it('ignores ambient loops — they are exempt from the scale and from this rule', () => {
+    expect(
+      rungsWithoutReducedAnswer('.a { animation: drift var(--lc-dur-5) linear infinite; }'),
     ).toEqual([]);
   });
 });
