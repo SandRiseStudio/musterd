@@ -398,6 +398,7 @@ src/
     wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305)
     seeds.ts      // three team_seed_* tools: shared tray/read plus compact lifecycle update (ADR 318/319)
+    teamMemory.ts // team_insight_save + team_memory_search — findings for the whole team, pull-only retrieval (ADR 327)
     goals.ts      // team_goals / team_goal_declare — the declared-outcome layer above lanes (ADR 048/084)
     insights.ts   // team_report — the insight report at ic/team/exec altitudes (ADR 050/084/125)
     format.ts     // compact text rendering of a message for an agent to read; buildSkewWarning (ADR 135)

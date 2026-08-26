@@ -650,6 +650,18 @@ export const CATALOG: readonly CommandEntry[] = [
       'show the one-line pointer. No cross-seat read.',
   },
   {
+    name: 'insight',
+    signature:
+      'save --headline "<subject>" [body…] [--tags a,b] [--repo slug] | search "<keywords>"',
+    summary: 'save a finding for the whole team; search what teammates already saved',
+    group: 'inbox',
+    primary: false,
+    detail:
+      'Team memory (ADR 327): `save` writes an insight act — team-visible, attributed, dated — for traps, ' +
+      'measured numbers, and how-things-actually-work; `search` retrieves them pull-only via a derived index. ' +
+      'The fast tier under docs/wiki/: promote a durable finding there once it proves out.',
+  },
+  {
     name: 'wake-context',
     signature: '--act <id> | --lane <id>',
     summary: 'read a bounded, body-free wake orientation index',

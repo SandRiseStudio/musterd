@@ -18,6 +18,8 @@ import {
   type Seed,
   type SubmitSeedBrief,
   type PromoteSeed,
+  type TeamMemorySearchResponse,
+  TeamMemorySearchResponseSchema,
   type ToolTelemetryReport,
   type WakeContextPacket,
   type WakeContextRequest,
@@ -597,6 +599,19 @@ export class MusterdClient {
     if (!response.success)
       throw new Error('wake-context response did not match the protocol schema');
     return response.data.context;
+  }
+
+  /** ADR 327: team-memory search — the read side of `insight` acts, via the daemon's derived FTS
+   * fold. Parsed against the protocol schema so an older daemon (no route) fails loudly here
+   * rather than leaking shape guesses into a tool result. */
+  async teamMemorySearch(queryParams: string): Promise<TeamMemorySearchResponse> {
+    const json = await this.request(
+      'GET',
+      `/teams/${this.config.team}/memory/search?${queryParams}`,
+    );
+    const response = TeamMemorySearchResponseSchema.safeParse(json);
+    if (!response.success) throw new Error('team memory search response did not match the schema');
+    return response.data;
   }
 
   /**
