@@ -151,6 +151,7 @@ src/
     status.ts         // status
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
+    insight.ts        // insight save/search — team-visible findings via the insight act + FTS search (ADR 327)
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)

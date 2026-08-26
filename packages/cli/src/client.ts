@@ -384,6 +384,26 @@ export class HttpClient {
   clearMemory(slug: string): Promise<void> {
     return this.request('DELETE', `/teams/${slug}/memory`);
   }
+  // ── Team memory (ADR 327): the read side of `insight` acts, via the daemon's derived FTS fold
+  // (a rebuildable cache — never a source of truth). Writes travel as ordinary acts.
+  searchTeamMemory(
+    slug: string,
+    q: string,
+    limit?: number,
+  ): Promise<{
+    results: Array<{
+      id: string;
+      from: string;
+      headline: string;
+      body: string;
+      tags: string[];
+      ts: number;
+    }>;
+  }> {
+    const params = new URLSearchParams({ q });
+    if (limit) params.set('limit', String(limit));
+    return this.request('GET', `/teams/${slug}/memory/search?${params.toString()}`);
+  }
   /** ADR 242: the sampler's latest footprint tick, or null when the daemon has none (any non-200). */
   async footprint(slug: string): Promise<{
     ts: number;

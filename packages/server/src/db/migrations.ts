@@ -1016,6 +1016,49 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 327: the team-memory retrieval fold — a derived FTS5 index over `insight` acts in the
+    // message log. Triggers keep it current on the append-only log's insert/delete; the INSERT..
+    // SELECT below is the rebuild path's first run (store/insights.ts `rebuildInsightsFts` can
+    // repeat it at any time). The table is a declared cache (ADR 259): dropping it loses nothing
+    // the log does not hold.
+    version: 46,
+    up: (db) => {
+      db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS insights_fts USING fts5(
+          message_id UNINDEXED,
+          team_id UNINDEXED,
+          headline,
+          body,
+          tags
+        );
+        CREATE TRIGGER IF NOT EXISTS insights_fts_ins AFTER INSERT ON messages WHEN NEW.act = 'insight' BEGIN
+          INSERT INTO insights_fts (message_id, team_id, headline, body, tags)
+          VALUES (NEW.id,
+                  NEW.team_id,
+                  COALESCE(json_extract(NEW.meta, '$.headline'), ''),
+                  NEW.body,
+                  COALESCE(json_extract(NEW.meta, '$.tags'), ''));
+        END;
+        CREATE TRIGGER IF NOT EXISTS insights_fts_del AFTER DELETE ON messages WHEN OLD.act = 'insight' BEGIN
+          DELETE FROM insights_fts WHERE message_id = OLD.id;
+        END;
+      `);
+      // Backfill = the rebuild path's first run; delete-first so a rewound-and-replayed
+      // migration cannot double-index.
+      db.exec('DELETE FROM insights_fts');
+      db.exec(`
+        INSERT INTO insights_fts (message_id, team_id, headline, body, tags)
+        SELECT m.id,
+               m.team_id,
+               COALESCE(json_extract(m.meta, '$.headline'), ''),
+               m.body,
+               COALESCE(json_extract(m.meta, '$.tags'), '')
+        FROM messages m
+        WHERE m.act = 'insight';
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

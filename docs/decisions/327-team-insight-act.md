@@ -83,6 +83,15 @@ no standing-context injection (ADR 212).
   if volume outruns value, tag requirements tighten — the act needs no change.
 - Increments: (i) protocol enum + meta schema + SPEC; (ii) server acceptance/caps/audit + FTS
   migration + search route; (iii) MCP tools; (iv) CLI + skill guidance line.
+- _Implementation note (dated 2026-08-26): increment (i) landed in #1073; increments (ii)–(iv) in
+  #1078._ Migration v46 carries the `insights_fts` fold with insert/delete triggers and a
+  delete-first backfill; the fold lives in `store/teamMemory.ts` — deliberately named apart from
+  `store/insights.ts`, which is the ADR 050 coordination-insight *report* engine, not this. The
+  search route is `GET /teams/:slug/memory/search`; surfaces are MCP `team_insight_save` /
+  `team_memory_search` and CLI `musterd insight save|search`; guidance v18 carries the playbook
+  line (search before you re-derive; promote durable findings into docs/wiki/). The standing-context
+  budgets were raised for the tool pair under that file's own raise protocol, each justification
+  naming this ADR and the eval that must show the bytes earn their rent.
 
 ## Observability & Evaluation
 

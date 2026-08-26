@@ -38,3 +38,4 @@ export * from './lanes.js';
 export * from './seeds.js';
 export * from './autoTarget.js';
 export * from './tool-telemetry.js';
+export * from './memory.js';

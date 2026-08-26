@@ -20,6 +20,7 @@ import { hostCommand } from './commands/host.js';
 import { humanCommand } from './commands/human.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
+import { insightCommand } from './commands/insight.js';
 import { joinCommand } from './commands/join.js';
 import { laneCommand, lanesCommand } from './commands/lane.js';
 import { liveCommand } from './commands/live.js';
@@ -247,6 +248,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return statusCommand(rest);
     case 'availability':
       return availabilityCommand(rest);
+    case 'insight':
+      return insightCommand(rest);
     case 'memory':
       return memoryCommand(rest);
     case 'wake-context':

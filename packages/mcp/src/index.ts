@@ -33,6 +33,7 @@ import { registerMemory } from './tools/memory.js';
 import { registerSeeds } from './tools/seeds.js';
 import { registerSend } from './tools/send.js';
 import { registerStatus } from './tools/status.js';
+import { registerTeamMemory } from './tools/teamMemory.js';
 import { registerWakeContext } from './tools/wakeContext.js';
 import {
   instrumentToolTransport,
@@ -259,6 +260,7 @@ export function buildMcpServer(
   registerMemory(server, client);
   registerWakeContext(server, client);
   registerSeeds(server, client);
+  registerTeamMemory(server, client, config);
   registerLanes(server, client);
   registerGoals(server, client);
   registerInsights(server, client);

@@ -62,6 +62,7 @@ import {
   SeedResultSchema,
   SeedSchema,
   SubmitSeedBriefSchema,
+  TeamMemorySearchResponseSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -215,6 +216,7 @@ import {
 } from '../store/seeds.js';
 import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
 import { staleLaneWarnings } from '../store/staleness.js';
+import { searchInsights } from '../store/teamMemory.js';
 import {
   archiveTeam,
   createTeam,
@@ -2773,6 +2775,28 @@ export async function handleHttp(
         const { team, member } = authTouch(ctx, slug, req);
         assertSeatCanRead(member);
         return sendJson(res, 200, SeedListSchema.parse({ seeds: listSeeds(ctx.db, team.id) }));
+      }
+
+      // ── Team memory search (ADR 327): pull-only retrieval over `insight` acts via the derived
+      // FTS fold (store/teamMemory.ts). Read like every team-scoped GET; no write path here —
+      // insights are saved as ordinary acts through the message routes.
+      if (method === 'GET' && rest === '/memory/search') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const url = new URL(req.url ?? '/', 'http://localhost');
+        const limitRaw = Number(url.searchParams.get('limit') ?? '');
+        return sendJson(
+          res,
+          200,
+          TeamMemorySearchResponseSchema.parse({
+            results: searchInsights(
+              ctx.db,
+              team.id,
+              url.searchParams.get('q') ?? '',
+              Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
+            ),
+          }),
+        );
       }
 
       const seedReadMatch = rest.match(/^\/seeds\/([^/]+)$/);

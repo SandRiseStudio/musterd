@@ -42,4 +42,6 @@ export const TOOL_NAMES = [
   'team_goal_retract',
   'team_goals',
   'team_report',
+  'team_insight_save',
+  'team_memory_search',
 ] as const;
