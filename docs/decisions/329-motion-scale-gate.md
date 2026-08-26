@@ -1,4 +1,4 @@
-# 327 — Motion has one vocabulary, pinned to capture frames and held by a gate
+# 329 — Motion has one vocabulary, pinned to capture frames and held by a gate
 
 - Status: accepted
 - Date: 2026-08-25

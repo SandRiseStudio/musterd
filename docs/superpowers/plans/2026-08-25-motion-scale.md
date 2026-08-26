@@ -764,12 +764,16 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 8: the ADR, and the full gate chain
 
 **Files:**
-- Create: `docs/decisions/327-motion-scale-gate.md`
+- Create: `docs/decisions/<N>-motion-scale-gate.md`
 
-- [ ] **Step 1: Confirm 327 is free**
+- [ ] **Step 1: Get a number with `pnpm adr:next` — NOT by listing the directory**
 
-Run: `cd /Users/nick/agents-miley && ls docs/decisions/ | grep -oE '^[0-9]+' | sort -n | tail -1`
-Expected: `326`. If higher, use the next free number.
+Run: `cd /Users/nick/agents-miley && pnpm adr:next`
+
+**Do not use `ls docs/decisions/ | sort -n | tail -1`.** That reads only this checkout, so it cannot
+see a number an *open PR* has already claimed — which is exactly how this plan's first attempt
+collided: it took 327, and `327-team-insight-act.md` was already claimed on another branch. CI's
+`adr-numbers:check` catches it, but only after a push. `pnpm adr:next` reads the open PRs too.
 
 - [ ] **Step 2: Write the ADR**
 
@@ -797,12 +801,12 @@ rest — this is the real gate.
 - [ ] **Step 4: Commit and open the PR**
 
 ```bash
-git add docs/decisions/327-motion-scale-gate.md
-git commit -m "docs: ADR 327 — the motion scale and its gate
+git add docs/decisions/329-motion-scale-gate.md
+git commit -m "docs: ADR 329 — the motion scale and its gate
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 git push -u origin miley/motion-scale
-gh pr create --title "Delight C: the motion scale — frame-pinned rungs, one vocabulary, a gate (ADR 327)" --body "..."
+gh pr create --title "Delight C: the motion scale — frame-pinned rungs, one vocabulary, a gate (ADR 329)" --body "..."
 ```
 
 - [ ] **Step 5: Submit the lane for acceptance**
