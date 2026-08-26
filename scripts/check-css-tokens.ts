@@ -30,6 +30,13 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DUR, EASE_CSS } from '../packages/web/src/live/office-scene/motion.ts';
+import {
+  disagreeingTokens,
+  offFrameDurations,
+  rawMotionLiterals,
+  type MotionFinding,
+} from './motion-scale.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
@@ -176,9 +183,46 @@ for (const file of files) {
   });
 }
 
-if (findings.length === 0) {
-  console.log(`tokens:check — ${files.length} stylesheets, no colour token lies`);
+/*
+ * The motion arm (spec 2026-08-25-motion-scale-design.md §4). The colour rules above ask whether a
+ * palette lies about itself; these ask whether motion has a shared vocabulary at all. They ride the
+ * same command because they answer the same question — does this stylesheet agree with its own
+ * declared source of truth — and because the header's non-colour exemption is exactly the hole they
+ * fill.
+ */
+const expectedMotion = new Map<string, string>([
+  ...Object.entries(DUR).map(
+    ([k, ms]) => [`--lc-${k.replace('d', 'dur-')}`, `${String(ms)}ms`] as const,
+  ),
+  ...Object.entries(EASE_CSS).map(
+    ([k, cp]) =>
+      [`--lc-ease-${k === 'inOut' ? 'in-out' : k}`, `cubic-bezier(${cp.join(', ')})`] as const,
+  ),
+]);
+
+const motionFindings: (MotionFinding & { file: string })[] = [];
+for (const file of files) {
+  const css = readFileSync(file, 'utf8');
+  const rel = relative(repoRoot, file);
+  for (const f of [
+    ...disagreeingTokens(css, expectedMotion),
+    ...offFrameDurations(css),
+    ...rawMotionLiterals(css),
+  ]) {
+    motionFindings.push({ ...f, file: rel });
+  }
+}
+
+if (findings.length === 0 && motionFindings.length === 0) {
+  console.log(
+    `tokens:check — ${files.length} stylesheets, no colour token lies and motion is on the scale`,
+  );
   process.exit(0);
+}
+
+if (motionFindings.length > 0 && findings.length === 0) {
+  reportMotion();
+  process.exit(1);
 }
 
 console.error(`tokens:check FAILED — ${findings.length} colour token issue(s)\n`);
@@ -202,4 +246,20 @@ console.error(
   'Runtime-parametric properties are never reported — neither non-colour ones (--i, --lc-mote-delay)\n' +
     'nor colour ones the sources actually set (--lc-amb-tint). A fallback there is the correct idiom.\n',
 );
+reportMotion();
 process.exit(1);
+
+/** The motion arm's report. A function so both exit paths above can reach it. */
+function reportMotion(): void {
+  if (motionFindings.length === 0) return;
+  console.error(`tokens:check FAILED — ${motionFindings.length} motion issue(s)\n`);
+  for (const f of motionFindings) {
+    console.error(`  ${f.file}:${f.line}\n    ${f.kind}: ${f.detail}`);
+  }
+  console.error(
+    '\n  The motion scale lives in packages/web/src/live/office-scene/motion.ts. Five rungs, each a\n' +
+      '  whole number of frames at the 720p25 capture rate (120/200/280/400/600ms), and three easing\n' +
+      '  roles (--lc-ease-out / --lc-ease-in-out / --lc-ease-pop). Use var(--lc-dur-N), never a bare\n' +
+      '  duration or an inline cubic-bezier. `infinite` animations are ambient life and exempt.\n',
+  );
+}

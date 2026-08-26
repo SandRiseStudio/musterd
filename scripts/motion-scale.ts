@@ -15,6 +15,12 @@
  * drift), not interaction feedback, and is not on the same scale as a hover transition. A rule the
  * gate can check beats a list someone has to remember to update.
  *
+ * A NOTE ON THE NAMESPACE. Rules 1, 3 and 4 govern the `--lc-dur-*` / `--lc-ease*` names. A duration
+ * hidden under some other name (the pre-scale `--lc-fast: 140ms` was exactly this) is invisible to
+ * them. That is deliberate rather than a hole worth closing with a value-sniffing heuristic: rule 2
+ * catches the *uses* regardless of what the token is called, so a stylesheet cannot smuggle motion
+ * past the gate — only mis-file where its value is declared.
+ *
  * A NOTE ON MULTI-LINE DECLARATIONS. `Live.css` writes most of its transitions across several lines
  * (see the four-property block at Live.css:1782). A per-line scan would silently miss every
  * continuation line — a gate that under-reports is worse than no gate — so declarations are
