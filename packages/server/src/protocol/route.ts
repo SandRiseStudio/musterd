@@ -132,6 +132,12 @@ function routeEnvelopeInner(
   if (env.from !== sender.name || env.team !== team.slug) {
     throw new MusterdError('forbidden', 'envelope from/team must match the authenticated member');
   }
+  // ADR 327: an insight's finding text is capped at 2048 bytes — server-enforced here on the one
+  // validate→persist→deliver path, like seat memory's blob cap (ADR 093), because actMetaRules
+  // sees only {act, thread, meta}, never the body.
+  if (env.act === 'insight' && Buffer.byteLength(env.body, 'utf8') > 2048) {
+    throw new MusterdError('validation', 'act "insight" body is limited to 2048 bytes');
+  }
   // Observer seats (ADR 063) are read-only — they watch the firehose but cannot speak.
   if (sender.observer) {
     throw new MusterdError('forbidden', 'observer seats are read-only and cannot send');

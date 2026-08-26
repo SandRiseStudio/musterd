@@ -17,6 +17,13 @@ import { z } from 'zod';
  * tier holds; below-top proceeds with a recorded risk-acceptance). The no-answer resolution rides
  * `status_update` (`meta.ask_outcome`) and the human "deciding — check back" reply rides `wait`
  * (`meta.until`), so `ask` is the only new verb — "surfaces before more acts" (ADR 145 §4).
+ *
+ * `insight` (ADR 327) is the team-memory act: a reusable finding saved so the whole team can find
+ * it. Required `meta.headline` (≤120 chars); optional `meta.tags` / `meta.repo`; the text rides the
+ * envelope body (server-enforced ≤2048 bytes). Team-visible by intent — there is no private variant,
+ * so ADR 093's seat-memory privacy line stays untouched. Retrieved through a derived FTS index over
+ * the log (a declared cache, rebuildable — never a source of truth); durable findings promote into
+ * `docs/wiki/` per ADR 259.
  */
 export const ACTS = [
   'message',
@@ -31,6 +38,7 @@ export const ACTS = [
   'challenge',
   'defer',
   'ask',
+  'insight',
 ] as const;
 export type Act = (typeof ACTS)[number];
 export const ActSchema = z.enum(ACTS);

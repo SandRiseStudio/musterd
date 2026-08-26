@@ -152,6 +152,45 @@ export function actMetaRules(
       });
     }
   }
+  // `insight` (ADR 327) is the team-memory act: a finding saved so the whole team can find it. It
+  // MUST carry a non-empty `meta.headline` (≤120 chars — the commit-subject discipline ADR 093
+  // chose); MAY carry `meta.tags` (≤8 non-empty strings) and `meta.repo` (a slug naming the repo
+  // the finding is bound to). The finding text rides the envelope body; its ≤2048-byte cap is
+  // server-enforced at save time, like seat memory's blob cap (ADR 093), not wire-schema.
+  if (env.act === 'insight') {
+    const headline = meta['headline'];
+    if (typeof headline !== 'string' || headline.trim().length === 0 || headline.length > 120) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'headline'],
+        message: 'act "insight" requires meta.headline (1..120 chars)',
+      });
+    }
+    if (meta['tags'] !== undefined) {
+      const tags = meta['tags'];
+      const ok =
+        Array.isArray(tags) &&
+        tags.length <= 8 &&
+        tags.every((t) => typeof t === 'string' && t.trim().length > 0);
+      if (!ok) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'tags'],
+          message: 'meta.tags must be at most 8 non-empty strings',
+        });
+      }
+    }
+    if (meta['repo'] !== undefined) {
+      const repo = meta['repo'];
+      if (typeof repo !== 'string' || repo.trim().length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['meta', 'repo'],
+          message: 'meta.repo must be a non-empty slug when present',
+        });
+      }
+    }
+  }
   // ADR 254: the eligible set. **Shape only.** `actMetaRules` receives `{act, thread, meta}` — no
   // `from`, no roster handle — so "these seats exist, none has left, none is an observer, and none is
   // the sender" is necessarily a server-side check in `routeEnvelope`. Two-layer by structure, not by
