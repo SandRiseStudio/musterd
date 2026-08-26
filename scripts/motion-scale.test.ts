@@ -3,6 +3,7 @@ import {
   declaredMotionTokens,
   disagreeingTokens,
   offFrameDurations,
+  phantomMotionRefs,
   rawMotionLiterals,
 } from './motion-scale.ts';
 
@@ -88,6 +89,35 @@ describe('disagreeingTokens', () => {
     const expected = new Map([['--lc-ease-out', 'cubic-bezier(0.16, 1, 0.3, 1)']]);
     expect(
       disagreeingTokens(':root { --lc-ease-out: cubic-bezier(0.16,1,0.3,1); }', expected),
+    ).toEqual([]);
+  });
+});
+
+describe('phantomMotionRefs', () => {
+  const known = new Set(['--lc-dur-1', '--lc-ease-out']);
+
+  it('flags a motion var() that no stylesheet declares — a silently dead transition', () => {
+    // The real case: Task 4 deleted --lc-fast, and ApprovalCard.css still pointed at it. A
+    // transition whose duration does not resolve simply does not animate, and nothing says so.
+    const css = '.a { transition: color var(--lc-fast) var(--lc-ease-out); }';
+    expect(phantomMotionRefs(css, known)).toEqual([
+      {
+        kind: 'phantom',
+        line: 1,
+        detail: 'var(--lc-fast) is used in a transition but declared nowhere',
+      },
+    ]);
+  });
+
+  it('accepts references to declared tokens', () => {
+    expect(
+      phantomMotionRefs('.a { transition: color var(--lc-dur-1) var(--lc-ease-out); }', known),
+    ).toEqual([]);
+  });
+
+  it('ignores non-motion custom properties it knows nothing about', () => {
+    expect(
+      phantomMotionRefs('.a { transition: color var(--lc-dur-1) var(--x-other); }', known),
     ).toEqual([]);
   });
 });

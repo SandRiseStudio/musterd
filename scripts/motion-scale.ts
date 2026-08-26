@@ -32,7 +32,7 @@
 export const FRAME_MS = 40;
 
 export type MotionFinding = {
-  kind: 'disagree' | 'raw' | 'off-frame' | 'reduced';
+  kind: 'disagree' | 'raw' | 'off-frame' | 'reduced' | 'phantom';
   line: number;
   detail: string;
 };
@@ -129,6 +129,37 @@ export function disagreeingTokens(
         line,
         detail: `${token}: CSS has ${value}, motion.ts has ${want}`,
       });
+    }
+  }
+  return out;
+}
+
+/**
+ * Rule 5 — a motion `var()` in a transition that no stylesheet declares.
+ *
+ * Found by the Task 4 migration doing the damage itself: deleting `--lc-fast` left four references
+ * in ApprovalCard.css pointing at nothing, and a transition whose duration does not resolve simply
+ * does not animate. Nothing in CSS complains, and none of rules 1-4 could see it — they judge
+ * declarations and literals, and this is neither.
+ *
+ * `known` is every motion token declared across all stylesheets, so a token declared in one file and
+ * used in another (the normal case — the scale lives in Live.css) is not a false positive. Only the
+ * motion namespace is judged; an unknown `--x-other` belongs to some other system.
+ */
+export function phantomMotionRefs(css: string, known: ReadonlySet<string>): MotionFinding[] {
+  const out: MotionFinding[] = [];
+  for (const decl of motionDeclarations(css)) {
+    for (const { text, line } of decl.lines) {
+      for (const m of text.matchAll(/var\((--lc-(?:dur-[\w-]+|ease[\w-]*|fast|med))\)/g)) {
+        const token = m[1];
+        if (token && !known.has(token)) {
+          out.push({
+            kind: 'phantom',
+            line,
+            detail: `var(${token}) is used in a transition but declared nowhere`,
+          });
+        }
+      }
     }
   }
   return out;

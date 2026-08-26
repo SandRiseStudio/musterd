@@ -69,8 +69,14 @@ Three easing roles replace the eight literals:
 | `--lc-ease-in-out` | `cubic-bezier(0.4, 0, 0.2, 1)` | the `(0.4, 0, 0.2, 1)` literal **and** the global `--ease-in-out`, which is a *different* curve — `(0.65, 0, 0.35, 1)` |
 | `--lc-ease-pop` | one tuned overshoot | `(0.34,1.56,0.64,1)`, `(0.34,1.4,0.5,1)`, `(0.2,0.9,0.3,1.4)`, `(0.2,0.9,0.25,1.08)` |
 
-`--lc-ease-quart` and the two global easings in `tokens.css` collapse into these, ending the
-three-namespace split.
+`--lc-ease-quart` collapses into these, and `/live`'s uses of the two global easings in `tokens.css`
+re-point at them — ending the three-namespace split **for this surface**.
+
+The global `--ease-out` / `--ease-in-out` stay declared: `components/GetStarted.css` and
+`components/Footer.css` use them, and those are the public site, outside this lane's scope
+(`live/**`, `Live.css`, `Broadcast.css`). Deleting a token the site depends on from inside a `/live`
+lane would be a change nobody reviewing this lane is looking at. The residue is one namespace on one
+surface this lane does not own — worth its own lane if the site ever wants the scale.
 
 **Overshoot is the riskiest family at 25fps** and deserves its own note: the peak of an overshoot can
 fall between two captured frames and simply not exist on the stream. One overshoot whose peak is

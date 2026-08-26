@@ -224,9 +224,9 @@
   color: var(--lc-dim);
   cursor: pointer;
   transition:
-    background var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease),
-    color var(--lc-fast) var(--lc-ease);
+    background var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    color var(--lc-dur-1) var(--lc-ease-out);
   text-align: center;
   line-height: 1.2;
 }
@@ -254,7 +254,7 @@
   color: var(--lc-faint);
   cursor: pointer;
   padding: 2px 6px;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .ac__deny:hover {
   color: var(--lc-danger);

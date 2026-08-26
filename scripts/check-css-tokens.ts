@@ -32,8 +32,10 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DUR, EASE_CSS } from '../packages/web/src/live/office-scene/motion.ts';
 import {
+  declaredMotionTokens,
   disagreeingTokens,
   offFrameDurations,
+  phantomMotionRefs,
   rawMotionLiterals,
   type MotionFinding,
 } from './motion-scale.ts';
@@ -200,6 +202,13 @@ const expectedMotion = new Map<string, string>([
   ),
 ]);
 
+/* Rule 5 needs every motion token declared ANYWHERE — the scale lives in Live.css and is used from
+ * sibling stylesheets, so a per-file view would call every cross-file reference a phantom. */
+const knownMotion = new Set<string>();
+for (const file of files) {
+  for (const { token } of declaredMotionTokens(readFileSync(file, 'utf8'))) knownMotion.add(token);
+}
+
 const motionFindings: (MotionFinding & { file: string })[] = [];
 for (const file of files) {
   const css = readFileSync(file, 'utf8');
@@ -208,6 +217,7 @@ for (const file of files) {
     ...disagreeingTokens(css, expectedMotion),
     ...offFrameDurations(css),
     ...rawMotionLiterals(css),
+    ...phantomMotionRefs(css, knownMotion),
   ]) {
     motionFindings.push({ ...f, file: rel });
   }

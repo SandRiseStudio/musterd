@@ -98,10 +98,17 @@
   --lc-r-sm: 6px;
   --lc-r-md: 9px;
   --lc-r-lg: 14px;
-  --lc-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --lc-ease-quart: cubic-bezier(0.25, 1, 0.5, 1);
-  --lc-fast: 140ms;
-  --lc-med: 220ms;
+  /* The motion scale — mirrors office-scene/motion.ts, enforced by `pnpm tokens:check`.
+     Frame counts at the 720p25 capture rate: 3, 5, 7, 10, 15. A duration that is not a whole
+     frame lands mid-frame on the stream and its last step renders partial — that is the judder. */
+  --lc-dur-1: 120ms;
+  --lc-dur-2: 200ms;
+  --lc-dur-3: 280ms;
+  --lc-dur-4: 400ms;
+  --lc-dur-5: 600ms;
+  --lc-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --lc-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --lc-ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
   --lc-z-rail: 1;
   --lc-z-overlay: 5;
 
@@ -179,9 +186,9 @@
   color: var(--lc-muted);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc__sound:hover,
 .lc__pbtn:hover {
@@ -224,7 +231,7 @@
   justify-content: flex-end;
   background: color-mix(in srgb, var(--lc-ground) 58%, transparent);
   backdrop-filter: blur(3px);
-  animation: lc-fade 180ms var(--lc-ease) both;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-seeds__panel {
   display: flex;
@@ -235,7 +242,7 @@
   border-left: 1px solid var(--lc-border-2);
   box-shadow: -24px 0 70px -40px rgba(42, 33, 24, 0.55);
   outline: none;
-  animation: lc-seeds-in 280ms var(--lc-ease) both;
+  animation: lc-seeds-in var(--lc-dur-3) var(--lc-ease-out) both;
 }
 @keyframes lc-seeds-in {
   from {
@@ -449,8 +456,8 @@
   overflow: hidden;
   isolation: isolate;
   transition:
-    border-color var(--lc-med) var(--lc-ease),
-    box-shadow var(--lc-med) var(--lc-ease);
+    border-color var(--lc-dur-2) var(--lc-ease-out),
+    box-shadow var(--lc-dur-2) var(--lc-ease-out);
 }
 .lc-clock:hover {
   border-color: color-mix(in srgb, var(--lc-accent) 40%, transparent);
@@ -470,7 +477,7 @@
     transparent 62%
   );
   transform: translateX(-120%);
-  animation: lc-clock-sheen 7s var(--lc-ease-quart) infinite;
+  animation: lc-clock-sheen 7s var(--lc-ease-out) infinite;
   pointer-events: none;
 }
 @keyframes lc-clock-sheen {
@@ -497,7 +504,7 @@
   display: inline-block;
   width: 0.62em;
   text-align: center;
-  animation: lc-clock-roll 420ms var(--lc-ease) both;
+  animation: lc-clock-roll var(--lc-dur-4) var(--lc-ease-out) both;
 }
 @keyframes lc-clock-roll {
   from {
@@ -518,7 +525,7 @@
   width: 0.34em;
   text-align: center;
   color: var(--lc-accent-ink);
-  animation: lc-clock-breathe 2s var(--lc-ease) infinite;
+  animation: lc-clock-breathe 2s var(--lc-ease-out) infinite;
 }
 /* A breath, not a blink: the colons stay legible at the trough — a colon that vanishes reads as a
    gap in the number rather than as a ticking clock. */
@@ -573,7 +580,7 @@
 .lc__status--live::before {
   background: var(--lc-success);
   opacity: 1;
-  animation: lc-ping 2.4s var(--lc-ease) infinite;
+  animation: lc-ping 2.4s var(--lc-ease-out) infinite;
 }
 .lc__status--error {
   color: var(--lc-danger-ink);
@@ -623,8 +630,8 @@
   font: inherit;
   font-size: 12px;
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc__error button:hover {
   background: rgba(255, 255, 255, 0.07);
@@ -652,8 +659,8 @@
   grid-template-columns: var(--col-office) var(--col-roster) var(--col-stream);
   flex: 1;
   min-height: 0;
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
-  transition: grid-template-columns 380ms var(--lc-ease);
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
+  transition: grid-template-columns var(--lc-dur-4) var(--lc-ease-out);
 }
 /* Pin each panel to its own grid track. Required because the responsive rules below hide a panel
    with `display: none` (roster ≤1080px, office ≤880px), and a `display:none` grid item is pulled out
@@ -722,10 +729,10 @@
   color: var(--lc-dim);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-collapse:hover {
   color: var(--lc-accent-bright);
@@ -869,10 +876,10 @@
   cursor: pointer;
   font: inherit;
   overflow: hidden;
-  animation: lc-rail-in 320ms var(--lc-ease) both;
+  animation: lc-rail-in var(--lc-dur-3) var(--lc-ease-out) both;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-rail--right {
   border-inline-end: 0;
@@ -900,7 +907,7 @@
     transparent
   );
   opacity: 0.75;
-  transition: opacity var(--lc-med) var(--lc-ease);
+  transition: opacity var(--lc-dur-2) var(--lc-ease-out);
 }
 .lc-rail--right::before {
   inset-inline-start: auto;
@@ -927,8 +934,8 @@
   border: 1px solid var(--lc-border);
   background: rgba(255, 255, 255, 0.04);
   transition:
-    transform var(--lc-med) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    transform var(--lc-dur-2) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-rail__chevron svg {
   width: 15px;
@@ -1149,7 +1156,7 @@
   font-size: 10.5px;
   color: var(--lc-paper-ink);
   background: color-mix(in srgb, var(--lc-paper) 58%, transparent);
-  transition: background 160ms ease;
+  transition: background var(--lc-dur-1) ease;
 }
 .lc-workstack__row:hover {
   background: color-mix(in srgb, var(--lc-accent) 12%, var(--lc-paper));
@@ -1292,7 +1299,7 @@
   align-items: center;
   gap: 3px;
   white-space: nowrap;
-  transition: opacity var(--lc-med) var(--lc-ease);
+  transition: opacity var(--lc-dur-2) var(--lc-ease-out);
 }
 /* The nameplate: compact paper pill — collapsed is dot + name + provider icon; expand grows a
    divider after the name and reveals model · harness · role behind it. Broadcast always shows icon +
@@ -1424,7 +1431,7 @@
   font-size: 13px;
   line-height: 1.4;
   color: var(--lc-paper-ink);
-  animation: lc-caption-in 240ms ease-out;
+  animation: lc-caption-in var(--lc-dur-2) ease-out;
 }
 @keyframes lc-caption-in {
   from { opacity: 0; }
@@ -1468,7 +1475,7 @@
 .lc-gl-label__detail {
   display: grid;
   grid-template-columns: 0fr;
-  transition: grid-template-columns 460ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: grid-template-columns var(--lc-dur-4) var(--lc-ease-out);
 }
 .lc-gl-label__detailin {
   display: inline-flex;
@@ -1488,8 +1495,8 @@
   opacity: 0;
   transform: translateX(-5px);
   transition:
-    opacity 260ms var(--lc-ease),
-    transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity var(--lc-dur-3) var(--lc-ease-out),
+    transform var(--lc-dur-4) var(--lc-ease-out);
 }
 .lc-gl-label.is-expanded .lc-gl-label__detail .lc-gl-label__seg,
 .lc-gl-label.is-expanded .lc-gl-label__detail .lc-gl-label__rule,
@@ -1517,8 +1524,8 @@
   transform: rotate(-45deg) scale(0.86);
   transform-origin: 60% 60%;
   transition:
-    transform 460ms cubic-bezier(0.34, 1.4, 0.5, 1),
-    border-color 200ms var(--lc-ease);
+    transform var(--lc-dur-4) var(--lc-ease-pop),
+    border-color var(--lc-dur-2) var(--lc-ease-out);
 }
 .lc-gl-label.is-expanded .lc-gl-label__caret {
   transform: rotate(45deg) scale(0.86);
@@ -1549,7 +1556,7 @@
   );
 }
 .lc-gl-label.is-expanded .lc-gl-label__plate::after {
-  animation: lc-plate-sweep 620ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: lc-plate-sweep var(--lc-dur-5) var(--lc-ease-out);
 }
 @keyframes lc-plate-sweep {
   from {
@@ -1779,11 +1786,11 @@
   transform: translateY(7px) scale(0.9);
   transform-origin: 50% 100%;
   transition:
-    opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    max-width 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    max-height 260ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 220ms ease; /* gentle overshoot on enter — a warm little pop; smooth grow on hover */
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-4) var(--lc-ease-pop),
+    max-width var(--lc-dur-3) var(--lc-ease-out),
+    max-height var(--lc-dur-3) var(--lc-ease-out),
+    box-shadow var(--lc-dur-2) ease; /* gentle overshoot on enter — a warm little pop; smooth grow on hover */
 }
 /* The downward tail, matching the bubble body. Two triangles: a slightly larger one in the tone ring's
    colour with a smaller one in the stock sitting on top of it — the only way a CSS-border triangle
@@ -1816,8 +1823,8 @@
   opacity: 0;
   transform: translateY(-12px) scale(0.97); /* drifts up as it fades — like a spoken word rising away */
   transition:
-    opacity 520ms ease,
-    transform 560ms cubic-bezier(0.4, 0, 0.2, 1);
+    opacity var(--lc-dur-5) ease,
+    transform var(--lc-dur-5) var(--lc-ease-in-out);
 }
 /* a bubble that carries an act id is a click-through to the stream row — quiet until hovered */
 .lc-speech.is-clickable {
@@ -1826,9 +1833,9 @@
 }
 .lc-speech.is-clickable .lc-speech__inner {
   transition:
-    opacity 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1),
-    box-shadow 220ms ease;
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-4) var(--lc-ease-pop),
+    box-shadow var(--lc-dur-2) ease;
 }
 .lc-speech.is-clickable:hover .lc-speech__inner {
   transform: translateY(-2px) scale(1.03);
@@ -1854,8 +1861,8 @@
   padding: 0;
   border-radius: 6px;
   transition:
-    box-shadow 220ms var(--lc-ease, ease),
-    transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.4);
+    box-shadow var(--lc-dur-2) var(--lc-ease, ease),
+    transform var(--lc-dur-2) var(--lc-ease-pop);
 }
 /* Hover lifts the board a hair off the wall and warms the light around it — the promise that this
    object comes off the wall, made before you click. Lives on the DOM hotspot, not the canvas, so
@@ -1892,8 +1899,8 @@
   padding: 2px 7px;
   opacity: 0;
   transition:
-    opacity 180ms var(--lc-ease, ease),
-    transform 260ms var(--lc-ease, ease);
+    opacity var(--lc-dur-2) var(--lc-ease, ease),
+    transform var(--lc-dur-3) var(--lc-ease, ease);
   pointer-events: none;
 }
 .lc-boardspot:hover .lc-boardspot__tag,
@@ -1942,7 +1949,7 @@
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-dasharray: 1 0;
-  animation: lc-trace-draw 620ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: lc-trace-draw var(--lc-dur-5) var(--lc-ease-out) forwards;
 }
 @keyframes lc-trace-draw {
   0% {
@@ -1963,7 +1970,7 @@
 }
 
 .lc-speech.is-picked .lc-speech__inner {
-  animation: lc-speech-picked 460ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: lc-speech-picked var(--lc-dur-4) var(--lc-ease-out);
 }
 @keyframes lc-speech-picked {
   0% {
@@ -2008,7 +2015,7 @@
    .is-off, which retriggers the pop animation). Each is tinted by the act's tone so a resolve's
    chips read green, an ask's mustard — the bubble feels of a piece with the act it speaks. */
 .lc-st {
-  animation: lc-st-pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: lc-st-pop var(--lc-dur-3) var(--lc-ease-pop);
 }
 /* chips are atomic — inline-block so they can scale in and never break mid-token; a runaway-long
    code span ellipsizes inside the bubble instead of overflowing it. Strong prose stays inline so
@@ -2108,7 +2115,7 @@
   letter-spacing: 0.06em;
   color: color-mix(in srgb, var(--lc-speech-tone) 78%, #f4ead9);
   opacity: 0.85;
-  transition: opacity 160ms ease;
+  transition: opacity var(--lc-dur-1) ease;
   pointer-events: none;
 }
 /* ── hover-expand: the glance grows into the full text, scrollable past a viewport-relative cap ── */
@@ -2145,11 +2152,11 @@
   /* no spring/drift — just a soft cross-fade (opacity is safe under reduced-motion) */
   .lc-speech__inner {
     transform: none;
-    transition: opacity 160ms linear;
+    transition: opacity var(--lc-dur-1) linear;
   }
   .lc-speech.is-out .lc-speech__inner {
     transform: none;
-    transition: opacity 200ms linear;
+    transition: opacity var(--lc-dur-2) linear;
   }
 }
 
@@ -2176,7 +2183,7 @@
     transparent 62%
   );
   opacity: var(--lc-amb-strength, 0.3);
-  transition: opacity 1200ms ease;
+  transition: opacity var(--lc-dur-5) ease;
   will-change: opacity;
 }
 /* (The working-monitor glow moved into the canvas — it's drawn by `screenPanel` as additive light on the
@@ -2439,7 +2446,7 @@
   gap: var(--lc-3);
   padding: var(--lc-3) var(--lc-3);
   border-radius: var(--lc-r-sm);
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-seat:hover {
   background: color-mix(in srgb, var(--lc-surface) 60%, transparent);
@@ -2476,7 +2483,7 @@
    not gone. A slow amber breathe distinguishes it from a cold seat without shouting. */
 .lc-seat__dot--recon {
   background: var(--lc-accent);
-  animation: lc-recon-breathe 1.6s var(--lc-ease) infinite;
+  animation: lc-recon-breathe 1.6s var(--lc-ease-out) infinite;
 }
 @keyframes lc-recon-breathe {
   0%,
@@ -2725,8 +2732,8 @@
   letter-spacing: 0.06em;
   cursor: pointer;
   transition:
-    color 140ms ease,
-    border-color 140ms ease;
+    color var(--lc-dur-1) ease,
+    border-color var(--lc-dur-1) ease;
 }
 .lc-earlier:hover {
   color: var(--lc-text);
@@ -2751,18 +2758,18 @@
   padding: var(--lc-4) var(--lc-5);
   border-radius: var(--lc-r-md);
   border: 1px solid transparent;
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-row:hover {
   background: var(--lc-surface);
 }
 .lc-row--enter {
-  animation: lc-enter 0.42s var(--lc-ease) both;
+  animation: lc-enter 0.42s var(--lc-ease-out) both;
 }
 .lc-row--settle {
   animation:
-    lc-enter 0.42s var(--lc-ease) both,
-    lc-settle 1.7s var(--lc-ease) both;
+    lc-enter 0.42s var(--lc-ease-out) both,
+    lc-settle 1.7s var(--lc-ease-out) both;
 }
 @keyframes lc-settle {
   0% {
@@ -3049,8 +3056,8 @@
   cursor: pointer;
   font: inherit;
   transition:
-    background var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    background var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-quote:hover {
   background: color-mix(in srgb, var(--lc-text) 9%, transparent);
@@ -3086,7 +3093,7 @@
 
 /* flash the original when its reply's quote is clicked */
 .lc-row--flash {
-  animation: lc-flash 1.5s var(--lc-ease) both;
+  animation: lc-flash 1.5s var(--lc-ease-out) both;
 }
 @keyframes lc-flash {
   0%,
@@ -3217,7 +3224,7 @@
   background:
     radial-gradient(70% 54% at 50% 42%, rgba(244, 207, 82, 0.13), transparent 60%),
     radial-gradient(120% 80% at 50% 116%, rgba(255, 168, 92, 0.2), transparent 58%);
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-form__card {
   position: relative;
@@ -3234,7 +3241,7 @@
   box-shadow:
     0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
     0 26px 64px -26px rgba(0, 0, 0, 0.66);
-  animation: lc-rise 0.5s var(--lc-ease) both;
+  animation: lc-rise 0.5s var(--lc-ease-out) both;
 }
 @keyframes lc-rise {
   from {
@@ -3289,8 +3296,8 @@
   letter-spacing: normal;
   text-transform: none;
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    box-shadow var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    box-shadow var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-form__field input::placeholder {
   color: var(--lc-faint);
@@ -3325,8 +3332,8 @@
   font-size: 14px;
   cursor: pointer;
   transition:
-    filter var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    filter var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-form__connect:hover:not(:disabled) {
   filter: brightness(1.08);
@@ -3364,7 +3371,7 @@
   cursor: pointer;
   padding: var(--lc-1);
   align-self: center;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-form__advanced:hover {
   color: var(--lc-dim);
@@ -3411,8 +3418,8 @@
   padding: 4px 12px;
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-audit__refresh:hover:not(:disabled) {
   color: var(--lc-dim);
@@ -3468,7 +3475,7 @@
 }
 .lc-audit__row {
   border-bottom: 1px solid var(--lc-border);
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-audit__row:hover {
   background: color-mix(in srgb, var(--lc-surface) 50%, transparent);
@@ -3552,7 +3559,7 @@
   border-radius: var(--lc-r-sm);
   padding: 6px 16px;
   cursor: pointer;
-  transition: background var(--lc-fast) var(--lc-ease);
+  transition: background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-audit__older:hover:not(:disabled) {
   background: var(--lc-surface-2);
@@ -3658,7 +3665,7 @@
     color-mix(in srgb, var(--lc-ground) 68%, transparent)
   );
   opacity: 0;
-  transition: opacity 280ms var(--lc-ease);
+  transition: opacity var(--lc-dur-3) var(--lc-ease-out);
   pointer-events: none;
 }
 .lc-boardoverlay.is-in::before {
@@ -3686,8 +3693,8 @@
   /* The overshoot lives in the curve's tail (>1), not in a keyframe: the panel passes its resting
      size by ~3% and swings back, which is what a held object does and a scaling rectangle doesn't. */
   transition:
-    transform 620ms cubic-bezier(0.2, 0.9, 0.25, 1.08),
-    opacity 260ms var(--lc-ease);
+    transform var(--lc-dur-5) var(--lc-ease-pop),
+    opacity var(--lc-dur-3) var(--lc-ease-out);
   outline: none;
 }
 .lc-boardoverlay.is-in .lc-boardoverlay__panel {
@@ -3695,7 +3702,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .lc-boardoverlay__panel {
-    transition: opacity 180ms var(--lc-ease);
+    transition: opacity var(--lc-dur-2) var(--lc-ease-out);
   }
 }
 .lc-boardoverlay__bar {
@@ -3740,8 +3747,8 @@
   line-height: 1;
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-boardoverlay__close:hover {
   color: var(--lc-text);
@@ -3895,9 +3902,9 @@
   /* resting elevation: barely off the tray */
   box-shadow: 0 1px 2px color-mix(in srgb, #000 5%, transparent);
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease),
-    box-shadow var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out),
+    box-shadow var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-card:hover {
   border-color: var(--lc-border-2);
@@ -4009,13 +4016,13 @@
 /* card entrances: first-load stagger + the landing after a move between columns */
 .lc-card--enter,
 .lc-card--landed {
-  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+  animation: lc-rise var(--lc-dur-2) var(--lc-ease-out) both;
 }
 /* the done beat — glide in, then one warm mustard pulse; calm after (#warm-flourish) */
 .lc-card--flourish {
   animation:
-    lc-rise var(--lc-med) var(--lc-ease) both,
-    lc-card-glow 700ms var(--lc-ease) 120ms 1;
+    lc-rise var(--lc-dur-2) var(--lc-ease-out) both,
+    lc-card-glow var(--lc-dur-5) var(--lc-ease-out) var(--lc-dur-1) 1;
 }
 @keyframes lc-card-glow {
   0% {
@@ -4040,7 +4047,7 @@
   box-shadow:
     0 0 0 2px color-mix(in srgb, var(--lc-accent) 42%, transparent),
     0 10px 28px -14px color-mix(in srgb, var(--lc-accent) 45%, transparent);
-  animation: lc-card-knock 900ms var(--lc-ease) 180ms 1;
+  animation: lc-card-knock var(--lc-dur-5) var(--lc-ease-out) var(--lc-dur-2) 1;
 }
 /* Hover still lifts it — it just keeps its ring while doing so. */
 .lc-card.lc-card--focused:hover {
@@ -4067,7 +4074,7 @@
 
 /* waiting on a human, made ambient: a human-owned blocked card breathes softly in rose */
 .lc-card--breathe {
-  animation: lc-card-breathe 2.4s var(--lc-ease) infinite;
+  animation: lc-card-breathe 2.4s var(--lc-ease-out) infinite;
 }
 @keyframes lc-card-breathe {
   0%,
@@ -4101,7 +4108,7 @@
 @media (hover: hover) and (pointer: fine) {
   .lc-card__actions {
     opacity: 0;
-    transition: opacity var(--lc-fast) var(--lc-ease);
+    transition: opacity var(--lc-dur-1) var(--lc-ease-out);
   }
   .lc-card:hover .lc-card__actions,
   .lc-card:focus-within .lc-card__actions,
@@ -4136,7 +4143,7 @@
   font-size: 11px;
   color: var(--lc-faint);
   cursor: pointer;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-card__abandon:hover:not(:disabled) {
   color: var(--lc-danger-ink);
@@ -4148,7 +4155,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--lc-3);
-  animation: lc-picker-in var(--lc-fast) var(--lc-ease) both;
+  animation: lc-picker-in var(--lc-dur-1) var(--lc-ease-out) both;
 }
 @keyframes lc-picker-in {
   from {
@@ -4175,7 +4182,7 @@
 .lc-card--compose {
   border-color: color-mix(in srgb, var(--lc-accent) 40%, var(--lc-border));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--lc-accent) 10%, transparent) inset;
-  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+  animation: lc-rise var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-card__compose-title {
   border: 0;
@@ -4234,8 +4241,8 @@
   color: var(--lc-faint);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-col__more:hover {
   color: var(--lc-dim);
@@ -4275,8 +4282,8 @@
   color: var(--lc-muted);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-board__view--on {
   background: color-mix(in srgb, var(--lc-accent) 18%, transparent);
@@ -4294,7 +4301,7 @@
   border: 1px solid var(--lc-border);
   border-radius: var(--lc-r-lg);
   background: color-mix(in srgb, var(--lc-ground) 55%, transparent);
-  animation: lc-rise var(--lc-med) var(--lc-ease) both;
+  animation: lc-rise var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-insight--rail {
   position: relative;
@@ -4386,7 +4393,7 @@
   font-size: 10.5px;
   color: var(--lc-faint);
   cursor: pointer;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-insight__more:hover {
   color: var(--lc-dim);
@@ -4467,9 +4474,9 @@
   color: var(--lc-muted);
   cursor: pointer;
   transition:
-    color var(--lc-fast) var(--lc-ease),
-    border-color var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    color var(--lc-dur-1) var(--lc-ease-out),
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-filter:hover {
   color: var(--lc-dim);
@@ -4514,7 +4521,7 @@
   font-size: 10.5px;
   color: var(--lc-faint);
   cursor: pointer;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc__identity-out:hover {
   color: var(--lc-danger-ink);
@@ -4530,8 +4537,8 @@
   font-weight: 600;
   cursor: pointer;
   transition:
-    filter var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    filter var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-board__new:hover:not(:disabled) {
   filter: brightness(1.08);
@@ -4561,7 +4568,7 @@
   border: 1px solid var(--lc-border);
   border-radius: 999px;
   background: color-mix(in srgb, var(--lc-ground-2) 88%, transparent);
-  animation: lc-fade var(--lc-med) var(--lc-ease) both;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-asks--loud {
   border-color: color-mix(in srgb, var(--lc-accent) 55%, transparent);
@@ -4569,7 +4576,7 @@
     0 0 0 1px color-mix(in srgb, var(--lc-accent) 26%, transparent),
     0 6px 22px -12px color-mix(in srgb, var(--lc-accent) 55%, transparent);
   animation:
-    lc-fade var(--lc-med) var(--lc-ease) both,
+    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
     lc-asks-breathe 2.4s ease-in-out infinite;
 }
 @keyframes lc-asks-breathe {
@@ -4650,7 +4657,7 @@
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  transition: color var(--lc-fast) var(--lc-ease);
+  transition: color var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-asks__lead:hover {
   color: var(--lc-accent-ink);
@@ -4778,7 +4785,7 @@
   stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
-  transition: transform var(--lc-med) var(--lc-ease);
+  transition: transform var(--lc-dur-2) var(--lc-ease-out);
 }
 .is-open .lc-asks__chev {
   transform: rotate(180deg);
@@ -4814,17 +4821,17 @@
   transform: translateY(-4px) scale(0.98);
   visibility: hidden;
   transition:
-    opacity 120ms var(--lc-ease),
-    transform 120ms var(--lc-ease),
-    visibility 0s linear 120ms;
+    opacity var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out),
+    visibility 0s linear var(--lc-dur-1);
 }
 .lc-asks__sheet[data-open] {
   opacity: 1;
   transform: translateY(0) scale(1);
   visibility: visible;
   transition:
-    opacity var(--lc-med) var(--lc-ease-quart),
-    transform var(--lc-med) var(--lc-ease-quart),
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-2) var(--lc-ease-out),
     visibility 0s;
 }
 /* A LIST, not a grid of cards. Twenty asks is a triage queue, and triage wants one scan axis: every
@@ -4844,7 +4851,7 @@
 /* Cards arrive in sequence, most urgent first — reads as one motion instead of a flash of four.
    The delay caps at the first eight: past that the reader is scrolling, not watching an overture. */
 .lc-asks__sheet[data-open] .lc-ask {
-  animation: lc-ask-in var(--lc-med) var(--lc-ease-quart) backwards;
+  animation: lc-ask-in var(--lc-dur-2) var(--lc-ease-out) backwards;
   animation-delay: calc(min(var(--i, 0), 8) * 45ms);
 }
 @keyframes lc-ask-in {
@@ -4894,7 +4901,7 @@
   .lc-asks__sheet,
   .lc-asks__sheet[data-open] {
     transition:
-      opacity 120ms linear,
+      opacity var(--lc-dur-1) linear,
       visibility 0s;
     transform: none;
   }
@@ -5005,10 +5012,10 @@
   cursor: pointer;
   white-space: nowrap;
   transition:
-    border-color var(--lc-fast) var(--lc-ease),
-    background var(--lc-fast) var(--lc-ease),
-    color var(--lc-fast) var(--lc-ease),
-    transform var(--lc-fast) var(--lc-ease);
+    border-color var(--lc-dur-1) var(--lc-ease-out),
+    background var(--lc-dur-1) var(--lc-ease-out),
+    color var(--lc-dur-1) var(--lc-ease-out),
+    transform var(--lc-dur-1) var(--lc-ease-out);
 }
 .lc-ask__glyph {
   width: 11px;
@@ -5200,7 +5207,7 @@
     inset 0 1px 0 var(--lc-paper-sheen),
     0 3px 8px -3px var(--lc-paper-seat),
     0 20px 44px -20px var(--lc-paper-drop);
-  animation: lc-ov-card-in 480ms var(--ease-out) both;
+  animation: lc-ov-card-in var(--lc-dur-4) var(--lc-ease-out) both;
 }
 
 .lc-ov__id {
@@ -5262,7 +5269,7 @@
   inset: 0;
   border-radius: 50%;
   border: 1px solid var(--lc-ov-live);
-  animation: lc-ov-breathe 2.4s var(--ease-out) infinite;
+  animation: lc-ov-breathe 2.4s var(--lc-ease-out) infinite;
 }
 
 @keyframes lc-ov-breathe {
@@ -5301,8 +5308,8 @@
   pointer-events: auto;
   cursor: default;
   transition:
-    box-shadow 200ms var(--ease-out),
-    transform 200ms var(--ease-out);
+    box-shadow var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-2) var(--lc-ease-out);
 }
 
 /* Rises a hair under the pointer — the whole "you can drive this" cue, at the cost of one transform. */
@@ -5344,8 +5351,8 @@
   line-height: 1;
   cursor: pointer;
   transition:
-    background-color 140ms var(--ease-out),
-    color 140ms var(--ease-out);
+    background-color var(--lc-dur-1) var(--lc-ease-out),
+    color var(--lc-dur-1) var(--lc-ease-out);
 }
 
 .lc-ov__step:hover {
@@ -5387,7 +5394,7 @@
   gap: clamp(7px, 0.5cqw, 12px);
   min-width: 0;
   margin: 0;
-  animation: lc-ov-now-in 440ms var(--ease-out) both;
+  animation: lc-ov-now-in var(--lc-dur-4) var(--lc-ease-out) both;
 }
 
 .lc-ov__who {
@@ -5567,7 +5574,7 @@
 @media (prefers-reduced-motion: reduce) {
   /* The hover lift goes with the rest of the motion; the shadow change still reports the hover. */
   .lc-ov.is-interactive .lc-ov__card {
-    transition: box-shadow 200ms var(--ease-out);
+    transition: box-shadow var(--lc-dur-2) var(--lc-ease-out);
   }
   .lc-ov.is-interactive .lc-ov__card:hover,
   .lc-ov.is-interactive .lc-ov__card:focus-visible {
