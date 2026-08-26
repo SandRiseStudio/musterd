@@ -1,0 +1,59 @@
+/**
+ * Disk persistence. The predecessor persisted through a Python REST backend; standalone means
+ * boards are plain JSON snapshots under the data dir (default ~/.whiteboard/boards/,
+ * WHITEBOARD_DATA_DIR overrides — deliberately NOT under ~/.musterd, ADR 330 decision 1).
+ * Boards stay out of git: mutable working state, not a reviewed artifact.
+ */
+import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { assertBoardName } from '../port.js';
+
+export function dataDir(): string {
+  return process.env['WHITEBOARD_DATA_DIR'] ?? join(homedir(), '.whiteboard');
+}
+
+function boardsDir(): string {
+  return join(dataDir(), 'boards');
+}
+
+function boardPath(name: string): string {
+  assertBoardName(name);
+  return join(boardsDir(), `${name}.json`);
+}
+
+export async function loadSnapshot(name: string): Promise<unknown | null> {
+  try {
+    return JSON.parse(await readFile(boardPath(name), 'utf8'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+export async function saveSnapshot(name: string, snapshot: unknown): Promise<void> {
+  await mkdir(boardsDir(), { recursive: true });
+  // Write-then-rename so a crash mid-write can't leave a truncated board.
+  const path = boardPath(name);
+  const tmp = `${path}.tmp`;
+  await writeFile(tmp, JSON.stringify(snapshot), 'utf8');
+  await rename(tmp, path);
+}
+
+export async function listBoards(): Promise<Array<{ name: string; updatedAt: number }>> {
+  let entries: string[];
+  try {
+    entries = await readdir(boardsDir());
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  const boards: Array<{ name: string; updatedAt: number }> = [];
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue;
+    const name = entry.slice(0, -'.json'.length);
+    const s = await stat(join(boardsDir(), entry));
+    boards.push({ name, updatedAt: s.mtimeMs });
+  }
+  return boards.sort((a, b) => b.updatedAt - a.updatedAt);
+}
