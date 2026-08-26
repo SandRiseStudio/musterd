@@ -1,10 +1,10 @@
 import type { McpServer } from '@modelcontextprotocol/server';
+import { makeEnvelope } from '@musterd/protocol';
+import { ulid } from 'ulid';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { errorResult, notReadyMessage, textResult } from './format.js';
-import { makeEnvelope } from '@musterd/protocol';
-import { ulid } from 'ulid';
 
 /**
  * Team memory (ADR 327): findings saved so the whole team can find them. `team_insight_save`

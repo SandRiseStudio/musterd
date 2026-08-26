@@ -1,12 +1,12 @@
+import { makeEnvelope } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { makeEnvelope } from '@musterd/protocol';
 import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
 import { routeEnvelope } from '../protocol/route.js';
 import { addMember } from './members.js';
-import { createTeam } from './teams.js';
 import { ftsQuery, rebuildInsightsFts, searchInsights } from './teamMemory.js';
+import { createTeam } from './teams.js';
 
 const ID = '01M0XINSIGHTTEST00000000000A';
 

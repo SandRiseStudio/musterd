@@ -214,9 +214,9 @@ import {
   promoteSeed,
   submitSeedBrief,
 } from '../store/seeds.js';
-import { searchInsights } from '../store/teamMemory.js';
 import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
 import { staleLaneWarnings } from '../store/staleness.js';
+import { searchInsights } from '../store/teamMemory.js';
 import {
   archiveTeam,
   createTeam,

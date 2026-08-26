@@ -1,5 +1,5 @@
-import type { Database } from 'better-sqlite3';
 import type { InsightHit } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
 
 /**
  * Team memory retrieval (ADR 327) — the daemon's fold over the `insight` acts in the message log.
