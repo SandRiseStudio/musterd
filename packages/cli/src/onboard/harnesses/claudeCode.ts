@@ -45,6 +45,8 @@ interface ClaudeHookMatcher {
 interface ClaudeSettings {
   permissions?: { allow?: string[]; ask?: string[]; deny?: string[] };
   hooks?: Record<string, ClaudeHookMatcher[]>;
+  /** The seat chip's slot (see {@link installMusterdStatusline}) — one per settings file. */
+  statusLine?: { type?: string; command?: string };
 }
 function settingsLocalPath(dir: string = process.cwd()): string {
   return join(dir, '.claude', 'settings.local.json');
@@ -151,6 +153,7 @@ export const PRETOOLUSE_HOOK_MARKER = 'musterd-gate-hook';
 export const SESSIONMSG_HOOK_MARKER = 'musterd-sessionmsg-hook';
 export const SESSION_CAPTURE_HOOK_MARKER = 'musterd-session-capture-hook';
 export const SESSION_END_HOOK_MARKER = 'musterd-session-end-hook';
+export const STATUSLINE_MARKER = 'musterd-statusline';
 
 /** The user's GLOBAL Claude Code settings (read at session start for all folders). Honors
  *  `CLAUDE_CONFIG_DIR` (which Claude Code itself respects) so the config home is overridable + testable. */
@@ -554,7 +557,103 @@ export function installMusterdHooks(dir: string = process.cwd()): string[] {
     const globalWarning = upsertHook(globalSettingsPath(), event, matches, command);
     if (globalWarning) warnings.push(globalWarning);
   }
+  // The seat chip rides the same install: it is the human-facing half of what the SessionStart
+  // orientation above does for the agent, and shipping one without the other is what left the
+  // terminal blank in the first place.
+  const statuslineWarning = installMusterdStatusline(dir);
+  if (statuslineWarning) warnings.push(statuslineWarning);
   return warnings;
+}
+
+/**
+ * The seat statusline chip (`musterd session statusline`) — the user-facing half of the session
+ * orientation, and the reason it exists is worth stating where the wiring lives:
+ *
+ * ADR 326 put the orientation block on `SessionStart` and promised it would greet the human on
+ * open. It cannot. That event has no user-facing seam at exit 0 — its stdout and `additionalContext`
+ * both land in MODEL context, and `systemMessage`, the field that surfaces a line to the human
+ * everywhere else, is explicitly discarded for it. The block was always addressed to the agent; the
+ * statusline is the seam for the other reader, visible with zero typing and persistent for the
+ * session. See `commands/sessionStatusline.ts` for the spec quote.
+ *
+ * PROJECT-LOCAL, unlike the machine-wide SessionStart hooks: a chip names ONE seat, so a shared
+ * machine-level slot would stamp this seat's name onto every terminal on the laptop.
+ */
+function statuslineCommandText(): string {
+  // Same self-gating, never-failing shape as the hooks: no musterd on PATH, no binding, or a dead
+  // daemon all end as silence. A statusline that prints an error sits there all session printing it.
+  return (
+    'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session statusline --stdin 2>/dev/null || true ' +
+    `# ${STATUSLINE_MARKER}`
+  );
+}
+
+/** True if a statusLine slot is one musterd wrote (vs. the user's own). */
+function isMusterdStatusline(s: ClaudeSettings): boolean {
+  return s.statusLine?.command?.includes(STATUSLINE_MARKER) === true;
+}
+
+/**
+ * Install the seat chip into `.claude/settings.local.json`.
+ *
+ * Returns a warning string (and writes NOTHING) when the slot already holds a statusline that is
+ * not ours. There is exactly one `statusLine` per settings file, so installing over a foreign one
+ * is an unrecoverable overwrite of something the user chose — the asymmetry with hooks, which
+ * coexist as a list, is deliberate. A warning is the whole remedy.
+ */
+export function installMusterdStatusline(dir: string = process.cwd()): string | undefined {
+  const path = settingsLocalPath(dir);
+  const settings = readSettingsSafe(path);
+  if (!settings) return undefined; // unparseable — never rewrite a file we cannot read
+  if (settings.statusLine && !isMusterdStatusline(settings)) {
+    return (
+      `.claude/settings.local.json already has a \`statusLine\` that musterd did not write, so the ` +
+      `seat chip was NOT installed (it would have overwritten your own). To use it, replace that ` +
+      `command with: ${statuslineCommandText()}`
+    );
+  }
+  settings.statusLine = { type: 'command', command: statuslineCommandText() };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+  return undefined;
+}
+
+/** Remove the seat chip — ours only; a foreign statusline is left exactly as it was. */
+export function removeMusterdStatusline(dir: string = process.cwd()): void {
+  const path = settingsLocalPath(dir);
+  const settings = readSettingsSafe(path);
+  if (!settings || !isMusterdStatusline(settings)) return;
+  delete settings.statusLine;
+  writeFileSync(path, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+}
+
+/**
+ * Drift for the seat chip, on the same ADR 168 terms as the hooks: presence was never the question,
+ * because a slot written by an older build is present and wrong. Silent about a FOREIGN statusline —
+ * that is the user's choice, and reporting a choice as drift trains people to ignore drift.
+ */
+export function inspectClaudeStatuslineDrift(cwd: string): string[] {
+  const path = join(cwd, '.claude', 'settings.local.json');
+  if (!existsSync(path)) return [];
+  const settings = readSettingsSafe(path);
+  if (!settings) return [];
+  if (!settings.statusLine) {
+    return [
+      'the Claude Code `statusLine` seat chip is missing from .claude/settings.local.json — this ' +
+        'session has no user-facing seat indicator, so the human sees an unlabelled terminal while ' +
+        'the SessionStart orientation reaches the agent only. Run `musterd init --refresh-hooks` here.',
+    ];
+  }
+  if (!isMusterdStatusline(settings)) return []; // the user's own statusline — a choice, not drift
+  if (settings.statusLine.command !== statuslineCommandText()) {
+    return [
+      'the Claude Code `statusLine` seat chip in .claude/settings.local.json was written by a ' +
+        'different musterd build and no longer matches this one — it is present but STALE, which no ' +
+        'presence check can see (ADR 168). Run `musterd init --refresh-hooks` here to rewrite it.',
+    ];
+  }
+  return [];
 }
 
 /**
@@ -594,6 +693,7 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
       );
     }
   }
+  drift.push(...inspectClaudeStatuslineDrift(cwd));
   drift.push(...inspectGlobalSessionStartDrift());
   return drift;
 }
@@ -682,6 +782,7 @@ export function removeMusterdHooks(): void {
     isMusterdHookFor(m, SESSION_CAPTURE_HOOK_MARKER),
   );
   dropHook(settingsLocalPath(), 'SessionEnd', (m) => isMusterdHookFor(m, SESSION_END_HOOK_MARKER));
+  removeMusterdStatusline(); // marker-exact, like every drop above — a user's own chip survives
 }
 
 // `has`/`resolveClaudeBin` moved to the shared `claudeBin.ts` (ADR 131 inc 3): the wake actuator

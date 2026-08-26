@@ -27,6 +27,7 @@ import {
 } from '../session/liveness.js';
 import { findWorkspaceDir } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
+import { composeSessionStatusline } from './sessionStatusline.js';
 
 /**
  * `musterd session start|end --stdin | show` (ADR 131 §5, increment 4) — session capture. The
@@ -58,10 +59,11 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   if (sub === 'label-nudge') return labelNudgeCommand();
   if (sub === 'orient-nudge') return orientNudgeCommand();
   if (sub === 'orient-stamp') return orientStampCommand();
+  if (sub === 'statusline') return statuslineCommand(parsed);
   if (sub === 'bind') return bindCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | bind --thread <id> | show  ' +
+    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | statusline --stdin | bind --thread <id> | show  ' +
       '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -227,6 +229,52 @@ export async function emitSessionOrientation(
   } catch {
     return null; // hook contract: a failing orientation must never disturb the session it rides
   }
+}
+
+/**
+ * `session statusline` — the user-facing half of the orientation (see `sessionStatusline.ts` for
+ * why the SessionStart block could never be that half itself).
+ *
+ * Same anchoring discipline as capture and the orientation: resolve from the payload's cwd via
+ * {@link resolveCaptureDir}, never bare `process.cwd()`. A statusline is the WORST place to get
+ * this wrong — it redraws every turn, so a mis-anchored chip would sit there all session telling
+ * the human they are in a seat they are not in.
+ *
+ * Unlike the orientation this is NOT wake-suppressed: a wake injects context, and suppression
+ * exists to keep the block from re-priming an already-primed agent. The chip primes nobody — it is
+ * a label on a terminal, and a woken session still needs to know which seat it belongs to.
+ */
+export async function emitSessionStatusline(
+  dir: string | null,
+  fetch: OrientationFetcher = defaultOrientationFetcher,
+): Promise<string | null> {
+  try {
+    const input = await fetch(dir);
+    if (!input) return null;
+    return composeSessionStatusline({
+      seat: input.seat,
+      team: input.team,
+      waiting: input.waiting.length,
+      incidents: input.incidents.length,
+      carrying: input.carrying,
+    });
+  } catch {
+    return null; // a statusline that errors is strictly worse than no statusline
+  }
+}
+
+async function statuslineCommand(parsed: Parsed): Promise<number> {
+  if (parsed.flags['stdin'] !== true) {
+    throw new CliError(
+      'usage: musterd session statusline --stdin  — harness-driven: pipe the statusLine JSON in ' +
+        '(`musterd init` wires it); to inspect this workspace, use `musterd session show`',
+      2,
+    );
+  }
+  const payload = parseHookPayload(await readStdin());
+  const chip = await emitSessionStatusline(resolveCaptureDir(payload));
+  if (chip) process.stdout.write(chip + '\n');
+  return 0;
 }
 
 async function observeCommand(parsed: Parsed): Promise<number> {

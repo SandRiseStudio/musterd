@@ -87,3 +87,54 @@ oriented without a human prompt, and `team_wake_context` had zero callers.
 nothing — the agent must greet oriented, directed asks answered, incidents triaged, nudge quiet by
 turn two. If the human still types "continue from last session", the design failed regardless of
 test greenness.
+
+## Amendment — 2026-08-26: the block is agent-facing; the chip is the user-facing half
+
+**Lane:** 01M0Y2PFQCY117KRGM4SKZE722
+
+The live falsifier above ran on 2026-08-26 in the `dolly` seat and returned a **split result**, which
+is more useful than either a pass or a fail.
+
+The agent half passed exactly as designed: the block generated, and the session opened by reading it,
+running the orient ritual, and clearing five stale `daemon_down` asks unprompted — before the human
+had said anything about them. The human half failed completely. Nick opened the terminal, saw a blank
+screen, and reported "nothing happened."
+
+Both are true because **the orientation was only ever addressed to the agent**, and this ADR did not
+notice it was making a promise to a second audience. The Claude Code hooks contract gives
+`SessionStart` no user-facing seam at exit 0:
+
+> `SessionStart` doesn't use the standard decision model. Exit code 2 shows stderr to the user only;
+> it doesn't block anything. JSON output is discarded entirely.
+>
+> | `systemMessage` | **Discarded.** Use `additionalContext` instead |
+
+So stdout and `additionalContext` both land in model context, and `systemMessage` — the field that
+surfaces a line to the human on nearly every other event — is dropped on this one. No formatting
+change to the block could have fixed this; the seam does not exist.
+
+**What changes.** Nothing about the block, which was right. This ADR's claim about who sees it was
+wrong, and the §Experiment falsifier above should be read as testing the agent behaviour only.
+
+**What is added.** A project-local `statusLine` seat chip (`musterd session statusline`), rendering
+`🔶 seat · team · ⚑n waiting · lane: …`. It is visible with zero typing, persists for the session
+instead of scrolling past, and redraws as the inbox changes. The chip composes counts and validated
+slugs and carries **no free text at all** — stricter than the block, which fences one field (the
+seat's own memory headline): a surface that redraws every turn is a worse host for attacker-controlled
+bytes than a one-shot block.
+
+**Rejected: `SessionStart` exit 2 → stderr.** It is the one documented path to the terminal at session
+start, and it would have matched the original promise most literally. It was rejected because it
+inverts musterd's never-failing hook contract — every hook we ship ends `|| true` precisely so a
+coordination failure can never disturb the session riding it — and because the harness is free to
+style exit-2 stderr as a hook error, which would make a routine greeting look like a broken install.
+
+**Scope.** Claude Code only, like the hooks: it is the harness with the seam. The chip is
+project-local, not machine-wide, because a chip names ONE seat — a shared slot would stamp this seat's
+name onto every terminal on the laptop. `installMusterdStatusline` refuses to overwrite a `statusLine`
+musterd did not write and returns a warning instead: there is exactly one such slot per settings file,
+so installing over a user's own is unrecoverable, unlike hooks, which coexist as a list.
+
+**Falsifier for this amendment.** Open a session in a seat workspace and type nothing: the chip must
+name the correct seat for THAT workspace (not the ambient cwd's) before the first prompt, and must
+render nothing at all — never an error — in a folder with no binding or with the daemon down.

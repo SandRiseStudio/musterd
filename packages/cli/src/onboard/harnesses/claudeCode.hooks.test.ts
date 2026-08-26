@@ -128,12 +128,15 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(localPath(), JSON.stringify({ hooks: { Notification: [] } }), 'utf8');
     const drift = inspectClaudeHookDrift(cwd);
-    expect(drift).toHaveLength(5);
+    expect(drift).toHaveLength(6);
     expect(drift[0]).toContain('PostToolUse interrupt hook is missing');
     expect(drift[1]).toContain('PreToolUse enforcement-gate hook is missing');
     expect(drift[2]).toContain('session-messaging observer hook is missing');
     expect(drift[3]).toContain('session-capture hook is missing');
     expect(drift[4]).toContain('SessionEnd hook is missing');
+    // The user-facing half (seat statusline chip) is doctored alongside the agent-facing hooks —
+    // its absence is why a correctly-oriented session could still look dead to the human.
+    expect(drift[5]).toContain('`statusLine` seat chip is missing');
 
     // Once init wires them, the drift clears.
     installMusterdHooks();
