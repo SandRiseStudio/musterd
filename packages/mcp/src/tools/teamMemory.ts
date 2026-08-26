@@ -15,16 +15,11 @@ import { ulid } from 'ulid';
  */
 
 const SAVE_DESCRIPTION =
-  'Saves a reusable finding for the WHOLE team (unlike team_memory_save, which is private): a trap ' +
-  'hit and fixed, a measured number, how something actually works. One finding per call — headline ' +
-  '(≤120 chars) plus the detail. Team members find it via team_memory_search. When a finding proves ' +
-  'durably useful, also write it into docs/wiki/ — this tool is the fast capture, the wiki is the ' +
-  'governed home. Never store secrets.';
+  'Save a reusable finding for the WHOLE team (team_memory_save is seat-private): a trap fixed, a ' +
+  'measured number, how something works. Findable via team_memory_search; promote durable ones into docs/wiki/.';
 
 const SEARCH_DESCRIPTION =
-  "Searches the team's saved insights (team_insight_save findings) by keyword. Pull-only: nothing " +
-  'arrives unprompted, so search BEFORE re-deriving — a teammate may have already recorded the trap ' +
-  'you are about to hit. Returns headline, finder, age, and body of each match.';
+  "Search the team's saved insights by keyword — before re-deriving what a teammate may have recorded.";
 
 export function registerTeamMemory(
   server: McpServer,
@@ -36,16 +31,10 @@ export function registerTeamMemory(
     {
       description: SAVE_DESCRIPTION,
       inputSchema: {
-        // Declared here as well as in the protocol's actMetaRules (ADR 144 inc 4's rule): the caller
-        // should be bounced with a repair hint, not discover the cap in a late server error.
         headline: z.string().min(1).max(120).describe('one-line subject (≤120 chars)'),
-        body: z.string().max(2048).describe('the finding itself (≤2048 bytes)'),
-        tags: z
-          .array(z.string())
-          .max(8)
-          .optional()
-          .describe('up to 8 short topic tags, e.g. ["daemon","node"]'),
-        repo: z.string().optional().describe('repo slug the finding is bound to, when it is'),
+        body: z.string().max(2048).describe('the finding (≤2048 bytes)'),
+        tags: z.array(z.string()).max(8).optional().describe('up to 8 short tags'),
+        repo: z.string().optional().describe('repo slug, when bound to one'),
       },
     },
     async (args) => {
