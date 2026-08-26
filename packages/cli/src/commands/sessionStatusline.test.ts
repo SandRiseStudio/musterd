@@ -1,3 +1,4 @@
+import { SEAT_CHIP } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { composeSessionStatusline, type SessionStatuslineInput } from './sessionStatusline.js';
 
@@ -11,23 +12,25 @@ const base: SessionStatuslineInput = {
 
 describe('composeSessionStatusline', () => {
   it('renders the chip: seat, team, waiting count, idle lane', () => {
-    expect(composeSessionStatusline(base)).toBe('🔶 dolly · revive · ⚑12 waiting · lane: none');
+    expect(composeSessionStatusline(base)).toBe(
+      `${SEAT_CHIP} dolly · revive · ⚑12 waiting · lane: none`,
+    );
   });
 
   it('drops the waiting segment when the inbox is clear', () => {
     const out = composeSessionStatusline({ ...base, waiting: 0 });
-    expect(out).toBe('🔶 dolly · revive · lane: none');
+    expect(out).toBe(`${SEAT_CHIP} dolly · revive · lane: none`);
   });
 
   it('counts carried lanes instead of "none"', () => {
     expect(composeSessionStatusline({ ...base, waiting: 0, carrying: 2 })).toBe(
-      '🔶 dolly · revive · lane: 2 in flight',
+      `${SEAT_CHIP} dolly · revive · lane: 2 in flight`,
     );
   });
 
   it('surfaces incidents ahead of waiting — a shared red outranks a personal inbox', () => {
     const out = composeSessionStatusline({ ...base, incidents: 3 });
-    expect(out).toBe('🔶 dolly · revive · 🔴3 incidents · ⚑12 waiting · lane: none');
+    expect(out).toBe(`${SEAT_CHIP} dolly · revive · 🔴3 incidents · ⚑12 waiting · lane: none`);
   });
 
   it('is one line even when every segment is populated', () => {
@@ -76,6 +79,6 @@ describe('composeSessionStatusline', () => {
         incidents: 0,
         carrying: 0,
       }),
-    ).toBe('🔶 dolly · revive · lane: none');
+    ).toBe(`${SEAT_CHIP} dolly · revive · lane: none`);
   });
 });

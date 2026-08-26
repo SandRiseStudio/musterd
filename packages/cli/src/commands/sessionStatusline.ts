@@ -29,6 +29,8 @@
  * is testable without a daemon.
  */
 
+import { SEAT_CHIP } from '@musterd/protocol';
+
 export type SessionStatuslineInput = {
   seat: string;
   team: string;
@@ -58,7 +60,9 @@ function count(n: number): string {
 export function composeSessionStatusline(d: SessionStatuslineInput): string | null {
   if (!SLUG.test(d.seat) || !SLUG.test(d.team)) return null;
 
-  const segments: string[] = [`🔶 ${d.seat}`, d.team];
+  // SEAT_CHIP, not a literal 🔶: the session-label chip (ADR 286) already owns that glyph, and two
+  // definitions of one seat marker drift the moment either moves.
+  const segments: string[] = [`${SEAT_CHIP} ${d.seat}`, d.team];
   // Incidents lead: a shared red outranks a personal inbox, same precedence the orient skill uses.
   if (d.incidents > 0) segments.push(`🔴${count(d.incidents)} incidents`);
   if (d.waiting > 0) segments.push(`⚑${count(d.waiting)} waiting`);
