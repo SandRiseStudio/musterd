@@ -1,7 +1,9 @@
 # 328 — the machine credential: an `msnode_` identity per daemon, enrolled once, revocable at the hub
 
-- Status: proposed — 2026-08-25. Authored by stanley on lane `01M0Y3H7HMWEWGA6QE1Y2ZRT4A`, as the
-  first increment of the ADR 325 federation build.
+- Status: accepted — 2026-08-25 (ryder PASS on #1077 with one required amendment to decision 4:
+  residence is a hub-minted binding, not a reading of ADR 131 residency records — applied). Authored
+  by stanley on lane `01M0Y3H7HMWEWGA6QE1Y2ZRT4A`, as the first increment of the ADR 325
+  federation build.
 - Date: 2026-08-25
 - Builds on: [ADR 325](325-multi-machine-federation.md) (which named this ADR and deferred the
   decision to it), [ADR 040](040-secured-off-loopback-bind.md) (the secured bind the sync surface
@@ -40,10 +42,12 @@ string, enrolled server-side and mirrored into `~/.musterd/host-registry.json` a
 workspace map. That label is self-asserted and unauthenticated; the registry's own header says so —
 "No secrets live here". It tells a wake where to spawn. It cannot tell a hub whom to believe.
 
-**The existing secret substrate is good and should be extended, not replaced.** `newSecret(prefix)`
-mints `prefix + base64url(randomBytes(24))`; `hashToken` stores only the sha256 hex; the plaintext
-is returned exactly once and never logged or re-fetchable (SPEC A.2). That scheme has carried four
-kinds without incident. A fifth costs a registry entry and a column.
+**The existing secret substrate is good and should be extended, not replaced.** The prefix registry
+is protocol-side, but the minting is not: `newSecret(prefix)` — `prefix + base64url(randomBytes(24))`
+— and `hashToken` both live in `packages/server/src/store/members.ts`, which is where a fifth kind
+gets minted too. `hashToken` stores only the sha256 hex; the plaintext is returned exactly once and
+never logged or re-fetchable (SPEC A.2). That scheme has carried four kinds without incident. A
+fifth costs a registry entry and a column.
 
 ## Problem
 
@@ -95,10 +99,27 @@ to the hub, or let the admitted daemon attest which of its local seats is acting
 We take the second. Replicating token hashes would widen the blast radius of a hub compromise from
 "the coordination log" to "every seat credential on the team", to buy a check the daemon is already
 trusted to make — today's daemon is the sole validator of its local seats' tokens, and federation
-does not make it less so. The hub therefore enforces **residence**, not authentication: a claim
-asserting seat X is accepted only from the node where X is enrolled, which the residency records
-(ADR 131) already establish. The daemon is a carrier for its own residents, never a delegate for the
-team.
+does not make it less so. The hub therefore enforces **residence**, not authentication. The daemon
+is a carrier for its own residents, never a delegate for the team.
+
+**Residence is a hub-minted binding, not a reading of the residency records.** This distinction is
+load-bearing and the ADR would be wrong without it. ADR 131's residency enrollment cannot carry the
+weight for two independent reasons: it is **opt-in per seat** ("Residency is opt-in per seat, and
+enrollment is the authorization event", ADR 131 §2), so for every seat that never ran `residency on`
+the predicate would have no input at all — undefined in the common case, not merely stale; and the
+host registry that holds it is machine-local by design — "the store the daemon must never hold"
+(`packages/cli/src/host/registry.ts`) — so the hub structurally cannot read it. §Context above says
+that label "cannot tell a hub whom to believe", and it must not be quietly promoted three decisions
+later into the thing that does.
+
+So the hub mints the binding itself: **seat X binds to node N the first time N speaks for X**,
+first-writer-wins under the same guarded CAS as the `msinv_` consumption, with re-binding requiring
+an explicit act rather than a silent overwrite. Three properties follow, and each is one the
+residency-record version lacked. The binding is *authenticated* — it is written under an admitted
+node credential, never asserted by a self-declared label. It is *complete by construction* — there
+is no enrollment gap, because the first claim is the enrollment. And it makes a refusal *mean*
+something: "this seat is bound to another node", a fact the hub owns, rather than "no residency row
+exists", which is indistinguishable from a seat that simply never opted in.
 
 The honest consequence is stated rather than buried: *compromise of a node credential is the ability
 to act as the seats resident on that machine.* That is a real and bounded loss, it is the same
@@ -136,14 +157,16 @@ starts doing.
   cannot be revoked per-machine (rotating it re-keys the whole team); and it already sits in every
   workspace's `.musterd/binding.json`, which is the widest distribution of any secret in the system.
   A machine credential must be exactly as narrow as the machine.
-- **Asymmetric keypair (ed25519); the node signs each event.** Genuinely better in one respect — the
-  hub would hold nothing that can impersonate a node, and per-event signatures would make ADR
-  101/158 attestation cryptographic rather than declarative. Rejected *for sequencing, not on
-  merit*: it needs key management, a signing envelope, and verification on every replicated row —
-  more build than the sync surface it would guard, and none of it foreclosed by starting with a
-  bearer secret. Named as the upgrade path, and decision 5 is what keeps it open: the node id is
-  stable across credential *form*, so a public key can replace the bearer hash on the same row
-  without disturbing a single `origin_node` stamp in the log.
+- **Asymmetric keypair (ed25519); the node signs each event.** This is really two upgrades, and they
+  should be priced separately rather than sold as one. *Replacing the credential* — the hub holds a
+  public key instead of a hash, and so holds nothing that can impersonate a node — is cheap and
+  stays open: decision 5 keeps the node id stable across credential *form*, so a public key replaces
+  the bearer hash on the same row without disturbing a single `origin_node` stamp in the log.
+  *Making ADR 101/158 attestation cryptographic rather than declarative* is the larger half and is
+  not bought by the first: it needs a signing envelope over each replicated event and verification
+  on every applied row, which is a wire change in increment 3's territory. Both are rejected here
+  *for sequencing, not on merit* — neither is foreclosed by starting with a bearer secret, and a
+  later reader should not budget the second at the price of the first.
 - **mTLS client certificates.** The ADR 040 bind could carry them. Rejected: a CA and its rotation
   is more operational apparatus than a personal-scale team will run, and it puts the identity in the
   transport layer, where the application cannot see it at the moment it needs to stamp
@@ -152,6 +175,13 @@ starts doing.
   declared node with no secret is an authorization that anyone with push access grants themselves.
   Roster identity answers "who is on this team"; it structurally cannot answer "prove you are this
   machine."
+- **Derive residence from ADR 131's residency records** rather than minting the binding at the hub.
+  This is what an earlier draft of this ADR said, and it is wrong twice over (ryder, #1077 review):
+  residency is opt-in per seat, so the predicate is *undefined* for every seat that never enrolled —
+  the common case, not an edge — and the host registry holding it is machine-local by design, so the
+  hub cannot read it at all. Recorded rather than silently fixed because the mistake is an attractive
+  one: the records look like exactly the right fact, and they are, for the wake path they were built
+  for.
 - **No machine credential — rely on the secured bind and network reachability.** This is the status
   quo's implicit model (`isLocalPeer`) generalized to "whoever can reach the port". Rejected on
   exactly the grounds ADR 134 rejected it once already: an emergent property of the bind is not a
@@ -171,17 +201,28 @@ starts doing.
   `.musterd/binding.json`, `~/.musterd/host-registry.json`). `~/.musterd/node.json` is the fourth,
   and unlike the host registry it *does* hold a secret — the three-stores table and its "no secrets
   here" line need the amendment, and that edit rides this build.
-- **The invite CAS is the second instance of the guarded-write pattern** #1071 introduced for lane
-  claims. Two is a coincidence; if the sync surface produces a third, it wants a shared helper rather
-  than a third hand-rolled `changes === 0`.
-- **The residence rule inherits ADR 325's staleness question rather than answering it.** That ADR
-  already flagged that the hub arbitrates on presence summaries stale by the heartbeat/reap window
-  plus sync lag. Residence is a slower-moving fact than presence, so it is a sturdier input than the
-  one ADR 325 worried about — but a seat that has just moved machines is exactly the case where the
-  two disagree, which is why the Experiment below watches it.
+- **This ADR makes the guarded-write pattern a third and fourth instance**, after the lane claim
+  #1071 landed: the `msinv_` consumption and the seat→node binding. Three was the threshold this
+  ADR's own draft named for extracting a shared helper, and the build should take it rather than
+  hand-roll `changes === 0` twice more.
+- **Node identity is per-enrollment, not per-machine.** A revoked machine that later re-enrolls gets
+  a new node row, so one physical machine becomes two origins with two independent `origin_seq`
+  streams, the older frozen mid-history. Nothing breaks — a new origin is a legitimate origin, and
+  the frozen stream stays valid history — but anything reasoning *per machine* (`last_seen_at`, a
+  future "which machines are still syncing" view) will count that machine twice. Correlating the two
+  is a reporting concern, deliberately not an identity one: collapsing them would mean a stable
+  machine fingerprint, which is a second identity substrate this ADR declines to invent.
+- **Residence is a sturdier input than the one ADR 325 worried about.** That ADR flagged the hub
+  arbitrating on presence summaries stale by the heartbeat/reap window plus sync lag. A hub-minted
+  binding is not stale in that way at all — it is a fact the hub wrote itself, under CAS. What it
+  can be is *out of date with the human's intent*: a seat whose operator has moved to another laptop
+  is bound where it last spoke, which is exactly the case the Experiment below watches.
 - **Not in scope:** the sync wire format and its routes (ADR 325 increment 3), the hub storage
-  engine, humans-multi-presence (still deferred per ADR 039), an explicit seat-migration act (only
-  if the Experiment demands it), and cryptographic per-event attestation (the keypair upgrade above).
+  engine, humans-multi-presence (still deferred per ADR 039), and cryptographic per-event
+  attestation (the larger half of the keypair upgrade above). Re-binding a seat to a new node *is*
+  decided here — it is an explicit act, never a silent overwrite — but its ergonomics (who may call
+  it, whether it needs the losing node's cooperation) wait on the Experiment, which is what will say
+  whether it is a rare administrative repair or an everyday move.
 
 ## Observability & Evaluation
 
@@ -190,15 +231,22 @@ starts doing.
   or claim refused for an unknown, unenrolled, or revoked node returns a *distinct* error code from
   an ordinary auth failure, so a mis-enrolled machine is diagnosable from the hub's log rather than
   from silence — the failure mode a TOFU pairing flow actually produces in the field. `last_seen_at`
-  per node makes "which machines are still syncing" a query rather than an inference from lag.
-- **Eval:** the acceptance test is the invite race — two daemons redeeming one `msinv_` code
+  per node makes "which machines are still syncing" a query rather than an inference from lag —
+  read per enrollment, not per machine, per the identity consequence above. The seat→node bindings
+  are themselves the residence trace: the table answers "where does the hub believe this seat
+  lives", which is the question every residence refusal will provoke.
+- **Eval:** two races, one pattern. **(i)** The invite race — two daemons redeeming one `msinv_` code
   concurrently, exactly one enrolls (dataset: the two interleavings; baseline: the unguarded
   read-then-write, where both enroll, which is the 2026-08-01 double-claim defect in a new place).
-  Second pinned case: a claim asserting a seat not resident on the asserting node is refused, and
-  refused with the distinct code above.
-- **Experiment:** decision 4's residence binding is the falsifiable choice. If seats legitimately
-  move between machines often enough for the rule to bite — refusals landing at exactly the moment
-  someone resumes a seat on a different laptop — the evidence appears as a run of residence-refused
-  claims in the hub log against seats that then re-enroll elsewhere. That is the signal to add an
-  explicit seat-migration act, and the point of writing it down now is that the rule gets relaxed
-  deliberately rather than loosened quietly the first time it is inconvenient.
+  **(ii)** The binding race — two nodes speaking for the same unbound seat concurrently, exactly one
+  binds and the other is refused with the distinct code above. Both are the same guarded CAS under
+  test, which is the argument for the shared helper rather than a third hand-rolled `changes === 0`.
+  Third pinned case, not a race: a claim from a node the seat is not bound to is refused.
+- **Experiment:** decision 4's residence binding is the falsifiable choice, and the hub-minted form
+  makes the signal legible in a way the residency-record form could not. If seats legitimately move
+  between machines often enough for first-writer-wins to bite — refusals landing at exactly the
+  moment someone resumes a seat on a different laptop — the evidence is a run of refusals naming a
+  *bound-elsewhere* node, followed by an explicit re-bind. That pair is unambiguous, where "no
+  residency row" would have been indistinguishable from a seat that simply never opted in. A
+  sustained run is the signal to add an explicit seat-migration act; writing it down now is what
+  makes that a deliberate relaxation rather than a quiet loosening the first time it is inconvenient.
