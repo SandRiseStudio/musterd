@@ -292,7 +292,13 @@ async function defaultStatuslineFetcher(
     seat,
     team,
     waiting: waiting.length,
-    ...(inboxRes.truncated ? { waitingTruncated: true } : {}),
+    // `unread_remaining`, NOT `truncated`: the server computes truncated as
+    // `limit === undefined && full` (http.ts:3854), so it is exclusively the no-limit caller's
+    // signal and is permanently absent here — reading it made the marker dead code (ryder's #1076
+    // re-check). `unread_remaining` is the counterpart computed for the limit-naming branch.
+    // It counts UNREAD rows while `waiting` counts the action-needed subset, so it means "more was
+    // cut that I did not classify" — exactly a floor marker, which is all `n+` claims.
+    ...((inboxRes.unread_remaining ?? 0) > 0 ? { waitingTruncated: true } : {}),
     incidents: (brief.incidents ?? []).length,
     carrying: brief.in_flight.length,
   };
