@@ -37,17 +37,15 @@ A duration that is not a whole multiple of 40ms lands mid-frame on the stream: t
 step is a partial one, which is the judder the lane brief warns about. This converts "pick nice
 durations" from taste into arithmetic.
 
-It also produces a hard floor. Three durations in the codebase are **below three frames** and cannot
-render as motion at all on the stream — they are snaps that merely cost a repaint:
+It also produces a hard floor: **below three frames (120ms) a transition has too few samples to read
+as motion at all** — it is a snap that merely costs a repaint.
 
-| Value | Frames @25fps |
-|---|---|
-| `45ms` | 1.1 |
-| `50ms` | 1.25 |
-| `90ms` | 2.25 |
-
-These are the only values in the two stylesheets this spec calls outright defects rather than
-inconsistencies.
+**Corrected 2026-08-26.** This section listed `45ms`, `50ms` and `90ms` as three such durations and
+called them defects. They are not durations: all three are `transition-delay` / `animation-delay`
+values (`Live.css:1509`, `4855`). A delay shifts *when* motion starts, so the whole-frame rule does
+not apply to it, and the claim survived into ADR 329, the PR body and a commit message before
+ryder's acceptance review caught it. The floor is a property of the capture rate and needs no
+example from the tree to be true.
 
 ## 3. The scale
 
@@ -80,8 +78,9 @@ surface this lane does not own — worth its own lane if the site ever wants the
 
 **This spec originally claimed overshoot was the riskiest family at 25fps** — that an overshoot's
 peak could fall between two captured frames and not exist on the stream. **Measured 2026-08-25, that
-is false**, and the measurement is in `docs/perf/motion-capture.md`: 97–100% of the overshoot
-survives at every rung, for all three candidate curves. A cubic-bezier's overshoot is a broad smooth
+is false**, and the measurement is in `docs/perf/motion-capture.md`: the overshoot survives capture
+at every rung `pop` is used on (d2–d5; 83.2–98.1% at worst-case phase, and d1 — where it drops to
+56.6% — is never used with `pop`). A cubic-bezier's overshoot is a broad smooth
 maximum, not a spike, and with one control-point pair it cannot oscillate — the narrow-peak failure
 belongs to stiff spring physics, which this codebase does not use.
 
@@ -169,10 +168,11 @@ not an assertion:
 > and (c) one accept-confetti. Each must occupy the expected whole number of frames, and the
 > `--lc-ease-pop` overshoot must have a visible peak in at least one captured frame.
 
-**The overshoot half of this was run analytically on 2026-08-25 and cannot fail** — see
-`docs/perf/motion-capture.md`. A falsifier no cubic-bezier can fail is not a gate, so it is retired
-rather than performed; the frame-count half stands and is now enforced continuously by the gate's
-rule 3 rather than by a one-off capture.
+**The overshoot half of this was run analytically on 2026-08-25** — see
+`docs/perf/motion-capture.md`. At the rungs `pop` is used on (d2–d5) it could not have failed, so it
+is retired rather than performed; the frame-count half stands and is now enforced continuously by the
+gate's rule 3 rather than by a one-off capture. (Amended 2026-08-26: the original wording here,
+"cannot fail" for *any* cubic-bezier, overclaimed — d1 is outside the covered range.)
 
 **A note on when a capture is even meaningful.** The hosted capture renders
 `http://${AIR_IP}:4849` — the daemon's build of `main`. A branch's motion is not on the stream until
