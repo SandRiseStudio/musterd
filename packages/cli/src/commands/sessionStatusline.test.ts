@@ -55,16 +55,20 @@ describe('composeSessionStatusline', () => {
     expect(composeSessionStatusline({ ...base, seat: '' })).toBeNull();
   });
 
-  it('is bounded: absurd counts cannot stretch the line without limit', () => {
+  it('is bounded at the WORST case, not a convenient one', () => {
+    // ryder's #1076 nit: asserting ≤80 with 5-char slugs tests a number that isn't the bound. The
+    // real ceiling is the SLUG regex's own 32-char limit on both seat and team, with every segment
+    // populated and every count clamped — so pin that, or the "bounded" claim is untested.
     const out = composeSessionStatusline({
-      seat: 'dolly',
-      team: 'revive',
+      seat: 'd'.repeat(32),
+      team: 't'.repeat(32),
       waiting: 10 ** 12,
+      waitingTruncated: true,
       incidents: 10 ** 12,
       carrying: 10 ** 12,
     });
     expect(out).not.toBeNull();
-    expect(out!.length).toBeLessThanOrEqual(80);
+    expect(out!.length).toBeLessThanOrEqual(140);
   });
 
   it('renders a quiet seat rather than nothing — unlike the orientation, presence IS the signal', () => {

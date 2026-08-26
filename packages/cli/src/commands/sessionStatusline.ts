@@ -35,6 +35,10 @@ export type SessionStatuslineInput = {
   seat: string;
   team: string;
   waiting: number;
+  /** The inbox reply was a bounded PREFIX, so `waiting` is a floor, not a total (ryder's #1076
+   *  review): the block listed items, so a short list read as short — a bare number reads as
+   *  authoritative, and silently undercounting is worse than admitting the bound. */
+  waitingTruncated?: boolean;
   incidents: number;
   carrying: number;
 };
@@ -65,7 +69,10 @@ export function composeSessionStatusline(d: SessionStatuslineInput): string | nu
   const segments: string[] = [`${SEAT_CHIP} ${d.seat}`, d.team];
   // Incidents lead: a shared red outranks a personal inbox, same precedence the orient skill uses.
   if (d.incidents > 0) segments.push(`🔴${count(d.incidents)} incidents`);
-  if (d.waiting > 0) segments.push(`⚑${count(d.waiting)} waiting`);
+  if (d.waiting > 0) {
+    const n = count(d.waiting);
+    segments.push(`⚑${n}${d.waitingTruncated && !n.endsWith('+') ? '+' : ''} waiting`);
+  }
   segments.push(d.carrying > 0 ? `lane: ${count(d.carrying)} in flight` : 'lane: none');
 
   return segments.join(' · ');
