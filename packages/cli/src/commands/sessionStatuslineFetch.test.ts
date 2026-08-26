@@ -1,3 +1,4 @@
+import { SEAT_CHIP } from '@musterd/protocol';
 import { createServer, type Server } from 'node:http';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,7 +72,7 @@ describe('defaultStatuslineFetcher against a stub daemon', () => {
   });
 
   it('renders a quiet seat and asks for exactly two presence-neutral reads', async () => {
-    expect(await emitSessionStatusline(dir)).toBe('🔶 dolly · revive · lane: none');
+    expect(await emitSessionStatusline(dir)).toBe(`${SEAT_CHIP} dolly · revive · lane: none`);
     // Two, not three: the orientation's memory-envelope call is dropped (the chip has no headline).
     expect(seen.map((s) => s.path)).toEqual(['/teams/revive/inbox', '/teams/revive/next']);
     // The required fix from the first review — a redraw must never fake liveness (ADR 057/241).
