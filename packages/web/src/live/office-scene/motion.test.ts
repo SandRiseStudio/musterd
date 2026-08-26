@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CANVAS_EASE, DUR, EASE_CSS, FRAME_MS, cssDuration, cssEase } from './motion';
 
@@ -40,6 +42,21 @@ describe('the motion scale', () => {
       expect(x1, name).toBeLessThanOrEqual(1);
       expect(x2, name).toBeGreaterThanOrEqual(0);
       expect(x2, name).toBeLessThanOrEqual(1);
+    }
+  });
+
+  // `pnpm tokens:check` is what ENFORCES the mirror across every stylesheet. This test exists so the
+  // relationship is visible from the TS side too: someone editing DUR here sees which file has to
+  // move with it, without having to know the gate exists.
+  it('Live.css mirrors every rung and every easing role', () => {
+    const css = readFileSync(join(import.meta.dirname, '../Live.css'), 'utf8');
+    for (const [key, ms] of Object.entries(DUR)) {
+      const token = `--lc-${key.replace('d', 'dur-')}`;
+      expect(css, `${token} missing from Live.css`).toContain(`${token}: ${String(ms)}ms;`);
+    }
+    for (const key of Object.keys(EASE_CSS) as (keyof typeof EASE_CSS)[]) {
+      const token = `--lc-ease-${key === 'inOut' ? 'in-out' : key}`;
+      expect(css, `${token} missing from Live.css`).toContain(`${token}: ${cssEase(key)};`);
     }
   });
 });

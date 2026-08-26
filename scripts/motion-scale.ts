@@ -102,11 +102,18 @@ export function offFrameDurations(css: string): MotionFinding[] {
     if (!ms?.[1]) continue;
     const n = Number(ms[1]);
     if (n % FRAME_MS !== 0) {
-      const frames = (n / FRAME_MS).toFixed(1).replace(/\.0$/, '');
+      // Two decimals, trailing zeros trimmed. toFixed(1) rounded 281ms to "7 frames" — a message
+      // asserting the value IS whole while failing it for not being, which is the one thing this
+      // line must never say.
+      const frames = (n / FRAME_MS).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+      const off = n % FRAME_MS;
+      const nearest = Math.round(n / FRAME_MS) * FRAME_MS;
       out.push({
         kind: 'off-frame',
         line,
-        detail: `${token}: ${String(n)}ms is ${frames} frames at 25fps`,
+        detail:
+          `${token}: ${String(n)}ms is ${frames} frames at 25fps ` +
+          `(off by ${String(Math.min(off, FRAME_MS - off))}ms — nearest whole frame is ${String(nearest)}ms)`,
       });
     }
   }

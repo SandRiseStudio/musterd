@@ -69,8 +69,20 @@ describe('rawMotionLiterals', () => {
 describe('offFrameDurations', () => {
   it('flags a duration that is not a whole frame at 25fps', () => {
     expect(offFrameDurations(':root { --lc-dur-x: 220ms; }')).toEqual([
-      { kind: 'off-frame', line: 1, detail: '--lc-dur-x: 220ms is 5.5 frames at 25fps' },
+      {
+        kind: 'off-frame',
+        line: 1,
+        detail:
+          // 5.5 frames sits exactly between two boundaries; Math.round takes the upper one.
+          '--lc-dur-x: 220ms is 5.5 frames at 25fps (off by 20ms — nearest whole frame is 240ms)',
+      },
     ]);
+  });
+
+  it('never rounds the fraction away — a near-miss must not read as a whole frame count', () => {
+    const [finding] = offFrameDurations(':root { --lc-dur-x: 281ms; }');
+    expect(finding?.detail).toContain('7.03 frames');
+    expect(finding?.detail).not.toMatch(/\bis 7 frames\b/);
   });
 
   it('accepts a whole-frame duration', () => {

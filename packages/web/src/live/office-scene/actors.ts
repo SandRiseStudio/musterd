@@ -17,6 +17,7 @@ import {
   STRIP_CAP,
 } from './layout';
 import { FLOOR } from './iso';
+import { CANVAS_EASE } from './motion';
 import { findPath, walkable, type P } from './nav';
 import type { Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, STRIDE } from './skeleton';
@@ -36,12 +37,11 @@ type Spot = (typeof LEISURE_SPOTS)[number];
  */
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
-const easeInOut = (t: number): number => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
-const easeIn = (t: number): number => t * t;
-const easeOut = (t: number): number => 1 - (1 - t) * (1 - t);
 /** Velocity profile of one walk leg — see `legsAlong`, which picks these so speed is continuous. */
 type Ease = 'in' | 'out' | 'inOut' | 'linear';
-const EASE: Record<Ease, (t: number) => number> = { in: easeIn, out: easeOut, inOut: easeInOut, linear: (t) => t };
+/** The scene's easings live in `motion.ts` with the durations they belong beside (spec 2026-08-25).
+ *  Same four curves, same maths — this is a move, not a retune. */
+const EASE: Record<Ease, (t: number) => number> = CANVAS_EASE;
 
 /** How fast a member swivels to a new facing (radians/sec) — a quarter turn in ~0.17s, brisk but visible. */
 const TURN_RATE = 9;
