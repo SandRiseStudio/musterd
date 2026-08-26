@@ -78,10 +78,16 @@ The global `--ease-out` / `--ease-in-out` stay declared: `components/GetStarted.
 lane would be a change nobody reviewing this lane is looking at. The residue is one namespace on one
 surface this lane does not own — worth its own lane if the site ever wants the scale.
 
-**Overshoot is the riskiest family at 25fps** and deserves its own note: the peak of an overshoot can
-fall between two captured frames and simply not exist on the stream. One overshoot whose peak is
-tuned to land on a frame is more likely to survive capture than four untuned ones. Picking that
-control point is an implementation task with a falsifier (§7), not a value this spec asserts.
+**This spec originally claimed overshoot was the riskiest family at 25fps** — that an overshoot's
+peak could fall between two captured frames and not exist on the stream. **Measured 2026-08-25, that
+is false**, and the measurement is in `docs/perf/motion-capture.md`: 97–100% of the overshoot
+survives at every rung, for all three candidate curves. A cubic-bezier's overshoot is a broad smooth
+maximum, not a spike, and with one control-point pair it cannot oscillate — the narrow-peak failure
+belongs to stiff spring physics, which this codebase does not use.
+
+`--lc-ease-pop` therefore keeps `cubic-bezier(0.34, 1.56, 0.64, 1)` and needs no tuning. What is
+genuinely at risk at 25fps is short *durations*, not easing shape — which is what the scale's
+three-frame floor already answers.
 
 ## 4. Source of truth: mirror and gate
 
@@ -163,11 +169,15 @@ not an assertion:
 > and (c) one accept-confetti. Each must occupy the expected whole number of frames, and the
 > `--lc-ease-pop` overshoot must have a visible peak in at least one captured frame.
 
-If the overshoot peak is absent from every frame, `--lc-ease-pop`'s control point is wrong and §3's
-tuning task is not done.
+**The overshoot half of this was run analytically on 2026-08-25 and cannot fail** — see
+`docs/perf/motion-capture.md`. A falsifier no cubic-bezier can fail is not a gate, so it is retired
+rather than performed; the frame-count half stands and is now enforced continuously by the gate's
+rule 3 rather than by a one-off capture.
 
-**Dependency:** the hosted stream was stopped on 2026-08-25. This falsifier needs it up, or a local
-720p25 capture run standing in for it.
+**A note on when a capture is even meaningful.** The hosted capture renders
+`http://${AIR_IP}:4849` — the daemon's build of `main`. A branch's motion is not on the stream until
+it lands, so a pre-merge capture measures the *previous* scale and says nothing about the change
+under review. Visual confirmation belongs after merge.
 
 ## 8. Non-goals
 
