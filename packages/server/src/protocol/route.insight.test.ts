@@ -1,12 +1,12 @@
-import { describe, expect, it } from 'vitest';
 import { makeEnvelope } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { openDb } from '../db/open.js';
+import { describe, expect, it } from 'vitest';
 import type { Ctx } from '../context.js';
+import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
-import { routeEnvelope } from './route.js';
 import { addMember } from '../store/members.js';
 import { createTeam } from '../store/teams.js';
+import { routeEnvelope } from './route.js';
 
 const ID = '01M0XINSIGHT0000000000000000';
 
