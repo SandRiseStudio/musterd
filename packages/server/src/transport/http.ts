@@ -63,6 +63,11 @@ import {
   SeedSchema,
   SubmitSeedBriefSchema,
   TeamMemorySearchResponseSchema,
+  TOKEN_PREFIXES,
+  NodeInviteMintSchema,
+  NodeJoinRequestSchema,
+  NodeJoinResponseSchema,
+  NodeListSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -133,6 +138,7 @@ import {
   markSeatReleased,
   markSessionEnded,
   mintCredential,
+  newSecret,
   rotateToken,
   setAvailability,
   setMemberGovernance,
@@ -148,6 +154,14 @@ import {
   pendingInterrupts,
   rowToEnvelope,
 } from '../store/messages.js';
+import {
+  bindNode,
+  consumeInvite,
+  listNodes,
+  mintInvite,
+  revokeNode,
+  rotateNode,
+} from '../store/nodes.js';
 import { deriveNext } from '../store/orientation.js';
 import {
   attach,
@@ -269,6 +283,13 @@ const DEFERRAL_SCAN_LIMIT = 2000;
  * cursor cannot hold the loop while its whole history is marshalled and serialised.
  */
 const INBOX_DEFAULT_LIMIT = 200;
+
+/**
+ * Rollback sentinel for node enrollment (ADR 328 §2). better-sqlite3 commits a transaction whose
+ * function returns normally, so a refusal has to throw to roll the invite's consumption back with
+ * the bind that failed. Compared by identity and never surfaced — the caller gets one 409.
+ */
+const ENROLL_REFUSED = Symbol('enrollment refused');
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -2767,6 +2788,141 @@ export async function handleHttp(
           ...(hint ? { delivery_hint: hint } : {}),
           ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
         });
+      }
+
+      // ── Node enrollment (ADR 328), increment 3a of the ADR 325 federation build.
+      //
+      // These are NEW routes that `isLocalPeer` never guarded (§6): nothing that is localhost-only
+      // today becomes remote-reachable because of them. `join` authenticates on the invite code
+      // alone — that IS the ceremony (§2: trust-on-first-use, bounded by a short window) — and
+      // every other verb is strict admin.
+      //
+      // An `msnode_` is minted here but never accepted here: it admits its bearer to the sync
+      // surface (3b) and nothing else, so no route on this file authenticates one. A machine being
+      // admitted and a seat being authorized are independent axes (§3).
+      if (method === 'POST' && rest === '/nodes/invite') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const body = (await readJson(req)) as { label?: unknown };
+        const label =
+          typeof body?.label === 'string' && body.label ? body.label : 'unnamed machine';
+        const minted = mintInvite(ctx.db, team.id, label, member.name);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'node.invited',
+          target: label,
+          result: 'allow',
+          detail: { expires_at: minted.expires_at },
+        });
+        return sendJson(res, 200, NodeInviteMintSchema.parse(minted));
+      }
+
+      if (method === 'POST' && rest === '/nodes/join') {
+        const team = requireTeam(ctx.db, slug);
+        const body = NodeJoinRequestSchema.parse(await readJson(req));
+        const credential = newSecret(TOKEN_PREFIXES.node);
+
+        // Consume-then-bind is ONE transaction: a consumed invite whose bind then fails would burn
+        // the operator's code and enroll nobody, which is the worst of both outcomes.
+        //
+        // The refusal has to THROW rather than return null. better-sqlite3 commits a transaction
+        // whose function returns normally — a returned null would leave the consumption standing,
+        // so a mistyped node id would silently cost an invite and the operator would have to mint
+        // another to discover why. Throwing is what rolls the consumption back with the bind.
+        const bound = ((): { id: string } | null => {
+          try {
+            return ctx.db.transaction(() => {
+              if (!consumeInvite(ctx.db, team.id, body.code, body.node_id)) throw ENROLL_REFUSED;
+              const b = bindNode(ctx.db, team.id, body.node_id, body.label, credential, 'invite');
+              if (!b) throw ENROLL_REFUSED;
+              return b;
+            })();
+          } catch (err) {
+            if (err === ENROLL_REFUSED) return null;
+            throw err;
+          }
+        })();
+
+        if (!bound) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'node.enrollment_refused',
+            target: body.label,
+            result: 'deny',
+            // The node id is the operator's own diagnostic; the code never appears, hashed or not.
+            detail: { node_id: body.node_id },
+          });
+          // Deliberately one refusal for every reason — spent code, unknown code, expired code,
+          // wrong team, id already bound, id belongs to the hub. Telling an unauthenticated caller
+          // WHICH guess was close is how a short-lived code becomes searchable.
+          return sendJson(res, 409, {
+            error: 'conflict',
+            message:
+              'enrollment refused — the invite is unknown, expired or already used, or that node ' +
+              'id is not available to bind',
+          });
+        }
+
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action: 'node.enrolled',
+          target: body.label,
+          result: 'allow',
+          detail: { node_id: bound.id },
+        });
+        return sendJson(
+          res,
+          200,
+          // Shown once, never re-fetchable — the handling every token kind before it gets.
+          NodeJoinResponseSchema.parse({
+            node_credential: credential,
+            node_id: bound.id,
+            team: slug,
+          }),
+        );
+      }
+
+      const nodeVerb = rest.match(/^\/nodes\/([^/]+)\/(rotate|revoke)$/);
+      if (method === 'POST' && nodeVerb) {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const nodeId = decodeURIComponent(nodeVerb[1]!);
+
+        if (nodeVerb[2] === 'rotate') {
+          const rotated = rotateNode(ctx.db, team.id, nodeId);
+          if (!rotated) {
+            return sendJson(res, 409, {
+              error: 'conflict',
+              message: `node "${nodeId}" is unknown or revoked — a revoked credential is re-issued by enrolling, not by rotating`,
+            });
+          }
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'node.rotated',
+            target: nodeId,
+            result: 'allow',
+            detail: null,
+          });
+          // The id is unchanged on purpose: every `origin_node` already in the log still names it.
+          return sendJson(res, 200, { node_credential: rotated.credential, node_id: nodeId });
+        }
+
+        const revoked = revokeNode(ctx.db, team.id, nodeId);
+        if (revoked) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'node.revoked',
+            target: nodeId,
+            result: 'allow',
+            detail: null,
+          });
+        }
+        // `revoked: false` for an already-revoked or unknown node — idempotent, without claiming to
+        // have acted. Events already ingested stay either way (§5).
+        return sendJson(res, 200, { node_id: nodeId, revoked });
+      }
+
+      if (method === 'GET' && rest === '/nodes') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, NodeListSchema.parse({ nodes: listNodes(ctx.db, team.id) }));
       }
 
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All
