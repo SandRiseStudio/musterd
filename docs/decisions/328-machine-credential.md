@@ -144,11 +144,7 @@ authenticated by `msnode_` over the ADR 040 secured bind. Nothing that is localh
 becomes remote-reachable because of this ADR — a property worth naming, since ADR 134 exists because
 that boundary was once assumed rather than checked.
 
-**7. Inert until a second machine appears.** _(Amended 2026-08-27 by
-[ADR 331](331-ordering-substrate.md): the `nodes` table is no longer empty on a single-machine team
-— migration v47 mints a local node row so `origin_seq` can be stamped from the first message. The
-operational promise stands unchanged: no enrollment ceremony, no `msnode_` minted, no route
-changes.)_ A single-machine team is ADR 325's degenerate case: its
+**7. Inert until a second machine appears.** A single-machine team is ADR 325's degenerate case: its
 daemon is its own hub, the `nodes` table is empty, no `msnode_` is ever minted, and no route
 changes. Enrollment is something you do when you add a machine, not something today's deployment
 starts doing.
@@ -221,6 +217,12 @@ starts doing.
   binding is not stale in that way at all — it is a fact the hub wrote itself, under CAS. What it
   can be is *out of date with the human's intent*: a seat whose operator has moved to another laptop
   is bound where it last spoke, which is exactly the case the Experiment below watches.
+- **Amended 2026-08-27 by [ADR 331](331-ordering-substrate.md): Decision §7's "the `nodes` table is
+  empty" no longer holds.** Migration v47 mints a local node row on every team, single-machine ones
+  included, so `(origin_node, origin_seq)` can be stamped from the first message rather than
+  retrofitted when a second machine appears. What §7 actually promised is unchanged and still holds:
+  no enrollment ceremony, no `msnode_` minted, no route changes. Only the emptiness of the table —
+  the incidental way §7 stated that promise — is superseded.
 - **Not in scope:** the sync wire format and its routes (ADR 325 increment 3), the hub storage
   engine, humans-multi-presence (still deferred per ADR 039), and cryptographic per-event
   attestation (the larger half of the keypair upgrade above). Re-binding a seat to a new node *is*
