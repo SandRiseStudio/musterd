@@ -144,7 +144,11 @@ authenticated by `msnode_` over the ADR 040 secured bind. Nothing that is localh
 becomes remote-reachable because of this ADR — a property worth naming, since ADR 134 exists because
 that boundary was once assumed rather than checked.
 
-**7. Inert until a second machine appears.** A single-machine team is ADR 325's degenerate case: its
+**7. Inert until a second machine appears.** _(Amended 2026-08-27 by
+[ADR 331](331-ordering-substrate.md): the `nodes` table is no longer empty on a single-machine team
+— migration v47 mints a local node row so `origin_seq` can be stamped from the first message. The
+operational promise stands unchanged: no enrollment ceremony, no `msnode_` minted, no route
+changes.)_ A single-machine team is ADR 325's degenerate case: its
 daemon is its own hub, the `nodes` table is empty, no `msnode_` is ever minted, and no route
 changes. Enrollment is something you do when you add a machine, not something today's deployment
 starts doing.
