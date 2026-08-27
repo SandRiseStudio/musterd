@@ -7,7 +7,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
-import { seatActor, type CreatedBy, type EditOp, type ItemInput } from '../port.js';
+import { NOTE_TEXT_MAX, seatActor, type CreatedBy, type EditOp, type ItemInput } from '../port.js';
 import { WhiteboardServiceClient } from './client.js';
 import { formatOutline } from './format.js';
 
@@ -31,7 +31,18 @@ function errorResult(err: unknown): {
 const itemSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('note'),
-    text: z.string().min(1),
+    text: z
+      .string()
+      .min(1)
+      .max(
+        NOTE_TEXT_MAX,
+        `a sticky is a headline, not a paragraph — keep it under ${NOTE_TEXT_MAX} characters and put the thinking in \`detail\``,
+      )
+      .describe(`the headline, max ${NOTE_TEXT_MAX} chars — a phrase someone can read at zoom`),
+    detail: z
+      .string()
+      .optional()
+      .describe('the full thought. Stays OFF the canvas; returned on every read'),
     color: z.string().optional().describe('tldraw color name, default yellow'),
     cluster: z.string().optional().describe('cluster id to place the note inside'),
     x: z.number().optional(),
@@ -69,6 +80,12 @@ const editOpSchema = z.discriminatedUnion('op', [
   }),
   z.object({ op: z.literal('retitle'), id: z.string(), text: z.string().min(1) }),
   z.object({ op: z.literal('delete'), id: z.string() }),
+  z.object({
+    op: z.literal('resize'),
+    id: z.string().describe('a cluster id — notes and labels size themselves'),
+    w: z.number(),
+    h: z.number(),
+  }),
 ]);
 
 export function buildWhiteboardMcpServer(client: WhiteboardServiceClient): McpServer {
@@ -106,8 +123,9 @@ export function buildWhiteboardMcpServer(client: WhiteboardServiceClient): McpSe
     {
       description:
         'Place notes, labels, links (A → B), and clusters on the board — batched: one call per ' +
-        'burst of ideas, not one per idea. Positions auto-layout when omitted. Everything you ' +
-        'place appears live in the human’s browser.',
+        'burst of ideas, not one per idea. A note is a HEADLINE (short, scannable at zoom); put ' +
+        'the reasoning in `detail`, which stays off the canvas and comes back on every read. ' +
+        'Layout is automatic — clusters grid their members and grow to fit.',
       inputSchema: {
         board: z.string(),
         items: z.array(itemSchema).min(1),

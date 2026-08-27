@@ -95,6 +95,7 @@ export function outlineFromSnapshot(
   for (const { shape, changed } of shapes.values()) {
     if (since !== undefined && changed <= since) continue;
     const kind = KIND_BY_TYPE[shape.type] ?? 'other';
+    const detail = (shape.meta as Record<string, unknown>)['detail'];
     const item: OutlineItem = {
       id: shape.id,
       kind,
@@ -102,6 +103,7 @@ export function outlineFromSnapshot(
       createdBy: createdBy(shape),
       x: shape.x,
       y: shape.y,
+      ...(typeof detail === 'string' && detail ? { detail } : {}),
     };
     if (clusterIds.has(shape.parentId)) item.cluster = shape.parentId;
     if (kind === 'link') {

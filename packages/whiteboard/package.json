@@ -2,7 +2,7 @@
   "name": "agent-whiteboard",
   "version": "0.1.0",
   "private": true,
-  "description": "Standalone shared whiteboard for human+agent brainstorming: provider-agnostic port, tldraw adapter, sync service, and its own whiteboard_* MCP server (ADR 330). Deliberately imports nothing from @musterd/* — extractable to its own repository at any time.",
+  "description": "Standalone shared whiteboard for human+agent brainstorming: provider-agnostic port, tldraw adapter, sync service, and its own whiteboard_* MCP server (ADR 330). Deliberately imports nothing from @musterd/* \u2014 extractable to its own repository at any time.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,6 +28,7 @@
     "@tldraw/store": "4.5.9",
     "@tldraw/sync": "4.5.9",
     "@tldraw/sync-core": "4.5.9",
+    "@tldraw/utils": "4.5.9",
     "ws": "^8.18.0",
     "zod": "^4.4.3"
   },

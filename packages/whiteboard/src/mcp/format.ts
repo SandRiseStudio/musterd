@@ -14,9 +14,10 @@ function who(item: OutlineItem): string {
 
 function line(item: OutlineItem, byId: Map<string, OutlineItem>): string {
   const id = shortId(item.id);
+  const detail = item.detail ? `\n    ↳ ${item.detail.replace(/\n/g, '\n      ')}` : '';
   switch (item.kind) {
     case 'note':
-      return `- [${id}] (${who(item)}) "${item.text}"`;
+      return `- [${id}] (${who(item)}) "${item.text}"${detail}`;
     case 'label':
       return `- [${id}] (${who(item)}) label "${item.text}"`;
     case 'link': {

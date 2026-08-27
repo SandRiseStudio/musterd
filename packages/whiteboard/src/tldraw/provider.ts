@@ -13,7 +13,7 @@ import type {
   Outline,
   WhiteboardProvider,
 } from '../port.js';
-import { assertBoardName } from '../port.js';
+import { assertBoardName, NOTE_TEXT_MAX } from '../port.js';
 import { listBoards } from '../sync/persistence.js';
 import type { RoomManager } from '../sync/roomManager.js';
 import { outlineFromSnapshot, shapeCount, type RoomSnapshotLike } from './outline.js';
@@ -25,12 +25,20 @@ import {
   buildNote,
   nextIndex,
   PAGE_ID,
+  richTextToPlain,
   toRichText,
   type BindingRecord,
   type ShapeRecord,
 } from './records.js';
 
 type Room = TLSocketRoom<UnknownRecord, void>;
+
+// Cluster layout. A tldraw note is 200x200; these are the gaps and padding around them.
+const CLUSTER_COLS = 3;
+const CLUSTER_GAP = 40;
+const CLUSTER_PAD = 60;
+const MEMBER_W = 200;
+const MEMBER_H = 200;
 
 function snap(room: Room): RoomSnapshotLike {
   return room.getCurrentSnapshot() as unknown as RoomSnapshotLike;
@@ -39,6 +47,38 @@ function snap(room: Room): RoomSnapshotLike {
 function getShape(room: Room, id: string): ShapeRecord | undefined {
   const doc = snap(room).documents.find((d) => d.state.id === id);
   return doc && doc.state.typeName === 'shape' ? (doc.state as ShapeRecord) : undefined;
+}
+
+/**
+ * A member's rendered height. A tldraw note is 200 wide but grows DOWN to fit its text, and
+ * the browser writes that growth back as props.growY — so a long note is 700+ tall and a
+ * fixed-size layout puts the next row straight through it.
+ */
+function memberHeight(shape: ShapeRecord): number {
+  const props = shape.props;
+  if (shape.type === 'note') {
+    // Two sources, take the larger. props.growY is authoritative but only exists AFTER a
+    // browser has rendered and measured the note — laying out from it alone means the first
+    // pass under-sizes every fresh note and the row below lands on top of it. The estimate
+    // is independent of any client, so the layout is stable before anyone has looked.
+    const growY = props['growY'];
+    const measured = MEMBER_H + (typeof growY === 'number' ? growY : 0);
+    return Math.max(measured, estimatedNoteHeight(richTextToPlain(props['richText'])));
+  }
+  const h = props['h'];
+  return typeof h === 'number' ? h : MEMBER_H;
+}
+
+/** A note is 200 wide and wraps at roughly this many characters at the default text size. */
+const NOTE_CHARS_PER_LINE = 22;
+const NOTE_LINE_HEIGHT = 28;
+const NOTE_TEXT_PAD = 48;
+
+function estimatedNoteHeight(text: string): number {
+  const lines = text
+    .split('\n')
+    .reduce((n, line) => n + Math.max(1, Math.ceil(line.length / NOTE_CHARS_PER_LINE)), 0);
+  return Math.max(MEMBER_H, lines * NOTE_LINE_HEIGHT + NOTE_TEXT_PAD);
 }
 
 function ownedBy(shape: ShapeRecord, actor: CreatedBy): boolean {
@@ -63,6 +103,7 @@ export class TldrawProvider implements WhiteboardProvider {
   ): Promise<{ ids: string[]; version: number }> {
     const { room } = await this.rooms.ensureRoom(board);
     const ids: string[] = [];
+    const touchedClusters = new Set<string>();
     let count = shapeCount(snap(room));
 
     // Pre-validate link endpoints in OUR vocabulary before touching the store — the whole
@@ -70,6 +111,13 @@ export class TldrawProvider implements WhiteboardProvider {
     const known = new Set(
       snap(room)
         .documents.filter((d) => d.state.typeName === 'shape')
+        .map((d) => d.state.id),
+    );
+    const clusters = new Set(
+      snap(room)
+        .documents.filter(
+          (d) => d.state.typeName === 'shape' && (d.state as ShapeRecord).type === 'frame',
+        )
         .map((d) => d.state.id),
     );
     for (const item of items) {
@@ -81,6 +129,23 @@ export class TldrawProvider implements WhiteboardProvider {
             );
           }
         }
+      }
+      // A bad cluster id used to be accepted silently, orphaning the note where nobody could
+      // see it — including the board's own author, mid-session.
+      if (item.kind === 'note' && item.cluster !== undefined && !clusters.has(item.cluster)) {
+        throw new Error(
+          `cluster ${JSON.stringify(item.cluster)} is not a cluster on this board — create it first, or use an id from whiteboard_read; nothing was placed`,
+        );
+      }
+      // A whiteboard is scanned, not read. Paragraph-length stickies are unreadable at the
+      // zoom anyone actually views the board at, so the headline is capped and the thinking
+      // goes to `detail` (off-canvas, returned on every read).
+      if (item.kind === 'note' && item.text.length > NOTE_TEXT_MAX) {
+        throw new Error(
+          `note headline is ${item.text.length} characters, over the ${NOTE_TEXT_MAX} limit — ` +
+            `a sticky is a headline, not a paragraph. Shorten \`text\` and move the rest to ` +
+            `\`detail\`, which stays off the canvas and comes back on every read. Nothing was placed.`,
+        );
       }
     }
 
@@ -99,13 +164,13 @@ export class TldrawProvider implements WhiteboardProvider {
               ...base,
               text: item.text,
               ...(item.color ? { color: item.color } : {}),
+              ...(item.detail ? { detail: item.detail } : {}),
             });
+            // Position inside a cluster is not the caller's business — relayoutCluster()
+            // below grids every member and grows the frame to fit.
             if (item.cluster) {
               note.parentId = item.cluster;
-              // Frame children position in frame-local coordinates.
-              const inside = autoPosition(0);
-              note.x = inside.x / 2;
-              note.y = inside.y / 2;
+              touchedClusters.add(item.cluster);
             }
             store.put(note as unknown as UnknownRecord);
             ids.push(note.id);
@@ -138,8 +203,62 @@ export class TldrawProvider implements WhiteboardProvider {
       }
     });
 
+    for (const clusterId of touchedClusters) await this.relayoutCluster(room, clusterId);
     await this.rooms.persist(board);
     return { ids, version: snap(room).documentClock };
+  }
+
+  /**
+   * Grid a cluster's members and grow the frame to fit them. Called after any change to
+   * membership, so a cluster is never smaller than what it holds — the failure mode that
+   * made a real board unreadable (notes stacked at one point, inside a frame too small to
+   * show them). Members keep their relative order; positions are the layout's business,
+   * not the caller's.
+   */
+  private async relayoutCluster(room: Room, clusterId: string): Promise<void> {
+    const s = snap(room);
+    const frame = s.documents.find((d) => d.state.id === clusterId)?.state as
+      | ShapeRecord
+      | undefined;
+    if (!frame || frame.type !== 'frame') return;
+
+    const members = s.documents
+      .map((d) => d.state)
+      .filter((r): r is ShapeRecord => r.typeName === 'shape' && r.parentId === clusterId)
+      .sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : 0));
+
+    const cols = Math.max(1, Math.min(members.length, CLUSTER_COLS));
+    let cursorY = CLUSTER_PAD;
+    const placed: Array<{ member: ShapeRecord; x: number; y: number }> = [];
+
+    // Row by row, each row as tall as its tallest member. Order-preserving, and it accounts
+    // for the fact that a note GROWS with its text — long content makes a 700px-tall sticky,
+    // which is what overflowed the frame and collided with the row below.
+    for (let i = 0; i < members.length; i += cols) {
+      const row = members.slice(i, i + cols);
+      row.forEach((member, j) => {
+        placed.push({
+          member,
+          x: CLUSTER_PAD + j * (MEMBER_W + CLUSTER_GAP),
+          y: cursorY,
+        });
+      });
+      cursorY += Math.max(...row.map(memberHeight)) + CLUSTER_GAP;
+    }
+
+    await room.updateStore((store) => {
+      for (const { member, x, y } of placed) {
+        store.put({ ...member, x, y } as unknown as UnknownRecord);
+      }
+      store.put({
+        ...frame,
+        props: {
+          ...frame.props,
+          w: CLUSTER_PAD * 2 + cols * MEMBER_W + (cols - 1) * CLUSTER_GAP,
+          h: Math.max(CLUSTER_PAD * 2 + MEMBER_H, cursorY - CLUSTER_GAP + CLUSTER_PAD),
+        },
+      } as unknown as UnknownRecord);
+    });
   }
 
   async read(board: string, since?: number): Promise<Outline> {
@@ -154,6 +273,7 @@ export class TldrawProvider implements WhiteboardProvider {
   ): Promise<{ version: number; refused: EditRefusal[] }> {
     const { room } = await this.rooms.ensureRoom(board);
     const refused: EditRefusal[] = [];
+    const touchedClusters = new Set<string>();
 
     await room.updateStore((store) => {
       for (const op of ops) {
@@ -172,12 +292,24 @@ export class TldrawProvider implements WhiteboardProvider {
             const updated: ShapeRecord = { ...shape, parentId: op.cluster ?? PAGE_ID };
             if (op.x !== undefined) updated.x = op.x;
             if (op.y !== undefined) updated.y = op.y;
-            if (op.cluster && op.x === undefined) {
-              // Default frame-local placement, offset from the frame's origin.
-              updated.x = 40;
-              updated.y = 60;
-            }
             store.put(updated as unknown as UnknownRecord);
+            // Both the old and new cluster re-fit: one loses a member, one gains.
+            if (op.cluster) touchedClusters.add(op.cluster);
+            if (shape.parentId !== PAGE_ID) touchedClusters.add(shape.parentId);
+            break;
+          }
+          case 'resize': {
+            if (shape.type !== 'frame') {
+              refused.push({
+                id: op.id,
+                reason: 'only a cluster can be resized — notes and labels size themselves',
+              });
+              continue;
+            }
+            store.put({
+              ...shape,
+              props: { ...shape.props, w: op.w, h: op.h },
+            } as unknown as UnknownRecord);
             break;
           }
           case 'retitle': {
@@ -215,12 +347,14 @@ export class TldrawProvider implements WhiteboardProvider {
               }
             }
             store.delete(op.id);
+            if (shape.parentId !== PAGE_ID) touchedClusters.add(shape.parentId);
             break;
           }
         }
       }
     });
 
+    for (const clusterId of touchedClusters) await this.relayoutCluster(room, clusterId);
     await this.rooms.persist(board);
     return { version: snap(room).documentClock, refused };
   }

@@ -175,6 +175,12 @@ export async function startService(port = servicePort()): Promise<RunningService
     close: async () => {
       await rooms.persistAllAndClose();
       wss.close();
+      // server.close() alone waits for open connections — a browser ws or a pooled
+      // keep-alive fetch keeps the process alive AFTER it stops listening, leaving a
+      // half-dead server still answering old connections while a new process owns the
+      // port. That split brain ate real board work; sever everything.
+      for (const client of wss.clients) client.terminate();
+      server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
@@ -214,6 +220,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const running = await startService();
   const shutdown = async () => {
     log('info', 'shutting down — persisting open boards');
+    // Belt on the graceful path: if anything above stalls, die anyway. A signaled service
+    // that lingers becomes the split-brain server the close() comment describes.
+    setTimeout(() => process.exit(1), 10_000).unref();
     await running.close();
     process.exit(0);
   };

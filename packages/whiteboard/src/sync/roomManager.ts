@@ -29,6 +29,10 @@ export interface RoomManagerConfig {
 
 export class RoomManager {
   private rooms = new Map<string, ManagedRoom>();
+  private loading = new Map<
+    string,
+    Promise<{ room: TLSocketRoom<UnknownRecord, void>; created: boolean }>
+  >();
 
   constructor(private config: RoomManagerConfig) {}
 
@@ -36,13 +40,30 @@ export class RoomManager {
     return this.rooms.size;
   }
 
-  /** Load (or create) the live room for a board. */
+  /**
+   * Load (or create) the live room for a board. Single-flight per board: two callers racing
+   * through the load (a browser reconnect and an API write, in practice) used to each build a
+   * TLSocketRoom — the map kept the later one, but the loser's persist timer kept firing and
+   * clobbered the board file with its stale snapshot. That ghost cost a real board three
+   * versions of work before it was caught.
+   */
   async ensureRoom(
     name: string,
   ): Promise<{ room: TLSocketRoom<UnknownRecord, void>; created: boolean }> {
     const existing = this.rooms.get(name);
     if (existing) return { room: existing.tlRoom, created: false };
 
+    const inFlight = this.loading.get(name);
+    if (inFlight) return inFlight;
+
+    const load = this.createRoom(name).finally(() => this.loading.delete(name));
+    this.loading.set(name, load);
+    return load;
+  }
+
+  private async createRoom(
+    name: string,
+  ): Promise<{ room: TLSocketRoom<UnknownRecord, void>; created: boolean }> {
     const persisted = await loadSnapshot(name);
     const created = persisted === null;
     type Options = ConstructorParameters<typeof TLSocketRoom<UnknownRecord, void>>[0];

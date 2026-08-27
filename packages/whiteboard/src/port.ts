@@ -18,9 +18,20 @@ export function seatActor(seat: string): CreatedBy {
 
 export type ItemKind = 'note' | 'label' | 'link' | 'cluster';
 
+/**
+ * A whiteboard is scanned, not read. `text` is a headline and is length-capped so it stays
+ * one; everything else goes in `detail`, which rides along in the item's metadata — invisible
+ * on the canvas, returned in full by every read. The board stays legible at zoom; the
+ * reasoning is not lost.
+ */
+export const NOTE_TEXT_MAX = 90;
+
 export interface NoteInput {
   kind: 'note';
+  /** The headline. At most NOTE_TEXT_MAX characters — put the rest in `detail`. */
   text: string;
+  /** The full thought. Not drawn on the canvas; comes back on every read. */
+  detail?: string;
   /** tldraw-ish color name; providers map or ignore. */
   color?: string;
   /** Place inside this cluster (outline id of a cluster). */
@@ -64,6 +75,8 @@ export interface OutlineItem {
   kind: ItemKind | 'other';
   /** Note/label text, cluster title, or link label. Empty when the item carries none. */
   text: string;
+  /** The full thought behind a headline, when one was recorded. Never drawn on the canvas. */
+  detail?: string;
   createdBy: CreatedBy;
   /** Outline id of the containing cluster, when inside one. */
   cluster?: string;
@@ -95,7 +108,9 @@ export type EditOp =
       y?: number;
     }
   | { op: 'retitle'; id: string; text: string }
-  | { op: 'delete'; id: string };
+  | { op: 'delete'; id: string }
+  /** Clusters only — notes and labels size themselves. Rarely needed: a cluster grows to fit. */
+  | { op: 'resize'; id: string; w: number; h: number };
 
 export interface EditRefusal {
   id: string;

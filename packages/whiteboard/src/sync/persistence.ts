@@ -33,6 +33,18 @@ export async function loadSnapshot(name: string): Promise<unknown | null> {
 
 export async function saveSnapshot(name: string, snapshot: unknown): Promise<void> {
   await mkdir(boardsDir(), { recursive: true });
+  // A snapshot must never move the file backwards. The room manager's single-flight load is
+  // the real fix for the ghost-room clobber; this is the belt that makes any future stale
+  // writer lose harmlessly instead of eating newer work.
+  const clock = (snapshot as { documentClock?: number })?.documentClock;
+  if (typeof clock === 'number') {
+    const onDisk = (await loadSnapshot(name)) as { documentClock?: number } | null;
+    if (onDisk && typeof onDisk.documentClock === 'number' && onDisk.documentClock > clock) {
+      throw new Error(
+        `refusing to persist board ${JSON.stringify(name)} at clock ${clock}: the file is already at ${onDisk.documentClock} — a stale room is trying to overwrite newer work`,
+      );
+    }
+  }
   // Write-then-rename so a crash mid-write can't leave a truncated board.
   const path = boardPath(name);
   const tmp = `${path}.tmp`;

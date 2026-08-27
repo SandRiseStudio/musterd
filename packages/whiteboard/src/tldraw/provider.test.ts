@@ -16,6 +16,33 @@ let dir: string;
 let rooms: RoomManager;
 let provider: TldrawProvider;
 
+/** Read one shape straight out of a live room — for asserting on tldraw-side props. */
+function snapshotShape(
+  room: Awaited<ReturnType<RoomManager['ensureRoom']>>['room'],
+  id: string,
+): { props: Record<string, unknown> } {
+  const snap = room.getCurrentSnapshot() as unknown as {
+    documents: Array<{ state: { id: string; props?: Record<string, unknown> } }>;
+  };
+  return snap.documents.find((d) => d.state.id === id)!.state as {
+    props: Record<string, unknown>;
+  };
+}
+
+/** The whole record, for tests that need to write it back. */
+function snapshotShapeFull(
+  room: Awaited<ReturnType<RoomManager['ensureRoom']>>['room'],
+  id: string,
+): { id: string; props: Record<string, unknown> } {
+  const snap = room.getCurrentSnapshot() as unknown as {
+    documents: Array<{ state: { id: string } }>;
+  };
+  return snap.documents.find((d) => d.state.id === id)!.state as {
+    id: string;
+    props: Record<string, unknown>;
+  };
+}
+
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'whiteboard-test-'));
   process.env['WHITEBOARD_DATA_DIR'] = dir;
@@ -118,6 +145,114 @@ describe('TldrawProvider', () => {
     const after = await provider.read('b4');
     expect(after.items.find((i) => i.id === noteId)!.text).toBe('my own, reworded');
     expect(after.items.find((i) => i.id === humanNote.id)).toBeDefined();
+  });
+
+  it('grids cluster members and grows the frame to fit — never stacks them at one point', async () => {
+    const { ids } = await provider.add('b8', 'seat:izzo', [{ kind: 'cluster', title: 'Big' }]);
+    const clusterId = ids[0]!;
+    await provider.add(
+      'b8',
+      'seat:izzo',
+      Array.from({ length: 7 }, (_, i) => ({
+        kind: 'note' as const,
+        text: `idea ${i}`,
+        cluster: clusterId,
+      })),
+    );
+
+    const outline = await provider.read('b8');
+    const members = outline.items.filter((i) => i.cluster === clusterId);
+    expect(members).toHaveLength(7);
+    // Every member sits at its own point — the stacking bug that made a real board unreadable.
+    const points = new Set(members.map((m) => `${m.x},${m.y}`));
+    expect(points.size).toBe(7);
+
+    // And the frame grew to hold three rows rather than clipping them.
+    const { room } = await rooms.ensureRoom('b8');
+    const frame = snapshotShape(room, clusterId);
+    expect(frame.props['h']).toBeGreaterThan(3 * 200);
+    expect(frame.props['w']).toBeGreaterThan(3 * 200);
+  });
+
+  it('a tall note pushes the row below it instead of colliding with it', async () => {
+    const { ids } = await provider.add('b10', 'seat:izzo', [{ kind: 'cluster', title: 'Mixed' }]);
+    const clusterId = ids[0]!;
+    const noteIds = (
+      await provider.add(
+        'b10',
+        'seat:izzo',
+        Array.from({ length: 4 }, (_, i) => ({
+          kind: 'note' as const,
+          text: `n${i}`,
+          cluster: clusterId,
+        })),
+      )
+    ).ids;
+
+    // The browser writes growth back as props.growY when a note's text overflows; simulate a
+    // long note in the first row, then force a relayout by adding a fifth member.
+    const { room } = await rooms.ensureRoom('b10');
+    const tall = snapshotShapeFull(room, noteIds[0]!);
+    await room.updateStore((store) =>
+      store.put({ ...tall, props: { ...tall.props, growY: 600 } } as never),
+    );
+    await provider.add('b10', 'seat:izzo', [
+      { kind: 'note', text: 'forces relayout', cluster: clusterId },
+    ]);
+
+    const outline = await provider.read('b10');
+    const byId = new Map(outline.items.map((i) => [i.id, i]));
+    const firstRowTop = byId.get(noteIds[0]!)!.y;
+    const secondRowTop = byId.get(noteIds[3]!)!.y;
+    // Row 2 must start below the 800px-tall note in row 1, not at a fixed 240 offset.
+    expect(secondRowTop).toBeGreaterThanOrEqual(firstRowTop + 800);
+
+    const frame = snapshotShape(room, clusterId);
+    expect(frame.props['h']).toBeGreaterThan(secondRowTop);
+  });
+
+  it('refuses a note aimed at a cluster that does not exist, rather than orphaning it', async () => {
+    await expect(
+      provider.add('b11', 'seat:izzo', [
+        { kind: 'note', text: 'would vanish', cluster: 'shape:not-a-cluster' },
+      ]),
+    ).rejects.toThrow(/is not a cluster on this board/);
+    expect((await provider.read('b11')).items).toHaveLength(0);
+  });
+
+  it('refuses a note aimed at a note as if it were a cluster', async () => {
+    const { ids } = await provider.add('b12', 'seat:izzo', [{ kind: 'note', text: 'plain note' }]);
+    await expect(
+      provider.add('b12', 'seat:izzo', [{ kind: 'note', text: 'nested?', cluster: ids[0]! }]),
+    ).rejects.toThrow(/is not a cluster on this board/);
+  });
+
+  it('caps the headline and keeps detail off the canvas but in the read', async () => {
+    const long = 'x'.repeat(200);
+    await expect(provider.add('b13', 'seat:izzo', [{ kind: 'note', text: long }])).rejects.toThrow(
+      /headline is 200 characters.*a sticky is a headline, not a paragraph/s,
+    );
+
+    const { ids } = await provider.add('b13', 'seat:izzo', [
+      { kind: 'note', text: 'door 3 makes it a team', detail: long },
+    ]);
+    const item = (await provider.read('b13')).items.find((i) => i.id === ids[0])!;
+    expect(item.text).toBe('door 3 makes it a team');
+    expect(item.detail).toBe(long);
+
+    // Detail must not reach the canvas: it lives in meta, not in the drawn props.
+    const { room } = await rooms.ensureRoom('b13');
+    const shape = snapshotShape(room, ids[0]!);
+    expect(JSON.stringify(shape.props)).not.toContain(long);
+  });
+
+  it('resize is refused on anything that is not a cluster', async () => {
+    const { ids } = await provider.add('b9', 'seat:izzo', [{ kind: 'note', text: 'a note' }]);
+    const { refused } = await provider.edit('b9', 'seat:izzo', [
+      { op: 'resize', id: ids[0]!, w: 500, h: 500 },
+    ]);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.reason).toMatch(/only a cluster/);
   });
 
   it('refuses a link to a nonexistent item in port vocabulary, placing nothing', async () => {

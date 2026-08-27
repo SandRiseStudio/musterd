@@ -4,6 +4,7 @@ import {
   buildLabel,
   buildLink,
   buildNote,
+  nextIndex,
   richTextToPlain,
   toRichText,
 } from './records.js';
@@ -19,6 +20,18 @@ describe('rich text', () => {
     expect(richTextToPlain(null)).toBe('');
     expect(richTextToPlain(42)).toBe('');
     expect(richTextToPlain({})).toBe('');
+  });
+});
+
+describe('nextIndex', () => {
+  it('stays a valid tldraw index key past the ninth shape — a10 is not one', () => {
+    const keys = Array.from({ length: 70 }, (_, i) => nextIndex(i));
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const key of keys) expect(key).toMatch(/^[a-zA-Z0-9]+$/);
+    // The base-62 boundary that broke a real ten-item batch.
+    expect(keys).not.toContain('a10');
+    // Index keys must sort in placement order, which is what tldraw uses them for.
+    expect([...keys].sort()).toEqual(keys);
   });
 });
 

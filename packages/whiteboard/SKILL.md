@@ -22,7 +22,8 @@ itself when needed):
 - `whiteboard_open {board, seat}` — open/reopen a named board. **Call first**: `seat` is what
   attributes your shapes. Hand the human the returned URL.
 - `whiteboard_add {board, items[]}` — notes, labels, links (A → B), clusters. **Batch a burst
-  of ideas into one call.**
+  of ideas into one call.** A note's `text` is a **headline** (capped, scannable at zoom); the
+  reasoning goes in `detail`, which stays off the canvas and comes back on every read.
 - `whiteboard_read {board, since?}` — the outline, attributed per item. Pass the last version
   as `since` to see just what the human drew.
 - `whiteboard_edit {board, ops[]}` — move anyone's items into/out of clusters; retitle/delete
@@ -56,6 +57,9 @@ conclusion there is a separate, deliberate act. An architecture decision goes on
 
 ## Rules that keep the loop honest
 
+- **A whiteboard is scanned, not read.** A sticky carries a phrase someone can take in at a
+  glance — the argument goes in `detail`, and your prose goes in chat. A board of paragraphs
+  is a document with extra steps, and it stops being legible at the zoom people actually use.
 - Never reword or delete the human's items — the tool refuses it, and the refusal is right.
   Add your own note beside theirs, or ask.
 - A read that says the board holds freehand or image content the outline cannot carry means

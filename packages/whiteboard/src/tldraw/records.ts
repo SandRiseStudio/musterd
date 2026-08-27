@@ -5,6 +5,7 @@
  * room, no IO — so the round-trip is testable without a canvas.
  */
 import { randomBytes } from 'node:crypto';
+import { getIndices } from '@tldraw/utils';
 
 export interface TldrawRecord {
   id: string;
@@ -147,7 +148,11 @@ interface BuildBase {
   createdBy: string;
 }
 
-function baseShape(type: string, b: BuildBase, props: Record<string, unknown>): ShapeRecord {
+function baseShape(
+  type: string,
+  b: BuildBase & { detail?: string },
+  props: Record<string, unknown>,
+): ShapeRecord {
   return {
     id: b.id ?? newShapeId(),
     typeName: 'shape',
@@ -160,11 +165,19 @@ function baseShape(type: string, b: BuildBase, props: Record<string, unknown>): 
     parentId: b.parentId ?? PAGE_ID,
     index: b.index,
     props,
-    meta: { createdBy: b.createdBy, createdAt: new Date().toISOString() },
+    meta: {
+      createdBy: b.createdBy,
+      createdAt: new Date().toISOString(),
+      // Detail lives in meta, never in props: tldraw draws props, so this stays off-canvas
+      // while surviving persistence and coming back on every read.
+      ...(b.detail ? { detail: b.detail } : {}),
+    },
   };
 }
 
-export function buildNote(b: BuildBase & { text: string; color?: string }): ShapeRecord {
+export function buildNote(
+  b: BuildBase & { text: string; color?: string; detail?: string },
+): ShapeRecord {
   return baseShape('note', b, {
     color: b.color ?? 'yellow',
     labelColor: 'black',
@@ -266,7 +279,11 @@ export function autoPosition(existingShapeCount: number): { x: number; y: number
   return { x: GRID_ORIGIN_X + col * GRID_GAP_X, y: GRID_ORIGIN_Y + row * GRID_GAP_Y };
 }
 
-/** Fractional index after the current max — good enough ordering for agent-placed shapes. */
+/**
+ * Nth valid fractional index key. NOT `a${n}` — tldraw's index keys are base-62, so the
+ * successor of `a9` is `aA`, and `a10` fails validation. Found the hard way: a batch of ten
+ * shapes was rejected mid-brainstorm at the tenth. Delegated to tldraw's own generator.
+ */
 export function nextIndex(existingShapeCount: number): string {
-  return `a${existingShapeCount + 1}`;
+  return getIndices(existingShapeCount + 2)[existingShapeCount + 1]!;
 }
