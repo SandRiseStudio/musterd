@@ -1,9 +1,11 @@
 # 331 — the ordering substrate: `(origin_node, origin_seq)` on every logged event, stamped from the first message
 
-- Status: proposed — 2026-08-27. Authored by stanley on lane `01M10AJKMPAK54TM0CCG35VZD9`, as the
+- Status: proposed — 2026-08-27 (ryder REJECT on #1085 at `dcda5b57`, two REQUIRED — the
+  transaction premise below was false as first drafted, and the per-team/per-daemon question was
+  undeclared; both applied). Authored by stanley on lane `01M10AJKMPAK54TM0CCG35VZD9`, as the
   second increment of the ADR 325 federation build. **Amends [ADR 328](328-machine-credential.md)
-  decisions 1 and 7** — see §Decision 1 below; that ADR landed at `c6a0de99` two hours before this
-  one was drafted, and the amendment is the reason this is an ADR rather than a build task.
+  decision 7** — see §Decision 1 below; that ADR landed at `c6a0de99` two hours before this one was
+  drafted, and the amendment is the reason this is an ADR rather than a build task.
 - Date: 2026-08-27
 - Builds on: [ADR 325](325-multi-machine-federation.md) (which named this pair as "the global
   ordering primitive the schema currently lacks"), [ADR 328](328-machine-credential.md) (which made
@@ -48,8 +50,8 @@ enrollment CLI, all of which remain ADR 325 increment 3.
 
 ## Decision
 
-**1. The `nodes` table exists from this increment, holding exactly one self-minted local row — and
-this amends ADR 328 decisions 7 and 1.**
+**1. The `nodes` table exists from this increment, holding one self-minted local row per team —
+and this amends ADR 328 decision 7.**
 
 ADR 328 §7 says a single-machine team's `nodes` table "is empty"; §1 says `origin_node` **is** a
 `nodes` row id. Held together literally, they mean today's daemon has no legal value to stamp, and
@@ -59,11 +61,23 @@ permanent hole in the sequence and **restamping an append-only log**, which is t
 this system must never perform. The contradiction is resolved now, in the increment that would
 otherwise inherit it.
 
-So: migration v47 creates `nodes` in the full ADR 328 shape with `credential_hash` **nullable**,
-and inserts one row for this daemon if none exists — ULID `id`, `label` from the hostname,
-`enrolled_at` and `credential_hash` NULL. Enrollment in increment 3 **adopts** that row: it writes
-the credential hash and `enrolled_at` onto it. It does not create a second one, and it does not
-touch a single `origin_node` stamp.
+So: migration v47 creates `nodes` in ADR 328's shape with three departures named in §Consequences,
+of which the relevant one here is that `credential_hash` is **nullable**. It inserts one row per
+team this daemon hosts, if absent — ULID `id`, the team's `team_id`, `label` from the hostname,
+`enrolled_at` and `credential_hash` NULL. Enrollment in increment 3 **adopts** the row for the
+team being enrolled: it writes the credential hash and `enrolled_at` onto it. It does not create a
+second one, and it does not touch a single `origin_node` stamp.
+
+**The row is per (daemon, team), not per daemon** — ADR 328 §1 put `team_id` on the node row and
+that is correct as written, needing no further amendment. Federation is per-team by ADR 325's
+topology: *one team, one hub authority*. A daemon hosting two teams syncs to two hubs, is admitted
+separately at each, and must be separately revocable at each — so it holds two node identities and
+two independent `origin_seq` streams. `origin_node` therefore names a machine-*team*, and
+`next_seq` is per node row, which is per (machine, team). Naming a bare machine would mean one
+identity spanning two hubs that cannot see each other, which is not an identity any authority
+could authenticate. This is the same shape ADR 328 §Consequences already accepted when it noted a
+re-enrolled machine becomes two origins: node identity is per-enrollment, and enrollment is
+per-team.
 
 This is the principle ADR 328 §5 already established, applied one step earlier. That decision made
 the node id a ULID on the row and explicitly *not* derived from the credential, so that identity
@@ -76,23 +90,38 @@ single-machine team "its daemon is its own hub". Origin and authenticating hub a
 process, so a locally minted id is a hub-minted id — the degenerate case ADR 325 defined, taken at
 its word rather than treated as an exception to it.
 
-**What genuinely changes, and is not buried:** at enrollment a joining daemon **presents** an
-existing `origin_node` id rather than receiving a fresh one. The origin-id namespace stops being
-hub-controlled. ADR 328 §1 rejected sender-chosen provenance, and this is a real, if narrow,
-step toward it — narrow because the hub still authenticates the *credential* and still owns the
-binding of credential to origin; what it no longer owns is the choice of identifier. A hostile
-joiner presenting another node's id becomes a case that must be explicitly refused, where under
-328 as written it could not arise. The refusal is the guarded CAS that ADR is already built on:
-`INSERT … WHERE NOT EXISTS(id bound to a different credential)`, `changes === 0` is a refusal, and
-it is the same helper §Consequences of 328 already asked the build to extract. ULID collision
-between honest nodes is not a practical risk; deliberate collision is, and it is checked rather
-than assumed.
+**What changes at enrollment, and why it does not soften §1:** a joining daemon **presents** an
+existing `origin_node` id rather than receiving a fresh one. This is a change of *who allocates the
+identifier*, not of who vouches for it, and §1's actual content is the latter. Its words are
+"an event's origin is a fact the hub authenticated at ingest, not a string the sender chose" — and
+under this decision the hub still authenticates: it verifies the `msnode_` credential and it writes
+the credential→origin binding itself, under the guarded CAS, refusing an id already bound to a
+different credential. What a sender proposes at first sight is not what a sender chose, because
+the proposal only becomes an origin once the hub has bound it and can refuse to. §1 stands; a
+later reader should not cite this ADR as the precedent that softened it.
 
-**2. `origin_seq` is a counter on the node row, incremented inside the writing transaction.**
-`nodes.next_seq INTEGER NOT NULL DEFAULT 0`. `insertMessage` increments it and reads the new value
-in the same transaction as the row insert. SQLite's single-writer lock makes the result monotone
-and gapless by construction — there is no window in which two writers can read the same value,
-and no separate store that can drift from the log it numbers.
+The residual, priced honestly: after the CAS eliminates every dishonest joiner, what remains is
+ULID collision between honest nodes — 80 bits of entropy per row, which is nothing. The real cost
+is one refusal path that must exist where under 328 as written it could not arise, and it is the
+same guarded-write helper 328's §Consequences already asked the build to extract. That is a
+checklist item, not a weakening.
+
+**2. `origin_seq` is a counter on the node row, and `insertMessage` opens the transaction that
+increments it.** `nodes.next_seq INTEGER NOT NULL DEFAULT 0`. The increment, the read of the new
+value, and the message insert are one atomic unit.
+
+**`insertMessage` must open that transaction itself** — it cannot inherit one, because today there
+is none to inherit. Its sole production caller is `protocol/route.ts:330` and there is no
+`db.transaction` anywhere on that path; `packages/server/src/protocol/` contains none at all.
+Absent this, the increment and the insert autocommit separately, and any throw between them — a
+`UNIQUE` violation on a replayed envelope id is the realistic one — burns a sequence number and
+leaves precisely the hole this decision exists to prevent. So `insertMessage` wraps both in
+`db.transaction`, which better-sqlite3 nests as a `SAVEPOINT` when a caller already has one open,
+making it a no-op for future callers that do their own transaction management.
+
+With that, SQLite's single-writer lock makes the result monotone and gapless by construction:
+there is no window in which two writers read the same value, no separate store that can drift from
+the log it numbers, and no failure that advances the counter without producing the row it numbers.
 
 The two rejected homes are in §Alternatives. The property worth naming here is *gapless*, not
 merely increasing: a puller detecting holes needs to know that the absence of seq 7 means seq 7 is
@@ -155,10 +184,21 @@ derivation with an origin would assert that the derivation is itself an event.
 
 ## Consequences
 
-- **The origin-id namespace is no longer hub-controlled.** Stated in §Decision 1 rather than here
-  because it is a modification to ADR 328 §1's argument, not a side effect of it. The mitigation
-  is a guarded CAS at enrollment; the residual risk is that a hub's origin ids now come from its
-  joiners, so a node id is unique-by-ULID rather than unique-by-construction.
+- **Origin ids are allocated by joiners, bound by the hub.** Argued in §Decision 1 rather than
+  here, because it is a claim about what ADR 328 §1 means and not a side effect of this one. The
+  operational residue: a node id is unique-by-ULID rather than unique-by-construction, and
+  increment 3 owes one refusal path for an id already bound to a different credential.
+- **`nodes` departs from ADR 328 §1's stated shape in three ways**, all of them here rather than
+  discovered in the diff: `next_seq` is added (§Decision 2), `credential_hash` is nullable
+  (§Decision 1), and `enrolled_at` is nullable for the same reason. `enrolled_by`, `revoked_at`,
+  and `last_seen_at` are created as 328 specified and stay unused until increment 3.
+- **A future `messages` rebuild must carry the new columns.** Migrations v9 and v31
+  (`migrations.ts:79`, `:300`) rebuild the table with `INSERT INTO messages_new SELECT * FROM
+  messages` — positional, and correct only while the column lists match. SQLite cannot `ALTER` a
+  `CHECK` in place, so the next act-vocabulary change will rebuild again, and that rebuild must
+  include `origin_node` and `origin_seq` in `messages_new` or silently drop every stamp. This is
+  the standing hazard of the `SELECT *` rebuild pattern; naming it here is cheaper than
+  rediscovering it.
 - **ADR 328 §7's promise is narrowed but not broken.** The `nodes` table is no longer empty on a
   single-machine team. What §7 actually promised operationally — no enrollment ceremony, no
   `msnode_` minted, no route changes, nothing new to run — all still holds. A reader of 328 should
@@ -168,12 +208,13 @@ derivation with an origin would assert that the derivation is itself an event.
   than creating both at once under an enrollment flow. The cost is that `credential_hash` is
   nullable, so "enrolled" is a state to check (`credential_hash IS NOT NULL`) rather than a state
   guaranteed by the row's existence.
-- **Every message write now touches two tables.** `insertMessage` updates `nodes` and inserts into
-  `messages`. Both are already inside the caller's transaction and the update is a single-row
-  primary-key write, so the cost is small — but the log's write path is no longer append-only in
-  the literal sense, and a future writer that inserts a message outside a transaction would break
-  gaplessness rather than merely being slow. The single-insert-path property is what keeps this
-  safe, and it is now load-bearing rather than incidental.
+- **Every message write now touches two tables, inside a transaction it opens itself.**
+  `insertMessage` updates `nodes` and inserts into `messages`; the update is a single-row
+  primary-key write, so the cost is a savepoint on a path that previously had none. Two things
+  follow. The log's write path is no longer append-only in the literal sense. And the
+  single-insert-path property — one production caller, one function — stops being incidental and
+  becomes load-bearing: a second insert path that skipped `insertMessage` would break gaplessness
+  rather than merely duplicating logic.
 - **The migration is a rewind-and-replay case.** Per the note migration v31 left, the migration
   tests rewind `schema_version` and replay the tail, so v47's backfill must be idempotent under
   replay — hence guarded `ALTER`s and an insert-if-absent for the local node row, not a bare
@@ -190,14 +231,19 @@ derivation with an origin would assert that the derivation is itself an event.
   the difference is lag with no inference. Before then the stamps are inert but observable, which
   is the point of landing them a slice early — a substrate that has been writing correct values
   for a while is a better foundation than one whose first real use is also its first test.
-- **Eval:** four pinned cases. **(i)** *Gaplessness under concurrency* — N concurrent
+- **Eval:** five pinned cases. **(i)** *Gaplessness under concurrency* — N concurrent
   `insertMessage` calls yield exactly the sequence 1..N for this node with no duplicates and no
   holes (baseline: a read-then-write counter outside the transaction, which duplicates under the
-  same interleavings — the 2026-08-01 double-claim defect's shape, third instance). **(ii)**
-  *Monotone across restart* — the counter resumes past its pre-restart maximum, since it is a
-  column and not process state. **(iii)** *Backfill is a gapless prefix* — after v47 on a
-  populated DB, `origin_seq` over existing rows is exactly 1..count in `(ts, id)` order and
-  `next_seq` is count+1. **(iv)** *No caller-supplied origin* — an envelope carrying `origin_node`
+  same interleavings — the 2026-08-01 double-claim defect's shape, third instance). **(ii)** *A
+  failed insert burns no number* — force the `messages` insert to throw after the increment (a
+  duplicate envelope id does it), then assert `next_seq` is unchanged and the sequence has no
+  hole. This is the falsifier for §Decision 2's transaction, and it is deliberately *not* case
+  (i): (i) tests concurrency, this tests failure, and the premise that made the transaction
+  necessary — that no caller supplies one — was false in this ADR's first draft and caught in
+  review. **(iii)** *Monotone across restart* — the counter resumes past its pre-restart maximum,
+  since it is a column and not process state. **(iv)** *Backfill is a gapless prefix* — after v47
+  on a populated DB, `origin_seq` over existing rows is exactly 1..count in `(ts, id)` order and
+  `next_seq` is count+1. **(v)** *No caller-supplied origin* — an envelope carrying `origin_node`
   or `origin_seq` fields has them ignored, the same falsifier `from_provenance` warrants.
   Migration rewind-and-replay is covered by the existing migration test harness rather than a new
   case.
