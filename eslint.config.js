@@ -11,7 +11,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', 'npm-reserve/**', 'docs/**'],
+    ignores: ['**/dist/**', '**/dist-web/**', '**/node_modules/**', '**/coverage/**', 'npm-reserve/**', 'docs/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -22,7 +22,7 @@ export default tseslint.config(
     // `window`/`document`, and TanStack owns its import shape), so `globals.node`, `import/order`'s
     // builtin-first grouping and `no-default-export` are the wrong rules there. It keeps the
     // universal baselines above (js + typescript-eslint recommended) and gains its own block below.
-    ignores: ['packages/web/**'],
+    ignores: ['packages/web/**', 'packages/whiteboard/web/**'],
     languageOptions: {
       globals: { ...globals.node },
     },
@@ -108,7 +108,7 @@ export default tseslint.config(
     //
     // `react-hooks` rides along because the same files carry the office's rAF loops and subscription
     // effects, where a missing dep is a stale-closure bug that no test here would catch.
-    files: ['packages/web/**/*.{ts,tsx}'],
+    files: ['packages/web/**/*.{ts,tsx}', 'packages/whiteboard/web/**/*.{ts,tsx}'],
     plugins: { 'jsx-a11y': jsxA11y, 'react-hooks': reactHooks },
     languageOptions: {
       globals: { ...globals.browser },

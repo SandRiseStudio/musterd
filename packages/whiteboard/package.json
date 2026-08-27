@@ -1,0 +1,45 @@
+{
+  "name": "agent-whiteboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone shared whiteboard for human+agent brainstorming: provider-agnostic port, tldraw adapter, sync service, and its own whiteboard_* MCP server (ADR 330). Deliberately imports nothing from @musterd/* \u2014 extractable to its own repository at any time.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "agent-whiteboard-mcp": "./dist/mcp/index.js",
+    "agent-whiteboard-service": "./dist/service.js"
+  },
+  "files": [
+    "dist",
+    "dist-web",
+    "SKILL.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && vite build",
+    "dev:service": "tsx src/service.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "@tldraw/store": "4.5.9",
+    "@tldraw/sync": "4.5.9",
+    "@tldraw/sync-core": "4.5.9",
+    "@tldraw/utils": "4.5.9",
+    "ws": "^8.18.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "6.0.3",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "tldraw": "4.5.9",
+    "vite": "8.1.0"
+  }
+}
