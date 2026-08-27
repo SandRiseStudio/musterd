@@ -6,6 +6,10 @@ One enforced git loop (ADR 106): branch from fresh origin/main → PR → `gh pr
 
 Branch `feat/`|`fix/`|`docs/` from fresh `origin/main`; commits are throwaway (squash-merge). Fast local smoke only — CI is the authority. `gh pr create` → `gh pr merge --squash --auto --delete-branch`, walk away. Sync a stale branch by `git rebase origin/main` + `git push --force-with-lease`; never `merge main`, never bare `--force`. Required checks on main: `gates` + `Cursor Bugbot`; linear history; squash-only.
 
+## A PR's review count is not this team's review record
+
+Seat reviews are musterd acts, so a fully-reviewed PR routinely shows **0 reviews and 0 comments** on GitHub. Do not read an empty forge as an unreviewed PR, and post substantive reviews to both stores with each pointing at the other — see [the ledger and the forge](ledger-and-forge.md).
+
 ## Bugbot no-show (2026-07-08, PR #170, intermittent; falsify: check-runs list on a stalled PR)
 
 Cursor Bugbot can silently never register its check-run (2026-07-08, PR #170; intermittent — #167 minutes earlier ran normally): `gates` green for 20+ minutes while auto-merge waits on a check that does not exist, and nothing alerts. If a PR sits OPEN with `gates` SUCCESS and no `Cursor Bugbot` entry in `gh api repos/…/commits/<sha>/check-runs`, comment `bugbot run` on the PR — it registers and completes within ~90s (neutral conclusion = clean, auto-merge fires).
