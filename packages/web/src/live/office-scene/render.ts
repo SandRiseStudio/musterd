@@ -3591,12 +3591,15 @@ function deskWedge(
   // Face toward the viewer: iso depth grows along +lx+ly, so flip the facing axis if it points away.
   const away: [number, number] = f[0] + f[1] > 0 ? [-f[0], -f[1]] : [f[0], f[1]];
   const O = project(ix, iy, fit);
-  // Screen-space iso basis vectors, one logical unit each — derived via project() so the wedge
-  // shares the room's exact axonometry without re-exporting KX/KY.
-  const pu = { x: project(ix + p[0], iy + p[1], fit).x - O.x, y: project(ix + p[0], iy + p[1], fit).y - O.y };
-  const bu = {
-    x: project(ix + away[0], iy + away[1], fit).x - O.x,
-    y: project(ix + away[0], iy + away[1], fit).y - O.y,
+  // A screen-space iso basis vector for one logical direction, normalized — derived via project()
+  // so the wedge shares the room's exact axonometry without re-exporting KX/KY. Only the direction
+  // is ever wanted here (the plate is sized in screen px, not logical units), so it normalizes at
+  // the source rather than handing back a length nothing reads.
+  const unit = (d: [number, number]): { x: number; y: number } => {
+    const q = project(ix + d[0], iy + d[1], fit);
+    const v = { x: q.x - O.x, y: q.y - O.y };
+    const m = Math.hypot(v.x, v.y);
+    return { x: v.x / m, y: v.y / m };
   };
   const deskY = O.y - DESK_UP * fit.scale;
 
@@ -3619,14 +3622,10 @@ function deskWedge(
   // axes. `sEff` clamps the world scale so depth still reads without the type collapsing.
   const sEff = Math.max(0.85, Math.min(1.15, fit.scale));
   const puN = (() => {
-    const m = Math.hypot(pu.x, pu.y);
-    const u = { x: pu.x / m, y: pu.y / m };
+    const u = unit(p);
     return u.x < 0 ? { x: -u.x, y: -u.y } : u; // never paint the engraving upside down
   })();
-  const buN = (() => {
-    const m = Math.hypot(bu.x, bu.y);
-    return { x: bu.x / m, y: bu.y / m };
-  })();
+  const buN = unit(away);
   const len = Math.max(34, nameW + 14); // screen px along the plate
   const high = px + (sub ? px : 0) + 8 * sEff; // face height, screen px
   const lean = 6 * sEff; // how far the top edge leans back, screen px
