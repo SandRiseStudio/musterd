@@ -2873,9 +2873,12 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/nodes/join') {
-        const team = requireTeam(ctx.db, slug);
         const body = NodeJoinRequestSchema.parse(await readJson(req));
         const credential = newSecret(TOKEN_PREFIXES.node);
+        // An unknown slug must fail as ONE refusal with everything else (ryder, 2026-08-27). This
+        // route is unauthenticated by design, so a 404-before-the-code-is-checked answers "does
+        // team X exist on this hub?" to anyone who asks — a free team-slug oracle on a public bind.
+        const team = getTeamBySlug(ctx.db, slug);
 
         // Consume-then-bind is ONE transaction: a consumed invite whose bind then fails would burn
         // the operator's code and enroll nobody, which is the worst of both outcomes.
@@ -2885,10 +2888,22 @@ export async function handleHttp(
         // so a mistyped node id would silently cost an invite and the operator would have to mint
         // another to discover why. Throwing is what rolls the consumption back with the bind.
         const bound = ((): { id: string } | null => {
+          if (!team) return null;
           try {
             return ctx.db.transaction(() => {
-              if (!consumeInvite(ctx.db, team.id, body.code, body.node_id)) throw ENROLL_REFUSED;
-              const b = bindNode(ctx.db, team.id, body.node_id, body.label, credential, 'invite');
+              // `enrolled_by` carries the invite's row id, not the literal 'invite' (ryder,
+              // 2026-08-27): it makes node.invited → node.enrolled a joinable chain, so an auditor
+              // can say WHICH code admitted a machine and who minted it.
+              const invite = consumeInvite(ctx.db, team.id, body.code, body.node_id);
+              if (!invite) throw ENROLL_REFUSED;
+              const b = bindNode(
+                ctx.db,
+                team.id,
+                body.node_id,
+                body.label,
+                credential,
+                `invite:${invite.id}`,
+              );
               if (!b) throw ENROLL_REFUSED;
               return b;
             })();
@@ -2898,15 +2913,19 @@ export async function handleHttp(
           }
         })();
 
-        if (!bound) {
-          appendAudit(ctx.db, team.id, {
-            actor: null,
-            action: 'node.enrollment_refused',
-            target: body.label,
-            result: 'deny',
-            // The node id is the operator's own diagnostic; the code never appears, hashed or not.
-            detail: { node_id: body.node_id },
-          });
+        // `!team` is redundant at runtime (a missing team already yields `bound === null`) but it
+        // is what narrows the type for the audit write below — and it keeps the two conditions that
+        // mean "refuse" in one place.
+        if (!bound || !team) {
+          if (team)
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'node.enrollment_refused',
+              target: body.label,
+              result: 'deny',
+              // The node id is the operator's own diagnostic; the code never appears, hashed or not.
+              detail: { node_id: body.node_id },
+            });
           // Deliberately one refusal for every reason — spent code, unknown code, expired code,
           // wrong team, id already bound, id belongs to the hub. Telling an unauthenticated caller
           // WHICH guess was close is how a short-lived code becomes searchable.

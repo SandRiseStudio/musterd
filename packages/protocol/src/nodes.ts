@@ -28,9 +28,14 @@ export type NodeInviteMint = z.infer<typeof NodeInviteMintSchema>;
  * different credential. What a sender proposes is not what a sender chose.
  */
 export const NodeJoinRequestSchema = z.object({
-  code: z.string().min(1),
-  node_id: z.string().min(1),
-  label: z.string().min(1),
+  // Bounded, not merely non-empty (ryder, 2026-08-27). This route is unauthenticated by design, so
+  // an unbounded `label` lets any caller write megabytes into `nodes` and the audit ledger on a
+  // REFUSED enrollment — the refusal path is the one an attacker can drive at will. A node id is a
+  // ULID (26 chars); the ceiling is loose enough for a foreign id scheme and tight enough to be
+  // uninteresting as a write primitive.
+  code: z.string().min(1).max(256),
+  node_id: z.string().min(1).max(128),
+  label: z.string().min(1).max(200),
 });
 export type NodeJoinRequest = z.infer<typeof NodeJoinRequestSchema>;
 

@@ -186,6 +186,43 @@ describe('node enrollment routes (ADR 328)', () => {
     expect(retry.json.node_id).toBe('node-free');
   });
 
+  it('does not answer whether an unknown team exists — same 409 as every refusal', async () => {
+    // The route is unauthenticated by design, so a 404 for an unknown slug is a free team-slug
+    // oracle on a public bind (ryder, 2026-08-27). Both shapes must be indistinguishable.
+    const unknown = await request('POST', '/teams/no-such-team/nodes/join', {
+      code: 'msinv_x',
+      node_id: 'node-x',
+      label: 'l',
+    });
+    const known = await request('POST', '/teams/bravo/nodes/join', {
+      code: 'msinv_x',
+      node_id: 'node-x',
+      label: 'l',
+    });
+    expect(unknown.status).toBe(409);
+    expect(known.status).toBe(409);
+    expect(unknown.json).toEqual(known.json);
+  });
+
+  it('records WHICH invite admitted a node, so the audit chain joins', async () => {
+    const code = await invite();
+    await request('POST', '/teams/bravo/nodes/join', {
+      code,
+      node_id: 'node-remote',
+      label: 'laptop',
+    });
+
+    const team = getTeamBySlug(server.db, 'bravo')!;
+    const enrolledBy = server.db
+      .prepare<[string], { enrolled_by: string }>('SELECT enrolled_by FROM nodes WHERE id = ?')
+      .get('node-remote')!.enrolled_by;
+    const inviteId = server.db
+      .prepare<[string], { id: string }>('SELECT id FROM node_invites WHERE team_id = ?')
+      .get(team.id)!.id;
+    // Not the literal string 'invite' — the row id, so node.invited → node.enrolled is joinable.
+    expect(enrolledBy).toBe(`invite:${inviteId}`);
+  });
+
   it("refuses a joiner presenting the hub's own node id", async () => {
     // Make the hub mint its own local row the way a live daemon does — by writing to its log.
     const team = getTeamBySlug(server.db, 'bravo')!;

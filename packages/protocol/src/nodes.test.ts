@@ -28,6 +28,16 @@ describe('the node enrollment vocabulary (ADR 328)', () => {
     ).toBe('01M');
   });
 
+  it('bounds every field a joiner can send — the refusal path is attacker-driven', () => {
+    // Unauthenticated route: an unbounded label is a write primitive into `nodes` and the audit
+    // ledger, usable on refusals, which an attacker can drive at will.
+    const ok = { code: 'msinv_x', node_id: '01M', label: 'laptop' };
+    expect(() => NodeJoinRequestSchema.parse({ ...ok, label: 'x'.repeat(201) })).toThrow();
+    expect(() => NodeJoinRequestSchema.parse({ ...ok, node_id: 'x'.repeat(129) })).toThrow();
+    expect(() => NodeJoinRequestSchema.parse({ ...ok, code: 'x'.repeat(257) })).toThrow();
+    expect(NodeJoinRequestSchema.parse({ ...ok, label: 'x'.repeat(200) }).label.length).toBe(200);
+  });
+
   it('carries the minted credential on the join response, once', () => {
     const parsed = NodeJoinResponseSchema.parse({
       node_credential: 'msnode_abc',
