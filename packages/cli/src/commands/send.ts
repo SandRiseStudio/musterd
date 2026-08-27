@@ -17,7 +17,7 @@ import { flagStr, parseMeta, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { readBindingAt } from '../config.js';
 import { CliError } from '../errors.js';
-import { openActionNeeded, renderMessageRow } from '../render/rows.js';
+import { dischargedIds, openActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { bindThread } from '../session/continuity.js';
 import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
@@ -31,7 +31,7 @@ import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
 async function openRequests(http: HttpClient, team: string, me: string): Promise<Envelope[]> {
   try {
     const res = await http.inbox(team, { unread: false });
-    const open = openActionNeeded(res.messages, me, res.answered ?? []).filter(
+    const open = openActionNeeded(res.messages, me, res.answered ?? [], dischargedIds(res)).filter(
       (m) =>
         m.act === 'request_help' || m.act === 'handoff' || m.act === 'challenge' || m.act === 'ask',
     );

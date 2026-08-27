@@ -15,7 +15,7 @@ import { HttpClient } from '../client.js';
 import { findBinding, findWorkspaceSpec, requireUsableBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { HARNESSES } from '../onboard/harnesses/index.js';
-import { openActionNeeded } from '../render/rows.js';
+import { dischargedIds, openActionNeeded } from '../render/rows.js';
 import { clock, theme } from '../render/theme.js';
 import { bindThread, pruneOnDisk, readRegistry } from '../session/continuity.js';
 import { sessionDigest } from '../session/digest.js';
@@ -187,7 +187,12 @@ async function defaultOrientationFetcher(
     http.next(team),
     http.getMemoryEnvelope(team).catch(() => undefined), // absent memory is a normal state
   ]);
-  const waiting = openActionNeeded(inboxRes.messages, seat, inboxRes.answered ?? []).map((m) => ({
+  const waiting = openActionNeeded(
+    inboxRes.messages,
+    seat,
+    inboxRes.answered ?? [],
+    dischargedIds(inboxRes),
+  ).map((m) => ({
     act: m.act,
     from: m.from,
     id: m.id,
@@ -287,7 +292,12 @@ async function defaultStatuslineFetcher(
     http.inbox(team, { unread: true, limit: STATUSLINE_INBOX_LIMIT }),
     http.next(team),
   ]);
-  const waiting = openActionNeeded(inboxRes.messages, seat, inboxRes.answered ?? []);
+  const waiting = openActionNeeded(
+    inboxRes.messages,
+    seat,
+    inboxRes.answered ?? [],
+    dischargedIds(inboxRes),
+  );
   return {
     seat,
     team,

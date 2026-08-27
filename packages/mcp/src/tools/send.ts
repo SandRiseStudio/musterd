@@ -84,7 +84,7 @@ const ANSWERABLE = new Set<Act>(['request_help', 'handoff', 'challenge', 'ask'])
  */
 async function openAnswerable(client: MusterdClient, me: string): Promise<Envelope[]> {
   try {
-    const { messages, answered } = await client.fetchInbox(false);
+    const { messages, answered, discharged } = await client.fetchInbox(false);
     const resolved = new Set<string>();
     for (const m of messages) if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
     // An act I already replied to is not open, and only the server can tell me so: the inbox
@@ -94,11 +94,22 @@ async function openAnswerable(client: MusterdClient, me: string): Promise<Envelo
     // asks and could push the live one out of the six it shows. Absent on an older daemon ⇒ empty ⇒
     // exactly the previous behaviour.
     const alreadyAnswered = new Set(answered ?? []);
+    // ADR 254: and an eligible-set act a CO-ELIGIBLE seat already took is not open either — the
+    // discharging accept is a DM to the asker, so this seat is not a party to it and cannot fold it
+    // out for itself. Without this an un-named `accept` could auto-target an act someone else had
+    // already answered, which is the one case where guessing wrong writes a duplicate verdict into
+    // the ledger. Absent on an older daemon ⇒ empty ⇒ exactly the previous behaviour.
+    const stoodDown = new Set((discharged ?? []).map((d) => d.id));
     const open = messages.filter((m) => {
       if (!ANSWERABLE.has(m.act)) return false;
       const directed =
         m.act === 'request_help' || m.act === 'ask' || (m.to.kind === 'member' && m.to.name === me);
-      return directed && !resolved.has(m.thread ?? m.id) && !alreadyAnswered.has(m.id);
+      return (
+        directed &&
+        !resolved.has(m.thread ?? m.id) &&
+        !alreadyAnswered.has(m.id) &&
+        !stoodDown.has(m.id)
+      );
     });
     return open.sort((a, b) => b.ts - a.ts);
   } catch {

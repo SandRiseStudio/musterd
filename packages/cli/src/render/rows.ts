@@ -466,20 +466,44 @@ function threadKey(env: Envelope): string {
  * alone — and the live ledger holds 199 accepts against 9 resolves, so an answered ask counted as
  * waiting forever, in the `⚑ N requests waiting for you` banner, in the notification Loud set, and
  * in the lane-acceptance candidate list. Omitted ⇒ the previous behaviour exactly.
+ *
+ * `discharged` is the ADR 254 counterpart: the server's list of eligible-set act ids some OTHER seat
+ * already answered. It has to come from outside for a stronger reason than `answered` does — the
+ * discharging accept is a DM to the asker, so a second eligible seat is not a party to it and
+ * need-to-know scoping hides it outright. Without this the count disagreed with the row beside it:
+ * {@link renderMessageRow} has printed `↳ answered by X — you no longer owe this` since ADR 254 while
+ * the same act kept counting as waiting. Most acts on this team use eligible sets, so this was a
+ * standing overcount, not an edge case. Omitted ⇒ the previous behaviour exactly.
  */
 export function openActionNeeded(
   messages: Envelope[],
   me: string,
   answered: Iterable<string> = [],
+  discharged: Iterable<string> = [],
 ): Envelope[] {
   const resolved = new Set<string>();
   for (const m of messages) {
     if (m.act === 'resolve' && m.thread) resolved.add(m.thread);
   }
   const alreadyAnswered = new Set(answered);
+  const stoodDown = new Set(discharged);
   return messages.filter(
-    (m) => isActionNeeded(m, me) && !resolved.has(threadKey(m)) && !alreadyAnswered.has(m.id),
+    (m) =>
+      isActionNeeded(m, me) &&
+      !resolved.has(threadKey(m)) &&
+      !alreadyAnswered.has(m.id) &&
+      !stoodDown.has(m.id),
   );
+}
+
+/**
+ * The `discharged` half of an inbox reply as bare ids, for {@link openActionNeeded}. One place, so a
+ * caller cannot spell the `?? []` fallback differently and silently reinstate the overcount on an
+ * older daemon. Takes the whole reply rather than the field so the call site reads as "this inbox's
+ * stand-downs" and there is nothing to forget to pass.
+ */
+export function dischargedIds(res: { discharged?: { id: string }[] }): string[] {
+  return (res.discharged ?? []).map((d) => d.id);
 }
 
 /**

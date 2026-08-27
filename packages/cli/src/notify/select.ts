@@ -1,5 +1,5 @@
 import type { Availability, Envelope } from '@musterd/protocol';
-import { openActionNeeded } from '../render/rows.js';
+import { dischargedIds, openActionNeeded } from '../render/rows.js';
 import type { NotifyItem } from './os.js';
 
 /** An envelope carrying the `urgent` breakthrough flag (SPEC A.6a; ADR 044). */
@@ -24,11 +24,12 @@ export function pendingToNotify(
   seen: Set<string>,
   availability?: Availability | null,
   answered: Iterable<string> = [],
+  discharged: Iterable<string> = [],
 ): Envelope[] {
   const status = availability?.status ?? 'available';
   // away holds the Loud set too; available/dnd pass it. (dnd "holds quiet" — quiet was never a
   // candidate here, since notify only ever considers the Loud/directed set + urgent.)
-  const loud = status === 'away' ? [] : openActionNeeded(messages, me, answered);
+  const loud = status === 'away' ? [] : openActionNeeded(messages, me, answered, discharged);
   const urgent = messages.filter(isUrgent); // breakthrough at every tier
   const byId = new Map<string, Envelope>();
   for (const env of [...loud, ...urgent]) byId.set(env.id, env);
@@ -76,8 +77,14 @@ export interface NotifyDeps {
   me: string;
   /** The current unread messages (one inbox read off the durable cursor), plus the server's list
    *  of ask ids this seat has already replied to — without it an answered ask keeps firing an OS
-   *  notification, because the inbox never contains the reply that discharged it. */
-  inbox: () => Promise<{ messages: Envelope[]; answered?: string[] }>;
+   *  notification, because the inbox never contains the reply that discharged it. `discharged` is
+   *  the ADR 254 counterpart for an eligible-set act a CO-ELIGIBLE seat took: notifying a human
+   *  about work someone else already did is the same defect one seat over. */
+  inbox: () => Promise<{
+    messages: Envelope[];
+    answered?: string[];
+    discharged?: { id: string }[];
+  }>;
   /** Is the human reachable in-stream right now (a live `inbox --watch`/app presence)? */
   isReachable: () => Promise<boolean>;
   /** The recipient's self-declared availability, for tiering (null = implicit-available; ADR 044). */
@@ -96,7 +103,14 @@ export interface NotifyDeps {
 export async function pollOnce(deps: NotifyDeps, seen: Set<string>): Promise<NotifyItem[]> {
   const availability = await deps.availability();
   const box = await deps.inbox();
-  const pending = pendingToNotify(box.messages, deps.me, seen, availability, box.answered ?? []);
+  const pending = pendingToNotify(
+    box.messages,
+    deps.me,
+    seen,
+    availability,
+    box.answered ?? [],
+    dischargedIds(box),
+  );
   if (pending.length === 0) return [];
   // One reachability read for the whole batch — the posture is the human's, not per-message.
   const reachable = await deps.isReachable();
