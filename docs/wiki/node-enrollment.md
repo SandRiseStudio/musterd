@@ -57,7 +57,9 @@ as B. It reports success, and the joiner can then authenticate as team B's node.
 Neither is reachable by an outsider (the invite is admin-minted, single-use, 15 minutes) — both are
 reachable by the *invitee*, which is the party a CAS exists to bound.
 
-The shipped guard is `ON CONFLICT(id) DO NOTHING`: a legitimate joiner's id is fresh to the hub by
+Both drafts are an instance of [the boundary-injection trap](boundary-injection.md)'s sibling failure:
+the guard was written against the cases its author could enumerate, and each new case looked like the
+last one patched. The shipped guard is `ON CONFLICT(id) DO NOTHING`: a legitimate joiner's id is fresh to the hub by
 construction, so **any** id the hub already knows is a refusal. Falsify: on a hub hosting two teams,
 `musterd node list` each, take either row shown `local`, and try to join presenting that id; a 409
 means the guard holds, a 200 means it does not (`store/nodes.bind.test.ts` cases 3b and 3d — they

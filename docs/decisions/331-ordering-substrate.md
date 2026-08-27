@@ -230,12 +230,26 @@ derivation with an origin would assert that the derivation is itself an event.
   Confirmed by a two-daemon run: the joiner presented `01M12QH1KG…`, minted by v47 before any
   credential existed, and the hub bound exactly that id; rotation left it unchanged.
 
-  One thing the Experiment did not anticipate, found while building the guard: `credential_hash IS
-  NULL` **alone** would have admitted the hub's *own* node row, which is permanently unbound because
-  a hub never enrolls with itself. A joiner presenting that id would have bound its credential to
-  the hub's origin and thereafter stamped events as the hub. Increment 3a therefore refuses any id
-  in `local_node`. Recorded here because it is a hazard of this decision's shape — the joiner
-  proposing the identifier — and not of the code that implemented it.
+  **The bind rule this decision implies, stated once: the hub refuses any node id it already knows.**
+  Because the joiner proposes the identifier, the hub needs a rule for a proposal that collides with
+  something it holds — and the rule is total, not a list of exceptions. A legitimate joiner's id is
+  fresh to the hub by construction (it is the ULID v47 minted on the joiner's own machine), so a
+  collision is never a case to reconcile: it is an already-enrolled node, the hub's own row for this
+  team, or the hub's own row for another team it hosts. `INSERT … ON CONFLICT(id) DO NOTHING`,
+  `changes === 0` is the refusal.
+
+  This is recorded here rather than in a separate ADR (nick, 2026-08-27) because it is a consequence
+  of *this* decision's shape rather than a new decision: moving allocation to the joiner is what
+  creates the collision case at all. The path to it is worth keeping, because two drafts were wrong
+  and each looked right. `credential_hash IS NULL` **alone** admits the hub's own row, which is
+  permanently unbound because a hub never enrolls with itself — a joiner presenting that id binds to
+  the hub's origin and thereafter stamps events *as* the hub. Adding an exclusion for this team's
+  `local_node` row still leaks: on a hub hosting A and B, a joiner enrolling into A presents B's
+  hub-local id, A's exclusion does not name it, and the upsert writes a foreign credential onto B's
+  origin identity while leaving `team_id` as B (miley, ryder and izzo independently, 2026-08-27, on
+  #1100). Both are reachable only by an invitee, which is exactly the party the CAS bounds. The
+  general lesson, since it will outlive this ADR: **a guard that enumerates what it excludes keeps
+  missing cases** — the property actually required was "the hub has never seen this id".
 - **`nodes` arrives before the credential work that motivated it.** Increment 3 inherits a table
   that already exists and already has a row, which is a smaller and better-tested starting point
   than creating both at once under an enrollment flow. The cost is that `credential_hash` is
