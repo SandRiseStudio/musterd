@@ -9,7 +9,7 @@ import {
 } from '../onboard/declined.js';
 import {
   claudeRefusableSurfaces,
-  removeMusterdStatusline,
+  removeClaudeSurface,
   SURFACE_STATUSLINE,
 } from '../onboard/harnesses/claudeCode.js';
 import { theme } from '../render/theme.js';
@@ -83,8 +83,15 @@ function declineOne(dir: string, name: string): number {
     return 0;
   }
   // Remove as well as record: leaving an installed surface in place while claiming it is refused
-  // would make the tombstone a lie about the state of the folder.
-  if (name === SURFACE_STATUSLINE) removeMusterdStatusline(dir);
+  // would make the tombstone a lie about the state of the folder. Refuse the name outright rather
+  // than record a refusal we cannot carry out — a tombstone for a surface nothing can remove is the
+  // same lie one step removed.
+  if (!removeClaudeSurface(dir, name)) {
+    throw new CliError(
+      `unknown surface: ${name} — \`musterd surface list\` names the ones that can be declined here`,
+      2,
+    );
+  }
   declineSurface(dir, name, process.env['USER']);
   process.stdout.write(
     `${theme.ok(sym.ok)} ${name} declined — musterd will not report it missing here.\n` +

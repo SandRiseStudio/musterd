@@ -66,6 +66,19 @@ inside an amendment is how vocabulary gets invented badly.
    the original date: the date shown back to a user must be when they decided, not when they last
    typed the command.
 
+   Two clauses this rule needs to actually hold, both found in review (ryder, #1089) after the first
+   implementation offered six hook names and removed only the chip:
+
+   - **Every name `surface list` offers is removable.** A name the command accepts but cannot carry
+     out produces the forbidden state above by a different route, so `decline` now refuses a name
+     this build does not own rather than tombstoning it. Recording a refusal we cannot perform is
+     the same lie one step removed.
+   - **The unit is the slot, not the entry.** Two musterd hooks share the Claude Code `PreToolUse`
+     event (the ADR 150 lane gate and the ADR 167 session-message observer), and `<harness>:<slot>`
+     cannot name them apart. So `claude-code:PreToolUse` is listed once and declining it removes
+     both — a slot half-removed would leave the surface firing under a tombstone claiming otherwise.
+     A foreign entry on the same event is never touched; matching is by musterd's own markers.
+
 6. **The override.** `musterd init --refresh-hooks` clears every tombstone in the folder — an
    explicit install command *is* the user asking for these surfaces back — and prints one line per
    resurrection naming the surface, the date it was declined, and how to refuse it again. Routine
@@ -108,6 +121,11 @@ inside an amendment is how vocabulary gets invented badly.
      the declined surface, and every other drift class still reports normally. **One false silence —
      a genuinely stale or missing *undeclined* surface going unreported — falsifies the read rule in
      decision (4).**
+  1b. **The removal half, one sample per refusable name.** For each name `surface list` offers,
+     `surface decline` on a provisioned folder leaves that surface absent from the settings file.
+     **One name that survives its own refusal falsifies decision (5)** — which is exactly how the
+     first implementation failed: the six hook names all tombstoned and none were removed, and the
+     unit test missed it because the statusline is the one surface that *was* removed.
   2. If, after 10 uses of `surface decline`, more than one is followed within a day by
      `surface accept` or a hand-edit of `declined.json`, the vocabulary is being used to mute
      something it should not, and (5)'s remove-and-record coupling is wrong.

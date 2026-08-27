@@ -648,9 +648,42 @@ export function surfaceName(event: string): string {
   return `${CLAUDE_SURFACE_PREFIX}:${event}`;
 }
 
-/** Every surface a user may refuse here, for `musterd surface list`. */
+/**
+ * Every surface a user may refuse here, for `musterd surface list`.
+ *
+ * De-duplicated because a surface is a SLOT, not an entry: two of our `LOCAL_HOOKS` share the
+ * `PreToolUse` event (the ADR 150 lane gate and the ADR 167 session-message observer), and listing
+ * `claude-code:PreToolUse` twice would offer a name whose two rows a user cannot tell apart or
+ * address separately. Declining that one name removes both, which is what `removeClaudeSurface`
+ * does — the slot is the unit the user can actually refuse.
+ */
 export function claudeRefusableSurfaces(): string[] {
-  return [SURFACE_STATUSLINE, ...LOCAL_HOOKS.map((s) => surfaceName(s.event))];
+  return [...new Set([SURFACE_STATUSLINE, ...LOCAL_HOOKS.map((s) => surfaceName(s.event))])];
+}
+
+/**
+ * Remove a refusable surface by name — the other half of ADR 332's `decline`, which promises "one
+ * command, one outcome". Returns false for a name this harness does not own, so the caller can
+ * refuse to record a tombstone for it.
+ *
+ * A tombstone that claims a refusal while the surface sits installed and firing is exactly the lie
+ * the ADR forbids, and that is what shipped: `decline` removed only the statusline while accepting
+ * all six hook names. Every surface `claudeRefusableSurfaces()` offers is removable here.
+ */
+export function removeClaudeSurface(dir: string, name: string): boolean {
+  if (name === SURFACE_STATUSLINE) {
+    removeMusterdStatusline(dir);
+    return true;
+  }
+  // The slot is the unit: drop every musterd entry under this event, which is both PreToolUse hooks
+  // when that is the name. A foreign entry on the same event is never matched — `isMusterdHookFor`
+  // keys on our own markers.
+  const specs = LOCAL_HOOKS.filter((s) => surfaceName(s.event) === name);
+  if (specs.length === 0) return false;
+  dropHook(settingsLocalPath(dir), specs[0]!.event, (m) =>
+    specs.some((s) => isMusterdHookFor(m, s.marker)),
+  );
+  return true;
 }
 
 export function inspectClaudeStatuslineDrift(cwd: string): string[] {
