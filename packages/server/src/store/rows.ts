@@ -118,6 +118,10 @@ export interface MessageRow {
   /** Sender's presence provenance at send time (v21, ADR 131 §4) — server-stamped, never wire-fed;
    *  the wake ledger's ping-pong demotion read. Null: pre-v21 row or no live presence at send. */
   from_provenance: string | null;
+  /** The ADR 331 ordering pair (v47) — this daemon's `nodes` row for the message's team, and the
+   *  per-node gapless counter. Server-stamped inside `insertMessage`'s transaction, never wire-fed. */
+  origin_node: string;
+  origin_seq: number;
   ts: number;
   created_at: number;
 }

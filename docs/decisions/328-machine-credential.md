@@ -217,6 +217,12 @@ starts doing.
   binding is not stale in that way at all — it is a fact the hub wrote itself, under CAS. What it
   can be is *out of date with the human's intent*: a seat whose operator has moved to another laptop
   is bound where it last spoke, which is exactly the case the Experiment below watches.
+- **Amended 2026-08-27 by [ADR 331](331-ordering-substrate.md): Decision §7's "the `nodes` table is
+  empty" no longer holds.** Migration v47 mints a local node row on every team, single-machine ones
+  included, so `(origin_node, origin_seq)` can be stamped from the first message rather than
+  retrofitted when a second machine appears. What §7 actually promised is unchanged and still holds:
+  no enrollment ceremony, no `msnode_` minted, no route changes. Only the emptiness of the table —
+  the incidental way §7 stated that promise — is superseded.
 - **Not in scope:** the sync wire format and its routes (ADR 325 increment 3), the hub storage
   engine, humans-multi-presence (still deferred per ADR 039), and cryptographic per-event
   attestation (the larger half of the keypair upgrade above). Re-binding a seat to a new node *is*
