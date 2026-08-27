@@ -20,6 +20,7 @@ import {
 import { renderBanner } from '../render/rows.js';
 import { paint as pc, theme } from '../render/theme.js';
 import { sym } from '../render/ui.js';
+import { acceptSurface, readDeclined } from './declined.js';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { CANONICAL_SKILL_PATH, establishedHarnesses, writeGuidance } from './guidance.js';
 import type { Harness } from './harness.js';
@@ -190,6 +191,13 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
     );
     return 0;
   }
+  // ADR 332: an explicit `--refresh-hooks` IS the user asking for these surfaces back, so it clears
+  // every tombstone in this folder — but never silently. A surface reappearing with no explanation is
+  // how someone finds the chip returned and has no idea why, which is the same absence-carries-no-
+  // intent defect one direction over. Routine drift checks still honour a refusal; only this does not.
+  const resurrected = readDeclined(dir);
+  for (const t of resurrected) acceptSurface(dir, t.surface);
+
   let refused = 0;
   for (const h of present) {
     const res = h.refreshHooks!.run(dir);
@@ -202,6 +210,13 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
       refused++;
       process.stderr.write(`${theme.warn(sym.warn)} ${w}\n`);
     }
+  }
+  for (const t of resurrected) {
+    process.stdout.write(
+      `${theme.warn('↑')} re-installed ${t.surface}, which was declined ${t.at.slice(0, 10)}` +
+        `${t.by ? ` by ${t.by}` : ''} — ` +
+        `${theme.meta('`musterd surface decline ' + t.surface + '` to refuse it again.')}\n`,
+    );
   }
   return refused > 0 ? 1 : 0;
 }

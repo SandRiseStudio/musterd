@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
+import { isDeclined } from '../declined.js';
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
@@ -239,6 +240,23 @@ export const HOOK_NUDGE_TEXTS = {
     'musterd: finished a unit of work? team_send status_update (one line), then team_inbox_check.',
 } as const;
 
+/**
+ * The shell clause that lets a MACHINE-WIDE hook honour a per-folder refusal (ADR 332).
+ *
+ * The two hooks below live in one global `settings.json` and fire in every folder, so `decline`
+ * cannot enforce itself by removal the way it does for a project-local surface — and a tombstone
+ * whose surface keeps firing is the lie decision (5) forbids. Suppression is the enforcement
+ * instead, and it belongs in the hook because the hook is the only thing that runs per folder.
+ *
+ * A grep, not a `musterd` call: this is on the per-turn path, so it must not spawn a CLI process,
+ * and it must work before `musterd` is on PATH. FAILS OPEN by construction — a missing, unreadable
+ * or malformed `declined.json` makes grep exit non-zero and the hook proceeds, which is the same
+ * bias `readDeclined` takes: never invent a refusal.
+ */
+function declinedGate(surface: string): string {
+  return `grep -q '"${surface}"' "$d/.musterd/declined.json" 2>/dev/null && exit 0; `;
+}
+
 function sessionStartHookCommand(): string {
   // Global self-gating verify-then-orient (ADR 060): exit silently unless this folder carries the
   // committed `musterd:start` primer; else cd in, and if `claude` is on PATH and `mcp get musterd`
@@ -251,6 +269,7 @@ function sessionStartHookCommand(): string {
   // server doesn't make it live until reload).
   return (
     'd="${CLAUDE_PROJECT_DIR:-.}"; test -f "$d/AGENTS.md" && grep -q musterd:start "$d/AGENTS.md" || exit 0; ' +
+    declinedGate(SURFACE_MACHINE_SESSION_START) +
     'cd "$d" 2>/dev/null; ' +
     'if command -v claude >/dev/null 2>&1 && ! claude mcp get musterd >/dev/null 2>&1; then ' +
     'if [ -f "$d/.musterd/workspace.json" ]; then ' +
@@ -286,7 +305,8 @@ function promptSubmitHookCommand(): string {
   // Formerly a hand-pasted recipe (docs/harness-hooks.md); managed here so it drift-checks and
   // epoch-guards like every other musterd hook.
   return (
-    'f="${CLAUDE_PROJECT_DIR:-.}/AGENTS.md"; test -f "$f" && grep -q musterd:start "$f" || exit 0; ' +
+    'd="${CLAUDE_PROJECT_DIR:-.}"; test -f "$d/AGENTS.md" && grep -q musterd:start "$d/AGENTS.md" || exit 0; ' +
+    declinedGate(SURFACE_MACHINE_PROMPT_SUBMIT) +
     `echo '${HOOK_NUDGE_TEXTS.prompt_submit_ritual}'; ` +
     // orient-nudge repeats per turn on the same measured grounds as the label clause above —
     // one-shot session-start asks get skipped; a repeat that a stamp quiets actually lands.
@@ -633,12 +653,96 @@ export function removeMusterdStatusline(dir: string = process.cwd()): void {
  * because a slot written by an older build is present and wrong. Silent about a FOREIGN statusline —
  * that is the user's choice, and reporting a choice as drift trains people to ignore drift.
  */
+/**
+ * The refusable surfaces this harness owns, named `<harness>:<slot>` (ADR 332). The harness prefix
+ * is load-bearing: `statusLine` and `PostToolUse` are unique only inside one harness, and a folder
+ * can be provisioned for several. Exported so the `surface` command offers real names rather than
+ * asking the user to guess a string that only these inspectors would ever match.
+ */
+export const CLAUDE_SURFACE_PREFIX = 'claude-code';
+export const SURFACE_STATUSLINE = `${CLAUDE_SURFACE_PREFIX}:statusLine`;
+
+/**
+ * The two MACHINE-WIDE hooks, named apart from their project-local namesakes (ryder's round-2
+ * REQUIRED on #1089). `claude-code:SessionStart` used to mean both the local session-capture hook
+ * and the global orientation hook, which share that event name across two different files — so
+ * declining it removed the local half and left the global one firing under a tombstone that said
+ * otherwise. One name cannot answer for two surfaces with two lifetimes; these get their own.
+ *
+ * They are refusable but not REMOVABLE: one entry serves every folder on the machine, so deleting
+ * it to satisfy one folder would silently de-provision all the others. `declinedGate` is how the
+ * refusal is honoured instead.
+ */
+export const SURFACE_MACHINE_SESSION_START = `${CLAUDE_SURFACE_PREFIX}:machine:SessionStart`;
+export const SURFACE_MACHINE_PROMPT_SUBMIT = `${CLAUDE_SURFACE_PREFIX}:machine:UserPromptSubmit`;
+const MACHINE_SURFACES = [SURFACE_MACHINE_SESSION_START, SURFACE_MACHINE_PROMPT_SUBMIT];
+
+/** The surface name for one of this harness's project-local hooks. */
+export function surfaceName(event: string): string {
+  return `${CLAUDE_SURFACE_PREFIX}:${event}`;
+}
+
+/**
+ * Every surface a user may refuse here, for `musterd surface list`.
+ *
+ * De-duplicated because a surface is a SLOT, not an entry: two of our `LOCAL_HOOKS` share the
+ * `PreToolUse` event (the ADR 150 lane gate and the ADR 167 session-message observer), and listing
+ * `claude-code:PreToolUse` twice would offer a name whose two rows a user cannot tell apart or
+ * address separately. Declining that one name removes both, which is what `removeClaudeSurface`
+ * does — the slot is the unit the user can actually refuse.
+ */
+export function claudeRefusableSurfaces(): string[] {
+  return [
+    ...new Set([
+      SURFACE_STATUSLINE,
+      ...LOCAL_HOOKS.map((s) => surfaceName(s.event)),
+      ...MACHINE_SURFACES,
+    ]),
+  ];
+}
+
+/** How a refusal of `name` is enforced — see `removeClaudeSurface`. */
+export type SurfaceRefusal = 'removed' | 'suppressed' | 'unknown';
+
+/**
+ * Remove a refusable surface by name — the other half of ADR 332's `decline`, which promises "one
+ * command, one outcome". Returns false for a name this harness does not own, so the caller can
+ * refuse to record a tombstone for it.
+ *
+ * A tombstone that claims a refusal while the surface sits installed and firing is exactly the lie
+ * the ADR forbids, and that is what shipped: `decline` removed only the statusline while accepting
+ * all six hook names. Every surface `claudeRefusableSurfaces()` offers is removable here.
+ */
+export function removeClaudeSurface(dir: string, name: string): SurfaceRefusal {
+  if (name === SURFACE_STATUSLINE) {
+    removeMusterdStatusline(dir);
+    return 'removed';
+  }
+  // A machine-wide hook cannot be removed for ONE folder — its single entry serves every folder on
+  // the machine, so deleting it here would de-provision all of them. The refusal is real and is
+  // enforced at fire time by `declinedGate`, which reads this folder's tombstone. Saying
+  // 'suppressed' rather than 'removed' keeps the caller's message honest about which happened.
+  if (MACHINE_SURFACES.includes(name)) return 'suppressed';
+  // The slot is the unit: drop every musterd entry under this event, which is both PreToolUse hooks
+  // when that is the name. A foreign entry on the same event is never matched — `isMusterdHookFor`
+  // keys on our own markers.
+  const specs = LOCAL_HOOKS.filter((s) => surfaceName(s.event) === name);
+  if (specs.length === 0) return 'unknown';
+  dropHook(settingsLocalPath(dir), specs[0]!.event, (m) =>
+    specs.some((s) => isMusterdHookFor(m, s.marker)),
+  );
+  return 'removed';
+}
+
 export function inspectClaudeStatuslineDrift(cwd: string): string[] {
   const path = join(cwd, '.claude', 'settings.local.json');
   if (!existsSync(path)) return [];
   const settings = readSettingsSafe(path);
   if (!settings) return [];
   if (!settings.statusLine) {
+    // ADR 332: absence that was CHOSEN is not drift. Silence, not a softer line — a check that still
+    // speaks after a refusal is the nag this vocabulary exists to end.
+    if (isDeclined(cwd, SURFACE_STATUSLINE)) return [];
     return [
       'the Claude Code `statusLine` seat chip is missing from .claude/settings.local.json — this ' +
         'session has no user-facing seat indicator, so the human sees an unlabelled terminal while ' +
@@ -679,7 +783,10 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
   for (const spec of LOCAL_HOOKS) {
     const installed = installedFor(spec);
     if (installed === undefined) {
-      if (spec.missing) drift.push(spec.missing);
+      // ADR 332, same rule as the chip: a refused hook is absent on purpose. Only the MISSING branch
+      // consults the tombstone — a STALE hook is still installed, and refusing a surface was never a
+      // licence to leave a wrong one in place.
+      if (spec.missing && !isDeclined(cwd, surfaceName(spec.event))) drift.push(spec.missing);
       continue;
     }
     // Present — but presence was never the question (ADR 168). A hook's value is entirely in its
