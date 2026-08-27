@@ -2,8 +2,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { declineSurface } from '../declined.js';
 import {
   inspectClaudeStatuslineDrift,
+  SURFACE_STATUSLINE,
   installMusterdStatusline,
   removeMusterdStatusline,
   STATUSLINE_MARKER,
@@ -96,6 +98,31 @@ describe('musterd Claude Code statusline (project-local seat chip)', () => {
   it('stays silent about a foreign statusline — that is a choice, not drift', () => {
     seed(cwd, { statusLine: { type: 'command', command: 'my-own-prompt.sh' } });
     expect(inspectClaudeStatuslineDrift(cwd)).toEqual([]);
+  });
+
+  // ADR 332. Without this, removing the chip and being told to reinstall it are the same state, so
+  // the check nags forever and there is no way to say no.
+  it('is silent about a missing statusline the user declined (ADR 332 tombstone)', () => {
+    seed(cwd, {});
+    expect(inspectClaudeStatuslineDrift(cwd).join(' ')).toContain('statusLine');
+    declineSurface(cwd, SURFACE_STATUSLINE, 'nick');
+    expect(inspectClaudeStatuslineDrift(cwd)).toEqual([]);
+  });
+
+  // A refusal of one surface is not a refusal of the harness. Declining an unrelated slot must not
+  // buy silence about the chip — that would make the tombstone a blunt mute switch.
+  it('a refusal of a different surface buys no silence', () => {
+    seed(cwd, {});
+    declineSurface(cwd, 'claude-code:PostToolUse');
+    expect(inspectClaudeStatuslineDrift(cwd).join(' ')).toContain('statusLine');
+  });
+
+  // Refusing a surface was never a licence to leave a WRONG one installed: stale is present, and
+  // present-but-wrong is the exact case ADR 168 exists for.
+  it('still reports a STALE statusline even when the surface is declined', () => {
+    seed(cwd, { statusLine: { type: 'command', command: `old-text # ${STATUSLINE_MARKER}` } });
+    declineSurface(cwd, SURFACE_STATUSLINE);
+    expect(inspectClaudeStatuslineDrift(cwd).join(' ')).toContain('STALE');
   });
 
   it('invents no drift from an absent or unparseable settings file', () => {

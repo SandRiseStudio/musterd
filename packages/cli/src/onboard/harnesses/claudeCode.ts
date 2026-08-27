@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { CCD_SEND_MESSAGE_TOOL, FEATURE_EPOCH } from '@musterd/protocol';
 import { hasRunnable as has, resolveClaudeBin } from '../../claudeBin.js';
 import { readModelFromTranscript } from '../../session/transcript-model.js';
+import { isDeclined } from '../declined.js';
 import { primaryCheckoutFor } from '../entryGuard.js';
 import { applyFileMap, guidanceFileMap, observeFileMap } from '../guidance.js';
 import type { Harness, ProvisionPermissions, ProvisionPlan, UnprovisionPlan } from '../harness.js';
@@ -633,12 +634,34 @@ export function removeMusterdStatusline(dir: string = process.cwd()): void {
  * because a slot written by an older build is present and wrong. Silent about a FOREIGN statusline —
  * that is the user's choice, and reporting a choice as drift trains people to ignore drift.
  */
+/**
+ * The refusable surfaces this harness owns, named `<harness>:<slot>` (ADR 332). The harness prefix
+ * is load-bearing: `statusLine` and `PostToolUse` are unique only inside one harness, and a folder
+ * can be provisioned for several. Exported so the `surface` command offers real names rather than
+ * asking the user to guess a string that only these inspectors would ever match.
+ */
+export const CLAUDE_SURFACE_PREFIX = 'claude-code';
+export const SURFACE_STATUSLINE = `${CLAUDE_SURFACE_PREFIX}:statusLine`;
+
+/** The surface name for one of this harness's project-local hooks. */
+export function surfaceName(event: string): string {
+  return `${CLAUDE_SURFACE_PREFIX}:${event}`;
+}
+
+/** Every surface a user may refuse here, for `musterd surface list`. */
+export function claudeRefusableSurfaces(): string[] {
+  return [SURFACE_STATUSLINE, ...LOCAL_HOOKS.map((s) => surfaceName(s.event))];
+}
+
 export function inspectClaudeStatuslineDrift(cwd: string): string[] {
   const path = join(cwd, '.claude', 'settings.local.json');
   if (!existsSync(path)) return [];
   const settings = readSettingsSafe(path);
   if (!settings) return [];
   if (!settings.statusLine) {
+    // ADR 332: absence that was CHOSEN is not drift. Silence, not a softer line — a check that still
+    // speaks after a refusal is the nag this vocabulary exists to end.
+    if (isDeclined(cwd, SURFACE_STATUSLINE)) return [];
     return [
       'the Claude Code `statusLine` seat chip is missing from .claude/settings.local.json — this ' +
         'session has no user-facing seat indicator, so the human sees an unlabelled terminal while ' +
@@ -679,7 +702,10 @@ export function inspectClaudeHookDrift(cwd: string): string[] {
   for (const spec of LOCAL_HOOKS) {
     const installed = installedFor(spec);
     if (installed === undefined) {
-      if (spec.missing) drift.push(spec.missing);
+      // ADR 332, same rule as the chip: a refused hook is absent on purpose. Only the MISSING branch
+      // consults the tombstone — a STALE hook is still installed, and refusing a surface was never a
+      // licence to leave a wrong one in place.
+      if (spec.missing && !isDeclined(cwd, surfaceName(spec.event))) drift.push(spec.missing);
       continue;
     }
     // Present — but presence was never the question (ADR 168). A hook's value is entirely in its

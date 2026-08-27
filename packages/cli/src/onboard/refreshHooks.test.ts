@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { declineSurface, isDeclined } from './declined.js';
+import { SURFACE_STATUSLINE } from './harnesses/claudeCode.js';
 import { runRefreshHooks } from './init.js';
 
 /**
@@ -89,6 +91,41 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
     // Identity is untouched — the entire reason this verb exists rather than "just run init".
     expect(existsSync(join(cwd, '.musterd', 'binding.json'))).toBe(false);
     expect(existsSync(join(cwd, '.musterd', 'workspace.json'))).toBe(false);
+  });
+
+  // ADR 332: an explicit --refresh-hooks IS the user asking for the surface back, so it clears every
+  // tombstone in the folder — but says which, and when it was declined, and how to refuse again. A
+  // silent resurrection is how someone finds the chip returned with no idea why.
+  it('clears a recorded refusal and names what it resurrected (ADR 332)', () => {
+    h.folderBinding = { team: 'revive' };
+    seedProvisioned();
+    declineSurface(cwd, SURFACE_STATUSLINE, 'nick');
+    const said: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+      said.push(String(c));
+      return true;
+    });
+
+    expect(runRefreshHooks(cwd)).toBe(0);
+
+    expect(isDeclined(cwd, SURFACE_STATUSLINE)).toBe(false);
+    const out = said.join('');
+    expect(out).toContain(SURFACE_STATUSLINE);
+    expect(out).toContain('was declined');
+    expect(out).toContain('nick');
+    expect(out).toContain('surface decline'); // how to refuse again
+  });
+
+  it('says nothing about refusals when there were none', () => {
+    h.folderBinding = { team: 'revive' };
+    seedProvisioned();
+    const said: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+      said.push(String(c));
+      return true;
+    });
+    expect(runRefreshHooks(cwd)).toBe(0);
+    expect(said.join('')).not.toContain('was declined');
   });
 
   it('stamps the machine-wide orientation hook, so the next stale writer is refused', () => {

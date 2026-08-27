@@ -94,6 +94,7 @@ src/
     doctor.ts         // inspectProvisioning(cwd) + `init --check`: primer↔server drift detector, read-only (ADR 060); baked entry secrets flagged on PRESENCE, report.repair routes --fix to `wire` (entry drift, headless, repairs the repo-root-shared family) vs full init (ADR 165); an entry read from a harness's machine-global config (DetectResult.registeredElsewhere) is reported with that path and its machine-wide reach, and never with a repair prescription — musterd does not write those files (ADR 031); ADR 232 increment 2 census notes ride the report (warn-only, never exit-1)
     workspace.ts      // provisionWorkspace(name): git worktree / sibling folder for an isolated agent seat (ADR 065)
     guard.ts          // inspectInitTarget(cwd): pure folder-suitability heuristics → warnings (ADR 020)
+    declined.ts       // recorded refusals, the ADR 332 tombstone: read/write `.musterd/declined.json` (`<harness>:<slot>` names, version 1). The third provisioning state — absence that was CHOSEN — so a drift check can stop prescribing a repair the user already declined. Fails OPEN (a malformed file yields no refusals, never an invented one); sibling of binding.json because a re-claim rewrites that and a preference must not depend on identity churn
     harness.ts        // adapter interface (detect + configure); ConfigureResult carries activation/target/scope/secretPath
     mcpEntry.ts       // resolve how to launch @musterd/mcp; buildMcpEnv returns {} — the repo-root-shared entry carries NO per-seat state, everything resolves from binding.json/workspace.json (ADR 158/165)
     entryGuard.ts     // foreignAdapterNote + siblingWorkspaces + isInside — inspection-path checks for an adapter launched from another seat's checkout (assertEntryIdentity removed by ADR 165: no secrets in the entry, nothing to compare)
@@ -153,6 +154,7 @@ src/
     availability.ts   // set your own availability axis: available/away/dnd (ADR 044)
     memory.ts         // memory show/save/clear — the seat's continuity note + the claim/status one-liner (ADR 093)
     insight.ts        // insight save/search — team-visible findings via the insight act + FTS search (ADR 327)
+    surface.ts        // musterd surface list|decline|accept (ADR 332): the vocabulary for refusing a provisioned surface. `decline` removes it AND records the tombstone (one command, one outcome); `list` names what is refusable here plus any refusal this build no longer recognises; `accept` clears one. `init --refresh-hooks` overrides every tombstone in the folder and says which it resurrected
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
     claim.ts          // claim a seat by name or open role (ADR 032/034/036)
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)

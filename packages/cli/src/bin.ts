@@ -43,6 +43,7 @@ import { serviceCommand } from './commands/service.js';
 import { sessionCommand } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
 import { streamCommand } from './commands/stream.js';
+import { surfaceCommand } from './commands/surface.js';
 import { teamCommand } from './commands/team.js';
 import { toolkitCommand } from './commands/toolkit.js';
 import { unbindCommand } from './commands/unbind.js';
@@ -278,6 +279,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return gateCommand(rest);
     case 'harness':
       return harnessCommand(rest);
+    case 'surface':
+      return surfaceCommand(rest);
     case 'host':
       return hostCommand(rest);
     case 'wire':
