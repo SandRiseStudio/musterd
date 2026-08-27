@@ -108,6 +108,7 @@ CREATE TABLE schema_meta (
 - **`availability` and `lifecycle_until`** exist now but v1 does **not** enforce schedules or auto-expire `until` members at runtime (a reaper _may_ mark expired members `left_at`, but enforcement of availability windows is roadmap). Store, don't enforce. Keep the columns.
 - **`token_hash`** stores `sha256(token)`; the plaintext join token is shown once at `team add` time and never stored. The CLI/MCP present the token to authenticate as that Member.
 - **Messages are append-only.** No edits/deletes in v1. `accept`/`decline` reference the original via `thread_id`/`meta.in_reply_to`, they don't mutate it.
+- **Every message carries `(origin_node, origin_seq)`** (v47, ADR 331): the local `nodes` row for its team and a per-node gapless counter (`nodes.next_seq` holds the next value), both stamped inside `insertMessage`'s own transaction — server-derived, no wire field. `nodes` holds one self-minted row per (daemon, team), unenrolled (`credential_hash` NULL) until ADR 328's enrollment adopts it.
 
 ## Migrations
 

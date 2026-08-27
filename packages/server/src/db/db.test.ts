@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('46');
+    expect(ver?.value).toBe('47');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -247,7 +247,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(46); // runs v18…v46 (including the shared Seed store)
+    expect(runMigrations(db)).toBe(47); // runs v18…v47 (including the shared Seed store)
 
     const scope = (id: string) =>
       db
@@ -311,7 +311,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(46);
+    expect(runMigrations(db)).toBe(47);
 
     const policy = (id: string) =>
       db
@@ -430,6 +430,110 @@ describe('v41 — incident convergence (spec 2026-08-14)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * ADR 331 eval (iv): the v47 backfill partitions by team — there is no "the local node". The
+ * fixture seeds TWO teams with interleaved timestamps on purpose: a single-team fixture passes
+ * identically under the global and the partitioned readings, so it cannot fail.
+ */
+describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', () => {
+  const buildV46 = () => {
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    for (const m of MIGRATIONS) {
+      if (m.version > 46) break;
+      m.up(db);
+    }
+    db.prepare(
+      "INSERT INTO schema_meta (key, value) VALUES ('schema_version', '46') " +
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run();
+    const now = Date.now();
+    for (const t of ['t1', 't2']) {
+      db.prepare(
+        `INSERT INTO teams (id, slug, display, default_lifecycle, created_at, updated_at)
+         VALUES (?, ?, ?, 'forever', ?, ?)`,
+      ).run(t, t, t, now, now);
+      db.prepare(
+        `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+         VALUES (?, ?, 'ada', 'agent', '', 'forever', 0, ?, ?)`,
+      ).run(`m-${t}`, t, now, now);
+    }
+    // Interleaved by ts across teams: t1 at 1000/3000/5000, t2 at 2000/4000. A global numbering
+    // would scatter each team's numbers through 1..5; the partitioned one must not.
+    const msg = db.prepare(
+      `INSERT INTO messages (id, team_id, from_member, to_kind, act, body, ts, created_at)
+       VALUES (?, ?, ?, 'team', 'message', '', ?, ?)`,
+    );
+    msg.run('m-a', 't1', 'm-t1', 1000, 1000);
+    msg.run('m-b', 't2', 'm-t2', 2000, 2000);
+    msg.run('m-c', 't1', 'm-t1', 3000, 3000);
+    msg.run('m-d', 't2', 'm-t2', 4000, 4000);
+    msg.run('m-e', 't1', 'm-t1', 5000, 5000);
+    return db;
+  };
+
+  const seqs = (db: InstanceType<typeof Database>, team: string) =>
+    db
+      .prepare<
+        [string],
+        { id: string; origin_seq: number; origin_node: string }
+      >('SELECT id, origin_seq, origin_node FROM messages WHERE team_id = ? ORDER BY ts, id')
+      .all(team);
+
+  it('backfills each team as a gapless prefix in (ts, id) order, next_seq = count + 1', () => {
+    const db = buildV46();
+    runMigrations(db);
+
+    const t1 = seqs(db, 't1');
+    const t2 = seqs(db, 't2');
+    expect(t1.map((r) => r.origin_seq)).toEqual([1, 2, 3]);
+    expect(t2.map((r) => r.origin_seq)).toEqual([1, 2]);
+    // Two node identities — per (daemon, team), never one machine row spanning both.
+    expect(t1[0]!.origin_node).not.toBe(t2[0]!.origin_node);
+    const nextSeq = (team: string) =>
+      db
+        .prepare<[string], { next_seq: number }>('SELECT next_seq FROM nodes WHERE team_id = ?')
+        .get(team)?.next_seq;
+    expect(nextSeq('t1')).toBe(4);
+    expect(nextSeq('t2')).toBe(3);
+    // The 328 shape holds, unenrolled: credential_hash and enrolled_at NULL until increment 3.
+    const node = db
+      .prepare<
+        [],
+        { credential_hash: string | null; enrolled_at: number | null; label: string }
+      >('SELECT credential_hash, enrolled_at, label FROM nodes LIMIT 1')
+      .get();
+    expect(node?.credential_hash).toBeNull();
+    expect(node?.enrolled_at).toBeNull();
+    expect(node?.label.length).toBeGreaterThan(0);
+    db.close();
+  });
+
+  it('is idempotent under rewind-and-replay: renumbers rather than doubling', () => {
+    const db = buildV46();
+    runMigrations(db);
+    const firstNodes = db
+      .prepare<[], { id: string }>('SELECT id FROM nodes ORDER BY team_id')
+      .all()
+      .map((r) => r.id);
+
+    db.prepare("UPDATE schema_meta SET value = '46' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM nodes').get()).toEqual({ n: 2 });
+    // The replay adopts the existing rows (insert-if-absent), never minting a second identity.
+    expect(
+      db
+        .prepare<[], { id: string }>('SELECT id FROM nodes ORDER BY team_id')
+        .all()
+        .map((r) => r.id),
+    ).toEqual(firstNodes);
+    expect(seqs(db, 't1').map((r) => r.origin_seq)).toEqual([1, 2, 3]);
+    expect(seqs(db, 't2').map((r) => r.origin_seq)).toEqual([1, 2]);
+    db.close();
   });
 });
 

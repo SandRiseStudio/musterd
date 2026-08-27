@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import { sparsifyPolicy } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { monotonicFactory as monotonicUlid } from 'ulid';
@@ -1057,6 +1058,67 @@ export const MIGRATIONS: Migration[] = [
         FROM messages m
         WHERE m.act = 'insight';
       `);
+    },
+  },
+  {
+    // ADR 331: the ordering substrate. `nodes` arrives in ADR 328's shape with the three departures
+    // that ADR names (`next_seq`, nullable `credential_hash`/`enrolled_at`), one self-minted row per
+    // hosted team — per (daemon, team), not per daemon. `(origin_node, origin_seq)` land NOT NULL on
+    // `messages`, backfilled per team as a gapless prefix in (ts, id) order. Guarded ALTERs and
+    // insert-if-absent because the migration tests rewind-and-replay; the backfill recomputes, so a
+    // replayed partition renumbers rather than doubling. `next_seq` holds the NEXT value to assign.
+    version: 47,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS nodes (
+          id              TEXT PRIMARY KEY,
+          team_id         TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          label           TEXT NOT NULL,
+          credential_hash TEXT,
+          enrolled_at     INTEGER,
+          enrolled_by     TEXT,
+          revoked_at      INTEGER,
+          last_seen_at    INTEGER,
+          next_seq        INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS idx_nodes_team ON nodes(team_id);
+      `);
+      const msgCols = (db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]).map(
+        (c) => c.name,
+      );
+      // NOT NULL via ALTER needs a default; insertMessage always stamps, and the backfill below
+      // overwrites the default on every pre-existing row, so '' / 0 never survive the migration.
+      if (!msgCols.includes('origin_node'))
+        db.exec("ALTER TABLE messages ADD COLUMN origin_node TEXT NOT NULL DEFAULT ''");
+      if (!msgCols.includes('origin_seq'))
+        db.exec('ALTER TABLE messages ADD COLUMN origin_seq INTEGER NOT NULL DEFAULT 0');
+
+      const mint = monotonicUlid();
+      const now = Date.now();
+      const teams = db.prepare<[], { id: string }>('SELECT id FROM teams ORDER BY id').all();
+      const nodeFor = db.prepare<[string], { id: string }>(
+        'SELECT id FROM nodes WHERE team_id = ? ORDER BY id LIMIT 1',
+      );
+      const stamp = db.prepare('UPDATE messages SET origin_node = ?, origin_seq = ? WHERE id = ?');
+      for (const team of teams) {
+        let node = nodeFor.get(team.id);
+        if (!node) {
+          node = { id: mint(now) };
+          db.prepare('INSERT INTO nodes (id, team_id, label, next_seq) VALUES (?, ?, ?, 1)').run(
+            node.id,
+            team.id,
+            hostname(),
+          );
+        }
+        const rows = db
+          .prepare<
+            [string],
+            { id: string }
+          >('SELECT id FROM messages WHERE team_id = ? ORDER BY ts, id')
+          .all(team.id);
+        rows.forEach((row, i) => stamp.run(node!.id, i + 1, row.id));
+        db.prepare('UPDATE nodes SET next_seq = ? WHERE id = ?').run(rows.length + 1, node.id);
+      }
     },
   },
 ];

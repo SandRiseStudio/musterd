@@ -1,8 +1,8 @@
 # 331 — the ordering substrate: `(origin_node, origin_seq)` on every logged event, stamped from the first message
 
-- Status: proposed — 2026-08-27 (ryder REJECT on #1085 at `dcda5b57`, two REQUIRED — the
-  transaction premise below was false as first drafted, and the per-team/per-daemon question was
-  undeclared; both applied). Authored by stanley on lane `01M10AJKMPAK54TM0CCG35VZD9`, as the
+- Status: accepted — 2026-08-27 (merged `e8683532`; ryder ACCEPT at `f3362b63` after a REJECT at
+  `dcda5b57` whose two REQUIRED — the transaction premise below was false as first drafted, and the
+  per-team/per-daemon question was undeclared — were both applied). Authored by stanley on lane `01M10AJKMPAK54TM0CCG35VZD9`, as the
   second increment of the ADR 325 federation build. **Amends [ADR 328](328-machine-credential.md)
   decision 7** — see §Decision 1 below; that ADR landed at `c6a0de99` two hours before this one was
   drafted, and the amendment is the reason this is an ADR rather than a build task.
@@ -70,7 +70,7 @@ second one, and it does not touch a single `origin_node` stamp.
 
 **The row is per (daemon, team), not per daemon** — ADR 328 §1 put `team_id` on the node row and
 that is correct as written, needing no further amendment. Federation is per-team by ADR 325's
-topology: *one team, one hub authority*. A daemon hosting two teams syncs to two hubs, is admitted
+topology: *one team, one authority*. A daemon hosting two teams syncs to two hubs, is admitted
 separately at each, and must be separately revocable at each — so it holds two node identities and
 two independent `origin_seq` streams. `origin_node` therefore names a machine-*team*, and
 `next_seq` is per node row, which is per (machine, team). Naming a bare machine would mean one
@@ -107,8 +107,12 @@ same guarded-write helper 328's §Consequences already asked the build to extrac
 checklist item, not a weakening.
 
 **2. `origin_seq` is a counter on the node row, and `insertMessage` opens the transaction that
-increments it.** `nodes.next_seq INTEGER NOT NULL DEFAULT 0`. The increment, the read of the new
-value, and the message insert are one atomic unit.
+increments it.** `nodes.next_seq INTEGER NOT NULL DEFAULT 1`, holding the **next value to assign**
+— the meaning the name says, and the one §Decision 3's backfill (`next_seq = count_team + 1`) and
+eval (iv) already assumed. (As merged this sentence said `DEFAULT 0` with the stamp read *after*
+the increment; under that reading the backfill's `count_team + 1` burns a number, so the first
+draft contradicted itself off-by-one. Amended at the build increment, 2026-08-27.) The read of the
+current value, the increment, and the message insert are one atomic unit.
 
 **`insertMessage` must open that transaction itself** — it cannot inherit one, because today there
 is none to inherit. Its sole production caller is `protocol/route.ts:330` and there is no

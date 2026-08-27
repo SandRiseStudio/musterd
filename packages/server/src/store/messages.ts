@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import {
   DeferUntilSchema,
   eligibleOf,
@@ -6,6 +7,7 @@ import {
   type Envelope,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { ulid } from 'ulid';
 import type { MessageRow } from './rows.js';
 
 /**
@@ -25,7 +27,34 @@ function senderProvenance(db: Database, memberId: string): string | null {
   return row?.provenance ?? null;
 }
 
-/** Insert an envelope into the append-only log. `toMemberId` set iff to.kind==='member'. */
+/**
+ * This team's local node row (ADR 331 §Decision 1) — per (daemon, team), minted by migration v47
+ * and lazily here for teams created after it. Before increment 3 lands enrollment there is exactly
+ * one row per team; the ORDER BY makes the pick deterministic should that ever not hold.
+ */
+function localNodeForTeam(db: Database, teamId: string): { id: string } {
+  const existing = db
+    .prepare<[string], { id: string }>('SELECT id FROM nodes WHERE team_id = ? ORDER BY id LIMIT 1')
+    .get(teamId);
+  if (existing) return existing;
+  const id = ulid();
+  db.prepare('INSERT INTO nodes (id, team_id, label, next_seq) VALUES (?, ?, ?, 1)').run(
+    id,
+    teamId,
+    hostname(),
+  );
+  return { id };
+}
+
+/**
+ * Insert an envelope into the append-only log. `toMemberId` set iff to.kind==='member'.
+ *
+ * Stamps `(origin_node, origin_seq)` (ADR 331): SERVER-derived like `from_provenance` — there is no
+ * wire field, so a caller cannot supply an origin. Opens its own transaction (a SAVEPOINT when the
+ * caller already holds one): the seq allocation and the insert are one atomic unit, so a throw
+ * between them — a replayed envelope id's UNIQUE violation is the realistic one — burns no number
+ * and leaves no hole.
+ */
 export function insertMessage(
   db: Database,
   teamId: string,
@@ -33,27 +62,40 @@ export function insertMessage(
   toMemberId: string | null,
   env: Envelope,
 ): MessageRow {
-  const row: MessageRow = {
-    id: env.id,
-    team_id: teamId,
-    from_member: fromMemberId,
-    to_kind: env.to.kind,
-    to_member: toMemberId,
-    act: env.act,
-    body: env.body,
-    thread_id: env.thread ?? null,
-    meta: env.meta ? JSON.stringify(env.meta) : null,
-    from_provenance: senderProvenance(db, fromMemberId),
-    ts: env.ts,
-    created_at: Date.now(),
-  };
-  db.prepare(
-    `INSERT INTO messages
-       (id, team_id, from_member, to_kind, to_member, act, body, thread_id, meta, from_provenance, ts, created_at)
-     VALUES
-       (@id, @team_id, @from_member, @to_kind, @to_member, @act, @body, @thread_id, @meta, @from_provenance, @ts, @created_at)`,
-  ).run(row);
-  return row;
+  return db.transaction((): MessageRow => {
+    const node = localNodeForTeam(db, teamId);
+    // Read-then-bump under SQLite's single-writer lock: `next_seq` names the next value to assign,
+    // so the returned pre-increment value is this message's seq — monotone and gapless by construction.
+    const seq = db
+      .prepare<
+        [string],
+        { seq: number }
+      >('UPDATE nodes SET next_seq = next_seq + 1 WHERE id = ? RETURNING next_seq - 1 AS seq')
+      .get(node.id)!.seq;
+    const row: MessageRow = {
+      id: env.id,
+      team_id: teamId,
+      from_member: fromMemberId,
+      to_kind: env.to.kind,
+      to_member: toMemberId,
+      act: env.act,
+      body: env.body,
+      thread_id: env.thread ?? null,
+      meta: env.meta ? JSON.stringify(env.meta) : null,
+      from_provenance: senderProvenance(db, fromMemberId),
+      origin_node: node.id,
+      origin_seq: seq,
+      ts: env.ts,
+      created_at: Date.now(),
+    };
+    db.prepare(
+      `INSERT INTO messages
+         (id, team_id, from_member, to_kind, to_member, act, body, thread_id, meta, from_provenance, origin_node, origin_seq, ts, created_at)
+       VALUES
+         (@id, @team_id, @from_member, @to_kind, @to_member, @act, @body, @thread_id, @meta, @from_provenance, @origin_node, @origin_seq, @ts, @created_at)`,
+    ).run(row);
+    return row;
+  })();
 }
 
 /** The `ts` of one message by id (loop-latency lookups, ADR 082 slice 3). Null when unknown. */
