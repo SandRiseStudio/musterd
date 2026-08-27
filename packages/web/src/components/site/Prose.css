@@ -5,8 +5,14 @@
 }
 
 .prose {
-  width: min(68ch, 100% - 2.5rem);
-  margin-inline: auto;
+  /* Left edge tracks the shell rail (the nav's left edge), not the viewport centre:
+     on any viewport the inset from the edge is max(gutter, (vw - maxw)/2 + gutter) —
+     exactly .shell's inner left. The measure stays 68ch, left-aligned within that rail,
+     so the heading lines up with the logo in a screenshot rather than sitting 80px
+     indented. At 375px both edges were already 20px and stay there. */
+  width: min(68ch, calc(100% - 2 * var(--gutter)));
+  margin-left: max(var(--gutter), calc((100% - var(--maxw)) / 2 + var(--gutter)));
+  margin-right: auto;
   padding-block: var(--section-y) calc(var(--section-y) * 1.4);
   color: var(--text);
   line-height: 1.65;
