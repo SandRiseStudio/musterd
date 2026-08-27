@@ -43,5 +43,6 @@ export const TOOL_NAMES = [
   'team_goals',
   'team_report',
   'team_insight_save',
-  'team_memory_search',
+  'team_insight_search',
+  'team_memory_search', // deprecated alias — remove after one epoch (ADR 296)
 ] as const;

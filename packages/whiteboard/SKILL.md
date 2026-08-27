@@ -37,7 +37,7 @@ itself when needed):
 **Open.** Respond immediately — never make the human wait while you gather context. Ask what
 they're chasing before assuming. Open the board early and share the URL; before starting
 fresh, check `whiteboard_list` for a prior board on the topic and offer to pick it up.
-*(musterd: also `team_memory_search` the topic — search before you re-derive.)*
+*(musterd: also `team_insight_search` the topic — search before you re-derive.)*
 
 **Diverge.** Volume first, judgment later. Every idea lands as a note the moment it's said —
 yours and theirs. Weave techniques in without naming them: inversion, analogy transfer,

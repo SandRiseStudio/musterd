@@ -65,7 +65,7 @@ events. "Ghost learned trap T while doing L" *is* an event. So:
    provenance machinery, audit-recorded by size only. Additive protocol change → SPEC minor gated by
    its own ADR (hard rule 1).
 2. **Read path**: a derived, rebuildable full-text index (SQLite FTS5 projected from the log, same
-   posture as every other derived store) plus `team_memory_search "<query>"`. Grep-grade first;
+   posture as every other derived store) plus `team_insight_search "<query>"`. Grep-grade first;
    ADR 259's retrieval-increment gate applies unchanged to anything fancier.
 3. **Delivery**: pull-first. At most a one-line digest at task boundaries via existing inbox
    mechanics — never a push into every session's context (ADR 212).

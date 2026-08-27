@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 18;
+export const GUIDANCE_CONTENT_VERSION = 19;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -33,7 +33,7 @@ export const SKILL_MCP_TOOLS = [
   // ADR 327: the team-visible counterpart to seat memory — save a finding for everyone; search
   // before re-deriving what a teammate may already have recorded.
   'team_insight_save',
-  'team_memory_search',
+  'team_insight_search',
   'team_next',
   // ADR 209, wired by the session-orientation spec 2026-08-25 §C: the wake templates name it, so
   // a woken session must find it in the skill's tool reference.
@@ -228,7 +228,7 @@ export function renderSkillBody(opts: { team: string }): string {
     'A trap hit, a measured number, how something actually works: save it where teammates can find it.',
     '`team_insight_save {headline, body}` / `musterd insight save --headline "<subject>" [body]` writes an',
     'insight the whole team sees — the opposite of seat memory, which stays private. **Search before you',
-    're-derive**: `team_memory_search` / `musterd insight search "<keywords>"` may surface a finding a',
+    're-derive**: `team_insight_search` / `musterd insight search "<keywords>"` may surface a finding a',
     'teammate already recorded. When an insight proves durable, promote it into docs/wiki/ — the insight is',
     'the fast capture; the wiki page is the governed home. Never put secrets in either.',
     '',

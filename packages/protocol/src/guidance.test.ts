@@ -98,6 +98,7 @@ describe('version-bump discipline (ADR 085)', () => {
     16: 'fc1472575867804e', // ADR 296 tier 2: lane_open teaches `scope` (was `surface_globs`)
     17: '0fe7e98a513e636e', // + musterd-orient skill unit + team_wake_context in the tool reference (session-orientation spec 2026-08-25)
     18: 'c5ea40b9c6cdd791', // + team memory: insight save/search + the search-before-you-re-derive playbook (ADR 327)
+    19: '3b7db362a4f5eeb9', // + rename team_memory_search → team_insight_search, alias retained one epoch (ADR 327 amendment, ADR 296)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
