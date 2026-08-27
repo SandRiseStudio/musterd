@@ -90,7 +90,8 @@ the lane is looking at.
 
 - **Traces:** `pnpm tokens:check` (already in the `format:check` chain, so it runs in CI) prints one
   summary line per run and names every violation with its file, line, rule and remedy. Five rules:
-  disagreement with `motion.ts`, raw literals in transitions, off-frame durations, a rung with no
+  disagreement with `motion.ts`, raw literals in transitions, off-frame durations (including a rung
+  whose value cannot be read at all, which is reported rather than skipped), a rung with no
   reduced-motion answer, and a motion `var()` declared nowhere. `docs/perf/motion-capture.md` holds
   the frame counts and the overshoot analysis.
 - **Eval:** dataset is the stylesheets themselves at 4f3d916e — 25 distinct `ms` durations, 8
@@ -104,10 +105,18 @@ the lane is looking at.
   `/^(\d+)ms$/` and survived that fix, leaving `--lc-dur-6: 0.18s` — a new rung at 4.5 frames,
   rule 3's own defect class — uncounted by any of the five rules. **A falsifier written in the input
   class the code already handles cannot fail**, which is the general form and is now recorded as a
-  team insight. The falsifier reads, in both unit classes: injecting `240ms` *or* `0.18s`, as a raw
-  literal *and* as a new `--lc-dur-*` rung, must each fail CI. Verified by injection against
-  `pnpm tokens:check` itself rather than against the exported functions, and confirmed load-bearing
-  by reverting rule 3 to its `ms`-only parse and watching `0.18s` go green again.
+  team insight. Verified by injection against `pnpm tokens:check` itself rather than against the
+  exported functions, and confirmed load-bearing by reverting rule 3 to its `ms`-only parse and
+  watching `0.18s` go green again.
+- **Enumerating unit classes was still the wrong shape, and the third round proved it.** Widening
+  the parse to `ms|s` left `0.18S`, `180MS`, `+0.18s` and `1.8e-1s` green — all 4.5-frame rungs.
+  Each round the falsifier grew by the forms someone had thought of, and each round the gate stayed
+  blind to the forms nobody had. **Rule 3 now fails CLOSED: a `--lc-dur-*` value it cannot read is
+  reported as `unreadable` rather than skipped.** The falsifier therefore no longer enumerates
+  inputs at all, which is what makes it stable: *for any value a rung can hold, the gate either
+  names its frame count or names its inability to read it — never neither.* Exercised across ms, s,
+  both cases, signed and exponent forms, `calc()`, a `var()` indirection, a unitless number and an
+  empty value.
 - **Experiment:** n/a — the overshoot question was settled analytically rather than A/B-tested (see
   the falsified claim below), and the failure paths were exercised directly by reintroducing each
   defect and confirming the gate caught it.

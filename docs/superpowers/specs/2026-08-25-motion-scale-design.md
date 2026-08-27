@@ -127,6 +127,17 @@ itself. Both rules read either unit now. **The unit a duration is spelled in was
 the number of frames it occupies is** — and any future rule that parses a duration must go through
 `durationMs`, not its own regex, which is the mistake that got made twice.
 
+**Corrected again, same review.** Widening the parse fixed the listed forms and left the shape
+intact: rule 3 still *skipped* whatever it could not read, so the parser's blind spots stayed the
+gate's blind spots. `0.18S`, `180MS`, `+0.18s` and `1.8e-1s` all left the gate green, and all four
+are 4.5 frames — the same sentence, one round later (ryder's second REQUIRED on #1082).
+
+**So rule 3 now fails closed: a `--lc-dur-*` value it cannot read is a finding, not a skip.** The
+case-insensitivity fix is real, because CSS units are case-insensitive. The rest are reported rather
+than parsed, and that is the point — a third widening would have been beaten by a form nobody
+listed, whereas "count the frames or say you could not" has no unlisted forms. A gate must never be
+silent in a way a reader will mistake for having checked and been satisfied.
+
 ## 5. Exemptions, and why they are a rule rather than a list
 
 Two classes are exempt from the rung scale. Neither is exempt from §6.
@@ -141,11 +152,18 @@ exempt.** This is checkable, so the gate enforces the rule rather than trusting 
 one-line reason. An allowlist that must be edited by hand is the point: it makes an exception cost a
 sentence.
 
-Each entry is keyed on value **and** file **and** site, not value and file. The reasons name a
-specific declaration ("the expiry bar is a countdown"), so the check enforces that declaration —
-otherwise exempting `1s` for the countdown also exempts `1s` in any hover transition in the same
-file, and the list would grant more than any of its sentences claim (ryder's non-blocking (a) on
-#1082).
+Each entry is keyed on value **and** file **and** CSS property **and** the token naming the site
+within it (an animation name, or the animated property) — not value and file. The reasons name a
+specific declaration ("the expiry bar is a countdown"), so the check enforces that declaration:
+exempting `1s` for the countdown must not also exempt `1s` in any hover transition in the same file
+(ryder's non-blocking (a) on #1082, round one), and matching the site as a bare substring must not
+let `max-width` inherit `width`'s exemption (round two).
+
+**What the exemption is NOT keyed on: the selector.** An entry names a declaration, not a rule, so
+moving `transition: width 1s linear` to a different selector in the same file keeps it exempt. That
+is the honest description of the match, and it is written here because the earlier draft of this
+paragraph claimed the exemption "binds to the declaration that earned it" while the code bound it to
+file plus a substring — and the sentence in the doc is the thing that gets cited, not the regex.
 
 Two of these (`0.42s`, `0.5s`) are close enough to rungs that the implementation should test whether
 they are deliberate at all, or simply the same accidental drift as the `ms` clusters. If they are

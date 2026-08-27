@@ -8,7 +8,8 @@
  * Five rules:
  *   1. DISAGREE  — a motion token in CSS whose value differs from `motion.ts`.
  *   2. RAW       — a cubic-bezier() or a bare duration (ms OR s) in a motion declaration.
- *   3. OFF-FRAME — a duration that is not a whole frame at the 720p25 capture rate.
+ *   3. OFF-FRAME — a duration that is not a whole frame at the 720p25 capture rate. Fails closed:
+ *                  a rung it cannot read is reported (UNREADABLE), never skipped.
  *   4. REDUCED   — a rung used in a transition with no prefers-reduced-motion answer in the file.
  *   5. PHANTOM   — a motion var() in a transition that no stylesheet declares.
  *
@@ -35,7 +36,7 @@ export { FRAME_MS } from '../packages/web/src/live/office-scene/motion.ts';
 import { FRAME_MS } from '../packages/web/src/live/office-scene/motion.ts';
 
 export type MotionFinding = {
-  kind: 'disagree' | 'raw' | 'off-frame' | 'reduced' | 'phantom';
+  kind: 'disagree' | 'raw' | 'off-frame' | 'unreadable' | 'reduced' | 'phantom';
   line: number;
   detail: string;
 };
@@ -161,7 +162,7 @@ export function rawMotionLiterals(css: string, file = ''): MotionFinding[] {
       for (const m of seg.text.matchAll(LITERAL)) {
         const literal = m[0];
         if (isZeroDuration(literal)) continue;
-        if (isAllowedLong(literal, file, `${decl.property}:${seg.text}`)) continue;
+        if (isAllowedLong(literal, file, decl.property, seg.text)) continue;
         out.push({ kind: 'raw', line: lineAt(seg.start + (m.index ?? 0)), detail: literal });
       }
     }
@@ -187,57 +188,80 @@ function isZeroDuration(literal: string): boolean {
  * annoying to add. These are keyframe one-shots and a countdown, none of which are interaction
  * feedback, so none of them belong on a scale built for interaction feedback.
  */
-const ALLOWED_LONG: { value: string; file: string; within: string; reason: string }[] = [
+const ALLOWED_LONG: {
+  value: string;
+  file: string;
+  property: string;
+  token: string;
+  reason: string;
+}[] = [
   {
     value: '1s',
     file: 'ApprovalCard.css',
-    within: 'width',
+    property: 'transition',
+    token: 'width',
     reason: 'the expiry bar is a countdown driven by a per-second tick; a rung would desync it',
   },
   {
     value: '0.42s',
     file: 'Live.css',
-    within: 'lc-enter',
+    property: 'animation',
+    token: 'lc-enter',
     reason: 'lc-enter one-shot entrance, tuned with the scene',
   },
   {
     value: '1.7s',
     file: 'Live.css',
-    within: 'lc-settle',
+    property: 'animation',
+    token: 'lc-settle',
     reason: 'lc-settle one-shot, deliberately slower than any UI rung',
   },
   {
     value: '1.5s',
     file: 'Live.css',
-    within: 'lc-flash',
+    property: 'animation',
+    token: 'lc-flash',
     reason: 'lc-flash one-shot attention beat',
   },
   {
     value: '0.5s',
     file: 'Live.css',
-    within: 'lc-rise',
+    property: 'animation',
+    token: 'lc-rise',
     reason: 'lc-rise one-shot entrance',
   },
   {
     value: '3.6s',
     file: 'Live.css',
-    within: 'animation-duration',
+    property: 'animation-duration',
+    token: '',
     reason: 'ambient duration longhand on a looping keyframe',
   },
 ];
 
 /**
- * `within` is ryder's non-blocking (a) on #1082. The check was value + filename, so `1s` was exempt
- * ANYWHERE in ApprovalCard.css — including a hover transition nobody had reasoned about. Each
- * reason names a site, so the check now enforces the site: the exemption binds to the declaration
- * that earned it, and moving the literal elsewhere in the same file costs a new entry.
+ * `within` is ryder's non-blocking (a) on #1082, twice over.
  *
- * Matched against `property: segment` because one entry (`3.6s`) is exempt for being a duration
- * longhand and so has no animation name to key on.
+ * Round one: the check was value + filename, so `1s` was exempt ANYWHERE in ApprovalCard.css,
+ * including a hover transition nobody had reasoned about.
+ *
+ * Round two: keying on `within` alone via `context.includes()` matched a bare substring against
+ * `property:segment`, so `max-width` inherited `width`'s exemption — one property silently taking
+ * another's. And the doc-comment claimed the exemption "binds to the declaration that earned it"
+ * while the code bound it to file + property substring. The claim is the thing that gets cited, so
+ * either the claim or the match had to narrow; narrowing the match is the honest direction.
+ *
+ * So an entry names its `property` exactly and the `token` that identifies the site within it
+ * (an animation name, or the animated property). Both must hold. `3.6s` is exempt as a duration
+ * longhand and has no animation name, so its token is empty — the property alone identifies it.
  */
-function isAllowedLong(literal: string, file: string, context: string): boolean {
+function isAllowedLong(literal: string, file: string, property: string, segment: string): boolean {
   return ALLOWED_LONG.some(
-    (a) => a.value === literal && file.endsWith(a.file) && context.includes(a.within),
+    (a) =>
+      a.value === literal &&
+      file.endsWith(a.file) &&
+      property.trim().toLowerCase() === a.property &&
+      (a.token === '' || new RegExp(`(?<![\\w-])${a.token}(?![\\w-])`).test(segment)),
   );
 }
 
@@ -260,21 +284,54 @@ const trim2 = (n: number) =>
  * Seconds are converted by decimal shift rather than `* 1000` because `0.18 * 1000` is
  * 180.00000000000003 in IEEE754, and a gate that reports `--lc-dur-6: 180.00000000000003ms is
  * 4.500000000000001 frames` has found the right defect and made itself impossible to trust.
+ *
+ * The unit is matched case-insensitively because CSS units are. Everything else this does NOT
+ * accept — `+0.18s`, `1.8e-1s` — is deliberate: see `offFrameDurations`, which treats a value it
+ * cannot read as a finding rather than a skip. Widening this pattern is the move that has already
+ * failed twice; the next unlisted form would slip through a third time.
  */
 export function durationMs(value: string): number | null {
-  const m = /^(\d+(?:\.\d+)?|\.\d+)(m?s)$/.exec(value.trim());
+  const m = /^(\d+(?:\.\d+)?|\.\d+)(m?s)$/i.exec(value.trim());
   if (!m?.[1]) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n)) return null;
-  return m[2] === 'ms' ? n : Math.round(n * 1e6) / 1e3;
+  return m[2]?.toLowerCase() === 'ms' ? n : Math.round(n * 1e6) / 1e3;
 }
 
-/** Rule 3 — a declared duration that is not a whole frame at 25fps. */
+/** A rung — a `--lc-dur-*` token. `--lc-ease*` holds beziers and is rule 1's business, not rule 3's. */
+const IS_RUNG = /^--lc-dur-/;
+
+/**
+ * Rule 3 — a declared duration that is not a whole frame at 25fps.
+ *
+ * FAILS CLOSED, and this is ryder's second REQUIRED on #1082. The rule used to `continue` on
+ * anything it could not parse, so the parser's blind spots became the gate's blind spots silently.
+ * Widening the regex fixed one round and left the next: at 9e0ddf90, `--lc-dur-6:` set to `0.18S`,
+ * `180MS`, `+0.18s` or `1.8e-1s` all left `tokens:check` green, and all four are 4.5 frames — a new
+ * rung at rule 3's own defect class, the exact sentence the previous round was supposed to retire.
+ *
+ * So an unreadable rung is now a finding. The case fix above is real (CSS units are
+ * case-insensitive); the other forms are reported rather than parsed, which closes the class BY
+ * CONSTRUCTION instead of by enumeration. A gate that cannot count the frames must say so — the one
+ * thing it must never do is stay quiet and let the reader infer that it counted them and was happy.
+ */
 export function offFrameDurations(css: string): MotionFinding[] {
   const out: MotionFinding[] = [];
   for (const { token, value, line } of declaredMotionTokens(css)) {
     const n = durationMs(value);
-    if (n === null) continue;
+    if (n === null) {
+      if (IS_RUNG.test(token)) {
+        out.push({
+          kind: 'unreadable',
+          line,
+          detail:
+            `${token}: ${value} — cannot be read as a duration, so its frame count is unknown. ` +
+            `Write it as a plain number of ms or s (e.g. 200ms, 0.2s); ` +
+            `signs, exponents and indirection are not accepted here on purpose.`,
+        });
+      }
+      continue;
+    }
     // Non-integer ms are reachable now (`0.0005s`), so the whole-frame test is a remainder on a
     // float. Compare the rounded remainder, not the raw one, or 6ms-exact values spelled in
     // seconds fail on representation error rather than on frames.

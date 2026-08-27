@@ -123,25 +123,50 @@ describe('rawMotionLiterals', () => {
     expect(rawMotionLiterals(css)).toEqual([{ kind: 'raw', line: 2, detail: '240ms' }]);
   });
 
-  // ryder's non-blocking (a) on #1082: the allowlist matched value + filename, so `1s` was exempt
-  // ANYWHERE in ApprovalCard.css. Each reason names a site; the check now enforces the site.
+  // ryder's non-blocking (a) on #1082, both rounds. Round one: the allowlist matched value +
+  // filename, so `1s` was exempt ANYWHERE in ApprovalCard.css. Round two: it matched the site as a
+  // bare substring of `property:segment`, so `max-width` inherited `width`'s exemption — and the
+  // test below ("elsewhere in the same file") changed selector AND property at once, so it passed
+  // identically whether the binding was by site or by property. It could not tell them apart, which
+  // is the same defect as a falsifier written in the class the code already handles.
+  //
+  // Each case below varies exactly ONE coordinate from the exempt declaration.
   describe('the §5 allowlist binds to the declaration that earned it', () => {
+    const exempt = '.bar { transition: width 1s linear; }';
+
     it('exempts the entry at its own site', () => {
-      expect(
-        rawMotionLiterals('.bar { transition: width 1s linear; }', 'ApprovalCard.css'),
-      ).toEqual([]);
+      expect(rawMotionLiterals(exempt, 'ApprovalCard.css')).toEqual([]);
     });
 
-    it('does NOT exempt the same literal elsewhere in the same file', () => {
+    it('vary the FILE only — not exempt', () => {
+      expect(rawMotionLiterals(exempt, 'Live.css')).toEqual([
+        { kind: 'raw', line: 1, detail: '1s' },
+      ]);
+    });
+
+    it('vary the ANIMATED PROPERTY only — not exempt', () => {
       expect(
-        rawMotionLiterals('.card:hover { transition: opacity 1s linear; }', 'ApprovalCard.css'),
+        rawMotionLiterals('.bar { transition: opacity 1s linear; }', 'ApprovalCard.css'),
       ).toEqual([{ kind: 'raw', line: 1, detail: '1s' }]);
     });
 
-    it('does NOT exempt the same literal at the same site in a different file', () => {
-      expect(rawMotionLiterals('.bar { transition: width 1s linear; }', 'Live.css')).toEqual([
-        { kind: 'raw', line: 1, detail: '1s' },
-      ]);
+    it('vary the CSS PROPERTY only — not exempt', () => {
+      expect(rawMotionLiterals('.bar { animation: width 1s linear; }', 'ApprovalCard.css')).toEqual(
+        [{ kind: 'raw', line: 1, detail: '1s' }],
+      );
+    });
+
+    it('vary the SELECTOR only — still exempt, because the entry names a declaration not a rule', () => {
+      expect(
+        rawMotionLiterals('.somewhere-else { transition: width 1s linear; }', 'ApprovalCard.css'),
+      ).toEqual([]);
+    });
+
+    // A bare `includes()` let one property inherit another's exemption.
+    it('does NOT let max-width inherit width’s exemption', () => {
+      expect(
+        rawMotionLiterals('.bar { transition: max-width 1s linear; }', 'ApprovalCard.css'),
+      ).toEqual([{ kind: 'raw', line: 1, detail: '1s' }]);
     });
   });
 });
@@ -195,9 +220,53 @@ describe('offFrameDurations', () => {
     );
   });
 
-  it('ignores a value that is not a bare duration', () => {
+  it('ignores an easing token — beziers are rule 1’s business, not rule 3’s', () => {
     expect(offFrameDurations(':root { --lc-ease-out: cubic-bezier(0.16, 1, 0.3, 1); }')).toEqual(
       [],
+    );
+  });
+
+  // ryder's SECOND REQUIRED on #1082. The rule `continue`d on anything it could not parse, so the
+  // parser's blind spots became the gate's blind spots SILENTLY. At 9e0ddf90 each of these left
+  // tokens:check green, and every one of them is 4.5 frames — a new rung at rule 3's own defect
+  // class, which is the exact sentence the previous round was supposed to have retired.
+  describe('fails CLOSED — an unreadable rung is a finding, not a skip', () => {
+    // The case fix is real: CSS units are case-insensitive, so these are genuinely 180ms.
+    it.each(['0.18S', '180MS', '0.18s'])('%s is read as 180ms and flagged off-frame', (value) => {
+      const [finding] = offFrameDurations(`:root { --lc-dur-6: ${value}; }`);
+      expect(finding?.kind).toBe('off-frame');
+      expect(finding?.detail).toContain('4.5 frames');
+    });
+
+    // These are NOT parsed, on purpose. Widening the regex is the move that failed twice; the
+    // third failure would be a form neither of us listed. Reported instead of read.
+    it.each(['+0.18s', '1.8e-1s', 'var(--lc-dur-2)', 'calc(200ms * 0.9)', '200'])(
+      '%s is reported as unreadable rather than skipped',
+      (value) => {
+        const [finding] = offFrameDurations(`:root { --lc-dur-6: ${value}; }`);
+        expect(finding?.kind).toBe('unreadable');
+        expect(finding?.detail).toContain(value);
+      },
+    );
+
+    it('stays quiet about an unreadable EASING value — only rungs carry frame counts', () => {
+      expect(offFrameDurations(':root { --lc-ease-x: var(--something); }')).toEqual([]);
+    });
+
+    // The general property, stated without reference to any listed form: whatever a rung holds,
+    // the gate either counts its frames or says it could not. It never does neither.
+    it.each(['200ms', '0.2s', '0.18s', '+0.18s', '1.8e-1s', 'nonsense', ''])(
+      'a rung holding %s is either counted or reported — never silently passed over',
+      (value) => {
+        const css = `:root { --lc-dur-6: ${value}; }`;
+        const readable = durationMs(value) !== null;
+        const findings = offFrameDurations(css);
+        if (readable) {
+          expect(findings.every((f) => f.kind === 'off-frame')).toBe(true);
+        } else {
+          expect(findings.map((f) => f.kind)).toEqual(['unreadable']);
+        }
+      },
     );
   });
 });
@@ -213,12 +282,28 @@ describe('durationMs', () => {
     expect(durationMs(value)).toBe(ms);
   });
 
-  it.each(['cubic-bezier(0.16, 1, 0.3, 1)', 'ease', '200', '200px', 'var(--lc-dur-2)', ''])(
-    'returns null for %s',
-    (value) => {
-      expect(durationMs(value)).toBeNull();
-    },
-  );
+  it('matches the unit case-insensitively, because CSS units are', () => {
+    expect(durationMs('0.18S')).toBe(180);
+    expect(durationMs('180MS')).toBe(180);
+    expect(durationMs('180Ms')).toBe(180);
+  });
+
+  it.each([
+    'cubic-bezier(0.16, 1, 0.3, 1)',
+    'ease',
+    '200',
+    '200px',
+    'var(--lc-dur-2)',
+    '',
+    // Valid CSS number forms, deliberately NOT accepted — offFrameDurations reports what it
+    // cannot read, so the class closes by construction instead of by growing this pattern.
+    '+0.18s',
+    '-0.18s',
+    '1.8e-1s',
+    'calc(200ms * 0.9)',
+  ])('returns null for %s', (value) => {
+    expect(durationMs(value)).toBeNull();
+  });
 });
 
 describe('disagreeingTokens', () => {
