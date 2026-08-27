@@ -161,6 +161,22 @@ describe('node command', () => {
     expect(again.out).toMatch(/already revoked|nothing/i);
   });
 
+  it("surfaces the server's reason, not a bare status code", async () => {
+    const { out } = await capture(() => nodeCommand(parseArgs(['invite', '--label', 'laptop'])));
+    const code = /msinv_[\w-]+/.exec(out)![0];
+    await fetch(`${hubBase}/teams/dawn/nodes/join`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, node_id: 'node-remote', label: 'laptop' }),
+    });
+    await capture(() => nodeCommand(parseArgs(['revoke', 'node-remote'])));
+
+    // The daemon writes a careful sentence explaining that a revoked credential is re-issued by
+    // enrolling, not rotating. The operator has to actually see it: a refusal rendered as
+    // "server error (409)" is the daemon's explanation thrown away at the last step.
+    await expect(nodeCommand(parseArgs(['rotate', 'node-remote']))).rejects.toThrow(/revoked/);
+  });
+
   it('refuses an unknown subcommand and a join missing its arguments', async () => {
     await expect(nodeCommand(parseArgs(['frobnicate']))).rejects.toThrow();
     await expect(nodeCommand(parseArgs(['join']))).rejects.toThrow();

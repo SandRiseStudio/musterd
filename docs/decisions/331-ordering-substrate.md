@@ -219,6 +219,23 @@ derivation with an origin would assert that the derivation is itself an event.
   single-machine team. What §7 actually promised operationally — no enrollment ceremony, no
   `msnode_` minted, no route changes, nothing new to run — all still holds. A reader of 328 should
   read §7 as amended here; the sentence "the `nodes` table is empty" is the part that is wrong.
+- **Experiment result, 2026-08-27 (increment 3a, PR pending, lane `01M12B79XG`): the prediction
+  held, with one correction to how it was worded.** §Observability's Experiment predicted that
+  adoption-at-enrollment would need no "special-casing beyond writing two fields onto an existing
+  row", and that presented origin ids would not collide. Both held. What was wrong is the phrase
+  *existing row*: on the **hub** the presented id names a row that does not exist there — the hub
+  has its own row for that team under a different id — so adoption is an `INSERT … ON CONFLICT DO
+  UPDATE … WHERE credential_hash IS NULL`, not an `UPDATE`. That is one statement, not a special
+  case, so the decision stands and holding ADR 328 §7 would not have been the better call.
+  Confirmed by a two-daemon run: the joiner presented `01M12QH1KG…`, minted by v47 before any
+  credential existed, and the hub bound exactly that id; rotation left it unchanged.
+
+  One thing the Experiment did not anticipate, found while building the guard: `credential_hash IS
+  NULL` **alone** would have admitted the hub's *own* node row, which is permanently unbound because
+  a hub never enrolls with itself. A joiner presenting that id would have bound its credential to
+  the hub's origin and thereafter stamped events as the hub. Increment 3a therefore refuses any id
+  in `local_node`. Recorded here because it is a hazard of this decision's shape — the joiner
+  proposing the identifier — and not of the code that implemented it.
 - **`nodes` arrives before the credential work that motivated it.** Increment 3 inherits a table
   that already exists and already has a row, which is a smaller and better-tested starting point
   than creating both at once under an enrollment flow. The cost is that `credential_hash` is

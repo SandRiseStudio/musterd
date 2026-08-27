@@ -1352,12 +1352,11 @@ export async function handleHttp(
         .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
         .get(team.id);
       if (!local) {
-        return sendJson(res, 409, {
-          error: 'conflict',
-          message:
-            `this daemon has no node row for "${body.team}" yet — it is minted on the team's first ` +
+        throw new MusterdError(
+          'conflict',
+          `this daemon has no node row for "${body.team}" yet — it is minted on the team's first ` +
             'logged act, so send something on this machine before enrolling it',
-        });
+        );
       }
 
       const hubRes = await fetch(new URL(`/teams/${body.team}/nodes/join`, body.hub_url), {
@@ -2911,12 +2910,11 @@ export async function handleHttp(
           // Deliberately one refusal for every reason — spent code, unknown code, expired code,
           // wrong team, id already bound, id belongs to the hub. Telling an unauthenticated caller
           // WHICH guess was close is how a short-lived code becomes searchable.
-          return sendJson(res, 409, {
-            error: 'conflict',
-            message:
-              'enrollment refused — the invite is unknown, expired or already used, or that node ' +
+          throw new MusterdError(
+            'conflict',
+            'enrollment refused — the invite is unknown, expired or already used, or that node ' +
               'id is not available to bind',
-          });
+          );
         }
 
         appendAudit(ctx.db, team.id, {
@@ -2946,17 +2944,17 @@ export async function handleHttp(
         if (nodeVerb[2] === 'rotate') {
           const rotated = rotateNode(ctx.db, team.id, nodeId);
           if (!rotated) {
-            return sendJson(res, 409, {
-              error: 'conflict',
-              message: `node "${nodeId}" is unknown or revoked — a revoked credential is re-issued by enrolling, not by rotating`,
-            });
+            throw new MusterdError(
+              'conflict',
+              `node "${nodeId}" is unknown or revoked — a revoked credential is re-issued by ` +
+                'enrolling it again, not by rotating',
+            );
           }
           appendAudit(ctx.db, team.id, {
             actor: member.name,
             action: 'node.rotated',
             target: nodeId,
             result: 'allow',
-            detail: null,
           });
           // The id is unchanged on purpose: every `origin_node` already in the log still names it.
           return sendJson(res, 200, { node_credential: rotated.credential, node_id: nodeId });
@@ -2969,7 +2967,6 @@ export async function handleHttp(
             action: 'node.revoked',
             target: nodeId,
             result: 'allow',
-            detail: null,
           });
         }
         // `revoked: false` for an already-revoked or unknown node — idempotent, without claiming to
