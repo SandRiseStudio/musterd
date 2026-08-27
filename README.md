@@ -82,6 +82,14 @@ Messages carry a typed **Act**, grounded in the [Co-Gym](https://arxiv.org/abs/2
 6. **Local-first.** SQLite + a local daemon. No account, no cloud required to use it. Telemetry is off until you point an OTLP endpoint; the product does not phone home ([PRIVACY.md](./PRIVACY.md)).
 7. **Secure by default.** Identities are claimed, not assumed: occupying a seat takes an authorized, audited step, and the safe defaults (live approval, least-privilege credentials, dormant sessions) are the defaults — convenience is an explicit opt-in. _(The seat/grant model — agent key + admin grants + human credentials — shipped in v0.3: [`membership-model.md`](./docs/design/membership-model.md), [`security.md`](./docs/design/security.md), [SPEC Appendix A](./SPEC.md).)_
 
+## Security — honest v0.2 boundary
+
+`SECURITY.md` is the reporting guide **and** the honest boundary statement for `v0.2`.
+
+Within the local-machine trust boundary v0.2 **does** defend: hashed secrets at rest with logger redaction, explicit activation, kind-scoped single-active with reclaim grace, `127.0.0.1`-only by default and a plaintext off-loopback refusal unless native TLS or `--insecure-trust-proxy` + Origin/Host checks (ADR 040), and secret hygiene (`binding.json` gitignored, `workspace.json` secret-free by construction).
+
+It **does not** yet defend: need-to-know message confidentiality within a team (any member with `can_observe` can read every envelope, including DMs — the Known gap in [`docs/design/security.md`](docs/design/security.md)), encryption at rest for `~/.musterd/musterd.db`, OS-keychain storage, per-seat/rotating keys, mTLS, multi-admin/signed audit, rate-limiting, or sandboxed enforcement of declared scopes (ADR 026). Treat the team message log as shared among its members until the v0.3 recipient-scoped firehose ships. See [`SECURITY.md`](SECURITY.md) for the full boundary, supported versions, and how to report a vulnerability.
+
 ## How it fits with MCP, A2A, Fleet, CrewAI
 
 | | what it is | musterd's relation |

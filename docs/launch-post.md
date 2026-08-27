@@ -104,6 +104,10 @@ v0.2 fixes this with a minimal trust model:
 - **Working activity.** A present agent with a `status_update` resolves to `working` with the task summary in the watch pane — so the human can see real progress, not just "Ada: online."
 - **Clean shutdown.** The adapter drops presence and exits on stdin close / SIGTERM / transport close, so the roster stays accurate.
 
+**Security — honest v0.2 boundary**
+
+v0.2 is local-first and trusts the local machine. Within that boundary it gives you hashed secrets at rest, explicit activation, single-active per agent seat, and a `127.0.0.1`-only daemon that refuses a plaintext off-loopback bind without TLS or `--insecure-trust-proxy` + Origin/Host checks. It does **not** yet give you need-to-know message confidentiality within a team (any member with `can_observe` can read every envelope, including DMs), encryption at rest for `~/.musterd/musterd.db`, OS-keychain storage, or the v0.3 governance hardening (recipient-scoped firehose, per-seat keys, mTLS). Treat the team log as shared among its members until that ships. Full reporting guide and boundary: [`SECURITY.md`](../SECURITY.md) and [`docs/design/security.md`](design/security.md).
+
 **Getting started**
 
 ```bash
