@@ -4,6 +4,10 @@ import {
   ErrorBodySchema,
   ActDeliverySchema,
   GoalListSchema,
+  NodeInviteMintSchema,
+  NodeListSchema,
+  type NodeInviteMint,
+  type NodeList,
   GoalSchema,
   GrantMintSchema,
   LaneBoardSchema,
@@ -640,6 +644,51 @@ export class HttpClient {
     const json = await this.request('GET', `/teams/${slug}/goals`);
     const parsed = GoalListSchema.safeParse(json);
     if (!parsed.success) throw new CliError('goals response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  // ── Machine credentials (ADR 328), increment 3a of the ADR 325 federation build.
+
+  /** Mint a single-use enrollment code. Admin-only server-side; the plaintext comes back once. */
+  async nodeInvite(slug: string, label: string): Promise<NodeInviteMint> {
+    const json = await this.request('POST', `/teams/${slug}/nodes/invite`, { label });
+    const parsed = NodeInviteMintSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('invite response did not match the protocol schema', 1);
+    return parsed.data;
+  }
+
+  /**
+   * Ask **this machine's own daemon** to enroll itself at a hub — not the hub directly. The daemon
+   * holds the `nodes` row whose id gets presented and is what will hold the credential, so it makes
+   * the call and writes `node.json`. The response carries no secret by design.
+   */
+  async nodeEnroll(body: { hub_url: string; code: string; team: string }): Promise<{
+    node_id: string;
+    team: string;
+  }> {
+    return (await this.request('POST', '/node/enroll', body)) as { node_id: string; team: string };
+  }
+
+  /** Mint a fresh credential against the SAME node row — the id, and every stamp naming it, stays. */
+  async nodeRotate(slug: string, nodeId: string): Promise<{ node_credential: string }> {
+    return (await this.request(
+      'POST',
+      `/teams/${slug}/nodes/${encodeURIComponent(nodeId)}/rotate`,
+    )) as { node_credential: string };
+  }
+
+  /** Revoke a node. `revoked: false` means it was already revoked or unknown. */
+  async nodeRevoke(slug: string, nodeId: string): Promise<{ revoked: boolean }> {
+    return (await this.request(
+      'POST',
+      `/teams/${slug}/nodes/${encodeURIComponent(nodeId)}/revoke`,
+    )) as { revoked: boolean };
+  }
+
+  async nodes(slug: string): Promise<NodeList> {
+    const json = await this.request('GET', `/teams/${slug}/nodes`);
+    const parsed = NodeListSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('nodes response did not match the protocol schema', 1);
     return parsed.data;
   }
 

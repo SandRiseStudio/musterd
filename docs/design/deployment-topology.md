@@ -95,7 +95,9 @@ Appendix A, via ADR 042) rather than being pure transport.
 
 ## 8. What this is explicitly NOT
 
-- **Not federation.** One team is still one daemon (§2). Team-to-team addressing and cross-team identity are a separate roadmap item (`ROADMAP.md`, ADR 001). A member belongs to one team.
+> **Unfrozen 2026-08-27 — federation is being built.** ADR 039's "not federation" line was superseded in part by [ADR 325](../decisions/325-multi-machine-federation.md), which relocated the invariant from *one daemon* to **one team, one authority**: a team is served by one **hub** and any number of **machine daemons** (replicas), with a single-machine team as the degenerate case where its one daemon is its own hub. ADR 325 §Consequences said this section unfreezes "when the build starts". It has — see §11 below. Everything else in this section still holds as written, and the topologies of §3 remain the right answer for any team that fits on one daemon.
+
+- ~~**Not federation.**~~ Superseded — see the note above and §11. Team-to-team addressing and cross-team identity remain a separate roadmap item (`ROADMAP.md`, ADR 001); a member still belongs to one team.
 - **Not multi-region / HA / replicated DB.** One daemon, one SQLite store remains the model. Scaling the daemon itself (replication, failover) is a later, separate concern.
 - **Not running members.** Reachability ≠ hosting. A member on a cloud box is *run* by whoever owns that box; musterd connects it (Principle 4). The optional sandboxed runtime (`ROADMAP.md`) is the only place musterd hosts a member, and it's unrelated to this doc.
 
@@ -111,3 +113,59 @@ Appendix A, via ADR 042) rather than being pure transport.
 - ~~Native TLS in the daemon vs. "always run a reverse proxy / overlay" as the documented stance~~ — **decided** (ADR 040): support **both** — native in-process TLS (`MUSTERD_TLS_CERT`/`MUSTERD_TLS_KEY`) *and* `--insecure-trust-proxy` for a TLS-terminating proxy/overlay in front; either satisfies the off-loopback guard.
 - ~~Heartbeat/grace/timeout constants: WAN-tuned defaults vs. per-team config (§6)~~ — **decided** (ADR 040): env-overridable per team, today's values kept as defaults (no behavior change out of the box).
 - Does Topology C reuse the same wire protocol end-to-end (relay is a dumb pipe) or introduce a relay-specific framing? Prefer the former.
+
+## 11. Federation (ADR 325) — the build, and where it has got to
+
+Added 2026-08-27, unfreezing §8's first bullet. This section tracks the shape actually built; the
+decisions themselves live in the ADRs it names.
+
+**The topology.** One team, one **authority**. A team is served by one hub and any number of machine
+daemons. A machine daemon is today's daemon unchanged in kind — same store, same clients, same
+synchronous SQLite; the hub is the same daemon *promoted*, additionally speaking the sync surface and
+arbitrating the facts that need global agreement. A single-machine team is the degenerate case and
+nothing about today's deployment changes ([ADR 325](../decisions/325-multi-machine-federation.md)).
+
+**Three residences for state**, decided by consistency need: hub-authoritative under linearizable CAS
+(lane ownership, canonical order, admission of remote daemons); locally-authoritative and replicated
+(messages and the other append-only events); local-only and never replicated (presence, wake leases,
+footprint, schema meta — and `local_node`, below). Roster identity stays on git, unchanged
+([ADR 058](../decisions/058-durable-on-git-live-on-daemon.md)).
+
+### Increments
+
+| # | What | Status |
+| --- | --- | --- |
+| 1 | Prereq hardening — guarded lane CAS, per-field `updateLane`, transition events | landed (#1071) |
+| 2 | The ordering substrate — `(origin_node, origin_seq)` stamped from the first message, migration v47 | landed 2026-08-27 (`5c1b35f0`, [ADR 331](../decisions/331-ordering-substrate.md)) |
+| **3a** | **The machine credential — `msnode_`, `msinv_` enrollment, rotation, revocation** | **this build** ([ADR 328](../decisions/328-machine-credential.md)) |
+| 3b | Sync wire format, push/pull routes, cursors | not started |
+| 3c | Hub-authoritative claim CAS, seat→node residence binding | not started |
+
+The hub storage engine needs no decision: ADR 325 defines a hub by the surface it speaks, and a
+promoted daemon on SQLite satisfies the CAS — one process, one writer.
+
+### What increment 3a added
+
+- **A node is a machine-*team* principal.** A daemon hosting two teams is admitted separately at two
+  hubs, revocable separately at each, and holds two identities with two independent `origin_seq`
+  streams (ADR 331 §Decision 1).
+- **Enrollment is a one-time code.** An admin runs `musterd node invite` on the hub for a single-use,
+  15-minute `msinv_`; the joining machine runs `musterd node join <hub-url> <code>`. That command
+  asks **its own daemon** to enroll — the daemon presents the node id it already holds from v47, and
+  writes the durable `msnode_` to `~/.musterd/node.json` at 0600. The CLI never holds the credential.
+- **The hub binds, and can refuse.** Consuming the invite and binding the credential are one
+  transaction, so a refused bind does not spend the operator's code. Two refusals: an id already
+  bound to a different credential, and **any id in `local_node`** — a hub never enrolls with itself,
+  so its own row is permanently unbound and would otherwise be bindable by a joiner, who could then
+  stamp events as the hub.
+- **`local_node`** (migration v48) records which `nodes` row is this daemon's. Increment 2 identified
+  it by `ORDER BY id LIMIT 1`, correct only while there was one row per team — which enrollment is
+  precisely what ends.
+- **An `msnode_` admits its bearer to the sync surface and nothing else** (ADR 328 §3). It is not a
+  seat credential: a machine being *admitted* and a seat being *authorized* are independent axes.
+
+### Not yet true
+
+No events sync. Increment 3a mints and retires machine identities; nothing pushes or pulls with them
+until 3b, and lane claims stay local until 3c. A team spanning two machines today has two admitted
+daemons and two separate logs.

@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('47');
+    expect(ver?.value).toBe('49');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -247,7 +247,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(47); // runs v18…v47 (including the shared Seed store)
+    expect(runMigrations(db)).toBe(49); // runs v18…v49 (including the shared Seed store)
 
     const scope = (id: string) =>
       db
@@ -311,7 +311,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(47);
+    expect(runMigrations(db)).toBe(49);
 
     const policy = (id: string) =>
       db
@@ -533,6 +533,86 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     ).toEqual(firstNodes);
     expect(seqs(db, 't1').map((r) => r.origin_seq)).toEqual([1, 2, 3]);
     expect(seqs(db, 't2').map((r) => r.origin_seq)).toEqual([1, 2]);
+    db.close();
+  });
+
+  /**
+   * v48 — the `local_node` marker (increment 3a). v47 identified the local row by `ORDER BY id
+   * LIMIT 1`, which is only correct while `nodes` holds one row per team. Enrollment is what breaks
+   * that, so the marker is recorded before enrollment can exist.
+   */
+  it('v48 marks every v47 row as local, one per team', () => {
+    const db = buildV46();
+    runMigrations(db);
+
+    const marks = db
+      .prepare<
+        [],
+        { team_id: string; node_id: string }
+      >('SELECT team_id, node_id FROM local_node ORDER BY team_id')
+      .all();
+    expect(marks.map((m) => m.team_id)).toEqual(['t1', 't2']);
+    expect(marks[0]!.node_id).toBe(seqs(db, 't1')[0]!.origin_node);
+    expect(marks[1]!.node_id).toBe(seqs(db, 't2')[0]!.origin_node);
+    db.close();
+  });
+
+  it('v48 is idempotent under rewind-and-replay: one mark per team, unchanged', () => {
+    const db = buildV46();
+    runMigrations(db);
+    const before = db
+      .prepare<
+        [],
+        { team_id: string; node_id: string }
+      >('SELECT team_id, node_id FROM local_node ORDER BY team_id')
+      .all();
+
+    db.prepare("UPDATE schema_meta SET value = '46' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    expect(
+      db
+        .prepare<
+          [],
+          { team_id: string; node_id: string }
+        >('SELECT team_id, node_id FROM local_node ORDER BY team_id')
+        .all(),
+    ).toEqual(before);
+    db.close();
+  });
+
+  /**
+   * v49 — `node_invites` (ADR 328 §2). No backfill to check: an invite is a live object with a
+   * 15-minute life, so history has none. What the replay must not do is drop live codes.
+   */
+  it('v49 creates node_invites and a replay keeps the codes already minted', () => {
+    const db = buildV46();
+    runMigrations(db);
+    db.prepare(
+      `INSERT INTO node_invites (id, team_id, code_hash, label, created_by, created_at, expires_at)
+       VALUES ('i1', 't1', 'hash-1', 'laptop', 'nick', 1000, 2000)`,
+    ).run();
+
+    db.prepare("UPDATE schema_meta SET value = '46' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM node_invites').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  it('v49 refuses two invites sharing one code hash', () => {
+    const db = buildV46();
+    runMigrations(db);
+    const insert = (id: string) =>
+      db
+        .prepare(
+          `INSERT INTO node_invites (id, team_id, code_hash, label, created_by, created_at, expires_at)
+           VALUES (?, 't1', 'same-hash', 'laptop', 'nick', 1000, 2000)`,
+        )
+        .run(id);
+    insert('i1');
+    // A replayed mint must collide rather than shadow the live code it duplicates.
+    expect(() => insert('i2')).toThrow();
     db.close();
   });
 });

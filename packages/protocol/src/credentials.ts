@@ -24,6 +24,15 @@ export const TOKEN_PREFIXES = {
   grant: 'msgr_',
   /** A human credential — what a person presents to authenticate. */
   credential: 'mscr_',
+  /**
+   * A machine credential (ADR 328) — what an admitted daemon presents on the sync surface, and
+   * nothing else. Deliberately not a seat credential: a machine being *admitted* and a seat being
+   * *authorized* are independent axes, and collapsing them would make one laptop's compromise a
+   * licence to mint teammates.
+   */
+  node: 'msnode_',
+  /** A single-use, short-TTL enrollment code that mints exactly one `msnode_` (ADR 328 §2). */
+  node_invite: 'msinv_',
 } as const;
 export type TokenKind = keyof typeof TOKEN_PREFIXES;
 

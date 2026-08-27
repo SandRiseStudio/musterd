@@ -309,7 +309,21 @@ export type AuditAction =
   // `{ killed: pid[], refused: {pid, reason}[], rss_kb }`. Every kill was re-verified against the
   // live process table at kill time (allowlist match + still orphaned) — the row records what the
   // verification let through, so a disputed reap can be audited against what was actually running.
-  | 'footprint.reaped';
+  | 'footprint.reaped'
+  // ADR 328 (federation increment 3a): the machine-credential lifecycle. Admitting a machine is a
+  // governance decision in exactly the sense this ledger exists for — it grants a principal the
+  // ability to speak for the seats resident on it, and revoking it is how that is taken back.
+  //
+  // `node.invited` (actor = the admin, target = the label, detail `{ expires_at }`);
+  // `node.enrolled` (actor null — the invite code is the authority, not a seat; detail
+  // `{ node_id }`); `node.enrollment_refused` (`result: deny`, the CAS turning down a spent code
+  // or an unavailable id); `node.rotated` and `node.revoked` (actor = the admin, target = the node
+  // id). No detail ever carries a credential, an invite code, or either one's hash.
+  | 'node.invited'
+  | 'node.enrolled'
+  | 'node.enrollment_refused'
+  | 'node.rotated'
+  | 'node.revoked';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

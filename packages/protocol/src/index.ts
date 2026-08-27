@@ -17,6 +17,7 @@ export * from './incident.js';
 export * from './duration.js';
 export * from './deliveryHint.js';
 export * from './credentials.js';
+export * from './nodes.js';
 export * from './guardian.js';
 export * from './claim.js';
 export * from './claim-handshake.js';

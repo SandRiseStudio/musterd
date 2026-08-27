@@ -1,5 +1,6 @@
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { hostname } from 'node:os';
 import { extname, join, resolve, sep } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
@@ -63,6 +64,12 @@ import {
   SeedSchema,
   SubmitSeedBriefSchema,
   TeamMemorySearchResponseSchema,
+  TOKEN_PREFIXES,
+  NodeEnrollRequestSchema,
+  NodeInviteMintSchema,
+  NodeJoinRequestSchema,
+  NodeJoinResponseSchema,
+  NodeListSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -73,6 +80,7 @@ import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
 import { log } from '../log.js';
+import { saveNodeEnrollment } from '../node/state.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import { deliveryHintFor } from '../protocol/nudge.js';
@@ -133,6 +141,7 @@ import {
   markSeatReleased,
   markSessionEnded,
   mintCredential,
+  newSecret,
   rotateToken,
   setAvailability,
   setMemberGovernance,
@@ -148,6 +157,14 @@ import {
   pendingInterrupts,
   rowToEnvelope,
 } from '../store/messages.js';
+import {
+  bindNode,
+  consumeInvite,
+  listNodes,
+  mintInvite,
+  revokeNode,
+  rotateNode,
+} from '../store/nodes.js';
 import { deriveNext } from '../store/orientation.js';
 import {
   attach,
@@ -269,6 +286,13 @@ const DEFERRAL_SCAN_LIMIT = 2000;
  * cursor cannot hold the loop while its whole history is marshalled and serialised.
  */
 const INBOX_DEFAULT_LIMIT = 200;
+
+/**
+ * Rollback sentinel for node enrollment (ADR 328 §2). better-sqlite3 commits a transaction whose
+ * function returns normally, so a refusal has to throw to roll the invite's consumption back with
+ * the bind that failed. Compared by identity and never surfaced — the caller gets one 409.
+ */
+const ENROLL_REFUSED = Symbol('enrollment refused');
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -1307,6 +1331,59 @@ export async function handleHttp(
         // Guardian probes filter log lines against this; older lines are evidence of nothing.
         booted_at: BOOTED_AT,
       });
+    }
+
+    /**
+     * `POST /node/enroll` (ADR 328 §2) — the local half of enrollment.
+     *
+     * The CLI does not call the hub itself. This daemon holds the v47 `nodes` row whose id must be
+     * presented (ADR 331 §Decision 1) and is what will hold the resulting credential, so it makes
+     * the call and writes `node.json`. Localhost-only, like every other operator verb: enrolling
+     * this machine somewhere is not something a remote caller gets to initiate.
+     *
+     * The response deliberately omits the credential — it went to disk, and the CLI has no use for
+     * it. Printing it would put a long-lived machine secret in a terminal's scrollback for no gain.
+     */
+    if (method === 'POST' && path === '/node/enroll') {
+      requireLocalPeer(ctx, req, 'enrolling this machine with a hub');
+      const body = parseOrBadRequest(NodeEnrollRequestSchema, await readJson(req));
+      const team = requireTeam(ctx.db, body.team);
+      const local = ctx.db
+        .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+        .get(team.id);
+      if (!local) {
+        throw new MusterdError(
+          'conflict',
+          `this daemon has no node row for "${body.team}" yet — it is minted on the team's first ` +
+            'logged act, so send something on this machine before enrolling it',
+        );
+      }
+
+      const hubRes = await fetch(new URL(`/teams/${body.team}/nodes/join`, body.hub_url), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code: body.code,
+          node_id: local.node_id,
+          label: hostname(),
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const hubBody: unknown = await hubRes.json().catch(() => null);
+      // Relay the hub's refusal rather than reinterpreting it: the hub is the authority on whether
+      // this machine is admitted, and a daemon that softened a 409 into a success would write a
+      // credential the hub never issued.
+      if (!hubRes.ok) return sendJson(res, hubRes.status, hubBody);
+
+      const minted = NodeJoinResponseSchema.parse(hubBody);
+      saveNodeEnrollment({
+        team: body.team,
+        hub_url: body.hub_url,
+        node_id: minted.node_id,
+        credential: minted.node_credential,
+        enrolled_at: Date.now(),
+      });
+      return sendJson(res, 200, { node_id: minted.node_id, team: body.team });
     }
 
     if (method === 'POST' && path === '/teams') {
@@ -2767,6 +2844,158 @@ export async function handleHttp(
           ...(hint ? { delivery_hint: hint } : {}),
           ...(result.handoff_lane ? { handoff_lane: result.handoff_lane } : {}),
         });
+      }
+
+      // ── Node enrollment (ADR 328), increment 3a of the ADR 325 federation build.
+      //
+      // These are NEW routes that `isLocalPeer` never guarded (§6): nothing that is localhost-only
+      // today becomes remote-reachable because of them. `join` authenticates on the invite code
+      // alone — that IS the ceremony (§2: trust-on-first-use, bounded by a short window) — and
+      // every other verb is strict admin.
+      //
+      // An `msnode_` is minted here but never accepted here: it admits its bearer to the sync
+      // surface (3b) and nothing else, so no route on this file authenticates one. A machine being
+      // admitted and a seat being authorized are independent axes (§3).
+      if (method === 'POST' && rest === '/nodes/invite') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const body = (await readJson(req)) as { label?: unknown };
+        const label =
+          typeof body?.label === 'string' && body.label ? body.label : 'unnamed machine';
+        const minted = mintInvite(ctx.db, team.id, label, member.name);
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'node.invited',
+          target: label,
+          result: 'allow',
+          detail: { expires_at: minted.expires_at },
+        });
+        return sendJson(res, 200, NodeInviteMintSchema.parse(minted));
+      }
+
+      if (method === 'POST' && rest === '/nodes/join') {
+        const body = NodeJoinRequestSchema.parse(await readJson(req));
+        const credential = newSecret(TOKEN_PREFIXES.node);
+        // An unknown slug must fail as ONE refusal with everything else (ryder, 2026-08-27). This
+        // route is unauthenticated by design, so a 404-before-the-code-is-checked answers "does
+        // team X exist on this hub?" to anyone who asks — a free team-slug oracle on a public bind.
+        const team = getTeamBySlug(ctx.db, slug);
+
+        // Consume-then-bind is ONE transaction: a consumed invite whose bind then fails would burn
+        // the operator's code and enroll nobody, which is the worst of both outcomes.
+        //
+        // The refusal has to THROW rather than return null. better-sqlite3 commits a transaction
+        // whose function returns normally — a returned null would leave the consumption standing,
+        // so a mistyped node id would silently cost an invite and the operator would have to mint
+        // another to discover why. Throwing is what rolls the consumption back with the bind.
+        const bound = ((): { id: string } | null => {
+          if (!team) return null;
+          try {
+            return ctx.db.transaction(() => {
+              // `enrolled_by` carries the invite's row id, not the literal 'invite' (ryder,
+              // 2026-08-27): it makes node.invited → node.enrolled a joinable chain, so an auditor
+              // can say WHICH code admitted a machine and who minted it.
+              const invite = consumeInvite(ctx.db, team.id, body.code, body.node_id);
+              if (!invite) throw ENROLL_REFUSED;
+              const b = bindNode(
+                ctx.db,
+                team.id,
+                body.node_id,
+                body.label,
+                credential,
+                `invite:${invite.id}`,
+              );
+              if (!b) throw ENROLL_REFUSED;
+              return b;
+            })();
+          } catch (err) {
+            if (err === ENROLL_REFUSED) return null;
+            throw err;
+          }
+        })();
+
+        // `!team` is redundant at runtime (a missing team already yields `bound === null`) but it
+        // is what narrows the type for the audit write below — and it keeps the two conditions that
+        // mean "refuse" in one place.
+        if (!bound || !team) {
+          if (team)
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'node.enrollment_refused',
+              target: body.label,
+              result: 'deny',
+              // The node id is the operator's own diagnostic; the code never appears, hashed or not.
+              detail: { node_id: body.node_id },
+            });
+          // Deliberately one refusal for every reason — spent code, unknown code, expired code,
+          // wrong team, id already bound, id belongs to the hub. Telling an unauthenticated caller
+          // WHICH guess was close is how a short-lived code becomes searchable.
+          throw new MusterdError(
+            'conflict',
+            'enrollment refused — the invite is unknown, expired or already used, or that node ' +
+              'id is not available to bind',
+          );
+        }
+
+        appendAudit(ctx.db, team.id, {
+          actor: null,
+          action: 'node.enrolled',
+          target: body.label,
+          result: 'allow',
+          detail: { node_id: bound.id },
+        });
+        return sendJson(
+          res,
+          200,
+          // Shown once, never re-fetchable — the handling every token kind before it gets.
+          NodeJoinResponseSchema.parse({
+            node_credential: credential,
+            node_id: bound.id,
+            team: slug,
+          }),
+        );
+      }
+
+      const nodeVerb = rest.match(/^\/nodes\/([^/]+)\/(rotate|revoke)$/);
+      if (method === 'POST' && nodeVerb) {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const nodeId = decodeURIComponent(nodeVerb[1]!);
+
+        if (nodeVerb[2] === 'rotate') {
+          const rotated = rotateNode(ctx.db, team.id, nodeId);
+          if (!rotated) {
+            throw new MusterdError(
+              'conflict',
+              `node "${nodeId}" is unknown or revoked — a revoked credential is re-issued by ` +
+                'enrolling it again, not by rotating',
+            );
+          }
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'node.rotated',
+            target: nodeId,
+            result: 'allow',
+          });
+          // The id is unchanged on purpose: every `origin_node` already in the log still names it.
+          return sendJson(res, 200, { node_credential: rotated.credential, node_id: nodeId });
+        }
+
+        const revoked = revokeNode(ctx.db, team.id, nodeId);
+        if (revoked) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'node.revoked',
+            target: nodeId,
+            result: 'allow',
+          });
+        }
+        // `revoked: false` for an already-revoked or unknown node — idempotent, without claiming to
+        // have acted. Events already ingested stay either way (§5).
+        return sendJson(res, 200, { node_id: nodeId, revoked });
+      }
+
+      if (method === 'GET' && rest === '/nodes') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, NodeListSchema.parse({ nodes: listNodes(ctx.db, team.id) }));
       }
 
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All

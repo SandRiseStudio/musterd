@@ -495,6 +495,19 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd lanes', 'musterd lanes --mine --open'],
   },
   {
+    name: 'node',
+    signature: '<invite|join|rotate|revoke|list>',
+    summary: 'machine credentials — admit a second machine to this team',
+    group: 'admin',
+    detail:
+      'The machine credential (ADR 328). An admin runs `node invite` on the hub to mint a single-use, ' +
+      '15-minute `msinv_` code; the joining machine runs `node join <hub-url> <code>`, which asks ITS ' +
+      'OWN daemon to enroll — the daemon presents the node id it already holds and writes the durable ' +
+      '`msnode_` to ~/.musterd/node.json at 0600. `rotate` re-keys a machine without changing its ' +
+      'identity, so every event it has already stamped still names it. `revoke` cuts it off ' +
+      'immediately and leaves its history alone.',
+  },
+  {
     name: 'next',
     signature: '[--json]',
     summary: 'the orientation brief — what you carry, what to pick up next',

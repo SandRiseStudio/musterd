@@ -1121,6 +1121,58 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Which `nodes` row is THIS daemon's, per team — ADR 325 residence 3 (local-only, never
+    // replicated), so a separate table rather than a column: "is this row me" is machine-relative,
+    // and `nodes` is hub-authoritative state that will replicate, where a self-referring boolean is
+    // false on every receiver.
+    //
+    // v47 picked the local row with `ORDER BY id LIMIT 1`, correct only while enrollment did not
+    // exist. Increment 3a is what adds the second row, so this precedes it: a remote ULID sorting
+    // lower would otherwise take over our stamp, holing our sequence and putting numbers in theirs
+    // that name events they never wrote — the loss-versus-silence ambiguity ADR 331 exists to
+    // prevent. Backfills from v47's rows, every one of which is local by construction because
+    // nothing has ever enrolled. `INSERT OR IGNORE` for the rewind-and-replay harness, and
+    // `ORDER BY id` so that if the one-row-per-team assumption is ever violated the row picked is
+    // deterministic rather than whatever the scan happened to reach first (miley, 2026-08-27).
+    version: 48,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS local_node (
+          team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          node_id TEXT NOT NULL REFERENCES nodes(id)
+        );
+        INSERT OR IGNORE INTO local_node (team_id, node_id)
+          SELECT team_id, id FROM nodes ORDER BY id;
+      `);
+    },
+  },
+  {
+    // Enrollment codes (ADR 328 §2): a one-time code, not a copied secret. Hashed like every other
+    // token kind — the plaintext is shown once at mint and never persisted. Single-use is enforced
+    // by the guarded CAS in store/nodes.ts (`WHERE consumed_at IS NULL`), not by this schema: the
+    // uniqueness here is on the code, so a replayed mint collides rather than shadowing.
+    //
+    // No backfill — an invite is a live object with a 15-minute life, and history has none.
+    version: 49,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS node_invites (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          code_hash   TEXT NOT NULL,
+          label       TEXT,
+          created_by  TEXT NOT NULL,
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL,
+          consumed_at INTEGER,
+          consumed_by TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_invites_team ON node_invites(team_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_node_invites_code ON node_invites(code_hash);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
