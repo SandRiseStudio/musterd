@@ -66,9 +66,13 @@
    * (re-add the Fraunces @imports in global.css before pointing here).
    */
 
-  /* Motion */
+  /* Motion — the SITE's easing. /live has its own scale in Live.css (ADR 329), and the site has not
+     adopted it: that lane has not happened. --ease-in-out was removed on 2026-08-26 once /live's
+     last use moved to --lc-ease-in-out and it had zero consumers left; this one still has three
+     (GetStarted.css, Footer.css). Note it is byte-identical to --lc-ease-out — the same value under
+     two names, which is exactly the drift ADR 329 exists to end, and which ends here when the site
+     adopts the scale. */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
   /* Layout */
   --maxw: 920px;

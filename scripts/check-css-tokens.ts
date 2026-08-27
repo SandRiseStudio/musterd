@@ -210,14 +210,25 @@ for (const file of files) {
   for (const { token } of declaredMotionTokens(readFileSync(file, 'utf8'))) knownMotion.add(token);
 }
 
+/*
+ * The motion arm judges the /live SURFACE, not every stylesheet in the repo.
+ *
+ * The scale is a /live scale: ADR 313 already splits the CSS budgets by surface, and the public
+ * site (components/*.css) was never migrated onto the rungs — its lane has not happened. Judging it
+ * here would report a surface nobody has agreed to move as broken, which is how a gate teaches
+ * people to ignore it. When the site adopts the scale, widen this.
+ */
+const onMotionSurface = (rel: string) => rel.includes('packages/web/src/live/');
+
 const motionFindings: (MotionFinding & { file: string })[] = [];
 for (const file of files) {
   const css = readFileSync(file, 'utf8');
   const rel = relative(repoRoot, file);
+  if (!onMotionSurface(rel)) continue;
   for (const f of [
     ...disagreeingTokens(css, expectedMotion),
     ...offFrameDurations(css),
-    ...rawMotionLiterals(css),
+    ...rawMotionLiterals(css, rel),
     ...phantomMotionRefs(css, knownMotion),
     // Rule 4. /broadcast is exempt by design (spec §6): it is a capture surface, and the harness
     // rather than a person decides what it renders — there is no viewer there to hold a preference.

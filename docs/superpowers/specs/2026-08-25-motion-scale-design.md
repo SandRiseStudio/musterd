@@ -37,17 +37,15 @@ A duration that is not a whole multiple of 40ms lands mid-frame on the stream: t
 step is a partial one, which is the judder the lane brief warns about. This converts "pick nice
 durations" from taste into arithmetic.
 
-It also produces a hard floor. Three durations in the codebase are **below three frames** and cannot
-render as motion at all on the stream — they are snaps that merely cost a repaint:
+It also produces a hard floor: **below three frames (120ms) a transition has too few samples to read
+as motion at all** — it is a snap that merely costs a repaint.
 
-| Value | Frames @25fps |
-|---|---|
-| `45ms` | 1.1 |
-| `50ms` | 1.25 |
-| `90ms` | 2.25 |
-
-These are the only values in the two stylesheets this spec calls outright defects rather than
-inconsistencies.
+**Corrected 2026-08-26.** This section listed `45ms`, `50ms` and `90ms` as three such durations and
+called them defects. They are not durations: all three are `transition-delay` / `animation-delay`
+values (`Live.css:1509`, `4855`). A delay shifts *when* motion starts, so the whole-frame rule does
+not apply to it, and the claim survived into ADR 329, the PR body and a commit message before
+ryder's acceptance review caught it. The floor is a property of the capture rate and needs no
+example from the tree to be true.
 
 ## 3. The scale
 
@@ -80,8 +78,9 @@ surface this lane does not own — worth its own lane if the site ever wants the
 
 **This spec originally claimed overshoot was the riskiest family at 25fps** — that an overshoot's
 peak could fall between two captured frames and not exist on the stream. **Measured 2026-08-25, that
-is false**, and the measurement is in `docs/perf/motion-capture.md`: 97–100% of the overshoot
-survives at every rung, for all three candidate curves. A cubic-bezier's overshoot is a broad smooth
+is false**, and the measurement is in `docs/perf/motion-capture.md`: the overshoot survives capture
+at every rung `pop` is used on (d2–d5; 83.2–98.1% at worst-case phase, and d1 — where it drops to
+56.6% — is never used with `pop`). A cubic-bezier's overshoot is a broad smooth
 maximum, not a spike, and with one control-point pair it cannot oscillate — the narrow-peak failure
 belongs to stiff spring physics, which this codebase does not use.
 
@@ -114,8 +113,46 @@ zero bytes, which matters under Delight 0's remaining initial-JS headroom.
 rather than adding a gate. It fails on three things:
 
 1. A motion token in CSS whose value disagrees with `motion.ts`.
-2. A raw `cubic-bezier()` or bare `ms` literal in a transition/animation outside the exemption list.
+2. A raw `cubic-bezier()` or bare duration literal in a transition/animation outside the exemption
+   list.
 3. A duration that is not a whole number of frames at 25fps.
+
+**Corrected 2026-08-26 (second pass).** Rules 2 and 3 both said `ms` and both meant it — each parsed
+milliseconds only, and a duration written in seconds was invisible to the gate. Rule 2's blindness
+let three live violations onto main (ryder's REQUIRED 1 on #1079). Rule 3's outlived that fix by one
+review: it still parsed `/^(\d+)ms$/`, so a **new rung** declared as `--lc-dur-6: 0.18s` was counted
+by nothing — rule 2 does not scan `:root` declarations, and rule 1 only knows tokens already in
+`motion.ts` (ryder's REQUIRED 1 on #1082). 4.5 frames, rule 3's own defect class, on the scale
+itself. Both rules read either unit now. **The unit a duration is spelled in was never the point;
+the number of frames it occupies is** — and any future rule that parses a duration must go through
+`durationMs`, not its own regex, which is the mistake that got made twice.
+
+**Corrected again, same review.** Widening the parse fixed the listed forms and left the shape
+intact: rule 3 still *skipped* whatever it could not read, so the parser's blind spots stayed the
+gate's blind spots. `0.18S`, `180MS`, `+0.18s` and `1.8e-1s` all left the gate green, and all four
+are 4.5 frames — the same sentence, one round later (ryder's second REQUIRED on #1082).
+
+**So rule 3 now fails closed: a `--lc-dur-*` value it cannot read is a finding, not a skip.** The
+case-insensitivity fix is real, because CSS units are case-insensitive. The rest are reported rather
+than parsed, and that is the point — a third widening would have been beaten by a form nobody
+listed, whereas "count the frames or say you could not" has no unlisted forms. A gate must never be
+silent in a way a reader will mistake for having checked and been satisfied.
+
+**Corrected a third time, third review round.** The paragraph above told rule 3's story and left
+rule 2 holding the same defect, in the same file, next to the sentence saying the class was closed:
+rule 2 kept its own literal pattern, case-sensitive and innocent of signs and exponents, so
+`0.18S`, `180MS` and `1.8e-1s` rode a green gate as real declarations while `180ms` failed (ryder's
+REQUIRED on #1082, round 3 — and `180MS` was one form wider than the report, found by exercising all
+of them). Two more private grammars were hiding in the same rule: the zero-duration test and the §5
+allowlist, both matching characters rather than values, so `0S` and `1S` meant nothing to either.
+
+**Rule 2 now has no duration grammar at all.** It splits a declaration into words, asks of each only
+"does this look like a duration" — has a digit, ends in an s unit — and hands every one that does to
+`durationMs`: counted if it reads, reported as UNREADABLE if it does not, on rule 3's shape. Zero
+and the allowlist compare milliseconds, not spelling. **The invariant, which names no forms:** for
+any value a motion declaration can hold, the gate either counts its frames or says it could not —
+never neither. That sentence is now true of both rules, and `durationMs` is the only thing in the
+file that decides what a duration is.
 
 ## 5. Exemptions, and why they are a rule rather than a list
 
@@ -130,6 +167,19 @@ exempt.** This is checkable, so the gate enforces the rule rather than trusting 
 `1.4s`, `1.5s`, `2.8s`, `3.6s`. These get a short, named allowlist in the gate, each entry carrying a
 one-line reason. An allowlist that must be edited by hand is the point: it makes an exception cost a
 sentence.
+
+Each entry is keyed on value **and** file **and** CSS property **and** the token naming the site
+within it (an animation name, or the animated property) — not value and file. The reasons name a
+specific declaration ("the expiry bar is a countdown"), so the check enforces that declaration:
+exempting `1s` for the countdown must not also exempt `1s` in any hover transition in the same file
+(ryder's non-blocking (a) on #1082, round one), and matching the site as a bare substring must not
+let `max-width` inherit `width`'s exemption (round two).
+
+**What the exemption is NOT keyed on: the selector.** An entry names a declaration, not a rule, so
+moving `transition: width 1s linear` to a different selector in the same file keeps it exempt. That
+is the honest description of the match, and it is written here because the earlier draft of this
+paragraph claimed the exemption "binds to the declaration that earned it" while the code bound it to
+file plus a substring — and the sentence in the doc is the thing that gets cited, not the regex.
 
 Two of these (`0.42s`, `0.5s`) are close enough to rungs that the implementation should test whether
 they are deliberate at all, or simply the same accidental drift as the `ms` clusters. If they are
@@ -169,10 +219,11 @@ not an assertion:
 > and (c) one accept-confetti. Each must occupy the expected whole number of frames, and the
 > `--lc-ease-pop` overshoot must have a visible peak in at least one captured frame.
 
-**The overshoot half of this was run analytically on 2026-08-25 and cannot fail** — see
-`docs/perf/motion-capture.md`. A falsifier no cubic-bezier can fail is not a gate, so it is retired
-rather than performed; the frame-count half stands and is now enforced continuously by the gate's
-rule 3 rather than by a one-off capture.
+**The overshoot half of this was run analytically on 2026-08-25** — see
+`docs/perf/motion-capture.md`. At the rungs `pop` is used on (d2–d5) it could not have failed, so it
+is retired rather than performed; the frame-count half stands and is now enforced continuously by the
+gate's rule 3 rather than by a one-off capture. (Amended 2026-08-26: the original wording here,
+"cannot fail" for *any* cubic-bezier, overclaimed — d1 is outside the covered range.)
 
 **A note on when a capture is even meaningful.** The hosted capture renders
 `http://${AIR_IP}:4849` — the daemon's build of `main`. A branch's motion is not on the stream until

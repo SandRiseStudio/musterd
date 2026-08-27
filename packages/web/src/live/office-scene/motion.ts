@@ -35,9 +35,15 @@ export type DurKey = keyof typeof DUR;
 /**
  * The three easing roles, as CSS bezier control points.
  *
- * `pop` is the overshoot role and the riskiest at 25fps: an overshoot peak can fall between two
- * captured frames and simply not exist on the stream. Its control point is chosen against the
- * capture falsifier (spec §7), not by eye on a 120Hz laptop, which shows every overshoot.
+ * `pop` is the overshoot role. The worry that its peak could fall between two captured frames and
+ * not exist on the stream was MEASURED AND DISPROVED — a cubic-bezier's overshoot is a broad
+ * maximum, not a spike. The analysis, including the phase assumption and the per-rung numbers, is
+ * `docs/perf/motion-capture.md`; the capture falsifier that sentence used to cite was retired in the
+ * same change that wrote it.
+ *
+ * One live constraint from that analysis: the margin is thin at `d1` (56.6% of the overshoot at
+ * worst-case capture phase, against 83%+ for d2–d5). `pop` is not used on `d1` today. If you put it
+ * there, recompute before assuming it reads.
  */
 export const EASE_CSS = {
   out: [0.16, 1, 0.3, 1],

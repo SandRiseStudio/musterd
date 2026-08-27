@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   declaredMotionTokens,
   disagreeingTokens,
+  durationMs,
   offFrameDurations,
   phantomMotionRefs,
   rawMotionLiterals,
@@ -64,6 +65,170 @@ describe('rawMotionLiterals', () => {
       ['240ms', '380ms', 'cubic-bezier(0.22, 1, 0.36, 1)'].sort(),
     );
   });
+
+  // ryder's REQUIRED 1 on #1079: LITERAL matched only `\d+ms`, so a duration written in SECONDS
+  // was invisible and three real violations passed a green gate on main — including
+  // `all 0.18s` (180ms = 4.5 frames), which is precisely rule 3's defect class.
+  it('flags a duration written in seconds — the unit is not the point, the number is', () => {
+    expect(rawMotionLiterals('.a { transition: all 0.18s ease; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '0.18s' },
+    ]);
+  });
+
+  it('flags a whole-second duration', () => {
+    expect(rawMotionLiterals('.a { transition: width 1s linear; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '1s' },
+    ]);
+  });
+
+  it('still exempts an ambient loop written in seconds', () => {
+    expect(rawMotionLiterals('.a { animation: drift 2.4s ease-in-out infinite; }')).toEqual([]);
+  });
+
+  // stanley's finding: the `infinite` exemption applied to the WHOLE declaration, so a
+  // comma-separated shorthand mixing an ambient loop with a finite animation smuggled the finite
+  // one past the gate.
+  it('exempts only the infinite animation in a comma-separated shorthand, not its finite sibling', () => {
+    const css = '.a { animation: sheen 3s linear infinite, card-in 200ms ease; }';
+    expect(rawMotionLiterals(css)).toEqual([{ kind: 'raw', line: 1, detail: '200ms' }]);
+  });
+
+  // ryder's non-blocking (a): longhands never opened a declaration, so the standing falsifier's
+  // promise ("a reintroduced bare 240ms fails CI") was false for `transition-duration: 240ms`.
+  it('sees duration longhands, which never used to open a declaration', () => {
+    expect(rawMotionLiterals('.a { transition-duration: 240ms; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '240ms' },
+    ]);
+    expect(rawMotionLiterals('.a { animation-duration: 3.6s; }')).toEqual([
+      { kind: 'raw', line: 1, detail: '3.6s' },
+    ]);
+  });
+
+  // A delay is not a duration: it shifts WHEN motion starts, so the whole-frame rule does not
+  // apply to it. This is ryder's REQUIRED 2 encoded as a test so the distinction cannot rot.
+  it('never flags a delay — a delay is not motion', () => {
+    expect(rawMotionLiterals('.a { transition-delay: calc(90ms + var(--i, 0) * 50ms); }')).toEqual(
+      [],
+    );
+    expect(rawMotionLiterals('.a { animation-delay: calc(min(var(--i, 0), 8) * 45ms); }')).toEqual(
+      [],
+    );
+  });
+
+  // ryder's non-blocking (c): the declaration used to close on the first `;` on its opening line.
+  it('assembles a transition whose OPENING line already carries a semicolon', () => {
+    // The declaration used to close on the first `;` seen on the opening line — which here is the
+    // `color: red;` *before* `transition:`, so every continuation line was dropped.
+    const css = ['.a { color: red; transition:', '    opacity 240ms ease;', '}'].join('\n');
+    expect(rawMotionLiterals(css)).toEqual([{ kind: 'raw', line: 2, detail: '240ms' }]);
+  });
+
+  // ryder's non-blocking (a) on #1082, both rounds. Round one: the allowlist matched value +
+  // filename, so `1s` was exempt ANYWHERE in ApprovalCard.css. Round two: it matched the site as a
+  // bare substring of `property:segment`, so `max-width` inherited `width`'s exemption — and the
+  // test below ("elsewhere in the same file") changed selector AND property at once, so it passed
+  // identically whether the binding was by site or by property. It could not tell them apart, which
+  // is the same defect as a falsifier written in the class the code already handles.
+  //
+  // Each case below varies exactly ONE coordinate from the exempt declaration.
+  describe('the §5 allowlist binds to the declaration that earned it', () => {
+    const exempt = '.bar { transition: width 1s linear; }';
+
+    it('exempts the entry at its own site', () => {
+      expect(rawMotionLiterals(exempt, 'ApprovalCard.css')).toEqual([]);
+    });
+
+    it('vary the FILE only — not exempt', () => {
+      expect(rawMotionLiterals(exempt, 'Live.css')).toEqual([
+        { kind: 'raw', line: 1, detail: '1s' },
+      ]);
+    });
+
+    it('vary the ANIMATED PROPERTY only — not exempt', () => {
+      expect(
+        rawMotionLiterals('.bar { transition: opacity 1s linear; }', 'ApprovalCard.css'),
+      ).toEqual([{ kind: 'raw', line: 1, detail: '1s' }]);
+    });
+
+    it('vary the CSS PROPERTY only — not exempt', () => {
+      expect(rawMotionLiterals('.bar { animation: width 1s linear; }', 'ApprovalCard.css')).toEqual(
+        [{ kind: 'raw', line: 1, detail: '1s' }],
+      );
+    });
+
+    it('vary the SELECTOR only — still exempt, because the entry names a declaration not a rule', () => {
+      expect(
+        rawMotionLiterals('.somewhere-else { transition: width 1s linear; }', 'ApprovalCard.css'),
+      ).toEqual([]);
+    });
+
+    // A bare `includes()` let one property inherit another's exemption.
+    it('does NOT let max-width inherit width’s exemption', () => {
+      expect(
+        rawMotionLiterals('.bar { transition: max-width 1s linear; }', 'ApprovalCard.css'),
+      ).toEqual([{ kind: 'raw', line: 1, detail: '1s' }]);
+    });
+
+    // The entry names a VALUE, not a spelling. `1S` is the same second.
+    it('exempts the entry spelled in a different case — case is not meaning', () => {
+      expect(
+        rawMotionLiterals('.bar { transition: width 1S linear; }', 'ApprovalCard.css'),
+      ).toEqual([]);
+    });
+  });
+
+  // ryder's REQUIRED on #1082 round 3. Rule 2 kept its own duration grammar — case-sensitive, and
+  // blind to signs and exponents — so `0.18S`, `180MS` and `1.8e-1s` rode a green gate as real
+  // declarations while `180ms` failed. All four are 180ms of motion. This is rule 3's round-2
+  // defect exactly, one rule over, beside the spec sentence saying that class was closed.
+  //
+  // The fix is rule 3's shape, not a wider regex: every duration-shaped literal goes through
+  // `durationMs`, and one it cannot read is REPORTED rather than skipped. Each case varies one
+  // coordinate from `240ms`.
+  describe('every duration-shaped literal goes through durationMs, and unreadable is a finding', () => {
+    it('vary the UNIT CASE only — flagged, because CSS units are case-insensitive', () => {
+      expect(rawMotionLiterals('.a { transition: opacity 0.18S linear; }')).toEqual([
+        { kind: 'raw', line: 1, detail: '0.18S' },
+      ]);
+      expect(rawMotionLiterals('.a { transition: opacity 180MS linear; }')).toEqual([
+        { kind: 'raw', line: 1, detail: '180MS' },
+      ]);
+    });
+
+    it('vary to an EXPONENT form — unreadable, so a finding rather than a skip', () => {
+      const found = rawMotionLiterals('.a { transition: opacity 1.8e-1s linear; }');
+      expect(found).toHaveLength(1);
+      expect(found[0]?.kind).toBe('unreadable');
+      expect(found[0]?.detail).toContain('1.8e-1s');
+    });
+
+    it('vary to a SIGNED form — unreadable, and named as such rather than flagged as a plain raw', () => {
+      const found = rawMotionLiterals('.a { transition: opacity +0.18s linear; }');
+      expect(found).toHaveLength(1);
+      expect(found[0]?.kind).toBe('unreadable');
+    });
+
+    // The falsifier that fails if the fix is a wider regex: nothing here enumerates a form.
+    it('any duration-shaped literal is either counted or named unreadable, never silently passed', () => {
+      for (const form of ['0.18S', '180MS', '1.8e-1s', '+0.18s', '18e1ms', '0,18s']) {
+        const found = rawMotionLiterals(`.a { transition: opacity ${form} linear; }`);
+        expect(found, form).not.toHaveLength(0);
+      }
+    });
+
+    it('stays quiet about values that are not durations at all', () => {
+      expect(
+        rawMotionLiterals('.a { transition: opacity var(--lc-dur-2) cubic-bezier2; }'),
+      ).toEqual([]);
+      expect(
+        rawMotionLiterals('.a { animation: lc-enter var(--lc-dur-3) steps(4, end); }'),
+      ).toEqual([]);
+    });
+
+    it('still exempts a zero duration written in either case — zero is not a scale violation', () => {
+      expect(rawMotionLiterals('.a { transition: visibility 0S linear; }')).toEqual([]);
+    });
+  });
 });
 
 describe('offFrameDurations', () => {
@@ -87,6 +252,117 @@ describe('offFrameDurations', () => {
 
   it('accepts a whole-frame duration', () => {
     expect(offFrameDurations(':root { --lc-dur-2: 200ms; }')).toEqual([]);
+  });
+
+  // ryder's REQUIRED 1 on #1082. Rule 3 parsed /^(\d+)ms$/ and skipped everything else, so a rung
+  // declared in seconds was never counted in frames — and no other rule covered it (rule 2 doesn't
+  // scan :root, rule 1 only knows tokens already in motion.ts). This is his exact falsifier.
+  it('counts frames in a rung declared in SECONDS — the whole rule was ms-only', () => {
+    const [finding] = offFrameDurations(':root { --lc-dur-6: 0.18s; }');
+    expect(finding?.kind).toBe('off-frame');
+    expect(finding?.detail).toContain('4.5 frames');
+  });
+
+  it.each([
+    ['0.2s', 5],
+    ['.28s', 7],
+    ['0.6s', 15],
+  ])('accepts %s — a whole %i frames spelled in seconds', (value) => {
+    expect(offFrameDurations(`:root { --lc-dur-x: ${value}; }`)).toEqual([]);
+  });
+
+  // 0.18 * 1000 is 180.00000000000003 in IEEE754. A gate reporting "180.00000000000003ms is
+  // 4.500000000000001 frames" has found the right defect and made itself impossible to trust.
+  it('reports a seconds value without float noise, and in ms whatever unit it was written in', () => {
+    const [finding] = offFrameDurations(':root { --lc-dur-6: 0.18s; }');
+    expect(finding?.detail).toBe(
+      '--lc-dur-6: 180ms is 4.5 frames at 25fps (off by 20ms — nearest whole frame is 200ms)',
+    );
+  });
+
+  it('ignores an easing token — beziers are rule 1’s business, not rule 3’s', () => {
+    expect(offFrameDurations(':root { --lc-ease-out: cubic-bezier(0.16, 1, 0.3, 1); }')).toEqual(
+      [],
+    );
+  });
+
+  // ryder's SECOND REQUIRED on #1082. The rule `continue`d on anything it could not parse, so the
+  // parser's blind spots became the gate's blind spots SILENTLY. At 9e0ddf90 each of these left
+  // tokens:check green, and every one of them is 4.5 frames — a new rung at rule 3's own defect
+  // class, which is the exact sentence the previous round was supposed to have retired.
+  describe('fails CLOSED — an unreadable rung is a finding, not a skip', () => {
+    // The case fix is real: CSS units are case-insensitive, so these are genuinely 180ms.
+    it.each(['0.18S', '180MS', '0.18s'])('%s is read as 180ms and flagged off-frame', (value) => {
+      const [finding] = offFrameDurations(`:root { --lc-dur-6: ${value}; }`);
+      expect(finding?.kind).toBe('off-frame');
+      expect(finding?.detail).toContain('4.5 frames');
+    });
+
+    // These are NOT parsed, on purpose. Widening the regex is the move that failed twice; the
+    // third failure would be a form neither of us listed. Reported instead of read.
+    it.each(['+0.18s', '1.8e-1s', 'var(--lc-dur-2)', 'calc(200ms * 0.9)', '200'])(
+      '%s is reported as unreadable rather than skipped',
+      (value) => {
+        const [finding] = offFrameDurations(`:root { --lc-dur-6: ${value}; }`);
+        expect(finding?.kind).toBe('unreadable');
+        expect(finding?.detail).toContain(value);
+      },
+    );
+
+    it('stays quiet about an unreadable EASING value — only rungs carry frame counts', () => {
+      expect(offFrameDurations(':root { --lc-ease-x: var(--something); }')).toEqual([]);
+    });
+
+    // The general property, stated without reference to any listed form: whatever a rung holds,
+    // the gate either counts its frames or says it could not. It never does neither.
+    it.each(['200ms', '0.2s', '0.18s', '+0.18s', '1.8e-1s', 'nonsense', ''])(
+      'a rung holding %s is either counted or reported — never silently passed over',
+      (value) => {
+        const css = `:root { --lc-dur-6: ${value}; }`;
+        const readable = durationMs(value) !== null;
+        const findings = offFrameDurations(css);
+        if (readable) {
+          expect(findings.every((f) => f.kind === 'off-frame')).toBe(true);
+        } else {
+          expect(findings.map((f) => f.kind)).toEqual(['unreadable']);
+        }
+      },
+    );
+  });
+});
+
+describe('durationMs', () => {
+  it.each([
+    ['200ms', 200],
+    ['0.18s', 180],
+    ['.28s', 280],
+    ['1s', 1000],
+    ['0s', 0],
+  ])('parses %s to %i ms', (value, ms) => {
+    expect(durationMs(value)).toBe(ms);
+  });
+
+  it('matches the unit case-insensitively, because CSS units are', () => {
+    expect(durationMs('0.18S')).toBe(180);
+    expect(durationMs('180MS')).toBe(180);
+    expect(durationMs('180Ms')).toBe(180);
+  });
+
+  it.each([
+    'cubic-bezier(0.16, 1, 0.3, 1)',
+    'ease',
+    '200',
+    '200px',
+    'var(--lc-dur-2)',
+    '',
+    // Valid CSS number forms, deliberately NOT accepted — offFrameDurations reports what it
+    // cannot read, so the class closes by construction instead of by growing this pattern.
+    '+0.18s',
+    '-0.18s',
+    '1.8e-1s',
+    'calc(200ms * 0.9)',
+  ])('returns null for %s', (value) => {
+    expect(durationMs(value)).toBeNull();
   });
 });
 

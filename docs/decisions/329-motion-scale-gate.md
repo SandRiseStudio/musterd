@@ -28,9 +28,20 @@ had to come first.
 
 `/broadcast` captures at 720p25, so **one frame is 40ms**. A duration that is not a whole multiple
 lands mid-frame and its final rendered step is a partial one — the judder the lane brief warns about.
-This converts "pick nice durations" from taste into arithmetic, and it produces a hard floor:
-`45ms`, `50ms` and `90ms` were below three frames and could not render as motion on the stream at
-all. Those three were defects, not inconsistencies.
+This converts "pick nice durations" from taste into arithmetic, and it gives the scale a floor: below
+three frames (120ms) a transition has too few samples to read as motion at all.
+
+**Correction (2026-08-26, ryder's acceptance review).** This section originally claimed `45ms`,
+`50ms` and `90ms` were sub-three-frame durations, and called them "defects, not inconsistencies" —
+in this ADR, the PR body and a commit message. **That was wrong.** All three are
+`transition-delay` / `animation-delay` values (`Live.css:1509`, `Live.css:4855`): stagger delays,
+not durations. A delay shifts *when* motion starts; it is not motion, so no whole-frame requirement
+applies to it. They were also untouched by the change, so the claim asserted three defects had been
+exposed while leaving all three in place.
+
+The arithmetic argument above stands without them — the floor is a property of the capture rate, not
+of any value that happened to be in the tree. The gate encodes the distinction now: `-delay` is
+deliberately absent from the properties rule 2 scans, with the reason stated at the regex.
 
 ## Decision
 
@@ -79,7 +90,8 @@ the lane is looking at.
 
 - **Traces:** `pnpm tokens:check` (already in the `format:check` chain, so it runs in CI) prints one
   summary line per run and names every violation with its file, line, rule and remedy. Five rules:
-  disagreement with `motion.ts`, raw literals in transitions, off-frame durations, a rung with no
+  disagreement with `motion.ts`, raw literals in transitions, off-frame durations (including a rung
+  whose value cannot be read at all, which is reported rather than skipped), a rung with no
   reduced-motion answer, and a motion `var()` declared nowhere. `docs/perf/motion-capture.md` holds
   the frame counts and the overshoot analysis.
 - **Eval:** dataset is the stylesheets themselves at 4f3d916e — 25 distinct `ms` durations, 8
@@ -87,14 +99,52 @@ the lane is looking at.
   those 72 on its first run, and the migration took them to 0. The standing falsifier is that a
   hand-edit reintroducing a bare `240ms` or an inline `cubic-bezier()` into a transition must fail
   CI; verified by injecting both and watching the gate name them.
+- **The standing falsifier above was too narrow, twice, and both times in the same way.** It names
+  `ms` inputs, so it was satisfiable by a gate that could only see `ms` — and was, at two different
+  layers. Rule 2 was `\b\d+ms\b` and let three seconds-spelled violations onto main. Rule 3 was
+  `/^(\d+)ms$/` and survived that fix, leaving `--lc-dur-6: 0.18s` — a new rung at 4.5 frames,
+  rule 3's own defect class — uncounted by any of the five rules. **A falsifier written in the input
+  class the code already handles cannot fail**, which is the general form and is now recorded as a
+  team insight. Verified by injection against `pnpm tokens:check` itself rather than against the
+  exported functions, and confirmed load-bearing by reverting rule 3 to its `ms`-only parse and
+  watching `0.18s` go green again.
+- **Enumerating unit classes was still the wrong shape, and the third round proved it.** Widening
+  the parse to `ms|s` left `0.18S`, `180MS`, `+0.18s` and `1.8e-1s` green — all 4.5-frame rungs.
+  Each round the falsifier grew by the forms someone had thought of, and each round the gate stayed
+  blind to the forms nobody had. **Rule 3 now fails CLOSED: a `--lc-dur-*` value it cannot read is
+  reported as `unreadable` rather than skipped.** The falsifier therefore no longer enumerates
+  inputs at all, which is what makes it stable: *for any value a rung can hold, the gate either
+  names its frame count or names its inability to read it — never neither.* Exercised across ms, s,
+  both cases, signed and exponent forms, `calc()`, a `var()` indirection, a unitless number and an
+  empty value.
+- **Scoping that falsifier to rungs left rule 2 holding the identical defect for one more round.**
+  It said "any value a RUNG can hold", so it was satisfied by a gate blind to the same forms one
+  rule over: rule 2 kept its own case-sensitive literal pattern, and `0.18S`, `180MS` and `1.8e-1s`
+  passed green as real declarations while `180ms` failed (ryder's REQUIRED on #1082 round 3; `180MS`
+  surfaced only because all forms were exercised rather than the two reported). Same lesson a third
+  time, at the level of the falsifier's *subject* rather than its input class: the narrow scope was
+  what made it satisfiable. **Rule 2 now owns no duration grammar** — it asks `durationMs` about
+  every duration-shaped word and reports what it cannot read, and the zero test and the §5 allowlist
+  compare milliseconds instead of characters. The falsifier reads **for any value a motion
+  declaration or a rung can hold**, and both halves were verified by injection into `Live.css`
+  against `pnpm tokens:check`, then confirmed load-bearing by reverting rule 2 in place and watching
+  `0.18S`, `180MS` and `1.8e-1s` go green again.
 - **Experiment:** n/a — the overshoot question was settled analytically rather than A/B-tested (see
   the falsified claim below), and the failure paths were exercised directly by reintroducing each
   defect and confirming the gate caught it.
 
 **One claim in the design spec was falsified by measuring it.** The spec asserted overshoot was the
 riskiest easing family at 25fps, on the reasoning that its peak could fall between captured frames
-and vanish. Sampled at 40ms across every rung, 97–100% of the overshoot survives for all three
-candidate curves: a cubic-bezier's overshoot is a broad maximum, not a spike, and one control-point
-pair cannot oscillate. `--lc-ease-pop` needed no tuning, and the capture falsifier the spec proposed
-was retired — no cubic-bezier can fail it, so it was not a gate. The constraint that earned its place
-was the opposite one: short durations, not curve shape.
+and vanish. Sampled at 40ms, the overshoot survives: a cubic-bezier's overshoot is a broad maximum,
+not a spike, and one control-point pair cannot oscillate. `--lc-ease-pop` needed no tuning, and the
+capture falsifier the spec proposed was retired because it could not have failed. The constraint that
+earned its place was the opposite one: short durations, not curve shape.
+
+**Amended 2026-08-26** (ryder's acceptance review). The retirement stands; its *phrasing* did not.
+"Across every rung, 97–100%" and "no cubic-bezier can fail it" were both overclaims, resting on a
+table that omitted the shortest rung and stated no phase assumption. Recomputed with both:
+`--lc-dur-1` retains 86.8% at aligned phase and **56.6% at worst-case phase**, against 83.2–98.1%
+worst-case for `--lc-dur-2` through `--lc-dur-5`. The defensible claim is narrower and still
+sufficient: **at the rungs `pop` is actually used — d2 through d5, never d1, verified in the
+stylesheets — no cubic-bezier overshoot is narrow enough for the capture to miss.** Putting `pop` on
+`--lc-dur-1` would leave the covered range; `docs/perf/motion-capture.md` says so at the table.
