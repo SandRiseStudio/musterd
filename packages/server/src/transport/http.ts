@@ -1,5 +1,6 @@
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { hostname } from 'node:os';
 import { extname, join, resolve, sep } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from 'node:zlib';
 import {
@@ -64,6 +65,7 @@ import {
   SubmitSeedBriefSchema,
   TeamMemorySearchResponseSchema,
   TOKEN_PREFIXES,
+  NodeEnrollRequestSchema,
   NodeInviteMintSchema,
   NodeJoinRequestSchema,
   NodeJoinResponseSchema,
@@ -78,6 +80,7 @@ import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
 import { log } from '../log.js';
+import { saveNodeEnrollment } from '../node/state.js';
 import { reconcileTeam, teamSpecForSlug } from '../projection/reconcile.js';
 import { adjudicateGate, recordActorAttestation } from '../protocol/gate.js';
 import { deliveryHintFor } from '../protocol/nudge.js';
@@ -1328,6 +1331,60 @@ export async function handleHttp(
         // Guardian probes filter log lines against this; older lines are evidence of nothing.
         booted_at: BOOTED_AT,
       });
+    }
+
+    /**
+     * `POST /node/enroll` (ADR 328 §2) — the local half of enrollment.
+     *
+     * The CLI does not call the hub itself. This daemon holds the v47 `nodes` row whose id must be
+     * presented (ADR 331 §Decision 1) and is what will hold the resulting credential, so it makes
+     * the call and writes `node.json`. Localhost-only, like every other operator verb: enrolling
+     * this machine somewhere is not something a remote caller gets to initiate.
+     *
+     * The response deliberately omits the credential — it went to disk, and the CLI has no use for
+     * it. Printing it would put a long-lived machine secret in a terminal's scrollback for no gain.
+     */
+    if (method === 'POST' && path === '/node/enroll') {
+      requireLocalPeer(ctx, req, 'enrolling this machine with a hub');
+      const body = parseOrBadRequest(NodeEnrollRequestSchema, await readJson(req));
+      const team = requireTeam(ctx.db, body.team);
+      const local = ctx.db
+        .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+        .get(team.id);
+      if (!local) {
+        return sendJson(res, 409, {
+          error: 'conflict',
+          message:
+            `this daemon has no node row for "${body.team}" yet — it is minted on the team's first ` +
+            'logged act, so send something on this machine before enrolling it',
+        });
+      }
+
+      const hubRes = await fetch(new URL(`/teams/${body.team}/nodes/join`, body.hub_url), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code: body.code,
+          node_id: local.node_id,
+          label: hostname(),
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const hubBody: unknown = await hubRes.json().catch(() => null);
+      // Relay the hub's refusal rather than reinterpreting it: the hub is the authority on whether
+      // this machine is admitted, and a daemon that softened a 409 into a success would write a
+      // credential the hub never issued.
+      if (!hubRes.ok) return sendJson(res, hubRes.status, hubBody);
+
+      const minted = NodeJoinResponseSchema.parse(hubBody);
+      saveNodeEnrollment({
+        team: body.team,
+        hub_url: body.hub_url,
+        node_id: minted.node_id,
+        credential: minted.node_credential,
+        enrolled_at: Date.now(),
+      });
+      return sendJson(res, 200, { node_id: minted.node_id, team: body.team });
     }
 
     if (method === 'POST' && path === '/teams') {
