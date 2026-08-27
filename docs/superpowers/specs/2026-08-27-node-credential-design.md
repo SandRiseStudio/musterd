@@ -160,10 +160,15 @@ reaching for. Recorded here so a later reader sees a decision rather than an ove
 
 ## Data
 
-**Migration v48.** Two new tables — `local_node` (decision 3) and `node_invites`; `nodes` already
-exists from v47 and is not altered.
+**Two migrations, deliberately split.** `nodes` already exists from v47 and is not altered by
+either.
 
-`local_node` per decision 3, backfilled from v47's rows:
+**v48 — `local_node`** (decision 3). This is a correctness fix to increment 2 and stands on its own:
+it is right even if nothing else in this slice ever lands, and it must precede any code path that
+can insert a second node row. Giving it its own version means it can be reasoned about, and if
+necessary shipped, independently of the credential work.
+
+**v49 — `node_invites`** (below). The enrollment object.
 
 ```sql
 CREATE TABLE IF NOT EXISTS local_node (
