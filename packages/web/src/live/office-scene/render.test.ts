@@ -210,16 +210,16 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
   });
 
   it('bakes the owner\'s name onto their kept desk — furniture-with-a-name', () => {
-    expect(bakeTexts(offlineNode())).toContain('sleeper');
+    expect(bakeTexts(offlineNode())).toContain('SLEEPER');
   });
 
   it('a left_team member leaves no desk and no plate', () => {
-    expect(bakeTexts(offlineNode({ offline_reason: 'left_team' }))).not.toContain('sleeper');
+    expect(bakeTexts(offlineNode({ offline_reason: 'left_team' }))).not.toContain('SLEEPER');
   });
 
   it('an away member\'s desk says stepped away — declared absence, desk kept (\u00a74 lane 4)', () => {
     const texts = bakeTexts({ ...node('sleeper', 'working'), presence: 'away', posture: 'away' });
-    expect(texts).toContain('sleeper');
+    expect(texts).toContain('SLEEPER');
     expect(texts).toContain('stepped away');
   });
 
@@ -227,8 +227,10 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
     expect(bakeTexts(offlineNode())).not.toContain('stepped away');
   });
 
-  it('a present member\'s desk carries no baked plate — floating labels stay present-only', () => {
-    expect(bakeTexts(node('worker', 'working'))).not.toContain('worker');
+  it('a present member\'s desk carries the wedge too — the plate belongs to the desk (Delight D)', () => {
+    const texts = bakeTexts(node('worker', 'working'));
+    expect(texts).toContain('WORKER');
+    expect(texts).not.toContain('stepped away');
   });
 });
 

@@ -3559,6 +3559,195 @@ function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: numbe
 const LAMP_ALONG = 8;
 const LAMP_ACROSS = 42;
 
+/**
+ * A folded brass desk wedge — the physical nameplate standing on every member's desk (Delight D).
+ * Desk furniture, not a person label: the floating chip remains the walking identity; this one
+ * belongs to the DESK, engraved with its owner's name whether they are seated, stepped away or
+ * offline. Deliberately oversized against true desk scale (the mock proved a to-scale wedge
+ * vanishes into the wood — same licence the speech bubbles already take), and brass, not bone:
+ * cream sits too close to the desk's own value and disappears; the metal band is what separates
+ * object from wood.
+ *
+ * The base carries a status light-pipe that spills onto the desk: working breathes (on `t`),
+ * online-idle amber, dnd a steady ember, away/offline unlit. The plate keeps the two presence
+ * CLAIMS the old baked plate made (§4/ADR 315): a stepped-away owner's plate says so in words,
+ * and a disconnected seat keeps its amber corner glint.
+ *
+ * Anchor (ix,iy) is the plate's centre on the desk surface; length runs across the desk, face
+ * turned toward the viewer (whichever sign of the facing axis has positive iso depth).
+ */
+function deskWedge(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  ix: number,
+  iy: number,
+  dir: Dir,
+  node: OfficeNode,
+  t: number,
+  steppedAway: boolean,
+): void {
+  const f = FWD[dir];
+  const p: [number, number] = [-f[1], f[0]];
+  // Face toward the viewer: iso depth grows along +lx+ly, so flip the facing axis if it points away.
+  const away: [number, number] = f[0] + f[1] > 0 ? [-f[0], -f[1]] : [f[0], f[1]];
+  const O = project(ix, iy, fit);
+  // A screen-space iso basis vector for one logical direction, normalized — derived via project()
+  // so the wedge shares the room's exact axonometry without re-exporting KX/KY. Only the direction
+  // is ever wanted here (the plate is sized in screen px, not logical units), so it normalizes at
+  // the source rather than handing back a length nothing reads.
+  const unit = (d: [number, number]): { x: number; y: number } => {
+    const q = project(ix + d[0], iy + d[1], fit);
+    const v = { x: q.x - O.x, y: q.y - O.y };
+    const m = Math.hypot(v.x, v.y);
+    return { x: v.x / m, y: v.y / m };
+  };
+  const deskY = O.y - DESK_UP * fit.scale;
+
+  // Type first — the plate is sized to its engraving. ≥13px so it bakes legibly at stream scale
+  // (the old owned-desk plate's clamp), which is also what keeps canvas type viable here at all.
+  const name = node.name.toUpperCase();
+  const px = Math.max(13, Math.round(13 * fit.scale));
+  ctx.font = canvasFont(px, '--font-display', 700);
+  // Letterspaced caps, engraver style — via the real canvas property (a no-op string assignment on
+  // engines without it), so the glyph run stays ONE string: tests and text extraction see the name.
+  const track = `${(px * 0.1).toFixed(1)}px`;
+  ctx.letterSpacing = track;
+  const nameW = ctx.measureText(name).width;
+  ctx.letterSpacing = '0px';
+  const sub = steppedAway ? 'stepped away' : null;
+
+  // Wedge geometry in SCREEN pixels, mock-proven: the plate is deliberately oversized against true
+  // desk scale (a to-scale wedge vanishes into the wood — the speech bubbles take the same
+  // licence), so it is sized to its engraving in px and only leaned/foreshortened along the iso
+  // axes. `sEff` clamps the world scale so depth still reads without the type collapsing.
+  const sEff = Math.max(0.85, Math.min(1.15, fit.scale));
+  const puN = (() => {
+    const u = unit(p);
+    return u.x < 0 ? { x: -u.x, y: -u.y } : u; // never paint the engraving upside down
+  })();
+  const buN = unit(away);
+  const len = Math.max(34, nameW + 14); // screen px along the plate
+  const high = px + (sub ? px : 0) + 8 * sEff; // face height, screen px
+  const lean = 6 * sEff; // how far the top edge leans back, screen px
+  const half = len / 2;
+  const P = (a: number, b: number, h: number): [number, number] => [
+    O.x + a * puN.x + b * buN.x,
+    deskY + a * puN.y + b * buN.y - h,
+  ];
+  const poly = (pts: [number, number][]): void => {
+    ctx.beginPath();
+    ctx.moveTo(pts[0]![0], pts[0]![1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]![0], pts[i]![1]);
+    ctx.closePath();
+  };
+
+  const fbl = P(-half, 0, 0);
+  const fbr = P(half, 0, 0);
+  const ftl = P(-half, lean, high);
+  const ftr = P(half, lean, high);
+
+  // Contact shadow pooled under the fold — what seats the object on the wood.
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.fillStyle = '#2a1a08';
+  poly([P(-half - 2, -1.5, 0), P(half + 2, -1.5, 0), P(half + 2, lean * 2.6, 0), P(-half - 2, lean * 2.6, 0)]);
+  ctx.fill();
+  ctx.restore();
+
+  // The fold's rear foot — a sliver of darker material behind the face.
+  ctx.fillStyle = '#6b4d1f';
+  poly([fbl, fbr, P(half, lean * 2.2, 0), P(-half, lean * 2.2, 0)]);
+  ctx.fill();
+
+  // Brass frame, then the engraved face panel inset within it.
+  ctx.fillStyle = '#b98f42';
+  poly([fbl, fbr, ftr, ftl]);
+  ctx.fill();
+  const grad = ctx.createLinearGradient(ftl[0], ftl[1], fbl[0], fbl[1]);
+  grad.addColorStop(0, '#9c7433');
+  grad.addColorStop(0.55, '#d8b166');
+  grad.addColorStop(1, '#9c7433');
+  ctx.fillStyle = grad;
+  const inset = 2;
+  poly([
+    P(-half + inset, lean * 0.12, 1.6),
+    P(half - inset, lean * 0.12, 1.6),
+    P(half - inset, lean * 0.88, high - 1.8),
+    P(-half + inset, lean * 0.88, high - 1.8),
+  ]);
+  ctx.fill();
+
+  // Top ridge catching the ceiling light — the fold's one specular line.
+  ctx.strokeStyle = '#f7e2ac';
+  ctx.lineWidth = Math.max(1, 1.4 * fit.scale);
+  ctx.globalAlpha = 0.95;
+  ctx.beginPath();
+  ctx.moveTo(ftl[0], ftl[1]);
+  ctx.lineTo(ftr[0], ftr[1]);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // Status light-pipe along the base + its spill onto the desk. Working breathes on `t` (the scene's
+  // existing frame clock — no new rAF); away/offline stays unlit, absence reads as dark brass.
+  const offline = node.presence === 'offline';
+  const pipe =
+    steppedAway || offline || node.presence === 'away'
+      ? null
+      : node.dnd
+        ? '#e8804f'
+        : node.posture === 'working'
+          ? '#7ddba0'
+          : '#f4cf52';
+  if (pipe) {
+    const breathe = node.posture === 'working' && !node.dnd ? 0.72 + 0.28 * Math.sin(t / 640) : 1;
+    ctx.save();
+    ctx.globalAlpha = 0.14 * breathe;
+    ctx.fillStyle = pipe;
+    poly([P(-half - 2, -5.5, 0), P(half + 2, -5.5, 0), P(half + 2, 0.8, 0), P(-half - 2, 0.8, 0)]);
+    ctx.fill();
+    ctx.globalAlpha = 0.95 * breathe;
+    ctx.strokeStyle = pipe;
+    ctx.lineWidth = Math.max(1.2, 1.9 * fit.scale);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(fbl[0] + puN.x * 3, fbl[1] + puN.y * 3);
+    ctx.lineTo(fbr[0] - puN.x * 3, fbr[1] - puN.y * 3);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // The engraving. Ink dark-on-brass with a hairline light undercut — debossed, not printed.
+  const mid = P(0, lean * 0.5, high * (sub ? 0.62 : 0.52));
+  const angle = Math.atan2(puN.y, puN.x);
+  ctx.save();
+  ctx.translate(mid[0], mid[1]);
+  ctx.rotate(angle);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = canvasFont(px, '--font-display', 700);
+  ctx.letterSpacing = track;
+  ctx.fillStyle = 'rgba(255, 246, 224, 0.5)';
+  ctx.fillText(name, 0, 0.8);
+  ctx.fillStyle = '#2a1d0c';
+  ctx.fillText(name, 0, 0);
+  ctx.letterSpacing = '0px';
+  if (sub) {
+    // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
+    ctx.font = canvasFont(Math.max(10, Math.round(10 * fit.scale)), '--font-mono', 400);
+    ctx.fillStyle = 'rgba(42, 29, 12, 0.72)';
+    ctx.fillText('stepped away', 0, px * 0.78);
+  }
+  ctx.restore();
+
+  if (!steppedAway && node.offline_reason === 'disconnected') {
+    // The one alarming flavor (ADR 315): a disconnected seat keeps its amber glint, top-right of the frame.
+    ctx.fillStyle = '#d9a13c';
+    ctx.beginPath();
+    ctx.arc(ftr[0] - puN.x * 4, ftr[1] + 3, Math.max(2, 2.2 * fit.scale), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
  * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
@@ -3611,6 +3800,21 @@ function drawWorkstation(
     box(ctx, fit, lx + sx * (wx / 2 - 6), ly + sy * (dy / 2 - 6), 8, 8, DH, dim(PAL.wood, 0.9));
   }
   box(ctx, fit, lx, ly, wx, dy, ST, PAL.wood, DH);
+  // Bevelled front lip (Delight D): a soft rim light along the slab's two viewer-facing top edges,
+  // so the worktop reads as a finished edge rather than a raw extrusion.
+  {
+    const e = project(lx - wx / 2, ly + dy / 2, fit);
+    const s2 = project(lx + wx / 2, ly + dy / 2, fit);
+    const e2 = project(lx + wx / 2, ly - dy / 2, fit);
+    const yUp = up * fit.scale;
+    ctx.strokeStyle = 'rgba(255, 238, 205, 0.32)';
+    ctx.lineWidth = Math.max(1, 1.1 * fit.scale);
+    ctx.beginPath();
+    ctx.moveTo(e.x, e.y - yUp);
+    ctx.lineTo(s2.x, s2.y - yUp);
+    ctx.lineTo(e2.x, e2.y - yUp);
+    ctx.stroke();
+  }
 
   // Surface props, placed in desk-relative (along-facing, across) coords and self-sorted back-to-front so
   // overlaps paint correctly regardless of the desk's facing. `along` +toward the monitor, −toward the seat.
@@ -3629,6 +3833,30 @@ function drawWorkstation(
   // land (`KEYBOARD_ALONG`; `skeleton.ts` reaches for exactly this spot).
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
   const mouseColor = MOUSE_COLORS[Math.floor(deskRnd(id, KB_SALT + 1) * MOUSE_COLORS.length)]!;
+  // Felt desk mat under the keyboard + mouse (Delight D) — a deep-green pad that gives the work
+  // gear a home and breaks up the bare slab. Flat paint sorted a hair before the keyboard so it
+  // never covers what sits on it.
+  if (node)
+    at(KEYBOARD_ALONG - 1, 6, (ix, iy) => {
+      const quad = (a: number, cr: number): Pt =>
+        project(ix + f[0] * a + p[0] * cr, iy + f[1] * a + p[1] * cr, fit);
+      const yUp = up * fit.scale;
+      const c1 = quad(-11, -30);
+      const c2 = quad(11, -30);
+      const c3 = quad(11, 30);
+      const c4 = quad(-11, 30);
+      ctx.fillStyle = 'rgba(38, 66, 54, 0.85)';
+      ctx.beginPath();
+      ctx.moveTo(c1.x, c1.y - yUp);
+      ctx.lineTo(c2.x, c2.y - yUp);
+      ctx.lineTo(c3.x, c3.y - yUp);
+      ctx.lineTo(c4.x, c4.y - yUp);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 238, 205, 0.14)';
+      ctx.lineWidth = Math.max(1, fit.scale);
+      ctx.stroke();
+    });
   at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t));
   at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
@@ -3669,34 +3897,20 @@ function drawWorkstation(
         ctx.fillStyle = `rgba(122, 148, 156, ${(0.18 * warmth).toFixed(3)})`;
         ctx.fillRect(b.x - 15 * fit.scale, b.y - (up + 23) * fit.scale, 30 * fit.scale, 18 * fit.scale);
       });
-    // A small baked nameplate at the desk's front edge: static, and ≥13px so it bakes legibly at
-    // stream scale. The amber corner glint marks `disconnected` — the one alarming flavor (ADR 315).
-    at(-Df / 2 + 12, sn ? -wx / 2 + 22 : wx / 2 - 22, (ix, iy) => {
-      const b = project(ix, iy, fit);
-      const y = b.y - up * fit.scale;
-      const px = Math.max(13, Math.round(13 * fit.scale));
-      ctx.font = canvasFont(px, '--font-mono', 700);
-      const w = Math.max(34, ctx.measureText(node.name).width + 12);
-      const h = px + 8;
-      ctx.fillStyle = 'rgba(46, 42, 36, 0.88)';
-      ctx.fillRect(b.x - w / 2, y - h, w, h);
-      ctx.fillStyle = 'rgba(233, 226, 214, 0.92)';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(node.name, b.x, y - h / 2);
-      if (steppedAway) {
-        // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
-        ctx.font = canvasFont(Math.max(11, Math.round(11 * fit.scale)), '--font-mono', 400);
-        ctx.fillStyle = 'rgba(233, 226, 214, 0.72)';
-        ctx.fillText('stepped away', b.x, y + Math.max(7, 7 * fit.scale));
-      }
-      if (!steppedAway && node.offline_reason === 'disconnected') {
-        ctx.fillStyle = '#d9a13c';
-        ctx.beginPath();
-        ctx.arc(b.x + w / 2 - 4, y - h + 4, Math.max(2, 2.4 * fit.scale), 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
+  }
+
+  // The brass desk wedge (Delight D): every desk with an owner carries one — occupied, stepped
+  // away or offline — because the plate belongs to the desk, not the person. It subsumes the old
+  // baked owned-desk plate (same ≥13px legibility clamp, same stepped-away wording and
+  // disconnected glint) and rides the prop pipeline so it depth-sorts with the desk.
+  if (node) {
+    // The viewer-nearest desk corner — always visible in front, clear of both the seated body
+    // (desk-centre front) and the monitor (desk-centre back), whatever the desk's facing.
+    const alongSign = f[0] + f[1] > 0 ? 1 : -1;
+    const acrossSign = p[0] + p[1] > 0 ? 1 : -1;
+    at(alongSign * (Df / 2 - 10), acrossSign * (W / 2 - 15), (ix, iy) =>
+      deskWedge(ctx, fit, ix, iy, dir, node, t, steppedAway),
+    );
   }
 
   props.sort((a, b) => a.sum - b.sum);
