@@ -324,6 +324,12 @@ export class HttpClient {
      *  PREFIX, so page on with `since` = the last message's ts until this is absent. Absent from an
      *  older daemon ⇒ the reply was complete, the prior behaviour. */
     truncated?: boolean;
+    /** How many unread rows were cut past this page — the limit-NAMING caller's counterpart to
+     *  `truncated`, which the server emits only when no limit was named. Counts unread rows, while
+     *  a caller filtering to action-needed counts a subset, so this reads as "more was cut that I
+     *  did not classify": a floor marker, never a renderable total. Absent from an older daemon,
+     *  and absent when nothing was cut ⇒ the reply was complete. */
+    unread_remaining?: number;
   }> {
     const q = new URLSearchParams();
     if (opts.unread) q.set('unread', '1');

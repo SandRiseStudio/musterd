@@ -27,6 +27,7 @@ import {
 } from '../session/liveness.js';
 import { findWorkspaceDir } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
+import { composeSessionStatusline, type SessionStatuslineInput } from './sessionStatusline.js';
 
 /**
  * `musterd session start|end --stdin | show` (ADR 131 §5, increment 4) — session capture. The
@@ -58,10 +59,11 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   if (sub === 'label-nudge') return labelNudgeCommand();
   if (sub === 'orient-nudge') return orientNudgeCommand();
   if (sub === 'orient-stamp') return orientStampCommand();
+  if (sub === 'statusline') return statuslineCommand(parsed);
   if (sub === 'bind') return bindCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | bind --thread <id> | show  ' +
+    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | statusline --stdin | bind --thread <id> | show  ' +
       '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -227,6 +229,112 @@ export async function emitSessionOrientation(
   } catch {
     return null; // hook contract: a failing orientation must never disturb the session it rides
   }
+}
+
+/**
+ * `session statusline` — the user-facing half of the orientation (see `sessionStatusline.ts` for
+ * why the SessionStart block could never be that half itself).
+ *
+ * Same anchoring discipline as capture and the orientation: resolve from the payload's cwd via
+ * {@link resolveCaptureDir}, never bare `process.cwd()`. A statusline is the WORST place to get
+ * this wrong — it redraws every turn, so a mis-anchored chip would sit there all session telling
+ * the human they are in a seat they are not in.
+ *
+ * Unlike the orientation this is NOT wake-suppressed: a wake injects context, and suppression
+ * exists to keep the block from re-priming an already-primed agent. The chip primes nobody — it is
+ * a label on a terminal, and a woken session still needs to know which seat it belongs to.
+ */
+export type StatuslineFetcher = (dir: string | null) => Promise<SessionStatuslineInput | null>;
+
+/** How long a whole render may take before the chip gives up and shows nothing.
+ *
+ *  A stopped daemon fails fast (connection refused), but a WEDGED one — socket held, not answering —
+ *  is the mode guardian raised five times in one day, and `HttpClient` carries no AbortSignal. Without
+ *  a bound, each redraw would hang until the harness killed it, leaving a stray node process per turn
+ *  instead of the clean silence this path promises. Silence-on-failure is only true if failure is
+ *  bounded (ryder's #1076 review). */
+const STATUSLINE_BUDGET_MS = 1_500;
+
+/** The statusline's OWN fetcher — deliberately not the orientation's.
+ *
+ *  Two differences, both required rather than cosmetic:
+ *
+ *  1. **Presence-neutral.** The orientation touches presence, and that is correct: a session opening
+ *     IS liveness. A statusline redraw is not — it fires as the conversation updates, so reusing the
+ *     touching client would make an open terminal look `present` forever. That silences the
+ *     away-notifier for the very seat it was reporting on (ADR 057, `touchAmbientPresence`'s own
+ *     comment names this hazard), pins a dormant seat in the ADR 188 review pool, and — because the
+ *     presence UPDATE rewrites surface/provenance/wake_lease unstickily — a redraw can NULL the
+ *     ADR 241 lease of a woken session. A background redraw must never fake liveness.
+ *  2. **Cheaper.** Two GETs, not three: the orientation's memory-envelope call is dropped outright
+ *     because the chip renders no headline, and the inbox is asked for a bounded page instead of
+ *     full envelope bodies we only take `.length` of. */
+async function defaultStatuslineFetcher(
+  dir: string | null,
+): Promise<SessionStatuslineInput | null> {
+  const binding = dir ? requireUsableBinding(dir) : null;
+  const seat = binding ? bindingSeat(binding) : undefined;
+  if (!binding || !seat || !binding.agent_key) return null;
+  const team = binding.team;
+  const http = new HttpClient({
+    server: binding.server,
+    key: binding.agent_key,
+    seat,
+    surface: 'cli',
+    ...(binding.model !== undefined ? { model: binding.model } : {}),
+  }).presenceNeutral();
+  const [inboxRes, brief] = await Promise.all([
+    http.inbox(team, { unread: true, limit: STATUSLINE_INBOX_LIMIT }),
+    http.next(team),
+  ]);
+  const waiting = openActionNeeded(inboxRes.messages, seat, inboxRes.answered ?? []);
+  return {
+    seat,
+    team,
+    waiting: waiting.length,
+    // `unread_remaining`, NOT `truncated`: the server computes truncated as
+    // `limit === undefined && full` (http.ts:3854), so it is exclusively the no-limit caller's
+    // signal and is permanently absent here — reading it made the marker dead code (ryder's #1076
+    // re-check). `unread_remaining` is the counterpart computed for the limit-naming branch.
+    // It counts UNREAD rows while `waiting` counts the action-needed subset, so it means "more was
+    // cut that I did not classify" — exactly a floor marker, which is all `n+` claims.
+    ...((inboxRes.unread_remaining ?? 0) > 0 ? { waitingTruncated: true } : {}),
+    incidents: (brief.incidents ?? []).length,
+    carrying: brief.in_flight.length,
+  };
+}
+
+/** Enough rows to count honestly for a chip; past this the count renders as `n+`. */
+const STATUSLINE_INBOX_LIMIT = 100;
+
+export async function emitSessionStatusline(
+  dir: string | null,
+  fetch: StatuslineFetcher = defaultStatuslineFetcher,
+  budgetMs = STATUSLINE_BUDGET_MS,
+): Promise<string | null> {
+  try {
+    const input = await Promise.race([
+      fetch(dir),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), budgetMs).unref?.()),
+    ]);
+    return input ? composeSessionStatusline(input) : null;
+  } catch {
+    return null; // a statusline that errors is strictly worse than no statusline
+  }
+}
+
+async function statuslineCommand(parsed: Parsed): Promise<number> {
+  if (parsed.flags['stdin'] !== true) {
+    throw new CliError(
+      'usage: musterd session statusline --stdin  — harness-driven: pipe the statusLine JSON in ' +
+        '(`musterd init` wires it); to inspect this workspace, use `musterd session show`',
+      2,
+    );
+  }
+  const payload = parseHookPayload(await readStdin());
+  const chip = await emitSessionStatusline(resolveCaptureDir(payload));
+  if (chip) process.stdout.write(chip + '\n');
+  return 0;
 }
 
 async function observeCommand(parsed: Parsed): Promise<number> {
