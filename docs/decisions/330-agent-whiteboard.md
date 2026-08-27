@@ -57,7 +57,11 @@ extractable package to `@musterd/mcp`.
    human shapes are attributed via sync presence. "What changed since" therefore answers the
    question that matters in a shared session: *what did the other party draw*. Convergence is
    legible in both directions — the agent proposes a grouping with `whiteboard_edit`, the human
-   dissents by dragging shapes back out, and the next read shows exactly that.
+   dissents by dragging shapes back out, and the next read shows exactly that. The edit policy
+   and the stamp are properties of the well-behaved caller, not of the system: `actor` is
+   caller-supplied on the localhost HTTP surface (the MCP server pins it per session), so this
+   is a guardrail against accident, never authentication — the same posture ADR 328 takes for
+   an unauthenticated origin.
 
 6. **The service never writes into a repository.** `whiteboard_close` returns the final outline;
    the seat authors the summary as a design exploration in `docs/design/` under its own identity,

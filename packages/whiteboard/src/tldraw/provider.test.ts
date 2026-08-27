@@ -288,6 +288,54 @@ describe('TldrawProvider', () => {
     expect(noteA.cluster).toBeUndefined(); // freed, not vanished
   });
 
+  it('ops in ONE batch see each other: [delete, retitle] cannot resurrect the note', async () => {
+    // #1084 review REQUIRED 1, the exact demonstrated falsifier: the retitle used to read the
+    // pre-batch snapshot, re-put the deleted shape, and refuse nothing.
+    const { ids } = await provider.add('b14', 'seat:izzo', [{ kind: 'note', text: 'doomed' }]);
+    const id = ids[0]!;
+    const { refused } = await provider.edit('b14', 'seat:izzo', [
+      { op: 'delete', id },
+      { op: 'retitle', id, text: 'back from the dead' },
+    ]);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.id).toBe(id);
+    const outline = await provider.read('b14');
+    expect(outline.items.find((i) => i.id === id)).toBeUndefined();
+  });
+
+  it('a batch that moves a note into a cluster and deletes the cluster frees the note', async () => {
+    // The overlay must apply to membership too: the move happened in-batch, so the delete's
+    // reparenting sweep has to see it.
+    const { ids } = await provider.add('b15', 'seat:izzo', [
+      { kind: 'note', text: 'survivor' },
+      { kind: 'cluster', title: 'Doomed cluster' },
+    ]);
+    const [noteId, clusterId] = ids as [string, string];
+    const { refused } = await provider.edit('b15', 'seat:izzo', [
+      { op: 'move', id: noteId, cluster: clusterId },
+      { op: 'delete', id: clusterId },
+    ]);
+    expect(refused).toHaveLength(0);
+    const outline = await provider.read('b15');
+    const note = outline.items.find((i) => i.id === noteId)!;
+    expect(note).toBeDefined();
+    expect(note.cluster).toBeUndefined();
+  });
+
+  it('concurrent add and close both settle fulfilled and the survivor clock is on disk', async () => {
+    // #1084 review REQUIRED 2: the fixed temp path let two writers corrupt each other's
+    // atomic rename — an ordinary add() failed with raw ENOENT.
+    await provider.add('b16', 'seat:izzo', [{ kind: 'note', text: 'first' }]);
+    const results = await Promise.allSettled([
+      provider.add('b16', 'seat:izzo', [{ kind: 'note', text: 'second' }]),
+      provider.close('b16'),
+    ]);
+    for (const r of results) expect(r.status).toBe('fulfilled');
+    const { outline } = await provider.open('b16');
+    expect(outline.version).toBeGreaterThan(0);
+    expect(outline.items.length).toBeGreaterThanOrEqual(1);
+  });
+
   it('boards persist across close and reopen', async () => {
     await provider.add('b6', 'seat:izzo', [{ kind: 'note', text: 'survives' }]);
     const finalOutline = await provider.close('b6');

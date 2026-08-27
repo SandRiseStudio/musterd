@@ -85,8 +85,20 @@ export class RoomManager {
       );
     }, this.config.persistIntervalMs);
 
+    // The first persist runs BEFORE the room is registered (#1084 review, non-blocking a):
+    // registering first meant a failed initial persist (unwritable data dir, ENOSPC) left a
+    // poisoned room in the map — live persist timer, no idle timer, handed back as healthy to
+    // every later caller. Fail here and nothing remembers the room existed.
+    if (created) {
+      try {
+        await this.persistRoom(name, managed);
+      } catch (err) {
+        if (managed.persistTimer) clearInterval(managed.persistTimer);
+        tlRoom.close();
+        throw err;
+      }
+    }
     this.rooms.set(name, managed);
-    if (created) await this.persistRoom(name, managed);
     this.resetIdleTimer(name, managed);
     return { room: tlRoom, created };
   }

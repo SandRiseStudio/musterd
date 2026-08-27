@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { CreatedBy, EditOp, ItemInput } from './port.js';
@@ -128,7 +128,9 @@ export async function startService(port = servicePort()): Promise<RunningService
       const isBoardPage = /^\/b\/[^/]+$/.test(path) || path === '/';
       const assetPath = isBoardPage ? '/index.html' : path;
       const file = normalize(join(WEB_DIST, assetPath));
-      if (!file.startsWith(WEB_DIST)) return json(res, 404, { error: 'not found' });
+      // Trailing separator so a sibling like `dist-web-other` can never pass the prefix
+      // check (#1084 review, non-blocking b) — unreachable today, real tomorrow.
+      if (!file.startsWith(WEB_DIST + sep)) return json(res, 404, { error: 'not found' });
       try {
         const content = await readFile(file);
         res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });

@@ -276,8 +276,26 @@ export class TldrawProvider implements WhiteboardProvider {
     const touchedClusters = new Set<string>();
 
     await room.updateStore((store) => {
+      // In-batch overlay (#1084 review, REQUIRED 1): updateStore's snapshot is the COMMITTED
+      // store — the callback's own puts/deletes are not in it, so a second op on the same id
+      // used to read pre-batch state, and a [delete, retitle] batch resurrected the note it
+      // had just deleted, refusing nothing. Every read and write in this callback goes
+      // through the overlay so ops see each other. null = deleted this batch.
+      const overlay = new Map<string, ShapeRecord | null>();
+      const resolveShape = (id: string): ShapeRecord | undefined =>
+        overlay.has(id) ? (overlay.get(id) ?? undefined) : getShape(room, id);
+      const putShape = (s: ShapeRecord): void => {
+        store.put(s as unknown as UnknownRecord);
+        overlay.set(s.id, s);
+      };
+      const deleteShape = (id: string): void => {
+        store.delete(id);
+        overlay.set(id, null);
+      };
+      const deletedBindings = new Set<string>();
+
       for (const op of ops) {
-        const shape = getShape(room, op.id);
+        const shape = resolveShape(op.id);
         if (!shape) {
           refused.push({
             id: op.id,
@@ -292,7 +310,7 @@ export class TldrawProvider implements WhiteboardProvider {
             const updated: ShapeRecord = { ...shape, parentId: op.cluster ?? PAGE_ID };
             if (op.x !== undefined) updated.x = op.x;
             if (op.y !== undefined) updated.y = op.y;
-            store.put(updated as unknown as UnknownRecord);
+            putShape(updated);
             // Both the old and new cluster re-fit: one loses a member, one gains.
             if (op.cluster) touchedClusters.add(op.cluster);
             if (shape.parentId !== PAGE_ID) touchedClusters.add(shape.parentId);
@@ -306,10 +324,10 @@ export class TldrawProvider implements WhiteboardProvider {
               });
               continue;
             }
-            store.put({
+            putShape({
               ...shape,
               props: { ...shape.props, w: op.w, h: op.h },
-            } as unknown as UnknownRecord);
+            });
             break;
           }
           case 'retitle': {
@@ -323,7 +341,7 @@ export class TldrawProvider implements WhiteboardProvider {
             const props = { ...shape.props };
             if (shape.type === 'frame') props['name'] = op.text;
             else props['richText'] = toRichText(op.text);
-            store.put({ ...shape, props } as unknown as UnknownRecord);
+            putShape({ ...shape, props });
             break;
           }
           case 'delete': {
@@ -335,18 +353,25 @@ export class TldrawProvider implements WhiteboardProvider {
               continue;
             }
             // Bindings referencing a deleted shape must go with it; a deleted cluster's
-            // children return to the open board rather than vanishing.
+            // children return to the open board rather than vanishing. Membership resolves
+            // through the overlay so an in-batch move into (or out of) this cluster counts.
             const s = snap(room);
             for (const doc of s.documents) {
               const r = doc.state;
               if (r.typeName === 'binding') {
                 const b = r as BindingRecord;
-                if (b.fromId === op.id || b.toId === op.id) store.delete(b.id);
-              } else if (r.typeName === 'shape' && (r as ShapeRecord).parentId === op.id) {
-                store.put({ ...(r as ShapeRecord), parentId: PAGE_ID } as unknown as UnknownRecord);
+                if ((b.fromId === op.id || b.toId === op.id) && !deletedBindings.has(b.id)) {
+                  store.delete(b.id);
+                  deletedBindings.add(b.id);
+                }
+              } else if (r.typeName === 'shape') {
+                const current = resolveShape(r.id);
+                if (current && current.parentId === op.id) {
+                  putShape({ ...current, parentId: PAGE_ID });
+                }
               }
             }
-            store.delete(op.id);
+            deleteShape(op.id);
             if (shape.parentId !== PAGE_ID) touchedClusters.add(shape.parentId);
             break;
           }
