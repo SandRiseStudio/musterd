@@ -26,6 +26,7 @@ import { laneCommand, lanesCommand } from './commands/lane.js';
 import { liveCommand } from './commands/live.js';
 import { memoryCommand } from './commands/memory.js';
 import { nextCommand } from './commands/next.js';
+import { nodeCommand } from './commands/node.js';
 import { notifyCommand } from './commands/notify.js';
 import { nudgeCommand } from './commands/nudge.js';
 import { reapCommand } from './commands/reap.js';
@@ -227,6 +228,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return lanesCommand(rest);
     case 'next':
       return nextCommand(rest);
+    case 'node':
+      return nodeCommand(rest);
     case 'done':
       return doneCommand(rest);
     case 'goal':

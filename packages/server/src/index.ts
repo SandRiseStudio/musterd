@@ -238,4 +238,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
 
 export { resolveConfig } from './config.js';
 export { openDb } from './db/open.js';
+// The machine's node credentials (ADR 328 §2) — exported so the CLI's tests can assert what the
+// daemon wrote. The CLI never reads or writes this file itself: the daemon owns it.
+export { nodeStatePath, readNodeState } from './node/state.js';
 export { seedDawn } from './db/seed.js';
