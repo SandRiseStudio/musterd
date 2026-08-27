@@ -70,3 +70,58 @@ export function consumeInvite(
       .get(now, nodeId, teamId, hashToken(code), now) ?? null
   );
 }
+
+/**
+ * Bind a credential to a node id the joiner presented (ADR 331 §Decision 1). `null` is a refusal.
+ *
+ * On the hub the presented id names a row that does not exist yet — the hub has its own row for
+ * this team, under a different id — so adoption is an INSERT, not the UPDATE the word "adopt"
+ * suggests. (Worth stating plainly: ADR 331's Experiment predicted "write two fields onto an
+ * existing row", and on the hub side that prediction is wrong. Recorded rather than smoothed over,
+ * because 331 named this increment as where the evidence arrives.)
+ *
+ * Two refusals, and the second is not in ADR 328 or 331:
+ *
+ *  1. **Already bound.** `WHERE nodes.credential_hash IS NULL` — an id bound to a credential is not
+ *     re-bindable by enrollment. Replacing a live credential is `rotateNode`, under admin
+ *     authority, never a path an invite can reach.
+ *
+ *  2. **The hub's own row.** `credential_hash IS NULL` alone would admit it: a hub never enrolls
+ *     with itself, so its own `local_node` row is permanently unbound. A joiner presenting that id
+ *     would bind its credential to the hub's origin identity and thereafter stamp events *as* the
+ *     hub — every `origin_node` in the log silently ambiguous between two machines. The invite is
+ *     admin-minted, single-use and short-lived, so this is not reachable by an outsider; it is
+ *     reachable by the invitee, which is exactly the party a CAS exists to bound.
+ *
+ * A third refusal falls out of the schema rather than the guard, and is tested: `nodes.id` is a
+ * global primary key while a node is a machine-*team* principal, so the same id presented under a
+ * second team hits the already-bound guard instead of re-pointing the existing row's `team_id`.
+ */
+export function bindNode(
+  db: Database,
+  teamId: string,
+  nodeId: string,
+  label: string,
+  credential: string,
+  enrolledBy: string,
+  now: number = Date.now(),
+): { id: string } | null {
+  const local = db
+    .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+    .get(teamId);
+  if (local?.node_id === nodeId) return null;
+
+  const res = db
+    .prepare(
+      `INSERT INTO nodes (id, team_id, label, next_seq, credential_hash, enrolled_at, enrolled_by)
+       VALUES (?, ?, ?, 1, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         credential_hash = excluded.credential_hash,
+         enrolled_at     = excluded.enrolled_at,
+         enrolled_by     = excluded.enrolled_by,
+         label           = excluded.label
+       WHERE nodes.credential_hash IS NULL`,
+    )
+    .run(nodeId, teamId, label, hashToken(credential), now, enrolledBy);
+  return res.changes === 0 ? null : { id: nodeId };
+}
