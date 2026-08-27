@@ -1,6 +1,8 @@
 # 326 — Session orientation: the injected block, the orient ritual, and the scoped wake
 
-- Status: accepted
+- Status: accepted (Decision 2 amended 2026-08-27 — owed reviews and routed acceptances are
+  **tier 1**, taken up unprompted; tier 2 is only unaddressed work. Read the 2026-08-27 amendment
+  below before acting on Decision 2 or its "autonomous pickup is deliberately excluded" clause.)
 - Date: 2026-08-25
 - Builds on: [ADR 049](049-orientation-and-handoff.md) (the orientation brief),
   [ADR 088](088-interrupt-line-tool-boundary-inbox-check.md) (composable-only injected context),
@@ -68,6 +70,14 @@ authorized, and named by no guidance surface at all.
 - A compromised predecessor session can still write a hostile memory headline for its successor;
   the fence, flattening, and length cap bound that residual, and it is this seat's own field —
   teammate-authored free text stays out of injected context by construction.
+- **2026-08-27 — Decision 2's tier split is superseded in part.** Its "surface tier 2 (owed
+  reviews…) without acting" and "autonomous pickup of new work is deliberately excluded" are both
+  amended by the 2026-08-27 amendment below: owed reviews and routed acceptances are tier 1 and are
+  taken up unprompted, and the excluded category is *unaddressed* work. The Decision text itself is
+  left verbatim because `change-adr:check` freezes the `## Decision` of an accepted ADR — the
+  inline-marker convention of ADR 160 predates that gate and no longer passes it, so the pointers
+  live here and on the Status line (the ADR 056 form) instead. The design spec carries the same
+  markers at §A(2) and §B step 4, where they are permitted.
 
 ## Observability & Evaluation
 
@@ -147,3 +157,56 @@ every supported harness; Cursor `sessionStart` and Codex `SessionStart` inject t
 been discarding that stdout); Codex also gets the repeating `orient-nudge` on UserPromptSubmit.
 OpenCode stays catalog-only. The ritual, the composable-only bar, and wake-suppression above are
 unchanged.
+
+## Amendment — 2026-08-27 (UTC): tier 1 is everything addressed to the seat
+
+Live observation (nick, across co-driven sessions; insight in team memory): seats surfaced
+acceptance and review requests routed to them and then asked the human's permission to take them.
+That is not model timidity; it is compliance with this ADR's own ritual, which placed owed reviews
+in tier 2 ("surface, do not handle") and closed with "stop and wait for direction". The behaviour
+trains users to stay inside co-driven sessions answering questions the protocol already answered —
+the opposite of the target mode (a human works their own lane and is interrupted only by what
+routes to them; see `docs/design/2026-08-26-musterd-user-agent-flow.md`).
+
+Two data points from the ledger, both `2026-08-27 01:0x UTC` (2026-08-26 evening local — the dates
+differ by zone, and the acts are the authority):
+
+1. **A seat declined addressed work on session-management grounds, then reversed on a human's
+   word.** `01M10BX9651` — stanley declining a review routed to it ("this seat is wrapping in the
+   next minute…") at 01:03:50, then `01M10C0449` taking the same review at 01:05:24 once the human
+   spoke. Its own orientation status one minute later, `01M10BYFH5` (01:04:30), does not mention the
+   review at all: the seat had disposed of an addressed act and its readout showed no trace of it.
+2. **The request left the open-action list the moment it was answered, before any review
+   existed.** Both replies above name `01M10BS69Q` in `meta.in_reply_to`, and both carry the same
+   `from_member` — one seat, not two. ADR 254 discharge is written by the **answering act**, not by
+   the work being done, so "taking it" reads as "settled" to every addressee including the taker.
+   Nothing in `openActionNeeded` distinguishes *answered* from *done* — the mechanical half that
+   guidance cannot reach (dolly's lane `01M0ZDKXPJ` / #1088).
+
+   Falsifier: `select id, from_member, act, json_extract(meta,'$.in_reply_to') from messages where
+   json_extract(meta,'$.in_reply_to')='01M10BS69QYFMJH1VKCQT0VXB4'` — two rows, one member. A row
+   from a second member would falsify this reading.
+
+**The autonomy line moves to where it always belonged: between ADDRESSED and UNADDRESSED work, not
+between answering and doing.** Decision 2 is amended: tier 1 is everything addressed to this seat —
+directed asks, incidents, **and acceptance/review requests routed to it, which the seat takes up
+unprompted**. Tier 2 — surfaced, never acted on — is work nobody routed to the seat: carried lanes,
+up-next, claimable open lanes. §E's exclusion of autonomous pickup now reads "unaddressed work"; a
+directed acceptance was never optional, so taking it is not an autonomy expansion.
+
+**The dedup step this makes load-bearing.** A `request_help` carries an eligible set of 2–4 names
+(ADR 254). While each addressee only *surfaced* it, the human arbitrated and duplication was bounded;
+telling every addressee to execute unprompted removes that bound, and the only mechanism left is
+ADR 254 discharge — which `packages/server/src/store/messages.ts` populates **only** from an
+`accept`/`decline` whose `meta.in_reply_to` names the request. A review delivered any other way (a
+plain `message`, a forge comment, or work done before the request act existed) discharges nothing.
+So the ritual gains one clause, and it is not optional: **announce with `team_send {act:'accept',
+reply_to:<the request act id>}` before starting.** `packages/mcp/src/tools/send.ts` maps `reply_to`
+→ `meta.in_reply_to`, the exact key the store reads, so the announcement *is* the discharge for
+every co-addressee at once. This is the guidance half; #1088 is the surface half, and they are
+complementary.
+
+Shipped as guidance v20 (`renderOrientSkill`), with a behavioural test pinning the claim and the
+snapshot discipline carrying the bump. The §Experiment falsifier gains two cases: a seat that
+orients onto a waiting review request and asks the human whether to take it, and two seats that
+review the same request because neither announced it.
