@@ -14,10 +14,13 @@ So the question is narrow: **does each harness expose a slot that runs a command
 
 | Harness | Persistent UI slot | Command-driven | Seat chip possible |
 | --- | --- | --- | --- |
-| Claude Code | `statusLine` | yes | **yes — shipped** |
+| Claude Code (interactive) | `statusLine` | yes | **yes — shipped** |
+| Claude Code (headless) | none — no TUI to draw in | n/a | no |
 | Codex CLI | status line (TUI) | no | no |
 | Cursor | none | n/a | no |
 | opencode | none | n/a | no (toast only) |
+
+The Claude Code row splits by **driver**, not just harness: a statusline needs a TUI, and headless has none. The [driver support matrix](driver-support-matrix.md) carries the per-driver cells, including a `persistent seat indicator` row pointing back here.
 
 ### Claude Code — yes, and it is shipped
 
@@ -29,7 +32,9 @@ Codex's TUI genuinely has a configurable status line (`codex-rs/tui/src/bottom_p
 
 The one variant carrying arbitrary text, `WorkspaceHeadline`, is not a local seam either: it is fetched from the OpenAI app-server via `GetWorkspaceMessagesResponse` and gated behind `response.feature_enabled` (`codex-rs/tui/src/workspace_messages.rs`, refreshed every 5 minutes). A local coordination daemon cannot write it.
 
-> Codex CLI's status line cannot render a locally-produced string (2026-08-26; falsify: find a `StatusLineItem` variant in `status_line_setup.rs` that carries operator-supplied text from local config rather than a built-in field or an app-server response — if one exists, the chip has a seam here).
+> Codex CLI's status line cannot render a locally-produced string (2026-08-26; falsify: check whether `StatusLineItem` still derives `Copy` at `status_line_setup.rs:54` — a variant carrying a `String` cannot be `Copy`, so operator-supplied text is impossible by the type, not merely absent from today's list. If that derive is dropped, re-read the variants: the enum can then hold text and the chip may have a seam here).
+
+That falsifier is deliberately structural rather than enumerative (ryder's #1080 review): "scan ~30 variants and judge each" asks a reader to repeat a survey, and answers only "we looked and did not find one". The `Copy` bound answers "one cannot exist without a derive change", and re-checking it is a single grep.
 
 ### Cursor — rich hooks, no persistent UI
 
