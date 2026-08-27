@@ -34,8 +34,16 @@ describe('Cursor hooks install (ADR 198)', () => {
     };
     expect(file.version).toBe(1);
     expect(file.hooks['sessionStart']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
-    expect(file.hooks['sessionStart']?.[0]?.command).toContain('session observe --stdin');
+    expect(file.hooks['sessionStart']?.[0]?.command).toContain(
+      'session observe --stdin --orient 2>/dev/null',
+    );
+    expect(file.hooks['sessionStart']?.[0]?.command).not.toContain(
+      'session observe --stdin --orient >/dev/null',
+    );
     expect(file.hooks['postToolUse']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
+    expect(file.hooks['postToolUse']?.[0]?.command).toContain(
+      'session observe --stdin >/dev/null 2>&1',
+    );
     expect(file.hooks['afterShellExecution']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
     expect(file.hooks['afterMCPExecution']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
     expect(file.hooks['sessionEnd']?.[0]?.command).toContain(CURSOR_END_HOOK_MARKER);

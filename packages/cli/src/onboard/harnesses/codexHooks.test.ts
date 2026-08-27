@@ -20,7 +20,7 @@ describe('Codex project hooks', () => {
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  it('adds the three marker-owned causal hooks without removing user handlers', () => {
+  it('adds the marker-owned causal hooks without removing user handlers', () => {
     const source = {
       hooks: {
         PostToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo user' }] }],
@@ -36,9 +36,20 @@ describe('Codex project hooks', () => {
     expect(hooks.hooks.PostToolUse).toContainEqual(source.hooks.PostToolUse[0]);
     expect(JSON.stringify(hooks)).toContain(CODEX_HOOK_MARKER);
     expect(Object.keys(hooks.hooks)).toEqual(
-      expect.arrayContaining(['SessionStart', 'SessionEnd', 'PostToolUse']),
+      expect.arrayContaining(['SessionStart', 'SessionEnd', 'PostToolUse', 'UserPromptSubmit']),
     );
     expect(inspectCodexHookDrift(root)).toEqual([]);
+  });
+
+  it('installs a marker-owned UserPromptSubmit orient-nudge (ADR 333)', () => {
+    installCodexHooks(root);
+    const hooks = JSON.parse(readFileSync(hooksPath, 'utf8')) as {
+      hooks: Record<string, { hooks: { command: string }[] }[]>;
+    };
+    const cmd = hooks.hooks.UserPromptSubmit?.[0]?.hooks[0]?.command ?? '';
+    expect(cmd).toContain('session orient-nudge');
+    expect(cmd).toContain(CODEX_HOOK_MARKER);
+    expect(cmd).not.toContain('codex-hook start');
   });
 
   it('removes only marker-owned hooks and leaves a user-only file intact', () => {

@@ -11,6 +11,7 @@ import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { sessionDigest } from '../session/digest.js';
 import { findWorkspaceDir } from './helpers.js';
+import { emitSessionOrientation } from './session.js';
 
 export type CodexHookDeps = {
   start?: (event: Extract<CodexHookEvent, { event: 'start' }>) => Promise<void> | void;
@@ -106,6 +107,9 @@ async function captureStart(event: Extract<CodexHookEvent, { event: 'start' }>):
     },
   });
   await attest(local.binding, event.session_id, 'start');
+  // ADR 333: Codex SessionStart stdout is developer context. Same block Claude emits; silent on fail.
+  const orientation = await emitSessionOrientation(local.dir);
+  if (orientation) process.stdout.write(orientation + '\n');
 }
 
 async function captureEnd(event: Extract<CodexHookEvent, { event: 'end' }>): Promise<void> {

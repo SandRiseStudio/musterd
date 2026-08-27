@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Binding } from '../config.js';
-import { ORIENT_NUDGE_TEXT, orientNudgeDue, writeOrientStamp } from './session.js';
+import {
+  ORIENT_NUDGE_TEXT,
+  formatCursorOrientation,
+  orientNudgeDue,
+  writeOrientStamp,
+} from './session.js';
 
 /** Mirrors the capture suite's temp-workspace idiom: never a real binding.json. */
 describe('session orient stamp/nudge', () => {
@@ -70,5 +75,14 @@ describe('session orient stamp/nudge', () => {
   it('the nudge text names the skill and stays one line', () => {
     expect(ORIENT_NUDGE_TEXT).toContain('musterd-orient');
     expect(ORIENT_NUDGE_TEXT).not.toContain('\n');
+  });
+
+  it('formatCursorOrientation wraps the block as Cursor additional_context JSON (ADR 333)', () => {
+    expect(formatCursorOrientation(null)).toBeNull();
+    const json = formatCursorOrientation('musterd orientation — seat "scout" on team "dawn"');
+    expect(json).not.toBeNull();
+    expect(JSON.parse(json!)).toEqual({
+      additional_context: 'musterd orientation — seat "scout" on team "dawn"',
+    });
   });
 });
