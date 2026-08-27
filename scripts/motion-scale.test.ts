@@ -168,6 +168,66 @@ describe('rawMotionLiterals', () => {
         rawMotionLiterals('.bar { transition: max-width 1s linear; }', 'ApprovalCard.css'),
       ).toEqual([{ kind: 'raw', line: 1, detail: '1s' }]);
     });
+
+    // The entry names a VALUE, not a spelling. `1S` is the same second.
+    it('exempts the entry spelled in a different case — case is not meaning', () => {
+      expect(
+        rawMotionLiterals('.bar { transition: width 1S linear; }', 'ApprovalCard.css'),
+      ).toEqual([]);
+    });
+  });
+
+  // ryder's REQUIRED on #1082 round 3. Rule 2 kept its own duration grammar — case-sensitive, and
+  // blind to signs and exponents — so `0.18S`, `180MS` and `1.8e-1s` rode a green gate as real
+  // declarations while `180ms` failed. All four are 180ms of motion. This is rule 3's round-2
+  // defect exactly, one rule over, beside the spec sentence saying that class was closed.
+  //
+  // The fix is rule 3's shape, not a wider regex: every duration-shaped literal goes through
+  // `durationMs`, and one it cannot read is REPORTED rather than skipped. Each case varies one
+  // coordinate from `240ms`.
+  describe('every duration-shaped literal goes through durationMs, and unreadable is a finding', () => {
+    it('vary the UNIT CASE only — flagged, because CSS units are case-insensitive', () => {
+      expect(rawMotionLiterals('.a { transition: opacity 0.18S linear; }')).toEqual([
+        { kind: 'raw', line: 1, detail: '0.18S' },
+      ]);
+      expect(rawMotionLiterals('.a { transition: opacity 180MS linear; }')).toEqual([
+        { kind: 'raw', line: 1, detail: '180MS' },
+      ]);
+    });
+
+    it('vary to an EXPONENT form — unreadable, so a finding rather than a skip', () => {
+      const found = rawMotionLiterals('.a { transition: opacity 1.8e-1s linear; }');
+      expect(found).toHaveLength(1);
+      expect(found[0]?.kind).toBe('unreadable');
+      expect(found[0]?.detail).toContain('1.8e-1s');
+    });
+
+    it('vary to a SIGNED form — unreadable, and named as such rather than flagged as a plain raw', () => {
+      const found = rawMotionLiterals('.a { transition: opacity +0.18s linear; }');
+      expect(found).toHaveLength(1);
+      expect(found[0]?.kind).toBe('unreadable');
+    });
+
+    // The falsifier that fails if the fix is a wider regex: nothing here enumerates a form.
+    it('any duration-shaped literal is either counted or named unreadable, never silently passed', () => {
+      for (const form of ['0.18S', '180MS', '1.8e-1s', '+0.18s', '18e1ms', '0,18s']) {
+        const found = rawMotionLiterals(`.a { transition: opacity ${form} linear; }`);
+        expect(found, form).not.toHaveLength(0);
+      }
+    });
+
+    it('stays quiet about values that are not durations at all', () => {
+      expect(
+        rawMotionLiterals('.a { transition: opacity var(--lc-dur-2) cubic-bezier2; }'),
+      ).toEqual([]);
+      expect(
+        rawMotionLiterals('.a { animation: lc-enter var(--lc-dur-3) steps(4, end); }'),
+      ).toEqual([]);
+    });
+
+    it('still exempts a zero duration written in either case — zero is not a scale violation', () => {
+      expect(rawMotionLiterals('.a { transition: visibility 0S linear; }')).toEqual([]);
+    });
   });
 });
 

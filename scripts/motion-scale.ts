@@ -7,7 +7,8 @@
  *
  * Five rules:
  *   1. DISAGREE  — a motion token in CSS whose value differs from `motion.ts`.
- *   2. RAW       — a cubic-bezier() or a bare duration (ms OR s) in a motion declaration.
+ *   2. RAW       — a cubic-bezier() or a bare duration (ms OR s) in a motion declaration. Fails
+ *                  closed like rule 3: a duration-shaped value it cannot read is UNREADABLE.
  *   3. OFF-FRAME — a duration that is not a whole frame at the 720p25 capture rate. Fails closed:
  *                  a rung it cannot read is reported (UNREADABLE), never skipped.
  *   4. REDUCED   — a rung used in a transition with no prefers-reduced-motion answer in the file.
@@ -46,16 +47,25 @@ export type MotionToken = { token: string; value: string; line: number };
 const MOTION_TOKEN = /(--lc-(?:dur-[\w-]+|ease[\w-]*))\s*:\s*([^;]+)/;
 
 /**
- * A raw timing literal: a bezier, or a duration in EITHER unit.
+ * A bezier, or a whole word that might be a duration. NOT a duration grammar — that is `durationMs`.
  *
- * The `s` half is ryder's REQUIRED 1 on #1079. This was `\b\d+ms\b`, which made a duration written
- * in seconds invisible — and three real violations rode a green gate onto main, including
- * `transition: all 0.18s` (180ms, 4.5 frames), which is exactly rule 3's defect class. The unit a
- * duration is spelled in was never the point; the number of frames it occupies is.
+ * This was `/cubic-bezier\(...\)|(?<![\w.-])(?:\d+(?:\.\d+)?|\.\d+)m?s\b/`: rule 2's own private
+ * pattern for what a duration looks like, and the third one in this file. It was case-sensitive and
+ * knew nothing of signs or exponents, so `0.18S`, `180MS` and `1.8e-1s` — all 180ms, all browser
+ * valid, all rule 2's own defect class — rode a green gate while `180ms` failed it. ryder's REQUIRED
+ * on #1082 round 3, and the same defect rule 3 had one round earlier.
  *
- * The lookbehind keeps it off identifiers and off the tail of a longer number.
+ * Widening it again was the wrong shape twice, so this does not try to describe a duration at all:
+ * it hands `rawMotionLiterals` every word in the declaration, and a word that LOOKS like a duration
+ * (has a digit, ends in an s unit) is put through `durationMs` — counted if it reads, reported as
+ * UNREADABLE if it does not. The class closes by construction rather than by enumeration.
  */
-const LITERAL = /cubic-bezier\([^)]*\)|(?<![\w.-])(?:\d+(?:\.\d+)?|\.\d+)m?s\b/g;
+const TIMING_WORD = /cubic-bezier\([^)]*\)|[\w.+-]+/g;
+
+/** Looks like a duration, whatever it turns out to be: has a digit and ends in an s unit. */
+function isDurationShaped(word: string): boolean {
+  return /\d/.test(word) && /m?s$/i.test(word);
+}
 
 /** Custom properties whose name marks them as motion. Line numbers are 1-indexed. */
 export function declaredMotionTokens(css: string): MotionToken[] {
@@ -159,26 +169,47 @@ export function rawMotionLiterals(css: string, file = ''): MotionFinding[] {
   for (const decl of motionDeclarations(css)) {
     for (const seg of decl.segments) {
       if (/\binfinite\b/.test(seg.text)) continue; // ambient loop, exempt by rule
-      for (const m of seg.text.matchAll(LITERAL)) {
+      for (const m of seg.text.matchAll(TIMING_WORD)) {
         const literal = m[0];
-        if (isZeroDuration(literal)) continue;
-        if (isAllowedLong(literal, file, decl.property, seg.text)) continue;
-        out.push({ kind: 'raw', line: lineAt(seg.start + (m.index ?? 0)), detail: literal });
+        const line = lineAt(seg.start + (m.index ?? 0));
+        if (literal.startsWith('cubic-bezier(')) {
+          out.push({ kind: 'raw', line, detail: literal });
+          continue;
+        }
+        if (!isDurationShaped(literal)) continue;
+        const ms = durationMs(literal);
+        if (ms === null) {
+          // Fails CLOSED, exactly as rule 3 does: the gate cannot count this one's frames, so it
+          // says so. Staying quiet would let the reader infer it counted them and was happy.
+          out.push({
+            kind: 'unreadable',
+            line,
+            detail:
+              `${literal} — reads as a duration but cannot be parsed as one, so its frame count ` +
+              `is unknown. Write it as a plain number of ms or s (e.g. 200ms, 0.2s); ` +
+              `signs, exponents and indirection are not accepted here on purpose.`,
+          });
+          continue;
+        }
+        if (ms === 0) continue; // no transition at all — never a scale violation
+        if (isAllowedLong(ms, file, decl.property, seg.text)) continue;
+        out.push({ kind: 'raw', line, detail: literal });
       }
     }
   }
   return out;
 }
 
-/**
+/*
  * `0s` / `0ms` is never a scale violation — a zero duration means "no transition". It is the
  * reduced-motion neutralisation idiom, and it is also how `transition: visibility 0s linear <delay>`
  * toggles visibility without animating it (Live.css:4826). Flagging zero would demand the
  * reduced-motion answers be broken to satisfy the rule that requires them.
+ *
+ * This was a fourth private grammar (`/^0(?:\.0+)?m?s$/`, case-sensitive like the rest). It is now
+ * `durationMs(literal) === 0` at the call site, so `0S` and `0.0ms` are the same zero the browser
+ * sees.
  */
-function isZeroDuration(literal: string): boolean {
-  return /^0(?:\.0+)?m?s$/.test(literal);
-}
 
 /**
  * The deliberate one-shot outliers the spec (§5) promised an allowlist for and never got one,
@@ -254,11 +285,15 @@ const ALLOWED_LONG: {
  * So an entry names its `property` exactly and the `token` that identifies the site within it
  * (an animation name, or the animated property). Both must hold. `3.6s` is exempt as a duration
  * longhand and has no animation name, so its token is empty — the property alone identifies it.
+ *
+ * Matched on the VALUE in milliseconds, not on the spelling: an entry written `1s` exempts `1S` and
+ * `1000ms` at the same site, because they are the same second and the exemption was reasoned about
+ * the duration, not the characters.
  */
-function isAllowedLong(literal: string, file: string, property: string, segment: string): boolean {
+function isAllowedLong(ms: number, file: string, property: string, segment: string): boolean {
   return ALLOWED_LONG.some(
     (a) =>
-      a.value === literal &&
+      durationMs(a.value) === ms &&
       file.endsWith(a.file) &&
       property.trim().toLowerCase() === a.property &&
       (a.token === '' || new RegExp(`(?<![\\w-])${a.token}(?![\\w-])`).test(segment)),

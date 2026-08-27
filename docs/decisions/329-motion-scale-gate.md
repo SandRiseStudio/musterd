@@ -117,6 +117,18 @@ the lane is looking at.
   names its frame count or names its inability to read it — never neither.* Exercised across ms, s,
   both cases, signed and exponent forms, `calc()`, a `var()` indirection, a unitless number and an
   empty value.
+- **Scoping that falsifier to rungs left rule 2 holding the identical defect for one more round.**
+  It said "any value a RUNG can hold", so it was satisfied by a gate blind to the same forms one
+  rule over: rule 2 kept its own case-sensitive literal pattern, and `0.18S`, `180MS` and `1.8e-1s`
+  passed green as real declarations while `180ms` failed (ryder's REQUIRED on #1082 round 3; `180MS`
+  surfaced only because all forms were exercised rather than the two reported). Same lesson a third
+  time, at the level of the falsifier's *subject* rather than its input class: the narrow scope was
+  what made it satisfiable. **Rule 2 now owns no duration grammar** — it asks `durationMs` about
+  every duration-shaped word and reports what it cannot read, and the zero test and the §5 allowlist
+  compare milliseconds instead of characters. The falsifier reads **for any value a motion
+  declaration or a rung can hold**, and both halves were verified by injection into `Live.css`
+  against `pnpm tokens:check`, then confirmed load-bearing by reverting rule 2 in place and watching
+  `0.18S`, `180MS` and `1.8e-1s` go green again.
 - **Experiment:** n/a — the overshoot question was settled analytically rather than A/B-tested (see
   the falsified claim below), and the failure paths were exercised directly by reintroducing each
   defect and confirming the gate caught it.

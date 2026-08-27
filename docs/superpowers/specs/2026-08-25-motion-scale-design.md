@@ -138,6 +138,22 @@ than parsed, and that is the point — a third widening would have been beaten b
 listed, whereas "count the frames or say you could not" has no unlisted forms. A gate must never be
 silent in a way a reader will mistake for having checked and been satisfied.
 
+**Corrected a third time, third review round.** The paragraph above told rule 3's story and left
+rule 2 holding the same defect, in the same file, next to the sentence saying the class was closed:
+rule 2 kept its own literal pattern, case-sensitive and innocent of signs and exponents, so
+`0.18S`, `180MS` and `1.8e-1s` rode a green gate as real declarations while `180ms` failed (ryder's
+REQUIRED on #1082, round 3 — and `180MS` was one form wider than the report, found by exercising all
+of them). Two more private grammars were hiding in the same rule: the zero-duration test and the §5
+allowlist, both matching characters rather than values, so `0S` and `1S` meant nothing to either.
+
+**Rule 2 now has no duration grammar at all.** It splits a declaration into words, asks of each only
+"does this look like a duration" — has a digit, ends in an s unit — and hands every one that does to
+`durationMs`: counted if it reads, reported as UNREADABLE if it does not, on rule 3's shape. Zero
+and the allowlist compare milliseconds, not spelling. **The invariant, which names no forms:** for
+any value a motion declaration can hold, the gate either counts its frames or says it could not —
+never neither. That sentence is now true of both rules, and `durationMs` is the only thing in the
+file that decides what a duration is.
+
 ## 5. Exemptions, and why they are a rule rather than a list
 
 Two classes are exempt from the rung scale. Neither is exempt from §6.
