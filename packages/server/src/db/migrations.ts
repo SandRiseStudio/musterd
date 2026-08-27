@@ -1121,6 +1121,29 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // Which `nodes` row is THIS daemon's, per team — ADR 325 residence 3 (local-only, never
+    // replicated), so a separate table rather than a column: "is this row me" is machine-relative,
+    // and `nodes` is hub-authoritative state that will replicate, where a self-referring boolean is
+    // false on every receiver.
+    //
+    // v47 picked the local row with `ORDER BY id LIMIT 1`, correct only while enrollment did not
+    // exist. Increment 3a is what adds the second row, so this precedes it: a remote ULID sorting
+    // lower would otherwise take over our stamp, holing our sequence and putting numbers in theirs
+    // that name events they never wrote — the loss-versus-silence ambiguity ADR 331 exists to
+    // prevent. Backfills from v47's rows, every one of which is local by construction because
+    // nothing has ever enrolled. `INSERT OR IGNORE` for the rewind-and-replay harness.
+    version: 48,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS local_node (
+          team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          node_id TEXT NOT NULL REFERENCES nodes(id)
+        );
+        INSERT OR IGNORE INTO local_node (team_id, node_id) SELECT team_id, id FROM nodes;
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

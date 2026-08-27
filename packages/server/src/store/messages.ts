@@ -29,20 +29,30 @@ function senderProvenance(db: Database, memberId: string): string | null {
 
 /**
  * This team's local node row (ADR 331 §Decision 1) — per (daemon, team), minted by migration v47
- * and lazily here for teams created after it. Before increment 3 lands enrollment there is exactly
- * one row per team; the ORDER BY makes the pick deterministic should that ever not hold.
+ * and lazily here for teams created after it.
+ *
+ * The `local_node` marker is the authority (v48, increment 3a), not `ORDER BY id LIMIT 1` as this
+ * read once was. That ordering was correct only while enrollment did not exist and `nodes` held one
+ * row per team; enrollment is exactly what adds remote rows, and one whose ULID sorted lower would
+ * have taken over our stamp — holing our own sequence while writing numbers into a remote node's
+ * that name events it never sent. Two sequences corrupted at once, which is the ambiguity between
+ * loss and silence that ADR 331 exists to prevent.
  */
 function localNodeForTeam(db: Database, teamId: string): { id: string } {
-  const existing = db
-    .prepare<[string], { id: string }>('SELECT id FROM nodes WHERE team_id = ? ORDER BY id LIMIT 1')
+  const marked = db
+    .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
     .get(teamId);
-  if (existing) return existing;
+  if (marked) return { id: marked.node_id };
+
   const id = ulid();
   db.prepare('INSERT INTO nodes (id, team_id, label, next_seq) VALUES (?, ?, ?, 1)').run(
     id,
     teamId,
     hostname(),
   );
+  // Both writes or neither: `insertMessage` already holds the transaction, so a row minted without
+  // its marker cannot survive to be re-minted on the next send.
+  db.prepare('INSERT INTO local_node (team_id, node_id) VALUES (?, ?)').run(teamId, id);
   return { id };
 }
 
