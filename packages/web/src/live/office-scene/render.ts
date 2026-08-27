@@ -3585,23 +3585,24 @@ function deskWedge(
   node: OfficeNode,
   t: number,
   steppedAway: boolean,
+  /** Which sign of the across (p) axis the anchor corner sits on — lets a long plate slide back
+   * toward the desk centre instead of overhanging the near edge. */
+  acrossSign: number,
 ): void {
   const f = FWD[dir];
   const p: [number, number] = [-f[1], f[0]];
   // Face toward the viewer: iso depth grows along +lx+ly, so flip the facing axis if it points away.
   const away: [number, number] = f[0] + f[1] > 0 ? [-f[0], -f[1]] : [f[0], f[1]];
   const O = project(ix, iy, fit);
-  // A screen-space iso basis vector for one logical direction, normalized — derived via project()
-  // so the wedge shares the room's exact axonometry without re-exporting KX/KY. Only the direction
-  // is ever wanted here (the plate is sized in screen px, not logical units), so it normalizes at
-  // the source rather than handing back a length nothing reads.
-  const unit = (d: [number, number]): { x: number; y: number } => {
+  // Screen-space iso basis vectors, normalized, plus the screen length of one logical unit —
+  // derived via project() so the wedge shares the room's exact axonometry without re-exporting
+  // KX/KY. The magnitude is what lets the plate measure itself against the desk.
+  const unit = (d: [number, number]): { x: number; y: number; m: number } => {
     const q = project(ix + d[0], iy + d[1], fit);
     const v = { x: q.x - O.x, y: q.y - O.y };
     const m = Math.hypot(v.x, v.y);
-    return { x: v.x / m, y: v.y / m };
+    return { x: v.x / m, y: v.y / m, m };
   };
-  const deskY = O.y - DESK_UP * fit.scale;
 
   // Type first — the plate is sized to its engraving. ≥13px so it bakes legibly at stream scale
   // (the old owned-desk plate's clamp), which is also what keeps canvas type viable here at all.
@@ -3610,28 +3611,41 @@ function deskWedge(
   ctx.font = canvasFont(px, '--font-display', 700);
   // Letterspaced caps, engraver style — via the real canvas property (a no-op string assignment on
   // engines without it), so the glyph run stays ONE string: tests and text extraction see the name.
-  const track = `${(px * 0.1).toFixed(1)}px`;
+  let track = `${(px * 0.1).toFixed(1)}px`;
   ctx.letterSpacing = track;
-  const nameW = ctx.measureText(name).width;
+  let nameW = ctx.measureText(name).width;
   ctx.letterSpacing = '0px';
   const sub = steppedAway ? 'stepped away' : null;
 
-  // Wedge geometry in SCREEN pixels, mock-proven: the plate is deliberately oversized against true
-  // desk scale (a to-scale wedge vanishes into the wood — the speech bubbles take the same
-  // licence), so it is sized to its engraving in px and only leaned/foreshortened along the iso
-  // axes. `sEff` clamps the world scale so depth still reads without the type collapsing.
+  // Wedge geometry in SCREEN pixels, mock-proven — but the DESK wins the argument about size
+  // (live lesson, 2026-08-27: engraving-sized plates put a banner across the whole room). The
+  // plate may be generous against true desk scale (the speech bubbles take the same licence),
+  // yet it is capped at ~62% of the desk's own projected span; a name that doesn't fit first
+  // drops its tracking, then condenses horizontally — never widens the plate past the cap.
   const sEff = Math.max(0.85, Math.min(1.15, fit.scale));
-  const puN = (() => {
-    const u = unit(p);
-    return u.x < 0 ? { x: -u.x, y: -u.y } : u; // never paint the engraving upside down
-  })();
+  const uP = unit(p);
+  const puN = uP.x < 0 ? { x: -uP.x, y: -uP.y } : uP; // never paint the engraving upside down
   const buN = unit(away);
-  const len = Math.max(34, nameW + 14); // screen px along the plate
+  const cap = 0.62 * DESK_W * uP.m; // the desk's screen span along the plate axis, scaled down
+  let textSx = 1; // horizontal condensation applied to the glyph run (1 = none)
+  if (nameW + 14 > cap) {
+    track = '0px';
+    nameW = ctx.measureText(name).width; // tracking dropped: remeasure before condensing
+    textSx = Math.min(1, Math.max(0.4, (cap - 12) / nameW));
+  }
+  const len = Math.max(34, Math.min(nameW * textSx + 14, cap)); // screen px along the plate
   const high = px + (sub ? px : 0) + 8 * sEff; // face height, screen px
   const lean = 6 * sEff; // how far the top edge leans back, screen px
   const half = len / 2;
+  // A plate longer than the corner allows slides back toward the desk centre, so it stays on the
+  // slab instead of overhanging the near edge (3 logical units of margin kept).
+  const halfLog = half / uP.m;
+  const anchorOff = DESK_W / 2 - 15; // the call site's across inset, in logical units from centre
+  const slide = anchorOff - Math.max(0, Math.min(anchorOff, DESK_W / 2 - 3 - halfLog));
+  const C = project(ix - p[0] * acrossSign * slide, iy - p[1] * acrossSign * slide, fit);
+  const deskY = C.y - DESK_UP * fit.scale;
   const P = (a: number, b: number, h: number): [number, number] => [
-    O.x + a * puN.x + b * buN.x,
+    C.x + a * puN.x + b * buN.x,
     deskY + a * puN.y + b * buN.y - h,
   ];
   const poly = (pts: [number, number][]): void => {
@@ -3722,6 +3736,9 @@ function deskWedge(
   ctx.save();
   ctx.translate(mid[0], mid[1]);
   ctx.rotate(angle);
+  // Condensed, not clipped: a name too wide for the desk-capped plate squeezes horizontally, so
+  // the glyph run stays ONE full string — text extraction and the bake tests still see the name.
+  ctx.scale(textSx, 1);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = canvasFont(px, '--font-display', 700);
@@ -3733,9 +3750,12 @@ function deskWedge(
   ctx.letterSpacing = '0px';
   if (sub) {
     // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
-    ctx.font = canvasFont(Math.max(10, Math.round(10 * fit.scale)), '--font-mono', 400);
+    const subPx = Math.max(10, Math.round(10 * fit.scale));
+    ctx.font = canvasFont(subPx, '--font-mono', 400);
+    const subW = ctx.measureText(sub).width * textSx;
+    if (subW > len - 12) ctx.scale((len - 12) / subW, 1); // compounds with the name's condensation
     ctx.fillStyle = 'rgba(42, 29, 12, 0.72)';
-    ctx.fillText('stepped away', 0, px * 0.78);
+    ctx.fillText(sub, 0, px * 0.78);
   }
   ctx.restore();
 
@@ -3909,7 +3929,7 @@ function drawWorkstation(
     const alongSign = f[0] + f[1] > 0 ? 1 : -1;
     const acrossSign = p[0] + p[1] > 0 ? 1 : -1;
     at(alongSign * (Df / 2 - 10), acrossSign * (W / 2 - 15), (ix, iy) =>
-      deskWedge(ctx, fit, ix, iy, dir, node, t, steppedAway),
+      deskWedge(ctx, fit, ix, iy, dir, node, t, steppedAway, acrossSign),
     );
   }
 
