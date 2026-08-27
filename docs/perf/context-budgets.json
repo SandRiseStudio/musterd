@@ -2,12 +2,12 @@
   "note": "Standing-context byte budgets (spec 2026-08-03, `pnpm context:check`). Every byte musterd injects into a seat's context \u2014 tools/list render, primer, hook nudges, including the due-gated label nudge \u2014 measured statically from source-of-truth exports. Raising any budget requires replacing that item's `justification`. bytes are UTF-8 of the model-readable text; estTokens = bytes/4 (the SurfaceRender formula).",
   "items": {
     "toolsListDefaultBytes": {
-      "budget": 17742,
-      "justification": "2026-08-26 (16897 B, +team_insight_save/team_memory_search descriptions \u2014 team memory ADR 327) + 5% headroom. Remains an allocation of perTurnTotalBytes."
+      "budget": 18287,
+      "justification": "2026-08-27 (17416 B, +team_insight_search alias team_memory_search — ADR 327 amendment, one-meaning-per-word) + 5% headroom. Pays rent via ADR 327 eval."
     },
     "toolsListMutedBytes": {
-      "budget": 7049,
-      "justification": "2026-08-26 (6713 B, +team_insight_save/team_memory_search \u2014 team memory ADR 327) + 5% headroom"
+      "budget": 7594,
+      "justification": "2026-08-27 (7232 B, +team_insight_search alias team_memory_search — ADR 327 amendment) + 5% headroom"
     },
     "primerBytes": {
       "budget": 2665,
@@ -26,12 +26,12 @@
       "justification": "post-trim 2026-08-03 (98 B) + 5% headroom"
     },
     "perTurnTotalBytes": {
-      "budget": 17942,
-      "justification": "2026-08-26 (17087 B, +team_insight_save/team_memory_search \u2014 team memory ADR 327: the write/read pair nick chartered so traps stop being re-derived privately) + 5% headroom. Raised deliberately: the insight surface pays rent via ADR 327 eval (trap-recurrence down, promotions up), reviewed at the next re-baseline."
+      "budget": 18487,
+      "justification": "2026-08-27 (17606 B, +team_insight_search alias — ADR 327 amendment) + 5% headroom. Pays rent via ADR 327 eval (trap-recurrence down, promotions up), reviewed at next re-baseline."
     },
     "perSessionTotalBytes": {
-      "budget": 21288,
-      "justification": "2026-08-26 (20274 B, same ADR 327 additions) + 5% headroom"
+      "budget": 21833,
+      "justification": "2026-08-27 (20793 B, same alias) + 5% headroom"
     }
   }
 }
