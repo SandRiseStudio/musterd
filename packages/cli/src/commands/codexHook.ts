@@ -10,8 +10,8 @@ import { HttpClient } from '../client.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import { sessionDigest } from '../session/digest.js';
-import { emitSessionOrientation } from './session.js';
 import { findWorkspaceDir } from './helpers.js';
+import { emitSessionOrientation } from './session.js';
 
 export type CodexHookDeps = {
   start?: (event: Extract<CodexHookEvent, { event: 'start' }>) => Promise<void> | void;
