@@ -62,43 +62,41 @@ exist yet — the hub has its own row for that team, with a different id — so 
 an `INSERT`, not the `UPDATE` the word "adopt" suggests. The joiner's own row is untouched; it gains
 only the credential, on disk, not in the row.
 
-The guard is therefore on **rebinding**, and it is the refusal 331 said this increment owed:
-
-```
-INSERT INTO nodes (id, team_id, label, next_seq, credential_hash, enrolled_at, enrolled_by)
-VALUES (?, ?, ?, 1, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET
-  credential_hash = excluded.credential_hash,
-  enrolled_at     = excluded.enrolled_at
-WHERE nodes.credential_hash IS NULL
-```
-
-`changes === 0` means the id is already bound to a credential — refuse. A second `msinv_` cannot
-silently take over a live node identity, which is what makes an `origin_node` stamp mean something
-after the fact.
-
-Note what this does *not* do: rotation must still be able to replace a non-NULL hash, so rotation is
-its own statement keyed by node id under admin authority, never this path. Enrollment binds once;
-rotation re-binds deliberately.
-
-**A hole in the guard as first drafted, and its patch.** `credential_hash IS NULL` admits *any*
-unbound row — and the hub's own local v47 row is unbound, permanently, because a hub never enrolls
-with itself. So a joiner presenting the hub's own node id, with a valid invite, would bind its
-credential onto the hub's origin identity and thereafter stamp events as the hub. The invite is
-admin-minted, single-use, and 15-minute-TTL, so this is not reachable by an outsider; it is reachable
-by a careless or malicious *invitee*, which is precisely the party the CAS exists to bound. ULID
-collision is not the risk — presenting a known id deliberately is.
-
-The bind therefore excludes this daemon's own rows for the team:
+**Any id the hub already knows is refused, whatever state it is in:**
 
 ```sql
-WHERE nodes.credential_hash IS NULL
-  AND nodes.id <> (SELECT node_id FROM local_node WHERE team_id = ?)
+INSERT INTO nodes (id, team_id, label, next_seq, credential_hash, enrolled_at, enrolled_by)
+VALUES (?, ?, ?, 1, ?, ?, ?)
+ON CONFLICT(id) DO NOTHING
 ```
 
-— which is a second reason decision 3's `local_node` marker has to exist: without it the hub cannot
-even name the row it must refuse to hand away. Stated here because it is the kind of hole that reads
-as obviously-fine in a diff. Test case 3b below pins it.
+`changes === 0` is the refusal. A legitimate joiner's id is fresh to the hub *by construction* — it
+is the ULID v47 minted on the joiner's own machine — so a conflict is never a case to reconcile. It
+is one of three, and all three want the same answer: an already-enrolled node (the refusal ADR 331
+left owed), the hub's own row for this team, or the hub's own row for a **different team it hosts**.
+
+Rotation is unaffected: it is its own statement keyed by node id under admin authority. Enrollment
+binds once; rotation re-binds deliberately.
+
+**Two holes found before this settled, and why the shape changed.** The first draft guarded only on
+`credential_hash IS NULL`, which admits *any* unbound row — and a hub's own local v47 row is unbound
+**permanently**, because a hub never enrolls with itself. A joiner presenting the hub's node id would
+bind its credential onto the hub's origin and thereafter stamp events as the hub.
+
+The patch for that was an exclusion subselect scoped to the enrolling team
+(`nodes.id <> (SELECT node_id FROM local_node WHERE team_id = ?)`). **miley's review (2026-08-27,
+`01M12KQHT8`) found that this still leaks across teams**: on a hub hosting A and B, a joiner
+enrolling into A presents the id of the hub's local row for **B**. A's exclusion does not name it, B's
+row is unbound, so the `DO UPDATE` wrote a foreign credential onto B's origin identity, left
+`team_id` as B, and reported success — after which the joiner authenticates as team B's node. Both
+holes are reachable only by an *invitee* (the invite is admin-minted, single-use, 15-minute-TTL),
+which is exactly the party a CAS exists to bound.
+
+`DO NOTHING` answers all of it with one clause and no subselect. The lesson is worth keeping: a guard
+that has to *enumerate what it excludes* will keep missing cases, while "the hub has never seen this
+id" is the property actually required. `local_node` stays load-bearing for `insertMessage`
+(decision 3); it is simply no longer part of this guard. Test cases 3b and 3d below pin both holes —
+they fail differently on the unpatched guard, so both are kept.
 
 ### 3. `local_node` — the marker increment 2 deferred, and why it is load-bearing now
 
@@ -230,7 +228,7 @@ isolation applies automatically and the suite cannot write the operator's real f
 | --- | --- |
 | `mintInvite(db, teamId, label, createdBy, now)` | — returns plaintext once |
 | `consumeInvite(db, teamId, code, nodeId, now)` | `WHERE consumed_at IS NULL AND expires_at > ?` |
-| `bindNode(db, teamId, nodeId, label, hash, by, now)` | `WHERE nodes.credential_hash IS NULL` |
+| `bindNode(db, teamId, nodeId, label, hash, by, now)` | `ON CONFLICT(id) DO NOTHING` — **any** id the hub already knows is refused (see decision 2) |
 | `rotateNode(db, teamId, nodeId, hash, now)` | `WHERE revoked_at IS NULL` |
 | `revokeNode(db, teamId, nodeId, now)` | `WHERE revoked_at IS NULL` |
 | `authenticateNode(db, teamId, token)` | `credential_hash = ? AND revoked_at IS NULL` |
@@ -269,6 +267,7 @@ TDD throughout; every row below is a test written before its code.
 | 3 | A second invite naming an already-bound node id is refused | **the ADR 331 debt** |
 | 3b | A joiner presenting the *hub's own* node id is refused | the decision-2 hole |
 | 3c | After a remote node row exists whose ULID sorts below ours, `insertMessage` still stamps OUR node and bumps OUR `next_seq` | **the decision-3 corruption** — fails on today's code |
+| 3d | A joiner presenting the hub's node id **for a different team the hub hosts** is refused | miley's cross-team finding — 3b and 3d fail differently on the unpatched guard, so both stay |
 | 4 | Rotation keeps `nodes.id`, so every `origin_node` stamp survives | ADR 328 §5 |
 | 5 | A revoked node's credential is refused everywhere | ADR 328 §5 |
 | 6 | Revocation leaves ingested events and held lanes alone | ADR 328 §5 |

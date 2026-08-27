@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { addMember, hashToken } from './members.js';
 import { insertMessage } from './messages.js';
-import { bindNode } from './nodes.js';
+import { authenticateNode, bindNode } from './nodes.js';
 import { createTeam } from './teams.js';
 
 /**
@@ -134,6 +134,36 @@ describe('bindNode (ADR 331 §Decision 1 — presented by the joiner, vouched fo
       .get('m-after');
     expect(row?.origin_node).toBe(ours);
     expect(row?.origin_seq).toBe(2);
+    db.close();
+  });
+
+  it("refuses another team's hub-local node id — the cross-team form of the same hole", () => {
+    // miley's review finding (2026-08-27, review 01M12KQHT8). The hub hosts two teams. A joiner
+    // enrolling into A presents the id of the hub's own local row for B. Every guard scoped to A
+    // passes: A's local_node names a different id, and B's row is `credential_hash IS NULL` because
+    // a hub never enrolls with itself — permanently. An `ON CONFLICT DO UPDATE` then writes the
+    // joiner's credential onto B's origin identity, leaving `team_id` as B, and reports success.
+    // The joiner can thereafter authenticate as team B's node.
+    const db = openDb(':memory:');
+    const a = createTeam(db, { slug: 'alpha' });
+    const b = createTeam(db, { slug: 'bravo' });
+    const adaA = addMember(db, a, { name: 'ada', kind: 'agent' }).row;
+    const adaB = addMember(db, b, { name: 'ada', kind: 'agent' }).row;
+    mintLocalNode(db, a.id, adaA.id, 'alpha');
+    const hubLocalB = mintLocalNode(db, b.id, adaB.id, 'bravo');
+
+    expect(bindNode(db, a.id, hubLocalB, 'impostor', 'msnode_ccc', 'nick')).toBeNull();
+
+    // B's hub identity must still be unbound and still B's.
+    const row = db
+      .prepare<
+        [string],
+        { credential_hash: string | null; team_id: string }
+      >('SELECT credential_hash, team_id FROM nodes WHERE id = ?')
+      .get(hubLocalB);
+    expect(row?.credential_hash).toBeNull();
+    expect(row?.team_id).toBe(b.id);
+    expect(authenticateNode(db, b.id, 'msnode_ccc')).toBeNull();
     db.close();
   });
 

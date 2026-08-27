@@ -1132,7 +1132,9 @@ export const MIGRATIONS: Migration[] = [
     // lower would otherwise take over our stamp, holing our sequence and putting numbers in theirs
     // that name events they never wrote — the loss-versus-silence ambiguity ADR 331 exists to
     // prevent. Backfills from v47's rows, every one of which is local by construction because
-    // nothing has ever enrolled. `INSERT OR IGNORE` for the rewind-and-replay harness.
+    // nothing has ever enrolled. `INSERT OR IGNORE` for the rewind-and-replay harness, and
+    // `ORDER BY id` so that if the one-row-per-team assumption is ever violated the row picked is
+    // deterministic rather than whatever the scan happened to reach first (miley, 2026-08-27).
     version: 48,
     up: (db) => {
       db.exec(`
@@ -1140,7 +1142,8 @@ export const MIGRATIONS: Migration[] = [
           team_id TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
           node_id TEXT NOT NULL REFERENCES nodes(id)
         );
-        INSERT OR IGNORE INTO local_node (team_id, node_id) SELECT team_id, id FROM nodes;
+        INSERT OR IGNORE INTO local_node (team_id, node_id)
+          SELECT team_id, id FROM nodes ORDER BY id;
       `);
     },
   },

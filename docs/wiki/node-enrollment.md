@@ -41,18 +41,27 @@ One statement, so the prediction holds in substance — but the wording was wron
 `SELECT COUNT(*) FROM nodes` is 1 before the join and 2 after; an UPDATE-shaped adoption would leave
 it at 1.
 
-## The trap: `credential_hash IS NULL` admits the hub's own row
+## The trap: a bind guard that enumerates what it excludes
 
 A hub never enrolls with itself, so its own `local_node` row is unbound **permanently**. A guard of
 `WHERE credential_hash IS NULL` alone therefore lets a joiner bind its credential to the *hub's*
 origin identity — after which it stamps events as the hub, and every `origin_node` in the log is
 ambiguous between two machines.
 
-Not reachable by an outsider (the invite is admin-minted, single-use, 15 minutes) — reachable by the
-invitee, which is the party a CAS exists to bound. `bindNode` refuses any id present in
-`local_node`. Falsify: `musterd node list` on the hub, take the row shown `local`, and try to join
-presenting that id; a 409 means the guard holds, a 200 means it does not
-(`packages/server/src/store/nodes.bind.test.ts` pins it).
+The obvious patch — also exclude this team's `local_node` id — **is still wrong, and that is the
+lesson** (miley review 2026-08-27, `01M12KQHT8`). On a hub hosting teams A and B, a joiner enrolling
+into A presents the id of the hub's local row for **B**: A's exclusion does not name it, B's row is
+unbound, and the upsert writes a foreign credential onto B's origin identity while leaving `team_id`
+as B. It reports success, and the joiner can then authenticate as team B's node.
+
+Neither is reachable by an outsider (the invite is admin-minted, single-use, 15 minutes) — both are
+reachable by the *invitee*, which is the party a CAS exists to bound.
+
+The shipped guard is `ON CONFLICT(id) DO NOTHING`: a legitimate joiner's id is fresh to the hub by
+construction, so **any** id the hub already knows is a refusal. Falsify: on a hub hosting two teams,
+`musterd node list` each, take either row shown `local`, and try to join presenting that id; a 409
+means the guard holds, a 200 means it does not (`store/nodes.bind.test.ts` cases 3b and 3d — they
+fail differently on the team-scoped guard, which is why both are kept).
 
 ## A refused bind must not spend the invite
 

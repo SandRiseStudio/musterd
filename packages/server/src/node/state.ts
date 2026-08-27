@@ -13,6 +13,13 @@ import { z } from 'zod';
  * put two processes on one piece of machine-local state — the drift ADR 131's three-stores table
  * exists to prevent.
  *
+ * **Keyed by team slug, while the database keys by `team_id`** (miley, 2026-08-27). Accepted rather
+ * than accidental: the slug is what the operator types and what the hub URL carries, so a file the
+ * human may have to read should name teams the way the human does. The cost is that renaming a team
+ * orphans its entry — the credential is still valid on the hub, but this daemon stops finding it and
+ * the machine must enroll again. Cheap to repair, and re-enrollment is already the recovery path for
+ * every other way this file can go wrong.
+ *
  * The path override follows `config.ts`'s established pattern (`env[...] ?? ~/.musterd/...`) rather
  * than the CLI's `machineStatePath`, keeping the daemon decoupled from the CLI package while
  * sharing the `~/.musterd/` home the db already lives in. `MUSTERD_NODE_STATE` is pinned by the
