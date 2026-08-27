@@ -161,7 +161,7 @@ export function rawMotionLiterals(css: string, file = ''): MotionFinding[] {
       for (const m of seg.text.matchAll(LITERAL)) {
         const literal = m[0];
         if (isZeroDuration(literal)) continue;
-        if (isAllowedLong(literal, file)) continue;
+        if (isAllowedLong(literal, file, `${decl.property}:${seg.text}`)) continue;
         out.push({ kind: 'raw', line: lineAt(seg.start + (m.index ?? 0)), detail: literal });
       }
     }
@@ -187,47 +187,111 @@ function isZeroDuration(literal: string): boolean {
  * annoying to add. These are keyframe one-shots and a countdown, none of which are interaction
  * feedback, so none of them belong on a scale built for interaction feedback.
  */
-const ALLOWED_LONG: { value: string; file: string; reason: string }[] = [
+const ALLOWED_LONG: { value: string; file: string; within: string; reason: string }[] = [
   {
     value: '1s',
     file: 'ApprovalCard.css',
+    within: 'width',
     reason: 'the expiry bar is a countdown driven by a per-second tick; a rung would desync it',
   },
-  { value: '0.42s', file: 'Live.css', reason: 'lc-enter one-shot entrance, tuned with the scene' },
+  {
+    value: '0.42s',
+    file: 'Live.css',
+    within: 'lc-enter',
+    reason: 'lc-enter one-shot entrance, tuned with the scene',
+  },
   {
     value: '1.7s',
     file: 'Live.css',
+    within: 'lc-settle',
     reason: 'lc-settle one-shot, deliberately slower than any UI rung',
   },
-  { value: '1.5s', file: 'Live.css', reason: 'lc-flash one-shot attention beat' },
-  { value: '0.5s', file: 'Live.css', reason: 'lc-rise one-shot entrance' },
-  { value: '3.6s', file: 'Live.css', reason: 'ambient duration longhand on a looping keyframe' },
+  {
+    value: '1.5s',
+    file: 'Live.css',
+    within: 'lc-flash',
+    reason: 'lc-flash one-shot attention beat',
+  },
+  {
+    value: '0.5s',
+    file: 'Live.css',
+    within: 'lc-rise',
+    reason: 'lc-rise one-shot entrance',
+  },
+  {
+    value: '3.6s',
+    file: 'Live.css',
+    within: 'animation-duration',
+    reason: 'ambient duration longhand on a looping keyframe',
+  },
 ];
 
-function isAllowedLong(literal: string, file: string): boolean {
-  return ALLOWED_LONG.some((a) => a.value === literal && file.endsWith(a.file));
+/**
+ * `within` is ryder's non-blocking (a) on #1082. The check was value + filename, so `1s` was exempt
+ * ANYWHERE in ApprovalCard.css — including a hover transition nobody had reasoned about. Each
+ * reason names a site, so the check now enforces the site: the exemption binds to the declaration
+ * that earned it, and moving the literal elsewhere in the same file costs a new entry.
+ *
+ * Matched against `property: segment` because one entry (`3.6s`) is exempt for being a duration
+ * longhand and so has no animation name to key on.
+ */
+function isAllowedLong(literal: string, file: string, context: string): boolean {
+  return ALLOWED_LONG.some(
+    (a) => a.value === literal && file.endsWith(a.file) && context.includes(a.within),
+  );
+}
+
+/** Two decimals, trailing zeros trimmed — `180` stays `180`, `4.5` stays `4.5`, `4.50` doesn't. */
+const trim2 = (n: number) =>
+  n
+    .toFixed(2)
+    .replace(/(\.\d*?)0+$/, '$1')
+    .replace(/\.$/, '');
+
+/**
+ * A declared duration in milliseconds, or null if the value isn't a bare duration.
+ *
+ * BOTH UNITS, and this is ryder's REQUIRED 1 on #1082. Rule 3 used to parse `/^(\d+)ms$/` and
+ * `continue` on anything else, so a rung declared in seconds was never counted in frames at all —
+ * and no other rule covered the gap: rule 2 doesn't scan `:root` declarations, and rule 1 only
+ * fires for tokens already in motion.ts's map, so a NEW rung was in neither. `--lc-dur-6: 0.18s`
+ * left the whole gate green: 4.5 frames, rule 3's own defect class, on the scale itself.
+ *
+ * Seconds are converted by decimal shift rather than `* 1000` because `0.18 * 1000` is
+ * 180.00000000000003 in IEEE754, and a gate that reports `--lc-dur-6: 180.00000000000003ms is
+ * 4.500000000000001 frames` has found the right defect and made itself impossible to trust.
+ */
+export function durationMs(value: string): number | null {
+  const m = /^(\d+(?:\.\d+)?|\.\d+)(m?s)$/.exec(value.trim());
+  if (!m?.[1]) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
+  return m[2] === 'ms' ? n : Math.round(n * 1e6) / 1e3;
 }
 
 /** Rule 3 — a declared duration that is not a whole frame at 25fps. */
 export function offFrameDurations(css: string): MotionFinding[] {
   const out: MotionFinding[] = [];
   for (const { token, value, line } of declaredMotionTokens(css)) {
-    const ms = /^(\d+)ms$/.exec(value);
-    if (!ms?.[1]) continue;
-    const n = Number(ms[1]);
-    if (n % FRAME_MS !== 0) {
-      // Two decimals, trailing zeros trimmed. toFixed(1) rounded 281ms to "7 frames" — a message
-      // asserting the value IS whole while failing it for not being, which is the one thing this
-      // line must never say.
-      const frames = (n / FRAME_MS).toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-      const off = n % FRAME_MS;
+    const n = durationMs(value);
+    if (n === null) continue;
+    // Non-integer ms are reachable now (`0.0005s`), so the whole-frame test is a remainder on a
+    // float. Compare the rounded remainder, not the raw one, or 6ms-exact values spelled in
+    // seconds fail on representation error rather than on frames.
+    const off = Math.round((n % FRAME_MS) * 1e3) / 1e3;
+    if (off !== 0) {
+      // toFixed(1) rounded 281ms to "7 frames" — a message asserting the value IS whole while
+      // failing it for not being, which is the one thing this line must never say.
+      const frames = trim2(n / FRAME_MS);
       const nearest = Math.round(n / FRAME_MS) * FRAME_MS;
       out.push({
         kind: 'off-frame',
         line,
+        // Reported in ms whatever unit it was written in — the value is the frame count, and the
+        // author needs the rung, not their own spelling read back to them.
         detail:
-          `${token}: ${String(n)}ms is ${frames} frames at 25fps ` +
-          `(off by ${String(Math.min(off, FRAME_MS - off))}ms — nearest whole frame is ${String(nearest)}ms)`,
+          `${token}: ${trim2(n)}ms is ${frames} frames at 25fps ` +
+          `(off by ${trim2(Math.min(off, FRAME_MS - off))}ms — nearest whole frame is ${String(nearest)}ms)`,
       });
     }
   }

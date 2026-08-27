@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   declaredMotionTokens,
   disagreeingTokens,
+  durationMs,
   offFrameDurations,
   phantomMotionRefs,
   rawMotionLiterals,
@@ -121,6 +122,28 @@ describe('rawMotionLiterals', () => {
     const css = ['.a { color: red; transition:', '    opacity 240ms ease;', '}'].join('\n');
     expect(rawMotionLiterals(css)).toEqual([{ kind: 'raw', line: 2, detail: '240ms' }]);
   });
+
+  // ryder's non-blocking (a) on #1082: the allowlist matched value + filename, so `1s` was exempt
+  // ANYWHERE in ApprovalCard.css. Each reason names a site; the check now enforces the site.
+  describe('the §5 allowlist binds to the declaration that earned it', () => {
+    it('exempts the entry at its own site', () => {
+      expect(
+        rawMotionLiterals('.bar { transition: width 1s linear; }', 'ApprovalCard.css'),
+      ).toEqual([]);
+    });
+
+    it('does NOT exempt the same literal elsewhere in the same file', () => {
+      expect(
+        rawMotionLiterals('.card:hover { transition: opacity 1s linear; }', 'ApprovalCard.css'),
+      ).toEqual([{ kind: 'raw', line: 1, detail: '1s' }]);
+    });
+
+    it('does NOT exempt the same literal at the same site in a different file', () => {
+      expect(rawMotionLiterals('.bar { transition: width 1s linear; }', 'Live.css')).toEqual([
+        { kind: 'raw', line: 1, detail: '1s' },
+      ]);
+    });
+  });
 });
 
 describe('offFrameDurations', () => {
@@ -145,6 +168,57 @@ describe('offFrameDurations', () => {
   it('accepts a whole-frame duration', () => {
     expect(offFrameDurations(':root { --lc-dur-2: 200ms; }')).toEqual([]);
   });
+
+  // ryder's REQUIRED 1 on #1082. Rule 3 parsed /^(\d+)ms$/ and skipped everything else, so a rung
+  // declared in seconds was never counted in frames — and no other rule covered it (rule 2 doesn't
+  // scan :root, rule 1 only knows tokens already in motion.ts). This is his exact falsifier.
+  it('counts frames in a rung declared in SECONDS — the whole rule was ms-only', () => {
+    const [finding] = offFrameDurations(':root { --lc-dur-6: 0.18s; }');
+    expect(finding?.kind).toBe('off-frame');
+    expect(finding?.detail).toContain('4.5 frames');
+  });
+
+  it.each([
+    ['0.2s', 5],
+    ['.28s', 7],
+    ['0.6s', 15],
+  ])('accepts %s — a whole %i frames spelled in seconds', (value) => {
+    expect(offFrameDurations(`:root { --lc-dur-x: ${value}; }`)).toEqual([]);
+  });
+
+  // 0.18 * 1000 is 180.00000000000003 in IEEE754. A gate reporting "180.00000000000003ms is
+  // 4.500000000000001 frames" has found the right defect and made itself impossible to trust.
+  it('reports a seconds value without float noise, and in ms whatever unit it was written in', () => {
+    const [finding] = offFrameDurations(':root { --lc-dur-6: 0.18s; }');
+    expect(finding?.detail).toBe(
+      '--lc-dur-6: 180ms is 4.5 frames at 25fps (off by 20ms — nearest whole frame is 200ms)',
+    );
+  });
+
+  it('ignores a value that is not a bare duration', () => {
+    expect(offFrameDurations(':root { --lc-ease-out: cubic-bezier(0.16, 1, 0.3, 1); }')).toEqual(
+      [],
+    );
+  });
+});
+
+describe('durationMs', () => {
+  it.each([
+    ['200ms', 200],
+    ['0.18s', 180],
+    ['.28s', 280],
+    ['1s', 1000],
+    ['0s', 0],
+  ])('parses %s to %i ms', (value, ms) => {
+    expect(durationMs(value)).toBe(ms);
+  });
+
+  it.each(['cubic-bezier(0.16, 1, 0.3, 1)', 'ease', '200', '200px', 'var(--lc-dur-2)', ''])(
+    'returns null for %s',
+    (value) => {
+      expect(durationMs(value)).toBeNull();
+    },
+  );
 });
 
 describe('disagreeingTokens', () => {

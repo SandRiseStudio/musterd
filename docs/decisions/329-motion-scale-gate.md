@@ -98,6 +98,16 @@ the lane is looking at.
   those 72 on its first run, and the migration took them to 0. The standing falsifier is that a
   hand-edit reintroducing a bare `240ms` or an inline `cubic-bezier()` into a transition must fail
   CI; verified by injecting both and watching the gate name them.
+- **The standing falsifier above was too narrow, twice, and both times in the same way.** It names
+  `ms` inputs, so it was satisfiable by a gate that could only see `ms` — and was, at two different
+  layers. Rule 2 was `\b\d+ms\b` and let three seconds-spelled violations onto main. Rule 3 was
+  `/^(\d+)ms$/` and survived that fix, leaving `--lc-dur-6: 0.18s` — a new rung at 4.5 frames,
+  rule 3's own defect class — uncounted by any of the five rules. **A falsifier written in the input
+  class the code already handles cannot fail**, which is the general form and is now recorded as a
+  team insight. The falsifier reads, in both unit classes: injecting `240ms` *or* `0.18s`, as a raw
+  literal *and* as a new `--lc-dur-*` rung, must each fail CI. Verified by injection against
+  `pnpm tokens:check` itself rather than against the exported functions, and confirmed load-bearing
+  by reverting rule 3 to its `ms`-only parse and watching `0.18s` go green again.
 - **Experiment:** n/a — the overshoot question was settled analytically rather than A/B-tested (see
   the falsified claim below), and the failure paths were exercised directly by reintroducing each
   defect and confirming the gate caught it.

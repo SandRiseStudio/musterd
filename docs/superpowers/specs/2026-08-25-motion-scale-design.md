@@ -113,8 +113,19 @@ zero bytes, which matters under Delight 0's remaining initial-JS headroom.
 rather than adding a gate. It fails on three things:
 
 1. A motion token in CSS whose value disagrees with `motion.ts`.
-2. A raw `cubic-bezier()` or bare `ms` literal in a transition/animation outside the exemption list.
+2. A raw `cubic-bezier()` or bare duration literal in a transition/animation outside the exemption
+   list.
 3. A duration that is not a whole number of frames at 25fps.
+
+**Corrected 2026-08-26 (second pass).** Rules 2 and 3 both said `ms` and both meant it — each parsed
+milliseconds only, and a duration written in seconds was invisible to the gate. Rule 2's blindness
+let three live violations onto main (ryder's REQUIRED 1 on #1079). Rule 3's outlived that fix by one
+review: it still parsed `/^(\d+)ms$/`, so a **new rung** declared as `--lc-dur-6: 0.18s` was counted
+by nothing — rule 2 does not scan `:root` declarations, and rule 1 only knows tokens already in
+`motion.ts` (ryder's REQUIRED 1 on #1082). 4.5 frames, rule 3's own defect class, on the scale
+itself. Both rules read either unit now. **The unit a duration is spelled in was never the point;
+the number of frames it occupies is** — and any future rule that parses a duration must go through
+`durationMs`, not its own regex, which is the mistake that got made twice.
 
 ## 5. Exemptions, and why they are a rule rather than a list
 
@@ -129,6 +140,12 @@ exempt.** This is checkable, so the gate enforces the rule rather than trusting 
 `1.4s`, `1.5s`, `2.8s`, `3.6s`. These get a short, named allowlist in the gate, each entry carrying a
 one-line reason. An allowlist that must be edited by hand is the point: it makes an exception cost a
 sentence.
+
+Each entry is keyed on value **and** file **and** site, not value and file. The reasons name a
+specific declaration ("the expiry bar is a countdown"), so the check enforces that declaration —
+otherwise exempting `1s` for the countdown also exempts `1s` in any hover transition in the same
+file, and the list would grant more than any of its sentences claim (ryder's non-blocking (a) on
+#1082).
 
 Two of these (`0.42s`, `0.5s`) are close enough to rungs that the implementation should test whether
 they are deliberate at all, or simply the same accidental drift as the `ms` clusters. If they are
