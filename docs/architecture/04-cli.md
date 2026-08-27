@@ -160,6 +160,7 @@ src/
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)
     seed.ts           // shared Seed tray/read/claim/clarification/brief/conclude/promote Surface (ADR 319)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
+    node.ts           // machine credentials (ADR 328, federation 3a): invite/join/rotate/revoke/list. `join <hub-url> <code>` does NOT call the hub — it asks THIS machine's daemon to enroll, so the process holding the nodes row also holds the credential and writes node.json. join/list use resolveRead (a fresh laptop has no bound identity; the code plus being on-machine is the authority); the admin verbs use resolve. join prints no credential — it went to disk
     done.ts           // close your work — mark the lane done (auto-targets your live lane), then show next (ADR 049/084)
     goal.ts           // declare/list team Goals — the declared-outcome layer above lanes (ADR 048/084)
     report.ts         // the insight report at ic/team/exec altitudes: flow, coordination, steering (ADR 050/084/125), waiting-on, Goal board

@@ -60,6 +60,7 @@ src/
     residency.ts      // the wake ledger: residency enrollment + wake leases — claimWakeLeases (transactional derivation: immediate/batched inbox + ADR 191/199 work_order when loops.review|dispatch ∧ flow:auto — typed handoff/review/work-order wakes select portable fresh; ordinary inbox wakes join only under the default-off policy cohort, ADR 209; a recent directed threaded reply may also be marked resume_eligible under the default-off ADR 210 switch — permission for a local exact-match resume, never an instruction, carrying the thread_id the host's registry is keyed by (the reverse direction — session id, transcript path, workspace — never travels); defer-snoozed) / buildWakeContext (recipient-authorized, body-free portable index for reply/handoff/review/work_order, ADR 209; wake templates name team_wake_context first, ADR 326) / settleWakeLease / expireWakeLeases / recordSessionAttestation (harness-class-only, inc 4); rate policy derived from residency.* audit rows (ADR 131); edge+spawned_at (ADR 262); markWakeSpawned; claimWakeLeases skips still-true wakeability / WORK_ORDER_EDGE_BREAKER_N failed edges
     footprint.ts      // seat-footprint samples (ADR 242): insertFootprintTick / latestFootprint / pruneFootprint over footprint_stacks + footprint_machine (schema v35)
     roles.ts          // roles table: role defaults (capabilities + charter), projected from roles/*.toml (ADR 070)
+    nodes.ts          // machine-credential store (ADR 328, federation 3a): mintInvite/consumeInvite (single-use msinv_, 15-min TTL) + bindNode (ON CONFLICT DO NOTHING — the hub refuses ANY id it already knows, which is what closes the cross-team capture of an unbound row) + rotateNode (same row, so origin stamps survive) / revokeNode (history stays) / authenticateNode / listNodes (credential masked to its kind)
     rows.ts           // raw DB row shapes (TeamRow/MemberRow/PresenceRow/MessageRow) + toMember (resolves account_status + capabilities, ADR 070)
   protocol/
     validate.ts       // thin wrappers over @musterd/protocol schemas + error mapping
@@ -79,6 +80,8 @@ src/
     scan.ts           // darwin scanners: ps → ProcSample[], sysctl vm.swapusage + vm_stat → MachineSample; throw-on-failure (callers own skip policy), non-darwin throws
     sampler.ts        // setInterval tick (60s default): scan → classify → insertFootprintTick + retention prune; any throw = one skipped tick, never a crashed daemon
     reap.ts           // reapOrphans: the daemon's only kill path — per-pid re-verification at kill time (allowlist + still orphaned), SIGTERM→grace→SIGKILL, footprint.reaped audit row
+  node/
+    state.ts          // ~/.musterd/node.json (ADR 328 §2): this machine's msnode_ per enrolled team, mode 0600 and chmod'd on overwrite (writeFileSync's mode applies only at create). The DAEMON owns it — `musterd node join` asks its own daemon to enroll, so one process holds the nodes row, the credential, and the file. Keyed by team SLUG while the db keys team_id: a rename orphans the entry, and re-enrolling is the repair
   seeds/
     ingest.ts         // setInterval poll (60s): parse Slack-only relay records, resolve human Member attribution, persist shared Seeds, and advance the cursor atomically; never opens a Lane (ADR 291/311)
   projection/
