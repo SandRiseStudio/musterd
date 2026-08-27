@@ -20,7 +20,7 @@ import {
   type Identity,
 } from '../config.js';
 import { CliError } from '../errors.js';
-import { openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
+import { dischargedIds, openActionNeeded, renderReachabilityNudge } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 
 /** Walk up from `startDir` to the folder holding `.musterd/binding.json` (the workspace root), or
@@ -258,7 +258,7 @@ export async function pendingActionSummary(
   me: string,
 ): Promise<{ count: number; since: number } | undefined> {
   const res = await http.inbox(team, { unread: true });
-  const waiting = openActionNeeded(res.messages, me, res.answered ?? []);
+  const waiting = openActionNeeded(res.messages, me, res.answered ?? [], dischargedIds(res));
   if (waiting.length === 0) return undefined;
   const since = waiting.reduce((min, m) => Math.min(min, m.ts), Infinity);
   return { count: waiting.length, since };

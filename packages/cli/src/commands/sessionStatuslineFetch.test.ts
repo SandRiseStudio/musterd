@@ -119,6 +119,37 @@ describe('defaultStatuslineFetcher against a stub daemon', () => {
     expect(out).not.toContain('+');
   });
 
+  it('does not count an eligible-set act another seat already discharged', async () => {
+    // The live case ryder cited: his inbox carried miley's #1079 request_help with
+    // `discharged_by: ryder` and the chip counted it anyway. `discharged` is server-computed and
+    // underivable here — the accept that took it is a DM to the asker — so the only way this can
+    // pass is the fetcher actually reading the field off the wire and handing it to
+    // openActionNeeded. Falsifier: drop the 4th argument at session.ts and ONLY this goes red.
+    inboxBody = {
+      messages: [
+        {
+          id: '01M0Y6WZ175QN2868880VBN65P',
+          from: 'miley',
+          to: '@team',
+          act: 'request_help',
+          body: 'review #1079',
+          ts: Date.now(),
+        },
+        {
+          id: '01M0X4012RJ3C84QJN9GBKAH2T',
+          from: 'stanley',
+          to: 'dolly',
+          act: 'ask',
+          body: 'still mine',
+          ts: Date.now(),
+        },
+      ],
+      cursor: { last_read_ts: 0 },
+      discharged: [{ id: '01M0Y6WZ175QN2868880VBN65P', by: 'ryder' }],
+    };
+    expect(await emitSessionStatusline(dir)).toContain('⚑1 waiting');
+  });
+
   it('is silent, not loud, when the folder carries no binding', async () => {
     const bare = mkdtempSync(join(tmpdir(), 'musterd-bare-'));
     try {

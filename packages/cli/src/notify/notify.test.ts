@@ -96,6 +96,14 @@ describe('pendingToNotify', () => {
     expect(pendingToNotify([help], 'nick', new Set(), null, [help.id])).toEqual([]);
   });
 
+  // ADR 254, one seat over: an eligible-set act a CO-eligible seat took. Same defect, different
+  // answerer — pushing an OS notification at a human for work someone else has already done.
+  it('drops an eligible-set act another seat discharged (server `discharged`)', () => {
+    const help = env({ act: 'request_help', from: 'lin', to: { kind: 'team' } });
+    expect(pendingToNotify([help], 'nick', new Set())).toHaveLength(1);
+    expect(pendingToNotify([help], 'nick', new Set(), null, [], [help.id])).toEqual([]);
+  });
+
   // ---- tiering by availability (SPEC A.6a; ADR 044) ----
 
   it('away holds the Loud (directed) set but an urgent ping breaks through', () => {

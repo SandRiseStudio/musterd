@@ -670,6 +670,28 @@ describe('openActionNeeded (ADR 025 — open-vs-done axis)', () => {
     const otherDone = env({ id: 'x2', act: 'resolve', to: { kind: 'team' }, thread: 'other' });
     expect(openActionNeeded([ask, otherDone], 'nick')).toHaveLength(1);
   });
+
+  // ADR 254: an eligible-set act is discharged by whoever answers FIRST, so the discharging reply is
+  // a DM to the asker that a second eligible seat never sees. The inbox row already says "answered by
+  // X — you no longer owe this"; the count has to agree, or the chip contradicts the row it summarises.
+  it('drops an eligible-set act another seat already discharged', () => {
+    const help = env({ id: 'h1', act: 'request_help', from: 'Ada', to: { kind: 'team' } });
+    expect(openActionNeeded([help], 'nick')).toHaveLength(1);
+    expect(openActionNeeded([help], 'nick', [], ['h1'])).toHaveLength(0);
+  });
+
+  it('discharges only the act named, and is independent of `answered`', () => {
+    const mine = env({ id: 'h1', act: 'request_help', to: { kind: 'team' } });
+    const other = env({ id: 'h2', act: 'request_help', to: { kind: 'team' } });
+    expect(openActionNeeded([mine, other], 'nick', [], ['h2'])).toEqual([mine]);
+    // `answered` (my own reply) and `discharged` (someone else's) both close, and neither needs the other
+    expect(openActionNeeded([mine, other], 'nick', ['h1'], ['h2'])).toHaveLength(0);
+  });
+
+  it('omitted `discharged` is exactly the previous behaviour', () => {
+    const help = env({ id: 'h1', act: 'request_help', to: { kind: 'team' } });
+    expect(openActionNeeded([help], 'nick', [])).toHaveLength(1);
+  });
 });
 
 describe('renderPendingSummary (ADR 024 — comeback summary)', () => {
