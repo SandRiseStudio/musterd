@@ -86,7 +86,8 @@ function declineOne(dir: string, name: string): number {
   // would make the tombstone a lie about the state of the folder. Refuse the name outright rather
   // than record a refusal we cannot carry out — a tombstone for a surface nothing can remove is the
   // same lie one step removed.
-  if (!removeClaudeSurface(dir, name)) {
+  const how = removeClaudeSurface(dir, name);
+  if (how === 'unknown') {
     throw new CliError(
       `unknown surface: ${name} — \`musterd surface list\` names the ones that can be declined here`,
       2,
@@ -95,6 +96,12 @@ function declineOne(dir: string, name: string): number {
   declineSurface(dir, name, process.env['USER']);
   process.stdout.write(
     `${theme.ok(sym.ok)} ${name} declined — musterd will not report it missing here.\n` +
+      // Say which enforcement happened. A machine-wide hook is one entry serving every folder, so it
+      // stays installed and goes quiet HERE instead — a user told "declined" who then finds the entry
+      // still in their settings file deserves to have been told why.
+      (how === 'suppressed'
+        ? `  ${theme.meta('machine-wide: the hook stays installed for your other folders and skips this one.')}\n`
+        : '') +
       `  ${theme.meta('`musterd surface accept ' + name + '` to change your mind.')}\n`,
   );
   return 0;

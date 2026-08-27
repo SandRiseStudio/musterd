@@ -10,6 +10,8 @@ import {
   installMusterdHooks,
   installMusterdStatusline,
   surfaceName,
+  SURFACE_MACHINE_PROMPT_SUBMIT,
+  SURFACE_MACHINE_SESSION_START,
   SURFACE_STATUSLINE,
 } from '../onboard/harnesses/claudeCode.js';
 import { surfaceCommand } from './surface.js';
@@ -122,6 +124,52 @@ describe('musterd surface (ADR 332)', () => {
 
     const listed = claudeRefusableSurfaces();
     expect(listed).toEqual([...new Set(listed)]);
+  });
+
+  // ryder's round-2 REQUIRED on #1089: `claude-code:SessionStart` named TWO surfaces with two
+  // lifetimes — the project-local capture hook and the machine-wide orientation hook, in different
+  // files. Declining it removed the local half and left the global one firing under a tombstone
+  // saying otherwise. The machine-wide hooks have their own names now, and the local name is honest
+  // about covering only what it can remove.
+  it('declining the local SessionStart name does not claim the machine-wide hook', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'settings.local.json'), '{}\n', 'utf8');
+    installMusterdHooks(cwd);
+    const globalSessionStart = (): unknown[] =>
+      (
+        JSON.parse(readFileSync(join(globalDir, 'settings.json'), 'utf8')) as {
+          hooks?: Record<string, unknown[]>;
+        }
+      ).hooks?.['SessionStart'] ?? [];
+    expect(globalSessionStart()).toHaveLength(1);
+
+    expect(run('decline', surfaceName('SessionStart'))).toBe(0);
+    // The machine-wide entry is untouched — it serves every other folder on this machine…
+    expect(globalSessionStart()).toHaveLength(1);
+    // …and it is NOT what this name claimed to refuse: the machine surface has its own tombstone.
+    expect(isDeclined(cwd, SURFACE_MACHINE_SESSION_START)).toBe(false);
+    expect(claudeRefusableSurfaces()).toContain(SURFACE_MACHINE_SESSION_START);
+  });
+
+  // A surface that cannot be removed for one folder is still refusable — the hook reads the
+  // tombstone at fire time. What must never happen is a tombstone with no enforcement at all.
+  it('declining a machine-wide hook suppresses it here, says so, and leaves it installed', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'settings.local.json'), '{}\n', 'utf8');
+    installMusterdHooks(cwd);
+
+    expect(run('decline', SURFACE_MACHINE_PROMPT_SUBMIT)).toBe(0);
+    expect(isDeclined(cwd, SURFACE_MACHINE_PROMPT_SUBMIT)).toBe(true);
+    expect(out).toContain('machine-wide');
+    const global = JSON.parse(readFileSync(join(globalDir, 'settings.json'), 'utf8')) as {
+      hooks?: Record<string, { hooks?: { command?: string }[] }[]>;
+    };
+    // Still installed for every other folder…
+    const cmd = global.hooks?.['UserPromptSubmit']?.[0]?.hooks?.[0]?.command ?? '';
+    expect(cmd).not.toBe('');
+    // …and the enforcement is in the hook itself: it reads THIS folder's tombstone and exits.
+    expect(cmd).toContain(`grep -q '"${SURFACE_MACHINE_PROMPT_SUBMIT}"'`);
+    expect(cmd).toContain('.musterd/declined.json');
   });
 
   // Recording a refusal we cannot carry out is the same lie one step removed.

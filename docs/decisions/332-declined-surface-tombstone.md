@@ -78,6 +78,22 @@ inside an amendment is how vocabulary gets invented badly.
      cannot name them apart. So `claude-code:PreToolUse` is listed once and declining it removes
      both — a slot half-removed would leave the surface firing under a tombstone claiming otherwise.
      A foreign entry on the same event is never touched; matching is by musterd's own markers.
+   - **A slot cannot span two lifetimes.** `claude-code:SessionStart` named the project-local
+     capture hook *and* the machine-wide orientation hook, which share that event name in two
+     different files. Declining it removed the local half and left the global one firing — the same
+     defect as `PreToolUse`, one file over, and the removal-shaped falsifier below could not see it
+     because the half it checks *was* absent. The machine-wide hooks are now their own surfaces,
+     `claude-code:machine:SessionStart` and `claude-code:machine:UserPromptSubmit`.
+
+   **Refusal is enforced by removal where removal is possible, and by suppression where it is not.**
+   A machine-wide hook is a single entry serving every folder on the laptop, so deleting it to
+   satisfy one folder would silently de-provision all the others — the cure worse than the nag this
+   ADR exists to end. Those two surfaces stay installed and instead read this folder's
+   `declined.json` at fire time and exit before doing anything. The check is a `grep` inside the
+   hook, not a `musterd` call: it is on the per-turn path, must not spawn a process, and must work
+   before `musterd` is on PATH. It fails open like every other read here — an unreadable or absent
+   tombstone file means the hook proceeds. `decline` says which enforcement it applied, because a
+   user told "declined" who then finds the entry still in their settings file deserves the reason.
 
 6. **The override.** `musterd init --refresh-hooks` clears every tombstone in the folder — an
    explicit install command *is* the user asking for these surfaces back — and prints one line per
@@ -121,11 +137,21 @@ inside an amendment is how vocabulary gets invented badly.
      the declined surface, and every other drift class still reports normally. **One false silence —
      a genuinely stale or missing *undeclined* surface going unreported — falsifies the read rule in
      decision (4).**
-  1b. **The removal half, one sample per refusable name.** For each name `surface list` offers,
-     `surface decline` on a provisioned folder leaves that surface absent from the settings file.
-     **One name that survives its own refusal falsifies decision (5)** — which is exactly how the
-     first implementation failed: the six hook names all tombstoned and none were removed, and the
-     unit test missed it because the statusline is the one surface that *was* removed.
+  1b. **The enforcement half, one sample per refusable name.** For each name `surface list` offers,
+     `surface decline` on a provisioned folder leaves that surface **either absent from every
+     settings file this folder's sessions load, or provably silent in this folder** — run the hook
+     command with `CLAUDE_PROJECT_DIR` set here and it must produce nothing, while the same command
+     still fires in a folder that did not decline. **One name that survives its own refusal
+     falsifies decision (5).**
+
+     The wording is deliberately not "absent from the settings file", which is how this falsifier
+     read in its first draft and why it missed the machine-wide SessionStart hook: the local half
+     *was* absent, so a removal-shaped check passed while the surface kept firing. A falsifier that
+     names the mechanism instead of the outcome inherits the mechanism's blind spots — twice here,
+     the same defect walked through it. Two implementations failed this: the first tombstoned six
+     hook names and removed none (the unit test missed it because the statusline is the one surface
+     that *was* removed), the second removed the local half of a name whose other half lives in
+     another file.
   2. If, after 10 uses of `surface decline`, more than one is followed within a day by
      `surface accept` or a hand-edit of `declined.json`, the vocabulary is being used to mute
      something it should not, and (5)'s remove-and-record coupling is wrong.
