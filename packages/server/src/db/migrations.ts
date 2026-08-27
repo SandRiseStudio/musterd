@@ -1144,6 +1144,32 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Enrollment codes (ADR 328 §2): a one-time code, not a copied secret. Hashed like every other
+    // token kind — the plaintext is shown once at mint and never persisted. Single-use is enforced
+    // by the guarded CAS in store/nodes.ts (`WHERE consumed_at IS NULL`), not by this schema: the
+    // uniqueness here is on the code, so a replayed mint collides rather than shadowing.
+    //
+    // No backfill — an invite is a live object with a 15-minute life, and history has none.
+    version: 49,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS node_invites (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          code_hash   TEXT NOT NULL,
+          label       TEXT,
+          created_by  TEXT NOT NULL,
+          created_at  INTEGER NOT NULL,
+          expires_at  INTEGER NOT NULL,
+          consumed_at INTEGER,
+          consumed_by TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_node_invites_team ON node_invites(team_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_node_invites_code ON node_invites(code_hash);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

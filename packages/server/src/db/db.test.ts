@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('48');
+    expect(ver?.value).toBe('49');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -247,7 +247,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(48); // runs v18…v48 (including the shared Seed store)
+    expect(runMigrations(db)).toBe(49); // runs v18…v49 (including the shared Seed store)
 
     const scope = (id: string) =>
       db
@@ -311,7 +311,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(48);
+    expect(runMigrations(db)).toBe(49);
 
     const policy = (id: string) =>
       db
@@ -578,6 +578,41 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
         >('SELECT team_id, node_id FROM local_node ORDER BY team_id')
         .all(),
     ).toEqual(before);
+    db.close();
+  });
+
+  /**
+   * v49 — `node_invites` (ADR 328 §2). No backfill to check: an invite is a live object with a
+   * 15-minute life, so history has none. What the replay must not do is drop live codes.
+   */
+  it('v49 creates node_invites and a replay keeps the codes already minted', () => {
+    const db = buildV46();
+    runMigrations(db);
+    db.prepare(
+      `INSERT INTO node_invites (id, team_id, code_hash, label, created_by, created_at, expires_at)
+       VALUES ('i1', 't1', 'hash-1', 'laptop', 'nick', 1000, 2000)`,
+    ).run();
+
+    db.prepare("UPDATE schema_meta SET value = '46' WHERE key = 'schema_version'").run();
+    runMigrations(db);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM node_invites').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  it('v49 refuses two invites sharing one code hash', () => {
+    const db = buildV46();
+    runMigrations(db);
+    const insert = (id: string) =>
+      db
+        .prepare(
+          `INSERT INTO node_invites (id, team_id, code_hash, label, created_by, created_at, expires_at)
+           VALUES (?, 't1', 'same-hash', 'laptop', 'nick', 1000, 2000)`,
+        )
+        .run(id);
+    insert('i1');
+    // A replayed mint must collide rather than shadow the live code it duplicates.
+    expect(() => insert('i2')).toThrow();
     db.close();
   });
 });
