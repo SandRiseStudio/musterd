@@ -138,3 +138,12 @@ so installing over a user's own is unrecoverable, unlike hooks, which coexist as
 **Falsifier for this amendment.** Open a session in a seat workspace and type nothing: the chip must
 name the correct seat for THAT workspace (not the ambient cwd's) before the first prompt, and must
 render nothing at all — never an error — in a folder with no binding or with the daemon down.
+
+### 2026-08-27 — distribution moved to ADR 333
+
+Decision (4) said Claude Code first, and that Codex had no SessionStart injection point. That
+clause is superseded by [ADR 333](333-orient-skill-every-harness.md): the skill is cataloged on
+every supported harness; Cursor `sessionStart` and Codex `SessionStart` inject the block (we had
+been discarding that stdout); Codex also gets the repeating `orient-nudge` on UserPromptSubmit.
+OpenCode stays catalog-only. The ritual, the composable-only bar, and wake-suppression above are
+unchanged.

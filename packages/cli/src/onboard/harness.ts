@@ -197,9 +197,10 @@ export interface HarnessGuidance {
    * message each other through agent-side tools (Claude Code Desktop today, the same surface test as
    * `sessionsSkillPath`). Omit elsewhere; a `delivery_hint` an agent can't act on is simply inert. */
   nudgeSkillPath?: string;
-  /** Path for the **orient** skill (session-orientation spec 2026-08-25 §B) — declared by harnesses
-   * whose SessionStart/UserPromptSubmit seams carry the orientation block and the orient nudge
-   * (Claude Code today). Omit elsewhere; the nudge that names the skill never fires there. */
+  /** Path for the **orient** skill (session-orientation spec 2026-08-25 §B / ADR 333) — declared by
+   * harnesses that catalog a native skill/rule shell (Claude Code + Cursor today). Harnesses with
+   * no native catalog (Codex, OpenCode) omit this; they get the canonical `.musterd/skill/orient.md`
+   * instead. Presence of this path is catalog, not a claim that the repeating nudge fires there. */
   orientSkillPath?: string;
 }
 

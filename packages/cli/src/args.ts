@@ -40,6 +40,7 @@ const BOOLEAN_FLAGS = new Set([
   'prune-bindings',
   'apply',
   'history',
+  'orient',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {

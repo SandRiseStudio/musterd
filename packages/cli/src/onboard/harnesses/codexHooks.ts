@@ -16,7 +16,24 @@ const REQUIRED = [
   ['SessionStart', 'start'],
   ['SessionEnd', 'end'],
   ['PostToolUse', 'post-tool-use'],
+  ['UserPromptSubmit', 'orient-nudge'],
 ] as const;
+
+function hookCommandLine(subcommand: (typeof REQUIRED)[number][1]): string {
+  if (subcommand === 'orient-nudge') {
+    return `musterd session orient-nudge # ${CODEX_HOOK_MARKER}`;
+  }
+  return `musterd codex-hook ${subcommand} --stdin # ${CODEX_HOOK_MARKER}`;
+}
+
+function ownedSubcommand(
+  command: string | undefined,
+  subcommand: (typeof REQUIRED)[number][1],
+): boolean {
+  if (!owned(command) || typeof command !== 'string') return false;
+  if (subcommand === 'orient-nudge') return command.includes('session orient-nudge');
+  return command.includes(`codex-hook ${subcommand} --stdin`);
+}
 
 /** Where this harness's project-local hooks live — exported so callers never re-derive the path. */
 export function codexHooksPath(root: string): string {
@@ -38,11 +55,9 @@ function owned(command: string | undefined): boolean {
   return typeof command === 'string' && command.includes(CODEX_HOOK_MARKER);
 }
 
-function requiredGroup(command: string): z.infer<typeof GroupSchema> {
+function requiredGroup(subcommand: (typeof REQUIRED)[number][1]): z.infer<typeof GroupSchema> {
   return {
-    hooks: [
-      { type: 'command', command: `musterd codex-hook ${command} --stdin # ${CODEX_HOOK_MARKER}` },
-    ],
+    hooks: [{ type: 'command', command: hookCommandLine(subcommand) }],
   };
 }
 
@@ -50,11 +65,7 @@ function healthy(file: HooksFile): boolean {
   return REQUIRED.every(([event, command]) =>
     (file.hooks?.[event] ?? []).some((group) =>
       group.hooks.some(
-        (handler) =>
-          owned(handler.command) &&
-          typeof handler.command === 'string' &&
-          handler.command.includes(`codex-hook ${command} --stdin`) &&
-          handler.type === 'command',
+        (handler) => ownedSubcommand(handler.command, command) && handler.type === 'command',
       ),
     ),
   );
@@ -71,12 +82,7 @@ export function installCodexHooks(root: string): string[] {
   for (const [event, command] of REQUIRED) {
     if (
       (hooks[event] ?? []).some((group) =>
-        group.hooks.some(
-          (handler) =>
-            owned(handler.command) &&
-            typeof handler.command === 'string' &&
-            handler.command.includes(`codex-hook ${command} --stdin`),
-        ),
+        group.hooks.some((handler) => ownedSubcommand(handler.command, command)),
       )
     ) {
       continue;
@@ -131,6 +137,6 @@ export function inspectCodexHookDrift(root: string): string[] {
 export function codexHookCommands(): { event: string; command: string }[] {
   return REQUIRED.map(([event, command]) => ({
     event,
-    command: `musterd codex-hook ${command} --stdin # ${CODEX_HOOK_MARKER}`,
+    command: hookCommandLine(command),
   }));
 }

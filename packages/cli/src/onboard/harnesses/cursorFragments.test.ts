@@ -171,6 +171,7 @@ describe('cursorAdapter — managed fragments', () => {
     await cursorAdapter.apply(ctx, { kind: 'write', intent: guidance });
     expect(fs.readFile('/w/a/.cursor/rules/musterd.mdc')).toContain('musterd:content');
     expect(fs.readFile('/w/a/.cursor/rules/musterd-label-session.mdc')).not.toBeNull();
+    expect(fs.readFile('/w/a/.cursor/rules/musterd-orient.mdc')).toContain('alwaysApply: false');
     expect(await cursorAdapter.observe(ctx, guidance)).toEqual({
       state: 'present',
       fingerprint: guidance.fingerprint,

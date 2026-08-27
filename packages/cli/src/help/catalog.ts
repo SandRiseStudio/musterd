@@ -750,6 +750,8 @@ export const CATALOG: readonly CommandEntry[] = [
       '`{apply, skipped}` out — the label-sessions skill pipes through it and applies the renames; ' +
       'it also stamps the machine-wide last-sweep file. `label-nudge` is the hook-driven other ' +
       'half: one imperative line while that stamp is missing/stale (>4h), silence otherwise. ' +
+      '`observe --orient` (ADR 333) is the Cursor sessionStart injector: after observe, stdout is ' +
+      'JSON `{ additional_context }` wrapping the orientation block. ' +
       '`bind --thread <id>` is ADR 210 repair: a threaded send binds this session to that thread ' +
       'automatically, and this re-binds when that never happened (capture arrived late, inherited ' +
       'session, dialogue moved). It binds the CURRENT capture only — a hand-named session is the ' +

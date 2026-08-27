@@ -63,7 +63,7 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   if (sub === 'bind') return bindCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | observe --stdin | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | statusline --stdin | bind --thread <id> | show  ' +
+    'usage: musterd session start --stdin | end --stdin | observe --stdin [--orient] | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | statusline --stdin | bind --thread <id> | show  ' +
       '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -350,12 +350,23 @@ async function statuslineCommand(parsed: Parsed): Promise<number> {
 async function observeCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError(
-      'usage: musterd session observe --stdin  — Cursor hook-driven (ADR 198): pipe the Agent hook JSON in',
+      'usage: musterd session observe --stdin [--orient]  — Cursor hook-driven (ADR 198 / ADR 333): pipe the Agent hook JSON in',
       2,
     );
   }
-  await observeCursorSession(parseHookPayload(await readStdin()));
+  const payload = parseHookPayload(await readStdin());
+  await observeCursorSession(payload);
+  if (parsed.flags['orient'] === true) {
+    const json = formatCursorOrientation(await emitSessionOrientation(resolveCaptureDir(payload)));
+    if (json) process.stdout.write(json + '\n');
+  }
   return 0;
+}
+
+/** Cursor sessionStart injection (ADR 333): wrap the orientation block as the host's JSON seam.
+ *  Null in → null out (hook stays silent). Exported for the unit that pins the shape. */
+export function formatCursorOrientation(block: string | null): string | null {
+  return block ? JSON.stringify({ additional_context: block }) : null;
 }
 
 /**

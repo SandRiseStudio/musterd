@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { GUIDANCE_CONTENT_VERSION, parseContentStamp } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import {
+  CANONICAL_ORIENT_PATH,
   CANONICAL_SKILL_PATH,
   contentHash,
   guidanceTargets,
@@ -49,10 +50,10 @@ describe('writeGuidance', () => {
     expect(readFileSync(join(dir, CANONICAL_SKILL_PATH), 'utf8')).not.toContain('name: musterd');
   });
 
-  it('gives Codex only the canonical skill (no native mechanism)', () => {
+  it('gives Codex the canonical team skill and the canonical orient skill (no native mechanism)', () => {
     const dir = tmp();
     const res = writeGuidance(dir, [codex], { team: 'dawn' });
-    expect(res.files).toEqual([CANONICAL_SKILL_PATH]);
+    expect(res.files).toEqual([CANONICAL_SKILL_PATH, CANONICAL_ORIENT_PATH]);
   });
 
   it('renders the Cursor rule with .mdc frontmatter', () => {
@@ -138,8 +139,11 @@ describe('guidanceTargets', () => {
   it('enumerates the canonical path plus each harness placement', () => {
     const targets = guidanceTargets([claudeCode, cursor, codex]);
     expect(targets).toContain(CANONICAL_SKILL_PATH);
+    expect(targets).toContain(CANONICAL_ORIENT_PATH);
     expect(targets).toContain('.claude/skills/musterd/SKILL.md');
+    expect(targets).toContain('.claude/skills/musterd-orient/SKILL.md');
     expect(targets).toContain('.cursor/rules/musterd.mdc');
+    expect(targets).toContain('.cursor/rules/musterd-orient.mdc');
     expect(targets).toContain('.claude/commands/musterd-standup.md');
   });
 });
@@ -208,5 +212,36 @@ describe('nudge-relay guidance unit (ADR 167)', () => {
     const { removed } = removeGuidance(dir, [claudeCode]);
     expect(removed).toContain(rel);
     expect(existsSync(join(dir, '.claude/skills/musterd-nudge-relay'))).toBe(false);
+  });
+});
+
+describe('orient guidance unit (ADR 333)', () => {
+  it('writes Claude native, Cursor .mdc, and canonical orient.md', () => {
+    const dir = tmp();
+    const res = writeGuidance(dir, [claudeCode, cursor, codex], { team: 'dawn' });
+    const claude = '.claude/skills/musterd-orient/SKILL.md';
+    const cursorRule = '.cursor/rules/musterd-orient.mdc';
+    expect(res.files).toContain(claude);
+    expect(res.files).toContain(cursorRule);
+    expect(res.files).toContain(CANONICAL_ORIENT_PATH);
+    const claudeText = readFileSync(join(dir, claude), 'utf8');
+    expect(claudeText).toContain('name: musterd-orient');
+    const cursorText = readFileSync(join(dir, cursorRule), 'utf8');
+    expect(cursorText).toContain('alwaysApply: false');
+    expect(cursorText).not.toContain('name: musterd-orient');
+    const canonical = readFileSync(join(dir, CANONICAL_ORIENT_PATH), 'utf8');
+    expect(canonical).toContain('# Orient this seat session');
+    expect(canonical).not.toContain('name: musterd-orient');
+  });
+
+  it('is enumerated by guidanceTargets and removed by removeGuidance (dir pruned)', () => {
+    const dir = tmp();
+    writeGuidance(dir, [claudeCode], { team: 'dawn' });
+    const rel = '.claude/skills/musterd-orient/SKILL.md';
+    expect(guidanceTargets([claudeCode])).toContain(rel);
+    const { removed } = removeGuidance(dir, [claudeCode]);
+    expect(removed).toContain(rel);
+    expect(removed).toContain(CANONICAL_ORIENT_PATH);
+    expect(existsSync(join(dir, '.claude/skills/musterd-orient'))).toBe(false);
   });
 });

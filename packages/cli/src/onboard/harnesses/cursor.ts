@@ -93,6 +93,16 @@ function observeHookCommand(): string {
   );
 }
 
+/** ADR 333: sessionStart still observes, then emits JSON `{ additional_context }` on stdout.
+ *  Stderr discarded; stdout is the Cursor injection seam (do NOT redirect it). */
+function sessionStartHookCommand(): string {
+  return (
+    'cd "${CURSOR_PROJECT_DIR:-.}" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session observe --stdin --orient 2>/dev/null || true ' +
+    `# ${CURSOR_OBSERVE_HOOK_MARKER}`
+  );
+}
+
 function sessionEndHookCommand(): string {
   return (
     'cd "${CURSOR_PROJECT_DIR:-.}" 2>/dev/null; ' +
@@ -151,7 +161,7 @@ export function installMusterdCursorHooks(dir: string = process.cwd()): string[]
   const path = projectHooksPath(dir);
   const warnings: string[] = [];
   for (const [event, marker, command] of [
-    ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
+    ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, sessionStartHookCommand()] as const,
     ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
     // ADR 265: cursor-agent's event surface is a subset of the IDE's. Older CLIs (measured:
     // 2026.01.23) never dispatch sessionStart/postToolUse/sessionEnd; they do dispatch
@@ -192,6 +202,9 @@ export const cursor: Harness = {
     // ADR 186: Cursor can rename the *current* chat via `rename_chat` (when cursor-app-control is
     // present) — not a peer sweep. Self-label guidance is a separate unit from Claude's cross-rename.
     selfLabelSkillPath: '.cursor/rules/musterd-label-session.mdc',
+    // ADR 333: catalog the orient ritual as a description-gated rule. The sessionStart hook injects
+    // the block once; there is no repeating nudge on Cursor (beforeSubmitPrompt cannot inject).
+    orientSkillPath: '.cursor/rules/musterd-orient.mdc',
   },
 
   // ADR 198: Cursor Agent hooks carry `model_id` / `model` on the common schema. Prefer the
@@ -323,7 +336,12 @@ function cursorHooksPayload(): { event: string; command: string }[] {
   return sortHookList(
     CURSOR_HOOK_EVENTS.map(([event, marker]) => ({
       event,
-      command: marker === CURSOR_END_HOOK_MARKER ? sessionEndHookCommand() : observeHookCommand(),
+      command:
+        marker === CURSOR_END_HOOK_MARKER
+          ? sessionEndHookCommand()
+          : event === 'sessionStart'
+            ? sessionStartHookCommand()
+            : observeHookCommand(),
     })),
   );
 }
