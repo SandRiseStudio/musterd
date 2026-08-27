@@ -129,12 +129,24 @@ undelivered. A counter that can skip — because a transaction rolled back after
 because the value is derived from a `MAX()` over a table rows can leave — turns every hole into an
 ambiguity, and the protocol built on it into one that cannot distinguish loss from silence.
 
-**3. Both columns are `NOT NULL`, and existing rows backfill to the local node.** Every message
-already in the log *did* originate on this daemon; stamping it with this node's id records a true
-fact rather than inventing one. The backfill assigns `origin_seq` in `(ts, id)` order, so the
-historical prefix is itself gapless and monotone, and `next_seq` is set past it. `NOT NULL` is the
-point of doing it this way: the invariant is enforced by the schema rather than by the convention
-that every future writer remembers to stamp.
+**3. Both columns are `NOT NULL`, and existing rows backfill to this daemon's node row *for their
+own team*.** Every message already in the log *did* originate on this daemon; stamping it with the
+matching node's id records a true fact rather than inventing one. **The backfill partitions by
+`team_id`**: within each partition it assigns `origin_seq` in `(ts, id)` order as `1..count_team`,
+against that team's node row, and sets that row's `next_seq` to `count_team + 1`. There is no
+single "the local node" to backfill to — §Decision 1 mints one row per (daemon, team), so a daemon
+hosting N teams has N sequences, each of which must be a gapless prefix on its own.
+
+A global numbering would not merely be untidy, it would be wrong on the first migration on the
+machine we develop on. Measured on `~/.musterd/musterd.db`: 8034 messages across four teams with
+traffic — 7774, 176, 83, and 1 — out of six teams hosted. Numbering that log 1..8034 in `(ts, id)`
+order scatters the 176-message team's numbers through the whole range, so *no* node's sequence is a
+gapless prefix and `next_seq` is wrong for every row however it is set. A puller for that team sees
+holes everywhere, which by §Decision 2's own words means "seq 7 is lost, not merely unsent" — the
+exact ambiguity this ADR exists to prevent, manufactured by its own migration.
+
+`NOT NULL` is the point of doing it this way: the invariant is enforced by the schema rather than
+by the convention that every future writer remembers to stamp.
 
 **4. Stamped by the server at insert; there is no wire field.** The columns are set inside
 `insertMessage`, alongside `from_provenance` — which is already exactly this pattern, and whose
@@ -217,8 +229,9 @@ derivation with an origin would assert that the derivation is itself an event.
   rather than merely duplicating logic.
 - **The migration is a rewind-and-replay case.** Per the note migration v31 left, the migration
   tests rewind `schema_version` and replay the tail, so v47's backfill must be idempotent under
-  replay — hence guarded `ALTER`s and an insert-if-absent for the local node row, not a bare
-  `INSERT`.
+  replay — hence guarded `ALTER`s and an insert-if-absent for **each team's** node row, not a bare
+  `INSERT`, and a delete-first on the backfill so a replayed partition renumbers rather than
+  doubling.
 - **Not in scope:** the sync wire format and routes, the enrollment/rotation/revocation CLI, the
   hub storage engine (all increment 3), and origin stamps on lanes, goals, and the audit log
   (their own slices, per §Decision 5).
@@ -241,9 +254,12 @@ derivation with an origin would assert that the derivation is itself an event.
   (i): (i) tests concurrency, this tests failure, and the premise that made the transaction
   necessary — that no caller supplies one — was false in this ADR's first draft and caught in
   review. **(iii)** *Monotone across restart* — the counter resumes past its pre-restart maximum,
-  since it is a column and not process state. **(iv)** *Backfill is a gapless prefix* — after v47
-  on a populated DB, `origin_seq` over existing rows is exactly 1..count in `(ts, id)` order and
-  `next_seq` is count+1. **(v)** *No caller-supplied origin* — an envelope carrying `origin_node`
+  since it is a column and not process state. **(iv)** *Backfill is a gapless prefix per node* — after v47
+  on a populated DB, `origin_seq` over each node's rows is exactly `1..count_team` in `(ts, id)`
+  order and that node's `next_seq` is `count_team + 1`. **The fixture seeds at least two teams with
+  interleaved timestamps**, because a single-team fixture passes identically under the global and
+  the partitioned readings — it cannot fail, which is how the singular wording survived this ADR's
+  first draft and its first review. **(v)** *No caller-supplied origin* — an envelope carrying `origin_node`
   or `origin_seq` fields has them ignored, the same falsifier `from_provenance` warrants.
   Migration rewind-and-replay is covered by the existing migration test harness rather than a new
   case.
