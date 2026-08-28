@@ -187,10 +187,12 @@ for (const file of files) {
   const lines = readFileSync(file, 'utf8').split('\n');
   lines.forEach((text, i) => {
     for (const { token, fallback } of varsWithFallback(text)) {
-      /* `other` is the parametric exemption — bare numbers, durations, angles. It is deliberately
-         NOT "everything that is not a colour" any more: that proxy let `font-size: var(--nope,
-         13px)` through while `color: var(--nope, #ff0000)` failed, the identical lie one property
-         over (measured 2026-08-28, docs/wiki/constraint-outlives-its-premise.md). */
+      /* `other` is TWO exemptions, not one. The parametric one — bare numbers, durations, angles —
+         and a jurisdictional one: easing lands in `other` too, and is quiet here only because
+         motion-scale.ts rule 5 owns the `--lc-ease*` namespace and catches it there. Neither is
+         "everything that is not a colour" any more: that proxy let `font-size: var(--nope, 13px)`
+         through while `color: var(--nope, #ff0000)` failed, the identical lie one property over
+         (measured 2026-08-28, docs/wiki/constraint-outlives-its-premise.md). */
       const kind = valueKind(fallback);
       if (kind === 'other') continue;
       const declared = resolveDeclared(token);
