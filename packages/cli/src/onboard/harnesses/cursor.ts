@@ -15,12 +15,12 @@ import {
   type McpServerEntry,
 } from '../mcpEntry.js';
 import type { FsSeam } from '../reconcile/context.js';
-import { roleBridgesFor } from '../roleSkills.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
   type HarnessAdapter,
 } from '../reconcile/fragments.js';
+import { roleBridgesFor } from '../roleSkills.js';
 
 interface CursorConfig {
   mcpServers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>;
