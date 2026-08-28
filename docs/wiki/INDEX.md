@@ -44,6 +44,7 @@
 - [Seat liveness — the ladder measures musterd silence](seat-liveness.md) — `lastActivityAt` ticks only on musterd MCP calls, so the ADR 164 ladder demotes exactly the seats heads-down on real work — builds, browser runs, and filesystem sweeps are all invisible to it.
 - [The shared daemon on :4849](shared-daemon.md) — The dogfood daemon auto-refreshes itself on merge — never hand nick a `service refresh` chore; read `~/.musterd/autorefresh/refresh.log` instead, and know the three refresh traps before touching it.
 - [Shipping a PR](shipping-a-pr.md) — One enforced git loop (ADR 106): branch from fresh origin/main → PR → `gh pr merge --squash --auto --delete-branch` → sync by rebase + `--force-with-lease`, never merge — plus the two traps that stall or pollute it.
+- [Sync push](sync-push.md) — What actually happens when an enrolled machine pushes its events to a hub, measured on two real daemons.
 - [Probing with a temp daemon](temp-daemon-probe.md) — Run probes against a throwaway daemon on its own DB and port — never against the shared daemon on :4849, and never via `musterd team create` from an unguarded shell.
 - [Per-package vitest configs](vitest-package-configs.md) — A package-local vitest run inherits NOTHING from the root config — each standalone package must re-declare whatever the root was giving it.
 - [Wake leases](wake-leases.md) — A wake lease is discharged by the seat REPORTING the wake — not by answering it — so `lease_expired` means the wake never landed, never "nobody answered".
