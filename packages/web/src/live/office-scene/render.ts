@@ -201,6 +201,69 @@ function roundRect(
   ctx.fill();
 }
 
+/**
+ * The pool of shade where a solid meets the surface it stands on.
+ *
+ * Until this existed the room had exactly ONE contact shadow — `drawGroundShadow`, which grounds the
+ * whole floor slab on the panel — plus a handful of hand-placed pools under the plants and the dog.
+ * Every desk, chair, cabinet, printer and monitor had nothing underneath it, which is the difference
+ * between an object resting ON a surface and an object floating a millimetre above one. It reads as
+ * weightlessness even when you cannot say why: the eye takes contact shade as the evidence that two
+ * things touch, and without it a flat-shaded solid is just a shape pasted at that coordinate.
+ *
+ * Drawn at `baseUp` rather than at the floor, so it lands on whatever the solid actually stands on —
+ * the floor for a desk, the desk top for the monitor on it. That is the whole reason this takes the
+ * same parameters as the caller's own footprint instead of a floor position.
+ *
+ * WARM, not cool, and deliberately so even though the room just gained a cool counterweight: the
+ * scene's standing rule (stated at `drawGroundShadow` and again in the roundness pass) is that a
+ * neutral or cold shade on a warm floor reads as dirt. The counterweight belongs to the walls, which
+ * are lit; this is contact, which is not.
+ *
+ * Cost: `box`/`frustum` run at BAKE time only — the room is drawn once into an offscreen buffer and
+ * re-baked on resize or a veil/lamp step, not per frame (ADR 085's two-tier render). So this is paid
+ * on a rebake, never on the 20fps ambient loop.
+ */
+export function contactPool(
+  ctx: CanvasRenderingContext2D,
+  fit: Fit,
+  lx: number,
+  ly: number,
+  w: number,
+  d: number,
+  baseUp: number,
+): void {
+  const span = (w + d) / 2;
+  /* A desk is not one box. It is a top, four legs, a monitor, a keyboard and a mug, and EVERY one of
+     them comes through here — so the first cut of this compounded: a dozen overlapping pools per pod
+     turned the desks into a dark brown mass and took the light out of the middle of the room. Two
+     guards, both about the fact that a contact pool is a per-OBJECT effect being applied per-solid:
+       · below `MIN_SPAN` nothing is drawn at all. A keyboard does not have a shadow you would notice,
+         and twenty of them do have one you cannot miss.
+       · the alpha is a fraction of what a lone pool would want, because these are meant to be READ in
+         aggregate. Tuned by eye against the muddied version, not by picking a round number. */
+  const MIN_SPAN = 9;
+  if (span < MIN_SPAN) return;
+  const c = project(lx, ly, fit);
+  const cy = c.y - baseUp * fit.scale;
+  // The penumbra spills a little past the footprint, and the pool is offset a touch toward the
+  // viewer — the room's light comes from the windows behind, so shade falls to the front.
+  const rx = span * KX * fit.scale * 0.78;
+  const ry = span * KY * fit.scale * 0.92;
+  ctx.save();
+  ctx.translate(c.x, cy + ry * 0.18);
+  ctx.scale(1, ry / rx);
+  const g = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
+  g.addColorStop(0, 'rgba(58, 34, 12, 0.13)');
+  g.addColorStop(0.45, 'rgba(58, 34, 12, 0.07)');
+  g.addColorStop(1, 'rgba(58, 34, 12, 0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 /** An iso block: three faces (top lightest, front medium, right darkest), footprint w×d (logical),
  * height hPx (screen px at scale 1), floated `baseUp` px off the floor. */
 function box(
@@ -221,6 +284,7 @@ function box(
   const lo = baseUp * fit.scale;
   const hi = (baseUp + hPx) * fit.scale;
   const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
+  contactPool(ctx, fit, lx, ly, w, d, baseUp);
   quad(ctx, [dn(B, lo), dn(C, lo), dn(C, hi), dn(B, hi)], shade(base, 0.72));
   quad(ctx, [dn(D, lo), dn(C, lo), dn(C, hi), dn(D, hi)], shade(base, 0.86));
   quad(ctx, [dn(A, hi), dn(B, hi), dn(C, hi), dn(D, hi)], base);
@@ -257,6 +321,7 @@ function frustum(
   // destructure aligned with `at`'s corner order rather than renaming the three that are drawn.
   const [, B0, C0, D0] = at(w0, d0, baseUp * fit.scale);
   const [A1, B1, C1, D1] = at(w1, d1, (baseUp + hPx) * fit.scale);
+  contactPool(ctx, fit, lx, ly, w0, d0, baseUp);
   quad(ctx, [B0!, C0!, C1!, B1!], shade(base, 0.72));
   quad(ctx, [D0!, C0!, C1!, D1!], shade(base, 0.86));
   quad(ctx, [A1!, B1!, C1!, D1!], base);

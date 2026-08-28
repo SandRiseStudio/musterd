@@ -12,6 +12,7 @@ import {
   BOOK_COLORS,
   CLOCK_NUMERALS,
   coffeeAnchor,
+  contactPool,
   drawCue,
   drawDog,
   glassColor,
@@ -818,5 +819,78 @@ describe('where an actor sorts against the furniture', () => {
     const p = pose({ ...cushion, sit: 1 });
     const a = actorSortAnchor(p, undefined, { depthAt: couch });
     expect(a.lx).toBe(couch.lx);
+  });
+});
+
+/**
+ * The contact pool's compounding guard.
+ *
+ * A desk is not one solid — it is a top, four legs, a monitor, a keyboard and a mug, and every one of
+ * them reaches `box()`. The first cut of the pool drew for all of them, and a dozen overlapping pools
+ * per pod turned the desks into a dark brown mass. The `MIN_SPAN` floor is what stops that, so it is
+ * pinned here: without it the guard is one careless edit away from returning, and the symptom (a room
+ * that has quietly lost its light) is not something any other assertion in this file would catch.
+ */
+describe('contact pool', () => {
+  const fit = fitFloor(1200, 900);
+  /** Count the radial gradients a call creates — one per pool actually drawn. */
+  function poolCtx(): { ctx: CanvasRenderingContext2D; pools: () => number } {
+    let n = 0;
+    const grad = { addColorStop() {} };
+    const ctx = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createRadialGradient')
+            return () => {
+              n++;
+              return grad;
+            };
+          if (prop === 'createLinearGradient') return () => grad;
+          if (prop === 'measureText') return () => ({ width: 0 });
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    return { ctx, pools: () => n };
+  }
+
+  it('draws nothing for a footprint below the minimum span', () => {
+    const { ctx, pools } = poolCtx();
+    // A keyboard-sized solid: real, but far too small to own a shadow anyone would notice.
+    contactPool(ctx, fit, 100, 100, 6, 4, 0);
+    expect(pools()).toBe(0);
+  });
+
+  it('draws a pool for a desk-sized footprint', () => {
+    const { ctx, pools } = poolCtx();
+    contactPool(ctx, fit, 100, 100, 100, 68, 0);
+    expect(pools()).toBe(1);
+  });
+
+  it('draws the pool at the surface the solid stands on, not always the floor', () => {
+    // The monitor on a desk pools on the DESK TOP. Same footprint, different baseUp, must not collapse
+    // to the same y — otherwise everything in the room casts onto the floor and desks read as glass.
+    const ys: number[] = [];
+    const grad = { addColorStop() {} };
+    const spy = new Proxy(
+      {},
+      {
+        get(_t, prop) {
+          if (prop === 'canvas') return { width: 1200, height: 900 };
+          if (prop === 'createRadialGradient' || prop === 'createLinearGradient') return () => grad;
+          if (prop === 'translate') return (_x: number, y: number) => void ys.push(y);
+          if (prop === 'measureText') return () => ({ width: 0 });
+          return () => undefined;
+        },
+        set: () => true,
+      },
+    ) as unknown as CanvasRenderingContext2D;
+    contactPool(spy, fit, 100, 100, 40, 40, 0);
+    contactPool(spy, fit, 100, 100, 40, 40, 30);
+    expect(ys).toHaveLength(2);
+    expect(ys[1]!).toBeLessThan(ys[0]!); // higher base → higher on screen
   });
 });
