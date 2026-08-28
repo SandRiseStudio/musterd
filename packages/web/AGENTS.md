@@ -99,13 +99,23 @@ against the markdown the moment either changed.
   Fraunces → Inter on 2026-07-20; `budgets.json` is the authority). A new family or
   weight is a re-font decision, not a side-effect (#329). Canvas painters read type via
   `src/live/canvasFont.ts` tokens — never hard-code a family name in a painter.
-- **Colour tokens must be defined, and a `var()` fallback must not contradict them.** `pnpm
-  tokens:check` (in the `format:check` chain) fails on two silent lies: a colour token used with a
+- **Colour AND length tokens must be defined, and a `var()` fallback must not contradict them.**
+  `pnpm tokens:check` (in the `format:check` chain) fails on two silent lies: a token used with a
   fallback but **defined nowhere** (the fallback quietly becomes the value, and defining it later
   silently restyles everything that used it), and a fallback that **disagrees** with the definition
   (dead, since the token resolves — but it misinforms the next reader, which is how a wrong value
   gets copied forward). Runtime-parametric properties are exempt automatically, including colour
   ones the sources actually `setProperty` — don't add fallback-free `var()` to those.
+  **Lengths were added on 2026-08-28** and were previously exempt as "non-colour": measured with a
+  control that fails, `color: var(--nope, #ff0000)` failed the gate while `font-size: var(--nope,
+  13px)` passed it, the identical lie one property over. Bare numbers, durations and angles stay
+  exempt — those are the parametric idiom.
+  **What it still cannot see:** a token that is DEFINED but **out of scope** at its usage site. The
+  token exists and its value is honest, so no token check can catch it, and an unresolved
+  `font-size: var()` is not an error — CSS drops the declaration and the element silently inherits,
+  with every gate green. That cost three of six new `--lc-type-*` tokens in #1104. When you add a
+  token, check where the consuming elements actually mount, not just where the rule looks like it
+  belongs. Background: [docs/wiki/constraint-outlives-its-premise.md](../../docs/wiki/constraint-outlives-its-premise.md).
   **Fill and text amber are different tokens**: `--lc-warn` is FILLS ONLY (presence dots, ~1.2:1 on
   paper by design) and `--lc-warn-ink` is anything read as text (4.92:1 worst case). Same split as
   `--lc-ov-accent` / `--lc-ov-accent-ink`. Reaching for the fill as a text colour is the mistake

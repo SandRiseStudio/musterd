@@ -1,5 +1,5 @@
 /*
- * CSS colour-token check — break the build when a stylesheet's palette lies about itself.
+ * CSS token check — break the build when a stylesheet lies about its own tokens.
  *
  * Two lies, both found live in packages/web on 2026-08-05 (lane 01KZA27Q7C), both silent:
  *
@@ -18,12 +18,28 @@
  * frame before it is set — that is the correct idiom, not a defect, and a check that flagged
  * "undefined tokens" wholesale would demand the office animations be broken to satisfy it.
  *
- *   1. Non-colour values (`--i`, `--lc-mote-delay`, `--lc-speech-h`): numbers, times and lengths.
- *   2. Colour values that TS/TSX actually sets at runtime. This one is not optional and the check
+ *   1. Values that claim nothing this gate can compare — bare numbers, durations, angles (`--i`,
+ *      `--lc-mote-delay`). See `css-value-kind.ts`; `valueKind` is the single definition of "not our
+ *      business" and both the caller and `resolveDeclared` use it.
+ *   2. Tokens that TS/TSX actually sets at runtime. This one is not optional and the check
  *      shipped without it for one draft: `--lc-amb-tint` is a genuine colour AND genuinely
  *      parametric (`office-scene/index.ts` writes it per light environment), so "colour-valued
  *      excludes parametric for free" was simply false. The sources are scanned for
  *      `setProperty('--x', …)` and `style={{ '--x': … }}` and those tokens are never phantoms.
+ *
+ * EXEMPTION 1 USED TO READ "non-colour values: numbers, times and LENGTHS", and lengths did not
+ * belong in it. Being non-colour was only ever a cheap proxy for being parametric, and exemption 2
+ * is the precise test for that — which made the proxy redundant the day it landed and left a hole
+ * shaped exactly like the lie the gate exists to catch. Measured 2026-08-28 with a control that
+ * fails: `color: var(--nope, #ff0000)` FAILED this gate and `font-size: var(--nope, 13px)` PASSED
+ * it, same file, same shape. It cost three of six new `--lc-type-*` tokens in #1104, which resolved
+ * to nothing on two surfaces with every gate green — an unresolved `font-size: var()` is not an
+ * error, CSS drops the declaration and the element silently inherits. Lengths are judged now.
+ *
+ * Still NOT covered, and worth knowing before you trust a green run: a token that is DEFINED but
+ * out of scope at its usage site. That is not a token lie — the token exists and its value is
+ * honest — so nothing here can see it, and the failure is identical from the outside. The wiki page
+ * docs/wiki/constraint-outlives-its-premise.md carries both halves.
  *
  *   pnpm tokens:check
  */
@@ -31,6 +47,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DUR, EASE_CSS } from '../packages/web/src/live/office-scene/motion.ts';
+import { valueKind, type ValueKind } from './css-value-kind.ts';
 import {
   declaredMotionTokens,
   disagreeingTokens,
@@ -45,11 +62,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 const ROOTS = [join(repoRoot, 'packages/web/src')];
 
-/** A literal colour: hex, or a colour function. Deliberately NOT matching `var(...)` — a fallback
- *  that defers to another token is a chain, not a claimed value, and has nothing to disagree with. */
-const COLOUR = /^(#[0-9a-f]{3,8}|(rgb|rgba|hsl|hsla|oklch|lab|color-mix)\()/i;
-
-const isColour = (value: string) => COLOUR.test(value.trim());
+/* The value-kind predicates live in their own module so they can be tested — this file reads the
+   filesystem and calls process.exit, the same reason `motion-scale.ts` sits beside it. */
 
 function cssFiles(dir: string): string[] {
   const out: string[] = [];
@@ -132,6 +146,10 @@ function varsWithFallback(text: string): { token: string; fallback: string }[] {
  * colour. Returns undefined when the token is defined nowhere (a genuine phantom), and an EMPTY set
  * when it is defined but resolves to nothing literal — unjudgeable, so the caller stays quiet rather
  * than guessing.
+ *
+ * Resolves LENGTHS as well as colours, so `var(--lc-type-body, 13px)` against a token declared
+ * `11.5px` reads as the disagreement it is. Judgeability is decided by `valueKind`, so the parametric
+ * exemption is the same one the caller uses and there is only one definition of "not our business".
  */
 function resolveDeclared(token: string, seen = new Set<string>()): Set<string> | undefined {
   const raw = defined.get(token);
@@ -140,12 +158,12 @@ function resolveDeclared(token: string, seen = new Set<string>()): Set<string> |
   seen.add(token);
   const out = new Set<string>();
   for (const value of raw) {
-    if (isColour(value) && !value.startsWith('var(')) {
+    if (valueKind(value) !== 'other' && !value.startsWith('var(')) {
       out.add(normalize(value));
       continue;
     }
     for (const inner of varsWithFallback(value)) {
-      if (isColour(inner.fallback)) out.add(normalize(inner.fallback));
+      if (valueKind(inner.fallback) !== 'other') out.add(normalize(inner.fallback));
       const chained = resolveDeclared(inner.token, seen);
       if (chained) for (const v of chained) out.add(v);
     }
@@ -159,6 +177,8 @@ interface Finding {
   token: string;
   fallback: string;
   kind: 'phantom' | 'disagrees';
+  /** Which arm caught it — the remedy differs, so the report must not blur them. */
+  valueKind: ValueKind;
   declared?: string[];
 }
 
@@ -167,11 +187,16 @@ for (const file of files) {
   const lines = readFileSync(file, 'utf8').split('\n');
   lines.forEach((text, i) => {
     for (const { token, fallback } of varsWithFallback(text)) {
-      if (!isColour(fallback)) continue; // parametric runtime var — correct idiom, never a finding
+      /* `other` is the parametric exemption — bare numbers, durations, angles. It is deliberately
+         NOT "everything that is not a colour" any more: that proxy let `font-size: var(--nope,
+         13px)` through while `color: var(--nope, #ff0000)` failed, the identical lie one property
+         over (measured 2026-08-28, docs/wiki/constraint-outlives-its-premise.md). */
+      const kind = valueKind(fallback);
+      if (kind === 'other') continue;
       const declared = resolveDeclared(token);
       if (!declared) {
         if (runtimeSet.has(token)) continue; // written by TS at runtime — the fallback is the idiom
-        findings.push({ file, line: i + 1, token, fallback, kind: 'phantom' });
+        findings.push({ file, line: i + 1, token, fallback, kind: 'phantom', valueKind: kind });
       } else if (declared.size > 0 && !declared.has(normalize(fallback))) {
         findings.push({
           file,
@@ -179,6 +204,7 @@ for (const file of files) {
           token,
           fallback,
           kind: 'disagrees',
+          valueKind: kind,
           declared: [...declared],
         });
       }
@@ -248,7 +274,7 @@ for (const file of files) {
 
 if (findings.length === 0 && motionFindings.length === 0) {
   console.log(
-    `tokens:check — ${files.length} stylesheets, no colour token lies and motion is on the scale`,
+    `tokens:check — ${files.length} stylesheets, no colour or length token lies and motion is on the scale`,
   );
   process.exit(0);
 }
@@ -258,14 +284,14 @@ if (motionFindings.length > 0 && findings.length === 0) {
   process.exit(1);
 }
 
-console.error(`tokens:check FAILED — ${findings.length} colour token issue(s)\n`);
+console.error(`tokens:check FAILED — ${findings.length} token issue(s)\n`);
 for (const f of findings) {
   const where = `${relative(repoRoot, f.file)}:${f.line}`;
   if (f.kind === 'phantom') {
     console.error(
-      `  ${where}\n    ${f.token} is used with the colour fallback ${f.fallback} but is DEFINED NOWHERE.\n` +
+      `  ${where}\n    ${f.token} is used with the ${f.valueKind} fallback ${f.fallback} but is DEFINED NOWHERE.\n` +
         `    The fallback is silently acting as the token. Define ${f.token} (use ${f.fallback} to keep\n` +
-        `    today's pixels), or drop the var() and name the colour outright.\n`,
+        `    today's pixels), or drop the var() and name the ${f.valueKind} outright.\n`,
     );
   } else {
     console.error(
