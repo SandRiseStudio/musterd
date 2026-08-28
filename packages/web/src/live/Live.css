@@ -1920,7 +1920,7 @@
   padding: 0;
   border-radius: 6px;
   transition:
-    box-shadow var(--lc-dur-2) var(--lc-ease, ease),
+    box-shadow var(--lc-dur-2) var(--lc-ease-out),
     transform var(--lc-dur-2) var(--lc-ease-pop);
 }
 /* Hover lifts the board a hair off the wall and warms the light around it — the promise that this
@@ -1958,8 +1958,8 @@
   padding: 2px 7px;
   opacity: 0;
   transition:
-    opacity var(--lc-dur-2) var(--lc-ease, ease),
-    transform var(--lc-dur-3) var(--lc-ease, ease);
+    opacity var(--lc-dur-2) var(--lc-ease-out),
+    transform var(--lc-dur-3) var(--lc-ease-out);
   pointer-events: none;
 }
 .lc-boardspot:hover .lc-boardspot__tag,

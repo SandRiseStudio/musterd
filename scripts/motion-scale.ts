@@ -427,7 +427,7 @@ export function phantomMotionRefs(css: string, known: ReadonlySet<string>): Moti
   const lineAt = lineIndexer(css);
   const out: MotionFinding[] = [];
   for (const decl of motionDeclarations(css)) {
-    for (const m of decl.text.matchAll(/var\((--lc-(?:dur-[\w-]+|ease[\w-]*|fast|med))\)/g)) {
+    for (const m of decl.text.matchAll(/var\((--lc-(?:dur-[\w-]+|ease[\w-]*|fast|med))\s*[,)]/g)) {
       const token = m[1];
       if (token && !known.has(token)) {
         out.push({

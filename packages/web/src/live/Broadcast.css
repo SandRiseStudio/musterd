@@ -178,7 +178,7 @@
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
-  animation: bc-reel-in var(--lc-dur-4) var(--lc-ease, ease-out) both;
+  animation: bc-reel-in var(--lc-dur-4) var(--lc-ease-out) both;
 }
 .bc-reel__row--quiet {
   color: var(--lc-paper-dim);
