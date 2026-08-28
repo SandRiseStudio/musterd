@@ -175,12 +175,32 @@
      0.57 — same hues, meaningfully less saturated, which is the whole reason the room read dustier
      than the reference it came from. Pulled most of the way there, not all: the pack is a soft-3D
      render with gradient shading to carry its intensity, and this room is flat-shaded, where full
-     saturation goes garish. `--wall` is deliberately NOT touched — the paper chrome's contrast was
-     tuned against this exact cream (#522), and moving the backdrop would silently undo that. */
+     saturation goes garish.
+
+     `--wall` USED TO SAY "deliberately not touched — the paper chrome's contrast was tuned against
+     this exact cream (#522), and moving the backdrop would silently undo that." That constraint was
+     real when it was written and is not any more: the speech bubble and the nameplate were both made
+     OPAQUE afterwards (see the long note on `.lc-speech__inner` in Live.css — a bubble's ink used to
+     be decided by whatever it floated over, measuring 12.60 on its own stock but 1.38 over a dark
+     actor). Opaque chrome cannot have its contrast reached by the backdrop, so the wall stopped being
+     load-bearing for it the day that landed, and nobody came back to say so. Verified rather than
+     assumed before this change: the contrast sweep over /office-preview measures the same paper ink
+     on the same paper, 0 below AA, with the wall at the new colour.
+
+     The wall moves because it was the room's colour problem. Measured on /office-preview: five room
+     tokens spanning TWELVE degrees of hue (floor 35, floor-2 32, wall 35, wood 29, couch 41) — every
+     surface the same colour at a different lightness, 77.7% of all chromatic pixels between 20 and 50
+     degrees. Warmth with nothing to be warm against stops reading as warmth and reads as a filter over
+     the whole picture. Three attempts to buy the counterweight downstream in the SHADING each moved
+     hue about 2% and cost saturation doing it (the shaded-face experiments, reverted 2026-08-28); this
+     one token moves warm to 55.9% and cool to 32.7%, because the wall is the largest single surface in
+     the frame and it was sitting on the floor's exact hue. Sage rather than grey or blue (nick chose
+     it from three): the green cast plays against the plants, and it leaves the room warm rather than
+     merely less orange. */
   --sky: linear-gradient(180deg, #e9d9c3 0%, #f3e7d4 52%, #ffe9c8 100%);
   --floor: #f6bb68;
   --floor-2: #d18f43;
-  --wall: #f2d4aa;
+  --wall: #d6ddd4;
   --wood: #a3652a;
   --couch: #e8b23d;
   --ink: #2a2118;
