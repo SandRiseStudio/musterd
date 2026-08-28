@@ -40,7 +40,13 @@
      own value. Before this pair existed --lc-warn was defined NOWHERE and its inline fallback was
      doing the work, which is how an amber this light nearly shipped as body copy (lane 01KZA27Q7C). */
   --lc-warn: #f4cf52; /* FILLS ONLY — the idle/away presence dots */
-  --lc-warn-ink: #7a4e06; /* 4.92:1 on the darkest paper it lands on — anything read as text */
+  /* Anything read as text; the FILL amber (`--lc-warn`) is never text — see packages/web/AGENTS.md.
+     Re-measured 2026-08-28: the nameplate's stock dropped to `--lc-paper-2` for the paper ranking,
+     which made a NEW darkest paper for this ink and took the old #7a4e06 from 4.92 to 4.67 sampled.
+     Still AA, but 0.17 of margin is not a margin — the `dnd` tag beside this token already has a
+     note recording that a 14% amber fill lightened its ground to 4.35 and failed the gate, so this
+     is the second time this one tag has spent its headroom. Darkened a step to buy it back. */
+  --lc-warn-ink: #744805; /* 5.11:1 on the darkest paper it lands on (paper-2 under the room) */
   /* The keyboard focus ring. --lc-accent is 2.66:1 on the ground — a ring drawn in it is decor,
      not an indicator (WCAG 1.4.11 wants ≥3:1 for functional marks). This mustard holds 3.3:1 on
      surface-3, the darkest chrome a ring lands on, and ~4:1 on the paper family. */
@@ -1320,19 +1326,40 @@
   /* Opaque for the same reason as the speech bubble directly above it in this file: the last 10% was
      the live room, so an 8px nameplate pinned to a walking character had its paper decided by the
      character it was pinned to. The plate is the smallest text on the surface and the least able to
-     afford it. Nothing else about the pill changes — rim, sheen and glow still carry the accent. */
-  background: var(--lc-paper);
+     afford it.
+
+     THE STOCK IS `--lc-paper-2`, ONE STEP BELOW THE BUBBLE'S — and that is the whole ranking. Every
+     paper surface in this room used to be cut from `--lc-paper` with a rim and a drop shadow: the
+     speech bubble, this plate, the workstack card, the desk wedge. Same stock, same lift, same
+     value. So a name — which is ambient, and only wants to be readable when you look for it — carried
+     the same weight as an utterance, which wants to interrupt you. Nothing receded, and a room where
+     nothing recedes reads as UI laid over a painting rather than a room with labels in it.
+
+     Ranking by STOCK rather than by ink is what keeps nick's 2026-07-28 constraint intact ("need to
+     pop out more but i dont want too dark of colors"): paper-2 is a step of lightness, not a
+     darkening, and `--lc-paper-ink` measures 10.99 on it against 12.60 on paper — both far above AA,
+     so the recede costs the name nothing it needs. */
+  background: var(--lc-paper-2);
   border: 1px solid color-mix(in srgb, var(--lc-accent) 26%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
   font-size: 8px;
   letter-spacing: -0.01em;
   color: var(--lc-paper-ink);
+  /* A RESTING PLATE DOES NOT EMIT. The accent halo ring and the 16px accent bloom that used to sit
+     here are gone, and the drop is tightened to match. They were the bubble's own devices — a tonal
+     ring and a tonal glow are how an utterance says "this is live, and this is what kind of act it
+     was" — worn by a label that is neither. On a twenty-seat floor that is twenty little suns burning
+     continuously, and the eye cannot tell which glow means something is happening.
+
+     The emission is not deleted, it MOVES: `:hover`/`:focus-within` below still lights the ring and
+     the bloom, harder than the resting state ever did. That turns the glow from a permanent property
+     of every name into an answer to "which one am I pointing at" — which is the only question it was
+     ever able to answer. Rim, sheen and seat stay: the plate is still a lit object sitting on the
+     floor, it has just stopped radiating. */
   box-shadow:
     inset 0 1px 0 var(--lc-paper-sheen),
-    0 0 0 1px color-mix(in srgb, var(--lc-accent) 14%, transparent),
-    0 2px 6px -1px var(--lc-paper-drop),
-    0 1px 1px -0.5px var(--lc-paper-seat),
-    0 0 16px -4px color-mix(in srgb, var(--lc-accent) 32%, transparent);
+    0 1px 4px -1px var(--lc-paper-drop),
+    0 1px 1px -0.5px var(--lc-paper-seat);
   cursor: default;
 }
 .lc-gl-label:not(.is-broadcast) .lc-gl-label__plate {
@@ -1442,7 +1469,7 @@
 }
 
 /* The dnd pill (presence-honesty §3): the one plate tag that is a state, not an identity — the
-   warn ink as border + text on the plate's own paper (--lc-warn-ink measures 4.92 worst case; the
+   warn ink as border + text on the plate's own paper (--lc-warn-ink measures 5.11 worst case; the
    14% amber fill this first shipped with lightened the ground to 4.35 and failed the gate). The
    FILL amber is never text; see AGENTS.md. Same slot grammar as the service tag. */
 .lc-gl-label__dnd {
