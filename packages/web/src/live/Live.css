@@ -40,6 +40,38 @@
      own value. Before this pair existed --lc-warn was defined NOWHERE and its inline fallback was
      doing the work, which is how an amber this light nearly shipped as body copy (lane 01KZA27Q7C). */
   --lc-warn: #f4cf52; /* FILLS ONLY — the idle/away presence dots */
+  /* ── the room's type scale ─────────────────────────────────────────────────────────────────────
+     Counted 2026-08-28 across the four surfaces the office lays over itself: SEVEN absolute sizes in
+     a 5.5px range — 7.5, 8, 9, 10, 10.5, 11.5, 13 — with 10 and 10.5 doing the same job half a pixel
+     apart on different components. That is not a scale, it is a list of numbers that accumulated, and
+     the only thing it tells the next person is that any value is allowed.
+
+     The steps are named for ROLE, not for size, and that is the point. A numeric scale (`--type-1`,
+     `--type-2`) still leaves you guessing which number a new label deserves; a role scale makes the
+     question answerable — you are labelling a tag, or a name, or something a member actually said —
+     and the size follows from the answer. A new surface that fits none of these roles is telling you
+     something worth stopping for, rather than quietly inventing an eighth size.
+
+     Only 10.5 was collapsed (into `aside`). The 7.5/8 pair reads like drift and is NOT: the nameplate
+     metrics are deliberately tight because collapsed plate width is what decides whether plates
+     collide over the desks at twenty seats — see the note above `.lc-gl-label__plate`. It stays, and
+     it stays documented as a decision so nobody "tidies" it into the scale later.
+
+     DEFINED ON `.lc`, not on the paper-set block below, and that is not tidiness. The workstack and
+     the caption rail are NOT inside `.lc-ov` / `.lc-gl-labels` — `.lc-office__work .lc-workstack`
+     redeclares the whole paper set locally for exactly that reason. Scoped with the paper set, three
+     of these six tokens resolved to nothing on the two surfaces that most needed them, and an
+     unresolved `font-size: var(…)` is not an error: the declaration is simply dropped and the element
+     silently inherits. Caught here by checking where the elements actually mount rather than by
+     reading the CSS. `tokens:check` guards colour tokens against precisely this and does not yet
+     cover length tokens, so nothing downstream would have said a word. */
+  --lc-type-tag: 7.5px; /* a classification, not an identity: `service`, `dnd` */
+  --lc-type-name: 8px; /* who this is — the nameplate's own line */
+  --lc-type-meta: 9px; /* the card's labels and counts */
+  --lc-type-aside: 10px; /* secondary chrome: a recipient chip, a row, a "there's more" */
+  --lc-type-body: 11.5px; /* what a member actually said */
+  --lc-type-caption: 13px; /* the one line the room says to a stranger */
+
   /* Anything read as text; the FILL amber (`--lc-warn`) is never text — see packages/web/AGENTS.md.
      Re-measured 2026-08-28: the nameplate's stock dropped to `--lc-paper-2` for the paper ranking,
      which made a NEW darkest paper for this ink and took the old #7a4e06 from 4.92 to 4.67 sampled.
@@ -1123,7 +1155,7 @@
 }
 .lc-workstack__title-label {
   font-family: var(--font-mono, monospace);
-  font-size: 9px;
+  font-size: var(--lc-type-meta);
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1135,7 +1167,7 @@
 .lc-workstack__quiet {
   margin-left: auto;
   font-family: var(--font-mono, monospace);
-  font-size: 9px;
+  font-size: var(--lc-type-meta);
   font-weight: 500;
   color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
 }
@@ -1159,7 +1191,7 @@
   padding: 4px 7px 4px 6px;
   border-radius: 7px;
   font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-size: var(--lc-type-aside);
   color: var(--lc-paper-ink);
   background: color-mix(in srgb, var(--lc-paper) 58%, transparent);
   transition: background var(--lc-dur-1) ease;
@@ -1196,7 +1228,7 @@
 .lc-workstack__said,
 .lc-workstack__more {
   flex: 0 0 auto;
-  font-size: 9px;
+  font-size: var(--lc-type-meta);
   font-weight: 600;
   letter-spacing: 0.03em;
   padding: 1px 6px;
@@ -1342,7 +1374,7 @@
   background: var(--lc-paper-2);
   border: 1px solid color-mix(in srgb, var(--lc-accent) 26%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
-  font-size: 8px;
+  font-size: var(--lc-type-name);
   letter-spacing: -0.01em;
   color: var(--lc-paper-ink);
   /* A RESTING PLATE DOES NOT EMIT. The accent halo ring and the 16px accent bloom that used to sit
@@ -1417,7 +1449,7 @@
   display: block;
 }
 .lc-gl-label__provider-letter {
-  font-size: 8px;
+  font-size: var(--lc-type-name);
   font-weight: 700;
   line-height: 1;
 }
@@ -1431,7 +1463,7 @@
   border-radius: 4px;
   border: 1px solid color-mix(in srgb, var(--lc-paper-ink) 26%, transparent);
   font-family: var(--font-mono, monospace);
-  font-size: 7.5px;
+  font-size: var(--lc-type-tag);
   font-weight: 600;
   letter-spacing: 0.07em;
   line-height: 1;
@@ -1455,7 +1487,7 @@
   border-radius: 999px;
   background: color-mix(in srgb, var(--lc-surface-1) 82%, transparent);
   font-family: var(--font-mono, monospace);
-  font-size: 13px;
+  font-size: var(--lc-type-caption);
   line-height: 1.4;
   color: var(--lc-paper-ink);
   animation: lc-caption-in var(--lc-dur-2) ease-out;
@@ -1479,7 +1511,7 @@
   border-radius: 4px;
   border: 1px solid color-mix(in srgb, var(--lc-warn-ink) 55%, transparent);
   font-family: var(--font-mono, monospace);
-  font-size: 7.5px;
+  font-size: var(--lc-type-tag);
   font-weight: 600;
   letter-spacing: 0.07em;
   line-height: 1;
@@ -1681,7 +1713,7 @@
     0 6px 18px -4px var(--lc-paper-drop),
     0 0 16px -6px color-mix(in srgb, var(--lc-accent) 30%, transparent);
   font-family: var(--font-mono, monospace);
-  font-size: 10px;
+  font-size: var(--lc-type-aside);
   line-height: 1.4;
   white-space: pre-wrap;
   color: var(--lc-paper-ink);
@@ -1949,7 +1981,7 @@
   border: 1px solid color-mix(in srgb, var(--lc-speech-tone) 38%, var(--lc-border));
   background: color-mix(in srgb, var(--lc-speech-tone) 9%, transparent);
   font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-size: var(--lc-type-aside);
   line-height: 16px;
   letter-spacing: -0.01em;
   color: var(--lc-muted);
@@ -2022,7 +2054,7 @@
   -webkit-line-clamp: 5; /* the glance shows ~5 lines; the rest lives one hover away */
   overflow: hidden;
   font-family: var(--font-sans, sans-serif);
-  font-size: 11.5px;
+  font-size: var(--lc-type-body);
   line-height: 1.36;
   font-weight: 500;
   letter-spacing: -0.005em;
@@ -2136,7 +2168,7 @@
   position: absolute;
   right: 7px;
   bottom: 3px;
-  font-size: 10px;
+  font-size: var(--lc-type-aside);
   line-height: 1;
   font-weight: 700;
   letter-spacing: 0.06em;
