@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
@@ -81,6 +82,21 @@ async function enrollJoiner() {
     team: 'bravo',
   });
   expect(res.status).toBe(200);
+}
+
+/** A hub that answers every push with one canned status+body — for the paths a real hub cannot reach. */
+function createHubStub(status: number, body: unknown) {
+  const server = createHttpServer((_req, res) => {
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body));
+  });
+  const url = new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve(`http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`);
+    });
+  });
+  return { url, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
 const joinerTeam = () => getTeamBySlug(joiner.db, 'bravo')!;
@@ -174,6 +190,68 @@ describe('the push loop', () => {
     expect(accepted).toBe(0);
     expect(stagedOnHub()).toEqual({ n: 1 });
     expect(cursor()).toBe(1);
+  });
+
+  it('refuses a resume point ahead of anything this node has ever minted', async () => {
+    send(joiner, 'm-1');
+    send(joiner, 'm-2');
+    send(joiner, 'm-3');
+    await enrollJoiner();
+
+    // A hub answering with a seq we never minted is asserting something impossible, not correcting
+    // us. dolly, 2026-08-28 (#1102 required B): validated only as an integer >= 1, expected_seq
+    // 1000000 drove the cursor to 999999 and every later pass sent nothing — the silent loss the
+    // cursor exists to prevent, reintroduced through the one number the hub gets to dictate.
+    const enrolled = readNodeState().nodes['bravo']!;
+    const stub = createHubStub(409, {
+      error: { code: 'conflict', message: 'gap' },
+      expected_seq: 1000000,
+    });
+    saveNodeEnrollment({ team: 'bravo', ...enrolled, hub_url: await stub.url });
+
+    await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/impossible|ahead/i);
+
+    // The cursor did not move, so the three messages are still queued for a hub that tells the truth.
+    expect(cursor()).toBe(0);
+    await stub.close();
+  });
+
+  it('accepts a resume point at or below this node\u2019s head', async () => {
+    send(joiner, 'm-1');
+    send(joiner, 'm-2');
+    await enrollJoiner();
+
+    // head + 1 EXACTLY — the boundary, and the case a too-tight clamp would break: the hub holds
+    // everything we have minted (1 and 2) and asks for the next seq we have not written yet. Tested
+    // at the boundary on purpose; asserting at `head` would pass under an off-by-one clamp too.
+    const enrolled = readNodeState().nodes['bravo']!;
+    const stub = createHubStub(409, {
+      error: { code: 'conflict', message: 'gap' },
+      expected_seq: 3,
+    });
+    saveNodeEnrollment({ team: 'bravo', ...enrolled, hub_url: await stub.url });
+
+    expect(await pushTeam(joinerCtx, joinerTeam())).toBe(0);
+    expect(cursor()).toBe(2);
+    await stub.close();
+  });
+
+  it('reports a terminal refusal at error rather than retrying it as if offline', async () => {
+    send(joiner, 'm-1');
+    await enrollJoiner();
+    // A 422 is a batch the hub will never accept. The loop's every other answer is "retry next
+    // tick", which here means resending a poison batch forever behind a line that reads as offline.
+    const stub = createHubStub(422, {
+      error: { code: 'validation', message: 'duplicate id' },
+      event_id: 'm-1',
+      terminal: true,
+    });
+    const enrolled = readNodeState().nodes['bravo']!;
+    saveNodeEnrollment({ team: 'bravo', ...enrolled, hub_url: await stub.url });
+
+    await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/permanently refused/i);
+    expect(cursor()).toBe(0);
+    await stub.close();
   });
 
   it('does nothing for a team with no enrollment', async () => {

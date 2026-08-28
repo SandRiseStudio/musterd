@@ -27,6 +27,19 @@ export class SyncOriginError extends Error {
 }
 
 /**
+ * An origin restaged one of its OWN envelope ids under a different `origin_seq`. Terminal, not
+ * resumable: an origin cannot honestly mint one id twice, so this is corruption at the source and
+ * no retry of the same batch will clear it. Named so the pusher can tell it from a transient
+ * failure and say so out loud, rather than retrying forever behind a warn line.
+ */
+export class SyncDuplicateIdError extends Error {
+  constructor(readonly eventId: string) {
+    super(`envelope id ${eventId} is already staged for this origin under a different origin_seq`);
+    this.name = 'SyncDuplicateIdError';
+  }
+}
+
+/**
  * The highest `origin_seq` this hub holds for a node, or 0 when it holds nothing.
  *
  * Scoped by node alone, deliberately: `nodes.id` is a global primary key and a node belongs to
@@ -75,7 +88,11 @@ export function ingestBatch(
     // team's log, because `nodes.id` is global while a node belongs to one team. Increment 3a's one
     // confirmed hole was exactly this confusion between a global id and a team-scoped check.
     const node = db
-      .prepare<[string], { team_id: string }>('SELECT team_id FROM nodes WHERE id = ?')
+      .prepare<[string], { team_id: string; slug: string }>(
+        `SELECT n.team_id AS team_id, t.slug AS slug
+           FROM nodes n JOIN teams t ON t.id = n.team_id
+          WHERE n.id = ?`,
+      )
       .get(nodeId);
     if (!node || node.team_id !== teamId) {
       throw new SyncOriginError('node is not a member of this team');
@@ -86,6 +103,13 @@ export function ingestBatch(
 
     for (const event of events) {
       if (event.origin_node !== nodeId) throw new SyncOriginError();
+      // The hub authenticated the TEAM, so the envelope does not get to name a different one.
+      // Nothing in 3b-i reads `envelope.team`; 3b-ii's fold is the reader, and a row whose team_id
+      // says one team while its payload says another is a contradiction the staging layer already
+      // had the information to refuse (dolly, 2026-08-28).
+      if (event.envelope.team !== node.slug) {
+        throw new SyncOriginError('envelope names a team other than the one it is pushed into');
+      }
 
       // A replay of something already held is a no-op, not a gap: the pusher resending after a lost
       // ack is the expected case, and it must not look like corruption. This is what makes the
@@ -109,18 +133,28 @@ export function ingestBatch(
         )
         .get(teamId)!.hub_seq;
 
-      db.prepare(
-        `INSERT INTO sync_log (id, team_id, origin_node, origin_seq, hub_seq, payload, received_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        event.envelope.id,
-        teamId,
-        nodeId,
-        event.origin_seq,
-        hubSeq,
-        JSON.stringify(event),
-        now,
-      );
+      try {
+        db.prepare(
+          `INSERT INTO sync_log (id, team_id, origin_node, origin_seq, hub_seq, payload, received_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          event.envelope.id,
+          teamId,
+          nodeId,
+          event.origin_seq,
+          hubSeq,
+          JSON.stringify(event),
+          now,
+        );
+      } catch (err) {
+        // Classified rather than allowed to surface raw: an unnamed SQLITE_CONSTRAINT reaches the
+        // pusher as a bare 500, which it cannot tell from a hub that is merely down — so it retries
+        // the identical poison batch every tick, silently, forever.
+        if (err instanceof Error && /idx_sync_log_origin_id|sync_log\.id/.test(err.message)) {
+          throw new SyncDuplicateIdError(event.envelope.id);
+        }
+        throw err;
+      }
       accepted += 1;
       expected += 1;
     }

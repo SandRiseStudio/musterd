@@ -249,7 +249,7 @@ import {
   setPolicy,
 } from '../store/teams.js';
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
-import { ingestBatch, SyncGapError, SyncOriginError } from '../sync/log.js';
+import { ingestBatch, SyncDuplicateIdError, SyncGapError, SyncOriginError } from '../sync/log.js';
 import {
   recordCcdNudge,
   recordNudgeDecision,
@@ -3035,6 +3035,18 @@ export async function handleHttp(
             });
           }
           if (err instanceof SyncOriginError) throw new MusterdError('forbidden', err.message);
+          if (err instanceof SyncDuplicateIdError) {
+            // Terminal, and it must SAY so. Left as a bare constraint violation this reaches the
+            // pusher as a 500, indistinguishable from a hub that is merely down — so the loop
+            // resends the identical poison batch every tick, forever, behind a warn line that reads
+            // as "offline" (dolly, 2026-08-28). 422: the batch is well-formed but unprocessable,
+            // and no retry of it will ever succeed.
+            return sendJson(res, 422, {
+              error: { code: 'validation', message: err.message },
+              event_id: err.eventId,
+              terminal: true,
+            });
+          }
           throw err;
         }
       }

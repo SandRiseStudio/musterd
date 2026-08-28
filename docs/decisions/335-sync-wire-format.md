@@ -106,6 +106,50 @@ A consequence worth naming, because it is what makes the canonical order *dense*
 unique: since nothing can silently decline to insert, every `hub_seq` allocated is a `hub_seq`
 stored.
 
+### 6. Envelope-id uniqueness is scoped to the **origin**, and never wider
+
+`sync_log` holds `UNIQUE(origin_node, id)`. The envelope id is not a primary key and not unique per
+team.
+
+Envelope ids are minted by the origin daemon, so for any enrolled node they are attacker-chosen. A
+uniqueness scope wider than the origin therefore hands every node a weapon against every other node
+inside that scope: stage the id your target will use next, and its pushes fail on the constraint
+forever. The refusal is correct in isolation and terminal in aggregate — the batch rolls back, the
+cursor rightly does not move, and the next tick resends into the same constraint. Scoping to the
+*team* would only narrow the blast radius to same-team nodes, which is the population federation
+exists to serve. (dolly, 2026-08-28, review of #1102, reproduced against `57c27e1b`.)
+
+Scoping to the origin is both safe and sufficient: an origin cannot honestly mint one id twice —
+`messages.id` is its own local primary key — so a repeat is corruption at that source, and wedging
+only itself is the correct blast radius.
+
+**A consequence 3b-ii must not inherit unstated:** two origins MAY now stage one envelope id. The
+fold must key on `(origin_node, origin_seq)` and cannot assume the envelope id alone identifies a
+row.
+
+### 7. Every refusal must be distinguishable from being offline
+
+A pusher's default answer to failure is "retry next tick", which is right for an unreachable hub and
+wrong for a refusal no retry can clear. Left undistinguished, a permanent rejection is reported
+exactly as a laptop on a train: one warn line, forever.
+
+So a terminal refusal is typed on the way out (`SyncDuplicateIdError`), carries `422` with the
+offending `event_id`, and is logged by the daemon at **error**. The failure has to be legible from
+the pushing machine's own log, without an operator reading the hub's database to find out why a
+machine went quiet.
+
+### 8. A hub's resume point is believed downward, bounded upward
+
+The `409` gap refusal names where to resume, and §Decision 4 makes that binding — the hub is the
+authority on what it holds. Upward it is not. A resume point ahead of anything this machine ever
+minted cannot be a correction; it moves the cursor past real events that every later pass then
+skips, which is the silent loss the cursor exists to prevent, reintroduced through the one number
+the hub gets to dictate. `expected_seq` is refused above this node's own `MAX(origin_seq) + 1`.
+
+This needs no hostile hub to matter: any hub-side miscomputation of the resume point converts into
+permanent data loss on the pusher, reported by nobody. (dolly, 2026-08-28, reproduced with a stubbed
+hub answering `expected_seq: 1000000` against three unpushed messages.)
+
 ## Alternatives considered
 
 **A parallel `SyncMessage` shape mirroring the message row.** Rejected: it restates the envelope's
@@ -161,7 +205,13 @@ guard goes.
   ordering from a superficially similar one: idempotence that dropped the replay *after* allocating
   would leave the row count right and the canonical order full of holes, so **the row count is not
   the check**. **(v)** *A distinct event reusing a staged envelope id is loud* — push seq N+1
-  carrying seq N's envelope id and assert a refusal rather than a silent drop.
+  carrying seq N's envelope id and assert a refusal rather than a silent drop. **(vi)** *One node
+  cannot wedge another* — stage id X from node A, then push id X from node B, and assert B's event
+  lands; if it throws, the uniqueness scope is wider than the origin and B's sync is dead until
+  someone operates on the hub's database. **(vii)** *A resume point ahead of this node's head is
+  refused* — answer a push with `expected_seq` far beyond `MAX(origin_seq)` and assert the cursor
+  does not move. Assert at `head + 1` for the accepting case, not at `head`: the looser assertion
+  passes under an off-by-one clamp, which is how that mutation first survived.
 - **Experiment:** §Decision 3's rule — travels iff it is a claim about the event — is the
   falsifiable generalization here, and it was derived from two fields. The evidence arrives at
   3b-ii, which must decide the same question for the fold's fields. If that increment finds a field

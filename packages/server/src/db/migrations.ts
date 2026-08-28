@@ -1184,8 +1184,17 @@ export const MIGRATIONS: Migration[] = [
     version: 50,
     up: (db) => {
       db.exec(`
+        -- id is NOT a primary key. It is the envelope's id, minted by the ORIGIN daemon, so it is
+        -- attacker-chosen for any enrolled node; a global unique on it lets one node permanently
+        -- wedge another's sync by staging that node's next id first (dolly, 2026-08-28, #1102). The
+        -- refusal is correct in isolation and terminal in aggregate: the batch rolls back, the
+        -- cursor rightly does not move, and the next tick resends into the same constraint forever.
+        -- Team-scoping it would only narrow the wedge to same-team nodes — the population federation
+        -- exists to serve. Uniqueness is scoped to the ORIGIN instead: an origin is answerable for
+        -- its own ids and for nobody else's, and it cannot honestly mint one twice (messages.id is
+        -- its own local primary key), so a repeat is its own corruption wedging only itself.
         CREATE TABLE IF NOT EXISTS sync_log (
-          id           TEXT PRIMARY KEY,
+          id           TEXT NOT NULL,
           team_id      TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
           origin_node  TEXT NOT NULL REFERENCES nodes(id),
           origin_seq   INTEGER NOT NULL,
@@ -1198,6 +1207,10 @@ export const MIGRATIONS: Migration[] = [
         -- schema instead of trusting the allocator, and it is the index 3b-ii's cursor read walks.
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_origin ON sync_log(origin_node, origin_seq);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_hub ON sync_log(team_id, hub_seq);
+        -- Envelope-id uniqueness, scoped to the origin per the note above. NOTE for 3b-ii: two
+        -- origins MAY now stage one envelope id, so the fold must key on (origin_node, origin_seq)
+        -- and cannot assume the envelope id alone identifies a row.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_origin_id ON sync_log(origin_node, id);
 
         -- The hub's canonical-order allocator, per team. next_hub_seq names the NEXT value to
         -- assign, the same convention nodes.next_seq uses, so the allocator must hand out the

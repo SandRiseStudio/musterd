@@ -36,6 +36,23 @@ function localNodeId(ctx: Ctx, teamId: string): string | null {
   );
 }
 
+/**
+ * The highest `origin_seq` this machine has ever minted for the node, or 0 if none.
+ *
+ * The ceiling on any resume point a hub may hand back: a hub claiming to hold seq N from us when we
+ * have only ever written M < N is asserting something impossible, not correcting us.
+ */
+function localHead(ctx: Ctx, teamId: string, nodeId: string): number {
+  return (
+    ctx.db
+      .prepare<
+        [string, string],
+        { high: number | null }
+      >('SELECT MAX(origin_seq) AS high FROM messages WHERE team_id = ? AND origin_node = ?')
+      .get(teamId, nodeId)?.high ?? 0
+  );
+}
+
 function readCursor(ctx: Ctx, teamId: string, nodeId: string): number {
   return (
     ctx.db
@@ -135,16 +152,45 @@ export async function pushTeam(
   });
 
   if (res.status === 409) {
-    // The hub holds a different idea of where we are. Believe IT, not us: it is the authority on
+    // The hub holds a different idea of where we are. Believe it DOWNWARD — it is the authority on
     // what it has, and a pusher that cannot self-correct retries the same rejected batch forever.
+    //
+    // Upward is a different thing entirely, and it is bounded here. A resume point ahead of
+    // anything this machine ever minted cannot be a correction: it would move the cursor past real
+    // events, which every later pass then skips, which is exactly the silent loss the cursor exists
+    // to prevent — reintroduced through the one number the hub gets to dictate. It does not take a
+    // hostile hub; any hub-side miscomputation of the resume point converts into permanent loss
+    // here, reported by nobody (dolly, 2026-08-28, #1102 required B).
     const body = (await res.json().catch(() => null)) as { expected_seq?: unknown } | null;
     const expected = body?.expected_seq;
     if (typeof expected === 'number' && Number.isInteger(expected) && expected >= 1) {
+      const head = localHead(ctx, team.id, nodeId);
+      if (expected > head + 1) {
+        throw new Error(
+          `hub asked to resume at origin_seq ${expected}, ahead of this node's head ${head} — ` +
+            'impossible, so refusing rather than skipping events',
+        );
+      }
       advanceCursor(ctx, team.id, nodeId, expected - 1, now);
       log.warn({ msg: 'sync_push_gap', team: team.slug, resume_at: expected });
       return 0;
     }
     throw new Error(`hub refused the batch (409) without a usable resume point`);
+  }
+
+  if (res.status === 422) {
+    // A refusal no retry can clear. Everything else in this loop is "offline, try next tick", and
+    // that answer is wrong here: the same batch will be refused forever. Logged at ERROR with the
+    // offending event id so the failure is legible from this daemon's log alone, without anyone
+    // reading the hub's database to find out why a machine went quiet.
+    const body = (await res.json().catch(() => null)) as { event_id?: unknown } | null;
+    log.error({
+      msg: 'sync_push_rejected',
+      team: team.slug,
+      event_id: typeof body?.event_id === 'string' ? body.event_id : null,
+      detail: 'the hub will never accept this batch; it needs operator attention',
+    });
+    throw new Error(`hub permanently refused the batch (422)`);
   }
   if (!res.ok) throw new Error(`hub responded ${res.status}`);
 

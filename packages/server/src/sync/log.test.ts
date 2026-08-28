@@ -6,6 +6,7 @@ import {
   hubHead,
   highestContiguousSeq,
   ingestBatch,
+  SyncDuplicateIdError,
   SyncGapError,
   SyncOriginError,
 } from './log.js';
@@ -152,18 +153,55 @@ describe('hub ingest (ADR 325)', () => {
     db.close();
   });
 
-  it('refuses a distinct event that reuses a staged envelope id, rather than dropping it', () => {
+  it('refuses a distinct event that reuses THIS origin\u2019s staged envelope id', () => {
     const { db, team } = seed();
     ingestBatch(db, team.id, 'node-a', [ev('node-a', 1)]);
     // seq 2 carrying seq 1's envelope id is not a replay — the idempotence key (origin_node,
     // origin_seq) says these are different events. Swallowing it would advance the origin's
-    // sequence past an event the hub never stored: silent loss wearing an ack, which is precisely
-    // the loss-versus-silence ambiguity ADR 331 exists to prevent. It must be loud.
-    expect(() => ingestBatch(db, team.id, 'node-a', [ev('node-a', 2, 'node-a-1')])).toThrow();
+    // sequence past an event the hub never stored: silent loss wearing an ack. An origin cannot
+    // honestly mint one id twice (messages.id is its own local PK), so this is its own corruption
+    // and wedging only itself is the correct blast radius.
+    expect(() => ingestBatch(db, team.id, 'node-a', [ev('node-a', 2, 'node-a-1')])).toThrow(
+      SyncDuplicateIdError,
+    );
     expect(staged(db)).toEqual({ n: 1 });
     // And the refusal took the allocated hub_seq back down with it, so the order stays dense.
     expect(hubHead(db, team.id)).toBe(1);
     expect(db.prepare('SELECT next_hub_seq FROM sync_meta').get()).toEqual({ next_hub_seq: 2 });
+    db.close();
+  });
+
+  it('lets a DIFFERENT origin stage the same envelope id — one node cannot wedge another', () => {
+    const { db, team } = seed();
+    ingestBatch(db, team.id, 'node-a', [ev('node-a', 1, 'COLLIDE')]);
+
+    // dolly, 2026-08-28 (#1102 required A): with a global `id` PRIMARY KEY this threw, and because
+    // the batch is refused, the route answers non-409, pushTeam throws, and the cursor correctly
+    // does NOT move — so the next tick resends the identical batch into the identical constraint.
+    // That node's sync is dead until someone operates on the hub's database, signalled only by a
+    // warn line indistinguishable from being offline. Envelope ids are minted by the origin, so a
+    // hostile enrolled node chooses the collision and it costs one push.
+    //
+    // Uniqueness is scoped to (origin_node, id): an origin is answerable for its own ids and for
+    // nobody else's. Scoping to the TEAM would have narrowed the wedge to same-team nodes, which is
+    // exactly the population federation exists to serve.
+    expect(ingestBatch(db, team.id, 'node-b', [ev('node-b', 1, 'COLLIDE')]).accepted).toBe(1);
+    expect(staged(db)).toEqual({ n: 2 });
+    expect(hubHead(db, team.id)).toBe(2);
+    db.close();
+  });
+
+  it('refuses an envelope naming a team other than the one it is pushed into', () => {
+    const { db, team } = seed();
+    const foreign = ev('node-a', 1);
+    foreign.envelope.team = 'dawn';
+
+    // The hub authenticated the team, so the envelope does not get to name a different one. Nothing
+    // in 3b-i reads envelope.team — but 3b-ii's fold is the reader, and a row whose team_id says
+    // bravo while its payload says alpha is a contradiction the staging layer had the information
+    // to refuse (dolly, 2026-08-28).
+    expect(() => ingestBatch(db, team.id, 'node-a', [foreign])).toThrow(SyncOriginError);
+    expect(staged(db)).toEqual({ n: 0 });
     db.close();
   });
 
