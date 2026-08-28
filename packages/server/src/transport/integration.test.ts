@@ -3346,7 +3346,8 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     );
     expect(muted.status).toBe(403);
     const audit = auditRows('dawn');
-    expect(audit.filter((r) => r.action === 'send.denied').length).toBe(2);
+    // An inert account is refused at authentication, before the send route has an action to audit.
+    expect(audit.filter((r) => r.action === 'send.denied').length).toBe(1);
   });
 
   it('banned = inert: a disabled/banned seat cannot READ the inbox or firehose either (defense-in-depth)', async () => {
@@ -3363,6 +3364,32 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     setCaps('dawn', 'Dis', {}, 'disabled');
     expect((await get('/teams/dawn/inbox', auth)).status).toBe(403);
     expect((await get('/teams/dawn/messages', auth)).status).toBe(403);
+  });
+
+  it.each(['disabled', 'banned', 'archived'])(
+    'an %s agent credential cannot update availability',
+    async (accountStatus) => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickTok = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
+      setCaps('dawn', 'Dis', {}, accountStatus);
+
+      const res = await post(
+        '/teams/dawn/availability',
+        { status: 'away' },
+        { key: team.json.agent_key as string, seat: 'Dis' },
+      );
+      expect(res.status).toBe(403);
+    },
+  );
+
+  it('a banned admin credential cannot change team policy', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    setCaps('dawn', 'nick', { is_admin: true }, 'banned');
+
+    const res = await post('/teams/dawn/policy', { allow_pre_issued_grants: true }, nickTok);
+    expect(res.status).toBe(403);
   });
 
   it('visibility_level: a non-admin viewer sees its own caps but not other seats’ authority map', async () => {

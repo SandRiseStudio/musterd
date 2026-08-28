@@ -12,7 +12,7 @@ import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
 import { releaseInFlightClaimsForSeat } from './lanes.js';
 import type { MemberRow, TeamRow } from './rows.js';
-import { parseRoles, resolveCapabilities } from './rows.js';
+import { parseRoles, resolveAccountStatus, resolveCapabilities } from './rows.js';
 import { getAgentKeyHash, requireTeam } from './teams.js';
 
 export function hashToken(token: string): string {
@@ -291,24 +291,29 @@ export function authMember(
   actingSeat?: string,
 ): { team: TeamRow; member: MemberRow } {
   const team = requireTeam(db, teamSlug);
+  let member: MemberRow;
 
   if (token.startsWith(TOKEN_PREFIXES.agent_key)) {
-    return { team, member: authByAgentKey(db, team, token, actingSeat) };
-  }
-  if (token.startsWith(TOKEN_PREFIXES.credential)) {
-    return { team, member: authByCredential(db, team, token, actingSeat) };
-  }
-  if (token.startsWith(TOKEN_PREFIXES.seat)) {
-    return { team, member: authByServiceToken(db, team, token, actingSeat) };
+    member = authByAgentKey(db, team, token, actingSeat);
+  } else if (token.startsWith(TOKEN_PREFIXES.credential)) {
+    member = authByCredential(db, team, token, actingSeat);
+  } else if (token.startsWith(TOKEN_PREFIXES.seat)) {
+    member = authByServiceToken(db, team, token, actingSeat);
+  } else {
+    // v0.3 hard cutover (ADR 069 decision 2): the v0.2 per-seat token (`mskd_`) auth path is removed
+    // for peer seats — the only credentials are the team agent key (`mskey_`), a human credential
+    // (`mscr_`), and a service seat's own token (`mskd_`, ADR 232 — kind-bound, see above).
+    throw new MusterdError(
+      'unauthorized',
+      `unrecognized credential for team "${teamSlug}" — present a team agent key (mskey_) or a human credential (mscr_)`,
+    );
   }
 
-  // v0.3 hard cutover (ADR 069 decision 2): the v0.2 per-seat token (`mskd_`) auth path is removed
-  // for peer seats — the only credentials are the team agent key (`mskey_`), a human credential
-  // (`mscr_`), and a service seat's own token (`mskd_`, ADR 232 — kind-bound, see above).
-  throw new MusterdError(
-    'unauthorized',
-    `unrecognized credential for team "${teamSlug}" — present a team agent key (mskey_) or a human credential (mscr_)`,
-  );
+  const accountStatus = resolveAccountStatus(member);
+  if (accountStatus === 'disabled' || accountStatus === 'banned' || accountStatus === 'archived') {
+    throw new MusterdError('forbidden', `seat "${member.name}" is ${accountStatus}`);
+  }
+  return { team, member };
 }
 
 /**
