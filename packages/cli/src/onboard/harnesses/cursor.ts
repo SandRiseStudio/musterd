@@ -15,6 +15,7 @@ import {
   type McpServerEntry,
 } from '../mcpEntry.js';
 import type { FsSeam } from '../reconcile/context.js';
+import { roleBridgesFor } from '../roleSkills.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
@@ -205,6 +206,8 @@ export const cursor: Harness = {
     // ADR 333: catalog the orient ritual as a description-gated rule. The sessionStart hook injects
     // the block once; there is no repeating nudge on Cursor (beforeSubmitPrompt cannot inject).
     orientSkillPath: '.cursor/rules/musterd-orient.mdc',
+    // ADR 334: same bridge, as a description-gated rule.
+    roleSkillPattern: '.cursor/rules/<role>.mdc',
   },
 
   // ADR 198: Cursor Agent hooks carry `model_id` / `model` on the common schema. Prefer the
@@ -416,7 +419,11 @@ export const cursorAdapter: HarnessAdapter = {
       env: launchEntryEnv(CURSOR_SURFACE),
     };
     const hooks = cursorHooksPayload();
-    const guidancePayload = guidanceFileMap(cursor.guidance!, ctx.team ?? '');
+    const guidancePayload = guidanceFileMap(
+      cursor.guidance!,
+      ctx.team ?? '',
+      roleBridgesFor(ctx.worktreeRoot, [cursor]),
+    );
     return [
       {
         harness: 'cursor',
@@ -502,7 +509,11 @@ export const cursorAdapter: HarnessAdapter = {
           ctx.fs,
           ctx.worktreeRoot,
           (intent.payload as Record<string, string> | undefined) ??
-            guidanceFileMap(cursor.guidance!, ctx.team ?? ''),
+            guidanceFileMap(
+              cursor.guidance!,
+              ctx.team ?? '',
+              roleBridgesFor(ctx.worktreeRoot, [cursor]),
+            ),
         );
       default:
         return { state: 'absent' };
@@ -582,7 +593,11 @@ export const cursorAdapter: HarnessAdapter = {
           ctx.fs,
           ctx.worktreeRoot,
           (intent.payload as Record<string, string> | undefined) ??
-            guidanceFileMap(cursor.guidance!, ctx.team ?? ''),
+            guidanceFileMap(
+              cursor.guidance!,
+              ctx.team ?? '',
+              roleBridgesFor(ctx.worktreeRoot, [cursor]),
+            ),
           mutation.kind === 'remove' ? 'remove' : 'write',
         );
         return;

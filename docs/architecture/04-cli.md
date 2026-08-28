@@ -109,6 +109,7 @@ src/
     pending.ts        // client-side pending-presence markers (ADR 033)
     permissions.ts    // ADR 261: STANDARD_FLOOR + installSeatPermissions — the harness permission layer becomes a provisioned artifact
     primer.ts         // renderRepositoryPrimer + idempotent upsertPrimer → Team-only AGENTS.md primer (ADR 307)
+    roleSkills.ts     // ADR 334: resolve the seat's roster Role (read-only team fact) and render thin bridges to its committed `.agents/skills/<role>/SKILL.md`, merged into the guidance fragment (ADR 299 §2)
     toolkit.ts        // Toolkit = harness-agnostic provisioning template ("profile" pre-ADR-296, "role template" pre-ADR-272); resolve/apply (ADR 026/029/038); tools.codex_plugins declared for the Codex adapter (ADR 323)
     toolkits/builtins.ts // the shipped built-in toolkit seed library
     harnesses/        // per-harness feature differences (labeling, hooks, skills discovery) are observed environment facts — documented in docs/wiki/driver-support-matrix.md, not modelled (ADR 296)
