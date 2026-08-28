@@ -74,7 +74,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { z } from 'zod';
-import { isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
+import { checkUpgrade, isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
 import { MusterdError, asMusterdError } from '../errors.js';
@@ -1297,6 +1297,21 @@ export async function handleHttp(
   res: ServerResponse,
 ): Promise<void> {
   try {
+    // Apply the same Host/Origin boundary to HTTP that protects WebSocket upgrades. In particular,
+    // bearer-free local identity requests must not be callable by a hostile browser origin on loopback.
+    const requestCheck = checkUpgrade(
+      { host: req.headers.host, origin: req.headers.origin },
+      {
+        boundHost: ctx.config.host,
+        allowedHosts: ctx.config.allowedHosts,
+        allowedOrigins: ctx.config.allowedOrigins,
+      },
+    );
+    if (!requestCheck.ok) {
+      return sendJson(res, 403, {
+        error: { code: 'forbidden', message: 'request Host or Origin is not allowed' },
+      });
+    }
     const url = new URL(req.url ?? '/', 'http://localhost');
     const path = url.pathname;
     const method = req.method ?? 'GET';
