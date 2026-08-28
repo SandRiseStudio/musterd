@@ -8,7 +8,7 @@ import { CliError } from '../errors.js';
 import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve, resolveRead } from './helpers.js';
-import { refreshModelObservation } from './session.js';
+import { attestSlotIfUnattested, refreshModelObservation } from './session.js';
 
 /** Block-until-message exit code on timeout — mirrors coreutils `timeout(1)` so shell loops can tell
  *  "no message yet" from a real failure. Zero is reserved for "a directed act woke me". */
@@ -261,6 +261,12 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   // before the env/identity gates below: the observation is local and is owed even to a seat whose
   // daemon is unreachable or whose nudges are muted. Self-guarded, silent, never throws.
   refreshModelObservation();
+  // …and the first moment a slot SessionStart never announced can still be announced (lane
+  // 01M159BHJK). Sits beside the observation for the same reason and under the same contract: both
+  // are local truths the seat OWES the daemon, both are silent and self-guarded, and both are due
+  // even to a seat whose nudges are muted — so this runs before the MUSTERD_NO_NUDGE gate below.
+  // One push per session, not per tool call: the slot's `attested_at` stamp is what bounds it.
+  await attestSlotIfUnattested();
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
   try {
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
