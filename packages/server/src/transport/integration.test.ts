@@ -7226,6 +7226,20 @@ describe("local sign-in identity: this machine's CLI seat, and nobody else's (AD
     expect(res.json.credential).toBe(team.json.human_credential);
   });
 
+  it('refuses a cross-origin browser request even from a loopback peer', async () => {
+    const team = await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
+    writeFileSync(
+      configPath,
+      JSON.stringify({ identities: { dusk: { name: 'nick', key: team.json.human_credential } } }),
+    );
+
+    const res = await get('/teams/dusk/local-identity', undefined, {
+      origin: 'https://evil.example',
+    });
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.json)).not.toContain(team.json.human_credential);
+  });
+
   it('refuses an agent-keyed vault entry — an agent key is a harness fact, not a person', async () => {
     await post('/teams', { slug: 'dusk', creator: { name: 'nick', kind: 'human' } });
     writeFileSync(
