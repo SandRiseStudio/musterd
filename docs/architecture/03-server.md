@@ -84,6 +84,8 @@ src/
     state.ts          // ~/.musterd/node.json (ADR 328 §2): this machine's msnode_ per enrolled team, mode 0600 and chmod'd on overwrite (writeFileSync's mode applies only at create). The DAEMON owns it — `musterd node join` asks its own daemon to enroll, so one process holds the nodes row, the credential, and the file. Keyed by team SLUG while the db keys team_id: a rename orphans the entry, and re-enrolling is the repair
   seeds/
     ingest.ts         // setInterval poll (60s): parse Slack-only relay records, resolve human Member attribution, persist shared Seeds, and advance the cursor atomically; never opens a Lane (ADR 291/311)
+  sync/
+    log.ts            // the hub's staging log for pushed events (ADR 325 inc 3b-i): highestContiguousSeq / hubHead / ingestBatch, plus the two refusals — SyncOriginError (the batch's origin is not the authenticated node, or that node is not on this team: `nodes.id` is global, so identity is not entitlement) and SyncGapError (carrying the resume seq, because a pusher that cannot self-correct retries forever). hub_seq is allocated from `sync_meta.next_hub_seq` in the insert's own transaction, pre-increment, so the first event gets 1. Writes NOTHING to `messages` and moves no `nodes.next_seq` — the fold is 3b-ii, and containment.test.ts holds that line
   projection/
     load.ts           // read .musterd/team.toml + seats/*.toml -> TeamSpec; fail-closed per seat (ADR 058)
     reconcile.ts      // match-by-name delta: ADD/UPDATE/REVIVE/REMOVE the projection from the files
