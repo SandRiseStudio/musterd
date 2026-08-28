@@ -1173,6 +1173,52 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 325 increment 3b-i: the hub's staging log for pushed events, and the daemon's push cursor.
+    //
+    // Pushed events land HERE, never in `messages`. The fold into `messages` is 3b-ii, and it is one
+    // implementation run by hub and puller alike, so exactly one piece of code ever writes a
+    // foreign-origin row into the local log — the second insert path ADR 331 §Consequences warned
+    // about, built once and reviewed as its own slice. Nothing in this migration relates to
+    // `nodes.next_seq`; `src/sync/containment.test.ts` is what holds that true.
+    version: 50,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS sync_log (
+          id           TEXT PRIMARY KEY,
+          team_id      TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          origin_node  TEXT NOT NULL REFERENCES nodes(id),
+          origin_seq   INTEGER NOT NULL,
+          hub_seq      INTEGER NOT NULL,
+          payload      TEXT NOT NULL,
+          received_at  INTEGER NOT NULL
+        );
+        -- The idempotence key (a replayed push is a no-op) and the canonical-order key. The second
+        -- is UNIQUE rather than a plain index on purpose: it enforces hub_seq's density in the
+        -- schema instead of trusting the allocator, and it is the index 3b-ii's cursor read walks.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_origin ON sync_log(origin_node, origin_seq);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_hub ON sync_log(team_id, hub_seq);
+
+        -- The hub's canonical-order allocator, per team. next_hub_seq names the NEXT value to
+        -- assign, the same convention nodes.next_seq uses, so the allocator must hand out the
+        -- PRE-increment value: copying this DEFAULT into an insert hands out 1 twice.
+        CREATE TABLE IF NOT EXISTS sync_meta (
+          team_id       TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          next_hub_seq  INTEGER NOT NULL DEFAULT 1
+        );
+
+        -- Local-only (ADR 325 residence 3): this describes THIS machine's conversation with a hub,
+        -- not team state, so it is never replicated.
+        CREATE TABLE IF NOT EXISTS sync_push_cursor (
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          node_id     TEXT NOT NULL,
+          last_seq    INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL,
+          PRIMARY KEY (team_id, node_id)
+        );
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

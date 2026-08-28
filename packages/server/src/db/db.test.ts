@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('49');
+    expect(ver?.value).toBe('50');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -247,7 +247,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(49); // runs v18…v49 (including the shared Seed store)
+    expect(runMigrations(db)).toBe(50); // runs v18…v50 (including the shared Seed store)
 
     const scope = (id: string) =>
       db
@@ -311,7 +311,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(49);
+    expect(runMigrations(db)).toBe(50);
 
     const policy = (id: string) =>
       db
@@ -613,6 +613,59 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     insert('i1');
     // A replayed mint must collide rather than shadow the live code it duplicates.
     expect(() => insert('i2')).toThrow();
+    db.close();
+  });
+
+  /**
+   * v50 — the sync staging tables (ADR 325 increment 3b-i). No backfill: nothing has ever been
+   * pushed, and history is already in `messages` under its own origin stamp. What the replay must
+   * not do is drop events a hub has staged but not yet folded.
+   */
+  const stage = (db: InstanceType<typeof Database>, id: string, seq: number, hubSeq: number) =>
+    db
+      .prepare(
+        `INSERT INTO sync_log (id, team_id, origin_node, origin_seq, hub_seq, payload, received_at)
+         VALUES (?, 't1', 'n-remote', ?, ?, '{}', 1000)`,
+      )
+      .run(id, seq, hubSeq);
+
+  const withRemoteNode = () => {
+    const db = buildV46();
+    runMigrations(db);
+    db.prepare(
+      "INSERT INTO nodes (id, team_id, label, next_seq) VALUES ('n-remote', 't1', 'remote', 1)",
+    ).run();
+    return db;
+  };
+
+  it('v50 creates the staging tables, and a replay keeps what was already staged', () => {
+    const db = withRemoteNode();
+    stage(db, 'm1', 1, 1);
+
+    db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
+    expect(runMigrations(db)).toBe(50);
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  it('v50 makes a replayed push a no-op rather than a duplicate', () => {
+    const db = withRemoteNode();
+    stage(db, 'm1', 1, 1);
+    // The same origin event arriving twice — the pusher retried, or its cursor lagged. The
+    // idempotence key is (origin_node, origin_seq), so a fresh row id does NOT let it in twice.
+    expect(() => stage(db, 'm1-again', 1, 2)).toThrow();
+    db.close();
+  });
+
+  it('v50 refuses two staged rows claiming one hub_seq — the order is dense by schema', () => {
+    const db = withRemoteNode();
+    stage(db, 'm1', 1, 1);
+    // The off-by-one this guards: an allocator that hands out its DEFAULT instead of the
+    // pre-increment value issues hub_seq 1 twice, and the canonical order silently forks.
+    expect(() => stage(db, 'm2', 2, 1)).toThrow();
+    stage(db, 'm2', 2, 2);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 2 });
     db.close();
   });
 });
