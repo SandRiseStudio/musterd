@@ -991,8 +991,8 @@ describe('musterd session (capture)', () => {
       writeFileSync(p, JSON.stringify({ message: { role: 'assistant', model: 'm' } }) + '\n');
       return p;
     };
-    const enumStub =
-      (rows: { id: string; path: string; mtime: number; bytes: number }[]) => () => rows;
+    const enumStub = (rows: { id: string; path: string; mtime: number; bytes: number }[]) => () =>
+      rows;
 
     it('attests the healed slot, and stamps it so the boundary is idempotent', async () => {
       const attest = vi
@@ -1047,6 +1047,24 @@ describe('musterd session (capture)', () => {
       );
       await expect(attestSlotIfUnattested(wsA)).resolves.toBeUndefined();
       expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+    });
+
+    it('captureSession does not stamp a push that failed — the boundary picks it up instead', async () => {
+      // The capture path's half of the same rule, and the one a mutation found unpinned: a
+      // SessionStart whose push never landed (dead daemon, mid-bounce, auth drift) must leave the
+      // slot DUE. Stamping optimistically here would recreate the defect one layer over — the
+      // session would be marked announced while the ledger never heard of it, and the tool boundary
+      // would skip it forever.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValue(new Error('daemon bouncing'));
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+
+      // The daemon comes back; the next tool boundary settles the debt.
+      attest.mockResolvedValue(undefined as never);
+      await attestSlotIfUnattested(wsA);
+      expect(readBinding(wsA).session!.attested_at).toBeGreaterThan(0);
     });
 
     it('leaves an ended slot alone — a corpse is not a session to announce', async () => {
