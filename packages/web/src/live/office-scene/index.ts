@@ -387,6 +387,10 @@ export function mountOffice(
     clearExpandTimer(name);
     st.expanded = !st.expanded;
     applyExpandDom(name, st.expanded);
+    // The tick lives HERE and not in applyExpandDom, whose other caller is scheduleCollapse's
+    // timer — a tick from a timer is feedback for an action nobody chose (E4 spec §2).
+    const at = heads.get(name);
+    roomTone.moment(st.expanded ? 'plateOpen' : 'plateClose', at ? screenPan(at.x, width) : 0);
   }
 
   // ── Tier-A ambient overlay (ADR 086): GPU-composited CSS life over the baked floor — a slow day-cycle
@@ -956,6 +960,9 @@ export function mountOffice(
       const trace = drawTether(head, target);
       labelHost.appendChild(trace);
       s.cancels.push(() => trace.remove());
+      // The whoosh deliberately follows the tether's own gate (E4 spec §2): a sweep describing
+      // motion that is not drawing would be a lie. Pan rides sender → addressee with the trace.
+      roomTone.moment('whoosh', screenPan(head.x, width), screenPan(target.x, width));
     }
 
     // enter on the next frame so the hidden initial state paints first → the CSS transition actually runs
