@@ -53,7 +53,7 @@ vi.mock('../client.js', () => ({
 const { buildSkewNotes, footprintNotes, inspectProvisioning, runSessionProbe } =
   await import('./doctor.js');
 const { writeGuidance, CANONICAL_SKILL_PATH } = await import('./guidance.js');
-const { writeProvisionManifest } = await import('./manifest.js');
+const { writeProvisionManifest, saveProvisioning } = await import('./manifest.js');
 
 function harness(label: string, installed: boolean, configured: boolean, registeredClaim?: string) {
   return {
@@ -397,6 +397,11 @@ describe('inspectProvisioning', () => {
           provisionedAt: '2026-08-19T00:00:00.000Z',
         }),
       );
+      // A provisioned folder carries the canonical guidance. Written here so this block tests the
+      // Codex prescription and nothing else: since the guidance check reads every manifest version
+      // (not just v1), a provisioned folder with no guidance on disk legitimately reports missing
+      // files, and that would decide `repair` instead of the entry drift under test.
+      writeGuidance(dir, [], { team: 'dawn' });
       return dir;
     };
 
@@ -764,6 +769,46 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
     const r = await inspectProvisioning(dir);
     expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
+  });
+
+  /**
+   * The field defect (2026-08-31, dolly's finding on #1087): every seat workspace on this laptop
+   * sat at guidance v18 while the build wrote v20, and `musterd init --check` reported NOTHING.
+   *
+   * `inspectGuidance` gated on `readProvisionManifest`, which parses the **v1** manifest
+   * (`version: z.literal(1)`). Every worktree past the v1 era — i.e. every provisioned worktree,
+   * since ADR 281/282 moved the file to v2 then v3 — parses as null there, so the check returned
+   * before reading a single stamp. The early return's premise ("no record ⇒ pre-085, never
+   * written") was true under v1 and stopped being true the moment a second manifest version
+   * existed: a constraint outliving its premise.
+   *
+   * That the whole existing suite above writes a v1 manifest is what kept it green.
+   */
+  it('flags a stale-version skill in a v3-manifest folder (the field case)', async () => {
+    const dir = tmp();
+    saveProvisioning(dir, {
+      version: 3,
+      toolkit: '',
+      desired: ['claude-code'],
+      contributions: {},
+      provisionedAt: new Date().toISOString(),
+    });
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
+  });
+
+  it('stays quiet in a folder that was never provisioned at all', async () => {
+    // The early return this replaces was doing one job correctly: an unprovisioned folder claims
+    // nothing, so it must not be told its guidance is stale. Keep that.
+    const dir = tmp();
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('v0'))).toBe(false);
   });
 
   it('flags a recorded-but-missing skill file as drift', async () => {
