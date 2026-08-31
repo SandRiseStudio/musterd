@@ -1207,9 +1207,13 @@ export const MIGRATIONS: Migration[] = [
         -- schema instead of trusting the allocator, and it is the index 3b-ii's cursor read walks.
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_origin ON sync_log(origin_node, origin_seq);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_hub ON sync_log(team_id, hub_seq);
-        -- Envelope-id uniqueness, scoped to the origin per the note above. NOTE for 3b-ii: two
-        -- origins MAY now stage one envelope id, so the fold must key on (origin_node, origin_seq)
-        -- and cannot assume the envelope id alone identifies a row.
+        -- Envelope-id uniqueness, scoped to the origin per the note above. NOTE for 3b-ii: this
+        -- scoping did not REMOVE the wedge, it MOVED it. Two rows in one team may now share an
+        -- envelope id, and messages.id is a PRIMARY KEY, so the fold cannot write both -- what was
+        -- one node's push loop failing is now the whole team's fold failing, and 3b-ii inherits it.
+        -- Still the right trade (refusing at the door hands one node a lever on another's
+        -- liveness), but a real cost, not a footnote. The fold must key on (origin_node,
+        -- origin_seq), and choosing what it does with the second row is 3b-ii's call.
         CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_log_origin_id ON sync_log(origin_node, id);
 
         -- The hub's canonical-order allocator, per team. next_hub_seq names the NEXT value to

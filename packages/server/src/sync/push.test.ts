@@ -99,6 +99,40 @@ function createHubStub(status: number, body: unknown) {
   return { url, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }
 
+/**
+ * Run `fn` and collect the daemon's log lines, so a test can assert what an OPERATOR would see
+ * rather than only what the caller catches.
+ *
+ * Vitest sets MUSTERD_SILENT=1 for the whole suite; it is lifted for the duration of the call
+ * because the visibility of the line IS the property under test here (ADR 335 §7 decision 7).
+ */
+async function captureLogs(fn: () => Promise<unknown>): Promise<Record<string, unknown>[]> {
+  const lines: Record<string, unknown>[] = [];
+  const record = (chunk: unknown): boolean => {
+    for (const line of String(chunk).split('\n').filter(Boolean)) {
+      try {
+        lines.push(JSON.parse(line) as Record<string, unknown>);
+      } catch {
+        // not one of ours
+      }
+    }
+    return true;
+  };
+  const silent = process.env['MUSTERD_SILENT'];
+  const [outWrite, errWrite] = [process.stdout.write, process.stderr.write];
+  delete process.env['MUSTERD_SILENT'];
+  process.stdout.write = record as typeof process.stdout.write;
+  process.stderr.write = record as typeof process.stderr.write;
+  try {
+    await fn().catch(() => undefined);
+  } finally {
+    process.stdout.write = outWrite;
+    process.stderr.write = errWrite;
+    if (silent !== undefined) process.env['MUSTERD_SILENT'] = silent;
+  }
+  return lines;
+}
+
 const joinerTeam = () => getTeamBySlug(joiner.db, 'bravo')!;
 const stagedOnHub = () => hub.db.prepare('SELECT COUNT(*) AS n FROM sync_log').get();
 const cursor = () =>
@@ -270,6 +304,65 @@ describe('the push loop', () => {
     saveNodeEnrollment({ team: 'bravo', ...enrolled, hub_url: await stub.url });
 
     await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/impossible|ahead/i);
+    expect(cursor()).toBe(0);
+    await stub.close();
+  });
+
+  it('distinguishes an impossible resume point from being offline', async () => {
+    send(joiner, 'm-1');
+    send(joiner, 'm-2');
+    await enrollJoiner();
+
+    // The refusal above is right and, until this line existed, invisible: startSyncPush catches it
+    // into log.warn sync_push_failed, the same line a laptop on a train writes every 60s forever.
+    // On the branch that guards against SILENT DATA LOSS, that is the one case where an operator
+    // most needs a signal saying nothing that reads like one (dolly, 2026-08-31, #1102 re-review).
+    const enrolled = readNodeState().nodes['bravo']!;
+    const stub = createHubStub(409, {
+      error: { code: 'conflict', message: 'gap' },
+      expected_seq: 4,
+    });
+    saveNodeEnrollment({ team: 'bravo', ...enrolled, hub_url: await stub.url });
+
+    const lines = await captureLogs(() => pushTeam(joinerCtx, joinerTeam()));
+
+    // Both numbers, because either alone leaves the reader unable to tell which side is wrong.
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: 'error',
+        msg: 'sync_push_impossible_resume',
+        resume_at: 4,
+        head: 2,
+      }),
+    );
+    expect(cursor()).toBe(0);
+    await stub.close();
+  });
+
+  it('distinguishes a 409 with no usable resume point at all from being offline', async () => {
+    send(joiner, 'm-1');
+    await enrollJoiner();
+
+    // Same throw-into-the-offline-line defect on the other 409 exit. `expected_seq` is present and
+    // unusable here rather than missing, because that is the shape a miscomputing hub produces and
+    // the value the operator needs echoed back.
+    const enrolled = readNodeState().nodes['bravo']!;
+    const stub = createHubStub(409, {
+      error: { code: 'conflict', message: 'gap' },
+      expected_seq: 0,
+    });
+    saveNodeEnrollment({ team: 'bravo', ...enrolled, hub_url: await stub.url });
+
+    const lines = await captureLogs(() => pushTeam(joinerCtx, joinerTeam()));
+
+    expect(lines).toContainEqual(
+      expect.objectContaining({
+        level: 'error',
+        msg: 'sync_push_no_resume_point',
+        resume_at: 0,
+        head: 1,
+      }),
+    );
     expect(cursor()).toBe(0);
     await stub.close();
   });

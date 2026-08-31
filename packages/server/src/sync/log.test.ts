@@ -191,6 +191,45 @@ describe('hub ingest (ADR 325)', () => {
     db.close();
   });
 
+  it('an origin that restages one seq under a different id is silently acked, not refused', () => {
+    const { db, team } = seed();
+    ingestBatch(db, team.id, 'node-a', [ev('node-a', 1, 'node-a-1')]);
+
+    // The guard above is ASYMMETRIC, and this test is the falsifier for saying so (dolly,
+    // 2026-08-31). An id reused under a NEW seq is refused terminally and loudly; the same seq
+    // restaged under a DIFFERENT id is swallowed by the `origin_seq < expected` replay branch
+    // before anything compares ids. The hub keeps its version, acks, and the origin advances its
+    // cursor believing the newer body landed — the same corruption at the same source as the case
+    // above, treated the opposite way: one screams, one is silent loss wearing an ack.
+    //
+    // It is left this way on purpose. Comparing ids on the replay path would make every lost ack
+    // a potential refusal, and an origin cannot honestly mint two bodies under one seq; 3b-ii's
+    // fold is where a divergent replay becomes detectable against a stored payload.
+    const restaged = ingestBatch(db, team.id, 'node-a', [ev('node-a', 1, 'node-a-1-REWRITTEN')]);
+    expect(restaged.accepted).toBe(0);
+    expect(staged(db)).toEqual({ n: 1 });
+    expect(db.prepare('SELECT id FROM sync_log').get()).toEqual({ id: 'node-a-1' });
+    db.close();
+  });
+
+  it('a batch that throws mid-loop leaves the hub_seq allocator exactly where it was', () => {
+    const { db, team } = seed();
+    ingestBatch(db, team.id, 'node-a', [ev('node-a', 1)]);
+
+    // The allocator is bumped INSIDE the loop, one event at a time, so a throw on a later event
+    // happens after earlier ones have already drawn numbers. Nothing leaks, because the bump and
+    // the insert share the transaction the throw rolls back — asserted here rather than reasoned
+    // about, since a leaked allocation is invisible until it shows as a hole in a dense order
+    // (dolly, 2026-08-31, answering my open question by running it).
+    expect(() => ingestBatch(db, team.id, 'node-a', [ev('node-a', 2), ev('node-a', 4)])).toThrow(
+      SyncGapError,
+    );
+    expect(db.prepare('SELECT next_hub_seq FROM sync_meta').get()).toEqual({ next_hub_seq: 2 });
+    expect(hubHead(db, team.id)).toBe(1);
+    expect(staged(db)).toEqual({ n: 1 });
+    db.close();
+  });
+
   it('refuses an envelope naming a team other than the one it is pushed into', () => {
     const { db, team } = seed();
     const foreign = ev('node-a', 1);

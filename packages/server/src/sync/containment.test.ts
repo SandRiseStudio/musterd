@@ -76,6 +76,47 @@ describe('3b-i containment', () => {
     db.close();
   });
 
+  it('stages two rows in one team that the fold cannot both write', () => {
+    const { db, team } = seed();
+    for (const id of ['node-a', 'node-b']) {
+      db.prepare('INSERT INTO nodes (id, team_id, label, next_seq) VALUES (?, ?, ?, 1)').run(
+        id,
+        team.id,
+        id,
+      );
+    }
+
+    // ADR 335 §Decision 6 scopes envelope-id uniqueness to the ORIGIN, which is the right trade —
+    // a wider scope hands one node a lever on another node's liveness. But it did not remove that
+    // wedge, it MOVED it, and this test is where the move is written down rather than argued
+    // about (dolly, 2026-08-31). Two origins may now stage one id in one team:
+    for (const node of ['node-a', 'node-b']) {
+      db.prepare(
+        `INSERT INTO sync_log (id, team_id, origin_node, origin_seq, hub_seq, payload, received_at)
+         VALUES (?, ?, ?, 1, ?, '{}', 1000)`,
+      ).run('COLLIDE', team.id, node, node === 'node-a' ? 1 : 2);
+    }
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 2 });
+
+    // …and `messages.id` is a PRIMARY KEY, so 3b-ii's fold can write exactly one of them. What was
+    // one node's push loop failing has become the whole team's fold failing. Standing here, in
+    // 3b-i, that is a consequence to state; 3b-ii owns choosing what the fold does about it.
+    const author = db.prepare<[], { id: string }>('SELECT id FROM members LIMIT 1').get()!.id;
+    const fold = (origin: string) =>
+      db
+        .prepare(
+          `INSERT INTO messages (id, team_id, from_member, to_kind, to_member, act, body, ts,
+                                 created_at, origin_node, origin_seq)
+           SELECT id, team_id, ?, 'team', NULL, 'message', 'hi', 1000, 1000, origin_node, origin_seq
+             FROM sync_log WHERE origin_node = ?`,
+        )
+        .run(author, origin);
+
+    fold('node-a');
+    expect(() => fold('node-b')).toThrow(/UNIQUE|PRIMARY KEY|constraint/i);
+    db.close();
+  });
+
   it('keeps the staging tables free of any counter tied to nodes.next_seq', () => {
     const { db } = seed();
 

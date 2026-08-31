@@ -71,6 +71,15 @@ and the next tick resent into the same constraint — permanently, behind a warn
 being offline. Falsify: run the two-row insert above and assert both land; if the second throws, the
 uniqueness scope is wider than the origin again.
 
+**The wedge moved; it did not go away** (dolly, 2026-08-31). Those two coexisting rows share an
+envelope id inside one team, and `messages.id` is a PRIMARY KEY — so 3b-ii's fold can write exactly
+one of them. What used to be one node's push loop failing is now the whole team's fold failing.
+Origin-scoping is still the right trade, because refusing at the door hands any enrolled node a
+lever on another node's liveness, but the cost is real and 3b-ii inherits it. Falsify:
+`packages/server/src/sync/containment.test.ts`, "stages two rows in one team that the fold cannot
+both write" — if that insert stops throwing, either the scope widened again or `messages.id` is no
+longer the fold's key.
+
 **These numbers were re-gathered on databases created after the fix.** The earlier run on this page
 was measured against the original v50, which still had the global PK. `runMigrations` skips any
 version at or below the stored one and the body is `CREATE TABLE IF NOT EXISTS`, so a database

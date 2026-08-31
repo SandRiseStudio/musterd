@@ -169,9 +169,22 @@ export async function pushTeam(
     // here, reported by nobody (dolly, 2026-08-28, #1102 required B).
     const body = (await res.json().catch(() => null)) as { expected_seq?: unknown } | null;
     const expected = body?.expected_seq;
+    const head = localHead(ctx, team.id, nodeId);
     if (typeof expected === 'number' && Number.isInteger(expected) && expected >= 1) {
-      const head = localHead(ctx, team.id, nodeId);
       if (expected > head + 1) {
+        // Decision 7 (ADR 335 §7): every refusal must be distinguishable from being offline.
+        // Without this line the throw falls into startSyncPush's catch as sync_push_failed — the
+        // identical line a laptop on a train writes every 60s — on the one branch that exists to
+        // stop silent data loss, so the case that most needs an operator says nothing that reads
+        // like it does (dolly, 2026-08-31, #1102 re-review).
+        log.error({
+          msg: 'sync_push_impossible_resume',
+          team: team.slug,
+          resume_at: expected,
+          head,
+          detail:
+            'the hub asked to resume ahead of anything this node has minted; it needs operator attention',
+        });
         throw new Error(
           `hub asked to resume at origin_seq ${expected}, ahead of this node's head ${head} — ` +
             'impossible, so refusing rather than skipping events',
@@ -181,6 +194,17 @@ export async function pushTeam(
       log.warn({ msg: 'sync_push_gap', team: team.slug, resume_at: expected });
       return 0;
     }
+    // Same decision-7 reason, same shape: a 409 whose resume point is missing or unusable is a hub
+    // this daemon cannot self-correct against, and retrying it at WARN is indistinguishable from
+    // being unreachable. `resume_at` carries what the hub actually said, unusable value and all.
+    log.error({
+      msg: 'sync_push_no_resume_point',
+      team: team.slug,
+      resume_at: expected === undefined ? null : expected,
+      head,
+      detail:
+        'the hub refused the batch without a usable resume point; it needs operator attention',
+    });
     throw new Error(`hub refused the batch (409) without a usable resume point`);
   }
 

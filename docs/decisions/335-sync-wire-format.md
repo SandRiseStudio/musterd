@@ -134,9 +134,27 @@ Scoping to the origin is both safe and sufficient: an origin cannot honestly min
 `messages.id` is its own local primary key — so a repeat is corruption at that source, and wedging
 only itself is the correct blast radius.
 
-**A consequence 3b-ii must not inherit unstated:** two origins MAY now stage one envelope id. The
-fold must key on `(origin_node, origin_seq)` and cannot assume the envelope id alone identifies a
-row.
+**A consequence 3b-ii must not inherit unstated: origin-scoping did not remove the wedge, it moved
+it.** Two rows in one team may now share an envelope id, and `messages.id` is a PRIMARY KEY — so the
+fold cannot write both. What was one node's push loop failing is now the whole team's fold failing,
+and 3b-ii inherits it. The trade is still the right one — refusing at the door hands one node a
+lever on another node's liveness, which is worse — but the cost is a real one and belongs here in
+plain words, not softened into "the fold cannot assume the id identifies a row". (dolly,
+2026-08-31, re-review of #1102.) Test: `sync/containment.test.ts` stages two rows in one team that
+the fold cannot both write.
+
+**The guard this decision installs is asymmetric, and knowing which half is loud matters.** An id
+reused under a NEW `origin_seq` is refused terminally and loudly (§Decision 5). The same `origin_seq`
+restaged under a DIFFERENT id is swallowed by the replay branch — `origin_seq < expected` returns
+before anything compares ids — so the hub keeps its version, acks, and the origin advances its
+cursor believing its newer body landed. Same corruption at the same source, opposite treatment: one
+screams, the other is silent loss wearing an ack.
+
+It is left asymmetric deliberately. Comparing ids on the replay path turns every lost ack into a
+potential refusal, which is the failure this protocol is built around; an origin cannot honestly
+mint two bodies under one seq; and 3b-ii's fold is the first place a divergent replay is detectable
+against a stored payload. Falsifier: `sync/log.test.ts`, "an origin that restages one seq under a
+different id is silently acked, not refused".
 
 ### 7. Every refusal must be distinguishable from being offline
 
@@ -161,11 +179,22 @@ The `409` gap refusal names where to resume, and §Decision 4 makes that binding
 authority on what it holds. Upward it is not. A resume point ahead of anything this machine ever
 minted cannot be a correction; it moves the cursor past real events that every later pass then
 skips, which is the silent loss the cursor exists to prevent, reintroduced through the one number
-the hub gets to dictate. `expected_seq` is refused above this node's own `MAX(origin_seq) + 1`.
+the hub gets to dictate. `expected_seq` is refused above this node's own head + 1.
 
 This needs no hostile hub to matter: any hub-side miscomputation of the resume point converts into
 permanent data loss on the pusher, reported by nobody. (dolly, 2026-08-28, reproduced with a stubbed
 hub answering `expected_seq: 1000000` against three unpushed messages.)
+
+The ceiling is read from the node's **allocator** (`nodes.next_seq - 1`), not from
+`MAX(origin_seq) FROM messages`. One allocator serves every replicated kind, so the moment a second
+kind draws from it — 3c's lane claims — a messages-derived head under-reports and a *legitimate*
+resume point trips this guard, wedging the loop it exists to protect.
+
+Both refusals on this path are logged at **error** with the offending resume point *and* this node's
+head, per §Decision 7: without that, they reach `startSyncPush`'s catch as `sync_push_failed` — the
+same line a laptop on a train writes every 60s — on the one branch guarding against silent data
+loss. Falsifiers: `sync/push.test.ts`, "distinguishes an impossible resume point from being offline"
+and "distinguishes a 409 with no usable resume point at all from being offline". (dolly, 2026-08-31.)
 
 ## Alternatives considered
 
