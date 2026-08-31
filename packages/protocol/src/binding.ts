@@ -52,8 +52,9 @@ export const WorkspaceSpecSchema = z
 export type WorkspaceSpec = z.infer<typeof WorkspaceSpecSchema>;
 
 /**
- * The captured harness session for this workspace (ADR 131 §5, increment 4) — written ONLY by the
- * SessionStart/SessionEnd hooks via `musterd session start|end --stdin`. Strictly machine-local: it
+ * The captured harness session for this workspace (ADR 131 §5, increment 4) — written by the
+ * SessionStart/SessionEnd hooks via `musterd session start|end --stdin`, and by the tool-boundary
+ * heal when the slot turns out to name a session that is not the one running. Strictly machine-local: it
  * lives in the gitignored 0600 `binding.json` (`WorkspaceSpecSchema.parse` strips it from the
  * committed `workspace.json`), the session id and transcript path NEVER cross the wire (the daemon
  * gets a harness-class-only attestation), and the MCP adapter never reads it (no hook-vs-adapter
@@ -71,6 +72,18 @@ export const SessionCaptureSchema = z.object({
   started_at: z.number().int(),
   /** Set by the advisory SessionEnd hook; absent after a crash — resumability never depends on it. */
   ended_at: z.number().int().optional(),
+  /**
+   * When the daemon was told this session exists (lane 01M159BHJK). Local-only bookkeeping: it
+   * records that an attestation LANDED, so the tool boundary can reconcile a slot SessionStart
+   * never announced without re-announcing every slot on every tool call.
+   *
+   * Absent is the honest default and it is what makes the retry work — set only after a successful
+   * push, never optimistically, so an unreachable daemon leaves the slot due rather than silently
+   * finished. Measured 2026-08-28: a session gated by the interloper gate (no attestation) that
+   * later took the slot via the heal (which does not attest) stayed invisible to the ledger for its
+   * entire two-hour life, because SessionStart was the only moment that could ever have told anyone.
+   */
+  attested_at: z.number().int().optional(),
 });
 
 export type SessionCapture = z.infer<typeof SessionCaptureSchema>;

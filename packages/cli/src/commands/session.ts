@@ -8,6 +8,7 @@ import {
   parseSeatLabel,
   renderSeatLabel,
   resolveAttestedWakeLease,
+  type Binding,
   type SessionCapture,
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
@@ -473,6 +474,90 @@ function observeModelFor(harnessId: string, payload: HookPayload): string | unde
  * The capture itself, stdin-free (exported for tests + the e2e harness): resolve the workspace,
  * write/annotate `binding.session`, then push the harness-class-only attestation best-effort.
  */
+/**
+ * The resumable attestation (harness class + correlation digest), best-effort: a dead daemon must
+ * never fail a hook, and the local capture is complete without it. Returns whether the push LANDED,
+ * which is the only thing that may be written down as attested.
+ *
+ * The digest travels; the id does not. It is what lets the ledger distinguish one session flapping
+ * from two short-lived sessions of the same seat — the question that made 48 same-seat
+ * captured→ended pairs unreadable on 2026-08-05.
+ */
+async function pushAttestation(
+  binding: Binding,
+  session: SessionCapture,
+  event: 'start' | 'end',
+): Promise<boolean> {
+  const seat = bindingSeat(binding);
+  if (!binding.agent_key || !seat) return false;
+  try {
+    const http = new HttpClient({
+      server: binding.server,
+      key: binding.agent_key,
+    }).presenceNeutral();
+    // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
+    // token rides the child's env, so it is attested here exactly as the presence-touch path
+    // attests it. Never defaulted — an ordinary session has no `MUSTERD_WAKE_LEASE` and says
+    // nothing (ADR 236). This is what lets a lease that dies `lease_expired` still be known to
+    // have PAID for a session: the captured row names the lease by identity, not by timing.
+    const wakeLease = resolveAttestedWakeLease(process.env);
+    await http.attestSession(binding.team, {
+      seat,
+      harness: CAPTURE_HARNESS,
+      event,
+      session_digest: sessionDigest(binding.agent_key, session.id),
+      ...(wakeLease ? { wake_lease: wakeLease } : {}),
+    });
+    return true;
+  } catch {
+    // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
+    return false;
+  }
+}
+
+/**
+ * Tell the daemon about a slot it was never told about (lane 01M159BHJK).
+ *
+ * SessionStart is not the only way a session comes to hold the workspace slot, but it was the only
+ * one that attested. The interloper gate turns a newcomer away with "no slot write AND no daemon
+ * attestation" — and a fresh session cannot satisfy that gate's activity predicate, because a
+ * transcript has no turn yet at SessionStart. The heal in {@link refreshModelObservation} then hands
+ * the slot to the session actually running, at the first tool boundary, and writes it locally with
+ * nothing sent anywhere.
+ *
+ * Measured on seat ryder 2026-08-28: a session that took the slot exactly that way ran for two
+ * hours, claimed a lane and closed one, and never appeared on the ledger at all — its digest
+ * `982f768adf12` returned zero audit rows, while the newest session the daemon knew of was a wake
+ * child that had ended 90 minutes before. The gate's note that "the slot self-corrects at the next
+ * SessionStart" is true of the slot and false of the ledger, which has no later moment to correct in.
+ *
+ * So the boundary that always happens reconciles it. Deliberately narrow:
+ *   · only an un-ended slot — a corpse is not a session to announce;
+ *   · only when `attested_at` is absent, so this is one push per session, not one per tool call;
+ *   · the stamp is written only when the push LANDED, so an unreachable daemon stays due instead of
+ *     being marked done — the failure this closes must not be re-openable by one bad minute;
+ *   · nothing here writes or steals a slot, so the interloper gate keeps deciding who holds it. A
+ *     newcomer the gate turned away has no slot, and therefore still announces nothing.
+ */
+export async function attestSlotIfUnattested(dirHint?: string): Promise<void> {
+  try {
+    const dir = dirHint ?? findWorkspaceDir();
+    if (!dir) return;
+    const binding = findBinding(dir, {});
+    const session = binding?.session;
+    if (!binding || !session) return;
+    if (session.ended_at !== undefined || session.attested_at !== undefined) return;
+    if (!(await pushAttestation(binding, session, 'start'))) return;
+    // Re-read: the push is awaited, and a concurrent hook may have rewritten the slot meanwhile.
+    // Stamping a slot that has since changed id would mark a DIFFERENT session as announced.
+    const fresh = findBinding(dir, {});
+    if (!fresh?.session || fresh.session.id !== session.id) return;
+    saveBinding(dir, { ...fresh, session: { ...fresh.session, attested_at: Date.now() } });
+  } catch {
+    // A tool-boundary reconciler must never fail the tool call it rides on.
+  }
+}
+
 export async function captureSession(event: 'start' | 'end', payload: HookPayload): Promise<void> {
   if (!payload.session_id) return; // no id, nothing to capture — a hook must never fail
 
@@ -565,29 +650,14 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // flapping from two short-lived sessions of the same seat — the question that made 48 same-seat
   // captured→ended pairs unreadable on 2026-08-05. Note the `end` branch above: a mismatched id
   // returns early, so an `ended` push always carries the digest of the capture it belongs to.
-  const seat = bindingSeat(binding);
-  if (binding.agent_key && seat) {
-    try {
-      const http = new HttpClient({
-        server: binding.server,
-        key: binding.agent_key,
-      }).presenceNeutral();
-      // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
-      // token rides the child's env, so it is attested here exactly as the presence-touch path
-      // attests it. Never defaulted — an ordinary session has no `MUSTERD_WAKE_LEASE` and says
-      // nothing (ADR 236). This is what lets a lease that dies `lease_expired` still be known to
-      // have PAID for a session: the captured row names the lease by identity, not by timing.
-      const wakeLease = resolveAttestedWakeLease(process.env);
-      await http.attestSession(binding.team, {
-        seat,
-        harness: CAPTURE_HARNESS,
-        event,
-        session_digest: sessionDigest(binding.agent_key, session.id),
-        ...(wakeLease ? { wake_lease: wakeLease } : {}),
-      });
-    } catch {
-      // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
-    }
+  // `start` records the landing so the tool boundary knows this slot is already announced; a failed
+  // push leaves `attested_at` absent, which is what makes {@link attestSlotIfUnattested} retry.
+  if ((await pushAttestation(binding, session, event)) && event === 'start') {
+    // Re-read: the push is awaited, and a concurrent writer (a slot heal, a model observation) may
+    // have rewritten the binding meanwhile. Stamping from the pre-await copy would revert it.
+    const fresh = findBinding(dir, {});
+    if (!fresh?.session || fresh.session.id !== session.id) return;
+    saveBinding(dir, { ...fresh, session: { ...fresh.session, attested_at: Date.now() } });
   }
 }
 

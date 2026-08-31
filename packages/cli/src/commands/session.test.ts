@@ -7,6 +7,7 @@ import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { LOCAL_SESSION_LIVE_MS } from '../session/liveness.js';
 import {
+  attestSlotIfUnattested,
   captureSession,
   LABEL_SWEEP_STALE_MS,
   labelSweepDue,
@@ -963,6 +964,200 @@ describe('musterd session (capture)', () => {
         transcript_path: livePath,
       });
       expect(a.model_observed).toBeUndefined();
+    });
+  });
+
+  /**
+   * Attestation belongs to HOLDING the slot, not to SessionStart (lane 01M159BHJK).
+   *
+   * Measured on seat ryder 2026-08-28. A wake-spawned session held the slot; an interactive session
+   * started beside it, was turned away by the interloper gate — which is documented to mean "no slot
+   * write AND no daemon attestation" — and then took the slot back legitimately at its first tool
+   * boundary, via the heal. The heal writes the slot and nothing else, and `captureSession` is the
+   * only caller of `attestSession`, so nothing ever told the daemon. That session then ran for two
+   * hours, claimed a lane and closed one, and never existed on the ledger: its correlation digest
+   * `982f768adf12` returned zero audit rows for its whole life, while the last session the daemon
+   * knew about was the wake child that had ended 90 minutes earlier.
+   *
+   * The gate's own note says "the slot self-corrects at the next SessionStart". Locally, yes. The
+   * LEDGER never self-corrects, because the only moment that attests has already passed.
+   *
+   * So the boundary that always happens is the one that reconciles: an un-ended slot the daemon has
+   * not been told about gets attested there, exactly once.
+   */
+  describe('the tool boundary attests a slot SessionStart never did', () => {
+    const transcript = (ws: string, name: string): string => {
+      const p = join(ws, name);
+      writeFileSync(p, JSON.stringify({ message: { role: 'assistant', model: 'm' } }) + '\n');
+      return p;
+    };
+    const enumStub = (rows: { id: string; path: string; mtime: number; bytes: number }[]) => () =>
+      rows;
+
+    it('attests the healed slot, and stamps it so the boundary is idempotent', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'wake-child',
+            transcript_path: join(wsA, 'wake.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+      const livePath = transcript(wsA, 'live.jsonl');
+      refreshModelObservation(
+        wsA,
+        enumStub([{ id: 'gated-live', path: livePath, mtime: Date.now(), bytes: 10 }]),
+      );
+      expect(readBinding(wsA).session!.id).toBe('gated-live'); // the heal took the slot
+      expect(attest).not.toHaveBeenCalled(); // …and told nobody, which is the defect
+
+      await attestSlotIfUnattested(wsA);
+      expect(attest).toHaveBeenCalledTimes(1);
+      expect(attest.mock.calls[0]![1]).toMatchObject({ seat: 'scout', event: 'start' });
+      const stamped = readBinding(wsA).session!;
+      expect(stamped.attested_at).toBeGreaterThan(0);
+
+      // The boundary runs on every tool call — a second pass must not re-announce the session.
+      await attestSlotIfUnattested(wsA);
+      expect(attest).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not stamp when the daemon could not be told — the retry must survive', async () => {
+      // A hook may never fail, so the push is swallowed; stamping regardless would convert one
+      // unreachable daemon into a permanently unattested session, which is the bug this closes.
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockRejectedValue(new Error('unreachable'));
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'live-1',
+            transcript_path: transcript(wsA, 'live1.jsonl'),
+            started_at: Date.now() - 60_000,
+          },
+        }),
+      );
+      await expect(attestSlotIfUnattested(wsA)).resolves.toBeUndefined();
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+    });
+
+    it('captureSession does not stamp a push that failed — the boundary picks it up instead', async () => {
+      // The capture path's half of the same rule, and the one a mutation found unpinned: a
+      // SessionStart whose push never landed (dead daemon, mid-bounce, auth drift) must leave the
+      // slot DUE. Stamping optimistically here would recreate the defect one layer over — the
+      // session would be marked announced while the ledger never heard of it, and the tool boundary
+      // would skip it forever.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValue(new Error('daemon bouncing'));
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+
+      // The daemon comes back; the next tool boundary settles the debt.
+      attest.mockResolvedValue(undefined as never);
+      await attestSlotIfUnattested(wsA);
+      expect(readBinding(wsA).session!.attested_at).toBeGreaterThan(0);
+    });
+
+    it('leaves an ended slot alone — a corpse is not a session to announce', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const startedAt = Date.now() - 3_600_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          session: {
+            harness: 'claude-code',
+            id: 'dead-1',
+            transcript_path: transcript(wsA, 'dead1.jsonl'),
+            started_at: startedAt,
+            ended_at: startedAt + 15_000,
+          },
+        }),
+      );
+      await attestSlotIfUnattested(wsA);
+      expect(attest).not.toHaveBeenCalled();
+    });
+
+    it('captureSession stamps its own attestation, so the boundary stays quiet', async () => {
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      expect(attest).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.attested_at).toBeGreaterThan(0);
+
+      await attestSlotIfUnattested(wsA);
+      expect(attest).toHaveBeenCalledTimes(1); // the ordinary path is unchanged
+    });
+
+    it('captureSession stamp does not revert a slot heal that landed during the awaited push', async () => {
+      // The stamp is written after an await, and the boundary heal may rewrite the slot meanwhile.
+      // Writing the stamp from the pre-await copy would de-slot the live session — the exact write
+      // this PR exists to make visible. Pins the re-read: a mid-await rewrite must survive.
+      const healed: Binding = bindingOf({
+        session: {
+          harness: 'claude-code',
+          id: 'healed-live',
+          transcript_path: join(wsA, 'healed.jsonl'),
+          started_at: Date.now(),
+        },
+      });
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockImplementation(async () => {
+        writeBinding(wsA, healed); // the concurrent heal lands while the push is in flight
+        return undefined as never;
+      });
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      const after = readBinding(wsA);
+      expect(after.session!.id).toBe('healed-live'); // the heal survived the stamp
+      expect(after.session!.attested_at).toBeUndefined(); // and was not stamped as sid-1's push
+    });
+
+    it('captureSession stamp carries forward a model observation that landed during the push', async () => {
+      // Same await, different concurrent writer: a tool-boundary refresh observing the model. The
+      // fresh read must carry it; a pre-await spread would silently erase the observation.
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockImplementation(async () => {
+        const current = readBinding(wsA);
+        writeBinding(wsA, {
+          ...current,
+          model_observed: { model: 'observed-mid-await', harness: 'claude-code', observed_at: 1 },
+        });
+        return undefined as never;
+      });
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      const after = readBinding(wsA);
+      expect(after.session).toMatchObject({ id: 'sid-1' });
+      expect(after.session!.attested_at).toBeGreaterThan(0); // the stamp itself still lands
+      expect(after.model_observed?.model).toBe('observed-mid-await'); // and the observation survives
+    });
+
+    it('says nothing when the gate turned the newcomer away and the slot is still the occupant', async () => {
+      // The gated newcomer wrote no slot, so there is nothing of ITS to announce — the live
+      // occupant's slot is already attested and stays that way. Pins that this fix does not hand
+      // the interloper the announcement the gate exists to deny it.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockResolvedValue(undefined as never);
+      const t = transcript(wsA, 'occupant.jsonl');
+      await captureSession('start', { session_id: 'occupant', cwd: wsA, transcript_path: t });
+      attest.mockClear();
+      await captureSession('start', {
+        session_id: 'ghost',
+        cwd: wsA,
+        transcript_path: join(wsA, 'ghost.jsonl'),
+      });
+      expect(readBinding(wsA).session!.id).toBe('occupant');
+      await attestSlotIfUnattested(wsA);
+      expect(attest).not.toHaveBeenCalled();
     });
   });
 });
