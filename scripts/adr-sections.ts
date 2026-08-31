@@ -42,6 +42,46 @@ function words(text: string): string {
 }
 
 /**
+ * Split a Decision into fenced and unfenced runs, in order.
+ *
+ * Why the comparison is not uniform (dolly's residual on #1117, 2026-08-31): outside a fence,
+ * markdown re-wraps freely and a line break carries no meaning, which is what lets a mid-sentence
+ * marker in at all. INSIDE a fence, whitespace is the content — indentation is the code — so a
+ * word-level comparison would wave through an indent change riding a marker. Measured before taking
+ * this: 22 of 329 ADR Decisions carry a fenced block, so it is a live surface, not a hypothetical.
+ *
+ * Markers are recognized only outside fences, for the same reason: a fence may legitimately contain
+ * an EXAMPLE of a marker, and stripping that would delete code from the comparison.
+ */
+function segments(text: string): { fenced: boolean; text: string }[] {
+  const out: { fenced: boolean; text: string }[] = [];
+  let fenced = false;
+  let buf: string[] = [];
+  const flush = () => {
+    if (buf.length > 0) out.push({ fenced, text: buf.join('\n') });
+    buf = [];
+  };
+  for (const line of text.split('\n')) {
+    if (/^[ \t]*```/.test(line)) {
+      buf.push(line);
+      if (fenced) {
+        flush(); // the closing delimiter belongs to the fenced run
+        fenced = false;
+      } else {
+        const opener = buf.pop()!;
+        flush(); // everything before the opener was unfenced
+        fenced = true;
+        buf.push(opener);
+      }
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+  return out;
+}
+
+/**
  * Is `after` the same Decision as `before` with nothing added but dated amendment markers?
  *
  * The problem this solves (2026-08-31, dolly's REQUIRED 1 on #1087): an accepted ADR whose Decision
@@ -75,12 +115,26 @@ function words(text: string): string {
  */
 export function isAppendOnlyAmendment(before: string, after: string): boolean {
   if (before === after) return false;
-  let stripped = after;
+  const was = segments(before);
+  const now = segments(after);
+  if (was.length !== now.length) return false; // a fence opened or closed — not a marker's doing
   let addedMarker = false;
-  for (const span of MARKER_SPANS) {
-    if (span.test(stripped)) addedMarker = true;
-    span.lastIndex = 0;
-    stripped = stripped.replace(span, ' ');
+  for (let i = 0; i < now.length; i++) {
+    const a = was[i]!;
+    const b = now[i]!;
+    if (a.fenced !== b.fenced) return false;
+    if (a.fenced) {
+      // Line-exact inside a fence: indentation is the code.
+      if (a.text !== b.text) return false;
+      continue;
+    }
+    let stripped = b.text;
+    for (const span of MARKER_SPANS) {
+      if (span.test(stripped)) addedMarker = true;
+      span.lastIndex = 0;
+      stripped = stripped.replace(span, ' ');
+    }
+    if (words(stripped) !== words(a.text)) return false;
   }
-  return addedMarker && words(stripped) === words(before);
+  return addedMarker;
 }

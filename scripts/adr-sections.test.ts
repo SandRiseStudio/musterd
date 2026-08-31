@@ -212,3 +212,92 @@ describe('ADR 326 Decision 2 — the case this allowance was built for', () => {
     expect(isAppendOnlyAmendment(before, rewrapped)).toBe(false);
   });
 });
+
+/*
+ * Fenced code inside a Decision (dolly's residual on #1117, 2026-08-31). She raised it, declined to
+ * make it a REQUIRED under wanderer's fresh reviewer charter, and left it conditional on whether
+ * such Decisions exist. Measured before taking it: 22 of 329 ADR Decisions carry a fenced block, so
+ * the condition holds.
+ *
+ * Inside a fence, whitespace IS semantic — indentation is the code — so the word-level comparison
+ * that makes mid-sentence markers possible would wave through an indent change riding a marker.
+ * Comparison is therefore line-exact inside fences and word-level outside.
+ */
+describe('fenced code in a Decision is compared exactly', () => {
+  const before = [
+    '1. **The shape.** The manifest is written as:',
+    '',
+    '```json',
+    '{',
+    '  "version": 3,',
+    '  "desired": ["claude-code"]',
+    '}',
+    '```',
+    '',
+    'and read back on every provision.',
+  ].join('\n');
+
+  it('accepts a marker added outside the fence', () => {
+    const after = [
+      '1. **The shape.** The manifest is written as:',
+      '   _(Amended 2026-08-31: version 4 supersedes this shape. See the amendment below.)_',
+      '',
+      '```json',
+      '{',
+      '  "version": 3,',
+      '  "desired": ["claude-code"]',
+      '}',
+      '```',
+      '',
+      'and read back on every provision.',
+    ].join('\n');
+    expect(isAppendOnlyAmendment(before, after)).toBe(true);
+  });
+
+  it('REFUSES an indentation change inside the fence, even with a valid marker', () => {
+    const after = [
+      '1. **The shape.** The manifest is written as:',
+      '   _(Amended 2026-08-31: version 4 supersedes this shape.)_',
+      '',
+      '```json',
+      '{',
+      '    "version": 3,',
+      '    "desired": ["claude-code"]',
+      '}',
+      '```',
+      '',
+      'and read back on every provision.',
+    ].join('\n');
+    expect(isAppendOnlyAmendment(before, after)).toBe(false);
+  });
+
+  it('REFUSES a changed value inside the fence', () => {
+    const after = before.replace('"version": 3', '"version": 4') + '\n_(Amended 2026-08-31: bumped.)_';
+    expect(isAppendOnlyAmendment(before, after)).toBe(false);
+  });
+
+  it('REFUSES a line added inside the fence', () => {
+    const after = [
+      '1. **The shape.** The manifest is written as:',
+      '   _(Amended 2026-08-31: a field was added.)_',
+      '',
+      '```json',
+      '{',
+      '  "version": 3,',
+      '  "toolkit": "",',
+      '  "desired": ["claude-code"]',
+      '}',
+      '```',
+      '',
+      'and read back on every provision.',
+    ].join('\n');
+    expect(isAppendOnlyAmendment(before, after)).toBe(false);
+  });
+
+  it('does not treat marker-shaped text inside a fence as a marker', () => {
+    // A fence can contain anything, including an example of a marker. Stripping it there would
+    // delete code from the comparison — the swallow hole again, one level down.
+    const after = before.replace('```json', '```json\n// _(Amended 2026-08-31: sample.)_');
+    expect(isAppendOnlyAmendment(before, after)).toBe(false);
+  });
+});
