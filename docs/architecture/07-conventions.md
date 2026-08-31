@@ -96,6 +96,15 @@ decision is the record of what was decided, not a place to record what happened 
 - **Put follow-up notes in `## Consequences`, never in `## Decision`.** A dated "completed / scope
   limit / superseded by" note belongs there — it constrains how the Decision is read without
   rewriting it.
+- **To mark superseded text where a reader will meet it, add a dated marker and change nothing
+  else** — `_(Amended YYYY-MM-DD: … See the amendment below.)_`, or ADR 160's blockquote form
+  `> **Amended YYYY-MM-DD.** …`. The note goes in `## Consequences`; the marker is the pointer to
+  it, for the reader who opens Decision 2, reads it, and stops. Append-only is **checked, not
+  trusted**: `change-adr:check` strips the markers and requires the remaining words to match the
+  old Decision exactly, so a reworded sentence, a deleted clause, an undated marker, or ordinary
+  new prose all still fail (`isAppendOnlyAmendment` in `scripts/adr-sections.ts`). This exists
+  because the convention was already in use at ADR 160:48/:90 and ADR 250:67 and became unwritable
+  when the gate's status regex was widened — see [amending an ADR](../wiki/amending-an-adr.md).
 - **Prettier cannot reach `docs/`, and you no longer have to remember that** (ADR 284). `pnpm format`
   and `pnpm format:check` both read one list — `FORMAT_GLOBS` in `scripts/format-scope.ts` — so the
   writer's scope and the gate's scope are equal by construction; `.prettierignore` carries `docs/`

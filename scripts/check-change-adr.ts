@@ -25,7 +25,7 @@
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decisionSection } from './adr-sections.ts';
+import { decisionSection, isAppendOnlyAmendment } from './adr-sections.ts';
 import { isAcceptedAdr } from './adr-status.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -222,6 +222,18 @@ for (const { path, status } of changed) {
     );
     continue;
   }
+  // An append-only dated amendment marker passes: the Decision's words survive and the only addition
+  // points at the amendment recorded elsewhere. This exists because the repo's own convention for
+  // marking superseded decision text in place (ADR 160:48/:90, ADR 250:67) became unwritable when
+  // this gate started firing — those markers landed while the status regex was blind, and
+  // `wasEverOnMain` cannot help, since it only ever passes text the file already held. The check is
+  // a property of the diff, not a promise: strip the markers, and the rest must match word for word.
+  if (nowDecision !== null && isAppendOnlyAmendment(wasDecision, nowDecision)) {
+    process.stdout.write(
+      `• ${path} — \`## Decision\` gained a dated amendment marker and is otherwise unchanged; allowed.\n`,
+    );
+    continue;
+  }
 
   failed = true;
   process.stderr.write(
@@ -230,6 +242,9 @@ for (const { path, status } of changed) {
       `  USUALLY WHAT YOU WANT: move the new text into \`## Consequences\` as a dated note. That is\n` +
       `  the amendment mechanism 07-conventions prescribes — Context / Consequences / Observability\n` +
       `  are all editable, and only Decision is frozen. A paragraph move, not a new document.\n` +
+      `  IF YOU ARE MARKING SUPERSEDED TEXT: add a dated marker and change nothing else —\n` +
+      `  \`_(Amended YYYY-MM-DD: … See the amendment below.)_\` or \`> **Amended YYYY-MM-DD.** …\`.\n` +
+      `  Append-only is checked, not trusted: strip the markers and the rest must match word for word.\n` +
       `  Write a superseding ADR only when the DECISION ITSELF is being reversed.\n\n`,
   );
 }
