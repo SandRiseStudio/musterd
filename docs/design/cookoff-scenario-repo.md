@@ -81,13 +81,15 @@ scoring script, and git archaeology are proven to work together before any paid 
 
 ## What's next (not this Lane)
 
-The **run ladder** Lane (`01KX6QBY86YD9A7W696P31ABXQ`) consumes this fixture. Its pins (model, harness,
-N, wall-clock cap) and spend authorization are frozen in the
-[**run manifest**](cookoff-run-manifest.md) (ADR 051 / ADR 123 §7). The manifest also records the
-smoke-rung calibration: finding 001's ≈37% is **not reproducible** by the git tool (single-actor
-history + deleted abandoned branches — see the manifest §3), so the reproducible calibration anchor is
-this fixture's multi-seat `reference-solution` (12.2%, non-zero, per-actor), validated before any paid
-cell.
+The **run ladder** consumed this fixture: smoke 2026-07-17, pilot + flagship 2026-07-20
+(finding [006](../research/006-enforcement-induces-coordination-cookoff-pilot.md)). Pins and spend
+live in the [**run manifest**](cookoff-run-manifest.md). Remaining unauthorized on the same fixture:
+D-res and cell E. Cell E's no-spend apparatus check (T9–T12 hidden suites, delivery-curve scorer)
+lives on disk at `~/cookoff-run/e-ladder/` and is not yet a fixture-repo change.
+
+The smoke-rung calibration still holds: finding 001's ≈37% is **not reproducible** by the git tool
+(single-actor history + deleted abandoned branches — see the manifest §3), so the reproducible
+calibration anchor is this fixture's multi-seat `reference-solution` (12.2%, non-zero, per-actor).
 
 ## Related
 

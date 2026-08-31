@@ -101,7 +101,9 @@ first.
   stated at the call site — it measures server work, not the sender. All of it is pinned at the
   **export** layer (the test asserts over `reader.collect()` data points, not over the record call).
   What actually blocks the leaderboard is **N**, not instrumentation: finding 005's own honest-N
-  caveat (one team, ~4h, 41 acts, two vendors) and the cookoff cells whose spend is not authorised.
+  caveat (one team, ~4h, 41 acts, two vendors). The cookoff A/B/C2/C3/D cells *did* run
+  (finding 006 flagship, 2026-07-20); what remains unauthorised is D-res and cell E, which do not
+  add a second model family.
   Two open design questions, neither of them a gap: whether `open_loops`/`diversity_flags` should
   carry model at all (a loop is *between* seats, so "model X's open loops" may not be well-defined),
   and whether `delivery.latency`'s omission should be revisited.
@@ -111,7 +113,8 @@ first.
   mid-session, so a seat's model is not constant even within one session. Read before computing any
   per-model aggregate over this corpus.
 - **Frontier cadence manifest** — protocol written, zero runs recorded.
-- **Cookoff cells A/B/C2/C3, D-res, cell E** — defined in the frozen manifest, spend not authorised.
+- **Cookoff D-res and cell E** — defined, spend not authorised. A/B/C2/C3/D already ran (finding
+  006 flagship); the wiki line that listed them as unauthorised was stale as of 2026-07-20.
 - **ADR 250's weekly reads** (asks-to-founder per merged PR; repeat wakes with unchanged reason;
   capability-miss count) — prose instructions, no instrument, no schedule.
 - **Radar M4/M5** — sweep and triage built, but `seen.json` is empty and no digest has ever been
