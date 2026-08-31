@@ -50,19 +50,31 @@ roomTone.moment(name: Moment, pan: number): void;
   (broadcast excepted, ADR 228) — the engine's existing gates, no new ones.
 - A moment that arrives before the engine chunk lands is **dropped, never queued** — the
   same rule as the firehose cues, for the same reason (a queued burst lands as a chord).
-- `pan` is the E2 screen convention: [-1, 1], scaled ×0.75 by the caller.
+- `pan` is the E2 screen convention: raw [-1, 1]; the engine applies the ×0.75 stereo
+  squeeze, in the one place that already owns it.
 
-Emit sites in `office-scene/index.ts`, all existing hooks:
+Emit sites in `office-scene/index.ts`, all existing hooks — **with the emits split from
+the visuals where the visuals are motion-gated**:
 
-| Moment | Hook | Pan |
+| Moment | Trigger | Pan |
 | --- | --- | --- |
-| `fanfare` | `pushConfetti(name)` — fires only on a directed accept with a live celebrant | the celebrant's head x |
-| `door` | `pushDoorCue()` — already fired on every door pulse (arrival or departure) | the door's x |
-| `askbell` | the speech branch, `ev.act === 'ask'` | addressee's head x when directed; `0` softened for team asks |
+| `fanfare` | the directed-accept branch (`ev.of` live) — **emitted before the `reduced` gate**, so the confetti stays motion-gated but the sound plays | the celebrant's head position, converted to [-1, 1] |
+| `door` | `takeDoorPulses() > 0` — **the pulse is read regardless of `reduced`**; only `pushDoorCue()`'s visual stays behind the motion gate | the entrance position, converted to [-1, 1] |
+| `askbell` | the speech branch, `ev.act === 'ask'` (already plays under reduced-motion) | addressee's head position converted, `0` softened for team asks |
+
+Audio is not motion — moments play under reduced-motion, matching E2 and the speech
+branch. The two motion-gated hooks (`pushConfetti`, `pushDoorCue`) therefore **cannot be
+the emit sites as-is**: the accept branch sits after `if (reduced) return`, and the door
+pulse read is wrapped in `!reduced`. The emits move above those gates (reading
+`takeDoorPulses()` exactly once for both consumers); the visual calls stay where they are.
+
+**Pan units.** `heads.get(...)` and the entrance are **canvas pixels**; occupancy already
+converts with `toX(...)` into [-1, 1]. Moments convert the same way, and the ×0.75 stereo
+squeeze is applied in exactly one place — the engine, which already owns it for life
+events — so callers pass raw [-1, 1] and nothing is squeezed twice.
 
 No visual changes and no new scene events: `ask` stays unmapped in `actToEvent` (its
-visual is the speech bubble it already gets). Audio is not motion — moments play under
-reduced-motion, matching E2 and the speech branch itself.
+visual is the speech bubble it already gets).
 
 ## 3. The voices — synth only, calibrated relative
 
@@ -99,7 +111,10 @@ respected (151.6/152.3 KB after E2's split leaves headroom).
 | `packages/web/src/live/office-scene/index.ts` | three one-line emits at the existing hooks. |
 
 Tests (pure half + façade, no AudioContext): throttle gate math; façade drops (not
-queues) before load and respects the preference; ask pan chooses addressee-vs-centre.
+queues) before load and respects the preference; ask pan chooses addressee-vs-centre;
+pixel→[-1, 1] pan conversion (a right-edge head must not become pan 1 squared to the
+edge twice); and the reduced-motion emit split — a directed accept and a door pulse under
+`reduced` still emit their moments while the visual calls stay gated.
 Manual: a directed accept on `/live` with room tone on (confetti + fanfare together), a
 join/leave for the door, a directed ask for the bell.
 
