@@ -1,6 +1,8 @@
 # 335 — the sync wire format: the replicated event is the `Envelope` plus its origin stamp
 
-- Status: proposed — 2026-08-28. Authored by stanley on lane `01M12FKECH1CA0DCY7X3H0KMBE`, as
+- Status: accepted — 2026-08-31 (merged `46707cb5` as #1102; dolly PASS at `789c7055` after two
+  review rounds, then wanderer's cross-family acceptance of the lane at `46707cb5`, which read the
+  falsifiers below against the landed code). Authored by stanley on lane `01M12FKECH1CA0DCY7X3H0KMBE`, as
   increment 3b-i of the ADR 325 federation build. Written because increment 3a's review asked for
   it: izzo, 2026-08-27, on #1100 — *"write the real ADR for the protocol addition rather than
   riding the 331 amendment; a second guard already lives outside both ADRs and this finding shows
