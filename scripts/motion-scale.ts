@@ -24,6 +24,14 @@
  * catches the *uses* regardless of what the token is called, so a stylesheet cannot smuggle motion
  * past the gate — only mis-file where its value is declared.
  *
+ * Rule 5 is NOT namespace-bound, and this note used to imply that by listing the three rules that
+ * are — while rule 5's own pattern was `--lc-(?:dur-…|ease…|fast|med)`, i.e. bound harder than any
+ * of them. dolly measured the consequence on #1109: `transition: opacity 200ms var(--lc-motion-ease,
+ * ease)` in Live.css passed a green gate, on the motion surface, under a `--lc-` name. Rule 5 judges
+ * by SITE now — a var() inside a motion declaration is a motion value whatever it is called, and one
+ * that resolves to nothing does not animate. Closing the class by construction, the same move rule 2
+ * made with `TIMING_WORD` and rule 3 with `durationMs`, after widening-by-enumeration failed twice.
+ *
  * A NOTE ON MULTI-LINE DECLARATIONS. `Live.css` writes most of its transitions across several lines
  * (see the four-property block at Live.css:1782). A per-line scan would silently miss every
  * continuation line — a gate that under-reports is worse than no gate — so declarations are
@@ -412,28 +420,47 @@ export function disagreeingTokens(
 }
 
 /**
- * Rule 5 — a motion `var()` in a transition that no stylesheet declares.
+ * Rule 5 — a `var()` in a motion declaration that nothing declares and nothing sets.
  *
  * Found by the Task 4 migration doing the damage itself: deleting `--lc-fast` left four references
  * in ApprovalCard.css pointing at nothing, and a transition whose duration does not resolve simply
  * does not animate. Nothing in CSS complains, and none of rules 1-4 could see it — they judge
  * declarations and literals, and this is neither.
  *
- * `known` is every motion token declared across all stylesheets, so a token declared in one file and
- * used in another (the normal case — the scale lives in Live.css) is not a false positive. Only the
- * motion namespace is judged; an unknown `--x-other` belongs to some other system.
+ * JUDGED BY SITE, NOT BY NAME, and that is dolly's finding on #1109. The pattern was
+ * `--lc-(?:dur-…|ease…|fast|med)`, so the rule only caught a phantom whose author had already
+ * filed it in the motion namespace — and `var(--lc-motion-ease, ease)` in Live.css, on the motion
+ * surface, under a `--lc-` name, rode a green gate. The name was never what made it motion: the
+ * position was. Any var() between `transition:`/`animation:` and its `;` is a motion value, and an
+ * unresolved one silently drops the declaration.
+ *
+ * Widening the name pattern instead would have been the third round of the move this file has
+ * already watched fail twice (rule 2's private duration grammar, rule 3's `/^(\d+)ms$/`), and it
+ * would leave the next unlisted prefix through.
+ *
+ * `declared` is every custom property declared across all stylesheets, so a token declared in one
+ * file and used in another (the normal case — the scale lives in Live.css) is not a false positive.
+ * `runtimeSet` is the tokens TS writes with `setProperty`, and it is load-bearing exactly as it is
+ * for the colour arm: `--lc-mote-delay` and `--lc-twinkle-delay` are undeclared in CSS ON PURPOSE
+ * and carry a fallback for the frame before JS sets them. They are the only three uses the widening
+ * newly reaches (measured 2026-08-31), so without this the honest fix would have shipped three
+ * false failures on its first run.
  */
-export function phantomMotionRefs(css: string, known: ReadonlySet<string>): MotionFinding[] {
+export function phantomMotionRefs(
+  css: string,
+  declared: ReadonlySet<string>,
+  runtimeSet: ReadonlySet<string> = new Set(),
+): MotionFinding[] {
   const lineAt = lineIndexer(css);
   const out: MotionFinding[] = [];
   for (const decl of motionDeclarations(css)) {
-    for (const m of decl.text.matchAll(/var\((--lc-(?:dur-[\w-]+|ease[\w-]*|fast|med))\s*[,)]/g)) {
+    for (const m of decl.text.matchAll(/var\(\s*(--[a-z0-9-]+)\s*[,)]/gi)) {
       const token = m[1];
-      if (token && !known.has(token)) {
+      if (token && !declared.has(token) && !runtimeSet.has(token)) {
         out.push({
           kind: 'phantom',
           line: lineAt(decl.start + (m.index ?? 0)),
-          detail: `var(${token}) is used in a transition but declared nowhere`,
+          detail: `var(${token}) is used in a motion declaration but declared nowhere and never set at runtime`,
         });
       }
     }
