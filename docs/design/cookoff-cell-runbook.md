@@ -2,10 +2,12 @@
 
 > **Opened 2026-07-17** (Lane `01KXS17GSZSAKA7B181DZJRD2V`, Goal cookoff-value-experiment) to
 > discharge the [run manifest](cookoff-run-manifest.md) §4 "still open" item — _the per-cell setup
-> runbook (clone/seed/identity/permission-policy), authored when the smoke rung runs._ The smoke rung
-> is **cell D only** (manifest §2), so **cell D is specified in full below** and the other cells are
-> stubbed for when the ladder resumes past the smoke check-in. Everything here inherits the manifest's
-> pins (§1) unchanged — this file adds only the _mechanics_ of standing a cell up, never a new variable.
+> runbook (clone/seed/identity/permission-policy), authored when the smoke rung runs._ Smoke (cell D)
+> ran 2026-07-17; pilot (A + D-enforcement) and flagship (A / B / C2 / C3 / D ×3) ran 2026-07-20
+> (finding [006](../research/006-enforcement-induces-coordination-cookoff-pilot.md)). §1 is the smoke
+> cell-D procedure; §2 is the other arms, filled from the scripts that actually launched them
+> (`~/cookoff-run/flagship/`). Everything here inherits the manifest's pins (§1 of the manifest)
+> unchanged — this file adds only the _mechanics_ of standing a cell up, never a new variable.
 >
 > **The cell-D procedure below is battle-tested** — it is the exact sequence that stood up the smoke
 > cell live on 2026-07-17 against `musterd` 0.2.0 / fixture kickoff `ea5c6d4`. The `⚠` notes are the
@@ -233,23 +235,101 @@ the calibrated `T`, and the tokens→billed-cost roll-up to the owner, and **sto
   identity set by hand (`solo-a1 (cell A)` / `solo-a1@cookoff-a.musterd`), actor added to
   `scoring.config.json`; wrap launches in `caffeinate -i`.
 
-## 2. Ladder-resume stubs (authored when the pilot/flagship rungs run)
+## 2. The other arms (filled 2026-07-20 from the flagship scripts)
 
-These inherit §0 and mirror cell D's mechanics; the manifest names their one distinguishing structure.
-Fill them in at their rung, not before (honesty rule — no apparatus authored ahead of its spend gate).
+These inherit §0 and mirror cell D's clone / allowlist / merge mechanic. The one distinguishing
+structure per arm is named below. Live scripts: `~/cookoff-run/flagship/{lib,provision-musterd-cell,run-mcell,run-ccell,wave-launch}.sh`. Artifacts: `~/cookoff-run/run-artifacts-flagship/`.
 
-- **Cell A** — `N=1, musterd absent`. One CLI session, one git identity, `TASKS.md` flat file, same
-  clone + allowlist. The single-agent control; no coordination surface.
-- **Cell B** — `N=1, musterd present`. One seat on a musterd team; isolates musterd's _solo_ overhead
-  (orientation/telemetry cost with nobody to coordinate with).
-- **Cell C2** — `N=3, musterd absent, dispatch`. Three sessions, work handed out by an operator
-  **dispatch** step rather than self-served — the "manager assigns" control. The `{{DISPATCH}}` block
-  in `prompts/kickoff.md` is populated here, and each assignment is logged as an `I1`.
-- **Cell C3** — `N=3, musterd absent, board`. Three sessions sharing a flat **`TASKS.md` board** (no
-  Goals/Lanes, no claim/handoff primitives). **This is cell D's control** — keep clone, identities,
-  ticket text, allowlist, and merge mechanic byte-identical; the only delta is the coordination layer.
-- **Cell D-res** — cell D + harness residency (manifest §3b). Adds a running `musterd host`, measures
-  attestation coverage / steer-lands / wake latency. Its own spend row.
+⚠ **The merge mechanic is a shared invariant.** Every N=3 cell (C2, C3, D) commits on `agent/<seat>`
+(or a seat-local branch) and integrates into the primary clone's `main`. Do not invent a different
+integration topology for the uncoordinated arms — that would confound wasted-work.
+
+⚠ **Stagger N=3 launches.** Launching 12 seats + 6 daemons at once crashed the machine on 2026-07-20.
+Flagship B/D relaunched in 3 waves of 4 (one D-cell + one B-cell). See [nicks-laptop](../wiki/nicks-laptop.md).
+
+### 2.1 Cell A — N=1, musterd absent (solo baseline)
+
+One CLI session, one git identity, `TASKS.md` as a flat file, no daemon, no MCP. Same `clone_fixture`
+and `write_settings_plain` as C2/C3 (pinned allowlist, **no** musterd grants). Identity is set by
+hand, not by `musterd agent`:
+
+| run        | git `user.name`     | git `user.email`            |
+| ---------- | ------------------- | --------------------------- |
+| pilot A1/A2 | `solo-a1 (cell A)` / `solo-a2 (cell A)` | `solo-aN@cookoff-a.musterd` |
+| flagship FA1–FA3 | `solo-faN (cell A)` | `solo-faN@cookoff-a.musterd` |
+
+Add that exact email to `scoring.config.json` `actors` before scoring. Launch wrapped in
+`caffeinate -i claude -p "$(cat kickoff)" --model claude-sonnet-5`. Kickoff is the shared prompt
+with `{{DISPATCH}}` blank. The delivered ref is this clone's `main`.
+
+Pilot A1/A2: 0% wasted, 8/8 acceptance, 2m45s–4m36s, ~24k output tokens. Flagship FA1–FA3: same
+shape (0/100 ×3). This is the honest cost denominator — never the sell comparison.
+
+### 2.2 Cell B — N=1, musterd present (solo overhead)
+
+Same `provision-musterd-cell.sh` path as cell D, with **one** seat. Flagship used seat `bea`, slug
+`cookoff-fbN`, identity written by `musterd agent`: `bea (musterd seat)` / `bea@cookoff-fbN.musterd`.
+Seed the same 8 Goals/Lanes; apply the same Gate A/B enforcement. The kickoff is the shared prompt
+(`DISPATCH` blank). Launch via `run-mcell.sh`.
+
+This arm isolates musterd's _solo_ cost. Flagship FB3 is the guard-metric hit: Gate B `push-remote`
+fired, the seat raised an `ask`, and — headless, no teammate, no human — **held and delivered
+nothing** (100% wasted, 0% acceptance). A block a lone seat cannot satisfy is a regression, not
+compliance. FB1/FB2 were clean 0/100. Mean 33.3% wasted / 67% acceptance is that one stranded cell
+dragging two clean ones.
+
+### 2.3 Cell C2 — N=3, musterd absent, operator dispatch
+
+Three plain sessions, no daemon. Clone + three git worktrees (`git worktree add -b agent/<seat>`),
+identities set by hand, `write_settings_plain` (no musterd). Flagship seats:
+
+| seat | git `user.name`  | git `user.email`         | assignment (I1) |
+| ---- | ---------------- | ------------------------ | --------------- |
+| kay  | `kay (cell C2)`  | `kay@cookoff-c2.musterd` | T1, T5, T6      |
+| kim  | `kim (cell C2)`  | `kim@cookoff-c2.musterd` | T2, T3, T7      |
+| kip  | `kip (cell C2)`  | `kip@cookoff-c2.musterd` | T4, T8          |
+
+The `{{DISPATCH}}` block in each seat's kickoff is the only prompt delta vs C3. Flagship files:
+`~/cookoff-run/flagship/kickoff-c2-{kay,kim,kip}.txt`. Log each assignment as an `I1` in
+`interventions.log` at launch. Launch via `run-ccell.sh <tag> <cell> kay:<kickoff> kim:<kickoff>
+kip:<kickoff>`.
+
+T3/T4 (duplicate-scope pair) split across kim/kip by design — careful assignment _is_ the treatment,
+and the traps still fire. Flagship C2: 59.3% wasted mean, 46% acceptance mean (2/3 runs shipped
+broken/incomplete trees). FC2r1's `kay` push-polluted the fixture remote; `clone_fixture` now
+`git remote remove origin` after resetting to `ea5c6d4` so that cannot recur.
+
+### 2.4 Cell C3 — N=3, musterd absent, shared `TASKS.md` (cell D's control)
+
+Identical to C2 **except** the kickoff: shared prompt, `{{DISPATCH}}` blank, seats self-organize off
+the flat `TASKS.md`. No Goals/Lanes, no claim/handoff primitives. Flagship seats:
+
+| seat | git `user.name`  | git `user.email`         |
+| ---- | ---------------- | ------------------------ |
+| ray  | `ray (cell C3)`  | `ray@cookoff-c3.musterd` |
+| rem  | `rem (cell C3)`  | `rem@cookoff-c3.musterd` |
+| rob  | `rob (cell C3)`  | `rob@cookoff-c3.musterd` |
+
+**This is cell D's control** — clone, ticket text, allowlist, and merge mechanic byte-identical;
+the only delta is the coordination layer. Flagship C3: **72.2% wasted mean, 100% acceptance** —
+all three agents redundantly re-solve a correct backlog. That is the sell number's uncoordinated
+side (finding 006: D 1.9% vs C3 72.2% at equal correctness, ~38×).
+
+### 2.5 Cell D-res — defined, not authorized
+
+Cell D + harness residency (manifest §3b). Adds a running `musterd host`; measures attestation
+coverage, steer-lands rate, wake latency. **Do not author a launch procedure here** — honesty rule:
+no apparatus ahead of its spend gate. The definition predates the data; the spend row is still ⏸.
+
+### 2.6 Cell E — design in progress, spend not authorized
+
+"Too big for solo" — the experiment that could change the *regime* the headline applies to, never
+the sell rule (still D-vs-uncoordinated-N). Settled (nick, 2026-08-01) and the unanswered arms
+question live in `~/cookoff-run/e-ladder/HANDOFF.md` — read that before resuming; do not re-litigate
+what it records. A no-spend apparatus check (2026-08-03) is at
+`~/cookoff-run/e-ladder/e1-apparatus-check.md` (T9–T12 hidden suites + delivery-curve scorer on
+disk; paid cells not launched). **nick 2026-08-31: hold E** — no launch procedure and no spend
+row in this lane. Resume from the HANDOFF when a later lane is opened for it.
 
 ## Related
 

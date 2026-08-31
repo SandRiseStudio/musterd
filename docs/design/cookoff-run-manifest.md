@@ -37,20 +37,24 @@ cell's `scoring.config.json` `actors` list; a commit attributed to no configured
 (ADR 123 §2). The reference-solution's `alix`/`boro`/`cyra` seats are the fixture's own validation
 identities, not a cell's.
 
-## 2. Spend authorization (owner-gated, 2026-07-10)
+## 2. Spend authorization (owner-gated, 2026-07-10; ladder climbed 2026-07-20)
 
 Owner (Nick) authorized **the smoke rung only**, then a check-in before more. Real money goes in one
-rung at a time; each rung gates the next.
+rung at a time; each rung gates the next. Smoke ran 2026-07-17; nick authorized the pilot the same
+morning; flagship followed the same day after the pilot check-in (finding
+[006](../research/006-enforcement-induces-coordination-cookoff-pilot.md)).
 
-| Rung         | Cells               | Runs     | Authorized             |
-| ------------ | ------------------- | -------- | ---------------------- |
-| **Smoke**    | D                   | 1        | ✅ now                 |
-| **Pilot**    | A + D               | 2 each   | ⏸ after smoke check-in |
-| **Flagship** | A / B / C2 / C3 / D | 3–5 each | ⏸ after pilot check-in |
+| Rung         | Cells               | Runs     | Authorized                          |
+| ------------ | ------------------- | -------- | ----------------------------------- |
+| **Smoke**    | D                   | 1        | ✅ 2026-07-17                       |
+| **Pilot**    | A + D               | 2 each   | ✅ 2026-07-20 (after smoke check-in) |
+| **Flagship** | A / B / C2 / C3 / D | 3 each   | ✅ 2026-07-20 (after pilot check-in) |
+| **D-res**    | D + residency       | —        | ⏸ defined §3b, not authorized      |
+| **E**        | too-big-for-solo    | —        | ⏸ design in progress, not authorized |
 
 The apparatus checks that carry **no model spend** (archaeology recalibration, scoring-harness
-validation — §3) are done ahead of the paid smoke build; only the cell-D agent build itself draws the
-authorized smoke spend.
+validation — §3) ran ahead of the paid smoke build. D-res and E still have no spend row — do not
+launch them on leftover flagship authorization.
 
 ## 3. Smoke-rung apparatus de-risking (done 2026-07-10, no model spend)
 
@@ -110,15 +114,17 @@ latency / answer rate** for acts that arrive while a seat is between sessions (f
 `musterd report residency`). Runs when the ladder resumes, after the pilot rung, under its own
 spend authorization row in §2 — this section defines it so the definition predates the data.
 
-## 4. Still open (flagged for the smoke run, not this freeze)
+## 4. Still open (flagged at freeze; status as of 2026-08-31)
 
-- **Wall-clock cap `T`** — proposed 90 min/run; calibrate against the smoke cell-D build's actual
-  time-to-done before the pilot (like the W3 dup-hunk thresholds, ADR 123 §7).
-- **Billed-cost roll-up** — tokens-to-done gets its public-pricing multiplier now the model is pinned
-  (Sonnet 5); wire it into `score.ts` before the pilot so the tokens support number is comparable.
-- **Per-cell setup runbook** — ✅ **cell D authored** (smoke rung) in
-  [`cookoff-cell-runbook.md`](cookoff-cell-runbook.md): clone/seed/identity/permission-policy +
-  Goals/Lanes seeding. A/B/C2/C3/D-res are stubbed there, to be filled at their rung.
+- **Wall-clock cap `T`** — proposed 90 min/run. Calibrated by the runs themselves: pilot A finished
+  in 2m45s–4m36s, D in ~7–35 min; flagship stayed inside the cap. 90 min remains the safety cap, not
+  a pass/fail deadline. Cell E treats it as a **censoring boundary** (incomplete-at-cap), not a
+  hidden acceptance threshold (`~/cookoff-run/e-ladder/e1-apparatus-check.md`).
+- **Billed-cost roll-up** — still open. Tokens-to-done is reported raw (finding 006: D ≈7.7× solo
+  output tokens). The public-pricing multiplier was not wired into `score.ts` before the flagship.
+- **Per-cell setup runbook** — ✅ **A / B / C2 / C3 / D filled** in
+  [`cookoff-cell-runbook.md`](cookoff-cell-runbook.md) from the 2026-07-17 smoke + 2026-07-20
+  pilot/flagship scripts. D-res and E stay unfilled until their spend gates (honesty rule).
 
 ## Related
 
