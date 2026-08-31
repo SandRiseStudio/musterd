@@ -19,7 +19,8 @@ Scope, agreed with nick 2026-08-31 (three interactions):
 2. **Board overlay open/close** — a quiet paper lift on open, a settle on close.
    Centre-panned: the overlay is chrome over the room, not in it.
 3. **Directed-act whoosh** — the A1 light-trace to an addressee's desk gets a quiet
-   airy sweep whose pan *moves* from sender to addressee over the trace's duration.
+   airy sweep whose pan *moves* from sender to addressee over the trace's own duration:
+   `--lc-dur-5` (600ms), the `lc-trace-draw` timing, so ear and eye arrive together.
 
 **Consent and gating:** these play only when **room tone is on** — the toggle is the
 existing consent, and these are part of the room, not a new channel. No new toggle, no
@@ -29,7 +30,7 @@ be interacted with anyway; the gate is belt-and-braces).
 ## 2. The plumbing — the E3 `moment` path, extended
 
 `roomTone.moment(name, pan)` already exists (E3): preference-gated, drop-never-queue,
-throttled, engine-owned ×0.75 squeeze. E4 adds four moment names rather than a new
+throttled, engine-owned ×0.75 squeeze. E4 adds five moment names rather than a new
 mechanism:
 
 ```ts
@@ -48,7 +49,7 @@ Emit sites (all existing interaction handlers, none new):
 
 | Moment | Hook | Pan |
 | --- | --- | --- |
-| `plateOpen` / `plateClose` | the nameplate expand toggle (`index.ts` `applyExpandDom`'s caller, where `st.expanded` flips) | the plate's head x via `screenPan` |
+| `plateOpen` / `plateClose` | **`toggleExpand` only**, after the flip — never `applyExpandDom`, which has a second caller: `scheduleCollapse` auto-collapses after 5s with no hand, and a tick from a timer is feedback for an action nobody chose. `scheduleCollapse` stays silent. | the plate's head x via `screenPan` |
 | `boardOpen` / `boardClose` | `live.tsx` where the BoardOverlay open state flips (both directions) | `0` (chrome, centre) |
 | `whoosh` | the tether emit in `showSpeech` (`addressee?.tether` with a live target) | sender's head x → addressee's head x, both via `screenPan` |
 
@@ -68,9 +69,10 @@ viewer's own hand — closer than the room, so *smaller* than the room):
   upward pitch offset on open, downward on close. ~50ms.
 - **board paper** — a brief noise swell through a bandpass, rising on open, falling and
   shorter on close — the `drawer` family, softer.
-- **whoosh** — ~350ms of lowpassed noise with a gentle amplitude arc, its `StereoPanner`
-  ramped from `momentPan(pan)` to `momentPan(panTo)` over the duration. The only voice
-  that animates its pan node.
+- **whoosh** — 600ms (`--lc-dur-5`, the trace's own `lc-trace-draw` timing — one number,
+  pinned) of lowpassed noise with a gentle amplitude arc, its `StereoPanner` ramped from
+  `momentPan(pan)` to `momentPan(panTo)` over that duration. The only voice that animates
+  its pan node.
 
 All parameter-jittered per play like every voice in the file. No assets; all bytes on the
 lazy engine chunk. The total-JS budget was raised to 252,000 B for E3 with ~2.6 KiB of
@@ -84,7 +86,7 @@ ritual, not a silent squeeze.
 | `packages/web/src/live/soundLife.ts` | widen `Moment`; no other logic (the throttle is shared). |
 | `packages/web/src/live/sound.ts` | `moment` gains the optional `panTo`, forwarded. |
 | `packages/web/src/live/soundEngine.ts` | three voices + dispatch; pan ramp for whoosh. |
-| `packages/web/src/live/office-scene/index.ts` | plate emit at the expand flip; whoosh emit beside the tether draw. |
+| `packages/web/src/live/office-scene/index.ts` | plate emit in `toggleExpand` (per §2 — `scheduleCollapse` silent); whoosh emit beside the tether draw. |
 | `packages/web/src/routes/live.tsx` | board open/close emits at the state flip. |
 
 Tests (pure half + façade): the widened `Moment` names dispatch (type-level); façade
