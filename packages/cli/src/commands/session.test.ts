@@ -1100,6 +1100,46 @@ describe('musterd session (capture)', () => {
       expect(attest).toHaveBeenCalledTimes(1); // the ordinary path is unchanged
     });
 
+    it('captureSession stamp does not revert a slot heal that landed during the awaited push', async () => {
+      // The stamp is written after an await, and the boundary heal may rewrite the slot meanwhile.
+      // Writing the stamp from the pre-await copy would de-slot the live session — the exact write
+      // this PR exists to make visible. Pins the re-read: a mid-await rewrite must survive.
+      const healed: Binding = bindingOf({
+        session: {
+          harness: 'claude-code',
+          id: 'healed-live',
+          transcript_path: join(wsA, 'healed.jsonl'),
+          started_at: Date.now(),
+        },
+      });
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockImplementation(async () => {
+        writeBinding(wsA, healed); // the concurrent heal lands while the push is in flight
+        return undefined as never;
+      });
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      const after = readBinding(wsA);
+      expect(after.session!.id).toBe('healed-live'); // the heal survived the stamp
+      expect(after.session!.attested_at).toBeUndefined(); // and was not stamped as sid-1's push
+    });
+
+    it('captureSession stamp carries forward a model observation that landed during the push', async () => {
+      // Same await, different concurrent writer: a tool-boundary refresh observing the model. The
+      // fresh read must carry it; a pre-await spread would silently erase the observation.
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockImplementation(async () => {
+        const current = readBinding(wsA);
+        writeBinding(wsA, {
+          ...current,
+          model_observed: { model: 'observed-mid-await', harness: 'claude-code', observed_at: 1 },
+        });
+        return undefined as never;
+      });
+      await captureSession('start', { session_id: 'sid-1', cwd: wsA });
+      const after = readBinding(wsA);
+      expect(after.session).toMatchObject({ id: 'sid-1' });
+      expect(after.session!.attested_at).toBeGreaterThan(0); // the stamp itself still lands
+      expect(after.model_observed?.model).toBe('observed-mid-await'); // and the observation survives
+    });
+
     it('says nothing when the gate turned the newcomer away and the slot is still the occupant', async () => {
       // The gated newcomer wrote no slot, so there is nothing of ITS to announce — the live
       // occupant's slot is already attested and stays that way. Pins that this fix does not hand

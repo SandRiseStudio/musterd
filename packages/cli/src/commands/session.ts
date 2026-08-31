@@ -652,12 +652,13 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // returns early, so an `ended` push always carries the digest of the capture it belongs to.
   // `start` records the landing so the tool boundary knows this slot is already announced; a failed
   // push leaves `attested_at` absent, which is what makes {@link attestSlotIfUnattested} retry.
-  if ((await pushAttestation(binding, session, event)) && event === 'start')
-    saveBinding(dir, {
-      ...binding,
-      session: { ...session, attested_at: Date.now() },
-      ...(model_observed ? { model_observed } : {}),
-    });
+  if ((await pushAttestation(binding, session, event)) && event === 'start') {
+    // Re-read: the push is awaited, and a concurrent writer (a slot heal, a model observation) may
+    // have rewritten the binding meanwhile. Stamping from the pre-await copy would revert it.
+    const fresh = findBinding(dir, {});
+    if (!fresh?.session || fresh.session.id !== session.id) return;
+    saveBinding(dir, { ...fresh, session: { ...fresh.session, attested_at: Date.now() } });
+  }
 }
 
 /**
