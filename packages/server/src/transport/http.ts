@@ -171,7 +171,9 @@ import {
 import { deriveNext } from '../store/orientation.js';
 import {
   attach,
+  clearOrphanPresence,
   clearMemberPresence,
+  clearPresenceById,
   countLivePresences,
   hasLivePresence,
   listLiveDrivers,
@@ -1830,6 +1832,105 @@ export async function handleHttp(
           // Deliver the token to the occupying session for a reusable grant (ADR 087) so it lands in
           // `binding.grant` and silently resumes on reconnect. A `once` grant is not a resume token.
           const resumeToken = body.lifetime === 'once' ? undefined : mint.token;
+          const pendingConn = ctx.hub.getConn(existing.from_session);
+
+          // A closed WS is not an occupier. Its request remains auditable and the approved grant remains
+          // available to the administrator, but it must neither create a phantom Presence nor displace
+          // a live incumbent. HTTP claim requests deliberately have no live waiter and retain their
+          // stateless approval behavior.
+          if (
+            !existing.from_session.startsWith('http:') &&
+            (!pendingConn?._claimApproved || !pendingConn.isOpen?.())
+          ) {
+            decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
+            appendAudit(ctx.db, team.id, {
+              actor: admin.name,
+              action: 'request.decide',
+              target: targetMember.name,
+              result: 'allow',
+              detail: {
+                decision: 'approve',
+                request_id: requestId,
+                delivered: false,
+                authorized_by: admin.name,
+              },
+            });
+            appendAudit(ctx.db, team.id, {
+              actor: admin.name,
+              action: 'grant.issue',
+              target: targetMember.name,
+              result: 'allow',
+              detail: {
+                scope: mint.grant.scope,
+                lifetime: mint.grant.lifetime,
+                grant_id: mint.grant.id,
+                via: 'request.decide',
+                request_id: requestId,
+                authorized_by: admin.name,
+              },
+            });
+            if (body.lifetime === 'once') consumeGrant(ctx.db, mint.grant.id);
+            return sendJson(res, 200, {
+              request_id: requestId,
+              decision: 'approve',
+              delivered: false,
+              ...(resumeToken ? { grant: resumeToken } : {}),
+            });
+          }
+
+          // An approval is an authorized claim transition too. Keep it after the decision but before
+          // attachment: a pending claimant must not displace anyone, while an approved agent claimant
+          // preserves newest-wins. A live WS waiter retains its Workspace in the hub, so it follows the
+          // same deferred same-Workspace eviction behavior as a direct WS claim.
+          const sameWorkspacePredecessors: string[] = [];
+          let displacedModel: string | null = null;
+          if (targetMember.kind === 'agent' && targetMember.observer === 0) {
+            const liveConns = ctx.hub.connsForMember(targetMember.id);
+            displacedModel =
+              ctx.db
+                .prepare<
+                  [string],
+                  { model: string }
+                >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+                .get(targetMember.id)?.model ?? null;
+            const orphaned = ctx.db
+              .prepare<
+                [string],
+                { count: number }
+              >('SELECT count(*) AS count FROM presence WHERE member_id = ? AND conn_id IS NULL')
+              .get(targetMember.id)?.count;
+            const sameWorkspace = (workspace?: string | null): boolean =>
+              workspace != null &&
+              pendingConn?.workspace != null &&
+              workspace === pendingConn.workspace;
+            let displaced = 0;
+            for (const old of liveConns) {
+              if (sameWorkspace(old.workspace)) {
+                sameWorkspacePredecessors.push(old.connId);
+                continue;
+              }
+              old.send?.({
+                type: 'error',
+                code: 'superseded',
+                message: `your session as "${targetMember.name}" was taken over by a newer one`,
+              });
+              old.close?.();
+              ctx.hub.remove(old.connId);
+              clearPresenceById(ctx.db, old.presenceId);
+              displaced++;
+            }
+            const evicted = displaced + (orphaned ?? 0);
+            if (evicted > 0) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'claim.superseded',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { same_workspace: false, evicted, via: 'request.approve' },
+              });
+            }
+            clearOrphanPresence(ctx.db, targetMember.id);
+          }
 
           // Attach presence for the approved session — carrying the claimant's attestation (ADR 101)
           // so the approved occupancy isn't born `unknown`.
@@ -1837,10 +1938,10 @@ export async function handleHttp(
             ctx.db,
             targetMember.id,
             existing.surface as import('@musterd/protocol').Surface,
-            existing.from_session,
+            pendingConn ? existing.from_session : null,
             {
               provenance: null,
-              workspace: null,
+              workspace: pendingConn?.workspace ?? null,
               driver: null,
               model: existing.model ?? null,
               // The tier the claimant declared at the gate, carried onto the occupancy it becomes —
@@ -1848,15 +1949,24 @@ export async function handleHttp(
               model_source: existing.model ? (existing.model_source ?? null) : null,
             },
           );
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, existing.model);
+          if (!existing.model && displacedModel && sameWorkspacePredecessors.length === 0) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: displacedModel, new: null, source: 'claim' },
+            });
+          } else {
+            recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, existing.model);
+          }
 
           // Settle the request.
           decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
 
           // Flip the waiting WS: find the pending connection and call _claimApproved.
-          const pendingConn = ctx.hub.getConn(existing.from_session);
           if (pendingConn?._claimApproved) {
-            pendingConn._claimApproved(presence.id);
+            pendingConn._claimApproved(presence.id, sameWorkspacePredecessors);
           }
 
           // Push the terminal occupied frame to the waiting WS, carrying the resume token (ADR 087).
@@ -2541,12 +2651,26 @@ export async function handleHttp(
           });
         }
 
-        // Step 4: single-active is kind-scoped (ADR 042), matching the WS path. An **agent** seat is
-        // newest-wins (ADR 017): a newer claim displaces the incumbent (superseded → close its socket +
-        // clear its presence) instead of refusing. A **human**/observer seat fans out — no displacement,
-        // a second claim just attaches another presence.
-        const liveConns = ctx.hub.connsForMember(targetMember.id);
-        if (liveConns.length > 0 && targetMember.kind === 'agent' && targetMember.observer === 0) {
+        // Single-active is kind-scoped (ADR 042), matching the WS path. Only an AUTHORIZED agent
+        // claim may invoke newest-wins (ADR 017). Keeping the transition behind the grant/self/re-seat
+        // decision makes refused and pending claims side-effect-free for the live incumbent.
+        let displacedModel: string | null = null;
+        const displaceAgentIncumbent = (): void => {
+          const liveConns = ctx.hub.connsForMember(targetMember.id);
+          if (targetMember.kind !== 'agent' || targetMember.observer === 1) return;
+          displacedModel =
+            ctx.db
+              .prepare<
+                [string],
+                { model: string }
+              >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+              .get(targetMember.id)?.model ?? null;
+          const orphaned = ctx.db
+            .prepare<
+              [string],
+              { count: number }
+            >('SELECT count(*) AS count FROM presence WHERE member_id = ? AND conn_id IS NULL')
+            .get(targetMember.id)?.count;
           for (const old of liveConns) {
             old.send?.({
               type: 'error',
@@ -2559,14 +2683,33 @@ export async function handleHttp(
           clearMemberPresence(ctx.db, targetMember.id);
           // ADR 237: every displacement writes a ledger row — this branch used to evict silently,
           // leaving only the winner's claim.occupied behind.
-          appendAudit(ctx.db, team.id, {
-            actor: targetMember.name,
-            action: 'claim.superseded',
-            target: targetMember.name,
-            result: 'allow',
-            detail: { same_workspace: false, evicted: liveConns.length, via: 'http' },
-          });
-        }
+          const evicted = liveConns.length + (orphaned ?? 0);
+          if (evicted > 0) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'claim.superseded',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { same_workspace: false, evicted, via: 'http' },
+            });
+          }
+        };
+        const recordHttpClaimAttestation = (
+          presenceId: string,
+          model: string | null | undefined,
+        ): void => {
+          if (!model && displacedModel) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presenceId, old: displacedModel, new: null, source: 'claim' },
+            });
+            return;
+          }
+          recordClaimAttestation(ctx.db, team.id, targetMember, presenceId, model);
+        };
 
         // Step 5: grant path — validate + consume, then occupy.
         if (body.grant) {
@@ -2601,6 +2744,7 @@ export async function handleHttp(
           consumeGrant(ctx.db, gv.grant.id);
           // Resume token (ADR 087): refresh a reusable grant's TTL on occupy (no-op for single_use).
           refreshGrant(ctx.db, gv.grant.id, ctx.config.resumeTtlMs);
+          displaceAgentIncumbent();
           // OCCUPY: stateless — attach presence with null connId (no persistent socket).
           const presence = attach(ctx.db, targetMember.id, body.surface, null, {
             provenance: null,
@@ -2618,7 +2762,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface },
           });
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
+          recordHttpClaimAttestation(presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -2639,6 +2783,7 @@ export async function handleHttp(
         // so there is no grant and no admin-approval request. Occupy directly (Step 2 already enforced
         // the credential matches the target seat for a seat-target claim).
         if (authenticatedMember && authenticatedMember.id === targetMember.id) {
+          displaceAgentIncumbent();
           const presence = attach(ctx.db, targetMember.id, body.surface, null, {
             provenance: null,
             workspace: null,
@@ -2655,7 +2800,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, auth: 'credential' },
           });
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
+          recordHttpClaimAttestation(presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },
@@ -2683,6 +2828,7 @@ export async function handleHttp(
           isHeld(targetMember) &&
           getPolicy(ctx.db, team.id).standing_reseat_known_agents
         ) {
+          displaceAgentIncumbent();
           const presence = attach(ctx.db, targetMember.id, body.surface, null, {
             provenance: null,
             workspace: null,
@@ -2699,7 +2845,7 @@ export async function handleHttp(
             result: 'allow',
             detail: { via: 'http', surface: body.surface, policy: 'standing_reseat_known_agents' },
           });
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, body.model);
+          recordHttpClaimAttestation(presence.id, body.model);
           ctx.hub.broadcastTeam(
             team.id,
             { type: 'presence', member: targetMember.name, status: 'online' },

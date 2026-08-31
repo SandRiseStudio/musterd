@@ -361,57 +361,9 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             }
           }
 
-          // Step 4: single-active is **kind-scoped** (ADR 042), matching the hello path. An **agent**
-          // seat is newest-wins (ADR 017): a newer claim displaces the incumbent — tell it it was
-          // superseded, close it, evict it — rather than dead-ending on `claim_conflict`, so a relaunched
-          // agent re-occupies its own seat without a manual leave. A **human**/observer seat fans out: a
-          // second claim attaches an *additional* presence with no displacement (a person may act on a
-          // laptop while watching on a phone). Displacement is **workspace-scoped** (ADR 068): a claim
-          // from the *same* workspace is the same seat reconnecting — a reload, or the ~90s health-check
-          // MCP probe — and must NOT supersede the live session, or the seat flaps. A client that sends no
-          // workspace falls back to displace-all. A same-workspace predecessor is kept here (anti-flap)
-          // but reaped after this successor proves durable — see scheduleSameWorkspaceEviction (ADR 092).
           const sameWorkspacePredecessors: string[] = [];
-          if (
-            targetMember &&
-            !('observe' in frame.target) &&
-            targetMember.kind === 'agent' &&
-            targetMember.observer === 0
-          ) {
-            const sameWorkspace = (w?: string | null): boolean =>
-              w != null && frame.workspace != null && w === frame.workspace;
-            let displaced = 0;
-            for (const old of ctx.hub.connsForMember(targetMember.id)) {
-              if (sameWorkspace(old.workspace)) {
-                // Same seat reconnecting/probing — keep it now; a durable successor reaps it (ADR 092).
-                sameWorkspacePredecessors.push(old.connId);
-                continue;
-              }
-              old.send?.({
-                type: 'error',
-                code: 'superseded',
-                message: `your session as "${targetMember.name}" was taken over by a newer one`,
-              });
-              old.close?.();
-              ctx.hub.remove(old.connId);
-              clearPresenceById(ctx.db, old.presenceId);
-              displaced++;
-            }
-            // ADR 237: an eviction the ledger cannot see is an eviction nobody can debug — this
-            // branch used to displace silently while the same-workspace reap audited.
-            if (displaced > 0) {
-              appendAudit(ctx.db, team.id, {
-                actor: targetMember.name,
-                action: 'claim.superseded',
-                target: targetMember.name,
-                result: 'allow',
-                detail: { same_workspace: false, evicted: displaced, via: 'ws' },
-              });
-            }
-            clearOrphanPresence(ctx.db, targetMember.id);
-          }
-
-          // Step 5: grant path — if frame.grant is present, validate it and OCCUPY immediately.
+          let displacedModel: string | null = null;
+          // Step 4: authorize. Refused and pending claims must not mutate the incumbent.
           let reseated = false;
           if (frame.grant) {
             const gv = validateGrant(ctx.db, team.id, frame.grant);
@@ -509,9 +461,11 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               presenceId: '',
               awaitingClaim: req.id,
               isAdmin: false,
+              workspace: frame.workspace ?? null,
+              isOpen: () => ws.readyState === ws.OPEN,
               send: (f) => send(ws, f),
               close: () => ws.close(),
-              _claimApproved: (presenceId) => {
+              _claimApproved: (presenceId, sameWorkspacePredecessors = []) => {
                 state.authenticated = true;
                 state.conn = {
                   connId: state.connId,
@@ -523,12 +477,21 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                   // Firehose visibility (ADR 136) — same predicate the history read uses, so the live
                   // stream and `GET /messages` can never disagree about what this seat may see.
                   fullVisibility: targetMember ? hasFullMessageVisibility(targetMember) : false,
+                  workspace: frame.workspace ?? null,
                   send: (f) => send(ws, f),
                   close: () => ws.close(),
                 };
                 // Promote from pending to full member slot in hub.
                 ctx.hub.remove(state.connId);
                 ctx.hub.add(state.conn);
+                const evictionTimer = scheduleSameWorkspaceEviction(
+                  ctx,
+                  team.id,
+                  state.connId,
+                  targetMember?.name ?? '',
+                  sameWorkspacePredecessors,
+                );
+                if (evictionTimer) state.evictionTimer = evictionTimer;
               },
             };
             ctx.hub.addPending(pendingConn);
@@ -558,6 +521,60 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               conn: state.connId,
             });
             return; // WS stays open — admin decision arrives via hub.deliverClaimDecision
+          }
+
+          // Step 5: transition an AUTHORIZED claim. Single-active is **kind-scoped** (ADR 042): an
+          // agent seat is newest-wins (ADR 017), while a human/observer seat fans out. Displacement is
+          // workspace-scoped (ADR 068): same-workspace predecessors survive until the authorized
+          // successor proves durable (ADR 092); a claim with no workspace displaces all incumbents.
+          if (
+            targetMember &&
+            !('observe' in frame.target) &&
+            targetMember.kind === 'agent' &&
+            targetMember.observer === 0
+          ) {
+            const sameWorkspace = (w?: string | null): boolean =>
+              w != null && frame.workspace != null && w === frame.workspace;
+            displacedModel =
+              ctx.db
+                .prepare<
+                  [string],
+                  { model: string }
+                >('SELECT model FROM presence WHERE member_id = ? AND model IS NOT NULL ORDER BY last_seen_at DESC LIMIT 1')
+                .get(targetMember.id)?.model ?? null;
+            const orphaned = ctx.db
+              .prepare<
+                [string],
+                { count: number }
+              >('SELECT count(*) AS count FROM presence WHERE member_id = ? AND conn_id IS NULL')
+              .get(targetMember.id)?.count;
+            let displaced = 0;
+            for (const old of ctx.hub.connsForMember(targetMember.id)) {
+              if (sameWorkspace(old.workspace)) {
+                sameWorkspacePredecessors.push(old.connId);
+                continue;
+              }
+              old.send?.({
+                type: 'error',
+                code: 'superseded',
+                message: `your session as "${targetMember.name}" was taken over by a newer one`,
+              });
+              old.close?.();
+              ctx.hub.remove(old.connId);
+              clearPresenceById(ctx.db, old.presenceId);
+              displaced++;
+            }
+            const evicted = displaced + (orphaned ?? 0);
+            if (evicted > 0) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'claim.superseded',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { same_workspace: false, evicted, via: 'ws' },
+              });
+            }
+            clearOrphanPresence(ctx.db, targetMember.id);
           }
 
           // OCCUPY: attach presence and complete the handshake.
@@ -650,7 +667,17 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // NOTHING is not a non-event — if this seat's previous occupancy attested a model, the
           // seat has just left the ADR 188 pool, and before ADR 246 the ledger could not say so
           // even in hindsight, because an occupancy born null has no old→new transition to audit.
-          recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, frame.model);
+          if (!frame.model && displacedModel && sameWorkspacePredecessors.length === 0) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'occupancy.model_attested',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { occupancy: presence.id, old: displacedModel, new: null, source: 'claim' },
+            });
+          } else {
+            recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, frame.model);
+          }
           log.info({
             msg: 'ws_claim_occupied',
             team: team.slug,
@@ -794,7 +821,13 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
         delete state.evictionTimer;
       }
       const conn = state.conn;
-      if (!conn) return;
+      if (!conn) {
+        // A waiting claimant has no Presence yet, but it is still registered by connId so an admin can
+        // answer it. Once its socket closes, it is not a valid approval target and must not later be
+        // promoted into a phantom connection by the HTTP decision path.
+        ctx.hub.remove(state.connId);
+        return;
+      }
       ctx.hub.remove(conn.connId);
       recordPresenceChurn('detach');
       // Keep the row as a reclaim hold for the grace window instead of deleting it (ADR 010).
