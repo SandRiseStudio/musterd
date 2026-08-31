@@ -272,7 +272,8 @@ describe('fenced code in a Decision is compared exactly', () => {
   });
 
   it('REFUSES a changed value inside the fence', () => {
-    const after = before.replace('"version": 3', '"version": 4') + '\n_(Amended 2026-08-31: bumped.)_';
+    const after =
+      before.replace('"version": 3', '"version": 4') + '\n_(Amended 2026-08-31: bumped.)_';
     expect(isAppendOnlyAmendment(before, after)).toBe(false);
   });
 
