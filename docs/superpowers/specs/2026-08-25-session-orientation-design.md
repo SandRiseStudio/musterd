@@ -6,6 +6,10 @@
 - Related: ADR 049 (orientation brief), ADR 088 (injection bar), ADR 093/259 (seat memory),
   ADR 131 (harness residency), ADR 167 (session-messaging rail), ADR 209 (portable wake context),
   ADR 212 (standing-context budget), ADR 233 (owed reviews), standing-context spec 2026-08-03
+- Status: the tier-1/tier-2 split below is **superseded 2026-08-27** by the amendment to
+  [ADR 326](../../decisions/326-session-orientation.md) — owed reviews and routed acceptances are
+  tier 1, taken up unprompted; tier 2 is only work nobody addressed to the seat. §A(2) and §B step
+  4 are marked in place. The rest of this spec stands.
 
 ## Problem
 
@@ -27,6 +31,9 @@ Target behavior, decided in conversation:
 2. **Urgent, tier 1 (handle now):** directed asks awaiting this seat's reply, and open
    `kind:incident` lanes. **Tier 2 (surface prominently, do not auto-handle):** owed reviews
    (ADR 233). Everything else is reported, not acted on.
+   _(Superseded 2026-08-27, ADR 326 amendment: owed reviews and routed acceptances are tier 1 and
+   are taken up unprompted. Tier 2 is only unaddressed work — carried lanes, up-next, claimable
+   open lanes.)_
 3. A **woken** session stays scoped to its errand — no broad team digest.
 4. Autonomous resume-of-work ("claim the next lane unprompted") is explicitly deferred.
 
@@ -90,6 +97,9 @@ A new generated skill (rendered from `packages/protocol/src/guidance.ts` like
    shared red.
 4. **Surface tier 2 and the rest to the human:** owed reviews with ages, carried lanes, up-next —
    one compact readout, no action.
+   _(Superseded 2026-08-27, ADR 326 amendment: owed reviews moved to step 3 — announce with
+   `team_send {act:'accept', reply_to:<request id>}`, then do the review. This step now carries
+   only carried lanes and up-next.)_
 5. `team_send {act:'status_update'}` — one line — then stamp oriented.
 6. Stop and wait for direction. (The autoresume ratchet lives here later; see E.)
 

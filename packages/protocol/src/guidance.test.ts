@@ -74,6 +74,33 @@ describe('content stamp', () => {
   });
 });
 
+describe('orient tier 1 owns addressed work (ADR 326 amendment 2026-08-27 UTC)', () => {
+  // The defect this pins: seats surfaced acceptance requests routed to them and then asked the
+  // human's permission to take them — because the skill's tier 2 said "owed reviews: surface,
+  // do not handle". The autonomy line sits between ADDRESSED and UNADDRESSED work.
+  it('a routed acceptance/review request is DONE unprompted, never asked about', () => {
+    const skill = renderOrientSkill();
+    expect(skill).toMatch(/acceptance or review request routed to you: DO the review/);
+    expect(skill).toMatch(/never ask the human whether to take it/);
+    // Anchor-free by construction (stanley + miley, #1087): an ordered form like
+    // `/tier 2\).*owed reviews/s` passes on two mutants that DO carry the defect — the phrase
+    // reinserted above the anchor, and the anchor itself renamed. The claim is that the phrase is
+    // gone from the skill, so assert exactly that.
+    expect(skill).not.toMatch(/owed reviews/);
+    expect(skill).toMatch(/tier 2\) — work nobody routed to you/);
+  });
+
+  // The dedup half (dolly, #1087): telling every addressee of an eligible set to execute
+  // unprompted removes the human arbitration that used to bound duplicates. ADR 254 discharge is
+  // written ONLY by an accept/decline naming the request, so the announcement is the mechanism.
+  it('teaches the announce-before-you-start step that discharges for co-addressees', () => {
+    const skill = renderOrientSkill();
+    expect(skill).toMatch(/Announce before you start/);
+    expect(skill).toMatch(/act:'accept', reply_to:<the request act id>/);
+    expect(skill).toMatch(/two\n?\s*seats review the same thing/);
+  });
+});
+
 describe('version-bump discipline (ADR 085)', () => {
   // Snapshot the full rendered guidance surface, keyed by content version. If you change any skill or
   // slash-command prose, this fails — the fix is to BUMP `GUIDANCE_CONTENT_VERSION` and add its new
@@ -99,6 +126,7 @@ describe('version-bump discipline (ADR 085)', () => {
     17: '0fe7e98a513e636e', // + musterd-orient skill unit + team_wake_context in the tool reference (session-orientation spec 2026-08-25)
     18: 'c5ea40b9c6cdd791', // + team memory: insight save/search + the search-before-you-re-derive playbook (ADR 327)
     19: '3b7db362a4f5eeb9', // + rename team_memory_search → team_insight_search, alias retained one epoch (ADR 327 amendment, ADR 296)
+    20: '199e0096a14dec89', // orient tier 1 = everything ADDRESSED to the seat: a routed acceptance/review request is done, not asked about, and announced with accept+reply_to so it discharges for co-addressees (ADR 326 amendment 2026-08-27 UTC)
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {

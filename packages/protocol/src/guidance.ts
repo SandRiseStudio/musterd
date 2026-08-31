@@ -18,7 +18,7 @@
 
 /** Bumped whenever the rendered skill/command *content* changes (the stamp + doctor drift check key off
  * it). A snapshot test fails if the body changes without this moving, forcing the bump. */
-export const GUIDANCE_CONTENT_VERSION = 19;
+export const GUIDANCE_CONTENT_VERSION = 20;
 
 /** MCP tool names the skill references by name. CI (`guidance:check`) asserts each is a registered tool
  * in `@musterd/mcp`, so renaming a tool without updating the skill breaks the build. */
@@ -474,8 +474,19 @@ export function renderNudgeRelayFrontmatter(): string {
 /**
  * The orient skill (spec 2026-08-25-session-orientation-design.md §B): what a seat session does
  * when the injected orientation block or the per-turn orient nudge says "orient now". Tier 1
- * (directed acts, incidents) is HANDLED unprompted; tier 2 (owed reviews and the rest) is
- * surfaced to the human — the autonomy line is deliberate and the spec's §E owns moving it.
+ * (everything ADDRESSED to this seat — directed acts, incidents, acceptance/review requests) is
+ * HANDLED unprompted; tier 2 is work NOBODY addressed to this seat — carried lanes, up-next,
+ * claimable open lanes — and is surfaced, never acted on. The tiers are one rule, not two lists:
+ * anything routed to the seat is tier 1 by construction, so routed-but-unhandled work can never
+ * be added back to tier 2. The autonomy line is deliberate and the spec's §E owns it: it sits
+ * between addressed and unaddressed work, not between answering and doing (ADR 326 amendment
+ * 2026-08-27 UTC — seats were asking the human's permission to take reviews routed to them,
+ * because this skill taught it).
+ *
+ * Step 3's announce clause is load-bearing, not etiquette: `request_help` carries an eligible set
+ * (ADR 254) and `discharged` is written ONLY by an accept/decline whose `meta.in_reply_to` names
+ * the request, so telling every addressee to execute unprompted without it makes duplicate reviews
+ * the default. The announcement IS the discharge for every co-addressee at once.
  */
 export function renderOrientSkill(): string {
   return [
@@ -487,15 +498,20 @@ export function renderOrientSkill(): string {
     '1. `team_inbox_check` — your first team_* call; it claims the seat and shows what waits.',
     '2. If the orientation block showed a memory headline, `team_memory_read` and pick up where',
     '   the previous session left off.',
-    '3. **Handle now (tier 1):** every directed ask / request_help / steer waiting on this seat —',
-    '   answer it (`team_send` accept/decline/reply as the act demands). Open incident lanes:',
-    '   read the lane, post one status_update with what you found. Do not start other work into',
-    '   a shared red.',
-    '4. **Surface, do not handle (tier 2):** owed reviews, carried lanes, up-next — one compact',
-    '   readout for the human. Do not claim new work.',
+    '3. **Handle now (tier 1) — everything addressed to this seat.** Directed asks /',
+    '   request_help / steers: answer them (`team_send` accept/decline/reply as the act',
+    '   demands). An acceptance or review request routed to you: DO the review — it is yours by',
+    '   address, never ask the human whether to take it. **Announce before you start** —',
+    "   `team_send {act:'accept', reply_to:<the request act id>}` — because a request carries 2-4",
+    '   eligible names and only that act discharges it for your co-addressees; skip it and two',
+    '   seats review the same thing. Open incident lanes: read the lane, post one status_update',
+    '   with what you found. Do not start other work into a shared red.',
+    '4. **Surface, do not handle (tier 2) — work nobody routed to you.** Carried lanes, up-next,',
+    '   claimable open lanes: one compact readout for the human. Do not claim unaddressed work.',
     "5. `team_send {act:'status_update'}` — one line — then run `musterd session orient-stamp`.",
-    '6. Stop and wait for direction. Autonomous pickup of new work is deliberately NOT this',
-    '   skill (session-orientation spec §E).',
+    '6. When tier 1 is done, stop and wait for direction. Autonomous pickup of UNADDRESSED work',
+    '   is deliberately NOT this skill (session-orientation spec §E); work addressed to this',
+    '   seat was never optional.',
     '',
   ].join('\n');
 }
