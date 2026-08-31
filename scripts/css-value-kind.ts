@@ -26,19 +26,28 @@
  * `other` HOLDS ONE MORE CLASS, and it is not exempt for the reason above. An easing keyword or a
  * `cubic-bezier(...)` also lands in `other`, and it is neither parametric nor runtime-set — nothing
  * writes it from TS, and a phantom easing is exactly the lie this gate was built to catch. It is
- * quiet HERE because it is loud ELSEWHERE: `motion-scale.ts` rule 5 owns the `--lc-dur-*` /
- * `--lc-ease*` namespace and fails on both `var(--lc-ease, ease)` and a bare `var(--lc-ease)`.
- * Judging timing functions here would mean this module reaching outside its own subject, and the
- * two arms would then disagree about who owns the finding. So: `other` is not one exemption but
- * two — the parametric one, and a jurisdictional one that assumes rule 5 is doing its job.
+ * quiet HERE because it is loud ELSEWHERE: `motion-scale.ts` rule 5 catches an unresolved var()
+ * anywhere inside a `transition:`/`animation:` declaration, so it fails on both
+ * `var(--lc-ease, ease)` and a bare `var(--lc-ease)`. Judging timing functions here would mean this
+ * module reaching outside its own subject, and the two arms would then disagree about who owns the
+ * finding. So: `other` is not one exemption but two — the parametric one, and a jurisdictional one
+ * that assumes rule 5 is doing its job.
  *
  * WHERE THAT ASSUMPTION RUNS OUT, measured 2026-08-28 at 903aa7ac. Rule 5 is scoped by
  * `onMotionSurface` to /live, because the public site never moved onto the scale. So the same
  * `transition: opacity 200ms var(--lc-ease, ease)` fails in Live.css and PASSES in
  * components/Footer.css — uncovered by rule 5 (wrong surface) and by this module (wrong kind).
- * A phantom easing outside /live, or under a name outside `--lc-*`, is caught by neither arm.
- * That is a known gap, not an oversight: closing it means widening rule 5's surface, which is a
- * decision about the public site's motion, not about value kinds. Do not close it here.
+ * A phantom easing OUTSIDE /live is caught by neither arm. That is a known gap, not an oversight:
+ * closing it means widening rule 5's surface, which is a decision about the public site's motion,
+ * not about value kinds. Do not close it here.
+ *
+ * THIS PARAGRAPH USED TO SAY "or under a name outside `--lc-*`", and that half was an overclaim by
+ * the fix for the previous overclaim (dolly, on #1109). Rule 5's namespace was `--lc-dur-*` /
+ * `--lc-ease*`, not `--lc-*`, so `var(--lc-motion-ease, ease)` sat INSIDE the range this sentence
+ * declared covered and was silent anyway. The sentence is now true of the code because the code
+ * moved: rule 5 judges by site, not by name. Both halves of this comment's history belong in
+ * docs/wiki/constraint-outlives-its-premise.md — a justification that does not cover the class it
+ * describes, written inside the fix for the last one, and with no gate of its own.
  */
 
 /** A literal colour: hex, or a colour function. Deliberately NOT matching `var(...)` — a fallback
@@ -67,7 +76,8 @@ export const isLength = (value: string): boolean => LENGTH.test(value.trim());
 
 /**
  * The kind of a `var()` fallback. `other` means "not this gate's business" — either parametric
- * (bare numbers, durations, angles) or another arm's subject (easing, which rule 5 owns) — and is
+ * (bare numbers, durations, angles) or another arm's subject (easing in a motion declaration, which
+ * rule 5 owns) — and is
  * the only kind the caller should skip.
  */
 export function valueKind(value: string): ValueKind {

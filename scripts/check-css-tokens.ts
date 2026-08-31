@@ -189,7 +189,8 @@ for (const file of files) {
     for (const { token, fallback } of varsWithFallback(text)) {
       /* `other` is TWO exemptions, not one. The parametric one — bare numbers, durations, angles —
          and a jurisdictional one: easing lands in `other` too, and is quiet here only because
-         motion-scale.ts rule 5 owns the `--lc-ease*` namespace and catches it there. Neither is
+         motion-scale.ts rule 5 owns any var() sitting inside a motion declaration and catches it
+         there — by site, not by namespace, since dolly's finding on #1109. Neither is
          "everything that is not a colour" any more: that proxy let `font-size: var(--nope, 13px)`
          through while `color: var(--nope, #ff0000)` failed, the identical lie one property over
          (measured 2026-08-28, docs/wiki/constraint-outlives-its-premise.md). */
@@ -231,11 +232,20 @@ const expectedMotion = new Map<string, string>([
   ),
 ]);
 
-/* Rule 5 needs every motion token declared ANYWHERE — the scale lives in Live.css and is used from
- * sibling stylesheets, so a per-file view would call every cross-file reference a phantom. */
-const knownMotion = new Set<string>();
+/* Rule 5 needs every custom property declared ANYWHERE — the scale lives in Live.css and is used
+ * from sibling stylesheets, so a per-file view would call every cross-file reference a phantom.
+ *
+ * ALL custom properties, not just motion ones, because rule 5 now judges a var() by where it sits
+ * rather than by what it is called (dolly's finding on #1109). The set is the union of the two
+ * collectors this file already runs — `defined` from the colour arm and `declaredMotionTokens` —
+ * rather than a third scan of the same declarations: the one grammar this file keeps re-deriving
+ * privately is exactly what rules 2 and 3 each had to unwind. `declaredMotionTokens` is not
+ * redundant in that union; it splits one-liner `:root { --a: 1; --b: 2; }` blocks that `defined`'s
+ * line-anchored pattern only sees the first declaration of. */
+const knownDeclared = new Set<string>(defined.keys());
 for (const file of files) {
-  for (const { token } of declaredMotionTokens(readFileSync(file, 'utf8'))) knownMotion.add(token);
+  for (const { token } of declaredMotionTokens(readFileSync(file, 'utf8')))
+    knownDeclared.add(token);
 }
 
 /*
@@ -257,7 +267,7 @@ for (const file of files) {
     ...disagreeingTokens(css, expectedMotion),
     ...offFrameDurations(css),
     ...rawMotionLiterals(css, rel),
-    ...phantomMotionRefs(css, knownMotion),
+    ...phantomMotionRefs(css, knownDeclared, runtimeSet),
     // Rule 4. /broadcast is exempt by design (spec §6): it is a capture surface, and the harness
     // rather than a person decides what it renders — there is no viewer there to hold a preference.
     ...(rel.endsWith('Broadcast.css')

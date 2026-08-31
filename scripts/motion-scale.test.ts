@@ -383,31 +383,62 @@ describe('disagreeingTokens', () => {
 });
 
 describe('phantomMotionRefs', () => {
-  const known = new Set(['--lc-dur-1', '--lc-ease-out']);
+  const declared = new Set(['--lc-dur-1', '--lc-ease-out']);
+  const nowhere = (token: string) =>
+    `var(${token}) is used in a motion declaration but declared nowhere and never set at runtime`;
 
   it('flags a motion var() that no stylesheet declares — a silently dead transition', () => {
     // The real case: Task 4 deleted --lc-fast, and ApprovalCard.css still pointed at it. A
     // transition whose duration does not resolve simply does not animate, and nothing says so.
     const css = '.a { transition: color var(--lc-fast) var(--lc-ease-out); }';
-    expect(phantomMotionRefs(css, known)).toEqual([
-      {
-        kind: 'phantom',
-        line: 1,
-        detail: 'var(--lc-fast) is used in a transition but declared nowhere',
-      },
+    expect(phantomMotionRefs(css, declared)).toEqual([
+      { kind: 'phantom', line: 1, detail: nowhere('--lc-fast') },
     ]);
   });
 
   it('accepts references to declared tokens', () => {
     expect(
-      phantomMotionRefs('.a { transition: color var(--lc-dur-1) var(--lc-ease-out); }', known),
+      phantomMotionRefs('.a { transition: color var(--lc-dur-1) var(--lc-ease-out); }', declared),
     ).toEqual([]);
   });
 
-  it('ignores non-motion custom properties it knows nothing about', () => {
-    expect(
-      phantomMotionRefs('.a { transition: color var(--lc-dur-1) var(--x-other); }', known),
-    ).toEqual([]);
+  /*
+   * dolly's finding on #1109, as a test. Every row here was silent before the rule judged by site:
+   * the pattern was `--lc-(?:dur-…|ease…|fast|med)`, so a phantom only failed if its author had
+   * already filed it in the motion namespace — which is the one thing an accidental phantom does
+   * not do. Row 3 is the one that falsified the comment in css-value-kind.ts: it is inside `--lc-*`
+   * and was silent anyway.
+   */
+  it.each([
+    ['--lc-motion-ease', 'a --lc- name outside the dur/ease prefixes'],
+    ['--brand-ease', 'another system’s namespace, used on the motion surface'],
+    ['--x-other', 'a name that claims nothing at all'],
+  ])('flags var(%s) in a transition — %s', (token) => {
+    expect(phantomMotionRefs(`.a { transition: opacity 200ms var(${token}, ease); }`, declared)) //
+      .toEqual([{ kind: 'phantom', line: 1, detail: nowhere(token) }]);
+  });
+
+  it('flags a bare phantom with no fallback too — nothing resolves either way', () => {
+    expect(phantomMotionRefs('.a { transition: opacity 200ms var(--lc-motion-ease); }', declared)) //
+      .toEqual([{ kind: 'phantom', line: 1, detail: nowhere('--lc-motion-ease') }]);
+  });
+
+  it('says nothing about a var() outside a motion declaration', () => {
+    // The widening is to the motion SITE, not to every var() in the stylesheet. A phantom in
+    // `color:` is the colour arm's finding, and two arms reporting one defect is how they start
+    // disagreeing about who owns it.
+    expect(phantomMotionRefs('.a { color: var(--x-other, red); }', declared)).toEqual([]);
+  });
+
+  it('exempts a token TS sets at runtime — the fallback is the idiom, not a lie', () => {
+    // --lc-mote-delay / --lc-twinkle-delay / --lc-mote-dur are undeclared in CSS on purpose and
+    // carry a fallback for the frame before JS sets them. They are the only uses the widening
+    // newly reaches on /live, so without this exemption the fix ships three false failures.
+    const css = '.mote { animation: drift var(--lc-mote-dur, 6s) linear infinite; }';
+    expect(phantomMotionRefs(css, declared, new Set(['--lc-mote-dur']))).toEqual([]);
+    expect(phantomMotionRefs(css, declared)).toEqual([
+      { kind: 'phantom', line: 1, detail: nowhere('--lc-mote-dur') },
+    ]);
   });
 });
 
