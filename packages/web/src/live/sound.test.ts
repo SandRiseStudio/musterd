@@ -1,30 +1,38 @@
 import { describe, expect, it, vi } from 'vitest';
+import { EMPTY_LIFE, firehoseSound, type LifeContext, roomTone } from './sound';
 import {
-  EMPTY_LIFE,
-  firehoseSound,
-  roomTone,
+  deskPhase,
   keyboardFor,
   keypressPlan,
   LIFE_EVENTS,
-  type LifeContext,
+  LIFE_GAP,
+  lifeGapFor,
   panFor,
   pickLifeEvent,
+  pickWorkDesk,
   shouldChime,
-} from './sound';
+} from './soundLife';
 
 // These tests cover the parts of the room-tone layer that are LOGIC — which event fires, under what
 // gate, with what pan. The levels are deliberately not unit-tested: they are verified by offline
 // render through the calibration graph documented in sound.ts, whose ±3 dB resolution no assertion
 // can hold meaningfully.
 
-const near: LifeContext = { pairs: [{ x: 0.3 }], dog: null };
-const withDog: LifeContext = { pairs: [], dog: { x: -0.4, walking: true } };
-const dogResting: LifeContext = { pairs: [], dog: { x: -0.4, walking: false } };
+const near: LifeContext = { ...EMPTY_LIFE, pairs: [{ x: 0.3 }] };
+const withDog: LifeContext = { ...EMPTY_LIFE, dog: { x: -0.4, walking: true } };
+const dogResting: LifeContext = { ...EMPTY_LIFE, dog: { x: -0.4, walking: false } };
+const oneWorking: LifeContext = { ...EMPTY_LIFE, working: [{ x: 0.5, seed: 7 }], density: 0.5 };
+
+/** A clock instant at which the given desk is in its typing phase (searched, deterministic). */
+function typingMomentFor(seed: number): number {
+  for (let t = 0; t < 120_000; t += 500) if (deskPhase(seed, t) === 'typing') return t;
+  throw new Error(`desk seed ${seed} never types in 120s`);
+}
 
 /** Every event the roll can produce for a context, swept finely across [0, 1). */
-function sweep(ctx: LifeContext): Set<string> {
+function sweep(ctx: LifeContext, nowMs = 0): Set<string> {
   const out = new Set<string>();
-  for (let r = 0; r < 1; r += 0.001) out.add(pickLifeEvent(r, ctx));
+  for (let r = 0; r < 1; r += 0.001) out.add(pickLifeEvent(r, ctx, nowMs));
   return out;
 }
 
@@ -91,6 +99,124 @@ describe('dog sounds', () => {
   it('keeps the paws to a dog that is actually walking', () => {
     expect(sweep(withDog).has('paws')).toBe(true);
     expect(sweep(dogResting).has('paws')).toBe(false);
+  });
+});
+
+describe('work sounds track evidenced work (E2 spec §3)', () => {
+  it('keeps every work-family sound out of a room where nobody is working', () => {
+    const heard = sweep(EMPTY_LIFE);
+    for (const n of ['keys', 'tap', 'softTap', 'creak', 'drawer', 'stapler']) {
+      expect(heard.has(n), n).toBe(false);
+    }
+  });
+
+  it('keeps work sounds out even when people are merely present (idle room keeps presence sounds)', () => {
+    const heard = sweep(near);
+    expect(heard.has('keys')).toBe(false);
+    expect(heard.has('murmur')).toBe(true);
+  });
+
+  it('lets keys fire only while some desk is in its typing phase', () => {
+    const at = typingMomentFor(7);
+    expect(sweep(oneWorking, at).has('keys')).toBe(true);
+    expect(sweep(oneWorking, at).has('tap')).toBe(true);
+  });
+
+  it('places a work event on an actual working desk', () => {
+    const at = typingMomentFor(7);
+    const desk = pickWorkDesk('keys', 0.5, oneWorking, at);
+    expect(desk).toEqual({ x: 0.5, seed: 7 });
+    expect(pickWorkDesk('keys', 0.5, EMPTY_LIFE, at)).toBeNull();
+  });
+
+  it('sends keys to a typing desk, never a thinking one', () => {
+    const typing = 7;
+    const at = typingMomentFor(typing);
+    let thinking: number | null = null;
+    for (let s = 100; s < 200; s++) {
+      if (deskPhase(s, at) === 'thinking') {
+        thinking = s;
+        break;
+      }
+    }
+    expect(thinking).not.toBeNull();
+    const ctx: LifeContext = {
+      ...EMPTY_LIFE,
+      working: [
+        { x: -0.8, seed: thinking! },
+        { x: 0.8, seed: typing },
+      ],
+    };
+    for (const roll of [0, 0.25, 0.5, 0.75, 0.999]) {
+      expect(pickWorkDesk('keys', roll, ctx, at)).toEqual({ x: 0.8, seed: typing });
+    }
+    // Taps may land on either desk — a thinking desk still shuffles paper.
+    expect(pickWorkDesk('tap', 0, ctx, at)).not.toBeNull();
+  });
+});
+
+describe('the think/type phase', () => {
+  it('is deterministic in (seed, now)', () => {
+    expect(deskPhase(7, 30_000)).toBe(deskPhase(7, 30_000));
+  });
+
+  it('visits both phases over a couple of minutes', () => {
+    const seen = new Set<string>();
+    for (let t = 0; t < 120_000; t += 1000) seen.add(deskPhase(7, t));
+    expect(seen).toEqual(new Set(['typing', 'thinking']));
+  });
+
+  it('gives different desks different rhythms', () => {
+    const a: string[] = [];
+    const b: string[] = [];
+    for (let t = 0; t < 120_000; t += 1000) {
+      a.push(deskPhase(7, t));
+      b.push(deskPhase(8, t));
+    }
+    expect(a.join('')).not.toBe(b.join(''));
+  });
+});
+
+describe('density is tempo, not gain (E2 spec §4)', () => {
+  it('leaves the quiet room at the historical gap', () => {
+    expect(lifeGapFor(0)).toEqual(LIFE_GAP);
+  });
+
+  it('schedules a full sprint about twice as often, monotonically', () => {
+    const [minFull, maxFull] = lifeGapFor(1);
+    expect(maxFull).toBeCloseTo(LIFE_GAP[1] / 2, 5);
+    expect(minFull).toBeLessThan(LIFE_GAP[0]);
+    const mids = [0, 0.25, 0.5, 0.75, 1].map((d) => lifeGapFor(d)[1]);
+    for (let i = 1; i < mids.length; i++) expect(mids[i]!).toBeLessThan(mids[i - 1]!);
+  });
+
+  it('never drops below the burst floor', () => {
+    expect(lifeGapFor(1)[0]).toBeGreaterThanOrEqual(1.2);
+  });
+});
+
+describe('the day cycle follows the window light (E2 spec §4)', () => {
+  it('lets birds sing only into a morning with actual daylight', () => {
+    const morning: LifeContext = { ...EMPTY_LIFE, hours: 7.5, daylight: 0.6 };
+    const noon: LifeContext = { ...EMPTY_LIFE, hours: 12, daylight: 1 };
+    const night: LifeContext = { ...EMPTY_LIFE, hours: 7.5, daylight: 0 };
+    expect(sweep(morning).has('birds')).toBe(true);
+    expect(sweep(noon).has('birds')).toBe(false);
+    expect(sweep(night).has('birds')).toBe(false);
+  });
+
+  it('keeps night air for a dark room that someone is actually in', () => {
+    const lateShift: LifeContext = {
+      ...EMPTY_LIFE,
+      hours: 23,
+      daylight: 0,
+      working: [{ x: 0, seed: 1 }],
+    };
+    const emptyNight: LifeContext = { ...EMPTY_LIFE, hours: 23, daylight: 0 };
+    const day: LifeContext = { ...lateShift, hours: 12, daylight: 1 };
+    expect(sweep(lateShift, typingMomentFor(1)).has('nightair')).toBe(true);
+    expect(sweep(emptyNight).has('nightair')).toBe(false);
+    expect(sweep(day, typingMomentFor(1)).has('nightair')).toBe(false);
   });
 });
 

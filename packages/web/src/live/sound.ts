@@ -11,8 +11,9 @@
 //
 //   1. The stored preferences, so a toggle can render in the right position on first paint without
 //      pulling 30 KB of synths to answer a yes/no question.
-//   2. The pure logic — which life event fires under what gate, with what pan, and the per-run
-//      keyboard. Testable without an AudioContext, and small.
+//   2. The `LifeContext` contract the scene pushes occupancy through — a type and one empty
+//      constant, so the eager graph carries no roll logic (that lives in `soundLife.ts`, loaded
+//      with the engines).
 //   3. The façades. Same API the call sites always used, so nothing downstream learned a new shape:
 //      `enabled` is answered synchronously from the preference; every command either forwards to a
 //      loaded engine or queues behind the one in-flight import.
@@ -42,28 +43,6 @@ function writePref(key: string, on: boolean): void {
   }
 }
 
-/**
- * Minimum gap between broadcast act cues, ms. The stream fires the whole team's acts at one
- * listener who cannot mute them, and the cue set was tuned for a person at a desk with sparse
- * arrivals — unthrottled, a busy minute is a slot machine.
- *
- * A dropped cue plays nothing later: the visual channel (speech bubble, stream panel) already
- * carries every act, so the audio does not owe the viewer completeness.
- */
-const BROADCAST_CUE_GAP_MS = 700;
-
-/** Pure gate for the broadcast cue throttle — a burst coalesces to one cue rather than queueing. */
-export function shouldChime(now: number, last: number, minGapMs = BROADCAST_CUE_GAP_MS): boolean {
-  return now - last >= minGapMs;
-}
-
-// ── the life roll, as data ───────────────────────────────────────────────────────────────────────
-//
-// Which small noise plays next used to be an inline `if (roll < 0.34) …` chain, which nothing could
-// test and every addition re-balanced by hand. It is now a weighted table plus a pure picker, so the
-// mix is inspectable, the gates (chatter needs two people NEAR each other, dog noises need the dog)
-// are testable without an AudioContext, and the synths below stay what they are: leaf functions.
-
 /** What the scene tells the sound engine. Pushed one way (scene → sound), never read back — that is
  *  what keeps this file testable without a canvas. `x` values are screen positions in [-1, 1]. */
 export interface LifeContext {
@@ -71,117 +50,32 @@ export interface LifeContext {
   pairs: ReadonlyArray<{ x: number }>;
   /** The office dog, when it is on the floor. */
   dog: { x: number; walking: boolean } | null;
+  /**
+   * Desks whose seats are audibly working. Collected by `posture === 'working'` at a desk — never
+   * `activity`, which lags: a stale activity with posture projected to idle used to sit on the
+   * lounge couch drumming an imaginary keyboard, and this field keyed on activity would be that bug
+   * in the ears. Same predicate the renderer types and lights screens on (E2 spec §2).
+   */
+  working: ReadonlyArray<{ x: number; seed: number }>;
+  /** Work intensity 0..1 — working share of present seats, nudged by recent act rate (scene-side). */
+  density: number;
+  /** From the lighting envelope, so audio and window light can never disagree. */
+  daylight: number;
+  /** Office clock, 0..24 PST — the same value the wall clock renders; `?light=HH` overrides audio too. */
+  hours: number;
 }
 
-/** An occupancy nobody has pushed yet: an empty office, which must not talk to itself. */
-export const EMPTY_LIFE: LifeContext = { pairs: [], dog: null };
+/** An occupancy nobody has pushed yet: an empty office, which must not talk to itself. Noon-lit so
+ *  neither day-cycle event is available — the neutral hour, not a phantom midnight. */
+export const EMPTY_LIFE: LifeContext = {
+  pairs: [],
+  dog: null,
+  working: [],
+  density: 0,
+  daylight: 1,
+  hours: 12,
+};
 
-/**
- * The mix. Work and talk stay the majority on purpose — the new events are seasoning, and a room
- * where the stapler fires as often as the typing is a cartoon. Weights sum to 1; the gated events'
- * weight is REDISTRIBUTED (by renormalising over what is available) when their condition fails, so
- * an empty office is not simply quieter by the chatter slots.
- */
-export const LIFE_EVENTS: ReadonlyArray<{ name: string; weight: number }> = [
-  { name: 'keys', weight: 0.34 },
-  { name: 'murmur', weight: 0.17 },
-  { name: 'whisper', weight: 0.04 },
-  { name: 'tap', weight: 0.07 },
-  { name: 'creak', weight: 0.06 },
-  { name: 'chime', weight: 0.04 },
-  { name: 'softTap', weight: 0.03 },
-  { name: 'stapler', weight: 0.03 },
-  { name: 'drawer', weight: 0.03 },
-  { name: 'footsteps', weight: 0.04 },
-  { name: 'sip', weight: 0.03 },
-  { name: 'blow', weight: 0.02 },
-  { name: 'water', weight: 0.02 },
-  { name: 'eating', weight: 0.03 },
-  { name: 'paws', weight: 0.025 },
-  { name: 'jingle', weight: 0.01 },
-  { name: 'yawn', weight: 0.01 },
-  // A bark on a timer is an alarm clock. Rarity IS the design; do not "fix" this upward.
-  { name: 'bark', weight: 0.005 },
-];
-
-const CHATTER = new Set(['murmur', 'whisper']);
-const DOG_EVENTS = new Set(['paws', 'jingle', 'yawn', 'bark']);
-
-/** Is this event available under the current occupancy? Chatter needs a co-located pair — a headcount
- *  of two at opposite ends of the floor is not a conversation. Paws need the dog actually walking. */
-function lifeAvailable(name: string, ctx: LifeContext): boolean {
-  if (CHATTER.has(name)) return ctx.pairs.length > 0;
-  if (name === 'paws') return ctx.dog?.walking === true;
-  if (DOG_EVENTS.has(name)) return ctx.dog != null;
-  return true;
-}
-
-/** Pick the next life event for a uniform `roll` in [0, 1). Pure and deterministic. */
-export function pickLifeEvent(roll: number, ctx: LifeContext): string {
-  const avail = LIFE_EVENTS.filter((e) => lifeAvailable(e.name, ctx));
-  const total = avail.reduce((sum, e) => sum + e.weight, 0);
-  let acc = 0;
-  for (const e of avail) {
-    acc += e.weight;
-    if (roll * total < acc) return e.name;
-  }
-  return avail[avail.length - 1]!.name;
-}
-
-/**
- * Where an event pans. Chatter comes from the pair and dog noises from the dog — the room's sound
- * should match what the eye can see. Everything else returns null: play it from a random side, the
- * way the layer always has (everything in an office happens at somebody else's desk).
- */
-export function panFor(name: string, ctx: LifeContext): number | null {
-  if (CHATTER.has(name)) return (ctx.pairs[0]?.x ?? 0) * 0.75;
-  if (DOG_EVENTS.has(name)) return (ctx.dog?.x ?? 0) * 0.75;
-  return null;
-}
-
-// ── the keyboard ─────────────────────────────────────────────────────────────────────────────────
-
-/** One desk's keyboard: the body pitch of its thock, the down→up gap, and the two transient gains. */
-export interface Keyboard {
-  body: number;
-  gap: number;
-  downGain: number;
-  upGain: number;
-}
-
-/**
- * A keyboard per RUN, not per key. Every keystroke in the office used to be the same synth roll, so
- * a burst at one desk sounded identical to a burst at another; drawing the parameters once per run
- * makes a burst one keyboard and the next burst a different desk. Deterministic in the seed so the
- * tests can hold it still.
- */
-export function keyboardFor(seed: number): Keyboard {
-  const r = (salt: number): number => {
-    let h = Math.imul(seed ^ (salt * 0x9e3779b9), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-  };
-  return {
-    // An octave-ish below the old 1650–2550 Hz band: the bright band was the "fake" half of the
-    // complaint — it was playing only a keystroke's click, never its thock.
-    body: 750 + r(1) * 550,
-    gap: 0.028 + r(2) * 0.03,
-    downGain: 0.017 + r(3) * 0.009,
-    upGain: 0.01 + r(4) * 0.005,
-  };
-}
-
-/**
- * The two transients of one keypress: a low thock as the key bottoms out, then a lighter, brighter
- * click as it releases. The original played only the second half, which is why it read as fake AND
- * as the loudest thing in the room — both complaints had the same root (nick, 2026-07-30).
- */
-export function keypressPlan(kb: Keyboard): ReadonlyArray<{ freq: number; gain: number; dur: number; at: number }> {
-  return [
-    { freq: kb.body, gain: kb.downGain, dur: 0.045, at: 0 },
-    { freq: kb.body * 2.6, gain: kb.upGain, dur: 0.028, at: kb.gap },
-  ];
-}
 // ── the façades ──────────────────────────────────────────────────────────────────────────────────
 //
 // One in-flight import, shared. Everything below is a thin forwarder whose only real job is to be

@@ -2,7 +2,7 @@ import type { MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { memberPosture } from '../format';
 import { DESK_SLOTS, LEISURE_SPOTS } from './layout';
-import { assignSeats, type Seatable } from './seating';
+import { assignSeats, audiblyWorking, type Seatable } from './seating';
 
 /** A working member by default — desks are for members with a task in hand. */
 function member(name: string, over: Partial<MemberSummary> = {}): Seatable {
@@ -182,5 +182,21 @@ describe('assignSeats', () => {
     const working = Array.from({ length: DESK_SLOTS.length }, (_, i) => member(`w${i}`));
     const seats = assignSeats([...idle, ...working]);
     for (const m of working) expect(seats.get(m.name)?.kind).toBe('desk');
+  });
+});
+
+describe('audiblyWorking (E2 spec §2 — one predicate for eyes, ears and the loop)', () => {
+  it('keys on posture, never activity — stale activity must not drum an imaginary keyboard', () => {
+    // activity says working, but the composed posture folded it to away (the lounge-couch case).
+    const stale = member('stale', { availability: { status: 'away' } });
+    expect(stale.posture).not.toBe('working');
+    expect(audiblyWorking(stale)).toBe(false);
+    // The evidenced case: posture working is what the renderer types and lights screens on.
+    expect(audiblyWorking(member('busy'))).toBe(true);
+  });
+
+  it('stays quiet for idle and offline seats', () => {
+    expect(audiblyWorking(member('idle', { activity: 'active' }))).toBe(false);
+    expect(audiblyWorking(member('gone', { presence: 'offline', activity: 'offline' }))).toBe(false);
   });
 });
