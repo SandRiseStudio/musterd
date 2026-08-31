@@ -216,3 +216,23 @@ export function keypressPlan(kb: Keyboard): ReadonlyArray<{ freq: number; gain: 
     { freq: kb.body * 2.6, gain: kb.upGain, dur: 0.028, at: kb.gap },
   ];
 }
+
+// ── milestone moments (E3) ───────────────────────────────────────────────────────────────────────
+
+/** The room's placed reactions — diegetic, on the room-tone layer; NOT the firehose act cues. */
+export type Moment = 'fanfare' | 'door' | 'askbell';
+
+/** Minimum gap between moments, ms. Moments are act-driven and sparse by nature; the one plausible
+ *  burst (a flood of accepts) coalesces rather than becoming a slot machine — same principle as the
+ *  broadcast cue throttle. */
+const MOMENT_GAP_MS = 400;
+
+/** Pure gate for the moment throttle — a burst plays once, the rest are dropped, never queued. */
+export function shouldPlayMoment(now: number, last: number): boolean {
+  return shouldChime(now, last, MOMENT_GAP_MS);
+}
+
+/** The engine's one squeeze: clamp, then ×0.75 — everything in an office happens off to one side. */
+export function momentPan(pan: number): number {
+  return Math.max(-1, Math.min(1, pan)) * 0.75;
+}

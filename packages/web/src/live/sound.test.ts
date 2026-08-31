@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { EMPTY_LIFE, firehoseSound, type LifeContext, roomTone } from './sound';
+import { EMPTY_LIFE, firehoseSound, type LifeContext, roomTone, screenPan } from './sound';
 import {
   deskPhase,
   keyboardFor,
@@ -9,8 +9,10 @@ import {
   lifeGapFor,
   panFor,
   pickLifeEvent,
+  momentPan,
   pickWorkDesk,
   shouldChime,
+  shouldPlayMoment,
 } from './soundLife';
 
 // These tests cover the parts of the room-tone layer that are LOGIC — which event fires, under what
@@ -335,5 +337,30 @@ describe('the lazy engine façade', () => {
     await Promise.resolve();
     expect(() => roomTone.setOccupancy(EMPTY_LIFE)).not.toThrow();
     expect(roomToneEngine).toBeDefined();
+  });
+});
+
+describe('milestone moments (E3 spec)', () => {
+  it('throttles a burst of moments to one per 400ms', () => {
+    expect(shouldPlayMoment(1000, -Infinity)).toBe(true);
+    expect(shouldPlayMoment(1000, 700)).toBe(false); // 300ms since — inside
+    expect(shouldPlayMoment(1000, 600)).toBe(true); // exactly 400ms
+  });
+
+  it('converts a canvas pixel to raw [-1, 1] without the stereo squeeze', () => {
+    expect(screenPan(0, 800)).toBe(-1);
+    expect(screenPan(400, 800)).toBe(0);
+    expect(screenPan(800, 800)).toBe(1); // raw edge — the squeeze is the engine's alone
+    expect(screenPan(900, 800)).toBe(1); // clamped
+    expect(screenPan(100, 0)).toBe(0); // unsized canvas: centre, not NaN
+  });
+
+  it('squeezes exactly once, in the engine step', () => {
+    expect(momentPan(screenPan(800, 800))).toBeCloseTo(0.75, 5);
+    expect(momentPan(-2)).toBeCloseTo(-0.75, 5); // clamps before squeezing
+  });
+
+  it('drops a moment issued before the engines load, rather than queueing it', () => {
+    expect(() => roomTone.moment('fanfare', 0.2)).not.toThrow();
   });
 });

@@ -76,6 +76,14 @@ export const EMPTY_LIFE: LifeContext = {
   hours: 12,
 };
 
+/** A canvas pixel x → raw pan in [-1, 1]. RAW on purpose: the ×0.75 stereo squeeze belongs to the
+ *  engine alone (`momentPan`), so a value converted here must never be squeezed by the caller too.
+ *  An unsized canvas yields centre, not NaN. */
+export function screenPan(px: number, width: number): number {
+  if (width <= 0) return 0;
+  return Math.max(-1, Math.min(1, (px / width) * 2 - 1));
+}
+
 // ── the façades ──────────────────────────────────────────────────────────────────────────────────
 //
 // One in-flight import, shared. Everything below is a thin forwarder whose only real job is to be
@@ -206,6 +214,17 @@ class RoomToneFacade {
   setOccupancy(ctx: LifeContext): void {
     this.occupancy = ctx;
     this.engine?.setOccupancy(ctx);
+  }
+
+  /**
+   * A placed one-shot for a room milestone (E3): fanfare at the celebrant, the door, an ask's
+   * weight. `pan` is raw [-1, 1] (`screenPan` at the emit site); the engine owns the stereo
+   * squeeze. A moment that arrives before the engine chunk lands is DROPPED, never queued — the
+   * same rule as the firehose cues, for the same reason (a queued burst lands as one chord).
+   */
+  moment(name: import('./soundLife').Moment, pan: number): void {
+    if (!this.enabled) return;
+    this.engine?.moment(name, pan);
   }
 }
 

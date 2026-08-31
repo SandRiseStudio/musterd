@@ -19,10 +19,13 @@ import {
   keyboardFor,
   keypressPlan,
   lifeGapFor,
+  type Moment,
+  momentPan,
   panFor,
   pickLifeEvent,
   pickWorkDesk,
   shouldChime,
+  shouldPlayMoment,
 } from './soundLife';
 
 /** One scheduled note: a frequency, a start offset (s), a length (s), a waveform, and a peak gain. */
@@ -276,6 +279,8 @@ export class RoomTone {
   private broadcast = false;
   /** What the scene last told us about who is near whom. Starts empty: an empty office is quiet. */
   private occupancy: LifeContext = EMPTY_LIFE;
+  /** When the last milestone moment played — the E3 burst throttle's clock. */
+  private lastMomentAt = -Infinity;
 
   /** Toggle the bed. The façade owns the preference and its persistence; this is the audio half. */
   setEnabled(on: boolean): void {
@@ -429,6 +434,89 @@ export class RoomTone {
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     this.noise = buf;
     return buf;
+  }
+
+  /**
+   * A placed room milestone (E3): fanfare at the celebrant, the door opening, an ask's weight.
+   * On the LIFE bus so it inherits the bed's calibration; throttled so a burst of accepts plays
+   * once (dropped, never queued); the ×0.75 stereo squeeze happens HERE and nowhere else —
+   * `pan` arrives raw [-1, 1] from `screenPan` at the emit site.
+   */
+  moment(name: Moment, pan: number): void {
+    const ctx = this.ctx;
+    const bus = this.lifeBus;
+    if (!ctx || !bus || ctx.state !== 'running' || this.isHidden()) return;
+    const now = Date.now();
+    if (!shouldPlayMoment(now, this.lastMomentAt)) return;
+    this.lastMomentAt = now;
+    const panNode = ctx.createStereoPanner?.();
+    const out = panNode ?? ctx.createGain();
+    if (panNode) panNode.pan.value = momentPan(pan);
+    out.connect(bus);
+    setTimeout(() => out.disconnect(), 4000);
+    switch (name) {
+      case 'fanfare': return this.fanfare(ctx, out);
+      case 'door': return this.doorMoment(ctx, out);
+      case 'askbell': return this.askbell(ctx, out);
+    }
+  }
+
+  /** Acceptance lands (E3): a quick rising major triad off the cue ladder, and a soft paper
+   *  flutter underneath — the confetti's own sound. A celebration you notice, not a jingle. */
+  private fanfare(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const triad = [523.25, 659.25, 783.99]; // C5 E5 G5 — the resolve chord, placed in the room
+    triad.forEach((f, i) => {
+      this.ping(ctx, out, t0 + i * (0.07 + Math.random() * 0.03), f * (0.995 + Math.random() * 0.01), 0.02 + Math.random() * 0.006);
+    });
+    // The flutter: a handful of tiny bright taps scattered over the ring — paper coming down.
+    let at = t0 + 0.25;
+    for (let i = 0; i < 5 + Math.floor(Math.random() * 4); i++) {
+      this.click(ctx, out, at, 1800 + Math.random() * 1400, 0.012 + Math.random() * 0.008, 0.03);
+      at += 0.05 + Math.random() * 0.07;
+    }
+  }
+
+  /** The door (E3): a low latch click, the closer arm's short sigh, then a few steps from that side. */
+  private doorMoment(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    this.click(ctx, out, t0, 320 + Math.random() * 120, 0.08, 0.05); // the latch
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900, t0 + 0.08);
+    lp.frequency.exponentialRampToValueAtTime(320, t0 + 0.55);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0 + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.045, t0 + 0.2);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55); // the closer's sigh
+    src.connect(lp).connect(g).connect(out);
+    src.start(t0 + 0.08);
+    src.stop(t0 + 0.6);
+    let at = t0 + 0.45;
+    for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
+      this.click(ctx, out, at, 110 + Math.random() * 60, 0.07, 0.07); // steps from the door's side
+      at += 0.4 + Math.random() * 0.12;
+    }
+  }
+
+  /** An ask lands (E3): one soft held tone with a slow decay — weight, not alarm, and quieter than
+   *  the firehose doorbell that may ring beside it. */
+  private askbell(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const f = 440 * (0.98 + Math.random() * 0.05);
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = f;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.018, t0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.2);
+    osc.connect(g).connect(out);
+    osc.start(t0);
+    osc.stop(t0 + 1.25);
   }
 
   /** Schedule the next sparse event, and re-arm from it. One timer, always. The gap tightens with

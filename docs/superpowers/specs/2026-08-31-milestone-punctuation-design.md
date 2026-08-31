@@ -108,7 +108,7 @@ respected (151.6/152.3 KB after E2's split leaves headroom).
 | `packages/web/src/live/soundLife.ts` | `momentFor` mapping helpers if any pure logic emerges; `shouldPlayMoment` throttle gate. |
 | `packages/web/src/live/sound.ts` | `moment()` on the room-tone façade (forward-or-drop). |
 | `packages/web/src/live/soundEngine.ts` | three voices + `moment()` dispatch. |
-| `packages/web/src/live/office-scene/index.ts` | three one-line emits at the existing hooks. |
+| `packages/web/src/live/office-scene/index.ts` | three emits per the §2 table — above the motion gates, NOT from `pushConfetti`/`pushDoorCue`. |
 
 Tests (pure half + façade, no AudioContext): throttle gate math; façade drops (not
 queues) before load and respects the preference; ask pan chooses addressee-vs-centre;
