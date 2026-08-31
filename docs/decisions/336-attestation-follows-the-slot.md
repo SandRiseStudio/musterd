@@ -1,4 +1,4 @@
-# 335 — Attestation follows the slot, not the hook
+# 336 — Attestation follows the slot, not the hook
 
 - Status: accepted
 - Date: 2026-08-28
