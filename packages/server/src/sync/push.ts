@@ -41,16 +41,22 @@ function localNodeId(ctx: Ctx, teamId: string): string | null {
  *
  * The ceiling on any resume point a hub may hand back: a hub claiming to hold seq N from us when we
  * have only ever written M < N is asserting something impossible, not correcting us.
+ *
+ * Read from the ALLOCATOR, not from `messages`. `nodes.next_seq` is one counter per node, and the
+ * moment a second replicated kind draws from it (3c's lane claims are the announced one), a
+ * `MAX(origin_seq) FROM messages` head under-reports — at which point a LEGITIMATE resume point
+ * trips the check below and wedges the loop this guard exists to protect. The allocator is the only
+ * reading that stays true as kinds are added (dolly, 2026-08-28, #1102 note 3).
  */
 function localHead(ctx: Ctx, teamId: string, nodeId: string): number {
-  return (
-    ctx.db
-      .prepare<
-        [string, string],
-        { high: number | null }
-      >('SELECT MAX(origin_seq) AS high FROM messages WHERE team_id = ? AND origin_node = ?')
-      .get(teamId, nodeId)?.high ?? 0
-  );
+  const row = ctx.db
+    .prepare<
+      [string, string],
+      { next_seq: number }
+    >('SELECT next_seq FROM nodes WHERE team_id = ? AND id = ?')
+    .get(teamId, nodeId);
+  // `next_seq` names the NEXT value to assign, so the head is one below it; 1 means nothing minted.
+  return row ? row.next_seq - 1 : 0;
 }
 
 function readCursor(ctx: Ctx, teamId: string, nodeId: string): number {
@@ -183,6 +189,10 @@ export async function pushTeam(
     // that answer is wrong here: the same batch will be refused forever. Logged at ERROR with the
     // offending event id so the failure is legible from this daemon's log alone, without anyone
     // reading the hub's database to find out why a machine went quiet.
+    //
+    // "Terminal" describes the BATCH, not the loop: startSyncPush still retries every 60s, so this
+    // repeats at ERROR until an operator acts. Deliberate — skipping the event would be silent
+    // loss, and choosing a drop policy belongs with the fold in 3b-ii, not here (dolly, note 2).
     const body = (await res.json().catch(() => null)) as { event_id?: unknown } | null;
     log.error({
       msg: 'sync_push_rejected',

@@ -87,6 +87,17 @@ Two refusals, and they are different refusals:
   this surface: increment 3a's one confirmed hole (izzo, 2026-08-27) was a guard that scoped to the
   requested team while the id it guarded was global.
 
+A third, from the same principle: **the envelope may not name a team other than the one it is pushed
+into.** The hub authenticated the team, so the payload does not get to contradict it. Nothing in
+3b-i reads `envelope.team` — 3b-ii's fold is the reader, and a row whose `team_id` says one team
+while its payload says another is a contradiction the staging layer already had the information to
+refuse.
+
+That check compares against `teams.slug`, which is safe **because slugs are immutable in practice**:
+`store/teams.ts` updates `agent_key_hash`, `policy`, the display fields and `archived_at`, and never
+`slug` (verified by dolly, 2026-08-28). If slugs ever become mutable, this check turns every
+previously-minted envelope into a permanent 403, and it must move to comparing team ids.
+
 Both refusals roll the whole batch back. A partially applied batch leaves a hole the pusher believes
 it has closed — which is the loss-versus-silence ambiguity ADR 331 exists to prevent, reintroduced
 at the transport layer.
@@ -137,6 +148,12 @@ So a terminal refusal is typed on the way out (`SyncDuplicateIdError`), carries 
 offending `event_id`, and is logged by the daemon at **error**. The failure has to be legible from
 the pushing machine's own log, without an operator reading the hub's database to find out why a
 machine went quiet.
+
+**"Terminal" describes the batch, not the loop.** The pass still retries every 60s, so the error
+repeats until an operator acts; the loop is not given an exit. That is deliberate rather than
+unfinished: skipping the offending event is silent loss, and choosing a drop policy belongs with the
+fold in 3b-ii. The blast radius is self-only by §Decision 6, and reaching it at all requires an
+origin to mint one id twice.
 
 ### 8. A hub's resume point is believed downward, bounded upward
 

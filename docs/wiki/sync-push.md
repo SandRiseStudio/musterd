@@ -54,6 +54,30 @@ happens before allocation, so every number handed out is a number stored, and th
 order dense rather than merely unique. Falsify: replay a batch and read `next_hub_seq` before and
 after; if it moved, the allocator is running ahead of the log.
 
+## One node cannot wedge another with a chosen envelope id
+
+Re-measured 2026-08-28 on fresh scratch DBs at `f6bc359d`, after the constraint was rescoped. A peer
+node pre-stages the envelope id the joiner will use next; the joiner then sends and pushes it:
+
+```
+sync_log:  m-joiner-4  origin_node <joiner>    origin_seq 4  hub_seq 4
+           m-joiner-4  origin_node peer-node   origin_seq 1  hub_seq 99
+cursor: 4        sync_push_failed / sync_push_rejected in the joiner's log: 0
+```
+
+Both rows coexist, distinguished by origin. Before the fix (`57c27e1b`, global `id` PRIMARY KEY) the
+joiner's push died on `UNIQUE constraint failed: sync_log.id`, the cursor correctly refused to move,
+and the next tick resent into the same constraint — permanently, behind a warn line that reads as
+being offline. Falsify: run the two-row insert above and assert both land; if the second throws, the
+uniqueness scope is wider than the origin again.
+
+**These numbers were re-gathered on databases created after the fix.** The earlier run on this page
+was measured against the original v50, which still had the global PK. `runMigrations` skips any
+version at or below the stored one and the body is `CREATE TABLE IF NOT EXISTS`, so a database
+already stamped at 50 never sees the rescope — and `migrations:check` only verifies that versions
+ascend, so nothing in CI can tell you (dolly, 2026-08-28). Mutating an unlanded migration is right;
+re-creating every scratch DB that ran the old one is the part that is easy to forget.
+
 ## Revocation stops push at the door
 
 `musterd node revoke <id>` on the hub, then a fourth message on the joiner. The next pass logged

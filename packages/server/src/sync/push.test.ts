@@ -254,6 +254,26 @@ describe('the push loop', () => {
     await stub.close();
   });
 
+  it('refuses a resume point just one past the boundary, not only an absurd one', async () => {
+    send(joiner, 'm-1');
+    send(joiner, 'm-2');
+    await enrollJoiner();
+
+    // head is 2, so head + 1 = 3 is legitimate and head + 2 = 4 is not. Tested at 4 rather than at
+    // an absurd 1000000 because only the adjacent value pins the ceiling: a head read one too high
+    // accepts 4 and every far-away assertion still passes. That mutation survived once.
+    const enrolled = readNodeState().nodes['bravo']!;
+    const stub = createHubStub(409, {
+      error: { code: 'conflict', message: 'gap' },
+      expected_seq: 4,
+    });
+    saveNodeEnrollment({ team: 'bravo', ...enrolled, hub_url: await stub.url });
+
+    await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/impossible|ahead/i);
+    expect(cursor()).toBe(0);
+    await stub.close();
+  });
+
   it('does nothing for a team with no enrollment', async () => {
     send(joiner, 'm-1');
 
