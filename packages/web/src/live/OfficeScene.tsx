@@ -1,5 +1,5 @@
 import type { LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MusterdWord } from '../brand/MusterdWord';
 import { memberColor, memberPosture } from './format';
 import type { OfficeData, OfficeHandle } from './office-scene';
@@ -154,6 +154,10 @@ export function OfficeScene({
     collapsedRef.current = collapsed;
   });
 
+  // The narration line (first-five-seconds §2), handed out by the scene — rendered in WorkStack's
+  // header rather than floating over the room (nick, 2026-08-31).
+  const [caption, setCaption] = useState<string | null>(null);
+
   useEffect(() => {
     const host = hostRef.current;
     const labelHost = labelRef.current;
@@ -170,6 +174,10 @@ export function OfficeScene({
         if (disposed || !host || !labelHost) return;
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
+          // The narration line renders in WorkStack's header (chrome), not as scene DOM.
+          onCaption: (line) => {
+            if (!disposed) setCaption(line);
+          },
           // Presence decides whether the hotspot exists at all, so gate on the mount-time prop —
           // stable per route (/live wires it, /broadcast never does) — and read through the ref after.
           ...(onBoardOpenRef.current
@@ -252,13 +260,14 @@ export function OfficeScene({
             present={presentCount(roster)}
             entries={entries}
             status={status}
+            caption={caption}
             interactive={false}
           />
         )}
         {/* Work card floats over the room (bottom of the stage) — not a band under it. */}
         {!collapsed && workCues === 'stack' && (
           <div className="lc-office__work">
-            <WorkStack entries={entries} />
+            <WorkStack entries={entries} caption={caption} />
           </div>
         )}
         {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
