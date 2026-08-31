@@ -1,6 +1,6 @@
 import type { Posture } from '@musterd/protocol';
 import { preloadCanvasFont } from '../canvasFont';
-import { roomTone, type LifeContext } from '../sound';
+import { roomTone, screenPan, type LifeContext } from '../sound';
 import { modelProvider } from '../modelProvider';
 import { providerIconHtml } from '../modelProviderIcon';
 import {
@@ -1457,7 +1457,12 @@ export function mountOffice(
     refreshLightEnv(); // fold the new occupancy (+ current clock) into the lighting before we bake
     // Animate presence changes (walk in/out, drift) unless reduced-motion asked for stillness.
     actors.setHomes(placements, byName, !reduced);
-    if (!reduced && actors.takeDoorPulses() > 0) pushDoorCue(); // the entrance "opens" as someone comes/goes
+    // The pulse is read ONCE, above the motion gate: the door's sound plays under reduced-motion
+    // (audio is not motion, E3 spec §2); only the visual glow stays gated.
+    if (actors.takeDoorPulses() > 0) {
+      roomTone.moment('door', screenPan(project(ENTRANCE.lx, ENTRANCE.ly, fit).x, width));
+      if (!reduced) pushDoorCue(); // the entrance "opens" as someone comes/goes
+    }
     // Someone just walked in: the dog goes to meet them at the door. Arrivals only — nobody, dog included,
     // gets up to see you leave. This outranks whatever nap it had planned, which is the whole point of it.
     if (!reduced && actors.takeArrivals() > 0) petGreet(pet);
@@ -1538,7 +1543,18 @@ export function mountOffice(
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
       showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act, ev.addressee);
+      // An ask lands with acoustic weight in the room (E3 spec §2): one soft held tone, panned to
+      // the asked member's desk when directed, soft-centre for a team ask. Stateless by design.
+      if (ev.act === 'ask') {
+        const at = ev.addressee ? heads.get(ev.addressee.name) : undefined;
+        roomTone.moment('askbell', at ? screenPan(at.x, width) : 0);
+      }
       return;
+    }
+    // The fanfare emits ABOVE the motion gate (E3 spec §2): the celebration sound plays under
+    // reduced-motion; the confetti and glances below stay gated with the rest of the choreography.
+    if (ev.kind === 'accept' && ev.of && ev.of !== ev.who && heads.has(ev.of)) {
+      roomTone.moment('fanfare', screenPan(heads.get(ev.of)!.x, width));
     }
     if (reduced) return;
     switch (ev.kind) {

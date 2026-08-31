@@ -480,3 +480,24 @@ rate (0.4 per 20 s slot × fallthrough playRate ≈ 1 → 1.2/min; E1b n=2 measu
 - Falsify: re-run the harness per its header (`--slot-ms 20000` for pre-E1b builds); if n=8
   delivered density moves materially above 2.5/idle-min without a code change, the saturation
   argument was wrong and P_FULL wants re-deriving.
+
+## 2026-08-31 — totalJsGzipBytes 249000 → 252000 (Delight E3 milestone moments, PR #1118)
+
+The E3 moments (fanfare / door / askbell voices + the `moment` dispatch and throttle) ride the
+lazy `soundEngine`/`soundLife` chunk, so `initialJsGzipBytes` is untouched (151.6 KiB, and the
+E2 `soundLife` split had already *reduced* it from 152.4). But total counts every chunk:
+
+| tree | total JS gzip (gate style) |
+| --- | --- |
+| main @ 90a8b331 (E2), local | 248,422 B |
+| branch a803c722 (E3), local | 248,934 B |
+| branch, CI | 249,344 B (the known ~0.7 KB CI toolchain delta, 2026-08-24) |
+
+Feature cost ≈ +0.5 KiB against a ceiling with ~600 B free locally and none on CI. No lazy
+remedy exists by construction (the code already sits on the lazy chunk — ADR 183: lazy-loading
+cannot move total), and no deletable twin was found: the voices reuse the existing `click`/
+`ping`/noise helpers rather than duplicating shapes. Raise to CI-measured + ~1.2%, matching the
+2026-08-24 (Shared Seeds) and 2026-08-25 (E1a) precedents.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit; total
+  should read ≈243.5 KiB against 246.1 KiB (252,000 B).
