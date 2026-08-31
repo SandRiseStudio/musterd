@@ -70,6 +70,8 @@ import {
   NodeJoinRequestSchema,
   NodeJoinResponseSchema,
   NodeListSchema,
+  SyncPushRequestSchema,
+  SyncPushResponseSchema,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -158,6 +160,7 @@ import {
   rowToEnvelope,
 } from '../store/messages.js';
 import {
+  authenticateNode,
   bindNode,
   consumeInvite,
   listNodes,
@@ -246,6 +249,7 @@ import {
   setPolicy,
 } from '../store/teams.js';
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
+import { ingestBatch, SyncDuplicateIdError, SyncGapError, SyncOriginError } from '../sync/log.js';
 import {
   recordCcdNudge,
   recordNudgeDecision,
@@ -3011,6 +3015,55 @@ export async function handleHttp(
       if (method === 'GET' && rest === '/nodes') {
         const { team } = authAdmin(ctx, slug, req);
         return sendJson(res, 200, NodeListSchema.parse({ nodes: listNodes(ctx.db, team.id) }));
+      }
+
+      // ── The sync surface (ADR 325 increment 3b-i). Authenticated by `msnode_` and by nothing
+      // else: ADR 328 §3 admits a node here and to no other route, so this is the first and only
+      // consumer of `authenticateNode`. Pushed events land in `sync_log`; nothing here writes to
+      // `messages` — that fold is 3b-ii.
+      if (method === 'POST' && rest === '/sync/push') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          // Deliberately the same refusal for an absent, a wrong-kind and a revoked credential: the
+          // sync surface must not tell an unauthenticated caller which of those it is holding.
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        const body = parseOrBadRequest(SyncPushRequestSchema, await readJson(req));
+        try {
+          const result = ingestBatch(ctx.db, team.id, node.id, body.events);
+          return sendJson(res, 200, SyncPushResponseSchema.parse(result));
+        } catch (err) {
+          // Both refusals are things the caller can act on, not faults. A 500 here would read as
+          // "the hub is broken" for what is actually "resend from seq N".
+          if (err instanceof SyncGapError) {
+            // Hand-built rather than thrown as a MusterdError because it carries a field the error
+            // envelope has no room for. `error: { code, message }` stays byte-compatible with
+            // ErrorBodySchema so the CLI's parser still finds the message — a flat
+            // `{ error, message }` was the 3a bug that rendered every refusal as "server error".
+            return sendJson(res, 409, {
+              error: { code: 'conflict', message: err.message },
+              expected_seq: err.expectedSeq,
+            });
+          }
+          if (err instanceof SyncOriginError) throw new MusterdError('forbidden', err.message);
+          if (err instanceof SyncDuplicateIdError) {
+            // Terminal, and it must SAY so. Left as a bare constraint violation this reaches the
+            // pusher as a 500, indistinguishable from a hub that is merely down — so the loop
+            // resends the identical poison batch every tick, forever, behind a warn line that reads
+            // as "offline" (dolly, 2026-08-28). 422: the batch is well-formed but unprocessable,
+            // and no retry of it will ever succeed.
+            return sendJson(res, 422, {
+              error: { code: 'validation', message: err.message },
+              event_id: err.eventId,
+              terminal: true,
+            });
+          }
+          throw err;
+        }
       }
 
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All

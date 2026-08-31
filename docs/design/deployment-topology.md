@@ -137,8 +137,9 @@ footprint, schema meta — and `local_node`, below). Roster identity stays on gi
 | --- | --- | --- |
 | 1 | Prereq hardening — guarded lane CAS, per-field `updateLane`, transition events | landed (#1071) |
 | 2 | The ordering substrate — `(origin_node, origin_seq)` stamped from the first message, migration v47 | landed 2026-08-27 (`5c1b35f0`, [ADR 331](../decisions/331-ordering-substrate.md)) |
-| **3a** | **The machine credential — `msnode_`, `msinv_` enrollment, rotation, revocation** | **this build** ([ADR 328](../decisions/328-machine-credential.md)) |
-| 3b | Sync wire format, push/pull routes, cursors | not started |
+| 3a | The machine credential — `msnode_`, `msinv_` enrollment, rotation, revocation | landed 2026-08-28 (#1100, `3b8415cf`, [ADR 328](../decisions/328-machine-credential.md)) |
+| **3b-i** | **Sync wire format and push — `sync_log` staging under a canonical `hub_seq`** | **this build** (migration v50) |
+| 3b-ii | The fold — applying staged events to `messages`, run by hub and puller alike | not started |
 | 3c | Hub-authoritative claim CAS, seat→node residence binding | not started |
 
 The hub storage engine needs no decision: ADR 325 defines a hub by the surface it speaks, and a
@@ -164,8 +165,37 @@ promoted daemon on SQLite satisfies the CAS — one process, one writer.
 - **An `msnode_` admits its bearer to the sync surface and nothing else** (ADR 328 §3). It is not a
   seat credential: a machine being *admitted* and a seat being *authorized* are independent axes.
 
+### What increment 3b-i added
+
+- **Events reach the hub.** An enrolled daemon pushes its own origin-stamped messages to
+  `POST /teams/:slug/sync/push` on a 60s loop. The hub stages them in **`sync_log`** (migration v50)
+  under a per-team **`hub_seq`** — the canonical total order, assigned in order of *ingest*, not of
+  `ts`: wall-clock across machines is exactly what [ADR 331](../decisions/331-ordering-substrate.md)
+  §Context says cannot be trusted, while arrival at the one authority is a fact that authority
+  observed.
+- **The replicated event is the `Envelope` plus its origin stamp**, not a parallel message shape.
+  The wire names its sender by **seat name**: `messages.from_member` is a daemon-private anchor, and
+  shipping it would dangle on the receiver or resolve to a different seat holding that id there.
+  `from_provenance` travels (an attested fact about the event); `created_at` deliberately does not
+  (local receipt time — shipping the origin's would assert a falsehood about when this machine
+  learned of the event).
+- **Two refusals at ingest.** A batch whose origin is not the authenticated node is `403`; a batch
+  that does not continue the origin's sequence is `409` carrying `expected_seq`, so a pusher can
+  resume rather than retry a rejected batch forever. Both roll the whole batch back — a partially
+  applied batch leaves a hole the pusher believes it has closed.
+- **The push cursor advances only past an ACKED batch.** A cursor moved on send would turn every
+  unreachable hub into permanent silent loss. Offline is the expected state for a laptop, not an
+  error: the pass logs `sync_push_failed` and retries next tick.
+
 ### Not yet true
 
-No events sync. Increment 3a mints and retires machine identities; nothing pushes or pulls with them
-until 3b, and lane claims stay local until 3c. A team spanning two machines today has two admitted
-daemons and two separate logs.
+**Nothing applies remotely.** Pushed events land in `sync_log` and stop there — no staged event is
+written to `messages`, and no `nodes.next_seq` moves on ingest. That is deliberate, and it is the
+whole shape of the 3b split: the fold is a *second insert path* into `messages`, the one ADR 331
+§Consequences warned would break gaplessness, so it is built once in 3b-ii as one implementation run
+by hub and puller alike, and reviewed as its own slice. `packages/server/src/sync/containment.test.ts`
+holds the line meanwhile.
+
+So a team spanning two machines today has **one merged log on the hub** — `sync_log`, in a single
+canonical order across every origin — and **two local logs** that each still see only their own
+traffic. Lane claims stay local until 3c.

@@ -1,0 +1,164 @@
+import type { SyncEvent } from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
+
+/**
+ * The hub's staging log for pushed events (ADR 325 increment 3b-i).
+ *
+ * Ingest lands events HERE and nowhere else — never in `messages`, never touching `nodes.next_seq`.
+ * The fold into `messages` is 3b-ii, one implementation run by hub and puller alike, which is what
+ * keeps ADR 331 §Consequences' "second insert path" a single reviewed thing rather than two that
+ * drift. `src/sync/containment.test.ts` is what holds that true.
+ */
+
+/** A batch arrived out of order. `expectedSeq` is where the pusher should resume. */
+export class SyncGapError extends Error {
+  constructor(readonly expectedSeq: number) {
+    super(`sync gap — expected origin_seq ${expectedSeq}`);
+    this.name = 'SyncGapError';
+  }
+}
+
+/** A batch carried an origin the pushing node is not entitled to write. */
+export class SyncOriginError extends Error {
+  constructor(message = 'a node may push only its own events') {
+    super(message);
+    this.name = 'SyncOriginError';
+  }
+}
+
+/**
+ * An origin restaged one of its OWN envelope ids under a different `origin_seq`. Terminal, not
+ * resumable: an origin cannot honestly mint one id twice, so this is corruption at the source and
+ * no retry of the same batch will clear it. Named so the pusher can tell it from a transient
+ * failure and say so out loud, rather than retrying forever behind a warn line.
+ */
+export class SyncDuplicateIdError extends Error {
+  constructor(readonly eventId: string) {
+    super(`envelope id ${eventId} is already staged for this origin under a different origin_seq`);
+    this.name = 'SyncDuplicateIdError';
+  }
+}
+
+/**
+ * The highest `origin_seq` this hub holds for a node, or 0 when it holds nothing.
+ *
+ * Scoped by node alone, deliberately: `nodes.id` is a global primary key and a node belongs to
+ * exactly one team, so the node IS the partition. Adding a team predicate here would invent a
+ * second, weaker key and let the same origin carry two sequences.
+ */
+export function highestContiguousSeq(db: Database, nodeId: string): number {
+  // The log is gapless per origin by construction — ingest refuses anything else — so MAX is the
+  // contiguous head rather than merely the largest value seen.
+  const row = db
+    .prepare<
+      [string],
+      { high: number | null }
+    >('SELECT MAX(origin_seq) AS high FROM sync_log WHERE origin_node = ?')
+    .get(nodeId);
+  return row?.high ?? 0;
+}
+
+/** The team's canonical order head — the highest `hub_seq` assigned, or 0 before the first ingest. */
+export function hubHead(db: Database, teamId: string): number {
+  const row = db
+    .prepare<
+      [string],
+      { high: number | null }
+    >('SELECT MAX(hub_seq) AS high FROM sync_log WHERE team_id = ?')
+    .get(teamId);
+  return row?.high ?? 0;
+}
+
+/**
+ * Ingest one pushed batch.
+ *
+ * Throws `SyncOriginError` or `SyncGapError` — and any constraint violation throws too. Every one
+ * of them rolls the whole batch back, because a partially applied batch leaves a hole the pusher
+ * believes it has closed.
+ */
+export function ingestBatch(
+  db: Database,
+  teamId: string,
+  nodeId: string,
+  events: SyncEvent[],
+  now: number = Date.now(),
+): { accepted: number; hub_seq_high: number } {
+  return db.transaction(() => {
+    // Authentication proves WHICH node is pushing; it does not prove the node may write to THIS
+    // team's log, because `nodes.id` is global while a node belongs to one team. Increment 3a's one
+    // confirmed hole was exactly this confusion between a global id and a team-scoped check.
+    const node = db
+      .prepare<[string], { team_id: string; slug: string }>(
+        `SELECT n.team_id AS team_id, t.slug AS slug
+           FROM nodes n JOIN teams t ON t.id = n.team_id
+          WHERE n.id = ?`,
+      )
+      .get(nodeId);
+    if (!node || node.team_id !== teamId) {
+      throw new SyncOriginError('node is not a member of this team');
+    }
+
+    let expected = highestContiguousSeq(db, nodeId) + 1;
+    let accepted = 0;
+
+    for (const event of events) {
+      if (event.origin_node !== nodeId) throw new SyncOriginError();
+      // The hub authenticated the TEAM, so the envelope does not get to name a different one.
+      // Nothing in 3b-i reads `envelope.team`; 3b-ii's fold is the reader, and a row whose team_id
+      // says one team while its payload says another is a contradiction the staging layer already
+      // had the information to refuse (dolly, 2026-08-28).
+      if (event.envelope.team !== node.slug) {
+        throw new SyncOriginError('envelope names a team other than the one it is pushed into');
+      }
+
+      // A replay of something already held is a no-op, not a gap: the pusher resending after a lost
+      // ack is the expected case, and it must not look like corruption. This is what makes the
+      // batch idempotent, so the insert below needs no ON CONFLICT — and must not have one. A
+      // distinct event reusing a staged envelope id is NOT a replay under the idempotence key
+      // (origin_node, origin_seq); swallowing it would advance the origin's sequence past an event
+      // the hub never stored, which is silent loss wearing an ack.
+      if (event.origin_seq < expected) continue;
+      if (event.origin_seq !== expected) throw new SyncGapError(expected);
+
+      // Allocated inside the same transaction as the insert, the shape `insertMessage` established
+      // for `next_seq`: SQLite's single writer means the read-bump-insert cannot interleave. The
+      // upsert seeds 2 and returns the PRE-increment value, so the first event gets hub_seq 1 —
+      // copying the schema's DEFAULT 1 here would hand out 1 twice. Because nothing below can
+      // silently decline to insert, every number allocated is a number stored: the order is dense.
+      const hubSeq = db
+        .prepare<[string], { hub_seq: number }>(
+          `INSERT INTO sync_meta (team_id, next_hub_seq) VALUES (?, 2)
+           ON CONFLICT(team_id) DO UPDATE SET next_hub_seq = next_hub_seq + 1
+           RETURNING next_hub_seq - 1 AS hub_seq`,
+        )
+        .get(teamId)!.hub_seq;
+
+      try {
+        db.prepare(
+          `INSERT INTO sync_log (id, team_id, origin_node, origin_seq, hub_seq, payload, received_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          event.envelope.id,
+          teamId,
+          nodeId,
+          event.origin_seq,
+          hubSeq,
+          JSON.stringify(event),
+          now,
+        );
+      } catch (err) {
+        // Classified rather than allowed to surface raw: an unnamed SQLITE_CONSTRAINT reaches the
+        // pusher as a bare 500, which it cannot tell from a hub that is merely down — so it retries
+        // the identical poison batch every tick, silently, forever.
+        if (err instanceof Error && /idx_sync_log_origin_id|sync_log\.id/.test(err.message)) {
+          throw new SyncDuplicateIdError(event.envelope.id);
+        }
+        throw err;
+      }
+      accepted += 1;
+      expected += 1;
+    }
+
+    return { accepted, hub_seq_high: hubHead(db, teamId) };
+  })();
+}
