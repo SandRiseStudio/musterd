@@ -352,6 +352,43 @@ describe('POST /requests/{id}/decide', () => {
     expect(JSON.parse(grantIssue.detail!).authorized_by).toBe('nick');
   });
 
+  it('replaces the stateless Presence when approving a later HTTP claim', async () => {
+    const first = await openPending();
+    expect(
+      (
+        await post(
+          `/teams/dawn/requests/${first}/decide`,
+          { decision: 'approve', lifetime: 'standing' },
+          nickCred,
+        )
+      ).status,
+    ).toBe(200);
+
+    const second = await openPending();
+    expect(
+      (
+        await post(
+          `/teams/dawn/requests/${second}/decide`,
+          { decision: 'approve', lifetime: 'standing' },
+          nickCred,
+        )
+      ).status,
+    ).toBe(200);
+
+    const roster = await get('/teams/dawn/members', nickCred);
+    expect(roster.json.members.find((member: any) => member.name === 'Ada').presences).toHaveLength(
+      1,
+    );
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const eviction = listAudit(server.db, teamId).find(
+      (row) =>
+        row.action === 'claim.superseded' &&
+        JSON.parse(row.detail ?? '{}').via === 'request.approve',
+    )!;
+    expect(JSON.parse(eviction.detail ?? '{}')).toMatchObject({ evicted: 1 });
+  });
+
   it('approve with lifetime "once" does not echo a resume token', async () => {
     const id = await openPending();
     const r = await post(

@@ -36,7 +36,9 @@ export interface Connection {
   /** Cached is_admin capability for quick admin broadcast targeting. */
   isAdmin?: boolean;
   /** Callback injected by the claim handler to flip state.authenticated from the HTTP decide path. */
-  _claimApproved?: (presenceId: string) => void;
+  _claimApproved?: (presenceId: string, sameWorkspacePredecessors?: string[]) => void;
+  /** Whether a held pending WebSocket is still available to be promoted after an admin decision. */
+  isOpen?: () => boolean;
 }
 
 /**

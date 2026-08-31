@@ -1083,6 +1083,7 @@ describe('WebSocket', () => {
       'Ada',
       'claude-code',
       await standingGrant(team.json.human_credential, 'Ada'),
+      'claude-opus-4-8',
     );
     expect((await get('/health')).json.connections).toBe(1);
     a.close();
@@ -1906,6 +1907,209 @@ describe('WebSocket', () => {
     second.close();
   });
 
+  it.each(['missing', 'invalid', 'wrong-target'] as const)(
+    'a WS claim with a %s grant leaves the live incumbent attached',
+    async (grantCase) => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await incumbent.claim(
+        'dawn',
+        team.json.agent_key,
+        'Ada',
+        'claude-code',
+        await standingGrant(team.json.human_credential, 'Ada'),
+      );
+
+      let grant: string | undefined;
+      if (grantCase === 'invalid') grant = 'msgr_invalid';
+      if (grantCase === 'wrong-target') {
+        await post(
+          '/teams/dawn/members',
+          { name: 'Bob', kind: 'agent' },
+          team.json.human_credential,
+        );
+        grant = await standingGrant(team.json.human_credential, 'Bob');
+      }
+
+      const challenger = new TestWs();
+      await challenger.open();
+      challenger.send({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        ...(grant ? { grant } : {}),
+        surface: 'cli',
+      });
+      await challenger.waitFor(grantCase === 'missing' ? 'pending' : 'refused');
+
+      const roster = await get('/teams/dawn/members', team.json.human_credential);
+      const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(adaRow.presences).toHaveLength(1);
+      expect(adaRow.presences[0].surface).toBe('claude-code');
+
+      incumbent.close();
+      challenger.close();
+    },
+  );
+
+  it.each(['missing', 'invalid', 'wrong-target'] as const)(
+    'an HTTP claim with a %s grant leaves the live incumbent attached',
+    async (grantCase) => {
+      const team = await post('/teams', {
+        slug: 'dawn',
+        creator: { name: 'nick', kind: 'human' },
+      });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await incumbent.claim(
+        'dawn',
+        team.json.agent_key,
+        'Ada',
+        'claude-code',
+        await standingGrant(team.json.human_credential, 'Ada'),
+      );
+
+      let grant: string | undefined;
+      if (grantCase === 'invalid') grant = 'msgr_invalid';
+      if (grantCase === 'wrong-target') {
+        await post(
+          '/teams/dawn/members',
+          { name: 'Bob', kind: 'agent' },
+          team.json.human_credential,
+        );
+        grant = await standingGrant(team.json.human_credential, 'Bob');
+      }
+
+      const claim = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        ...(grant ? { grant } : {}),
+        surface: 'cli',
+      });
+      expect(claim.status).toBe(grantCase === 'missing' ? 202 : 403);
+
+      const roster = await get('/teams/dawn/members', team.json.human_credential);
+      const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(adaRow.presences).toHaveLength(1);
+      expect(adaRow.presences[0].surface).toBe('claude-code');
+
+      incumbent.close();
+    },
+  );
+
+  it('an approved pending WS claim supersedes a live incumbent', async () => {
+    const team = await post('/teams', {
+      slug: 'dawn',
+      creator: { name: 'nick', kind: 'human' },
+    });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+    const incumbent = new TestWs();
+    await incumbent.open();
+    await incumbent.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+      'claude-opus-4-8',
+    );
+
+    const challenger = new TestWs();
+    await challenger.open();
+    challenger.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    const pending = await challenger.waitFor('pending');
+
+    const decided = await post(
+      `/teams/dawn/requests/${pending.request_id}/decide`,
+      { decision: 'approve', lifetime: 'standing' },
+      team.json.human_credential,
+    );
+    expect(decided.status).toBe(200);
+    expect((await challenger.waitFor('occupied')).type).toBe('occupied');
+    expect(await incumbent.waitFor('error')).toMatchObject({ code: 'superseded' });
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    expect(
+      listAudit(server.db, teamId)
+        .filter((row) => row.action === 'occupancy.model_attested')
+        .map((row) => JSON.parse(row.detail ?? '{}')),
+    ).toContainEqual(
+      expect.objectContaining({ old: 'claude-opus-4-8', new: null, source: 'claim' }),
+    );
+
+    const roster = await get('/teams/dawn/members', team.json.human_credential);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences).toHaveLength(1);
+    expect(adaRow.presences[0].surface).toBe('cli');
+
+    incumbent.close();
+    challenger.close();
+  });
+
+  it('approving a disconnected pending WS claim preserves the live incumbent', async () => {
+    const team = await post('/teams', {
+      slug: 'dawn',
+      creator: { name: 'nick', kind: 'human' },
+    });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+    const incumbent = new TestWs();
+    await incumbent.open();
+    await incumbent.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+
+    const challenger = new TestWs();
+    await challenger.open();
+    challenger.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    const pending = await challenger.waitFor('pending');
+    challenger.close();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const decided = await post(
+      `/teams/dawn/requests/${pending.request_id}/decide`,
+      { decision: 'approve', lifetime: 'standing' },
+      team.json.human_credential,
+    );
+    expect(decided.status).toBe(200);
+    await expect(incumbent.waitFor('error', 100)).rejects.toThrow(/timeout/);
+
+    const roster = await get('/teams/dawn/members', team.json.human_credential);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences).toHaveLength(1);
+    expect(adaRow.presences[0].surface).toBe('claude-code');
+
+    incumbent.close();
+  });
+
   it('an HTTP claim that displaces a live WS session audits the eviction (ADR 237)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
@@ -1935,6 +2139,63 @@ describe('WebSocket', () => {
     expect(detail).toMatchObject({ same_workspace: false, evicted: 1, via: 'http' });
 
     first.close();
+  });
+
+  it('a repeated authorized HTTP claim replaces its stateless Presence and audits it', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+
+    for (let claim = 0; claim < 2; claim++) {
+      const response = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(team.json.human_credential, 'Ada'),
+        surface: 'cli',
+      });
+      expect(response.status).toBe(200);
+    }
+
+    const roster = await get('/teams/dawn/members', team.json.human_credential);
+    const adaRow = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(adaRow.presences).toHaveLength(1);
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const eviction = listAudit(server.db, teamId).find((row) => row.action === 'claim.superseded');
+    expect(JSON.parse(eviction!.detail ?? '{}')).toMatchObject({
+      same_workspace: false,
+      evicted: 1,
+      via: 'http',
+    });
+  });
+
+  it('a WS claim audits its eviction of a stateless incumbent', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const httpClaim = await post('/teams/dawn/claim', {
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(team.json.human_credential, 'Ada'),
+      surface: 'cli',
+    });
+    expect(httpClaim.status).toBe(200);
+
+    const ws = new TestWs();
+    await ws.open();
+    await ws.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(team.json.human_credential, 'Ada'),
+    );
+
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    const eviction = listAudit(server.db, teamId).find(
+      (row) => row.action === 'claim.superseded' && JSON.parse(row.detail ?? '{}').via === 'ws',
+    )!;
+    expect(JSON.parse(eviction.detail ?? '{}')).toMatchObject({ evicted: 1 });
+
+    ws.close();
   });
 
   describe('durability-gated same-workspace eviction (ADR 092)', () => {
@@ -2013,6 +2274,87 @@ describe('WebSocket', () => {
       await expect(live.waitFor('error', 400)).rejects.toThrow(/timeout/);
 
       live.close();
+    });
+
+    it('an approved same-workspace pending claim reaps only after the grace', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+      const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await occupyAda(incumbent, team.json.agent_key, grant, 'repo@main');
+
+      const challenger = new TestWs();
+      await challenger.open();
+      challenger.send({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        surface: 'claude-code',
+        workspace: 'repo@main',
+      });
+      const pending = await challenger.waitFor('pending');
+
+      const decided = await post(
+        `/teams/dawn/requests/${pending.request_id}/decide`,
+        { decision: 'approve', lifetime: 'standing' },
+        team.json.human_credential,
+      );
+      expect(decided.status).toBe(200);
+      expect((await challenger.waitFor('occupied')).type).toBe('occupied');
+      await expect(incumbent.waitFor('error', 50)).rejects.toThrow(/timeout/);
+      expect(await incumbent.waitFor('error', 1000)).toMatchObject({
+        code: 'superseded',
+        same_workspace: true,
+      });
+
+      incumbent.close();
+      challenger.close();
+    });
+
+    it('preserves the Workspace on an approved pending claim for its next reconnect', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+      const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+      const incumbent = new TestWs();
+      await incumbent.open();
+      await occupyAda(incumbent, team.json.agent_key, grant, 'repo@main');
+
+      const approved = new TestWs();
+      await approved.open();
+      approved.send({
+        type: 'claim',
+        v: PROTOCOL_VERSION,
+        team: 'dawn',
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        surface: 'claude-code',
+        workspace: 'repo@main',
+      });
+      const pending = await approved.waitFor('pending');
+      await post(
+        `/teams/dawn/requests/${pending.request_id}/decide`,
+        { decision: 'approve', lifetime: 'standing' },
+        team.json.human_credential,
+      );
+      expect((await approved.waitFor('occupied')).type).toBe('occupied');
+
+      const reconnect = new TestWs();
+      await reconnect.open();
+      await occupyAda(reconnect, team.json.agent_key, grant, 'repo@main');
+      await expect(approved.waitFor('error', 50)).rejects.toThrow(/timeout/);
+      expect(await approved.waitFor('error', 1000)).toMatchObject({
+        code: 'superseded',
+        same_workspace: true,
+      });
+
+      incumbent.close();
+      approved.close();
+      reconnect.close();
     });
   });
 
