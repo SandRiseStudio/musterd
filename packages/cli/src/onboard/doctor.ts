@@ -110,8 +110,15 @@ function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; 
   // record ⇒ pre-085, never written") was true under one manifest version and false the moment
   // there were two.
   const v1 = readProvisionManifest(cwd)?.guidance;
-  const manifest = loadProvisioning(cwd).kind;
-  const provisioned = v1 !== undefined || manifest === 'valid' || manifest === 'legacy';
+  //
+  // Ask it of the FILE, not of today's parsers. `kind !== 'missing'` and not a list of the versions
+  // that happen to exist — dolly's REQUIRED on this PR, and she was right: keying on `valid |
+  // legacy` re-armed this very trap one version ahead, since `WorktreeProvisioningSchema` pins v3
+  // and the legacy recognizer accepts exactly v2 and v1, so a future v4 manifest classifies
+  // `invalid` and the check goes quiet again. A present `provisioned.json` is the evidence, whatever
+  // shape it is in. `invalid` counting as provisioned is the conservative direction on purpose: a
+  // corrupt or future manifest gets its drift REPORTED, never silenced.
+  const provisioned = v1 !== undefined || loadProvisioning(cwd).kind !== 'missing';
   if (!provisioned) return { drift, notes }; // never provisioned — nothing claimed, nothing to check
   // Only the v1 manifest recorded file paths; v2/v3 record fragment resource keys instead. Without
   // it the missing-file line loses the "was recorded, now gone" vs "never arrived" distinction and

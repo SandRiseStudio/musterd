@@ -800,6 +800,34 @@ describe('inspectProvisioning — guidance drift (ADR 085)', () => {
     expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
   });
 
+  /**
+   * dolly's REQUIRED on #1115, and the fixture that pins it: a manifest version that does not exist
+   * yet. A first cut keyed `provisioned` to `valid | legacy` — i.e. to versions 1, 2 and 3 — which
+   * re-armed this PR's own defect one version ahead, since a v4 file classifies `invalid` and the
+   * check would go quiet again. Probe-measured before the fix: v4 manifest + a v0-stamped skill
+   * reported no drift at all. The gate now asks whether the FILE is there, so an unreadable or
+   * future manifest reports drift rather than silencing it.
+   */
+  it('flags a stale-version skill under a manifest version that does not exist yet', async () => {
+    const dir = tmp();
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'provisioned.json'),
+      JSON.stringify({
+        version: 4,
+        toolkit: '',
+        desired: ['claude-code'],
+        contributions: {},
+        provisionedAt: new Date().toISOString(),
+      }),
+    );
+    const abs = join(dir, CANONICAL_SKILL_PATH);
+    mkdirSync(dirname(abs), { recursive: true });
+    writeFileSync(abs, 'old body\n<!-- musterd:content v0 sha256:0000000000000000 -->\n');
+    const r = await inspectProvisioning(dir);
+    expect(r.drift.some((d) => d.includes('v0') && d.includes('musterd init'))).toBe(true);
+  });
+
   it('stays quiet in a folder that was never provisioned at all', async () => {
     // The early return this replaces was doing one job correctly: an unprovisioned folder claims
     // nothing, so it must not be told its guidance is stale. Keep that.
