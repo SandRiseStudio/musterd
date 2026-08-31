@@ -205,6 +205,13 @@ export interface OfficeOptions {
    * the in-panel WorkStack fallback instead.
    */
   showWorkCues?: boolean;
+  /**
+   * The narration line (first-five-seconds §2) — one transient plain-language sentence about what
+   * just happened in the room. Called with the current line, or null when it expires. The rail used
+   * to be a floating lower-third element over the scene; it now reads as chrome, so the CHROME
+   * renders it (WorkStack's header) and the scene only says what the line is (nick, 2026-08-31).
+   */
+  onCaption?: (line: string | null) => void;
 }
 
 export function mountOffice(
@@ -285,11 +292,10 @@ export function mountOffice(
    * reads it, so it advances only while the loop runs and a rested office holds its frame. */
   let clock = 0;
   let placements = new Map<string, Placement>();
-  // The caption rail (first-five-seconds §2): one transient plain-language line, lower third.
-  // Owned here in the lazy chunk so its bytes never ride the entry. DOM in the label layer.
+  // The caption rail (first-five-seconds §2): one transient plain-language line. The queue/hold
+  // logic lives here in the lazy chunk; the LINE renders in WorkStack's header via onCaption.
   let rail: CaptionRail = { current: null, shownAt: 0, queue: [] };
   let railTimer: ReturnType<typeof setInterval> | null = null;
-  let railEl: HTMLDivElement | null = null;
   let onlineNames = new Set<string>();
   // The receptionist welcome (first-five-seconds §4) — stepped on a coarse timer; her bubble rides
   // the ordinary speech machinery via the synthetic 'receptionist' head injected each bake.
@@ -301,23 +307,8 @@ export function mountOffice(
     if (line) showSpeech('receptionist', line, 'info');
   }, 5_000);
   function renderRail() {
-    if (rail.current && !railEl) {
-      railEl = document.createElement('div');
-      railEl.className = 'lc-captions';
-      railEl.setAttribute('aria-live', 'polite');
-      const line = document.createElement('span');
-      line.className = 'lc-captions__line';
-      railEl.appendChild(line);
-      labelHost.appendChild(railEl);
-    }
-    if (railEl) {
-      if (!rail.current) {
-        railEl.remove();
-        railEl = null;
-      } else {
-        railEl.firstChild!.textContent = rail.current;
-      }
-    }
+    // The line is chrome now, not scene DOM — hand it out and let WorkStack's header carry it.
+    options.onCaption?.(rail.current);
     if (rail.current === null && rail.queue.length === 0) {
       if (railTimer) clearInterval(railTimer);
       railTimer = null;
@@ -1746,8 +1737,8 @@ export function mountOffice(
       cancelAnimationFrame(raf);
       clearInterval(lightTimer); // stop the PST lighting clock
       if (railTimer) clearInterval(railTimer); // stop the caption rail
+      options.onCaption?.(null);
       clearInterval(welcomeTimer); // stop the receptionist welcome
-      railEl?.remove();
       if (ambientTimer) clearTimeout(ambientTimer); // stop the idle-beat scheduler
       window.removeEventListener('resize', onResize);
       ro?.disconnect();

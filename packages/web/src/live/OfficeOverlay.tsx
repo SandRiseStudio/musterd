@@ -47,12 +47,16 @@ export function OfficeOverlay({
   present,
   entries,
   status,
+  caption,
   interactive = false,
 }: {
   teamName: string;
   present: number;
   entries: RoomEntry[];
   status: ConnStatus;
+  /** The room's narration line (first-five-seconds §2) — the broadcast card carries it now that
+   *  the floating lower-third rail is gone (nick, 2026-08-31). */
+  caption?: string | null;
   /** `/live` only. False keeps the passive, non-interactive, aria-hidden chyron `/broadcast` needs. */
   interactive?: boolean;
 }) {
@@ -239,6 +243,12 @@ export function OfficeOverlay({
         ) : (
           <p className="lc-ov__now is-quiet">
             <span className="lc-ov__title">nobody in the room yet</span>
+          </p>
+        )}
+
+        {caption && (
+          <p className="lc-ov__caption" aria-live="polite">
+            {caption}
           </p>
         )}
 

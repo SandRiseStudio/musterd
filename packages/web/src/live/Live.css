@@ -1163,6 +1163,30 @@
      sampling the painted pixel. #8a6508 read 4.06 there. */
   color: #734a05;
 }
+/* The narration line (first-five-seconds §2) in the header, beside the title — it replaced a
+   floating lower-third element over the room (nick, 2026-08-31). One line, truncated, quiet:
+   the room's own sentence, not a headline. Fades on change; reduced-motion needs no branch
+   because the fade is a plain opacity transition. */
+.lc-workstack__caption {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-meta);
+  font-weight: 500;
+  font-style: italic;
+  color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
+  animation: lc-caption-in var(--lc-dur-2) ease-out;
+}
+@keyframes lc-caption-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-workstack__caption { animation: none; }
+}
 .lc-workstack__count,
 .lc-workstack__quiet {
   margin-left: auto;
@@ -1470,35 +1494,7 @@
   text-transform: lowercase;
   color: color-mix(in srgb, var(--lc-paper-ink) 78%, transparent);
 }
-/* The caption rail (first-five-seconds §2): one transient plain-language line, lower third. Text
-   only — its appear/dissolve is a plain opacity transition, so reduced-motion needs no branch and
-   25fps capture has nothing new to judder. */
-.lc-captions {
-  position: absolute;
-  left: 50%;
-  bottom: 12%;
-  transform: translateX(-50%);
-  pointer-events: none;
-  z-index: 5;
-}
-.lc-captions__line {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--lc-surface-1) 82%, transparent);
-  font-family: var(--font-mono, monospace);
-  font-size: var(--lc-type-caption);
-  line-height: 1.4;
-  color: var(--lc-paper-ink);
-  animation: lc-caption-in var(--lc-dur-2) ease-out;
-}
-@keyframes lc-caption-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .lc-captions__line { animation: none; }
-}
+
 
 /* The dnd pill (presence-honesty §3): the one plate tag that is a state, not an identity — the
    warn ink as border + text on the plate's own paper (--lc-warn-ink measures 5.11 worst case; the
@@ -5447,6 +5443,19 @@
    One lane at a time, seat tag then title — musterd's own unit of work, laid out the way it is
    spoken. The node is keyed by lane id in the component, so this entrance plays on every change of
    subject: the lift-and-fade IS how you know the card moved on. */
+/* The narration line on the broadcast card — the room's transient sentence, quieter than the
+   member reel above it (it replaced the floating lower-third rail, nick 2026-08-31). */
+.lc-ov__caption {
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-meta);
+  font-style: italic;
+  color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
+  animation: lc-caption-in var(--lc-dur-2) ease-out;
+}
 .lc-ov__now {
   display: flex;
   align-items: baseline;

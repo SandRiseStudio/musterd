@@ -3625,132 +3625,122 @@ const LAMP_ALONG = 8;
 const LAMP_ACROSS = 42;
 
 /**
- * The brass desk plaque — the desk's nameplate, hung off the front lip (Delight D). Desk
- * furniture, not a person label: the floating chip remains the walking identity; this one belongs
- * to the DESK, engraved with its owner's name whether they are seated, stepped away or offline.
+ * The brass desk plaque — the desk's nameplate, on the desk's visible SIDE face (nick, 2026-08-31).
+ * Desk furniture, not a person label: the floating chip remains the walking identity; this one
+ * belongs to the DESK, engraved with its owner's name whether they are seated, stepped away or
+ * offline.
  *
  * Placement history, because it was earned: the plaque began as a folded wedge STANDING on the
- * desktop (#1096) and even desk-capped (#1098) any on-top plate occludes the desk behind it in an
- * isometric view — nick's live verdict, 2026-08-27. A chair-back mount was prototyped the same
- * day and re-created the floating-chip problem (plates hovering over the desks behind). Hanging
- * the plate flat against the slab's viewer-facing face won the comparison: the only thing behind
- * it is the empty leg gap, so it can occlude nothing on any facing. Brass, not bone: cream sits
- * too close to the desk's own value and disappears; the metal band separates object from wood.
+ * desktop (#1096) — any on-top plate occludes the desk behind it in an isometric view (nick's live
+ * verdict, 2026-08-27). A chair-back mount re-created the floating-chip problem. The front-lip hang
+ * won that round, but a seated member sits exactly in front of the front face and hides the plate
+ * (nick, 2026-08-31) — so it moved to the desk's SIDE: every desk shows exactly one short side face
+ * in this projection, and nobody ever sits in front of it. Where a pod neighbour abuts that visible
+ * side, the face itself is hidden, so the plate becomes a low TAB standing on the side edge,
+ * extending just above the desktop — same plane, above the slab, occluded by nothing.
  *
  * The bottom edge carries a status light-pipe: working breathes (on `t`, the scene's existing
  * frame clock — no new rAF), online-idle amber, dnd a steady ember, away/offline unlit. The plate
  * keeps the two presence CLAIMS the old baked plate made (§4/ADR 315): a stepped-away owner's
  * plate says so in words, and a disconnected seat keeps its amber corner glint.
- *
- * Anchor (ix,iy) is on the desk surface 10 units inside the viewer-facing edge (the call site's
- * corner spot); the plaque steps out to the edge itself and hangs down flush with the front face,
- * length running across the desk.
  */
 function deskWedge(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
-  ix: number,
-  iy: number,
-  dir: Dir,
+  slot: { lx: number; ly: number; dir: Dir; id: number },
   node: OfficeNode,
   t: number,
   steppedAway: boolean,
-  /** Which sign of the across (p) axis the anchor corner sits on — lets a long plate slide back
-   * toward the desk centre instead of overhanging the near edge. */
-  acrossSign: number,
+  /** Which sign of the across (p) axis the visible side face sits on (screen-down normal). */
+  v: number,
+  /** Neighbour desk abuts the visible side — stand the plate above the lip instead of hanging. */
+  tab: boolean,
 ): void {
+  const { lx, ly, dir } = slot;
   const f = FWD[dir];
   const p: [number, number] = [-f[1], f[0]];
-  const O = project(ix, iy, fit);
-  // The across axis as a screen-space direction (normalized) plus the screen length of one
-  // logical unit — derived via project() so the plaque shares the room's exact axonometry without
-  // re-exporting KX/KY. The magnitude is what lets the plate measure itself against the desk.
-  const q = project(ix + p[0], iy + p[1], fit);
-  const pv = { x: q.x - O.x, y: q.y - O.y };
-  const pm = Math.hypot(pv.x, pv.y);
-  const uP = { x: pv.x / pm, y: pv.y / pm };
-  const puN = uP.x < 0 ? { x: -uP.x, y: -uP.y } : uP; // never paint the engraving upside down
+  const O = project(lx, ly, fit);
+  // The plate's long axis is the desk's ALONG (f) axis — derived via project() so the plaque shares
+  // the room's exact axonometry; the magnitude lets the plate measure itself against the desk side.
+  const g = project(lx + f[0], ly + f[1], fit);
+  const fv = { x: g.x - O.x, y: g.y - O.y };
+  const fm = Math.hypot(fv.x, fv.y);
+  const uF0 = { x: fv.x / fm, y: fv.y / fm };
+  const uF = uF0.x < 0 ? { x: -uF0.x, y: -uF0.y } : uF0; // never paint the engraving upside down
 
-  // Type first — the plate is sized to its engraving. ≥13px so it bakes legibly at stream scale
+  // Type first — the plate is sized to its engraving. >=13px so it bakes legibly at stream scale
   // (the old owned-desk plate's clamp), which is also what keeps canvas type viable here at all.
   const name = node.name.toUpperCase();
   const px = Math.max(13, Math.round(13 * fit.scale));
   ctx.font = canvasFont(px, '--font-display', 700);
   // Letterspaced caps, engraver style — via the real canvas property (a no-op string assignment on
   // engines without it), so the glyph run stays ONE string: tests and text extraction see the name.
-  let track = `${(px * 0.1).toFixed(1)}px`;
+  let track = `${(px * 0.08).toFixed(1)}px`;
   ctx.letterSpacing = track;
   let nameW = ctx.measureText(name).width;
   ctx.letterSpacing = '0px';
   const sub = steppedAway ? 'stepped away' : null;
 
-  // The DESK wins the argument about size (live lesson, 2026-08-27: engraving-sized plates put a
-  // banner across the whole room): the plate is capped at ~62% of the desk's own projected span.
-  // A name that doesn't fit first drops its tracking, then condenses horizontally — never widens
-  // the plate past the cap.
+  // The DESK wins the argument about size (live lesson, 2026-08-27): the side face is only DESK_D
+  // deep, and the plate is capped a hair inside it. A name that doesn't fit first drops its
+  // tracking, then condenses horizontally — never widens the plate past the cap.
   const sEff = Math.max(0.85, Math.min(1.15, fit.scale));
-  const cap = 0.62 * DESK_W * pm;
+  const cap = 0.88 * DESK_D * fm;
   let textSx = 1; // horizontal condensation applied to the glyph run (1 = none)
-  if (nameW + 14 > cap) {
+  if (nameW + 10 > cap) {
     track = '0px';
     nameW = ctx.measureText(name).width; // tracking dropped: remeasure before condensing
-    textSx = Math.min(1, Math.max(0.4, (cap - 12) / nameW));
+    textSx = Math.min(1, Math.max(0.4, (cap - 8) / nameW));
   }
-  const len = Math.max(34, Math.min(nameW * textSx + 14, cap)); // screen px along the plate
-  const high = px + (sub ? px : 0) + 7 * sEff; // face height, screen px
+  const len = Math.max(28, Math.min(nameW * textSx + 10, cap)); // screen px along the plate
+  const high = px + (sub ? px : 0) + 5 * sEff; // face height, screen px
   const half = len / 2;
-  // A plate longer than the corner allows slides back toward the desk centre, so it stays on the
-  // slab instead of overhanging the near edge (3 logical units of margin kept); and the anchor
-  // steps out the 10 units to the desk edge so the plaque hangs flush with the front face.
-  const halfLog = half / pm;
-  const anchorOff = DESK_W / 2 - 15; // the call site's across inset, in logical units from centre
-  const slide = anchorOff - Math.max(0, Math.min(anchorOff, DESK_W / 2 - 3 - halfLog));
-  const alongSign = f[0] + f[1] > 0 ? 1 : -1;
-  const C = project(
-    ix - p[0] * acrossSign * slide + f[0] * alongSign * 10,
-    iy - p[1] * acrossSign * slide + f[1] * alongSign * 10,
-    fit,
-  );
+
+  // Anchor: the midpoint of the visible side edge. A hanging plate tucks 1px under the lip and
+  // drops below it; a tab rises the same height above it, standing on the slab's edge.
+  const C = project(lx + p[0] * v * (DESK_W / 2 - 1), ly + p[1] * v * (DESK_W / 2 - 1), fit);
   const lipY = C.y - DESK_UP * fit.scale;
+  const top = tab ? -(high + 1) : -1;
   // A vertical face in this projection is a parallelogram with vertical screen edges (the same
-  // shape as any box side face): points are (across, drop-below-the-lip).
-  const P = (a: number, drop: number): [number, number] => [C.x + a * puN.x, lipY + a * puN.y + drop];
+  // shape as any box side face): points are (along, drop-below-the-lip).
+  const P = (a: number, drop: number): [number, number] => [C.x + a * uF.x, lipY + a * uF.y + drop];
   const poly = (pts: [number, number][]): void => {
     ctx.beginPath();
     ctx.moveTo(pts[0]![0], pts[0]![1]);
     for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i]![0], pts[i]![1]);
     ctx.closePath();
   };
-  const tl = P(-half, -1); // tucked 1px under the lip so plate and slab read as one piece
-  const tr = P(half, -1);
-  const bl = P(-half, high);
-  const br = P(half, high);
+  const tl = P(-half, top);
+  const tr = P(half, top);
+  const bl = P(-half, top + high);
+  const br = P(half, top + high);
 
   // Brass frame, then the engraved face panel inset within it. The gradient runs top-light to
-  // bottom-dark — the ceiling light falls on the upper half of a hanging face.
+  // bottom-dark — the ceiling light falls on the upper half of a vertical face.
   ctx.fillStyle = '#b98f42';
   poly([bl, br, tr, tl]);
   ctx.fill();
   const grad = ctx.createLinearGradient(tl[0], tl[1], bl[0], bl[1]);
-  grad.addColorStop(0, '#d8b166');
-  grad.addColorStop(0.6, '#c29a4e');
-  grad.addColorStop(1, '#9c7433');
+  grad.addColorStop(0, '#dcb76c');
+  grad.addColorStop(0.55, '#c29a4e');
+  grad.addColorStop(1, '#96702f');
   ctx.fillStyle = grad;
-  poly([P(-half + 2, high - 1.6), P(half - 2, high - 1.6), P(half - 2, 0.6), P(-half + 2, 0.6)]);
+  poly([P(-half + 1.6, top + high - 1.4), P(half - 1.6, top + high - 1.4), P(half - 1.6, top + 0.6), P(-half + 1.6, top + 0.6)]);
   ctx.fill();
 
-  // Top ridge catching the ceiling light — the plaque's one specular line, right at the lip.
+  // Top ridge catching the ceiling light — the plaque's one specular line.
   ctx.strokeStyle = '#f7e2ac';
-  ctx.lineWidth = Math.max(1, 1.4 * fit.scale);
-  ctx.globalAlpha = 0.95;
+  ctx.lineWidth = Math.max(1, 1.2 * fit.scale);
+  ctx.globalAlpha = 0.8;
   ctx.beginPath();
   ctx.moveTo(tl[0], tl[1]);
   ctx.lineTo(tr[0], tr[1]);
   ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // Status light-pipe along the bottom edge + a soft spill into the leg gap below. Working
-  // breathes on `t`; away/offline stays unlit, absence reads as dark brass.
+  // Status light-pipe along the bottom edge + a soft spill below it — into the leg gap for a
+  // hanging plate, onto the slab's edge for a tab. Working breathes on `t`; away/offline stays
+  // unlit, absence reads as dark brass.
   const offline = node.presence === 'offline';
   const pipe =
     steppedAway || offline || node.presence === 'away'
@@ -3765,22 +3755,22 @@ function deskWedge(
     ctx.save();
     ctx.globalAlpha = 0.12 * breathe;
     ctx.fillStyle = pipe;
-    poly([P(-half - 2, high), P(half + 2, high), P(half + 2, high + 6 * sEff), P(-half - 2, high + 6 * sEff)]);
+    poly([P(-half - 2, top + high), P(half + 2, top + high), P(half + 2, top + high + 5 * sEff), P(-half - 2, top + high + 5 * sEff)]);
     ctx.fill();
     ctx.globalAlpha = 0.95 * breathe;
     ctx.strokeStyle = pipe;
-    ctx.lineWidth = Math.max(1.2, 1.9 * fit.scale);
+    ctx.lineWidth = Math.max(1.2, 1.7 * fit.scale);
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(bl[0] + puN.x * 3, bl[1] + puN.y * 3 - 1);
-    ctx.lineTo(br[0] - puN.x * 3, br[1] - puN.y * 3 - 1);
+    ctx.moveTo(bl[0] + uF.x * 3, bl[1] + uF.y * 3 - 1);
+    ctx.lineTo(br[0] - uF.x * 3, br[1] - uF.y * 3 - 1);
     ctx.stroke();
     ctx.restore();
   }
 
   // The engraving. Ink dark-on-brass with a hairline light undercut — debossed, not printed.
-  const mid = P(0, high * (sub ? 0.38 : 0.48));
-  const angle = Math.atan2(puN.y, puN.x);
+  const mid = P(0, top + high * (sub ? 0.38 : 0.5));
+  const angle = Math.atan2(uF.y, uF.x);
   ctx.save();
   ctx.translate(mid[0], mid[1]);
   ctx.rotate(angle);
@@ -3801,7 +3791,7 @@ function deskWedge(
     const subPx = Math.max(10, Math.round(10 * fit.scale));
     ctx.font = canvasFont(subPx, '--font-mono', 400);
     const subW = ctx.measureText(sub).width * textSx;
-    if (subW > len - 12) ctx.scale((len - 12) / subW, 1); // compounds with the name's condensation
+    if (subW > len - 8) ctx.scale((len - 8) / subW, 1); // compounds with the name's condensation
     ctx.fillStyle = 'rgba(42, 29, 12, 0.72)';
     ctx.fillText(sub, 0, px * 0.78);
   }
@@ -3811,7 +3801,7 @@ function deskWedge(
     // The one alarming flavor (ADR 315): a disconnected seat keeps its amber glint, top-right of the frame.
     ctx.fillStyle = '#d9a13c';
     ctx.beginPath();
-    ctx.arc(tr[0] - puN.x * 4, tr[1] + 3, Math.max(2, 2.2 * fit.scale), 0, Math.PI * 2);
+    ctx.arc(tr[0] - uF.x * 4, tr[1] + 3, Math.max(2, 2.2 * fit.scale), 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -3968,18 +3958,23 @@ function drawWorkstation(
   }
 
   // The brass desk plaque (Delight D): every desk with an owner carries one — occupied, stepped
-  // away or offline — because the plate belongs to the desk, not the person. It hangs off the
-  // desk's viewer-facing lip (see deskWedge for the placement history), subsumes the old baked
-  // owned-desk plate (same ≥13px legibility clamp, same stepped-away wording and disconnected
-  // glint) and rides the prop pipeline so it depth-sorts with the desk.
+  // away or offline — because the plate belongs to the desk, not the person. It sits on the desk's
+  // visible SIDE face (see deskWedge for the placement history — a seated member hides the front
+  // face), subsumes the old baked owned-desk plate (same ≥13px legibility clamp, same stepped-away
+  // wording and disconnected glint) and rides the prop pipeline so it depth-sorts with the desk.
   if (node) {
-    // The viewer-nearest desk corner — always visible in front, clear of both the seated body
-    // (desk-centre front) and the monitor (desk-centre back), whatever the desk's facing.
-    const alongSign = f[0] + f[1] > 0 ? 1 : -1;
-    const acrossSign = p[0] + p[1] > 0 ? 1 : -1;
-    at(alongSign * (Df / 2 - 10), acrossSign * (W / 2 - 15), (ix, iy) =>
-      deskWedge(ctx, fit, ix, iy, dir, node, t, steppedAway, acrossSign),
-    );
+    // The visible side: the across direction whose outward face normal points screen-down. Where a
+    // pod neighbour abuts that side, the face is hidden and the plate stands above the lip instead.
+    const o = project(lx, ly, fit);
+    const q = project(lx + p[0], ly + p[1], fit);
+    const v = q.y - o.y > 0 ? 1 : -1;
+    const tab = DESK_SLOTS.some((s) => {
+      if (s.id === slot.id) return false;
+      const across = (s.lx - lx) * p[0] + (s.ly - ly) * p[1];
+      const along = (s.lx - lx) * f[0] + (s.ly - ly) * f[1];
+      return Math.abs(along) < 30 && across * v > 0 && Math.abs(across) < W + 20;
+    });
+    at(0, v * (W / 2 - 1), () => deskWedge(ctx, fit, slot, node, t, steppedAway, v, tab));
   }
 
   props.sort((a, b) => a.sum - b.sum);
@@ -4282,10 +4277,17 @@ export function renderScene(
     // desk; swivel swings the backrest around the seat centre — the same pure curves the actor system
     // applies to the body, so chair and member can never drift apart.
     const f = FWD[slot.dir];
-    const shift = ownerPose && ownerPose.sit > 0.9 ? chairShift(ownerPose.gesture, ownerPose.gestureT) : 0;
-    const yaw = ownerPose && ownerPose.sit > 0.9 ? chairYaw(ownerPose.gesture, ownerPose.gestureT) : 0;
-    const cx = slot.lx - f[0] * (CHAIR_OFF + shift);
-    const cy = slot.ly - f[1] * (CHAIR_OFF + shift);
+    const seated = !!ownerPose && ownerPose.sit > 0.9;
+    const shift = seated ? chairShift(ownerPose.gesture, ownerPose.gestureT) : 0;
+    const yaw = seated ? chairYaw(ownerPose.gesture, ownerPose.gestureT) : 0;
+    // A vacant chair at a desk that faces the viewer is parked BEHIND the slab in this projection —
+    // fully hidden, so the desk reads as chairless (nick, 2026-08-31: the kimi desk). Roll it back
+    // far enough to emerge past the desk's far edge, the way a real chair sits pushed out when its
+    // owner is away. Facing is measured on screen, not guessed from the dir name.
+    const fScreen = project(slot.lx + f[0] * 10, slot.ly + f[1] * 10, fit).y - project(slot.lx, slot.ly, fit).y;
+    const vacantPeek = !seated && fScreen > 0 ? 16 : 0;
+    const cx = slot.lx - f[0] * (CHAIR_OFF + shift + vacantPeek);
+    const cy = slot.ly - f[1] * (CHAIR_OFF + shift + vacantPeek);
     const bdx = -f[0] * CHAIR_BACK_OFF;
     const bdy = -f[1] * CHAIR_BACK_OFF;
     const bx = cx + bdx * Math.cos(yaw) - bdy * Math.sin(yaw);
