@@ -14,15 +14,16 @@
 // with what pan) all live in `sound.ts`. Nothing here reads localStorage: an engine only exists
 // because a façade already decided it should be on, and told it so.
 
+import { EMPTY_LIFE, type LifeContext } from './sound';
 import {
-  EMPTY_LIFE,
   keyboardFor,
   keypressPlan,
-  type LifeContext,
+  lifeGapFor,
   panFor,
   pickLifeEvent,
+  pickWorkDesk,
   shouldChime,
-} from './sound';
+} from './soundLife';
 
 /** One scheduled note: a frequency, a start offset (s), a length (s), a waveform, and a peak gain. */
 interface Note {
@@ -227,9 +228,8 @@ export const firehoseEngine = new FirehoseSound();
 
 /** Ceiling on the whole bed. Low enough to sit under a podcast, loud enough to miss when it stops. */
 const ROOM_GAIN = 0.075;
-/** Gap between sparse events, seconds. Wide, and jittered inside the window — an office you can set
- *  your watch by is a metronome, and the ear finds a metronome within about two cycles. */
-const LIFE_GAP: [number, number] = [2.5, 8];
+// The gap between sparse events now lives in sound.ts (`LIFE_GAP` / `lifeGapFor`): it scales with
+// work density, and the scaling is logic the tests hold still without an AudioContext.
 /**
  * Makeup gain on the whole LIFE layer, and the reason it needs one.
  *
@@ -431,10 +431,12 @@ export class RoomTone {
     return buf;
   }
 
-  /** Schedule the next sparse event, and re-arm from it. One timer, always. */
+  /** Schedule the next sparse event, and re-arm from it. One timer, always. The gap tightens with
+   *  work density — a full sprint hums about twice as often as a quiet room (E2 spec §4). */
   private armLife(): void {
     clearTimeout(this.timer);
-    const wait = LIFE_GAP[0] + Math.random() * (LIFE_GAP[1] - LIFE_GAP[0]);
+    const [lo, hi] = lifeGapFor(this.occupancy.density);
+    const wait = lo + Math.random() * (hi - lo);
     this.timer = setTimeout(() => {
       if (this.bus && this.ctx?.state === 'running' && !this.isHidden()) this.life();
       this.armLife();
@@ -448,12 +450,15 @@ export class RoomTone {
     if (!ctx || !bus) return;
     // Placed across the stereo field, never dead centre: everything in an office happens at somebody
     // else's desk, and a sound in the middle of your head is a sound you made.
-    const name = pickLifeEvent(Math.random(), this.occupancy);
+    const now = Date.now();
+    const name = pickLifeEvent(Math.random(), this.occupancy, now);
     const pan = ctx.createStereoPanner?.();
     const out = pan ?? ctx.createGain();
-    // Positioned events (chatter, the dog) pan to where they are on screen; the rest land somewhere
-    // off to one side, the way the layer always has.
-    const at = panFor(name, this.occupancy);
+    // Positioned events pan to where they are on screen: work sounds to the working desk that makes
+    // them (E2 spec §3), chatter to the pair, the dog to the dog; the rest land somewhere off to one
+    // side, the way the layer always has.
+    const desk = pickWorkDesk(name, Math.random(), this.occupancy, now);
+    const at = desk ? desk.x * 0.75 : panFor(name, this.occupancy);
     if (pan) pan.pan.value = at ?? (Math.random() * 2 - 1) * 0.75;
     out.connect(bus);
     // Long enough for the longest murmur or typing run to finish before its channel goes away.
@@ -462,7 +467,7 @@ export class RoomTone {
     // Every branch jitters its own parameters, so even the same event twice in a row never plays the
     // same twice (nick, 2026-07-29: "very dynamic and variable so they don't get old").
     switch (name) {
-      case 'keys': return this.keys(ctx, out);
+      case 'keys': return this.keys(ctx, out, desk?.seed);
       case 'murmur': return this.murmur(ctx, out, false);
       case 'whisper': return this.murmur(ctx, out, true);
       case 'tap': return this.tap(ctx, out, 0.9);
@@ -480,6 +485,8 @@ export class RoomTone {
       case 'jingle': return this.jingle(ctx, out);
       case 'yawn': return this.blow(ctx, out, true);
       case 'bark': return this.bark(ctx, out);
+      case 'birds': return this.birds(ctx, out);
+      case 'nightair': return this.nightair(ctx, out);
     }
   }
 
@@ -488,8 +495,10 @@ export class RoomTone {
    *  long ones. A uniform run is what the ear learns first. One `Keyboard` per run (see
    *  `keyboardFor`), two transients per key (see `keypressPlan`) — and the whole thing sits at the
    *  bed's level now, not 9 dB over it, which was the "too loud" half of the complaint. */
-  private keys(ctx: AudioContext, out: AudioNode): void {
-    const kb = keyboardFor(Math.floor(Math.random() * 0xffffffff));
+  private keys(ctx: AudioContext, out: AudioNode, deskSeed?: number): void {
+    // A placed burst plays the desk's own keyboard (E2 spec §3) — the same seed every time, so a
+    // desk sounds like itself across bursts. An unplaced one draws a stranger's, as it always has.
+    const kb = keyboardFor(deskSeed ?? Math.floor(Math.random() * 0xffffffff));
     const long = Math.random() < 0.3;
     const n = long ? 14 + Math.floor(Math.random() * 12) : 4 + Math.floor(Math.random() * 9);
     const pauseAt = long ? 5 + Math.floor(Math.random() * (n - 8)) : -1;
@@ -760,6 +769,41 @@ export class RoomTone {
     src.connect(bp).connect(g).connect(out);
     src.start(t0);
     src.stop(t0 + 0.2);
+  }
+
+  /** Birdsong through the window, morning only (E2 spec §4): one bird, a short phrase of quick
+   *  upward chirps. Sine glides, not noise — a chirp is pitched — and each phrase draws its own
+   *  base pitch, count and pacing so no two mornings repeat. Soft: the window is closed. */
+  private birds(ctx: AudioContext, out: AudioNode): void {
+    const base = 2600 + Math.random() * 900;
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < 2 + Math.floor(Math.random() * 3); i++) {
+      const f = base * (0.92 + Math.random() * 0.16);
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, at);
+      osc.frequency.exponentialRampToValueAtTime(f * (1.25 + Math.random() * 0.2), at + 0.06);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(0.0055 + Math.random() * 0.003, at + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+      osc.connect(g).connect(out);
+      osc.start(at);
+      osc.stop(at + 0.11);
+      at += 0.13 + Math.random() * 0.22;
+    }
+  }
+
+  /** Night air for the late shift (E2 spec §4): a distant cricket-ish pulse train — a few tremolo'd
+   *  high pips, very quiet, very sparse. Deliberately under everything else: it is the sound of the
+   *  building being empty around the one lit desk, not a nature documentary. */
+  private nightair(ctx: AudioContext, out: AudioNode): void {
+    const f = 3800 + Math.random() * 700;
+    let at = ctx.currentTime + 0.02;
+    for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
+      this.ping(ctx, out, at, f * (0.98 + Math.random() * 0.04), 0.0035 + Math.random() * 0.002);
+      at += 0.07 + Math.random() * 0.04;
+    }
   }
 
   /** One short filtered noise burst — the shared shape behind a keystroke and a mug on a desk. */

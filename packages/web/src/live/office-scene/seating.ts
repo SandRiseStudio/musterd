@@ -31,6 +31,19 @@ function hash(name: string): number {
   return h;
 }
 
+/**
+ * Is this seat *audibly* working — may the room type, tap and creak from its desk?
+ *
+ * Keys on the composed posture, never `activity` (E2 spec §2): activity lags, and a stale
+ * `activity: working` with posture folded to idle used to sit on the lounge couch drumming an
+ * imaginary keyboard. This is the same predicate the renderer types and lights screens on
+ * (`render.ts` `skelFor` / screen glow), and the render loop's park check shares it too — one
+ * predicate for eyes, ears and the loop, so none of the three can disagree.
+ */
+export function audiblyWorking(m: Pick<Seatable, 'posture'>): boolean {
+  return m.posture === 'working';
+}
+
 /** dnd means *working, don't interrupt* (presence-honesty §4) — they keep their desk and chair. */
 export function isDnd(m: Seatable): boolean {
   return m.availability?.status === 'dnd';

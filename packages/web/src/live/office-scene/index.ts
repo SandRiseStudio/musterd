@@ -27,7 +27,7 @@ import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS , RECEPTIONIST } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
 import { isWithinWorkingHours } from './workingHours';
-import { assignSeats, type Placement } from './seating';
+import { assignSeats, audiblyWorking, type Placement } from './seating';
 import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type CaptionRail } from '../captions';
 import { createWelcome, stepWelcome } from './welcome';
 import {
@@ -1096,7 +1096,11 @@ export function mountOffice(
    */
   function living(): boolean {
     if (reduced) return false;
-    for (const n of actors.nodes().values()) if (n.activity === 'working') return true;
+    // The same predicate the renderer types on and the room-tone `working[]` is collected by
+    // (E2 spec §2's park invariant): keyed on activity while the renderer keyed on posture, a
+    // posture-working seat with stale activity froze mid-typing on the park frame — and the sound
+    // layer would have kept typing after the room visually idled.
+    for (const n of actors.nodes().values()) if (audiblyWorking(n)) return true;
     return false;
   }
 
@@ -1174,6 +1178,10 @@ export function mountOffice(
       raf = 0;
       last = 0;
       acc = 0;
+      // The loop is parking, so occupancy stops updating — hand the sound layer a final snapshot
+      // with `working: []` as the floor of the park invariant (E2 spec §2): a parked room must not
+      // keep typing off its last live snapshot.
+      pushOccupancy(now, true);
     }
   }
   function ensureLoop() {
@@ -1207,8 +1215,16 @@ export function mountOffice(
   // engine never reads the scene, and a push every couple of seconds is plenty for a layer whose
   // events are 2.5–8s apart.
   let occAt = 0;
-  function pushOccupancy(now: number): void {
-    if (now - occAt < 2000) return;
+  /** When the last act cue landed — the "recent act rate" nudge in `density` (E2 spec §2). */
+  let actPulseAt = 0;
+  /** FNV-ish name hash (same idiom as seating's) — a desk's audio seed is as stable as its chair. */
+  const audioSeed = (name: string): number => {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+    return h;
+  };
+  function pushOccupancy(now: number, parked = false): void {
+    if (!parked && now - occAt < 2000) return;
     occAt = now;
     const toX = (lx: number, ly: number): number => {
       const sx = project(lx, ly, fit).x;
@@ -1216,9 +1232,15 @@ export function mountOffice(
     };
     // Group present members by shared zone: a pod (desk slots), a leisure zone, or the nook.
     const zones = new Map<string, { lx: number; ly: number }[]>();
+    // Desks that may type, tap and creak (E2 spec §2/§3) — collected by `audiblyWorking` (posture,
+    // never activity) so the ears agree with the typing the eyes see. Forced empty on the park
+    // frame: the parked room is exactly the room that should be quiet.
+    const working: { x: number; seed: number }[] = [];
+    let present = 0;
     for (const [name, pl] of placements) {
       const node = actors.nodes().get(name);
       if (!node || node.presence === 'offline') continue;
+      present++;
       let zone: string | null = null;
       let at: { lx: number; ly: number } | null = null;
       if (pl.kind === 'desk') {
@@ -1228,6 +1250,9 @@ export function mountOffice(
           // sitters are exactly the "near each other" pair the room tone listens for.
           zone = slot.kind === 'pod' ? `pod-${slot.pod}` : slot.kind;
           at = { lx: slot.lx, ly: slot.ly };
+          if (!parked && audiblyWorking(node)) {
+            working.push({ x: toX(slot.lx, slot.ly), seed: audioSeed(name) });
+          }
         }
       } else if (pl.kind === 'leisure') {
         const spot = LEISURE_SPOTS[pl.spot];
@@ -1252,10 +1277,21 @@ export function mountOffice(
         pairs.push({ x: toX((mid[0]!.lx + mid[1]!.lx) / 2, (mid[0]!.ly + mid[1]!.ly) / 2) });
       }
     }
+    // Work intensity: the working share of who is present, nudged up while acts are actually
+    // landing (a fading pulse, gone after a quiet minute). Tempo and mix only — never gain.
+    const share = present > 0 ? working.length / present : 0;
+    // Wall clock, not the rAF timestamp `now` — `actPulseAt` is stamped with Date.now().
+    const actNudge = Math.max(0, 0.25 * (1 - (Date.now() - actPulseAt) / 60_000));
     const ctx: LifeContext = {
       pairs,
       // An asleep dog is a quiet dog — it neither pads nor jingles.
       dog: pet.mode === 'sleep' ? null : { x: toX(pet.lx, pet.ly), walking: pet.mode === 'walk' },
+      working,
+      density: Math.min(1, share + (working.length > 0 ? actNudge : 0)),
+      // The same envelope the daylight overlay and the wall clock read — audio and window light
+      // can never disagree, and `?light=HH` overrides audio too.
+      daylight: lightEnv.daylight,
+      hours: lightEnv.hours,
     };
     roomTone.setOccupancy(ctx);
   }
@@ -1431,6 +1467,7 @@ export function mountOffice(
   }
 
   function pushCue(name: string, color: string, glyph: Cue['glyph'], urgent = false) {
+    actPulseAt = Date.now(); // an act just landed — the density nudge's clock (E2 spec §2)
     const at = heads.get(name);
     if (!at) return;
     cues.push({ at: { x: at.x, y: at.y + 20 }, color, glyph, t: 0, urgent });
