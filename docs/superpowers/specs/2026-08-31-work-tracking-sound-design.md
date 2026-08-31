@@ -43,7 +43,7 @@ The scene→sound push stays exactly what it is: pushed from the office rAF loop
 export interface LifeContext {
   pairs: ReadonlyArray<{ x: number }>;          // existing
   dog: { x: number; walking: boolean } | null;  // existing
-  /** Desks of evidenced-`working` seats (screen x in [-1, 1]). Empty = nobody works. */
+  /** Desks whose seats are audibly working (screen x in [-1, 1]). Empty = nobody works. */
   working: ReadonlyArray<{ x: number; seed: number }>;
   /** Work intensity, 0..1 — working share of present seats, nudged by recent act rate. */
   density: number;
@@ -54,9 +54,13 @@ export interface LifeContext {
 }
 ```
 
-- `working` reuses the scene's per-seat `activity: 'working'` (presence-honesty's
-  evidenced state) and each member's stable seed, so a desk keeps its own keyboard voice
-  and its own think/type rhythm.
+- `working` collects seats by **`posture === 'working'` at their desk — never
+  `activity`**. This is the predicate the renderer already keys typing and lit screens on
+  (`skelFor`, `render.ts` screen glow): activity lags, and a stale `activity: working`
+  with posture projected to idle used to sit on the lounge couch drumming an imaginary
+  keyboard. Keying audio on activity would rebuild that bug in the ears — the exact lie
+  this spec exists to kill. Each entry carries the member's stable seed, so a desk keeps
+  its own keyboard voice and its own think/type rhythm.
 - `density` is computed scene-side: `working / present`, nudged upward by act arrivals the
   scene already observes for speech bubbles. Clamped 0..1. The exact nudge is an
   implementation constant; the contract is only "0 = nobody working, 1 = full sprint".
@@ -65,9 +69,16 @@ export interface LifeContext {
 - `EMPTY_LIFE` gains the new fields as zeros/empties: an empty office stays the silent
   baseline.
 
-A freebie worth stating: when nobody is working the render loop parks and occupancy stops
-updating — and that is *correct*, because the parked room is exactly the room that should
-be quiet. No new timer or subscription is needed to make silence happen.
+**Park invariant — one predicate for eyes, ears and the loop.** The render loop parks via
+`living()`, which today reads `activity` while the renderer types on posture — so if
+`working[]` moves to posture and the park predicate stays on activity, the last occupancy
+snapshot could keep typing after the room has visually idled (and, symmetrically, a
+posture-working seat with stale activity currently freezes mid-typing on the park frame —
+the visual half of the same mismatch). The fix is required by this spec: `living()` moves
+to the same posture-derived predicate that feeds `working[]`, and the final settled frame
+before parking pushes occupancy with `working: []` as a belt-and-braces floor. With that,
+the parked room is exactly the room that should be quiet, and no new timer or
+subscription is needed to make silence happen.
 
 ## 3. Honest causality — work sounds become gated and placed
 
