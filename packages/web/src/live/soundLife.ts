@@ -219,8 +219,17 @@ export function keypressPlan(kb: Keyboard): ReadonlyArray<{ freq: number; gain: 
 
 // ── milestone moments (E3) ───────────────────────────────────────────────────────────────────────
 
-/** The room's placed reactions — diegetic, on the room-tone layer; NOT the firehose act cues. */
-export type Moment = 'fanfare' | 'door' | 'askbell';
+/** The room's placed reactions — diegetic, on the room-tone layer; NOT the firehose act cues.
+ *  E3 gave the room its moments; E4 adds the viewer's own hand (plate, board, the directed whoosh). */
+export type Moment =
+  | 'fanfare'
+  | 'door'
+  | 'askbell'
+  | 'plateOpen'
+  | 'plateClose'
+  | 'boardOpen'
+  | 'boardClose'
+  | 'whoosh';
 
 /** Minimum gap between moments, ms. Moments are act-driven and sparse by nature; the one plausible
  *  burst (a flood of accepts) coalesces rather than becoming a slot machine — same principle as the

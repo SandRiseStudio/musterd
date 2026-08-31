@@ -265,6 +265,10 @@ const ROOM_GAIN = 0.075;
  */
 const LIFE_GAIN = 34;
 
+/** The whoosh's length, seconds — `--lc-dur-5` (600ms), the `lc-trace-draw` timing, so the pan
+ *  sweep lands with the visual (E4 spec: one number, pinned). */
+const WHOOSH_S = 0.6;
+
 export class RoomTone {
   enabled = false;
   private ctx: AudioContext | null = null;
@@ -281,6 +285,7 @@ export class RoomTone {
   private occupancy: LifeContext = EMPTY_LIFE;
   /** When the last milestone moment played — the E3 burst throttle's clock. */
   private lastMomentAt = -Infinity;
+
 
   /** Toggle the bed. The façade owns the preference and its persistence; this is the audio half. */
   setEnabled(on: boolean): void {
@@ -442,7 +447,7 @@ export class RoomTone {
    * once (dropped, never queued); the ×0.75 stereo squeeze happens HERE and nowhere else —
    * `pan` arrives raw [-1, 1] from `screenPan` at the emit site.
    */
-  moment(name: Moment, pan: number): void {
+  moment(name: Moment, pan: number, panTo?: number): void {
     const ctx = this.ctx;
     const bus = this.lifeBus;
     if (!ctx || !bus || ctx.state !== 'running' || this.isHidden()) return;
@@ -452,13 +457,73 @@ export class RoomTone {
     const panNode = ctx.createStereoPanner?.();
     const out = panNode ?? ctx.createGain();
     if (panNode) panNode.pan.value = momentPan(pan);
+    // The whoosh is the one voice that animates its pan node: it sweeps toward `panTo` over the
+    // trace's own duration, so ear and eye arrive together (E4 spec). Other voices ignore panTo.
+    if (panNode && name === 'whoosh' && panTo !== undefined) {
+      panNode.pan.setValueAtTime(momentPan(pan), ctx.currentTime + 0.02);
+      panNode.pan.linearRampToValueAtTime(momentPan(panTo), ctx.currentTime + 0.02 + WHOOSH_S);
+    }
     out.connect(bus);
     setTimeout(() => out.disconnect(), 4000);
     switch (name) {
       case 'fanfare': return this.fanfare(ctx, out);
       case 'door': return this.doorMoment(ctx, out);
       case 'askbell': return this.askbell(ctx, out);
+      case 'plateOpen': return this.plateTick(ctx, out, true);
+      case 'plateClose': return this.plateTick(ctx, out, false);
+      case 'boardOpen': return this.boardPaper(ctx, out, true);
+      case 'boardClose': return this.boardPaper(ctx, out, false);
+      case 'whoosh': return this.whoosh(ctx, out);
     }
+  }
+
+  /** A nameplate under the viewer's own hand (E4): one felt-pad tick, pitched a touch up on open
+   *  and down on close — siblings, not twins. Closer than the room, so smaller than the room. */
+  private plateTick(ctx: AudioContext, out: AudioNode, open: boolean): void {
+    const base = open ? 640 : 480;
+    this.click(ctx, out, ctx.currentTime + 0.01, base * (0.94 + Math.random() * 0.12), 0.035, 0.05);
+  }
+
+  /** The board overlay (E4): a brief paper swell — rising on open, falling and shorter on close. */
+  private boardPaper(ctx: AudioContext, out: AudioNode, open: boolean): void {
+    const t0 = ctx.currentTime + 0.02;
+    const dur = open ? 0.28 + Math.random() * 0.08 : 0.18 + Math.random() * 0.06;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.Q.value = 1.4;
+    bp.frequency.setValueAtTime(open ? 700 : 1100, t0);
+    bp.frequency.exponentialRampToValueAtTime(open ? 1200 : 600, t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.03, t0 + dur * 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(bp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + dur + 0.03);
+  }
+
+  /** The directed-act whoosh (E4): lowpassed air with a gentle arc over the trace's 600ms, its pan
+   *  swept by `moment` above. Quiet by design — it accompanies a line, it is not the line. */
+  private whoosh(ctx: AudioContext, out: AudioNode): void {
+    const t0 = ctx.currentTime + 0.02;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    src.loop = true;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(600, t0);
+    lp.frequency.exponentialRampToValueAtTime(1900 + Math.random() * 400, t0 + WHOOSH_S * 0.55);
+    lp.frequency.exponentialRampToValueAtTime(500, t0 + WHOOSH_S);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.026, t0 + WHOOSH_S * 0.45);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + WHOOSH_S);
+    src.connect(lp).connect(g).connect(out);
+    src.start(t0);
+    src.stop(t0 + WHOOSH_S + 0.03);
   }
 
   /** Acceptance lands (E3): a quick rising major triad off the cue ladder, and a soft paper

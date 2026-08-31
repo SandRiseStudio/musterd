@@ -363,4 +363,12 @@ describe('milestone moments (E3 spec)', () => {
   it('drops a moment issued before the engines load, rather than queueing it', () => {
     expect(() => roomTone.moment('fanfare', 0.2)).not.toThrow();
   });
+
+  it("carries the E4 interaction names and the whoosh's destination pan", () => {
+    // panTo rides the same forward-or-drop path; other voices simply ignore it.
+    expect(() => roomTone.moment('whoosh', -0.5, 0.5)).not.toThrow();
+    for (const m of ['plateOpen', 'plateClose', 'boardOpen', 'boardClose'] as const) {
+      expect(() => roomTone.moment(m, 0)).not.toThrow();
+    }
+  });
 });

@@ -292,10 +292,14 @@ function LivePage() {
   const openBoard = useCallback((rect: DOMRect) => {
     boardOpener.current = (document.activeElement as HTMLElement | null) ?? null;
     setBoardOrigin(rect);
+    // The paper lift rides the CLICK paths only (E4 spec §2) — the ?lane= deep link below arrives
+    // without a hand, so it stays silent. Centre-panned: the overlay is chrome over the room.
+    roomTone.moment('boardOpen', 0);
   }, []);
   const closeBoard = useCallback(() => {
     setBoardOrigin(null);
     setBoardLane(null);
+    roomTone.moment('boardClose', 0);
     // A macrotask, not rAF: focus must go home even in a hidden tab (rAF stalls there), and by the
     // time this runs React has committed the close and lifted `inert`.
     window.setTimeout(() => boardOpener.current?.focus?.({ preventScroll: true }), 0);
