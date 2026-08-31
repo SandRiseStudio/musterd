@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import {
+  type Envelope,
   FEATURE_EPOCH,
   GENERALIST_CAPABILITIES,
   PROTOCOL_VERSION,
@@ -17,6 +18,7 @@ import { createServer, type RunningServer } from '../index.js';
 import { appendAudit, listAudit } from '../store/audit.js';
 import { openDirectedLedger } from '../store/delivery.js';
 import { getMemberByName, setMemberGovernance } from '../store/members.js';
+import { insertMessage } from '../store/messages.js';
 import { REVIEW_LOOP_BREAKER_N } from '../store/review.js';
 import { getTeamBySlug } from '../store/teams.js';
 
@@ -448,23 +450,32 @@ describe('HTTP API', () => {
       // Pinned ONCE: `Date.now()` per iteration drifts, so tied rows would not actually tie —
       // the fixture would encode the same strictly-increasing assumption it exists to break.
       const t0 = Date.now();
+      // Seeded IN PROCESS through the same store function the route calls, not over HTTP. These
+      // tests are about the GET, and the backlog they need is large by construction — the bound
+      // under test is 200, so every fixture must exceed it. Built one POST at a time this block
+      // spent 1830ms of round-trips per test against 33ms in the call it exists to measure
+      // (measured 2026-08-28), because POST /messages is a heavy path — routeEnvelope, delivery
+      // hints, nudge-decision counting, audit rows — and none of it is this describe's subject.
+      // Linear in n and paid six times, that crossed the 30s timeout under a loaded parallel run
+      // while passing alone, which is the shape that teaches people to re-run a suite instead of
+      // reading it. `unreadOnly` filters the caller's cursor against `messages`, so nothing
+      // asserted below depends on the POST route having run; the route keeps its own coverage
+      // elsewhere in this file.
+      const teamRow = getTeamBySlug(server.db, 'dawn')!;
+      const nick = getMemberByName(server.db, teamRow.id, 'nick')!;
+      const boRow = getMemberByName(server.db, teamRow.id, 'bo')!;
       for (let i = 0; i < n; i++) {
-        await post(
-          '/teams/dawn/messages',
-          {
-            envelope: {
-              id: `b${String(i).padStart(4, '0')}`,
-              v: PROTOCOL_VERSION,
-              team: 'dawn',
-              from: 'nick',
-              to: { kind: 'member', name: 'bo' },
-              act: 'message',
-              body: 'x',
-              ts: t0 + (tieFrom !== undefined && i >= tieFrom ? tieFrom - 1 : i),
-            },
-          },
-          nickTok,
-        );
+        const envelope: Envelope = {
+          id: `b${String(i).padStart(4, '0')}`,
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'bo' },
+          act: 'message',
+          body: 'x',
+          ts: t0 + (tieFrom !== undefined && i >= tieFrom ? tieFrom - 1 : i),
+        };
+        insertMessage(server.db, teamRow.id, nick.id, boRow.id, envelope);
       }
       return { boTok: bo.json.human_credential as unknown };
     };
