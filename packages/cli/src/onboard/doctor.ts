@@ -100,9 +100,30 @@ export interface DoctorReport {
 function inspectGuidance(cwd: string, harnesses: Harness[]): { drift: string[]; notes: string[] } {
   const drift: string[] = [];
   const notes: string[] = [];
-  const recorded = readProvisionManifest(cwd)?.guidance;
-  if (!recorded) return { drift, notes }; // pre-085 / never written — nothing claimed, nothing to check
-  const wasRecorded = new Set(recorded.files);
+  // "Was this folder provisioned at all?" is the only gate here, and it must be asked of EVERY
+  // manifest version. Asking it of the v1 reader alone is what silently disabled this whole check
+  // (measured 2026-08-31): `readProvisionManifest` parses `version: z.literal(1)`, so once ADR 281
+  // moved the file to v2 and ADR 282 to v3, every provisioned worktree answered null and the
+  // function returned before reading a stamp. Seven seat workspaces sat at guidance v18 against a
+  // build writing v20 with `init --check` reporting nothing — the instrument was off, so the
+  // repair was never prescribed and nobody could have known. The early return's premise ("no
+  // record ⇒ pre-085, never written") was true under one manifest version and false the moment
+  // there were two.
+  const v1 = readProvisionManifest(cwd)?.guidance;
+  //
+  // Ask it of the FILE, not of today's parsers. `kind !== 'missing'` and not a list of the versions
+  // that happen to exist — dolly's REQUIRED on this PR, and she was right: keying on `valid |
+  // legacy` re-armed this very trap one version ahead, since `WorktreeProvisioningSchema` pins v3
+  // and the legacy recognizer accepts exactly v2 and v1, so a future v4 manifest classifies
+  // `invalid` and the check goes quiet again. A present `provisioned.json` is the evidence, whatever
+  // shape it is in. `invalid` counting as provisioned is the conservative direction on purpose: a
+  // corrupt or future manifest gets its drift REPORTED, never silenced.
+  const provisioned = v1 !== undefined || loadProvisioning(cwd).kind !== 'missing';
+  if (!provisioned) return { drift, notes }; // never provisioned — nothing claimed, nothing to check
+  // Only the v1 manifest recorded file paths; v2/v3 record fragment resource keys instead. Without
+  // it the missing-file line loses the "was recorded, now gone" vs "never arrived" distinction and
+  // says the latter — a wording degradation, and both prescribe the same repair.
+  const wasRecorded = new Set(v1?.files ?? []);
   // Stale files are counted, not listed: one version bump used to emit one line PER FILE — six
   // identical-in-substance lines for a single fact on a real seat. ADR 168 pre-registered "becomes
   // noise" as a failure mode of its own instrument; ADR 171 §2 pays that debt. The remedy is
