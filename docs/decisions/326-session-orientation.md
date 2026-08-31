@@ -45,11 +45,15 @@ authorized, and named by no guidance surface at all.
 2. **The orient ritual (acted, nudged until stamped).** A `musterd-orient` skill: inbox check
    (the autojoin moment), memory read, **handle tier 1 unprompted** — directed asks awaiting this
    seat's reply, open incident lanes — then **surface tier 2** (owed reviews, carried lanes,
-   up-next) without acting, one status_update, then `musterd session orient-stamp`. The stamp is
+   up-next) without acting, one status_update, then `musterd session orient-stamp`.
+   _(Amended 2026-08-27: owed reviews and routed acceptances are **tier 1** — taken up unprompted;
+   tier 2 is only work nobody addressed to the seat. See the amendment below.)_ The stamp is
    workspace-local and keyed by the captured session id — orientation is a property of the
    session, not the machine — and quiets a per-turn `musterd session orient-nudge` line carried by
    the machine-wide SessionStart and UserPromptSubmit hooks. Autonomous pickup of new work is
    deliberately excluded; a future policy flag owns moving that line (spec §E).
+   _(Amended 2026-08-27: reads "unaddressed work" — a routed acceptance or review request is
+   addressed, and taking one was never optional. See the amendment below.)_
 3. **Wakes stay scoped.** The daemon-composed wake lines now name `team_wake_context`
    first, and the tool joins `SKILL_MCP_TOOLS`. A woken session gets its errand (the ADR 209
    packet: wake kind, objective, lane/thread state, memory headline, explicit reads) — never the
@@ -73,11 +77,15 @@ authorized, and named by no guidance surface at all.
 - **2026-08-27 — Decision 2's tier split is superseded in part.** Its "surface tier 2 (owed
   reviews…) without acting" and "autonomous pickup of new work is deliberately excluded" are both
   amended by the 2026-08-27 amendment below: owed reviews and routed acceptances are tier 1 and are
-  taken up unprompted, and the excluded category is *unaddressed* work. The Decision text itself is
-  left verbatim because `change-adr:check` freezes the `## Decision` of an accepted ADR — the
-  inline-marker convention of ADR 160 predates that gate and no longer passes it, so the pointers
-  live here and on the Status line (the ADR 056 form) instead. The design spec carries the same
-  markers at §A(2) and §B step 4, where they are permitted.
+  taken up unprompted, and the excluded category is *unaddressed* work. The design spec carries the
+  same markers at §A(2) and §B step 4.
+  _(Amended 2026-08-31: this note first said the Decision text was left unmarked because
+  `change-adr:check` froze the section and ADR 160's inline convention no longer passed it. That was
+  true for one day. #1117 added an append-only dated marker allowance to that gate — the prior
+  Decision's words must survive, and only a dated marker may be added (`isAppendOnlyAmendment`,
+  `scripts/adr-sections.ts`; see [amending an ADR](../wiki/amending-an-adr.md)) — so :45 and :49 now
+  carry the markers inline where a reader meets them, and the Status line keeps its pointer. The
+  reason recorded here was a limitation, not a preference, and it is gone.)_
 
 ## Observability & Evaluation
 
