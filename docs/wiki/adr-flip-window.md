@@ -31,4 +31,5 @@ Fixing the Decision in one commit and flipping in the next lands as **one refuse
 ## Related
 
 - [`scripts/flip-window.test.ts`](../../scripts/flip-window.test.ts) — both directions against real fixture repos, red-first.
+- [Rule 3 across a rename](adr-rename-tracking.md) — the sibling hole dolly found reviewing #1129: until it was closed, a `git mv` lifted this rule and the accepted-ADR freeze alike.
 - ADR 338's baseline (the reviewer charter) classified the finding that produced this page: a reviewer-discovered gap, noted not blocking, routed to a lane with the finder's name on it.
