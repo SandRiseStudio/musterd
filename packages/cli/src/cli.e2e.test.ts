@@ -1036,3 +1036,46 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
     expect(Array.isArray(res.messages)).toBe(true);
   });
 });
+
+describe('inbox --interrupt-check is a hook one-shot — it must not reclaim the seat (#1138 gap)', () => {
+  afterEach(() => {
+    delete process.env['MUSTERD_BINDING'];
+  });
+
+  it("a stale-lease interrupt-check stays silent and leaves the live claimant's lease alone", async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'ava', '--kind', 'agent']);
+    const staleAuth = await claimedAgent('dawn', 'ava');
+    // The live claimant — the MCP adapter in production. Its claim revokes staleAuth's lease.
+    const live = await claimedAgent('dawn', 'ava');
+    const bindingPath = saveBinding(dir, {
+      version: 2,
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      agent_key: loadConfig().agentKeys['dawn']!,
+      seat_credential: staleAuth.key,
+      session_lease: staleAuth.sessionLease,
+      claim: { mode: 'seat', name: 'ava' },
+    });
+    process.env['MUSTERD_BINDING'] = bindingPath;
+
+    // The PostToolUse hook fires with the stale lease: silent, exit 0, and — the point — no reclaim.
+    const probe = await run(inboxCommand, ['--interrupt-check']);
+    expect(probe.code).toBe(0);
+    expect(probe.out).toBe('');
+
+    // Pre-fix, the probe's reclaim seized the seat and killed the live claimant's lease; this read
+    // then failed "invalid, expired, or revoked agent session lease".
+    const liveHttp = new HttpClient({
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      // The credential is minted once (first claim) and stable; only the lease is per-claim.
+      key: staleAuth.key,
+      seat: 'ava',
+      sessionLease: live.sessionLease,
+      surface: 'cli',
+    });
+    const res = await liveHttp.inbox('dawn', { unread: true, limit: 1 });
+    expect(Array.isArray(res.messages)).toBe(true);
+  });
+});

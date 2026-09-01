@@ -269,7 +269,12 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   await attestSlotIfUnattested();
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
   try {
-    const { http, team, identity, explicit } = resolveRead(parsed.flags);
+    // Hook one-shot (PostToolUse, every tool call): never reclaim the seat — a reclaim here evicts
+    // the live adapter's presence and kills its lease (see ResolveReadOptions; the #1138 gap miley
+    // found the same hour that fix landed).
+    const { http, team, identity, explicit } = resolveRead(parsed.flags, {
+      reclaimAgentLease: false,
+    });
     if (!explicit || !identity) return 0;
     const res = await http.interruptCheck(team);
     if (res.raised && res.line) process.stdout.write(res.line + '\n');
