@@ -59,11 +59,15 @@ Workspace that supersedes an adapter live in another.
 
 ## Observability & Evaluation
 
-- Falsifier: `packages/cli/src/cli.e2e.test.ts`, "a session attestation with a refused
-  lease reclaims once and lands on the ledger" — red without the fix with
-  `expected [] to equal ['residency.session_captured']`.
-- Unit cases pin: one claim per refusal; no claim on an accepted lease, an unreachable
-  daemon, a seat live elsewhere, or an unreadable roster; one claim per slot across
-  repeated tool boundaries; a fresh session event may claim again.
-- Live: the ADR 336 owed arm was observed on this build, 2026-09-01 13:26–13:28 — the
-  probe could not land a row without it.
+- Traces: `residency.session_captured` / `residency.session_ended` audit rows resume for
+  hooks past the five-minute lease; `claim.superseded {same_workspace:false, via:'ws'}` rows
+  from a hook actor must not appear — one would mean rule 2 failed.
+- Eval: `packages/cli/src/cli.e2e.test.ts`, "a session attestation with a refused lease
+  reclaims once and lands on the ledger" — the dataset is the real server in the claim-storm
+  describe; the baseline is the pre-fix client, which fails it with
+  `expected [] to equal ['residency.session_captured']`. Unit cases pin: one claim per
+  refusal; no claim on an accepted lease, an unreachable daemon, a seat live elsewhere, or
+  an unreadable roster; one claim per slot across repeated tool boundaries; a fresh session
+  event may claim again.
+- Experiment: the ADR 336 owed arm was observed live on this build, 2026-09-01 13:26–13:28
+  (`docs/wiki/residency-ledger-undercount.md`); the probe could not land a row without it.
