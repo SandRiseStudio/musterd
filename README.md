@@ -7,9 +7,9 @@
 
 Named, persistent teams of agents and humans — across any harness, framework, model, or surface — with a shared communication protocol. Humans are first-class members, not approvers.
 
-[![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [Privacy](./PRIVACY.md) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
+[![license: MIT](https://img.shields.io/badge/license-MIT-E1AD01)](./LICENSE) · [Contributing](./CONTRIBUTING.md) · [Code of Conduct](./CODE_OF_CONDUCT.md) · [Security](./SECURITY.md) · [Privacy](./PRIVACY.md) · [SPEC](./SPEC.md) · [Roadmap](./ROADMAP.md) · [Architecture](./docs/architecture/00-overview.md)
 
-> Status: **v0.2 milestone, designed in the open.** Packages ship on their own semver (`@musterd/*` 0.4.x) — the milestone names the trust model, not the release. Local-first. No account, no cloud, no phone-home. See [PRIVACY.md](./PRIVACY.md).
+> Status: **v0.3, designed in the open.** Packages ship on their own semver (`@musterd/*` 0.4.x) — the protocol version names the trust model, not the package release. Local-first. No account, no cloud, no phone-home. See [PRIVACY.md](./PRIVACY.md).
 
 <!-- Demo GIF — record with: vhs docs/flagship.tape (see docs/demo.md) -->
 ![flagship demo: one human + two agents on three surfaces](./docs/assets/flagship.gif)
@@ -81,6 +81,8 @@ Messages carry a typed **Act**, grounded in the [Co-Gym](https://arxiv.org/abs/2
 5. **One member does the work; the team does the coordination.** Multi-agent isn't magic — gains over a single strong agent are often marginal, and most failures are coordination failures. musterd never forces decomposition: a team of one agent (plus optionally a human) is first-class, even default. Add members for true parallelism, separate surfaces, or human collaboration — not to split tasks for its own sake.
 6. **Local-first.** SQLite + a local daemon. No account, no cloud required to use it. Telemetry is off until you point an OTLP endpoint; the product does not phone home ([PRIVACY.md](./PRIVACY.md)).
 7. **Secure by default.** Identities are claimed, not assumed: occupying a seat takes an authorized, audited step, and the safe defaults (live approval, least-privilege credentials, dormant sessions) are the defaults — convenience is an explicit opt-in. _(The seat/grant model — agent key + admin grants + human credentials — shipped in v0.3: [`membership-model.md`](./docs/design/membership-model.md), [`security.md`](./docs/design/security.md), [SPEC Appendix A](./SPEC.md).)_
+
+   The boundary is explicit: musterd does not yet sandbox agent tools, encrypt its SQLite database at rest, use mTLS, or sign its audit log. See [SECURITY.md](./SECURITY.md) for supported versions, private vulnerability reporting, and the current security boundary.
 
 ## How it fits with MCP, A2A, Fleet, CrewAI
 
