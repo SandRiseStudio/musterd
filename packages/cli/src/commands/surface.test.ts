@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -153,23 +154,79 @@ describe('musterd surface (ADR 332)', () => {
 
   // A surface that cannot be removed for one folder is still refusable — the hook reads the
   // tombstone at fire time. What must never happen is a tombstone with no enforcement at all.
-  it('declining a machine-wide hook suppresses it here, says so, and leaves it installed', () => {
+  //
+  // This case RUNS the installed hook rather than reading it. The assertion it replaced checked
+  // that the command string contained `grep -q '"<surface>"'` and `.musterd/declined.json` — both
+  // survive any mutation that keeps the grep and drops the exit (`&& exit 0` → `; ` passes it), so
+  // it could not tell enforcement from decoration. Silence is the claim; only running produces it.
+  it('declining a machine-wide hook actually silences it here, says so, and leaves it installed', () => {
     mkdirSync(join(cwd, '.claude'), { recursive: true });
     writeFileSync(join(cwd, '.claude', 'settings.local.json'), '{}\n', 'utf8');
     installMusterdHooks(cwd);
+    // The hook self-gates on the committed primer: without this it exits before reaching the
+    // tombstone clause, and both halves below would be silent for the wrong reason.
+    writeFileSync(join(cwd, 'AGENTS.md'), '<!-- musterd:start -->\n', 'utf8');
+
+    const global = JSON.parse(readFileSync(join(globalDir, 'settings.json'), 'utf8')) as {
+      hooks?: Record<string, { hooks?: { command?: string }[] }[]>;
+    };
+    const cmd = global.hooks?.['UserPromptSubmit']?.[0]?.hooks?.[0]?.command ?? '';
+    expect(cmd).not.toBe('');
+
+    /** Fire the hook the way Claude Code does: this folder as CLAUDE_PROJECT_DIR, its stdout kept.
+     *  PATH is stripped to the system utilities so the `command -v musterd` clause stays false —
+     *  a real CLI on PATH would make this test spawn daemon-touching subprocesses. */
+    const fire = (): string =>
+      execFileSync('sh', ['-c', cmd], {
+        env: { PATH: '/usr/bin:/bin', CLAUDE_PROJECT_DIR: cwd },
+        encoding: 'utf8',
+      });
+
+    // Installed and firing, before any refusal.
+    expect(fire()).toContain('musterd:');
 
     expect(run('decline', SURFACE_MACHINE_PROMPT_SUBMIT)).toBe(0);
     expect(isDeclined(cwd, SURFACE_MACHINE_PROMPT_SUBMIT)).toBe(true);
     expect(out).toContain('machine-wide');
+
+    // The refusal is enforced where it has to be — at fire time, in this folder. Silence, not a
+    // string that looks like silence.
+    expect(fire()).toBe('');
+
+    // …and the hook is still installed, still serving every other folder: the same command, fired
+    // from a folder with no tombstone, still speaks.
+    const otherFolder = mkdtempSync(join(tmpdir(), 'musterd-surface-other-'));
+    try {
+      writeFileSync(join(otherFolder, 'AGENTS.md'), '<!-- musterd:start -->\n', 'utf8');
+      const elsewhere = execFileSync('sh', ['-c', cmd], {
+        env: { PATH: '/usr/bin:/bin', CLAUDE_PROJECT_DIR: otherFolder },
+        encoding: 'utf8',
+      });
+      expect(elsewhere).toContain('musterd:');
+    } finally {
+      rmSync(otherFolder, { recursive: true, force: true });
+    }
+  });
+
+  // The gate FAILS OPEN by construction (a missing/unreadable/malformed declined.json makes grep
+  // exit non-zero): never invent a refusal. Asserted by running, for the same reason as above.
+  it('a malformed tombstone does not silence the hook — the gate fails open', () => {
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'settings.local.json'), '{}\n', 'utf8');
+    installMusterdHooks(cwd);
+    writeFileSync(join(cwd, 'AGENTS.md'), '<!-- musterd:start -->\n', 'utf8');
+    mkdirSync(join(cwd, '.musterd'), { recursive: true });
+    writeFileSync(join(cwd, '.musterd', 'declined.json'), '{ this is not json', 'utf8');
+
     const global = JSON.parse(readFileSync(join(globalDir, 'settings.json'), 'utf8')) as {
       hooks?: Record<string, { hooks?: { command?: string }[] }[]>;
     };
-    // Still installed for every other folder…
     const cmd = global.hooks?.['UserPromptSubmit']?.[0]?.hooks?.[0]?.command ?? '';
-    expect(cmd).not.toBe('');
-    // …and the enforcement is in the hook itself: it reads THIS folder's tombstone and exits.
-    expect(cmd).toContain(`grep -q '"${SURFACE_MACHINE_PROMPT_SUBMIT}"'`);
-    expect(cmd).toContain('.musterd/declined.json');
+    const fired = execFileSync('sh', ['-c', cmd], {
+      env: { PATH: '/usr/bin:/bin', CLAUDE_PROJECT_DIR: cwd },
+      encoding: 'utf8',
+    });
+    expect(fired).toContain('musterd:');
   });
 
   // Recording a refusal we cannot carry out is the same lie one step removed.
