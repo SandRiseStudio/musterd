@@ -208,7 +208,47 @@ for (const { path, status } of changed) {
   const before = fileAt(base, path);
   const after = fileAt('HEAD', path);
   if (before === null || after === null) continue;
-  if (!isAcceptedAdr(before)) continue; // a proposed ADR is still being drafted — editable
+  if (!isAcceptedAdr(before)) {
+    // A proposed ADR is still being drafted — editable. But the diff that FLIPS it to accepted is
+    // the last moment the Decision can change before the freeze, and rule 3 reads the before side,
+    // so without this branch that one diff could rewrite the Decision and freeze text nobody
+    // reviewed (dolly, #1123 review; measured on the corpus: 9 of 41 flips edited the Decision in
+    // the same commit, lane 01M1D3HJZACT6CC9KQ0QR88AJS). The flip diff must leave the Decision
+    // identical, or amend it with the same dated append-only markers accepted Decisions use — a
+    // silent rewrite is refused. `wasEverOnMain` deliberately does not apply here: a proposed
+    // Decision's history is drafts, and "some draft once said this" is not review.
+    if (!isAcceptedAdr(after)) continue;
+    const wasDecision = decisionSection(before);
+    const nowDecision = decisionSection(after);
+    if (wasDecision === nowDecision) {
+      process.stdout.write(
+        `• ${path} — Status flipped to accepted with the Decision unchanged; allowed. The freeze starts here.\n`,
+      );
+      continue;
+    }
+    if (
+      wasDecision !== null &&
+      nowDecision !== null &&
+      isAppendOnlyAmendment(wasDecision, nowDecision)
+    ) {
+      process.stdout.write(
+        `• ${path} — Status flipped to accepted and the Decision gained a dated amendment marker; allowed.\n`,
+      );
+      continue;
+    }
+    failed = true;
+    process.stderr.write(
+      `✗ ${path} — the \`## Decision\` changed in the same diff that flipped the ADR to accepted.\n` +
+        `  The flip is where the freeze begins, so this diff decides what text gets frozen — and a\n` +
+        `  Decision rewritten here is frozen without ever having been the text that was reviewed.\n` +
+        `  EITHER: keep the old text and add a dated marker carrying the correction —\n` +
+        `  \`_(Amended YYYY-MM-DD: … See the amendment below.)_\` — append-only, checked word for word.\n` +
+        `  OR: land the Decision change in a separate PR while the ADR is still proposed, and flip\n` +
+        `  in its own diff. The gate reads the whole diff, not commits, so splitting the commits on\n` +
+        `  one branch does not help — the separate PR is the reviewed route.\n\n`,
+    );
+    continue;
+  }
 
   const wasDecision = decisionSection(before);
   const nowDecision = decisionSection(after);
