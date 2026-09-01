@@ -30,37 +30,43 @@ claim authentication or making key distribution unauditable.
 
 1. Replace the single `teams.agent_key_hash` with server-side agent bootstrap
    credential records. A record has an opaque ID, Team, SHA-256 key hash,
-   allowed claim target (`seat:<name>` or `role:<name>`), optional
+   allowed use (`claim:seat:<name>`, `claim:role:<name>`, or `host:<name>`), optional
    administrator-facing Workspace/Harness label, state (`active`, `rotated`,
    or `revoked`), optional expiry, creator, and lifecycle timestamps. Labels
    are inventory only and never accepted from a client as authorization proof.
-2. A bootstrap credential authenticates only a claim whose target matches its
-   stored target. It remains bootstrap-only: it cannot authenticate routine
-   Member HTTP, issue a grant, decide a request, alter policy, or choose a
-   different seat/role. The existing grant, request, account-status, and
-   single-active checks remain mandatory after this scope check.
+2. A claim-scoped bootstrap credential authenticates only a claim whose target
+   matches its stored target. It cannot authenticate routine Member HTTP,
+   issue a grant, decide a request, alter policy, or choose a different
+   seat/role. The existing grant, request, account-status, and single-active
+   checks remain mandatory after this scope check.
 3. Administrators mint a credential for one declared agent-seat target as the
    normal path. Role-target credentials are permitted only for an explicitly
    declared role pool and may claim only the server-selected open seat in that
    role. A credential is shown once, stored only in the target Workspace's
    protected binding, and never written into a committed launch spec.
-4. Rotation is explicit and manual in this increment. An administrator mints
+4. A host-scoped credential authenticates only the presence-neutral wake
+   lease, progress, turn, and report routes for its recorded host label. It
+   cannot claim any seat or access a routine Member route. The server matches
+   the host label from the request to the credential record; it never trusts a
+   client-supplied label alone. This replaces the current Team-wide host-key
+   exception rather than preserving it implicitly.
+5. Rotation is explicit and manual in this increment. An administrator mints
    a successor, distributes it to the intended Workspace, verifies a
    successful claim or a non-secret credential-use audit row, then revokes the
    predecessor. Scheduled and anomaly-triggered rotation are deferred until
    the future abuse-control increment supplies trustworthy signals and an
    operator response policy.
-5. Credentials support an explicit expiry and revocation. Rotation does not
+6. Credentials support an explicit expiry and revocation. Rotation does not
    automatically revoke the predecessor, permitting bounded staged migration;
    an administrator must select an expiry or revoke it after verification.
    Revoked and expired credentials fail closed before request creation or
    Presence attachment.
-6. The existing Team `agent_key_hash` migrates to a marked legacy
+7. The existing Team `agent_key_hash` migrates to a marked legacy
    Team-scoped bootstrap record solely for a documented compatibility window.
    New minting never creates Team-scoped records. A release that removes the
    compatibility path must be separately ADR-gated after every configured
    Workspace has moved to a scoped credential.
-7. The claim protocol keeps the opaque `mskey_` value as its input; the server
+8. The claim protocol keeps the opaque `mskey_` value as its input; the server
    identifies the matching stored record by hash. Additive record identifiers
    and lifecycle fields remain server-private unless an admin inventory
    response needs a redacted projection. No secret, raw hash, or Workspace
@@ -75,9 +81,10 @@ claim authentication or making key distribution unauditable.
   one target, so the administrator must verify and revoke promptly.
 - This requires an ADR-gated protocol and storage implementation: record
   migration, scoped authentication in HTTP and WebSocket claim paths, admin
-  lifecycle operations, CLI/MCP binding migration, redaction, and coverage
-  for target mismatch, expiry, revocation, rotation overlap, and legacy-client
-  refusal after compatibility removal.
+  lifecycle operations, host authentication, CLI/MCP binding migration,
+  redaction, and coverage for target mismatch, host mismatch, expiry,
+  revocation, rotation overlap, and legacy-client refusal after compatibility
+  removal.
 - Scheduled rotation, compromise detection, and automatic revocation are not
   implied by credential records. They remain dependent on the next
   claim-abuse-controls decision.
