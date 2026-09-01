@@ -1,6 +1,6 @@
 # 337 — Agent HTTP session authority
 
-- Status: proposed — 2026-08-31
+- Status: accepted — 2026-08-31
 - Date: 2026-08-31
 - Lane: `01M1CRP2A76T7Q7C6D6H2S79XX`
 

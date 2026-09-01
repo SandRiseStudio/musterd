@@ -1,6 +1,6 @@
 # 340 — CLI lease reclaim preserves workspace
 
-- Status: proposed
+- Status: accepted — 2026-09-01
 - Date: 2026-08-31
 
 ## Context

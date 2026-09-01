@@ -1547,15 +1547,16 @@ const RAW: RawItem[] = [
   // ── captured from design docs / ADRs (roadmap-completeness pass, 2026-07-01) ──
   {
     id: 'team-hardening',
-    unfrozen: 'a cluster of security roadmap items; only ADR 128 inside it is frozen',
+    unfrozen:
+      'a cluster of security roadmap items; ADR 128 recipient visibility and ADR 136 public observer grades are shipped',
     wave: 'later',
     title: 'Shared/remote-team security hardening',
     plan: 'reserved',
     category: 'platform',
     blurb:
-      'The security cluster that follows the v0.3 governance work once teams span machines: recipient-scoped message reads, multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
+      'The security cluster that follows the v0.3 governance work once teams span machines: multi-admin delegation, rotating/per-seat keys, a signed audit log, and abuse limits.',
     detail:
-      'Named as "roadmap" in security.md + membership-model.md: **recipient-scoped message reads SHIPPED** (ADR 128 — `GET /messages` + the `team-all` firehose no longer leak others\' DMs to a regular member; a party is sender/recipient/team-broadcast, admins + read-only observers see all under localhost-trust; the local-vs-shared observer scoping — a shared watch-link seeing only public traffic — is the tracked remainder here). Still reserved in this cluster: local-vs-shared observer scoping, multi-admin delegation & policy, per-seat / rotating agent keys, a tamper-evident (signed) audit log, claim rate-limiting / anomaly detection + per-sender urgent rate-limit, OS-keychain secret storage, and DB encryption-at-rest. Follows directly from the shipped v0.3 governance substrate.',
+      'Named as "roadmap" in security.md + membership-model.md: **recipient-scoped message reads and public watch-link observer grades SHIPPED** (ADR 128/136 — regular Members receive only party-to-the-Act history and firehose traffic; a public watch link sees only team-broadcast traffic, while admins and full observers retain full visibility). Still reserved in this cluster: multi-admin delegation & policy, per-seat / rotating agent keys, a tamper-evident (signed) audit log, claim rate-limiting / anomaly detection + per-sender urgent rate-limit, OS-keychain secret storage, and DB encryption-at-rest. Follows directly from the shipped v0.3 governance substrate.',
     refs: [
       doc('docs/design/security.md', 'security.md'),
       doc('docs/design/membership-model.md', 'membership-model.md'),
