@@ -20,6 +20,7 @@ import { startSeedsIngest } from './seeds/ingest.js';
 import { countDiversityFlagsByTeam } from './store/mast.js';
 import { countOpenLoopsByTeam } from './store/messages.js';
 import { activePresenceBySurface, slowestInboxLagMs } from './store/metrics.js';
+import { startSyncPull } from './sync/pull.js';
 import { startSyncPush } from './sync/push.js';
 import { registerRuntimeGauges, startTelemetry, telemetryEnabled } from './telemetry.js';
 import { handleHttp } from './transport/http.js';
@@ -123,6 +124,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
   let stopReaper: (() => void) | null = null;
   let stopSeeds: (() => void) | null = null;
   let stopSync: (() => void) | null = null;
+  let stopPull: (() => void) | null = null;
   let stopFootprint: (() => void) | null = null;
   let stopWatcher: (() => void) | null = null;
   let stopTelemetry: (() => Promise<void>) | null = null;
@@ -178,6 +180,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
           stopReaper = startReaper(ctx);
           stopSeeds = startSeedsIngest(ctx);
           stopSync = startSyncPush(ctx);
+          stopPull = startSyncPull(ctx);
           stopFootprint = startFootprintSampler(ctx);
           startWatching();
           log.info({
@@ -222,6 +225,7 @@ export function createServer(opts: ServerOptions = {}): RunningServer {
         stopReaper?.();
         stopSeeds?.();
         stopSync?.();
+        stopPull?.();
         stopFootprint?.();
         stopWatcher?.();
         void stopTelemetry?.();
