@@ -151,7 +151,7 @@ A Role is more than a label: it carries **capabilities** (what a seat may do) at
 - **Non-admin seats/agents see a projection** — their teammates' handles + presence + the acts addressed to them; **not** credentials, grants, audit, team policy, or other roles' charters.
 - The roster/info endpoints return a _viewer-scoped_ view; the server enforces it.
 
-> **Known gap (2026-07-02):** the **roster/capabilities** projection above is enforced; **message content is not yet scoped.** `GET /teams/:slug/messages` and the `team-all` firehose return every envelope on the team (incl. others' DMs), gated only on `can_observe` (default `true`) — not on recipient. So "the acts addressed to them" is aspirational for message content today. Recipient-scoped reads belong with the v0.3 Shared/remote-team hardening work and gate the derived insight layer (ADRs 048/050/084). See `security.md` § Capabilities & visibility for the full note.
+> **Shipped (ADR 128/136):** the server scopes `GET /teams/:slug/messages` and the `team-all` firehose to a regular Member's sent, received, and Team-broadcast Acts. Admins and full-grade observers retain full visibility; a public watch-link observer receives Team-broadcast traffic only. Watch links remain identified observers rather than anonymous access: roster handles and Presence remain visible. See `security.md` § Capabilities & visibility for the full policy.
 
 **Enforce vs declare (keeps Principle 4 intact):**
 

@@ -48,6 +48,8 @@ Two design commitments follow from "read-only projection":
 
 A shared read-only **watch link** (`/live?team=<slug>&as=<observer>#w=<credential>`, ADR 063) lets a team
 hand someone a spectator view without provisioning them a real seat.
+The watch link mints a public-grade observer (ADR 136): it sees Team-broadcast Acts, not directed
+traffic. It is a scoped observer, not anonymous access; roster handles and Presence remain visible.
 
 > **Known limitation (2026-07-07):** the HTTP backfill is capped (200) and returns the oldest of an
 > over-cap history, so on a busy team the newest acts arrive only via the live socket, not the backfill.
