@@ -36,6 +36,12 @@ function git(...args: string[]): string {
     cwd: repoRoot,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
+    // Capture stderr instead of inheriting it. Several reads here PROBE for paths that may not exist
+    // at a ref (`fileAt`, the history walk), and each miss is expected and caught — but git still
+    // writes `fatal: path … does not exist` to the terminal, and a `fatal:` printed directly above a
+    // refusal reads as a crash rather than a verdict. The failure is still visible: it arrives in the
+    // thrown error, where the callers already handle it.
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
 
@@ -67,14 +73,61 @@ function resolveBase(): string {
 }
 
 const base = resolveBase();
-const changed = git('diff', '--name-status', `${base}...HEAD`)
+// `-M` so a rename arrives as one `R<score>\told\tnew` record instead of an unrelated delete plus
+// add. Without it rule 3 came off with a single `git mv`: the add has no before side, so a rename
+// that rewrote the Decision in the same diff was never judged at all (dolly, #1129 review, lane
+// 01M1EWVE68CB9CCGV76WGN61XT). Rules 1 and 2 are unaffected — neither reads the rename half.
+const changed = git('diff', '--name-status', '-M', `${base}...HEAD`)
   .split('\n')
   .filter(Boolean)
   .map((line) => {
     const [status, ...rest] = line.split('\t');
-    return { status: status ?? '', path: rest[rest.length - 1] ?? '' };
+    const code = status ?? '';
+    return {
+      status: code,
+      path: rest[rest.length - 1] ?? '',
+      // Only renames carry a second path; `null` everywhere else keeps the read below honest.
+      fromPath: code.startsWith('R') ? (rest[0] ?? '') : null,
+    };
   })
   .filter((c) => c.path);
+
+const ADR_PATH = /^docs\/decisions\/\d{3}-.*\.md$/;
+/** `docs/decisions/288-goal-retract.md` → `goal-retract.md`. The part a renumber does not touch. */
+const adrSlug = (path: string) => path.replace(/^docs\/decisions\/\d{3}-/, '');
+
+/*
+ * `-M` pairs by SIMILARITY, which is defeated by rewriting enough of the file: gut a long Decision
+ * and the pair falls under the 50% default, git reports an unrelated delete plus add, and rule 3 is
+ * off again. Measured on the corpus, 2026-09-01: renaming `106-unified-git-workflow.md` and
+ * replacing its 78-line Decision scored R040 — under threshold. Lowering the threshold trades one
+ * blind spot for false pairings across a 300-ADR corpus, so instead pair the way a RENUMBER actually
+ * works: the number changes and the slug does not. All 12 ADR renames in history keep the slug
+ * identical (falsify: `git log --diff-filter=R --name-status -M -- docs/decisions`). Deterministic,
+ * and it does not care how much of the body moved.
+ */
+const adrsBySlug = (status: string) => {
+  const by = new Map<string, typeof changed>();
+  for (const c of changed) {
+    if (c.status !== status || !ADR_PATH.test(c.path)) continue;
+    const slug = adrSlug(c.path);
+    by.set(slug, [...(by.get(slug) ?? []), c]);
+  }
+  return by;
+};
+
+const addedBySlug = adrsBySlug('A');
+const deletedBySlug = adrsBySlug('D');
+for (const [slug, added] of addedBySlug) {
+  const deleted = deletedBySlug.get(slug) ?? [];
+  // Exactly one candidate ON EACH SIDE, or the pairing is a guess — and a guess here accuses the
+  // wrong file of rewriting a Decision it never held. Two adds sharing a retired slug is the case
+  // that made the one-sided guard wrong (dolly, #1136 review): both were judged against the same
+  // before side, so a genuinely new ADR reusing the slug was refused.
+  if (added.length !== 1 || deleted.length !== 1) continue;
+  const entry = added[0];
+  if (entry) entry.fromPath = deleted[0]?.path ?? null;
+}
 
 if (changed.length === 0) {
   process.stdout.write('No changes against the base ref — nothing to gate.\n');
@@ -201,11 +254,18 @@ function wasEverOnMain(path: string, decision: string): boolean {
   return false;
 }
 
-for (const { path, status } of changed) {
-  if (status !== 'M') continue; // only in-place edits; a new ADR is the sanctioned path
-  if (!/^docs\/decisions\/\d{3}-.*\.md$/.test(path)) continue;
+for (const { path, status, fromPath } of changed) {
+  // An in-place edit, or a rename OF ONE ADR TO ANOTHER — renumbering is legitimate, but it must not
+  // carry a Decision rewrite through the gate. A rename from outside `docs/decisions/` is left alone
+  // deliberately: promoting a draft into the corpus is an add, and the before side is not an ADR to
+  // compare against. A new ADR remains the sanctioned path.
+  const renamedFromAdr = fromPath !== null && ADR_PATH.test(fromPath);
+  if (status !== 'M' && !renamedFromAdr) continue;
+  if (!ADR_PATH.test(path)) continue;
 
-  const before = fileAt(base, path);
+  // For a rename the before side lives at the OLD path; reading the new path at base would find
+  // nothing and skip the check, which is the evasion itself.
+  const before = fileAt(base, fromPath ?? path);
   const after = fileAt('HEAD', path);
   if (before === null || after === null) continue;
   if (!isAcceptedAdr(before)) {
@@ -256,7 +316,10 @@ for (const { path, status } of changed) {
   // A restoration passes: this exact Decision text is one the file has held before (see
   // `wasEverOnMain`). Undoing an edit that slipped through the blind years must not be blocked by
   // the gate that just started watching.
-  if (nowDecision !== null && wasEverOnMain(path, nowDecision)) {
+  // Ask about the OLD path on a rename: at the base the new path has no history, so the restoration
+  // escape would find nothing and refuse a legitimate restore-and-renumber. (`--follow` inside walks
+  // through earlier renames from there; this only gets it to the right starting name.)
+  if (nowDecision !== null && wasEverOnMain(fromPath ?? path, nowDecision)) {
     process.stdout.write(
       `• ${path} — \`## Decision\` restored to a form this file previously held; allowed.\n`,
     );
