@@ -32,15 +32,21 @@ PRs carried none). All twelve fall into four load-bearing categories, and **zero
 edge cases**:
 
 - **Honesty** — a claim in the PR or its docs that is false: #1123 (a review-provenance SHA
-  misattributed), #1087 ×2 (a data point that "would send the next reader to reproduce a scenario
+  misattributed), #1087 (a data point that "would send the next reader to reproduce a scenario
   that never happened").
 - **Probe-measured regression** — reproduced, not reasoned: #1102 ×2 ("I reproduced each with a
   throwaway test against this head rather than reasoning about it"), #1110 (concurrency probes red
-  at the reviewed head), #1103 ×2 ("five driving tests" in a temporary checkout of the branch).
+  at the reviewed head), #1103 ×2 ("five driving tests" in a temporary checkout of the branch),
+  #1087 (a missing dedup step with "a live instance on this PR" — the PR's own thread was the
+  reproduction).
 - **A named pin** — the change violates a rule already written down, including by the PR itself:
   #1115 ("the PR's own wiki page states the rule it violates"), #1110 (ADR number collision against
-  `adr-numbers:check`), #1087 ×2 (a spec still teaching a superseded ritual — doc/code
-  disagreement; a repo amendment convention not followed).
+  `adr-numbers:check`), #1087 ×2 (a spec still teaching the superseded ritual, cited as authority
+  by the shipped skill; the ADR's own Decision still teaching the rule the amendment reverses).
+
+(The #1087 rows were first filed here as 2 honesty / 2 pin; miley's review of this ADR recounted
+them against the original findings — 1 honesty / 2 pin / 1 probe-measured — and the correction is
+this paragraph. Totals: honesty 2, named pin 5, probe-measured 5.)
 - **Leaked secrets / AppSec** — none in the sample; the category exists in
   `.github/REVIEW-RULES.md` blocker 2 and the security skill.
 
@@ -72,9 +78,12 @@ recording — the question is only where it routes: into this change, or onto th
   driving scenario. Reasoning about a failure is a note; reproducing it is a REQUIRED.
 - **A named pin** — the change violates something already written: a falsifier or acceptance
   criterion in the lane detail or spec, an ADR clause, a doc/code disagreement
-  (`.github/REVIEW-RULES.md` blocker 4), or a rule the PR's own text states. "Named" is load-bearing:
-  the REQUIRED must quote or cite the pin, in the finding itself. A category claim ("this is a
-  correctness issue") with no probe and no pin is a note wearing a costume.
+  (`.github/REVIEW-RULES.md` blocker 4), a rule the PR's own text states, or a convention already
+  demonstrated in the tree — cited with file and line, the way precedent is (this last form is
+  miley's #1087 REQUIRED: the pin was `2026-07-31-…-design.md:6` carrying the supersede convention
+  the flagged spec lacked). "Named" is load-bearing: the REQUIRED must quote or cite the pin, in
+  the finding itself. A category claim ("this is a correctness issue") with no probe and no pin is
+  a note wearing a costume.
 
 ### 3. Everything else is noted, not blocking
 
@@ -87,9 +96,13 @@ review.
 ### 4. The author's duty is the same paragraph, not a separate nicety
 
 An author who receives a REQUIRED outside the four categories **declines it, citing this ADR**, and
-does not expand the lane. Declining is not insubordination — complying is the failure mode, because
-every out-of-scope fix bolted on to get to green lands unreviewed-in-spirit: it was specified by
-nobody, and the reviewer who demanded it is the only one who ever judged it. An author who *wants*
+does not expand the lane. A decline has a floor, the same one rule 3 gives notes: **the decline
+names which of the four categories the finding fails, and the finding routes to the board as a
+note under the finder's name.** Declining costs the author a record the way noting costs the
+reviewer one — the finding survives being wrong about its own severity, and a decline that names no
+category is itself the costume rule 2 forbids. Declining is not insubordination — complying is the
+failure mode, because every out-of-scope fix bolted on to get to green lands unreviewed-in-spirit:
+it was specified by nobody, and the reviewer who demanded it is the only one who ever judged it. An author who *wants*
 to take a noted finding may (the #1117 fenced-code residual was taken by choice, measured first);
 the difference between taking and complying is that taking is a decision recorded on the PR, with
 the measurement that justified it.
