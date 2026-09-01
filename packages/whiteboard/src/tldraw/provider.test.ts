@@ -322,6 +322,64 @@ describe('TldrawProvider', () => {
     expect(note.cluster).toBeUndefined();
   });
 
+  it('auto-places a new cluster to the RIGHT of existing content, never on the count-grid', async () => {
+    // The count-grid landed new clusters far off-viewport on a 100+ shape board — the human
+    // could not find what the agent just placed.
+    const { ids } = await provider.add('b20', 'seat:izzo', [
+      { kind: 'cluster', title: 'First' },
+      { kind: 'note', text: 'a', cluster: undefined },
+    ]);
+    const outline1 = await provider.read('b20');
+    const maxX = Math.max(
+      ...outline1.items.filter((i) => i.x !== undefined).map((i) => i.x! + 400),
+    );
+
+    await provider.add('b20', 'seat:izzo', [{ kind: 'cluster', title: 'Second' }]);
+    const outline2 = await provider.read('b20');
+    const second = outline2.items.find((i) => i.kind === 'cluster' && i.text === 'Second')!;
+    expect(second.x).toBeGreaterThanOrEqual(maxX - 400);
+    expect(ids).toHaveLength(2);
+  });
+
+  it('auto-places a loose note BELOW existing content', async () => {
+    await provider.add('b21', 'seat:izzo', [
+      { kind: 'cluster', title: 'Stuff' },
+      { kind: 'note', text: 'in', cluster: undefined },
+    ]);
+    const before = await provider.read('b21');
+    const maxY = Math.max(...before.items.filter((i) => i.y !== undefined).map((i) => i.y!));
+
+    await provider.add('b21', 'seat:izzo', [{ kind: 'note', text: 'late loose idea' }]);
+    const after = await provider.read('b21');
+    const loose = after.items.find((i) => i.text === 'late loose idea')!;
+    expect(loose.y).toBeGreaterThan(maxY);
+  });
+
+  it('grids a small cluster two columns wide — a 3-note cluster is not a long strip', async () => {
+    const { ids } = await provider.add('b22', 'seat:izzo', [{ kind: 'cluster', title: 'Small' }]);
+    const clusterId = ids[0]!;
+    await provider.add('b22', 'seat:izzo', [
+      { kind: 'note', text: 'one', cluster: clusterId },
+      { kind: 'note', text: 'two', cluster: clusterId },
+      { kind: 'note', text: 'three', cluster: clusterId },
+    ]);
+    const outline = await provider.read('b22');
+    const xs = new Set(
+      outline.items.filter((i) => i.cluster === clusterId).map((i) => i.x),
+    );
+    expect(xs.size).toBe(2);
+  });
+
+  it('the add result says where auto-placed items landed', async () => {
+    await provider.add('b23', 'seat:izzo', [{ kind: 'cluster', title: 'Origin' }]);
+    const { hint } = await provider.add('b23', 'seat:izzo', [
+      { kind: 'cluster', title: 'Next' },
+      { kind: 'note', text: 'loose' },
+    ]);
+    expect(hint).toMatch(/right of existing content/);
+    expect(hint).toMatch(/below existing content/);
+  });
+
   it('concurrent add and close both settle fulfilled and the survivor clock is on disk', async () => {
     // #1084 review REQUIRED 2: the fixed temp path let two writers corrupt each other's
     // atomic rename — an ordinary add() failed with raw ENOENT.

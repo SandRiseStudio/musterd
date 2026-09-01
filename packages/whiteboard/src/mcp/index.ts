@@ -134,9 +134,10 @@ export function buildWhiteboardMcpServer(client: WhiteboardServiceClient): McpSe
     async ({ board, items }) => {
       try {
         if (!actor) return errorResult(new Error(NO_ACTOR_MSG));
-        const { ids, version } = await client.add(board, actor, items as ItemInput[]);
+        const { ids, version, hint } = await client.add(board, actor, items as ItemInput[]);
         return textResult(
-          `placed ${ids.length} item(s), board now v${version}: ${ids.map((id) => id.replace(/^shape:/, '')).join(', ')}`,
+          `placed ${ids.length} item(s), board now v${version}: ${ids.map((id) => id.replace(/^shape:/, '')).join(', ')}` +
+            (hint ? `\n${hint}` : ''),
         );
       } catch (err) {
         return errorResult(err);

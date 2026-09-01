@@ -18,7 +18,6 @@ import { listBoards } from '../sync/persistence.js';
 import type { RoomManager } from '../sync/roomManager.js';
 import { outlineFromSnapshot, shapeCount, type RoomSnapshotLike } from './outline.js';
 import {
-  autoPosition,
   buildCluster,
   buildLabel,
   buildLink,
@@ -52,6 +51,43 @@ function snap(room: Room): RoomSnapshotLike {
 function fullId(id: string): string {
   return id.startsWith('shape:') ? id : `shape:${id}`;
 }
+
+/**
+ * Bounding box of the board's top-level content (page children; arrows excluded — their x/y
+ * are anchors, not extents). Drives placement of new items NEXT TO what exists: the old
+ * count-grid landed additions far off-viewport on a mature board, where the human at the
+ * browser could not find what the agent had just placed.
+ */
+function contentBounds(
+  s: RoomSnapshotLike,
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  let out: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
+  for (const d of s.documents) {
+    if (d.state.typeName !== 'shape') continue;
+    const sh = d.state as ShapeRecord;
+    if (sh.type === 'arrow' || sh.parentId !== PAGE_ID) continue;
+    const w =
+      sh.type === 'frame' && typeof sh.props['w'] === 'number' ? (sh.props['w'] as number) : 200;
+    const h =
+      sh.type === 'frame' && typeof sh.props['h'] === 'number'
+        ? (sh.props['h'] as number)
+        : memberHeight(sh);
+    if (!out) out = { minX: sh.x, minY: sh.y, maxX: sh.x + w, maxY: sh.y + h };
+    else {
+      out.minX = Math.min(out.minX, sh.x);
+      out.minY = Math.min(out.minY, sh.y);
+      out.maxX = Math.max(out.maxX, sh.x + w);
+      out.maxY = Math.max(out.maxY, sh.y + h);
+    }
+  }
+  return out;
+}
+
+const PLACE_MARGIN = 120;
+const LOOSE_STEP_X = 240;
+const LOOSE_STEP_Y = 260;
+const LOOSE_COLS = 4;
+const CLUSTER_STEP_Y = 420;
 
 function getShape(room: Room, id: string): ShapeRecord | undefined {
   const doc = snap(room).documents.find((d) => d.state.id === fullId(id));
@@ -109,7 +145,7 @@ export class TldrawProvider implements WhiteboardProvider {
     board: string,
     actor: CreatedBy,
     rawItems: ItemInput[],
-  ): Promise<{ ids: string[]; version: number }> {
+  ): Promise<{ ids: string[]; version: number; hint?: string }> {
     // Accept outline-form ids (prefix stripped) wherever an item references another.
     const items = rawItems.map((item): ItemInput => {
       if (item.kind === 'link') return { ...item, from: fullId(item.from), to: fullId(item.to) };
@@ -165,12 +201,46 @@ export class TldrawProvider implements WhiteboardProvider {
       }
     }
 
+    // Content-aware placement cursors: new clusters flow DOWN a column to the RIGHT of the
+    // existing content; loose notes/labels flow in rows BELOW it. Explicit x/y always wins,
+    // and members of a cluster are gridded by relayoutCluster regardless.
+    const bounds = contentBounds(snap(room));
+    const clusterX = bounds ? bounds.maxX + PLACE_MARGIN : 100;
+    let clusterY = bounds ? bounds.minY : 100;
+    const looseOriginX = bounds ? bounds.minX : 100;
+    let looseY = bounds ? bounds.maxY + PLACE_MARGIN : 100;
+    let looseN = 0;
+    let clustersPlaced = 0;
+    let loosePlaced = 0;
+    // An empty board and a populated one need different cursors for clusters vs loose items;
+    // on an empty board give loose items their own row below where a first cluster would go.
+    if (!bounds) looseY = 600;
+
+    const nextAutoPos = (item: ItemInput): { x: number; y: number } => {
+      if (item.kind === 'cluster') {
+        const pos = { x: clusterX, y: clusterY };
+        clusterY += CLUSTER_STEP_Y;
+        clustersPlaced++;
+        return pos;
+      }
+      const pos = {
+        x: looseOriginX + (looseN % LOOSE_COLS) * LOOSE_STEP_X,
+        y: looseY + Math.floor(looseN / LOOSE_COLS) * LOOSE_STEP_Y,
+      };
+      // A note headed into a cluster is re-gridded by relayoutCluster; don't burn a slot.
+      if (!(item.kind === 'note' && item.cluster)) {
+        looseN++;
+        if (item.kind !== 'link') loosePlaced++;
+      }
+      return pos;
+    };
+
     await room.updateStore((store) => {
       for (const item of items) {
         const pos =
           'x' in item && item.x !== undefined && item.y !== undefined
             ? { x: item.x, y: item.y }
-            : autoPosition(count);
+            : nextAutoPos(item);
         const base = { ...pos, index: nextIndex(count), createdBy: actor };
         count++;
 
@@ -221,7 +291,19 @@ export class TldrawProvider implements WhiteboardProvider {
 
     for (const clusterId of touchedClusters) await this.relayoutCluster(room, clusterId);
     await this.rooms.persist(board);
-    return { ids, version: snap(room).documentClock };
+
+    const hints: string[] = [];
+    if (bounds && clustersPlaced > 0)
+      hints.push(
+        `${clustersPlaced} cluster(s) placed right of existing content — zoom out to see them`,
+      );
+    if (bounds && loosePlaced > 0)
+      hints.push(`${loosePlaced} loose item(s) placed below existing content`);
+    return {
+      ids,
+      version: snap(room).documentClock,
+      ...(hints.length ? { hint: hints.join('; ') } : {}),
+    };
   }
 
   /**
@@ -243,7 +325,9 @@ export class TldrawProvider implements WhiteboardProvider {
       .filter((r): r is ShapeRecord => r.typeName === 'shape' && r.parentId === clusterId)
       .sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : 0));
 
-    const cols = Math.max(1, Math.min(members.length, CLUSTER_COLS));
+    // Small clusters grid 2-wide so they read as a block, not a strip; bigger ones fill out.
+    const maxCols = members.length <= 4 ? 2 : CLUSTER_COLS;
+    const cols = Math.max(1, Math.min(members.length, maxCols));
     let cursorY = CLUSTER_PAD;
     const placed: Array<{ member: ShapeRecord; x: number; y: number }> = [];
 
