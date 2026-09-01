@@ -74,8 +74,10 @@ Keeping the plate only on owned-but-EMPTY desks was considered and is the
 better *design* — no sitter means the plate returns to the front face, likely
 recovering full names at `/live` scale and deleting the whole threshold ladder.
 It was rejected on scope: it keeps `deskWedge`, its three states, its floors and
-its species fork alive to serve the minority of desks, and the room's absent
-owners are exactly the population a viewer is least often asking about.
+its species fork alive — the whole apparatus, and every future rework of it — to
+serve whichever desks happen to be empty. Whether that is worth carrying is a
+question about how the room is actually read, which nobody here has measured;
+the falsifier below is how it gets answered rather than argued.
 
 ## Consequences
 
