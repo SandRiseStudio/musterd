@@ -5,7 +5,9 @@ import { BindingSchema, type Binding } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
+import { CliError } from '../errors.js';
 import { LOCAL_SESSION_LIVE_MS } from '../session/liveness.js';
+import { resolveClaimWorkspace } from './helpers.js';
 import {
   attestSlotIfUnattested,
   captureSession,
@@ -118,6 +120,167 @@ describe('musterd session (capture)', () => {
   // ADR 252: the wake token the actuator stamps on a woken child rides the attestation, so an
   // expired lease can still be known to have PAID for a session. Never defaulted — an ordinary
   // session attests nothing rather than claiming a lease it knows nothing about (ADR 236).
+  // ADR 337 §4: the stored `binding.session_lease` is minted once, at claim, and lives five minutes.
+  // A hook that fires later presents a dead lease and the route refuses it; before this the refusal
+  // was swallowed with the rest of "daemon unreachable", so every SessionStart/SessionEnd more than
+  // five minutes after the claim wrote a local slot and no ledger row (lane 01M1F92X69, measured on
+  // seat ryder 2026-09-01). The hook must reclaim — once, on refusal, never pre-emptively (the
+  // 2026-09-01 claim storm, #1138/#1143). What it mints is not written back: a one-shot's lease dies
+  // with the Presence its socket releases on exit (ws.ts cleanup → held_until), measured 2026-09-01.
+  describe('a refused session lease is reclaimed', () => {
+    const leaseRefused = () =>
+      new CliError('invalid, expired, or revoked agent session lease', 4, 'unauthorized');
+    const claimSpy = (lease = 'msls_fresh') => {
+      const close = vi.fn();
+      const claim = vi
+        .spyOn(HttpClient.prototype, 'claimSessionLease')
+        .mockResolvedValue({ lease, close });
+      return { claim, close };
+    };
+    /** The roster the never-evict check reads: scout live in `workspaces`, offline otherwise. */
+    const rosterSpy = (...workspaces: (string | null)[]) =>
+      vi.spyOn(HttpClient.prototype, 'roster').mockResolvedValue({
+        members: [
+          {
+            name: 'scout',
+            presences: workspaces.map((workspace) => ({
+              surface: 'mcp',
+              status: 'online',
+              last_seen_at: Date.now(),
+              workspace,
+            })),
+          } as never,
+        ],
+      });
+    beforeEach(() => {
+      rosterSpy();
+    });
+
+    it('reclaims once on refusal, lands the attestation, and stamps the slot', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValueOnce(leaseRefused())
+        .mockResolvedValueOnce(undefined as never);
+      const { claim, close } = claimSpy();
+
+      await captureSession('start', { session_id: 'late-hook', cwd: wsA });
+
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(attest).toHaveBeenCalledTimes(2);
+      expect(close).toHaveBeenCalledTimes(1); // the claim's Presence is held only through the push
+      const after = readBinding(wsA);
+      expect(after.session!.attested_at).toBeGreaterThan(0);
+      // Nothing but the stamp moves: the credential stays, and the stored lease is not replaced
+      // with one that is dead the moment `close` ran.
+      expect(after.seat_credential).toBe('msac_scout');
+      expect(after.agent_key).toBe('mskey_test');
+      expect(after.session_lease).toBe('msls_stale');
+    });
+
+    it("the tool boundary spends the slot's one claim, then attests with what it holds", async () => {
+      const startedAt = Date.now() - 60_000;
+      writeBinding(
+        wsA,
+        bindingOf({
+          seat_credential: 'msac_scout',
+          session_lease: 'msls_stale',
+          session: { harness: 'claude-code', id: 'healed', started_at: startedAt },
+        }),
+      );
+      // The claim lands but the attest keeps failing for a non-lease reason — the shape that would
+      // otherwise claim again on every tool call against the daemon.
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValueOnce(leaseRefused())
+        .mockRejectedValueOnce(new Error('500'))
+        .mockRejectedValue(leaseRefused());
+      const { claim } = claimSpy();
+
+      await attestSlotIfUnattested(wsA);
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.claim_attempted_at).toBeGreaterThan(0);
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+
+      await attestSlotIfUnattested(wsA);
+      await attestSlotIfUnattested(wsA);
+      expect(claim).toHaveBeenCalledTimes(1); // still one — the boundary never claims twice
+      expect(attest).toHaveBeenCalledTimes(4); // …but keeps presenting what it holds
+
+      // A fresh session event may spend a claim again.
+      await captureSession('start', { session_id: 'next', cwd: wsA });
+      expect(claim).toHaveBeenCalledTimes(2);
+    });
+
+    it('never claims while the seat is live in another workspace — an eviction is worse than a gap', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      rosterSpy('agents-other@main');
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValue(leaseRefused());
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'sibling-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+      expect(attest).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+      expect(readBinding(wsA).session!.claim_attempted_at).toBeGreaterThan(0);
+    });
+
+    it('claims beside a live adapter in THIS workspace — the server keeps that one (ADR 340)', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      rosterSpy(resolveClaimWorkspace(process.env, wsA), null);
+      vi.spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValueOnce(leaseRefused())
+        .mockResolvedValueOnce(undefined as never);
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'same-ws-hook', cwd: wsA });
+      expect(claim).toHaveBeenCalledTimes(1);
+      expect(readBinding(wsA).session!.attested_at).toBeGreaterThan(0);
+    });
+
+    it('a roster it cannot read is read as held elsewhere — the safe miss', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      vi.spyOn(HttpClient.prototype, 'roster').mockRejectedValue(new Error('ECONNREFUSED'));
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockRejectedValue(leaseRefused());
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'blind-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+    });
+
+    it('a lease the route accepts is never reclaimed — no claim per hook', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_live' }));
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockResolvedValue(undefined as never);
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'early-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+      expect(readBinding(wsA).session_lease).toBe('msls_live');
+    });
+
+    it('an unreachable daemon is not a refused lease — no claim, no stamp', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_live' }));
+      vi.spyOn(HttpClient.prototype, 'attestSession').mockRejectedValue(new Error('ECONNREFUSED'));
+      const { claim } = claimSpy();
+      await captureSession('start', { session_id: 'offline-hook', cwd: wsA });
+      expect(claim).not.toHaveBeenCalled();
+      expect(readBinding(wsA).session!.attested_at).toBeUndefined();
+    });
+
+    it('a refused reclaim leaves the slot unattested so the tool boundary retries', async () => {
+      writeBinding(wsA, bindingOf({ seat_credential: 'msac_scout', session_lease: 'msls_stale' }));
+      const attest = vi
+        .spyOn(HttpClient.prototype, 'attestSession')
+        .mockRejectedValue(leaseRefused());
+      vi.spyOn(HttpClient.prototype, 'claimSessionLease').mockRejectedValue(
+        new CliError('seat "scout" is occupied elsewhere', 4),
+      );
+      await captureSession('start', { session_id: 'refused-hook', cwd: wsA });
+      expect(attest).toHaveBeenCalledTimes(1);
+      const after = readBinding(wsA);
+      expect(after.session!.attested_at).toBeUndefined();
+      expect(after.session_lease).toBe('msls_stale'); // nothing minted, nothing written
+    });
+  });
+
   describe('the wake lease travels with the capture', () => {
     const savedLease = process.env['MUSTERD_WAKE_LEASE'];
     afterEach(() => {

@@ -1033,6 +1033,38 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
     );
   });
 
+  // ADR 337 §4 on the attestation path (lane 01M1F92X69). Measured on seat ryder 2026-09-01: the
+  // stored lease is minted once at claim and lives five minutes, so every SessionStart/SessionEnd
+  // hook after that was refused, the refusal swallowed as "unreachable", and the ledger got no row.
+  it('a session attestation with a refused lease reclaims once and lands on the ledger', async () => {
+    await bindAvaWithStaleLease();
+    const bindingPath = process.env['MUSTERD_BINDING']!;
+    const readBinding = () =>
+      JSON.parse(readFileSync(bindingPath, 'utf8')) as {
+        session_lease?: string;
+        seat_credential?: string;
+        session?: { attested_at?: number };
+      };
+    const captured = () =>
+      server.db
+        .prepare<[], { action: string }>(
+          "SELECT action FROM audit WHERE target = 'ava' AND action LIKE 'residency.session_%' ORDER BY id",
+        )
+        .all()
+        .map((r) => r.action);
+
+    await captureSession('start', { session_id: 'late-hook', cwd: dir });
+    expect(captured()).toEqual(['residency.session_captured']);
+    const after = readBinding();
+    expect(after.session!.attested_at).toBeGreaterThan(0);
+    expect(after.seat_credential).toBeDefined(); // the claim renewed authority, not identity
+
+    // The end hook lands too. It claims again — the lease the start hook minted died with the
+    // Presence its socket released (ws.ts cleanup → held_until), so there is nothing to reuse.
+    await captureSession('end', { session_id: 'late-hook', cwd: dir });
+    expect(captured()).toEqual(['residency.session_captured', 'residency.session_ended']);
+  });
+
   it('an interactive read still reclaims (ADR 339 / #1130 preserved)', async () => {
     await bindAvaWithStaleLease();
     // Opting IN is now explicit. #1138 pinned this as the DEFAULT, and that default is what let the

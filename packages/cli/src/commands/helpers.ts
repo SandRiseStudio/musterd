@@ -38,7 +38,7 @@ export function findWorkspaceDir(startDir: string = process.cwd()): string | nul
 }
 
 /** The same bounded Workspace label the adapter sends on a claim (ADR 014/068). */
-function resolveClaimWorkspace(
+export function resolveClaimWorkspace(
   env: NodeJS.ProcessEnv = process.env,
   cwd: string = process.cwd(),
 ): string {
