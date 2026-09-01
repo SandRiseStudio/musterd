@@ -15,7 +15,7 @@ import {
   type AudienceContext,
 } from './asks';
 import { sendAct, type LiveConfig } from './client';
-import { stillMode } from './stillMode';
+import { asksOpenMode, stillMode } from './stillMode';
 import { initial, memberAvatar, kindOf } from './format';
 import { scrollToMessage } from './Stream';
 
@@ -66,7 +66,10 @@ export function AsksStrip({
   const [localAnswers, setLocalAnswers] = useState<Envelope[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
+  // Closed by default; `?asks-open` starts it open so the contrast gate can measure the cards inside
+  // it, which are `visibility: hidden` and therefore invisible to the sweep otherwise. Initial state
+  // only — the reader closes it like any other time.
+  const [open, setOpen] = useState(asksOpenMode);
   const rootRef = useRef<HTMLElement | null>(null);
 
   // One clock for the whole strip: it decides both what the countdowns read and, past a deadline,

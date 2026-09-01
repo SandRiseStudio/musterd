@@ -229,6 +229,29 @@ up() {
   as_seat "$SEATDIR/$C" send --to evan --act ask --meta species=approve --meta tier=blocking \
     "approve this before it ships?" >/dev/null 2>&1 || true
 
+  # A LAPSED ask — a below-top tier whose clock ran out with no answer and no outcome envelope. It
+  # is a distinct ink and a distinct card (quiet, no answer buttons) rather than a fourth copy of
+  # the three above, and without one seeded here the sweep measures every ask state EXCEPT the one
+  # that is deliberately understated, which is the one most likely to be under-contrasted.
+  #
+  # Backdated in the DB because `send` mints `ts` at now and lapsed is DEFINED by an old ts; a day
+  # clears every tier's timeout with room to spare. Written with better-sqlite3 (already a
+  # @musterd/server dependency) rather than a `sqlite3` binary, which is not guaranteed on CI.
+  as_seat "$SEATDIR/$B" send --to evan --act ask --meta species=consult --meta tier=standard \
+    "small one — going ahead unless you say otherwise" >/dev/null 2>&1 || true
+  # Resolved from packages/server, not from cwd: pnpm does not hoist, so a bare require from the
+  # repo root is MODULE_NOT_FOUND even though the package is installed.
+  MUSTERD_SERVER_PKG="$ROOT/packages/server" node -e '
+    const Database = require(
+      require.resolve("better-sqlite3", { paths: [process.env.MUSTERD_SERVER_PKG] }),
+    );
+    const db = new Database(process.env.MUSTERD_DB);
+    const n = db.prepare(
+      "UPDATE messages SET ts = ts - 86400000 WHERE act = ? AND body LIKE ?",
+    ).run("ask", "small one — going ahead%").changes;
+    if (n !== 1) { console.error(`✗ fixture: backdated ${n} asks, expected 1`); process.exit(1); }
+  ' || { echo "✗ a11y fixture: could not seed a lapsed ask" >&2; exit 1; }
+
   echo "▸ a11y fixture up — team '$TEAM' at $SERVER ($bound seats in the room)"
   echo "  $SERVER/board?team=$TEAM"
 }
