@@ -131,7 +131,7 @@ export interface WhiteboardProvider {
     board: string,
     actor: CreatedBy,
     items: ItemInput[],
-  ): Promise<{ ids: string[]; version: number }>;
+  ): Promise<{ ids: string[]; version: number; hint?: string }>;
   /** Full outline, or — with `since` — only items changed after that version. */
   read(board: string, since?: number): Promise<Outline>;
   edit(

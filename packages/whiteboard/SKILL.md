@@ -55,6 +55,25 @@ summary is a design exploration in `docs/design/YYYY-MM-DD-<topic>.md`, committe
 lane. NOT a wiki page — the wiki is for settled facts with falsifiers (ADR 259); promoting a
 conclusion there is a separate, deliberate act. An architecture decision goes on to an ADR.)*
 
+## Board craft — layout, color, and less text
+
+- **Color is a vocabulary; use it consistently** so the board can be read by color at a
+  glance: `yellow` = idea/hypothesis (the default), `orange` = open question,
+  `red` = tension/blocker, `green` = decision the human made (mark it `DECIDED`),
+  `blue` = observation/context, `violet` = synthesis across notes.
+- **Headlines, not sentences.** The 90-char cap is a ceiling, not a target — the best
+  stickies are 4–8 words. If a headline needs a subordinate clause, the clause is `detail`.
+- **Fewer, better notes.** One note per idea; when a reply mostly restates the human's note,
+  don't place it — build on it in chat and place only what's new. A cluster past ~8 notes
+  wants splitting or converging, not more members.
+- **Placement is automatic and content-aware**: new clusters land to the right of existing
+  content, loose notes below it, and the add result says where things went — relay that to
+  the human ("new frame to the right") so they never hunt the canvas.
+- **Prefer placing notes INTO a cluster at add time** (the `cluster` field) over loose notes
+  moved later; loose items are for genuinely unclustered thoughts.
+- **Link clusters, not notes,** for structure; link notes only when the single connection IS
+  the insight.
+
 ## Rules that keep the loop honest
 
 - **A whiteboard is scanned, not read.** A sticky carries a phrase someone can take in at a

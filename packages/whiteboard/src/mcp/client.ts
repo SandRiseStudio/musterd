@@ -78,7 +78,7 @@ export class WhiteboardServiceClient {
     board: string,
     actor: string,
     items: ItemInput[],
-  ): Promise<{ ids: string[]; version: number }> {
+  ): Promise<{ ids: string[]; version: number; hint?: string }> {
     return this.post(`/api/boards/${board}/add`, { actor, items });
   }
 
