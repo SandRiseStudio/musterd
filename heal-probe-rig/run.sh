@@ -8,6 +8,10 @@
 #   P2's first tool boundary heals the slot and (the fix under observation) attests it.
 # Expected on the ledger: P1 captured+ended; P2's FIRST session_captured row ~70s after it
 # started, exactly one such row (idempotence via the second tool call), then P2 ended.
+# Needs a CLI >= #1150 on PATH (the stored lease is dead five minutes after a claim; without the
+# reclaim no probe row lands at all) and NO adapter live elsewhere on the seat: #1150 refuses to
+# claim while the seat is held in another workspace, so a live MCP session on this seat means the
+# probe stages nothing — by design, an eviction being the worse outcome.
 set -e
 W="/tmp/heal-probe-$(date +%s)"
 SRC="$(cd "$(dirname "$0")" && pwd)"

@@ -99,6 +99,15 @@ that outlives its socket is a server decision under ADR 337.
 For an analyst: the undercount window for this cause is `7498d25f`..#1150, for every seat, and it
 is heaviest on `session_ended`.
 
+One gap #1150 keeps, on purpose (2026-09-01; falsify: read `heldElsewhere` in
+`packages/cli/src/commands/session.ts`): a hook whose seat is live in **another** workspace never
+claims, because that claim would supersede the live adapter — so a SessionStart in a second
+worktree while the adapter runs in the first attests nothing, and the slot stays unattested rather
+than evicting. Two worktrees on one seat is the ordinary shape here. That is a recorded gap where
+there was a silent eviction; count it as one. It also constrains the probe rig above: it stages a
+row only while no adapter is live elsewhere on the seat, which is why the 13:26 run — made before
+the rule — could evict this page's author's own adapter, and a re-run under #1150 as merged cannot.
+
 The signature to watch for, usable as a detector: a workspace `binding.json` whose
 `session.attested_at` is minutes after `session.started_at`, whose digest's **first** audit row
 carries that late timestamp, with no earlier row for the digest. (A lost-stamp reconcile looks
