@@ -3700,9 +3700,19 @@ function deskWedge(
   let len: number;
   let high: number;
   let capW: number;
-  // Words only exist on an engraved plate: the stepped-away CLAIM (§4/ADR 315) rides the status
-  // light-pipe at bar size, which stays unlit for an absent owner exactly as it does at full size.
-  const sub = engraved && steppedAway ? 'stepped away' : null;
+  // Words only exist on an engraved plate: the stepped-away CLAIM (§4) rides the status light-pipe
+  // at bar size, which stays unlit for an absent owner exactly as it does at full size.
+  //
+  // And the sub-line gets its OWN floor, not the name's (dolly's REQUIRED on #1127). It is drawn at
+  // `9 * s`, so inside the engraved band — s from 0.818, where the 11px name first clears 9 — it
+  // was rendering at 7.4px to 9.0px: legible name, illegible words underneath it, on
+  // /office-preview among others. Its floor binds harder than the name's rather than softer,
+  // because this line is mono lowercase at 66% alpha against the name's letterspaced bold caps at
+  // full strength. So the words need their own 9px and appear from s >= 1 (a /broadcast frame, or
+  // a preview window past ~1325x925); below that the light-pipe carries the same claim, which is
+  // the migration this plate already makes one threshold later.
+  const SUB_PX = 9 * s;
+  const sub = engraved && steppedAway && SUB_PX >= ENGRAVE_MIN_PX ? 'stepped away' : null;
 
   if (engraved) {
     ctx.font = canvasFont(px, '--font-display', 700);
@@ -3847,8 +3857,7 @@ function deskWedge(
   ctx.letterSpacing = '0px';
   if (sub) {
     // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
-    const subPx = 9 * s;
-    ctx.font = canvasFont(subPx, '--font-mono', 400);
+    ctx.font = canvasFont(SUB_PX, '--font-mono', 400);
     const subW = ctx.measureText(sub).width * textSx;
     const room = len - 6 * s - capW;
     if (subW > room) ctx.scale(room / subW, 1); // compounds with the name's condensation

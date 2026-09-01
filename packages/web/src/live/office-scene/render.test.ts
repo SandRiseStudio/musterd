@@ -224,7 +224,14 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
   });
 
   it('an away member\'s desk says stepped away — declared absence, desk kept (\u00a74 lane 4)', () => {
-    const texts = bakeTexts({ ...node('sleeper', 'working'), presence: 'away', posture: 'away' });
+    // At a size that can carry the words. This describe's own fit is scale 0.905, where the name is
+    // legible (10.0px) but the 9*scale sub-line would be 8.1px — see "gives the stepped-away words
+    // their own floor" below for why that band draws the name and not the words.
+    const texts = bakeTextsAt(fitFloor(1920, 1080), {
+      ...node('sleeper', 'working'),
+      presence: 'away',
+      posture: 'away',
+    });
     expect(texts).toContain('SLEEPER');
     expect(texts).toContain('stepped away');
   });
@@ -268,10 +275,27 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
       expect(namesAt(430, 700)).not.toContain('WORKER');
     });
 
-    it('drops the stepped-away words with it — the light-pipe carries presence at that size', () => {
+    /**
+     * The sub-line's floor BINDS HARDER than the name's, not softer (dolly's REQUIRED on #1127).
+     * It draws at `9 * scale`, so across the engraved band — which opens at scale 0.818, where the
+     * 11px name first clears 9 — it was rendering between 7.4px and 9.0px: a legible name with
+     * illegible words under it, on /office-preview among others. It is also mono lowercase at 66%
+     * alpha against the name's letterspaced bold caps at full strength, so if anything it needs
+     * MORE room, not less.
+     */
+    it('gives the stepped-away words their own floor — a legible name is not a licence', () => {
       const away = { ...node('worker', 'working'), presence: 'away' as const, posture: 'away' as const };
-      expect(bakeTextsAt(fitFloor(1568, 880), away)).toContain('stepped away');
-      expect(bakeTextsAt(fitFloor(699, 948), away)).not.toContain('stepped away');
+      // scale 1.167: 9*s = 10.5px, the words draw.
+      expect(bakeTextsAt(fitFloor(1920, 1080), away)).toContain('stepped away');
+      // scale 0.951 — the name is legible here (10.5px) and the words would be 8.6px. This is the
+      // exact band the REQUIRED named, and it must NOT draw them.
+      const preview = bakeTextsAt(fitFloor(1568, 880), away);
+      expect(preview).toContain('WORKER');
+      expect(preview).not.toContain('stepped away');
+      // and below the name's own floor neither survives — the light-pipe carries the claim.
+      const live = bakeTextsAt(fitFloor(699, 948), away);
+      expect(live).not.toContain('WORKER');
+      expect(live).not.toContain('stepped away');
     });
   });
 });
