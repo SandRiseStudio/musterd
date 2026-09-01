@@ -364,9 +364,7 @@ describe('TldrawProvider', () => {
       { kind: 'note', text: 'three', cluster: clusterId },
     ]);
     const outline = await provider.read('b22');
-    const xs = new Set(
-      outline.items.filter((i) => i.cluster === clusterId).map((i) => i.x),
-    );
+    const xs = new Set(outline.items.filter((i) => i.cluster === clusterId).map((i) => i.x));
     expect(xs.size).toBe(2);
   });
 
