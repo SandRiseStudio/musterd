@@ -47,14 +47,30 @@ import { type MemberRow } from './rows.js';
 export interface ReviewPick {
   /** The chosen counterpart's seat name. */
   reviewer: string;
-  /** Why this seat: 'human_admin' (risk route), 'cross_family', or 'named' — a seat a human routed
-   *  the acceptance to by hand, which the picker did not choose and cannot vouch for. Historical
-   *  two-value field widened once, on purpose: folding `named` into `cross_family` would let a
-   *  hand-routed acceptor be counted as a proven-diverse one. `grade` (ADR 188) carries the finer
-   *  truth for the two picked routes; a named route's grade is observed, not promised. */
+  /**
+   * Why this seat: 'human_admin' (risk route), 'cross_family', or 'named' — a seat a human routed
+   * the acceptance to by hand, which the picker did not choose and cannot vouch for. Historical
+   * two-value field widened once, on purpose: folding `named` into `cross_family` would let a
+   * hand-routed acceptor be counted as a proven-diverse one.
+   *
+   * **A `named` row must be excluded from any ADR 056 diversity claim, and from any metric about
+   * what the PICKER does.** This warning is on `route` rather than only on `namedAcceptor` because
+   * `route` is the field a query meets — izzo's review of #1152 traced `liveRouted`
+   * (`scripts/research/adr-260-acceptance-eval.ts`) and found named rows landing squarely in the
+   * denominator: `crossFamilyShare` would divide picker hits by picked-OR-named submits, and the
+   * pre-registered concentration metric would read a human repeatedly trusting one seat as the
+   * picker funnelling — a false positive on the exact hypothesis. Filter on this field, not on
+   * grade.
+   */
   route: 'human_admin' | 'cross_family' | 'named';
-  /** The achieved rung of the diversity ladder (ADR 188). 'human' for a human counterpart —
-   *  cross-family by construction, and named honestly rather than folded into cross_family. */
+  /**
+   * The achieved rung of the diversity ladder (ADR 188). 'human' for a human counterpart —
+   * cross-family by construction, and named honestly rather than folded into cross_family.
+   *
+   * On a `named` route this is OBSERVED, never promised: nothing was filtered on it, so it reports
+   * the pairing as it stood and abstains to `same_model` when it cannot prove better. It is not a
+   * routing decision and must never be read as one.
+   */
   grade: ReviewGrade | 'human';
   /** The reviewer's family ('human' for human seats) — the audit's reviewer_family. */
   reviewer_family: string;
