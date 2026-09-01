@@ -5,7 +5,9 @@
 > Security boundary: v0.3 ships scoped credentials, authorized seat claims, Presence-bound leases,
 > admin-gated governance, and append-only audit records. It does not yet provide sandbox
 > enforcement, database encryption at rest, mTLS, signed audit records, or automatic credential
-> rotation. Private vulnerability reports go through the repository's
+> rotation. The Team-wide key minted by `team create` remains accepted as a marked legacy
+> compatibility credential; new credentials use a seat, role, or residency-host scope. Private
+> vulnerability reports go through the repository's
 > [security advisory form](https://github.com/SandRiseStudio/musterd/security/advisories/new).
 >
 > ~~**Ship blocker:** as of 2026-08-13 musterd.io serves nothing — do not publish until it

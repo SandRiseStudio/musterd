@@ -29,6 +29,9 @@ Presence-bound leases for routine agent HTTP access; admin-gated governance; and
 records. Secrets are shown once, stored as hashes by the daemon, and excluded from logs and
 telemetry.
 
+The Team-wide key minted by `team create` remains accepted as a marked legacy compatibility
+credential. New credential minting uses a seat, role, or residency-host scope.
+
 musterd does not yet provide sandbox enforcement, database encryption at rest, mTLS, OS-keychain
 secret storage, automatic credential rotation, signed audit records, or claim rate limiting. Harness
 permissions and filesystem boundaries remain the harness or operator's responsibility.
