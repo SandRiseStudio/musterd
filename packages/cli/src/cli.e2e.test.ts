@@ -1031,8 +1031,22 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
 
   it('an interactive read still reclaims (ADR 339 / #1130 preserved)', async () => {
     await bindAvaWithStaleLease();
-    const { http } = resolveRead({});
+    // Opting IN is now explicit. #1138 pinned this as the DEFAULT, and that default is what let the
+    // storm survive it: every read path that did not think about the flag reclaimed, so the two
+    // callsites #1138 opted out were re-claimed anyway by other reads in the same process
+    // (reachabilityNudge, inbox --interrupt-check, infra-gate). Measured on main @ fcb92af8:
+    // 2 claim.superseded rows per hook invocation, 0 once suppressed.
+    const { http } = resolveRead({}, { reclaimAgentLease: true });
     const res = await http.inbox('dawn', { unread: true, limit: 1 });
     expect(Array.isArray(res.messages)).toBe(true);
+  });
+
+  it('DEFAULTS to not reclaiming — a read path that never considered the flag cannot storm', async () => {
+    await bindAvaWithStaleLease();
+    const { http, explicit } = resolveRead({});
+    expect(explicit).toBe(true);
+    await expect(http.inbox('dawn', { unread: true, limit: 1 })).rejects.toThrow(
+      /invalid, expired, or revoked/,
+    );
   });
 });

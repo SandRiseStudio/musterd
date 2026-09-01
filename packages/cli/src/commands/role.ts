@@ -66,7 +66,7 @@ function defaultSeatWorkspace(seat: string): string | undefined {
 
 async function defaultFetchRoster(flags: Parsed['flags']): Promise<RosterRead | null> {
   try {
-    const { team, http } = resolveRead(flags); // the status-command read path — auth-free
+    const { team, http } = resolveRead(flags, { reclaimAgentLease: true }); // status read path
     const res = await http.roster(team);
     if (!res.roles) return null; // older daemon: no library on the wire — template-only output
     return { team, members: res.members, roles: res.roles };

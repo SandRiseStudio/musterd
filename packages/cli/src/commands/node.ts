@@ -65,7 +65,7 @@ export async function nodeCommand(parsed: Parsed): Promise<number> {
     // being on this machine, not by holding an admin seat. A fresh laptop may have no bound
     // identity yet, and refusing there would make the ceremony need a credential it was designed
     // to avoid.
-    const { team, http } = resolveRead(parsed.flags);
+    const { team, http } = resolveRead(parsed.flags, { reclaimAgentLease: true });
     const enrolled = await http.nodeEnroll({ hub_url: hubUrl, code, team });
     process.stdout.write(
       success(`this machine is enrolled with ${hubUrl}`, {
@@ -115,7 +115,7 @@ export async function nodeCommand(parsed: Parsed): Promise<number> {
   }
 
   if (sub === 'list') {
-    const { team, http } = resolveRead(parsed.flags);
+    const { team, http } = resolveRead(parsed.flags, { reclaimAgentLease: true });
     const { nodes } = await http.nodes(team);
     if (parsed.flags['json']) {
       process.stdout.write(`${JSON.stringify({ nodes }, null, 2)}\n`);
