@@ -181,6 +181,20 @@ describe('evaluate — the named route stays out of the denominator', () => {
     expect(r.crossFamilyShare).toBe(1);
   });
 
+  it('keeps the mix line summing — a bucket that leaves liveRouted must still be counted', () => {
+    // dolly's catch on #1156: excluding `named` without printing it makes the mix stop adding up,
+    // and a reader attributes the gap to whichever bucket they already suspect. Exactly the ADR 234
+    // shape this PR flagged in her report.ts, reproduced in the file that flagged it.
+    const rows = [
+      picked(1000, 'wanderer', 'cross_family'),
+      named(2000, 'stanley'),
+      named(3000, 'stanley'),
+    ];
+    const r = evaluate('mix', rows as never);
+    expect(r.named).toBe(2);
+    expect(r.liveRouted + r.wakeQueued + r.noCandidate + r.exempt + r.named).toBe(r.submits);
+  });
+
   it('does not let a hand-routed acceptor become the top reviewer', () => {
     const rows = [
       picked(1000, 'wanderer', 'cross_family'),

@@ -127,6 +127,11 @@ export interface WindowResult {
   wakeQueued: number;
   noCandidate: number;
   exempt: number;
+  /** Hand-routed submits (ADR 348). Out of `liveRouted` by design — but counted, because a bucket
+   *  that leaves the population without appearing in the mix makes the mix stop summing, and a
+   *  reader then attributes the gap to whichever bucket they already suspect. dolly's catch on
+   *  #1156, and the same ADR 234 shape this PR flagged in her report.ts. */
+  named: number;
   good: number;
   confirms: number;
   jumped: number;
@@ -182,6 +187,7 @@ export function evaluate(name: string, rs: Submit[]): WindowResult {
     wakeQueued: rs.filter((r) => r.d.wake_queued).length,
     noCandidate: rs.filter((r) => r.d.no_candidate).length,
     exempt: rs.filter((r) => r.d.acceptance_exempt).length,
+    named: rs.filter((r) => r.d.route === 'named' && !r.d.acceptance_exempt).length,
     good,
     confirms,
     jumped,
@@ -589,7 +595,7 @@ function main() {
   for (const r of results) {
     console.log(`\n=== ${r.name} — ${r.submits} submits ===`);
     console.log(
-      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt}`,
+      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt} | hand-routed ${r.named}`,
     );
     console.log(
       `  [1] good <=10m ${r.good}/${r.liveRouted} = ${pct(r.goodRate)}   (any confirm ${r.confirms}/${r.liveRouted})`,
