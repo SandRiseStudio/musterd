@@ -80,9 +80,10 @@ describe('3b-i containment', () => {
   it('v52 holds (origin_node, origin_seq) unique in messages and adds the pull cursor', () => {
     const { db, team } = seed();
     const row = db
-      .prepare<[string], { origin_node: string; origin_seq: number }>(
-        'SELECT origin_node, origin_seq FROM messages WHERE team_id = ? LIMIT 1',
-      )
+      .prepare<
+        [string],
+        { origin_node: string; origin_seq: number }
+      >('SELECT origin_node, origin_seq FROM messages WHERE team_id = ? LIMIT 1')
       .get(team.id)!;
     const author = db.prepare<[], { id: string }>('SELECT id FROM members LIMIT 1').get()!.id;
     // A second row under the SAME origin pair must be refused by the schema, not by convention:

@@ -211,7 +211,7 @@ this the hard way (`sync_push_failed` was one line for "on a train" and for sile
 | Unresolvable seat (`from` or `to`) | **error**, once per distinct seat name, not per tick | every tick; clears when the roster reconciles | seat, `hub_seq`, hypothesis: "roster not yet reconciled from git, or seat removed upstream" |
 | Read-side gap — an origin's events do not continue what this daemon holds (`MAX(origin_seq)` for that origin in local `messages`, +1) | **error** | none — terminal | origin, expected, got |
 | Envelope-id collision across origins (rule 5) | **error** | none — terminal | id, both origins |
-| Unknown act — `messages.act` CHECK fails because the origin runs a newer build | **error** | every tick; clears on upgrade | act, `hub_seq`, "upgrade this daemon" |
+| Unknown act — the origin runs a newer build and its act is not in this build's `ActSchema` (`messages.act` carries no CHECK since the table rewrite, so the fold checks it explicitly before the insert) | **error** | every tick; clears on upgrade | act, `hub_seq`, "upgrade this daemon" |
 
 The read-side gap deserves its own sentence. It cannot happen if the hub ingests gaplessly and the
 puller walks `hub_seq` in order — which is exactly why it is a check and not a recovery: it is the
