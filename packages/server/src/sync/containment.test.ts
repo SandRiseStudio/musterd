@@ -7,15 +7,14 @@ import { insertMessage } from '../store/messages.js';
 import { createTeam } from '../store/teams.js';
 
 /**
- * The 3b-i containment property, and the reason the slice boundary is real rather than asserted.
+ * The containment property, narrowed by 3b-ii.
  *
- * ADR 331 §Consequences warned that a second insert path — one reaching `messages` without going
- * through `insertMessage` — would break the gaplessness the whole ordering substrate rests on.
- * This slice's answer is to not build one: pushed events land in `sync_log` and stop there. The
- * fold into `messages` is 3b-ii, one implementation run by hub and puller alike.
- *
- * Written BEFORE any ingest exists, so it cannot be retrofitted to whatever the code turned out to
- * do. When 3b-ii adds the fold, this file is what says the fold is the ONLY such path.
+ * 3b-i: nothing writes `messages` but `insertMessage`, and pushed events stop in `sync_log`.
+ * 3b-ii: nothing writes `messages` but `insertMessage` and `foldBatch` (sync/fold.ts) — and ONLY
+ * `insertMessage` moves `nodes.next_seq`. The fold copies the origin's stamp verbatim and never
+ * touches the allocator; `fold.test.ts`'s first case is that falsifier. This file keeps holding
+ * that the staging tables carry no counter tied to `next_seq`, and that a v50–v52 replay leaves the
+ * log and every allocator alone.
  */
 
 /** The local state 3b-i must leave alone: the message log, and every origin's next-seq counter. */
@@ -48,7 +47,7 @@ function seed() {
   return { db, team };
 }
 
-describe('3b-i containment', () => {
+describe('sync containment', () => {
   it('has the three staging tables, and they start empty', () => {
     const { db } = seed();
 
@@ -131,9 +130,10 @@ describe('3b-i containment', () => {
     }
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 2 });
 
-    // …and `messages.id` is a PRIMARY KEY, so 3b-ii's fold can write exactly one of them. What was
-    // one node's push loop failing has become the whole team's fold failing. Standing here, in
-    // 3b-i, that is a consequence to state; 3b-ii owns choosing what the fold does about it.
+    // …and `messages.id` is a PRIMARY KEY, so the fold can write exactly one of them. 3b-ii's
+    // answer (spec §"The fold's rule" 5): the second is an id_collision STOP — terminal, logged at
+    // error with both origins, never silently dropped. The raw INSERT below is what the fold
+    // refuses to do; it is here to show the constraint is real.
     const author = db.prepare<[], { id: string }>('SELECT id FROM members LIMIT 1').get()!.id;
     const fold = (origin: string) =>
       db

@@ -1,10 +1,10 @@
 # Federation increment 3b-ii — pull, the fold into `messages`, read-side gap detection
 
 - Date: 2026-09-01
-- Lane: to be opened (musterd was unreachable while this was designed — see §Provenance)
+- Lane: `01M1FAD24JM5ADVH7G774K2DQP`
 - Branch: `stanley/federation-sync-fold`
 - Author: stanley
-- Status: design, awaiting nick's review
+- Status: built (this branch)
 
 Build task under [ADR 325](../../decisions/325-multi-machine-federation.md), on the substrate
 [ADR 331](../../decisions/331-ordering-substrate.md) laid, the credential
