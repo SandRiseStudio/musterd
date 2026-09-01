@@ -3671,37 +3671,69 @@ function deskWedge(
   const uF0 = { x: fv.x / fm, y: fv.y / fm };
   const uF = uF0.x < 0 ? { x: -uF0.x, y: -uF0.y } : uF0; // never paint the engraving upside down
 
-  // Type first — the plate is sized to its engraving. 11px: the plate was reading as a slab of desk
-  // trim at 13 (nick, 2026-08-31). 13 was the old *brass* plate's stream-legibility clamp, and it was
-  // load-bearing there because dark ink on mid-brass is a low-contrast pairing; warm white on graphite
-  // is not, so the same read survives two points smaller. Verified at broadcast scale before taking it.
+  // THE PLATE IS DESK-PROPORTIONAL — no floor on any of its dimensions (nick, 2026-08-31, after
+  // looking at the merged #1126 on the real /live).
+  //
+  // #1126 clamped the type at a literal 11px. Below `fit.scale` 1 the DESK keeps shrinking and the
+  // plate did not, so it read proportionally LARGER on /live's ~699px office panel (scale 0.527)
+  // than in the 1600px preview it was tuned in — the inverse of the problem #1126 was fixing, and
+  // invisible from the fixture. Everything here now derives from `fit.scale`.
+  const s = fit.scale;
   const name = node.name.toUpperCase();
-  const px = Math.max(11, Math.round(11 * fit.scale));
-  ctx.font = canvasFont(px, '--font-display', 700);
-  // Letterspaced caps, engraver style — via the real canvas property (a no-op string assignment on
-  // engines without it), so the glyph run stays ONE string: tests and text extraction see the name.
-  let track = `${(px * 0.09).toFixed(1)}px`;
-  ctx.letterSpacing = track;
-  let nameW = ctx.measureText(name).width;
-  ctx.letterSpacing = '0px';
-  const sub = steppedAway ? 'stepped away' : null;
-
+  const px = 11 * s;
+  // ...which honestly puts the type at 5.8px on /live and 3.6px on a narrow window. That is not
+  // small type, it is a smear, and a smear is worse than either a big plate or no words at all. So
+  // below the legibility floor the ENGRAVING DROPS OUT and the plate becomes a short graphite bar
+  // whose near half is the member's own colour: at that size colour is the read that survives, it
+  // still says "this desk is owned, and by whom", and the floating member chip carries the name for
+  // anyone who needs the word. 9px is the floor for letterspaced bold caps on canvas.
+  const ENGRAVE_MIN_PX = 9;
+  const engraved = px >= ENGRAVE_MIN_PX;
   // The DESK wins the argument about size (live lesson, 2026-08-27): the side face is only DESK_D
-  // deep, and the plate is capped well inside it. A name that doesn't fit first drops its
-  // tracking, then condenses horizontally — never widens the plate past the cap.
-  const sEff = Math.max(0.85, Math.min(1.15, fit.scale));
+  // deep, and the plate is capped well inside it. `fm` is already the desk's own projected length,
+  // so this cap has always scaled correctly — it was the type, not the cap, that stopped.
   const cap = 0.68 * DESK_D * fm;
-  // The member's own colour, as a block at the near end of the plate — the one piece of colour on it,
-  // and it means something: the same `node.color` the floating chips, the rail dots and the roster read.
-  const capW = Math.max(3, Math.round(3.4 * sEff));
+
+  let track = '0px';
+  let nameW = 0;
   let textSx = 1; // horizontal condensation applied to the glyph run (1 = none)
-  if (nameW + 8 + capW > cap) {
-    track = '0px';
-    nameW = ctx.measureText(name).width; // tracking dropped: remeasure before condensing
-    textSx = Math.min(1, Math.max(0.4, (cap - 6 - capW) / nameW));
+  let len: number;
+  let high: number;
+  let capW: number;
+  // Words only exist on an engraved plate: the stepped-away CLAIM (§4/ADR 315) rides the status
+  // light-pipe at bar size, which stays unlit for an absent owner exactly as it does at full size.
+  const sub = engraved && steppedAway ? 'stepped away' : null;
+
+  if (engraved) {
+    ctx.font = canvasFont(px, '--font-display', 700);
+    // Letterspaced caps, engraver style — via the real canvas property (a no-op string assignment on
+    // engines without it), so the glyph run stays ONE string: tests and text extraction see the name.
+    track = `${(px * 0.09).toFixed(1)}px`;
+    ctx.letterSpacing = track;
+    nameW = ctx.measureText(name).width;
+    ctx.letterSpacing = '0px';
+    // The member's own colour, as a block at the near end — the one piece of colour on the plate, and
+    // it means something: the same `node.color` the floating chips, the rail dots and the roster read.
+    capW = 3.4 * s;
+    // A name that doesn't fit first drops its tracking, then condenses horizontally — never widens
+    // the plate past the cap.
+    if (nameW + 8 * s + capW > cap) {
+      track = '0px';
+      nameW = ctx.measureText(name).width; // tracking dropped: remeasure before condensing
+      textSx = Math.min(1, Math.max(0.4, (cap - 6 * s - capW) / nameW));
+    }
+    len = Math.min(nameW * textSx + 8 * s + capW, cap); // screen px along the plate
+    high = px + (sub ? px * 0.86 : 0) + 4 * s; // face height, screen px
+  } else {
+    // The bar takes the plate's FULL allowance — `cap` is already 68% of the desk's side face, so
+    // this is desk-proportional by construction and can never overhang. (Half of it was measured
+    // first and reads as a speck at /live: ~7px on a 15px side face.) 45% of the bar is the
+    // member's colour: at this size a 2px accent stripe is noise, so colour takes the space the
+    // name gave up and becomes the identity the plate still carries.
+    len = cap;
+    capW = len * 0.45;
+    high = 15 * s; // the same height the full plate has at scale 1, scaled like everything else
   }
-  const len = Math.max(26, Math.min(nameW * textSx + 8 + capW, cap)); // screen px along the plate
-  const high = px + (sub ? px * 0.86 : 0) + 4 * sEff; // face height, screen px
   const half = len / 2;
 
   // Anchor: the midpoint of the visible side edge. A hanging plate tucks 1px under the lip and
@@ -3777,7 +3809,7 @@ function deskWedge(
     ctx.save();
     ctx.globalAlpha = 0.12 * breathe;
     ctx.fillStyle = pipe;
-    poly([P(-half - 2, top + high), P(half + 2, top + high), P(half + 2, top + high + 5 * sEff), P(-half - 2, top + high + 5 * sEff)]);
+    poly([P(-half - 2 * s, top + high), P(half + 2 * s, top + high), P(half + 2 * s, top + high + 5 * s), P(-half - 2 * s, top + high + 5 * s)]);
     ctx.fill();
     ctx.globalAlpha = 0.95 * breathe;
     ctx.strokeStyle = pipe;
@@ -3792,6 +3824,10 @@ function deskWedge(
 
   // The engraving. Warm white on graphite with a hairline dark undercut — debossed, not printed.
   // Centred in the space the colour tab leaves, not on the plate, so the name doesn't crowd the block.
+  // Skipped entirely on the bar form: there is no legible size to draw it at (see `engraved` above).
+  // NOT an early return — the disconnected glint below is an ADR 315 presence claim, and the bar
+  // keeps every claim the full plate makes except the ones that are words.
+  if (engraved) {
   const mid = P(capW / 2, top + high * (sub ? 0.38 : 0.5));
   const angle = Math.atan2(uF.y, uF.x);
   ctx.save();
@@ -3811,21 +3847,22 @@ function deskWedge(
   ctx.letterSpacing = '0px';
   if (sub) {
     // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
-    const subPx = Math.max(9, Math.round(9 * fit.scale));
+    const subPx = 9 * s;
     ctx.font = canvasFont(subPx, '--font-mono', 400);
     const subW = ctx.measureText(sub).width * textSx;
-    const room = len - 6 - capW;
+    const room = len - 6 * s - capW;
     if (subW > room) ctx.scale(room / subW, 1); // compounds with the name's condensation
     ctx.fillStyle = 'rgba(238, 235, 228, 0.66)';
     ctx.fillText(sub, 0, px * 0.76);
   }
   ctx.restore();
+  }
 
   if (!steppedAway && node.offline_reason === 'disconnected') {
     // The one alarming flavor (ADR 315): a disconnected seat keeps its amber glint, top-right of the frame.
     ctx.fillStyle = '#d9a13c';
     ctx.beginPath();
-    ctx.arc(tr[0] - uF.x * 4, tr[1] + 3, Math.max(2, 2.2 * fit.scale), 0, Math.PI * 2);
+    ctx.arc(tr[0] - uF.x * 4 * s, tr[1] + 3 * s, 2.2 * s, 0, Math.PI * 2);
     ctx.fill();
   }
 }

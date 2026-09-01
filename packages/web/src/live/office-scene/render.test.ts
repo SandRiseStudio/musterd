@@ -182,6 +182,11 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
   const fit = fitFloor(1200, 900);
 
   function bakeTexts(n: OfficeNode): string[] {
+    return bakeTextsAt(fit, n);
+  }
+
+  /** `bakeTexts` at an arbitrary fit — the plate's size behaviour is a function of `fit.scale`. */
+  function bakeTextsAt(atFit: ReturnType<typeof fitFloor>, n: OfficeNode): string[] {
     const texts: string[] = [];
     const ctx = new Proxy(
       {},
@@ -199,7 +204,7 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
     ) as unknown as CanvasRenderingContext2D;
     const members = new Map([[n.name, n]]);
     const placements = assignSeats([n]);
-    renderScene(ctx, fit, placements, members, homePoses(placements, members), 0);
+    renderScene(ctx, atFit, placements, members, homePoses(placements, members), 0);
     return texts;
   }
 
@@ -232,6 +237,42 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
     const texts = bakeTexts(node('worker', 'working'));
     expect(texts).toContain('WORKER');
     expect(texts).not.toContain('stepped away');
+  });
+
+  /**
+   * The plate is DESK-PROPORTIONAL (nick, 2026-08-31, after looking at #1126 on the real /live).
+   *
+   * #1126 clamped the type at a literal 11px, so once `fit.scale` fell below 1 the desk kept
+   * shrinking and the plate did not — it read proportionally LARGER on /live's ~699px office panel
+   * (scale 0.527) than in the 1600px preview it was tuned in, which is the inverse of the problem
+   * #1126 was fixing. Scaling it honestly puts the type at 5.8px there and 3.6px on a narrow window,
+   * and that is not small type, it is a smear.
+   *
+   * So the plate scales all the way down and the ENGRAVING drops out below legibility, leaving a
+   * graphite bar with the member's colour. These tests pin the drop-out, because a tuning pass that
+   * nudges the base size is exactly how a smear gets reintroduced without anyone seeing it.
+   */
+  describe('scales with the desk', () => {
+    const namesAt = (w: number, h: number) =>
+      bakeTextsAt(fitFloor(w, h), node('worker', 'working'));
+
+    it('engraves the name where the desk is big enough to carry it', () => {
+      expect(namesAt(1920, 1080)).toContain('WORKER'); // /broadcast, scale ~1.17
+      expect(namesAt(1568, 880)).toContain('WORKER'); // /office-preview, scale ~0.95
+    });
+
+    it('drops the engraving rather than smearing it on a small panel', () => {
+      // /live's real office panel, measured 2026-08-31: 699x948 → scale 0.527 → 5.8px type.
+      expect(namesAt(699, 948)).not.toContain('WORKER');
+      // A narrow window is worse still (scale 0.324, 3.6px) and must not draw either.
+      expect(namesAt(430, 700)).not.toContain('WORKER');
+    });
+
+    it('drops the stepped-away words with it — the light-pipe carries presence at that size', () => {
+      const away = { ...node('worker', 'working'), presence: 'away' as const, posture: 'away' as const };
+      expect(bakeTextsAt(fitFloor(1568, 880), away)).toContain('stepped away');
+      expect(bakeTextsAt(fitFloor(699, 948), away)).not.toContain('stepped away');
+    });
   });
 });
 
