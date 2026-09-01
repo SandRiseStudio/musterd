@@ -330,6 +330,8 @@ export function identityFromEnv(
  *   So: re-read the on-disk file at write time and preserve its `session` unless the caller
  *   explicitly set one. Preserving is not *reading* the capture (the adapter never consumes it) —
  *   it is refusing to destroy another writer's field.
+ * - **Merge-guard on `seat_credential`.** The credential is server-minted, not reconstructed by a
+ *   binding writer. Omission preserves the valid on-disk credential (ADR 340).
  * - **Atomic write.** Hook and adapter can write concurrently; tmp-file + rename means a
  *   concurrent reader never sees a torn file (and the 0600 mode exists from the first byte).
  */
@@ -344,6 +346,9 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
   const dropObserved = opts?.drop?.model_observed === true;
   let merged: Binding = {
     ...binding,
+    ...(binding.seat_credential === undefined && onDisk?.seat_credential !== undefined
+      ? { seat_credential: onDisk.seat_credential }
+      : {}),
     ...(binding.session === undefined && onDisk?.session !== undefined
       ? { session: onDisk.session }
       : {}),

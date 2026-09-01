@@ -259,6 +259,9 @@ function readWorkspaceSpec(path: string): WorkspaceSpec | null {
  * *reading* `binding.session` (the no-boot-race contract): it never consumes the value, it only
  * refuses to destroy another writer's field. Tmp-file + rename keeps the concurrent-hook write
  * untorn (and 0600 from the first byte).
+ *
+ * The agent-seat credential is server-minted and irreplaceable by a local writer. Omit preserves a
+ * valid on-disk value (ADR 340).
  */
 /** Capture-writer intent, distinct from omit. persistBinding never passes this (ADR 270). */
 export type SaveBindingOptions = { drop?: { model_observed?: boolean } };
@@ -271,6 +274,9 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
   const dropObserved = opts?.drop?.model_observed === true;
   let merged: Binding = {
     ...binding,
+    ...(binding.seat_credential === undefined && onDisk?.seat_credential !== undefined
+      ? { seat_credential: onDisk.seat_credential }
+      : {}),
     ...(binding.session === undefined && onDisk?.session !== undefined
       ? { session: onDisk.session }
       : {}),

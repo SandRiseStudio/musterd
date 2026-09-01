@@ -20,9 +20,9 @@ src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
   help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
   args.ts             // argv parser → { command, positionals, flags }
-  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed (omit = preserve); capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268)
+  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed and claimed seat_credential (omit = preserve); capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268/340)
   machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
-  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; routine agent HTTP calls re-claim their bound seat and hold its Presence through the request (ADR 339); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
+  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; routine agent HTTP calls re-claim their bound seat in the same Workspace and hold its Presence through the request (ADR 339/340); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   test-auth.ts        // CLI integration-fixture claim helper: bootstrap key → agent-seat credential + Presence-bound lease (ADR 337)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
