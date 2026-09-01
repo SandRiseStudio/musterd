@@ -299,6 +299,66 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
     });
 
     /**
+     * INITIALS TAKE THE BAND THE WORDLESS BAR HELD (nick, 2026-09-01, after looking at #1127 on the
+     * real /live). The bar says a desk is owned but not by whom, and /live's usual panel width is
+     * exactly where the bar renders — so the plate was mute on the one surface that matters.
+     *
+     * Length was never what stopped the words: at /live there is 19.3px of cap and two 9px caps
+     * need ~11px. HEIGHT stopped them — the bar is 15*scale, so 7.9px there, and a 9px glyph does
+     * not fit in it. The desk's side face is DESK_UP (36) * scale = 19px, so the bar was using 42%
+     * of the room available. The initials plate takes what it needs of the rest.
+     *
+     * So there are THREE states now, not two: engraved name -> initials -> colour bar. These tests
+     * pin all three, because a tuning pass that nudges any size is exactly how a state silently
+     * collapses into its neighbour.
+     */
+    it('carries the owner\'s initials where the full name will not fit', () => {
+      // /live's real office panel at two real window sizes. 617x848 (scale 0.465) is what a
+      // 1440x900 window actually gives and is the one that matters most: the first cut of this
+      // band was measured only against #1127's 699x948 note, put its floor at scale 0.476, and
+      // so drew nothing on the ordinary /live it was written for. Both must engrave.
+      for (const [w, h] of [[617, 848], [699, 948]] as const) {
+        const live = namesAt(w, h);
+        expect(live, `${w}x${h}`).not.toContain('WORKER');
+        expect(live, `${w}x${h}`).toContain('WO');
+      }
+    });
+
+    it('never shows initials where the whole name fits — they are a fallback, not a style', () => {
+      for (const [w, h] of [[1920, 1080], [1568, 880]] as const) {
+        const texts = namesAt(w, h);
+        expect(texts).toContain('WORKER');
+        expect(texts).not.toContain('WO');
+      }
+    });
+
+    /**
+     * The initials have their own floor, and it is geometric rather than typographic: the plate that
+     * carries a 9px glyph is ~12px tall, and below scale ~0.476 that is more than 70% of the desk's
+     * whole side face — a plate that tall stops being desk trim and starts being a billboard hung on
+     * a doll's desk. Below it the colour bar returns, which is what the band above the bar always
+     * degraded to.
+     */
+    it('falls back to the colour bar when even two letters would overhang the desk', () => {
+      const narrow = namesAt(430, 700); // scale 0.324: 8.7px of usable face against a 12px plate
+      expect(narrow).not.toContain('WORKER');
+      expect(narrow).not.toContain('WO');
+      const cramped = namesAt(560, 848); // scale 0.422 — 11.4px, still short of the plate
+      expect(cramped).not.toContain('WO');
+    });
+
+    it('separates the seats a single letter would collide, on the desk itself', () => {
+      const at = (name: string) => bakeTextsAt(fitFloor(699, 948), node(name, 'working'));
+      expect(at('gptbot')).toContain('GP');
+      expect(at('guardian')).toContain('GU');
+      expect(at('ghost')).toContain('GH');
+      expect(at('grokbot')).toContain('GR');
+      // NOT big-body: it seats on a BENCH desk (slot 17), and bench/window desks draw no plate at
+      // any scale — pre-existing, unrelated to this band, and its own lane. The hyphenated
+      // derivation is covered in format.test.ts, where no seating is in the way.
+    });
+
+    /**
      * The disconnected glint keeps its 2px floor even though the plate lost all of its (izzo's
      * REQUIRED on #1127). It is ADR 315's one alarming flavor, at bar size it is the only alarm
      * left — the words are gone — and a 2px dot cannot overhang a desk, so "no floors, the plate

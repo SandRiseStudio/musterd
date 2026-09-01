@@ -269,6 +269,29 @@ export function initial(name: string): string {
   return (name.trim()[0] ?? '?').toUpperCase();
 }
 
+/**
+ * Two letters of identity, for the desk plate below its engraving floor (nick, 2026-09-01).
+ *
+ * `initial()` is the room's one-letter glyph and stays that everywhere it already is — chips, rail
+ * dots, roster, avatars — where colour and adjacency carry the rest. A desk plate has neither: it
+ * outlives the person sitting at it, and its whole claim is WHOSE desk this is. One letter cannot
+ * make that claim on this roster, where grokbot, gptbot, guardian and ghost are all `G`.
+ *
+ * Separated names give the first letter of their first two parts (`big-body` -> BB); a single word
+ * gives its first two letters (`miley` -> MI). Deliberately NOT roster-dependent: two single words
+ * sharing a prefix still collide (stanley and streamwatch are both ST), and colour separates them
+ * exactly as the wordless bar already does. Widening letters until the current roster happened to
+ * be unique would make a desk's plate change when somebody unrelated joined, which is worse than
+ * the collision it fixes.
+ */
+export function initials(name: string): string {
+  const parts = name.split(/[^A-Za-z0-9]+/u).filter(Boolean);
+  if (parts.length === 0) return '?';
+  const word = parts[0]!;
+  const two = parts.length > 1 ? word[0]! + parts[1]![0]! : word.slice(0, 2);
+  return two.toUpperCase();
+}
+
 /** 12-hour clock (e.g. `9:48 PM`) in the viewer's locale, from a ms-epoch ts. */
 export function clock(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
