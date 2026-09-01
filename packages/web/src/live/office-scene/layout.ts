@@ -782,6 +782,14 @@ export interface LeisureSpot {
   /** Seated blend at rest: `1` folded onto the furniture, `0` standing (a reader at the shelves). */
   sit: number;
   /**
+   * Sitting with **nothing in front of the hands** — a couch, a meeting chair, reception's waiting
+   * chair. Drives the casual skeleton (hands in the lap, settled back) instead of the desk one, which
+   * reaches onto a keyboard. Defaults to "any seated leisure spot", which is every one of them today;
+   * it is overridable because the actor system also fabricates a spot for a beat that holds a DESK
+   * member seated (the row-mate chat), and that one is emphatically not casual.
+   */
+  casual?: boolean;
+  /**
    * Sort the occupant at **this furniture's** depth rather than at their own feet — the same trick that
    * puts a desk member between `chairBase` and `chairBack` (see `renderScene`). Only needed for a piece
    * drawn as one box that is *long* relative to a person: the couch is sorted at its centre, so a sitter

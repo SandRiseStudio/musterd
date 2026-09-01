@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ConnStatus } from './client';
+import { CaptionPill } from './CaptionPill';
+import type { Caption } from './captions';
 import { stillMode } from './stillMode';
 import type { RoomEntry } from './workingOn';
 
@@ -48,6 +50,7 @@ export function OfficeOverlay({
   entries,
   status,
   caption,
+  captionColor,
   interactive = false,
 }: {
   teamName: string;
@@ -56,7 +59,9 @@ export function OfficeOverlay({
   status: ConnStatus;
   /** The room's narration line (first-five-seconds §2) — the broadcast card carries it now that
    *  the floating lower-third rail is gone (nick, 2026-08-31). */
-  caption?: string | null;
+  caption?: Caption | null;
+  /** The narrating member's colour, resolved by the caller. */
+  captionColor?: string | undefined;
   /** `/live` only. False keeps the passive, non-interactive, aria-hidden chyron `/broadcast` needs. */
   interactive?: boolean;
 }) {
@@ -247,8 +252,8 @@ export function OfficeOverlay({
         )}
 
         {caption && (
-          <p className="lc-ov__caption" aria-live="polite">
-            {caption}
+          <p className="lc-ov__caption">
+            <CaptionPill caption={caption} color={captionColor} />
           </p>
         )}
 

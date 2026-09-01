@@ -6,7 +6,7 @@ import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent, speechEventFor } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import { OfficeOverlay } from './OfficeOverlay';
-import { captionFor } from './captions';
+import { captionFor, type Caption } from './captions';
 import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
 import type { OfficeRoomProps } from './officeRoom';
@@ -156,7 +156,14 @@ export function OfficeScene({
 
   // The narration line (first-five-seconds §2), handed out by the scene — rendered in WorkStack's
   // header rather than floating over the room (nick, 2026-08-31).
-  const [caption, setCaption] = useState<string | null>(null);
+  const [caption, setCaption] = useState<Caption | null>(null);
+  // The narrator's own colour, from the same roster the floor is drawn from — so the pill's dot,
+  // their floor plate and their roster chip are one identity. A caption can name someone who is not
+  // in the working list (an arrival, above all), so this reads the roster rather than the entries.
+  const narrator = caption ? roster.find((m) => m.name === caption.who) : undefined;
+  const captionColor = narrator
+    ? memberColor(narrator.name, narrator.kind === 'human' ? 'human' : 'agent')
+    : undefined;
 
   useEffect(() => {
     const host = hostRef.current;
@@ -175,8 +182,8 @@ export function OfficeScene({
         const handle = mountOffice(host, labelHost, reduced, {
           onActClick: (id) => onActClickRef.current?.(id),
           // The narration line renders in WorkStack's header (chrome), not as scene DOM.
-          onCaption: (line) => {
-            if (!disposed) setCaption(line);
+          onCaption: (next) => {
+            if (!disposed) setCaption(next);
           },
           // Presence decides whether the hotspot exists at all, so gate on the mount-time prop —
           // stable per route (/live wires it, /broadcast never does) — and read through the ref after.
@@ -231,7 +238,7 @@ export function OfficeScene({
       // The caption rail (first-five-seconds §2): the lazy scene owns scheduling + DOM; only the
       // plain-sentence projection is computed here (keeps the entry chunk out of the rail's bytes).
       const caption = captionFor(e);
-      if (caption) h.emit({ kind: 'caption', text: caption });
+      if (caption) h.emit({ kind: 'caption', caption });
       // EVERY act also speaks over the sender's head — constructed in mapping.ts (speechEventFor),
       // where the passthrough of text/tone/addressee is pinned by tests this component can't carry.
       h.emit(speechEventFor(e));
@@ -261,13 +268,14 @@ export function OfficeScene({
             entries={entries}
             status={status}
             caption={caption}
+            captionColor={captionColor}
             interactive={false}
           />
         )}
         {/* Work card floats over the room (bottom of the stage) — not a band under it. */}
         {!collapsed && workCues === 'stack' && (
           <div className="lc-office__work">
-            <WorkStack entries={entries} caption={caption} />
+            <WorkStack entries={entries} caption={caption} captionColor={captionColor} />
           </div>
         )}
         {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}

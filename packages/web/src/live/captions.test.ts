@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Envelope } from '@musterd/protocol';
-import { captionFor, captionForPresence, pushCaption, tickCaption, type CaptionRail } from './captions';
+import {
+  captionFor,
+  captionForPresence,
+  pushCaption,
+  tickCaption,
+  type Caption,
+  type CaptionRail,
+} from './captions';
 
 const env = (over: Partial<Envelope>): Envelope =>
   ({
@@ -16,9 +23,11 @@ const env = (over: Partial<Envelope>): Envelope =>
 
 describe('captionFor — plain-language narration of notable moments (first-five-seconds §2)', () => {
   it('narrates a directed handoff with names first', () => {
-    expect(captionFor(env({ act: 'handoff', to: { kind: 'member', name: 'dolly' } }))).toBe(
-      'ryder is handing work to dolly',
-    );
+    expect(captionFor(env({ act: 'handoff', to: { kind: 'member', name: 'dolly' } }))).toEqual({
+      text: 'ryder is handing work to dolly',
+      who: 'ryder',
+      tone: 'handoff',
+    });
   });
 
   it('narrates a lane handoff the same way (the envelope form)', () => {
@@ -30,31 +39,37 @@ describe('captionFor — plain-language narration of notable moments (first-five
           meta: { lane_handoff: { lane: 'x' } },
         }),
       ),
-    ).toBe('ryder is handing work to dolly');
+    ).toEqual({ text: 'ryder is handing work to dolly', who: 'ryder', tone: 'handoff' });
   });
 
   it('narrates a directed accept as the work being done', () => {
-    expect(captionFor(env({ act: 'accept', from: 'dolly', to: { kind: 'member', name: 'izzo' } }))).toBe(
-      "dolly accepted izzo's work — it's done",
-    );
+    expect(captionFor(env({ act: 'accept', from: 'dolly', to: { kind: 'member', name: 'izzo' } }))).toEqual({
+      text: "dolly accepted izzo's work — it's done",
+      who: 'dolly',
+      tone: 'accept',
+    });
   });
 
   it('narrates a steer, at the team when undirected', () => {
-    expect(captionFor(env({ act: 'steer', to: { kind: 'member', name: 'izzo' } }))).toBe(
-      'ryder is redirecting izzo',
-    );
-    expect(captionFor(env({ act: 'steer' }))).toBe('ryder is redirecting the team');
+    expect(captionFor(env({ act: 'steer', to: { kind: 'member', name: 'izzo' } }))).toEqual({
+      text: 'ryder is redirecting izzo',
+      who: 'ryder',
+      tone: 'steer',
+    });
+    expect(captionFor(env({ act: 'steer' }))?.text).toBe('ryder is redirecting the team');
   });
 
   it('narrates a directed help request, urgently when urgent', () => {
-    expect(captionFor(env({ act: 'request_help', to: { kind: 'member', name: 'stanley' } }))).toBe(
-      'ryder is asking stanley for help',
-    );
+    expect(captionFor(env({ act: 'request_help', to: { kind: 'member', name: 'stanley' } }))).toEqual({
+      text: 'ryder is asking stanley for help',
+      who: 'ryder',
+      tone: 'ask',
+    });
     expect(
       captionFor(
         env({ act: 'request_help', to: { kind: 'member', name: 'stanley' }, meta: { urgent: true } }),
       ),
-    ).toBe('ryder urgently needs stanley');
+    ).toEqual({ text: 'ryder urgently needs stanley', who: 'ryder', tone: 'ask' });
   });
 
   it('narrates an ask to a human', () => {
@@ -62,10 +77,28 @@ describe('captionFor — plain-language narration of notable moments (first-five
       captionFor(
         env({ act: 'ask', to: { kind: 'member', name: 'nick' }, meta: { species: 'approve' } }),
       ),
-    ).toBe('ryder is asking nick to approve something');
-    expect(captionFor(env({ act: 'ask', to: { kind: 'member', name: 'nick' } }))).toBe(
+    ).toEqual({ text: 'ryder is asking nick to approve something', who: 'ryder', tone: 'ask' });
+    expect(captionFor(env({ act: 'ask', to: { kind: 'member', name: 'nick' } }))?.text).toBe(
       'ryder is asking nick to weigh in',
     );
+  });
+
+  it('carries the ACTOR and an act family on every line — what the pill colours by', () => {
+    // The dot takes the actor's colour, so `who` must be the member the sentence is *about* acting,
+    // never the recipient: on an accept that is the acceptor, and on an arrival it is the arriver.
+    const accept = captionFor(env({ act: 'accept', from: 'dolly', to: { kind: 'member', name: 'izzo' } }));
+    expect(accept?.who).toBe('dolly');
+    // Every tone a caption can carry is one the stylesheet has a rule for — a family added here
+    // without its `.is-<tone>` rule would fall back to the neutral tint and read as an arrival.
+    const tones = [
+      captionFor(env({ act: 'handoff', to: { kind: 'member', name: 'd' } }))?.tone,
+      accept?.tone,
+      captionFor(env({ act: 'steer' }))?.tone,
+      captionFor(env({ act: 'ask', to: { kind: 'member', name: 'nick' } }))?.tone,
+      captionFor(env({ act: 'request_help', to: { kind: 'member', name: 's' } }))?.tone,
+      captionForPresence(new Set(), new Set(['sloane']))?.tone,
+    ];
+    expect(tones).toEqual(['handoff', 'accept', 'steer', 'ask', 'ask', 'presence']);
   });
 
   it('status chatter never captions', () => {
@@ -77,12 +110,16 @@ describe('captionFor — plain-language narration of notable moments (first-five
 
 describe('captionForPresence — arrivals and departures', () => {
   it('narrates a join and a leave from the online-name diff', () => {
-    expect(captionForPresence(new Set(['a']), new Set(['a', 'sloane']))).toBe(
-      'sloane just walked in',
-    );
-    expect(captionForPresence(new Set(['a', 'sloane']), new Set(['a']))).toBe(
-      'sloane just stepped out',
-    );
+    expect(captionForPresence(new Set(['a']), new Set(['a', 'sloane']))).toEqual({
+      text: 'sloane just walked in',
+      who: 'sloane',
+      tone: 'presence',
+    });
+    expect(captionForPresence(new Set(['a', 'sloane']), new Set(['a']))).toEqual({
+      text: 'sloane just stepped out',
+      who: 'sloane',
+      tone: 'presence',
+    });
     expect(captionForPresence(new Set(['a']), new Set(['a']))).toBeNull();
   });
 });
@@ -90,25 +127,27 @@ describe('captionForPresence — arrivals and departures', () => {
 describe('pushCaption — one at a time, short queue, drop the past', () => {
   const empty: CaptionRail = { current: null, shownAt: 0, queue: [] };
 
+  const cap = (text: string): Caption => ({ text, who: text, tone: 'presence' });
+
   it('shows immediately when idle', () => {
-    const s = pushCaption(empty, 'hello', 1000);
-    expect(s.current).toBe('hello');
+    const s = pushCaption(empty, cap('hello'), 1000);
+    expect(s.current?.text).toBe('hello');
   });
 
   it('queues up to 2 while one is on screen, then drops', () => {
-    let s = pushCaption(empty, 'a', 0);
-    s = pushCaption(s, 'b', 100);
-    s = pushCaption(s, 'c', 200);
-    s = pushCaption(s, 'd', 300); // past the 2-deep queue: dropped, not narrated late
-    expect(s.current).toBe('a');
-    expect(s.queue).toEqual(['b', 'c']);
+    let s = pushCaption(empty, cap('a'), 0);
+    s = pushCaption(s, cap('b'), 100);
+    s = pushCaption(s, cap('c'), 200);
+    s = pushCaption(s, cap('d'), 300); // past the 2-deep queue: dropped, not narrated late
+    expect(s.current?.text).toBe('a');
+    expect(s.queue.map((q) => q.text)).toEqual(['b', 'c']);
   });
 
   it('advances after the ~6s hold', () => {
-    let s = pushCaption(empty, 'a', 0);
-    s = pushCaption(s, 'b', 100);
+    let s = pushCaption(empty, cap('a'), 0);
+    s = pushCaption(s, cap('b'), 100);
     s = tickCaption(s, 6500);
-    expect(s.current).toBe('b');
+    expect(s.current?.text).toBe('b');
     s = tickCaption(s, 13500);
     expect(s.current).toBeNull();
   });

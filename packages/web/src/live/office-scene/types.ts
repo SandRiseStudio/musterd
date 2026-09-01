@@ -1,4 +1,5 @@
 import type { LaneState, Posture, WorkingHours } from '@musterd/protocol';
+import type { Caption } from '../captions';
 import type { ActTone } from '../format';
 import type { Addressee } from './speech';
 import type { WallBoard } from './wallboard';
@@ -78,6 +79,12 @@ export interface Pose {
    * Absent → render by `dir` alone. */
   heading?: number;
   small: boolean;
+  /**
+   * Seated on furniture with nothing in front of the hands — the lounge couch, a meeting chair,
+   * reception's waiting chair. The skeleton rests the hands in the lap and settles the spine back
+   * instead of reaching onto a keyboard. Only meaningful while `sit > 0`; absent/false is the desk.
+   */
+  casual?: boolean;
   /** What's in the hands this frame: a handoff box, an errand's plate/bottle/mug — or nothing. */
   carry: CarryKind | null;
   bubble: Bubble;
@@ -144,8 +151,10 @@ export type OfficeEvent =
   | { kind: 'steer'; from: string; to: string | null; urgent: boolean }
   | { kind: 'challenge'; from: string; to: string | null; urgent: boolean }
   | { kind: 'defer'; who: string }
-  /** A plain-language caption line for the lower-third rail (first-five-seconds §2). */
-  | { kind: 'caption'; text: string }
+  /** A plain-language narrated moment for the caption rail (first-five-seconds §2). Structured
+   * rather than a bare string: the chrome colours the line by tone and dots it in the actor's own
+   * colour, and both facts were already known where the sentence was composed. */
+  | { kind: 'caption'; caption: Caption }
   // An act, typed out over the sender's head then faded — the body when it has one, else the act label.
   // Independent of the choreography cue above; both can fire for one act. `id` (the envelope id) makes
   // the bubble a click-through to the same act in the stream panel.

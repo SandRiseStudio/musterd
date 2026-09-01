@@ -2925,6 +2925,9 @@ function skelFor(pose: Pose, node: OfficeNode, t: number) {
   // And no typing *through a gesture* — a member mid-stretch or mid-sip has their hands anywhere but the keys.
   const typing = node.posture === 'working' && pose.sit > 0.9 && pose.gesture === 0 ? typingBurst(seed, t) : 0;
   return solveSkeleton({
+    // A deskless seat poses the hands in the lap instead of on a keyboard (nick, 2026-08-31): the
+    // couch, the meeting chairs and reception's waiting chair have nothing in front of them.
+    seat: pose.casual ? 'casual' : 'desk',
     phase: pose.phase,
     sit: pose.sit,
     stride: pose.stride,
@@ -3668,32 +3671,37 @@ function deskWedge(
   const uF0 = { x: fv.x / fm, y: fv.y / fm };
   const uF = uF0.x < 0 ? { x: -uF0.x, y: -uF0.y } : uF0; // never paint the engraving upside down
 
-  // Type first — the plate is sized to its engraving. >=13px so it bakes legibly at stream scale
-  // (the old owned-desk plate's clamp), which is also what keeps canvas type viable here at all.
+  // Type first — the plate is sized to its engraving. 11px: the plate was reading as a slab of desk
+  // trim at 13 (nick, 2026-08-31). 13 was the old *brass* plate's stream-legibility clamp, and it was
+  // load-bearing there because dark ink on mid-brass is a low-contrast pairing; warm white on graphite
+  // is not, so the same read survives two points smaller. Verified at broadcast scale before taking it.
   const name = node.name.toUpperCase();
-  const px = Math.max(13, Math.round(13 * fit.scale));
+  const px = Math.max(11, Math.round(11 * fit.scale));
   ctx.font = canvasFont(px, '--font-display', 700);
   // Letterspaced caps, engraver style — via the real canvas property (a no-op string assignment on
   // engines without it), so the glyph run stays ONE string: tests and text extraction see the name.
-  let track = `${(px * 0.08).toFixed(1)}px`;
+  let track = `${(px * 0.09).toFixed(1)}px`;
   ctx.letterSpacing = track;
   let nameW = ctx.measureText(name).width;
   ctx.letterSpacing = '0px';
   const sub = steppedAway ? 'stepped away' : null;
 
   // The DESK wins the argument about size (live lesson, 2026-08-27): the side face is only DESK_D
-  // deep, and the plate is capped a hair inside it. A name that doesn't fit first drops its
+  // deep, and the plate is capped well inside it. A name that doesn't fit first drops its
   // tracking, then condenses horizontally — never widens the plate past the cap.
   const sEff = Math.max(0.85, Math.min(1.15, fit.scale));
-  const cap = 0.88 * DESK_D * fm;
+  const cap = 0.68 * DESK_D * fm;
+  // The member's own colour, as a block at the near end of the plate — the one piece of colour on it,
+  // and it means something: the same `node.color` the floating chips, the rail dots and the roster read.
+  const capW = Math.max(3, Math.round(3.4 * sEff));
   let textSx = 1; // horizontal condensation applied to the glyph run (1 = none)
-  if (nameW + 10 > cap) {
+  if (nameW + 8 + capW > cap) {
     track = '0px';
     nameW = ctx.measureText(name).width; // tracking dropped: remeasure before condensing
-    textSx = Math.min(1, Math.max(0.4, (cap - 8) / nameW));
+    textSx = Math.min(1, Math.max(0.4, (cap - 6 - capW) / nameW));
   }
-  const len = Math.max(28, Math.min(nameW * textSx + 10, cap)); // screen px along the plate
-  const high = px + (sub ? px : 0) + 5 * sEff; // face height, screen px
+  const len = Math.max(26, Math.min(nameW * textSx + 8 + capW, cap)); // screen px along the plate
+  const high = px + (sub ? px * 0.86 : 0) + 4 * sEff; // face height, screen px
   const half = len / 2;
 
   // Anchor: the midpoint of the visible side edge. A hanging plate tucks 1px under the lip and
@@ -3715,23 +3723,37 @@ function deskWedge(
   const bl = P(-half, top + high);
   const br = P(half, top + high);
 
-  // Brass frame, then the engraved face panel inset within it. The gradient runs top-light to
-  // bottom-dark — the ceiling light falls on the upper half of a vertical face.
-  ctx.fillStyle = '#b98f42';
+  // Brushed-steel frame, then the graphite face panel inset within it. Graphite and not brass
+  // (nick, 2026-08-31): a warm metal plate on warm wood on a warm floor is three browns, and the
+  // plate read as desk trim rather than as a placard. A cool dark panel separates from every surface
+  // this room paints, and it buys the engraving real contrast instead of ink-on-mid-tone.
+  ctx.fillStyle = '#5b636e';
   poly([bl, br, tr, tl]);
   ctx.fill();
+  // Top-light to bottom-dark: the ceiling light falls on the upper half of a vertical face.
   const grad = ctx.createLinearGradient(tl[0], tl[1], bl[0], bl[1]);
-  grad.addColorStop(0, '#dcb76c');
-  grad.addColorStop(0.55, '#c29a4e');
-  grad.addColorStop(1, '#96702f');
+  grad.addColorStop(0, '#3a424e');
+  grad.addColorStop(0.5, '#2c333d');
+  grad.addColorStop(1, '#1f242b');
   ctx.fillStyle = grad;
-  poly([P(-half + 1.6, top + high - 1.4), P(half - 1.6, top + high - 1.4), P(half - 1.6, top + 0.6), P(-half + 1.6, top + 0.6)]);
+  poly([P(-half + 1.2, top + high - 1.1), P(half - 1.2, top + high - 1.1), P(half - 1.2, top + 0.5), P(-half + 1.2, top + 0.5)]);
+  ctx.fill();
+
+  // The member's colour, as a block at the near end — the plate's only colour, and the same value
+  // their chip and rail dot carry, so the accent is an identity rather than decoration.
+  ctx.fillStyle = hslL(node.color, 0.56);
+  poly([
+    P(-half + 1.2, top + high - 1.1),
+    P(-half + 1.2 + capW, top + high - 1.1),
+    P(-half + 1.2 + capW, top + 0.5),
+    P(-half + 1.2, top + 0.5),
+  ]);
   ctx.fill();
 
   // Top ridge catching the ceiling light — the plaque's one specular line.
-  ctx.strokeStyle = '#f7e2ac';
-  ctx.lineWidth = Math.max(1, 1.2 * fit.scale);
-  ctx.globalAlpha = 0.8;
+  ctx.strokeStyle = '#cfd6de';
+  ctx.lineWidth = Math.max(1, 1.1 * fit.scale);
+  ctx.globalAlpha = 0.55;
   ctx.beginPath();
   ctx.moveTo(tl[0], tl[1]);
   ctx.lineTo(tr[0], tr[1]);
@@ -3768,8 +3790,9 @@ function deskWedge(
     ctx.restore();
   }
 
-  // The engraving. Ink dark-on-brass with a hairline light undercut — debossed, not printed.
-  const mid = P(0, top + high * (sub ? 0.38 : 0.5));
+  // The engraving. Warm white on graphite with a hairline dark undercut — debossed, not printed.
+  // Centred in the space the colour tab leaves, not on the plate, so the name doesn't crowd the block.
+  const mid = P(capW / 2, top + high * (sub ? 0.38 : 0.5));
   const angle = Math.atan2(uF.y, uF.x);
   ctx.save();
   ctx.translate(mid[0], mid[1]);
@@ -3781,19 +3804,20 @@ function deskWedge(
   ctx.textBaseline = 'middle';
   ctx.font = canvasFont(px, '--font-display', 700);
   ctx.letterSpacing = track;
-  ctx.fillStyle = 'rgba(255, 246, 224, 0.5)';
+  ctx.fillStyle = 'rgba(9, 12, 16, 0.55)';
   ctx.fillText(name, 0, 0.8);
-  ctx.fillStyle = '#2a1d0c';
+  ctx.fillStyle = '#f2eee6';
   ctx.fillText(name, 0, 0);
   ctx.letterSpacing = '0px';
   if (sub) {
     // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
-    const subPx = Math.max(10, Math.round(10 * fit.scale));
+    const subPx = Math.max(9, Math.round(9 * fit.scale));
     ctx.font = canvasFont(subPx, '--font-mono', 400);
     const subW = ctx.measureText(sub).width * textSx;
-    if (subW > len - 8) ctx.scale((len - 8) / subW, 1); // compounds with the name's condensation
-    ctx.fillStyle = 'rgba(42, 29, 12, 0.72)';
-    ctx.fillText(sub, 0, px * 0.78);
+    const room = len - 6 - capW;
+    if (subW > room) ctx.scale(room / subW, 1); // compounds with the name's condensation
+    ctx.fillStyle = 'rgba(238, 235, 228, 0.66)';
+    ctx.fillText(sub, 0, px * 0.76);
   }
   ctx.restore();
 

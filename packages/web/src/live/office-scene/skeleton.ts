@@ -96,6 +96,14 @@ export const GESTURE = {
   sip: 6,
   swivel: 7,
   roll: 8,
+  /**
+   * The lounge beat: a slow shift of weight onto one hip, the free arm coming up along the seat back,
+   * the head drifting with it — then settling. The one beat that belongs to the *casual* seats (couch,
+   * meeting chairs, waiting chair), where the desk beats have nothing to work against: `lean` reclines
+   * a member who is already reclined, and `swivel`/`roll` need casters. Held, not arced, so it reads
+   * as making yourself comfortable rather than a twitch.
+   */
+  settle: 14,
   // Errand beats (played on a walk's hold/sit legs via `Leg.overlay`, not by the gesture scheduler):
   /** Peering into the open fridge, one hand on the door. */
   browse: 9,
@@ -187,6 +195,17 @@ export interface SkelInput {
   gestureT: number;
   /** A per-member constant in [0,1) that de-syncs idle breathing/sway so a room doesn't pulse in unison. */
   seed: number;
+  /**
+   * What they are sitting AT. `desk` (the default, so every existing caller is unchanged) reaches the
+   * hands onto the keyboard; `casual` is furniture with nothing in front of it — the lounge couch, the
+   * meeting chairs, reception's waiting chair — where the hands rest in the lap instead.
+   *
+   * This is a property of the SEAT, not of the person: `solveSeated` used to target `DESK_REACH`
+   * unconditionally, so an idle member on the couch sat reaching forward onto a keyboard that was not
+   * there (nick, 2026-08-31). Typing is already gated on posture upstream, but a deskless seat has
+   * nothing to type on at all, so the casual pose ignores `typing` outright rather than trusting the gate.
+   */
+  seat?: 'desk' | 'casual';
 }
 
 /**
@@ -426,14 +445,18 @@ function solveWalk(inp: SkelInput): Skel {
  */
 function solveSeated(inp: SkelInput): Skel {
   const C = CHAR;
+  const casual = inp.seat === 'casual';
   const s = restPose();
-  const bt = inp.t * 1.05 + inp.seed * 7;
-  const breath = Math.sin(bt) * 0.55;
+  // A casual sitter breathes slower and sways wider — the difference between "at work" and "waiting".
+  // Same curve, different tempo, so nothing new animates: it still rides the scene's one clock.
+  const bt = inp.t * (casual ? 0.72 : 1.05) + inp.seed * 7;
+  const breath = Math.sin(bt) * (casual ? 0.8 : 0.55);
   // A seated member drifts almost imperceptibly — the weight settles from one hip to the other.
-  const settle = Math.sin(bt * 0.4) * 0.6;
+  const settle = Math.sin(bt * (casual ? 0.28 : 0.4)) * (casual ? 1.1 : 0.6);
 
   const pelvis = v(settle * 0.3, SEAT_TOP + 1 + breath * 0.15, -1);
-  const lean = 0.16; // leaning into the work
+  // Leaning into the work — or settled back against the seat, which is the whole read on the couch.
+  const lean = casual ? -0.11 : 0.16;
 
   s.pelvis = pelvis;
   s.chest = leanAbout(v(settle * 0.5, pelvis.y + (C.chest - C.hip), pelvis.z), pelvis, lean);
@@ -446,11 +469,28 @@ function solveSeated(inp: SkelInput): Skel {
     const hip = v(sgn * C.hipW + settle * 0.3, pelvis.y, pelvis.z);
     s.hip[i] = hip;
     // Thigh forward and very slightly down; shin straight down to a flat foot. The foot target is on the
-    // floor, so the same IK that walks the character also folds it onto a chair.
-    const foot = v(sgn * (C.hipW + 1.5), C.ankle, pelvis.z + C.thigh + 4);
+    // floor, so the same IK that walks the character also folds it onto a chair. A casual sitter's feet
+    // go a little wider and a little further out — the ankles-crossed-ish sprawl of a chair with no task.
+    const foot = v(sgn * (C.hipW + (casual ? 4 : 1.5)), C.ankle, pelvis.z + C.thigh + (casual ? 7 : 4));
     s.ankle[i] = foot;
     s.knee[i] = ik2(hip, foot, C.thigh, C.shin, v(0, 1, 0.35)); // knee rides up and forward
 
+    const sh = leanAbout(
+      v(sgn * C.shoulderW + settle * 0.5, pelvis.y + (C.shoulder - C.hip) + breath, pelvis.z),
+      pelvis,
+      lean,
+    );
+    s.shoulder[i] = sh;
+    if (casual) {
+      // Hands in the lap, resting on the thighs — the same target the lean-back and roll-back beats
+      // drop them to (`lapHands` in the overlays), because that pose was already tuned for exactly
+      // this: a seated body with nothing under its hands. `typing` is ignored, not gated: there are
+      // no keys here to ripple on.
+      const hand = v(sgn * (C.hipW + 3) + settle * 0.4, pelvis.y + 8 + Math.sin(bt * 0.5 + i) * 0.35, pelvis.z + 12);
+      s.wrist[i] = hand;
+      s.elbow[i] = ik2(sh, hand, C.upperArm, C.foreArm, v(sgn * 0.7, -1, 0));
+      continue;
+    }
     // Hands on the keyboard. Typing is a *ripple*, not a piston: the hands alternate, each finger-tap is a
     // small drop-and-recover, and a per-hand offset keeps them from hammering in lockstep.
     const tap = inp.typing > 0 ? typingTap(inp.t, inp.seed, i) * inp.typing : 0;
@@ -460,12 +500,6 @@ function solveSeated(inp: SkelInput): Skel {
       DESK_REACH.y - tap * 1.8 + idleHand,
       DESK_REACH.z + tap * 0.6,
     );
-    const sh = leanAbout(
-      v(sgn * C.shoulderW + settle * 0.5, pelvis.y + (C.shoulder - C.hip) + breath, pelvis.z),
-      pelvis,
-      lean,
-    );
-    s.shoulder[i] = sh;
     s.wrist[i] = hand;
     // Elbows bend down-and-out — the natural desk posture. Without the outward hint the IK would pick a
     // plane that folds the arms into the ribs.
@@ -578,6 +612,17 @@ function applyOverlays(s: Skel, inp: SkelInput): void {
     s.wrist[1] = lerp3(s.wrist[1], mouth, up);
     s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.3, 0));
     s.head = v(s.head.x, s.head.y + tip * 0.8, s.head.z - tip * 1.2);
+  } else if (inp.gesture === GESTURE.settle) {
+    // Settling in: the weight goes onto one hip, the right arm comes up and back along the seat back,
+    // and the head drifts after it. The lap hand stays where the casual pose put it, so only one arm
+    // moves — which is what makes it read as getting comfortable rather than as a pose change.
+    const a = holdEnv(inp.gestureT);
+    const back = v(C.shoulderW + 7, s.shoulder[1].y + 2, s.pelvis.z - 7);
+    s.wrist[1] = lerp3(s.wrist[1], back, a);
+    s.elbow[1] = ik2(s.shoulder[1], s.wrist[1], C.upperArm, C.foreArm, v(1, -0.5, -0.4));
+    for (const k of ['chest', 'neck', 'head'] as const) s[k] = v(s[k].x + a * 2.2, s[k].y, s[k].z);
+    s.shoulder[0] = v(s.shoulder[0].x + a * 1.6, s.shoulder[0].y - a * 0.8, s.shoulder[0].z);
+    s.head = v(s.head.x + a * 1.2, s.head.y - a * 0.6, s.head.z);
   } else if (inp.gesture === GESTURE.roll) {
     // Roll-back: the chair (and body — `chairShift`) drifts back from the desk; hands in the lap, a
     // hint of recline, then it all rolls home.
