@@ -29,6 +29,7 @@ import {
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
 import { clearGrantFromBinding } from './binding.js';
+import { persistRenewedLease } from './claim.js';
 import { refreshAttestation, type McpConfig } from './config.js';
 import { reconcileCursorCapture } from './cursorCapture.js';
 import { SessionAttestation } from './sessionLiveness.js';
@@ -893,6 +894,14 @@ export class MusterdClient {
         this.heartbeat.unref?.();
         this.pendingJoin?.resolve();
         this.pendingJoin = null;
+      } else if (frame.type === 'lease') {
+        // ADR 347: the daemon renewed this Presence's agent session lease before it expired. Adopt
+        // it for every HTTP tool from here on (the previous one dies at its own expiry, so a call
+        // already in flight still lands) and write it to this seat's binding, so a CLI hook in the
+        // same worktree presents a live lease too. Before this, `sessionLease` was set once at claim
+        // and every HTTP tool died five minutes later (lane 01M1FC77F2, 2026-09-01).
+        this.config.sessionLease = frame.session_lease;
+        persistRenewedLease(this.config);
       } else if (frame.type === 'refused') {
         // Stale grant (ADR 193): a grant is an optimisation, not the authenticator. Drop it from
         // memory + binding and re-claim bare once on this same socket — do NOT clear wantPresence

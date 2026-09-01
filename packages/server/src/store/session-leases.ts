@@ -5,6 +5,13 @@ import { newSecret, hashToken } from './members.js';
 
 /** Five minutes limits replay exposure while avoiding renewal on every routine HTTP call (ADR 337). */
 export const AGENT_SESSION_LEASE_TTL_MS = 5 * 60_000;
+/**
+ * How long before expiry a live WS connection is handed a renewed lease (ADR 347). Two minutes of a
+ * five-minute lease: eight adapter heartbeats (15 s) fall inside the window, so one dropped
+ * heartbeat never leaves an adapter without authority. Measured 2026-09-01: with no renewal at all,
+ * every adapter's HTTP tools died five minutes after claim (lane 01M1FC77F2).
+ */
+export const AGENT_SESSION_LEASE_RENEW_AHEAD_MS = 2 * 60_000;
 
 export interface SessionLeaseMint {
   id: string;
@@ -37,6 +44,24 @@ export function mintSessionLease(
     now,
   );
   return lease;
+}
+
+/** Is this lease (by id) due for renewal — expiring within `aheadMs`, already expired, revoked, or
+ *  gone? Read from the store, not from connection memory: revocation and expiry live here. */
+export function sessionLeaseDueForRenewal(
+  db: Database,
+  leaseId: string,
+  aheadMs: number,
+  now = Date.now(),
+): boolean {
+  const row = db
+    .prepare<
+      [string],
+      { expires_at: number; revoked_at: number | null }
+    >('SELECT expires_at, revoked_at FROM session_leases WHERE id = ?')
+    .get(leaseId);
+  if (!row || row.revoked_at !== null) return true;
+  return row.expires_at - now <= aheadMs;
 }
 
 /** A lease proves this exact agent still holds the Presence it received at claim time. */
