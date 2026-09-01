@@ -990,3 +990,49 @@ describe('session capture end-to-end (ADR 131 inc 4)', () => {
     }
   });
 });
+
+describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', () => {
+  afterEach(() => {
+    delete process.env['MUSTERD_BINDING'];
+  });
+
+  /** Bind this folder to agent seat ava with a REVOKED lease — the state every hook one-shot
+   *  (gate check, nudge) wakes up in once any other process has claimed since. */
+  async function bindAvaWithStaleLease(): Promise<void> {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'ava', '--kind', 'agent']);
+    const auth = await claimedAgent('dawn', 'ava');
+    // A second claim supersedes the first, revoking the lease we are about to persist — the storm's
+    // steady state, reproduced once.
+    const stale = auth.sessionLease;
+    await claimedAgent('dawn', 'ava');
+    const bindingPath = saveBinding(dir, {
+      version: 2,
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      agent_key: loadConfig().agentKeys['dawn']!,
+      seat_credential: auth.key,
+      session_lease: stale,
+      claim: { mode: 'seat', name: 'ava' },
+    });
+    process.env['MUSTERD_BINDING'] = bindingPath;
+  }
+
+  it('a hook read (reclaimAgentLease: false) presents the stale lease and fails closed — it never claims', async () => {
+    await bindAvaWithStaleLease();
+    const { http, explicit } = resolveRead({}, { reclaimAgentLease: false });
+    expect(explicit).toBe(true);
+    // No reclaim: the stale lease is refused by the server and the read fails — instead of the
+    // hook seizing the seat, evicting the live adapter's presence, and killing ITS lease.
+    await expect(http.inbox('dawn', { unread: true, limit: 1 })).rejects.toThrow(
+      /invalid, expired, or revoked/,
+    );
+  });
+
+  it('an interactive read still reclaims (ADR 339 / #1130 preserved)', async () => {
+    await bindAvaWithStaleLease();
+    const { http } = resolveRead({});
+    const res = await http.inbox('dawn', { unread: true, limit: 1 });
+    expect(Array.isArray(res.messages)).toBe(true);
+  });
+});

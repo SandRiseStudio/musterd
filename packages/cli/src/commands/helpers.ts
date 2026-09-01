@@ -244,7 +244,24 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
  * signal (e.g. the comeback summary) only when someone is genuinely active here (ADR 036). Never
  * refuses on a missing/ambient identity — `status` must still print the (auth-free) roster anywhere.
  */
-export function resolveRead(flags: Record<string, string | boolean>): ResolvedRead {
+export interface ResolveReadOptions {
+  /**
+   * Whether this client may re-claim the bound agent seat when its lease is stale (ADR 339).
+   * Defaults to true — the interactive-CLI behaviour #1130 exists for. Hook-driven one-shots
+   * (gate check, nudge, infra-gate) MUST pass false: they fire every tool call in every live
+   * session, and each reclaim is a full WS seat claim that deletes the previous claimant's
+   * presence row — which is exactly what a session lease is bound to (ADR 337). Left on, the
+   * hooks of a few concurrent sessions churn every seat's lease sub-second, and no adapter's
+   * lease survives to its next HTTP call (the 2026-09-01 claim storm).
+   */
+  reclaimAgentLease?: boolean;
+}
+
+export function resolveRead(
+  flags: Record<string, string | boolean>,
+  opts: ResolveReadOptions = {},
+): ResolvedRead {
+  const reclaimAgentLease = opts.reclaimAgentLease ?? true;
   const { config, server, sources, team, workspace, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
@@ -275,7 +292,7 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
             seat: identity.name,
             ...(identity.sessionLease !== undefined ? { sessionLease: identity.sessionLease } : {}),
             surface: identity.surface,
-            reclaimAgentLease: true,
+            reclaimAgentLease,
             ...(model !== undefined ? { model } : {}),
           }
         : { server },
