@@ -15,7 +15,7 @@ Scanned every commit in `docs/decisions` history for a file whose **own** Status
 
 So a bare byte-identical rule would have refused about one flip in five, and most of those were honest build-time corrections. The rule had to admit the marked form.
 
-## The rule (since #1128)
+## The rule (since #1129)
 
 On a diff where `!isAcceptedAdr(before) && isAcceptedAdr(after)`, the Decision must be:
 
@@ -26,7 +26,7 @@ Refused (2026-09-01; falsify: the matching cases in `scripts/flip-window.test.ts
 
 ## The diff is the unit, not the commit
 
-Fixing the Decision in one commit and flipping in the next lands as **one refused diff** (2026-09-01; falsify: the two-commit case in `scripts/flip-window.test.ts` goes green without a marker) — the gate reads `base...HEAD` everywhere and cannot see per-commit review. The two sanctioned routes are the dated marker in the flip diff, or the Decision change in its own PR while the ADR is still proposed, with the flip in a later diff. Falsify: the two-commit case in `scripts/flip-window.test.ts` goes green without a marker.
+Fixing the Decision in one commit and flipping in the next lands as **one refused diff** (2026-09-01; falsify: the two-commit case in `scripts/flip-window.test.ts` goes green without a marker) — the gate reads `base...HEAD` everywhere and cannot see per-commit review. The two sanctioned routes are the dated marker in the flip diff, or the Decision change in its own PR while the ADR is still proposed, with the flip in a later diff.
 
 ## Related
 

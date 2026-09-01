@@ -176,6 +176,26 @@ describe('rule 3 flip window — the flip commit cannot silently rewrite the Dec
     expect(r.code).toBe(0);
   });
 
+  // The OR is judged on the whole diff: a valid dated marker does not buy cover for a reworded
+  // sentence beside it. Pinned one layer down in adr-sections.test.ts already; this pins it
+  // through the gate, where the flip branch actually calls it (dolly's note on #1129).
+  it('FAILS a flip whose marker rides with a reworded sentence — the marker is not a smuggling lane', () => {
+    const base = proposedBase('The default is `0`. The read is atomic.');
+    writeFileSync(
+      join(repo, ADR_PATH),
+      adr(
+        'accepted',
+        'The default is `0`. _(Amended 2026-01-02: the default is `1`. See the amendment below.)_ The read is one atomic unit.',
+      ),
+    );
+    git('add', '-A');
+    git('commit', '-qm', 'flip with a valid marker and a smuggled reword');
+
+    const r = gate(base);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('flipped the ADR to accepted');
+  });
+
   // The diff is the unit, not the commit: fixing the Decision in one commit and flipping in the
   // next lands as one refused diff. Deliberate — the gate reads diffs everywhere, and the message
   // names the two sanctioned routes (marker, or separate PR) rather than pretending it can see
