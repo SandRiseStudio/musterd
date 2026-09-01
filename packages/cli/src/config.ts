@@ -12,8 +12,8 @@ import { dirname, join, resolve } from 'node:path';
 import {
   BINDING_DIR,
   BINDING_FILE,
-  BindingSchema,
   bindingSeat,
+  BindingSchema,
   assertWritableBinding,
   ClaimPolicySchema,
   PENDING_DIR,
@@ -346,7 +346,10 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
   const dropObserved = opts?.drop?.model_observed === true;
   let merged: Binding = {
     ...binding,
-    ...(binding.seat_credential === undefined && onDisk?.seat_credential !== undefined
+    ...(binding.seat_credential === undefined &&
+    onDisk != null &&
+    bindingSeat(binding) === bindingSeat(onDisk) &&
+    onDisk?.seat_credential !== undefined
       ? { seat_credential: onDisk.seat_credential }
       : {}),
     ...(binding.session === undefined && onDisk?.session !== undefined

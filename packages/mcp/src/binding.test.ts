@@ -363,6 +363,30 @@ describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobbe
     }
   });
 
+  it('does not carry a credential to a different claimed seat', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-credential-switch-'));
+    try {
+      const boot = {
+        version: 2,
+        server: 'http://s1',
+        team: 'lab',
+        claim: { mode: 'seat' as const, name: 'Ui' },
+        agent_key: 'mskey_1',
+      };
+      saveBinding(ws, { ...boot, seat_credential: 'msac_ui' });
+      saveBinding(ws, {
+        ...boot,
+        claim: { mode: 'seat', name: 'Api' },
+      });
+      const after = JSON.parse(
+        readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(after['seat_credential']).toBeUndefined();
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   /**
    * The adapter shares the CLI's write path in shape but not in code, so it needs its own pin: the
    * refusal must hold on BOTH surfaces or the guard is only half there. #508's fractional

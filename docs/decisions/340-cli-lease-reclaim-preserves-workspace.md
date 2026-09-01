@@ -32,8 +32,9 @@ also lose its agent-seat credential when a later writer omits that field.
 1. A command-scoped CLI agent re-claim sends the same resolved Workspace label
    as the MCP adapter. It therefore follows ADR 068/092: a transient hook
    claimant does not supersede the live same-Workspace adapter.
-2. CLI and MCP binding writers preserve an on-disk `seat_credential` when their
-   caller omits it. There is no implicit credential-drop operation.
+2. CLI and MCP binding writers preserve an on-disk `seat_credential` only when
+   their caller retains that claimed seat and omits it. A claim for another
+   seat cannot inherit the prior seat's credential.
 3. A process running a pre-fix adapter cannot be changed in place. Reloading
    the MCP adapter once installs the corrected writer; if it has already lost
    its credential, a fresh authorized claim mints and persists a replacement.

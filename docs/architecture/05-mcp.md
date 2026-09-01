@@ -375,7 +375,7 @@ src/
   claim.ts        // claimSeat() mint-or-reuse + claimAndJoin() + adoptIdentity() (live claim, ADR 034)
   harness.ts      // bounded MCP clientInfo capture: adapter-local harness diagnostics, never model inference (ADR 120)
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
-  binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193); ADR 143 env leak guard + ADR 213/218 foreign-binary warn (real checkouts only); saveBinding preserves omitted capture fields and claimed seat_credential, capture writers pass { drop: { model_observed: true } } (ADR 270/340)
+  binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193); ADR 143 env leak guard + ADR 213/218 foreign-binary warn (real checkouts only); saveBinding preserves omitted capture fields and same-seat claimed seat_credential, capture writers pass { drop: { model_observed: true } } (ADR 270/340)
   brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 154)
   workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
