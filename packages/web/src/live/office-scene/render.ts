@@ -3700,8 +3700,10 @@ function deskWedge(
   let len: number;
   let high: number;
   let capW: number;
-  // Words only exist on an engraved plate: the stepped-away CLAIM (§4) rides the status light-pipe
-  // at bar size, which stays unlit for an absent owner exactly as it does at full size.
+  // Words only exist on an engraved plate: at bar size the stepped-away CLAIM (§4, amended
+  // 2026-08-31) rides the jacket draped over the chair — the one away-specific mark that survives
+  // every scale. (Not the light-pipe: it is null for away, offline and stepped-away owners alike,
+  // so an unlit pipe distinguishes nothing.)
   //
   // And the sub-line gets its OWN floor, not the name's (dolly's REQUIRED on #1127). It is drawn at
   // `9 * s`, so inside the engraved band — s from 0.818, where the 11px name first clears 9 — it
@@ -3709,7 +3711,7 @@ function deskWedge(
   // /office-preview among others. Its floor binds harder than the name's rather than softer,
   // because this line is mono lowercase at 66% alpha against the name's letterspaced bold caps at
   // full strength. So the words need their own 9px and appear from s >= 1 (a /broadcast frame, or
-  // a preview window past ~1325x925); below that the light-pipe carries the same claim, which is
+  // a preview window past ~1325x925); below that the jacket carries the same claim, which is
   // the migration this plate already makes one threshold later.
   const SUB_PX = 9 * s;
   const sub = engraved && steppedAway && SUB_PX >= ENGRAVE_MIN_PX ? 'stepped away' : null;
@@ -3871,7 +3873,10 @@ function deskWedge(
     // The one alarming flavor (ADR 315): a disconnected seat keeps its amber glint, top-right of the frame.
     ctx.fillStyle = '#d9a13c';
     ctx.beginPath();
-    ctx.arc(tr[0] - uF.x * 4 * s, tr[1] + 3 * s, 2.2 * s, 0, Math.PI * 2);
+    // The glint keeps its 2px floor even though the plate has none (izzo's REQUIRED on #1127): a
+    // 2px dot cannot overhang a desk, and below it this — ADR 315's one alarming flavor — would
+    // vanish exactly where the words already dropped out.
+    ctx.arc(tr[0] - uF.x * 4 * s, tr[1] + 3 * s, Math.max(2, 2.2 * s), 0, Math.PI * 2);
     ctx.fill();
   }
 }

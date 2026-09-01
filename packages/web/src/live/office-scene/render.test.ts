@@ -292,10 +292,52 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
       const preview = bakeTextsAt(fitFloor(1568, 880), away);
       expect(preview).toContain('WORKER');
       expect(preview).not.toContain('stepped away');
-      // and below the name's own floor neither survives — the light-pipe carries the claim.
+      // and below the name's own floor neither survives — the jacket carries the claim.
       const live = bakeTextsAt(fitFloor(699, 948), away);
       expect(live).not.toContain('WORKER');
       expect(live).not.toContain('stepped away');
+    });
+
+    /**
+     * The disconnected glint keeps its 2px floor even though the plate lost all of its (izzo's
+     * REQUIRED on #1127). It is ADR 315's one alarming flavor, at bar size it is the only alarm
+     * left — the words are gone — and a 2px dot cannot overhang a desk, so "no floors, the plate
+     * is desk-proportional" does not apply to it.
+     */
+    it('keeps the disconnected glint at 2px minimum where the plate has already gone to bar', () => {
+      const radiiAt = (w: number, h: number): number[] => {
+        const radii: number[] = [];
+        let amber = false;
+        const ctx = new Proxy(
+          {},
+          {
+            get(_t, prop) {
+              if (prop === 'canvas') return { width: w, height: h };
+              if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
+                return () => ({ addColorStop() {} });
+              if (prop === 'measureText') return () => ({ width: 0 });
+              if (prop === 'arc')
+                return (_x: number, _y: number, r: number) => void (amber && radii.push(r));
+              return () => undefined;
+            },
+            set: (_t, prop, v) => {
+              if (prop === 'fillStyle') amber = v === '#d9a13c';
+              return true;
+            },
+          },
+        ) as unknown as CanvasRenderingContext2D;
+        const n = { ...offlineNode({ name: 'worker' }), offline_reason: 'disconnected' as const };
+        const members = new Map([[n.name, n]]);
+        const placements = assignSeats([n]);
+        renderScene(ctx, fitFloor(w, h), placements, members, homePoses(placements, members), 0);
+        return radii;
+      };
+      // scale 0.324 — the narrow window where an unfloored glint measured 0.71px.
+      const narrow = radiiAt(430, 700);
+      expect(narrow.length).toBeGreaterThan(0);
+      for (const r of narrow) expect(r).toBeGreaterThanOrEqual(2);
+      // and at broadcast scale it still grows past the floor like everything else.
+      expect(Math.max(...radiiAt(1920, 1080))).toBeGreaterThan(2.2);
     });
   });
 });
