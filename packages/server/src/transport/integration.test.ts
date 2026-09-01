@@ -20,7 +20,7 @@ import { openDirectedLedger } from '../store/delivery.js';
 import { getMemberByName, setMemberGovernance } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { REVIEW_LOOP_BREAKER_N } from '../store/review.js';
-import { getTeamBySlug } from '../store/teams.js';
+import { getTeamBySlug, mintBootstrapCredential } from '../store/teams.js';
 
 let server: RunningServer;
 let base: string;
@@ -1801,6 +1801,42 @@ describe('WebSocket', () => {
     // Neither branch queued anything for an admin.
     const reqs = await get('/teams/dawn/requests', nickTok);
     expect((reqs.json.requests ?? []).length).toBe(0);
+  });
+
+  it('WS claim: a seat-scoped bootstrap credential only claims its recorded seat', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickTok);
+    const scoped = mintBootstrapCredential(server.db, {
+      teamId: getTeamBySlug(server.db, 'dawn')!.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+
+    const mismatch = new TestWs();
+    await mismatch.open();
+    mismatch.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: scoped.agent_key,
+      target: { seat: 'Lin' },
+      surface: 'cli',
+    });
+    expect((await mismatch.waitFor('refused')).message).toMatch(/only claim.*Ada/i);
+    mismatch.close();
+
+    const matched = new TestWs();
+    await matched.open();
+    await matched.claim(
+      'dawn',
+      scoped.agent_key,
+      'Ada',
+      'cli',
+      await standingGrant(nickTok, 'Ada'),
+    );
+    matched.close();
   });
 
   it('records provenance + workspace from the claim and surfaces them on the roster (ADR 014)', async () => {

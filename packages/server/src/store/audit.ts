@@ -53,6 +53,13 @@ export type AuditAction =
   // ADR 337: agent HTTP authority lifecycle. Detail carries opaque ids only, never secret values.
   | 'agent_seat_credential.minted'
   | 'agent_seat_credential.rotated'
+  // ADR 344: independently scoped bootstrap credential lifecycle.
+  | 'bootstrap_credential.minted'
+  | 'bootstrap_credential.rotated'
+  | 'bootstrap_credential.used'
+  | 'bootstrap_credential.refused'
+  | 'bootstrap_credential.expired'
+  | 'bootstrap_credential.revoked'
   | 'agent_session_lease.revoked'
   | 'agent_session_lease.minted'
   | 'agent_session_lease.renewed'

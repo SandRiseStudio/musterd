@@ -7,7 +7,7 @@ import { openLane, updateLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { listWakeTurns } from '../store/residency.js';
-import { getTeamBySlug, setPolicy } from '../store/teams.js';
+import { getTeamBySlug, mintBootstrapCredential, setPolicy } from '../store/teams.js';
 import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
@@ -81,6 +81,31 @@ async function enrollAda(): Promise<void> {
 async function claimAda(): Promise<void> {
   adaAuth = await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Ada');
 }
+
+describe('host-scoped bootstrap credentials', () => {
+  it('accepts only its recorded host label for wake lease polling', async () => {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const hostKey = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'host',
+      target: 'laptop.local',
+    });
+
+    const allowed = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      hostKey.agent_key,
+    );
+    expect(allowed.status).toBe(200);
+
+    const refused = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'other-host.local' },
+      hostKey.agent_key,
+    );
+    expect(refused.status).toBe(401);
+  });
+});
 
 describe('POST /teams/:slug/residency/session — the resumable attestation', () => {
   beforeEach(async () => {
@@ -974,6 +999,37 @@ describe('POST /teams/:slug/residency/wake-progress (ADR 262)', () => {
       '/teams/dawn/residency/wake-report',
       { lease_id: leaseId, occupied: true, session: 'fresh' },
       agentKey,
+    );
+    expect(report.status).toBe(200);
+  });
+
+  it('accepts a host credential across the lifecycle of a lease assigned to its recorded host', async () => {
+    const leaseId = await leaseReviewOrder();
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const hostKey = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'host',
+      target: 'laptop.local',
+    });
+
+    const allowed = await post(
+      '/teams/dawn/residency/wake-progress',
+      { lease_id: leaseId },
+      hostKey.agent_key,
+    );
+    expect(allowed.status).toBe(200);
+
+    const turn = await post(
+      '/teams/dawn/residency/wake-turn',
+      { lease_id: leaseId, turn: 1, usage: { input_tokens: 1, output_tokens: 1 } },
+      hostKey.agent_key,
+    );
+    expect(turn.status).toBe(200);
+
+    const report = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, session: 'fresh' },
+      hostKey.agent_key,
     );
     expect(report.status).toBe(200);
   });

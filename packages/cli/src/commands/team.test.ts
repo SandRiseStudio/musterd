@@ -59,6 +59,63 @@ describe('team policy command', () => {
     expect(res.out).toContain('dispatch loop: off');
   });
 
+  it('team add gives an agent its own seat-scoped bootstrap credential', async () => {
+    const added = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['add', 'Lin', '--kind', 'agent', '--json']))))
+        .out,
+    );
+    expect(added.agent_key).toMatch(/^mskey_/);
+    expect(added.bootstrap_credential).toMatchObject({
+      use: 'claim_seat',
+      target: 'Lin',
+    });
+    expect(added).not.toHaveProperty('human_credential');
+  });
+
+  it('mints, inventories, and revokes a seat-scoped bootstrap credential', async () => {
+    await capture(() => teamCommand(parseArgs(['add', 'Ada', '--kind', 'agent'])));
+
+    const minted = await capture(() =>
+      teamCommand(
+        parseArgs([
+          'bootstrap',
+          'mint',
+          '--seat',
+          'Ada',
+          '--label',
+          'ada-workspace',
+          '--expires-in',
+          '1h',
+          '--json',
+        ]),
+      ),
+    );
+    const mintBody = JSON.parse(minted.out);
+    expect(mintBody.agent_key).toMatch(/^mskey_/);
+    expect(mintBody.credential).toMatchObject({
+      use: 'claim_seat',
+      target: 'Ada',
+      label: 'ada-workspace',
+    });
+
+    const listed = JSON.parse(
+      (await capture(() => teamCommand(parseArgs(['bootstrap', 'list', '--json'])))).out,
+    );
+    expect(listed.credentials).toContainEqual(mintBody.credential);
+    expect(JSON.stringify(listed)).not.toContain(mintBody.agent_key);
+
+    const revoked = await capture(() =>
+      teamCommand(parseArgs(['bootstrap', 'revoke', mintBody.credential.id, '--json'])),
+    );
+    expect(JSON.parse(revoked.out)).toEqual({ ok: true });
+  });
+
+  it('requires exactly one bootstrap mint scope', async () => {
+    await expect(
+      teamCommand(parseArgs(['bootstrap', 'mint', '--seat', 'Ada', '--host', 'mac.local'])),
+    ).rejects.toThrow(/exactly one/);
+  });
+
   it('turns the dispatch loop on and reads it back', async () => {
     const set = await capture(() => teamCommand(parseArgs(['policy', '--dispatch-loop', 'on'])));
     expect(set.code).toBe(0);

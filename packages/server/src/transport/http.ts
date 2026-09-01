@@ -244,11 +244,16 @@ import { searchInsights } from '../store/teamMemory.js';
 import {
   archiveTeam,
   createTeam,
+  findBootstrapCredential,
+  findBootstrapCredentialRecord,
   getTeamBySlug,
   getAgentKeyHash,
   getPolicy,
   getStoredPolicy,
+  listBootstrapCredentials,
+  mintBootstrapCredential,
   requireTeam,
+  revokeBootstrapCredential,
   rotateAgentKey,
   setPolicy,
 } from '../store/teams.js';
@@ -1139,8 +1144,44 @@ function authAdmin(
  * impersonate. Presence-neutral by construction (the woken session announces itself by occupying
  * via the seat's own grant).
  */
-function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage): TeamRow {
+function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage, host?: string): TeamRow {
   const team = requireTeam(ctx.db, slug);
+  const credential = findBootstrapCredential(ctx.db, team.id, bearer(req));
+  const credentialRecord =
+    credential ?? findBootstrapCredentialRecord(ctx.db, team.id, bearer(req));
+  if (credentialRecord && !credential) {
+    const expired =
+      credentialRecord.expires_at !== null && credentialRecord.expires_at <= Date.now();
+    appendAudit(ctx.db, team.id, {
+      actor: null,
+      action: expired ? 'bootstrap_credential.expired' : 'bootstrap_credential.refused',
+      target: credentialRecord.id,
+      result: 'deny',
+      detail: {
+        reason: expired ? 'expired' : credentialRecord.state,
+        target: credentialRecord.target,
+      },
+    });
+  }
+  if (credential?.use_kind === 'host' && host !== undefined && credential.target === host) {
+    appendAudit(ctx.db, team.id, {
+      actor: null,
+      action: 'bootstrap_credential.used',
+      target: credential.id,
+      result: 'allow',
+      detail: { use: 'host', target: credential.target },
+    });
+    return team;
+  }
+  if (credential && credential.use_kind !== 'legacy') {
+    appendAudit(ctx.db, team.id, {
+      actor: null,
+      action: 'bootstrap_credential.refused',
+      target: credential.id,
+      result: 'deny',
+      detail: { reason: 'host_mismatch', target: credential.target },
+    });
+  }
   const keyHash = getAgentKeyHash(ctx.db, team.id);
   if (!keyHash || hashToken(bearer(req)) !== keyHash) {
     throw new MusterdError(
@@ -1149,6 +1190,18 @@ function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage): TeamRow
     );
   }
   return team;
+}
+
+/** The lease's server-recorded host is the authority for host-scoped credentials. */
+function hostForWakeLease(ctx: Ctx, teamId: string, leaseId: string): string | undefined {
+  return (
+    ctx.db
+      .prepare<
+        [string, string],
+        { host: string }
+      >('SELECT host FROM wake_leases WHERE team_id = ? AND id = ?')
+      .get(teamId, leaseId)?.host ?? undefined
+  );
 }
 
 /** Authorize an agent's routine HTTP action with its credential and live Presence lease (ADR 337). */
@@ -2182,6 +2235,106 @@ export async function handleHttp(
         return sendJson(res, 200, mint);
       }
 
+      const BootstrapCredentialBody = z
+        .object({
+          use: z.enum(['claim_seat', 'claim_role', 'host']),
+          target: z.string().min(1).max(120),
+          label: z.string().min(1).max(120).optional(),
+          expires_at: z.number().int().positive().optional(),
+        })
+        .strict()
+        .refine((body) => body.expires_at === undefined || body.expires_at > Date.now(), {
+          path: ['expires_at'],
+          message: 'must be in the future',
+        });
+      const credentialProjection = (
+        credential: import('../store/teams.js').BootstrapCredential,
+      ) => ({
+        id: credential.id,
+        use: credential.use_kind,
+        target: credential.target,
+        label: credential.label,
+        state: credential.state,
+        expires_at: credential.expires_at,
+        created_by: credential.created_by,
+        created_at: credential.created_at,
+        rotated_at: credential.rotated_at,
+        revoked_at: credential.revoked_at,
+      });
+
+      if (method === 'POST' && rest === '/agent-bootstrap-credentials') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const body = parseOrBadRequest(BootstrapCredentialBody, await readJson(req));
+        if (body.use === 'claim_seat' && !getMemberByName(ctx.db, team.id, body.target)) {
+          throw new MusterdError('not_found', `no seat "${body.target}" in team "${slug}"`);
+        }
+        if (
+          body.use === 'claim_role' &&
+          !ctx.db
+            .prepare<
+              [string, string],
+              { name: string }
+            >('SELECT name FROM roles WHERE team_id = ? AND name = ?')
+            .get(team.id, body.target)
+        ) {
+          throw new MusterdError('not_found', `no role "${body.target}" in team "${slug}"`);
+        }
+        const minted = mintBootstrapCredential(ctx.db, {
+          teamId: team.id,
+          useKind: body.use,
+          target: body.target,
+          ...(body.label !== undefined ? { label: body.label } : {}),
+          ...(body.expires_at !== undefined ? { expiresAt: body.expires_at } : {}),
+          createdBy: member.name,
+        });
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'bootstrap_credential.minted',
+          target: minted.credential.id,
+          result: 'allow',
+          detail: { use: body.use, target: body.target },
+        });
+        for (const predecessorId of minted.rotated) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'bootstrap_credential.rotated',
+            target: predecessorId,
+            result: 'allow',
+            detail: { successor_id: minted.credential.id, use: body.use, target: body.target },
+          });
+        }
+        return sendJson(res, 201, {
+          credential: credentialProjection(minted.credential),
+          agent_key: minted.agent_key,
+        });
+      }
+
+      if (method === 'GET' && rest === '/agent-bootstrap-credentials') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, {
+          credentials: listBootstrapCredentials(ctx.db, team.id).map(credentialProjection),
+        });
+      }
+
+      const bootstrapCredentialMatch = rest.match(/^\/agent-bootstrap-credentials\/([^/]+)$/);
+      if (method === 'DELETE' && bootstrapCredentialMatch) {
+        const credentialId = decodeURIComponent(bootstrapCredentialMatch[1]!);
+        const { team, member } = authAdmin(ctx, slug, req);
+        if (!revokeBootstrapCredential(ctx.db, team.id, credentialId)) {
+          throw new MusterdError(
+            'not_found',
+            `no active scoped bootstrap credential "${credentialId}" on ${slug}`,
+          );
+        }
+        appendAudit(ctx.db, team.id, {
+          actor: member.name,
+          action: 'bootstrap_credential.revoked',
+          target: credentialId,
+          result: 'allow',
+        });
+        return sendJson(res, 200, { ok: true });
+      }
+
       if (method === 'POST' && rest === '/policy') {
         const { team, member } = authAdmin(ctx, slug, req);
         // ADR 185: the wire carries the SPARSE doc — only the knobs an admin chose — and the row
@@ -2398,8 +2551,8 @@ export async function handleHttp(
       // orders — double-spawn is structurally impossible. Agent-key auth, no seat (the host is
       // infrastructure); the response carries structured fields only, never message bodies.
       if (method === 'POST' && rest === '/residency/wake-leases') {
-        const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeLeasesBodySchema, await readJson(req));
+        const team = authAgentKeyOnly(ctx, slug, req, body.host);
         const orders = claimWakeLeases(
           ctx.db,
           team.id,
@@ -2419,8 +2572,9 @@ export async function handleHttp(
       // `reported` lease. No audit row per turn: the wake_turns table IS the additive record, and
       // one audit row per model turn would bloat the ledger the O&E reads.
       if (method === 'POST' && rest === '/residency/wake-turn') {
-        const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeTurnBodySchema, await readJson(req));
+        const team = requireTeam(ctx.db, slug);
+        authAgentKeyOnly(ctx, slug, req, hostForWakeLease(ctx, team.id, body.lease_id));
         const appended = appendWakeTurn(ctx.db, team.id, body);
         if (!appended)
           throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -2428,8 +2582,9 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/residency/wake-progress') {
-        const team = authAgentKeyOnly(ctx, slug, req);
         const body = parseOrBadRequest(WakeProgressBodySchema, await readJson(req));
+        const team = requireTeam(ctx.db, slug);
+        authAgentKeyOnly(ctx, slug, req, hostForWakeLease(ctx, team.id, body.lease_id));
         const row = markWakeSpawned(ctx.db, team.id, body.lease_id);
         if (!row)
           throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -2441,8 +2596,16 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/residency/wake-report') {
-        const team = authAgentKeyOnly(ctx, slug, req);
-        const body = parseWakeReportOrAudit(ctx.db, team.id, await readJson(req));
+        const rawBody = await readJson(req);
+        const team = requireTeam(ctx.db, slug);
+        const authBody = WakeReportBodySchema.safeParse(rawBody);
+        authAgentKeyOnly(
+          ctx,
+          slug,
+          req,
+          authBody.success ? hostForWakeLease(ctx, team.id, authBody.data.lease_id) : undefined,
+        );
+        const body = parseWakeReportOrAudit(ctx.db, team.id, rawBody);
         const lease = settleWakeLease(ctx.db, team.id, body.lease_id);
         if (!lease) {
           const settled = ctx.db
@@ -2619,8 +2782,32 @@ export async function handleHttp(
         // Step 1: verify bootstrap key, human credential, or an agent's own credential. The latter
         // is valid only here to reconnect and obtain a fresh Presence lease (ADR 337).
         let authenticatedMember: MemberRow | null = null;
+        const bootstrapCredential = findBootstrapCredential(ctx.db, team.id, body.key);
+        const bootstrapRecord =
+          bootstrapCredential ?? findBootstrapCredentialRecord(ctx.db, team.id, body.key);
+        if (bootstrapRecord && !bootstrapCredential) {
+          const expired =
+            bootstrapRecord.expires_at !== null && bootstrapRecord.expires_at <= Date.now();
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: expired ? 'bootstrap_credential.expired' : 'bootstrap_credential.refused',
+            target: bootstrapRecord.id,
+            result: 'deny',
+            detail: {
+              reason: expired ? 'expired' : bootstrapRecord.state,
+              target: bootstrapRecord.target,
+            },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: `this bootstrap credential is ${expired ? 'expired' : bootstrapRecord.state}`,
+            claimable: [],
+            hint: 'ask a team admin to mint a replacement credential',
+          });
+        }
         const keyHash = getAgentKeyHash(ctx.db, team.id);
-        if (!keyHash || hashToken(body.key) !== keyHash) {
+        if (!bootstrapCredential && (!keyHash || hashToken(body.key) !== keyHash)) {
           authenticatedMember =
             ctx.db
               .prepare<
@@ -2703,6 +2890,72 @@ export async function handleHttp(
             message: refusal.message,
             claimable: [],
             hint: refusal.hint,
+          });
+        }
+
+        if (
+          bootstrapCredential?.use_kind === 'claim_seat' &&
+          (!('seat' in body.target) ||
+            body.target.seat !== bootstrapCredential.target ||
+            targetMember.name !== bootstrapCredential.target)
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.refused',
+            target: bootstrapCredential.id,
+            result: 'deny',
+            detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: `this bootstrap credential may only claim seat "${bootstrapCredential.target}"`,
+            claimable: [],
+            hint: `musterd claim ${bootstrapCredential.target}`,
+          });
+        }
+        if (
+          bootstrapCredential?.use_kind === 'claim_role' &&
+          (!('role' in body.target) || body.target.role !== bootstrapCredential.target)
+        ) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.refused',
+            target: bootstrapCredential.id,
+            result: 'deny',
+            detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: `this bootstrap credential may only claim role "${bootstrapCredential.target}"`,
+            claimable: [],
+            hint: `musterd claim --role ${bootstrapCredential.target}`,
+          });
+        }
+        if (bootstrapCredential?.use_kind === 'host') {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.refused',
+            target: bootstrapCredential.id,
+            result: 'deny',
+            detail: { reason: 'claim_with_host_credential', target: bootstrapCredential.target },
+          });
+          return sendJson(res, 403, {
+            type: 'refused',
+            code: 'forbidden',
+            message: 'a host bootstrap credential cannot claim a seat',
+            claimable: [],
+            hint: 'use the residency host endpoints with this credential',
+          });
+        }
+        if (bootstrapCredential) {
+          appendAudit(ctx.db, team.id, {
+            actor: null,
+            action: 'bootstrap_credential.used',
+            target: bootstrapCredential.id,
+            result: 'allow',
+            detail: { use: bootstrapCredential.use_kind, target: bootstrapCredential.target },
           });
         }
 

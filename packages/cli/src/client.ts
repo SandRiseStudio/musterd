@@ -141,6 +141,19 @@ export interface HttpClientOpts {
   noTouch?: boolean;
 }
 
+export interface BootstrapCredentialSummary {
+  id: string;
+  use: 'claim_seat' | 'claim_role' | 'host' | 'legacy';
+  target: string | null;
+  label: string | null;
+  state: 'active' | 'rotated' | 'revoked';
+  expires_at: number | null;
+  created_by: string | null;
+  created_at: number;
+  rotated_at: number | null;
+  revoked_at: number | null;
+}
+
 export class HttpClient {
   constructor(private opts: HttpClientOpts) {}
 
@@ -358,6 +371,33 @@ export class HttpClient {
    */
   rotateAgentKey(slug: string): Promise<AgentKeyMint> {
     return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-key/rotate`, {});
+  }
+  mintBootstrapCredential(
+    slug: string,
+    body: {
+      use: 'claim_seat' | 'claim_role' | 'host';
+      target: string;
+      label?: string;
+      expires_at?: number;
+    },
+  ): Promise<{
+    credential: BootstrapCredentialSummary;
+    agent_key: string;
+  }> {
+    return this.request(
+      'POST',
+      `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials`,
+      body,
+    );
+  }
+  listBootstrapCredentials(slug: string): Promise<{ credentials: BootstrapCredentialSummary[] }> {
+    return this.request('GET', `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials`);
+  }
+  revokeBootstrapCredential(slug: string, id: string): Promise<{ ok: true }> {
+    return this.request(
+      'DELETE',
+      `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials/${encodeURIComponent(id)}`,
+    );
   }
   roster(slug: string): Promise<{
     members: MemberSummary[];

@@ -82,23 +82,6 @@ export async function agentCommand(
   // Adding a member is an admin act — needs an active identity (binding/env/--as), like `team add`.
   const { team, http, config } = resolve(parsed.flags);
 
-  // PREFLIGHT the team agent key (ADR 075), before the first write.
-  //
-  // This check used to sit *below* `addMember`, and the ordering cost a real team a real seat: on
-  // 2026-08-14 a `revive` admin whose global config had lost its `agentKeys` entry ran this command,
-  // declared the member, and only then hit the error — leaving a roster row with no workspace, no
-  // binding and no wiring behind it. A credential the command cannot finish without belongs above
-  // every mutation, so a failure here leaves the team exactly as it found it.
-  const agentKey = config.agentKeys[team] ?? process.env['MUSTERD_AGENT_KEY'];
-  if (!agentKey) {
-    throw new CliError(
-      `no team agent key for "${team}" on this machine — nothing was changed. ` +
-        `Recover it with \`musterd team agent-key --team ${team}\` (it reads the key off the seat ` +
-        `bindings already here), or set MUSTERD_AGENT_KEY for this run.`,
-      4,
-    );
-  }
-
   // The warn-only infra-touch gate (ADR 227 inc 2). This verb re-provisions through
   // harness.configure, which rewrites the MACHINE-SHARED MCP entry every seat on this repo root
   // launches through (ADR 143) and reinstalls hooks — infra consequences the 01KZ9CGYGH outage
@@ -131,6 +114,17 @@ export async function agentCommand(
     }
     reused = true;
   }
+  // ADR 344: every provisioned workspace receives a credential constrained to this one seat.
+  // Mint after declaration because the server validates the target against the live roster. Never
+  // fall back to the ambient legacy Team-wide key: that would silently preserve its blast radius.
+  const agentKey = (
+    await http.mintBootstrapCredential(team, {
+      use: 'claim_seat',
+      target: name,
+      label: `${harness.id}:${name}`,
+    })
+  ).agent_key;
+
   // Mint a standing grant for the seat so the workspace's autojoin occupies immediately on launch
   // instead of opening an admin-approval request every session (ADR 077). Best-effort: if it fails
   // (e.g. the caller isn't admin), the agent still comes online — its first claim just routes through

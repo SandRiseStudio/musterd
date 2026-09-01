@@ -46,12 +46,90 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   if (sub === 'observe') return teamObserve(parsed);
   if (sub === 'credential') return teamCredential(parsed);
   if (sub === 'agent-key') return teamAgentKey(parsed);
+  if (sub === 'bootstrap') return teamBootstrap(parsed);
   if (sub === 'remove') return teamRemove(parsed);
   if (sub === 'archive') return teamArchive(parsed);
   if (sub === 'export') return teamExport(parsed);
   if (sub === 'policy') return teamPolicy(parsed);
   throw new CliError(
-    'usage: musterd team <create|add|observe|credential|agent-key|remove|archive|export|policy> ...',
+    'usage: musterd team <create|add|observe|credential|agent-key|bootstrap|remove|archive|export|policy> ...',
+    2,
+  );
+}
+
+/** Admin lifecycle for ADR 344's independently scoped bootstrap credentials. */
+async function teamBootstrap(parsed: Parsed): Promise<number> {
+  const action = parsed.positionals[1];
+  const { team, http } = resolve(parsed.flags);
+  const json = parsed.flags['json'] === true;
+
+  if (action === 'mint') {
+    const scopes = [
+      ['claim_seat', flagStr(parsed.flags, 'seat')],
+      ['claim_role', flagStr(parsed.flags, 'role')],
+      ['host', flagStr(parsed.flags, 'host')],
+    ].filter((entry): entry is [string, string] => entry[1] !== undefined);
+    if (scopes.length !== 1) {
+      throw new CliError(
+        'bootstrap mint needs exactly one of --seat <name>, --role <name>, or --host <label>',
+        2,
+      );
+    }
+    const expiresIn = flagStr(parsed.flags, 'expires-in');
+    const expiresAt = expiresIn
+      ? Date.now() + parseDurationMs(expiresIn, '--expires-in')
+      : undefined;
+    const [use, target] = scopes[0]!;
+    const minted = await http.mintBootstrapCredential(team, {
+      use: use as 'claim_seat' | 'claim_role' | 'host',
+      target,
+      ...(flagStr(parsed.flags, 'label') ? { label: flagStr(parsed.flags, 'label')! } : {}),
+      ...(expiresAt !== undefined ? { expires_at: expiresAt } : {}),
+    });
+    if (json) {
+      process.stdout.write(JSON.stringify(minted) + '\n');
+      return 0;
+    }
+    process.stdout.write(
+      success(`minted ${minted.credential.use} bootstrap credential for ${target}`) + '\n',
+    );
+    process.stdout.write(theme.meta('shown once — store it in the intended harness now:') + '\n');
+    process.stdout.write(`  ${minted.agent_key}\n`);
+    process.stdout.write(theme.meta(`credential id: ${minted.credential.id}`) + '\n');
+    return 0;
+  }
+
+  if (action === 'list') {
+    const inventory = await http.listBootstrapCredentials(team);
+    if (json) {
+      process.stdout.write(JSON.stringify(inventory) + '\n');
+      return 0;
+    }
+    if (inventory.credentials.length === 0) {
+      process.stdout.write(theme.meta(`no bootstrap credentials on ${team}`) + '\n');
+      return 0;
+    }
+    for (const credential of inventory.credentials) {
+      const target = credential.target ? ` ${credential.target}` : '';
+      const label = credential.label ? ` · ${credential.label}` : '';
+      process.stdout.write(
+        `${credential.id}  ${credential.state}  ${credential.use}${target}${label}\n`,
+      );
+    }
+    return 0;
+  }
+
+  if (action === 'revoke') {
+    const id = parsed.positionals[2];
+    if (!id) throw new CliError('usage: musterd team bootstrap revoke <credential-id>', 2);
+    const result = await http.revokeBootstrapCredential(team, id);
+    if (json) process.stdout.write(JSON.stringify(result) + '\n');
+    else process.stdout.write(success(`revoked bootstrap credential ${id}`) + '\n');
+    return 0;
+  }
+
+  throw new CliError(
+    'usage: musterd team bootstrap <mint|list|revoke> [--seat|--role|--host ...]',
     2,
   );
 }
@@ -621,14 +699,26 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     ...(lifecycle ? { lifecycle } : {}),
     ...(until ? { lifecycle_until: Date.parse(until) } : {}),
   });
+  const bootstrap =
+    kind === 'agent'
+      ? await http.mintBootstrapCredential(team, {
+          use: 'claim_seat',
+          target: name,
+          label: `team-add:${name}`,
+        })
+      : undefined;
 
   if (parsed.flags['json']) {
-    // v0.3 (ADR 069): a human gets an mscr_ credential (shown once); an agent is credential-less and
-    // claims with the team agent key. The vestigial `token` is no longer an authenticator.
     process.stdout.write(
       JSON.stringify({
         member: res.member,
         ...(res.human_credential ? { human_credential: res.human_credential } : {}),
+        ...(bootstrap
+          ? {
+              agent_key: bootstrap.agent_key,
+              bootstrap_credential: bootstrap.credential,
+            }
+          : {}),
       }) + '\n',
     );
     return 0;
@@ -639,13 +729,11 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     ) + '\n',
   );
   if (kind === 'agent') {
-    // Agents authenticate with the team agent key (mskey_) + a seat claim (ADR 069/075) — not a per-seat
-    // token. The simplest hand-off is `musterd agent` in the agent's folder (isolated worktree + MCP).
-    const agentKey = loadConfig().agentKeys[team] ?? 'mskey_…';
-    process.stdout.write(theme.meta('connect this agent via MCP with the team agent key:') + '\n');
+    // ADR 344: the handoff carries a one-seat bootstrap credential, never the Team-wide legacy key.
+    process.stdout.write(theme.meta('connect this agent via MCP with its scoped key:') + '\n');
     process.stdout.write(
       theme.meta(
-        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${agentKey} MUSTERD_CLAIM=seat:${name} MUSTERD_LAUNCH_SURFACE=claude-code`,
+        `  MUSTERD_TEAM=${team} MUSTERD_AGENT_KEY=${bootstrap!.agent_key} MUSTERD_CLAIM=seat:${name} MUSTERD_LAUNCH_SURFACE=claude-code`,
       ) + '\n',
     );
     process.stdout.write(

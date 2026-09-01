@@ -1,6 +1,6 @@
 # 344 — Scoped, rotatable agent bootstrap credentials
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-01
 
 ## Context

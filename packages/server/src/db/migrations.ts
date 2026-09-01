@@ -1259,6 +1259,37 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 344 replaces the Team-wide bootstrap-key column with independently scoped records.
+    // Existing keys become explicit legacy records so an installed Workspace remains usable until
+    // the separately ADR-gated compatibility removal.
+    version: 52,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_bootstrap_credentials (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          key_hash    TEXT NOT NULL UNIQUE,
+          use_kind    TEXT NOT NULL CHECK (use_kind IN ('claim_seat', 'claim_role', 'host', 'legacy')),
+          target      TEXT,
+          label       TEXT,
+          state       TEXT NOT NULL CHECK (state IN ('active', 'rotated', 'revoked')),
+          expires_at  INTEGER,
+          created_by  TEXT,
+          created_at  INTEGER NOT NULL,
+          rotated_at  INTEGER,
+          revoked_at  INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_bootstrap_credentials_lookup
+          ON agent_bootstrap_credentials(team_id, key_hash, state, expires_at);
+        INSERT OR IGNORE INTO agent_bootstrap_credentials
+          (id, team_id, key_hash, use_kind, target, state, created_at)
+        SELECT 'legacy-' || id, id, agent_key_hash, 'legacy', NULL, 'active', updated_at
+        FROM teams
+        WHERE agent_key_hash IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

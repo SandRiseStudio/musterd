@@ -41,7 +41,13 @@ import {
   touchAmbientPresence,
 } from './presence.js';
 import { mintSessionLease } from './session-leases.js';
-import { createTeam, rotateAgentKey } from './teams.js';
+import {
+  createTeam,
+  findBootstrapCredential,
+  mintBootstrapCredential,
+  revokeBootstrapCredential,
+  rotateAgentKey,
+} from './teams.js';
 
 function freshTeam() {
   const db = openDb(':memory:');
@@ -50,6 +56,65 @@ function freshTeam() {
 }
 
 describe('teams + members', () => {
+  it('mints and resolves a target-scoped bootstrap credential', () => {
+    const { db, team } = freshTeam();
+    const minted = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+      label: 'ada-workspace',
+    });
+
+    expect(findBootstrapCredential(db, team.id, minted.agent_key)).toMatchObject({
+      id: minted.credential.id,
+      use_kind: 'claim_seat',
+      target: 'Ada',
+    });
+    expect(findBootstrapCredential(db, team.id, 'mskey_wrong')).toBeNull();
+  });
+
+  it('revokes a scoped bootstrap credential without affecting another credential', () => {
+    const { db, team } = freshTeam();
+    const ada = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+    const lin = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Lin',
+    });
+
+    expect(revokeBootstrapCredential(db, team.id, ada.credential.id)).toBe(true);
+    expect(findBootstrapCredential(db, team.id, ada.agent_key)).toBeNull();
+    expect(findBootstrapCredential(db, team.id, lin.agent_key)).toMatchObject({
+      id: lin.credential.id,
+      state: 'active',
+    });
+  });
+
+  it('marks a predecessor rotated while keeping both credentials valid for staged migration', () => {
+    const { db, team } = freshTeam();
+    const predecessor = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+    const successor = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+
+    expect(findBootstrapCredential(db, team.id, predecessor.agent_key)).toMatchObject({
+      state: 'rotated',
+    });
+    expect(findBootstrapCredential(db, team.id, successor.agent_key)).toMatchObject({
+      state: 'active',
+    });
+  });
+
   it('rejects a duplicate slug with conflict', () => {
     const { db } = freshTeam();
     expect(() => createTeam(db, { slug: 'dawn' })).toThrow(MusterdError);

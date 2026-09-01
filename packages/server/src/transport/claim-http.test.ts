@@ -3,7 +3,7 @@ import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
 import { upsertRole } from '../store/roles.js';
-import { getTeamBySlug } from '../store/teams.js';
+import { getTeamBySlug, mintBootstrapCredential } from '../store/teams.js';
 
 /**
  * Direct HTTP coverage for the stateless claim handshake (`POST /claim`, ADR 077/087) and the admin
@@ -40,6 +40,11 @@ async function get(path: string, auth?: Auth) {
   const text = await res.text();
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
 }
+async function del(path: string, auth?: Auth) {
+  const res = await fetch(base + path, { method: 'DELETE', headers: authHeaders(auth) });
+  const text = await res.text();
+  return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
+}
 
 beforeEach(async () => {
   server = createServer({ db: openDb(':memory:'), port: 0 });
@@ -61,6 +66,95 @@ async function grantFor(seat: string, lifetime = 'standing'): Promise<string> {
   const r = await post('/teams/dawn/grants', { scope: 'seat', target: seat, lifetime }, nickCred);
   return r.json.token as string;
 }
+
+describe('agent bootstrap credential lifecycle', () => {
+  it('lets an admin mint, inventory, and revoke one scoped credential without exposing its hash', async () => {
+    const minted = await post(
+      '/teams/dawn/agent-bootstrap-credentials',
+      {
+        use: 'claim_seat',
+        target: 'Ada',
+        label: 'ada-workspace',
+        expires_at: Date.now() + 60_000,
+      },
+      nickCred,
+    );
+    expect(minted.status).toBe(201);
+    expect(minted.json.agent_key).toMatch(/^mskey_/);
+    expect(minted.json.credential).toMatchObject({
+      use: 'claim_seat',
+      target: 'Ada',
+      label: 'ada-workspace',
+      state: 'active',
+    });
+    expect(minted.json.credential).not.toHaveProperty('key_hash');
+
+    const successor = await post(
+      '/teams/dawn/agent-bootstrap-credentials',
+      { use: 'claim_seat', target: 'Ada', label: 'ada-successor' },
+      nickCred,
+    );
+    expect(successor.status).toBe(201);
+
+    const inventory = await get('/teams/dawn/agent-bootstrap-credentials', nickCred);
+    expect(inventory.status).toBe(200);
+    expect(inventory.json.credentials).toContainEqual({
+      ...minted.json.credential,
+      state: 'rotated',
+      rotated_at: expect.any(Number),
+    });
+    expect(JSON.stringify(inventory.json)).not.toContain(minted.json.agent_key);
+    expect(JSON.stringify(inventory.json)).not.toContain('key_hash');
+
+    const revoked = await del(
+      `/teams/dawn/agent-bootstrap-credentials/${minted.json.credential.id}`,
+      nickCred,
+    );
+    expect(revoked.status).toBe(200);
+
+    const claim = await post('/teams/dawn/claim', {
+      key: minted.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await grantFor('Ada'),
+      surface: 'cli',
+    });
+    expect(claim.status).toBe(403);
+
+    const actions = listAudit(server.db, getTeamBySlug(server.db, 'dawn')!.id).map(
+      (entry) => entry.action,
+    );
+    expect(actions).toEqual(
+      expect.arrayContaining([
+        'bootstrap_credential.minted',
+        'bootstrap_credential.rotated',
+        'bootstrap_credential.revoked',
+      ]),
+    );
+  });
+
+  it('keeps bootstrap credential lifecycle admin-only and rejects an invalid target', async () => {
+    const invalid = await post(
+      '/teams/dawn/agent-bootstrap-credentials',
+      { use: 'claim_seat', target: 'Missing' },
+      nickCred,
+    );
+    expect(invalid.status).toBe(404);
+    const expired = await post(
+      '/teams/dawn/agent-bootstrap-credentials',
+      { use: 'host', target: 'mac.local', expires_at: Date.now() - 1 },
+      nickCred,
+    );
+    expect(expired.status).toBe(400);
+
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickCred);
+    const denied = await post(
+      '/teams/dawn/agent-bootstrap-credentials',
+      { use: 'claim_seat', target: 'Ada' },
+      bob.json.human_credential,
+    );
+    expect(denied.status).toBe(403);
+  });
+});
 
 describe('POST /claim — refusals', () => {
   it('refuses an invalid key with 403 forbidden', async () => {
@@ -125,6 +219,122 @@ describe('POST /claim — refusals', () => {
     });
     expect(r.status).toBe(403);
     expect(r.json.type).toBe('refused');
+  });
+
+  it('refuses a seat-scoped bootstrap credential for a different seat without a request or Presence', async () => {
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickCred);
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const scoped = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+
+    const r = await post('/teams/dawn/claim', {
+      key: scoped.agent_key,
+      target: { seat: 'Lin' },
+      surface: 'cli',
+    });
+
+    expect(r.status).toBe(403);
+    expect(r.json).toMatchObject({ type: 'refused', code: 'forbidden' });
+    expect(r.json.message).toMatch(/only claim.*Ada/i);
+    expect(server.db.prepare('SELECT COUNT(*) AS n FROM requests').get()).toEqual({ n: 0 });
+    expect(server.db.prepare('SELECT COUNT(*) AS n FROM presence').get()).toEqual({ n: 0 });
+    const refusalAudit = listAudit(server.db, team.id).find(
+      (entry) => entry.action === 'bootstrap_credential.refused',
+    );
+    expect(refusalAudit).toMatchObject({ target: scoped.credential.id });
+    expect(JSON.parse(refusalAudit!.detail!)).toMatchObject({ reason: 'target_mismatch' });
+  });
+
+  it('accepts a seat-scoped bootstrap credential for its target', async () => {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const scoped = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+
+    const r = await post('/teams/dawn/claim', {
+      key: scoped.agent_key,
+      target: { seat: 'Ada' },
+      grant: await grantFor('Ada'),
+      surface: 'cli',
+    });
+
+    expect(r.status).toBe(200);
+  });
+
+  it('accepts a role credential only through its declared role pool and never as a seat key', async () => {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const scoped = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'claim_role',
+      target: 'backend',
+    });
+    const grant = await post(
+      '/teams/dawn/grants',
+      { scope: 'role', target: 'backend', lifetime: 'standing' },
+      nickCred,
+    );
+    const roleClaim = await post('/teams/dawn/claim', {
+      key: scoped.agent_key,
+      target: { role: 'backend' },
+      grant: grant.json.token,
+      surface: 'cli',
+    });
+    expect(roleClaim.status).toBe(200);
+
+    const seatClaim = await post('/teams/dawn/claim', {
+      key: scoped.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(seatClaim.status).toBe(403);
+  });
+
+  it('never accepts a host credential on a claim route', async () => {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const host = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'host',
+      target: 'mac.local',
+    });
+    const claim = await post('/teams/dawn/claim', {
+      key: host.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(claim.status).toBe(403);
+  });
+
+  it('audits an expired credential by opaque id without creating a request or Presence', async () => {
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const scoped = mintBootstrapCredential(server.db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+      expiresAt: Date.now() + 60_000,
+    });
+    server.db
+      .prepare('UPDATE agent_bootstrap_credentials SET expires_at = ? WHERE id = ?')
+      .run(Date.now() - 1, scoped.credential.id);
+
+    const claim = await post('/teams/dawn/claim', {
+      key: scoped.agent_key,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(claim.status).toBe(403);
+    expect(server.db.prepare('SELECT COUNT(*) AS n FROM requests').get()).toEqual({ n: 0 });
+    expect(server.db.prepare('SELECT COUNT(*) AS n FROM presence').get()).toEqual({ n: 0 });
+    expect(listAudit(server.db, team.id)).toContainEqual(
+      expect.objectContaining({
+        action: 'bootstrap_credential.expired',
+        target: scoped.credential.id,
+      }),
+    );
   });
 
   it('refuses when a human credential names a different seat (403)', async () => {

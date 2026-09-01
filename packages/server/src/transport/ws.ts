@@ -51,7 +51,13 @@ import {
   mintSessionLease,
   sessionLeaseDueForRenewal,
 } from '../store/session-leases.js';
-import { getAgentKeyHash, getPolicy, requireTeam } from '../store/teams.js';
+import {
+  findBootstrapCredential,
+  findBootstrapCredentialRecord,
+  getAgentKeyHash,
+  getPolicy,
+  requireTeam,
+} from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
 
@@ -224,8 +230,33 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // Step 1: authenticate the bootstrap key or a self-identifying seat credential. An agent
           // seat credential is accepted only to reconnect through this claim handshake (ADR 337).
           let authenticatedAs: import('../store/rows.js').MemberRow | null = null;
+          const bootstrapCredential = findBootstrapCredential(ctx.db, team.id, frame.key);
+          const bootstrapRecord =
+            bootstrapCredential ?? findBootstrapCredentialRecord(ctx.db, team.id, frame.key);
+          if (bootstrapRecord && !bootstrapCredential) {
+            const expired =
+              bootstrapRecord.expires_at !== null && bootstrapRecord.expires_at <= Date.now();
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: expired ? 'bootstrap_credential.expired' : 'bootstrap_credential.refused',
+              target: bootstrapRecord.id,
+              result: 'deny',
+              detail: {
+                reason: expired ? 'expired' : bootstrapRecord.state,
+                target: bootstrapRecord.target,
+              },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `this bootstrap credential is ${expired ? 'expired' : bootstrapRecord.state}`,
+              claimable: [],
+              hint: 'ask a team admin to mint a replacement credential',
+            });
+            return;
+          }
           const keyHash = getAgentKeyHash(ctx.db, team.id);
-          if (keyHash && hashToken(frame.key) === keyHash) {
+          if (bootstrapCredential || (keyHash && hashToken(frame.key) === keyHash)) {
             // Agent harness: key validates against the team secret. No specific member identity yet.
           } else {
             // Human credential: look up by hash.
@@ -348,6 +379,75 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               detail: { code: 'forbidden', reason: 'agent_key_human_seat' },
             });
             return;
+          }
+
+          if (
+            bootstrapCredential?.use_kind === 'claim_seat' &&
+            (!('seat' in frame.target) ||
+              frame.target.seat !== bootstrapCredential.target ||
+              targetMember?.name !== bootstrapCredential.target)
+          ) {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.refused',
+              target: bootstrapCredential.id,
+              result: 'deny',
+              detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `this bootstrap credential may only claim seat "${bootstrapCredential.target}"`,
+              claimable: [],
+              hint: `musterd claim ${bootstrapCredential.target}`,
+            });
+            return;
+          }
+          if (
+            bootstrapCredential?.use_kind === 'claim_role' &&
+            (!('role' in frame.target) || frame.target.role !== bootstrapCredential.target)
+          ) {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.refused',
+              target: bootstrapCredential.id,
+              result: 'deny',
+              detail: { reason: 'target_mismatch', target: bootstrapCredential.target },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: `this bootstrap credential may only claim role "${bootstrapCredential.target}"`,
+              claimable: [],
+              hint: `musterd claim --role ${bootstrapCredential.target}`,
+            });
+            return;
+          }
+          if (bootstrapCredential?.use_kind === 'host') {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.refused',
+              target: bootstrapCredential.id,
+              result: 'deny',
+              detail: { reason: 'claim_with_host_credential', target: bootstrapCredential.target },
+            });
+            send(ws, {
+              type: 'refused',
+              code: 'forbidden',
+              message: 'a host bootstrap credential cannot claim a seat',
+              claimable: [],
+              hint: 'use the residency host endpoints with this credential',
+            });
+            return;
+          }
+          if (bootstrapCredential) {
+            appendAudit(ctx.db, team.id, {
+              actor: null,
+              action: 'bootstrap_credential.used',
+              target: bootstrapCredential.id,
+              result: 'allow',
+              detail: { use: bootstrapCredential.use_kind, target: bootstrapCredential.target },
+            });
           }
 
           // Step 3: account_status check on target member.
