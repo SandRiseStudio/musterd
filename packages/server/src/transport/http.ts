@@ -4651,7 +4651,8 @@ export async function handleHttp(
         // is the same silent stranding the completion exists to prevent, reintroduced one layer up.
         const full = rows.length >= INBOX_DEFAULT_LIMIT;
         // The cursor tiebreak only applies when the floor IS the cursor; once a paging caller has
-        // walked past it, `since` is a plain ts and carries no id.
+        // walked past it, `since` is a plain position and carries no id. Every position here is
+        // `created_at` — receipt order, the order the cursor walks — never the envelope's `ts`.
         const sinceTs = since ? Number(since) : 0;
         const useCursorId = sinceTs <= cursor.last_read_ts;
         const unreadFloor = Math.max(cursor.last_read_ts, sinceTs);
@@ -4667,9 +4668,9 @@ export async function handleHttp(
                 ) -
                   rows.filter(
                     (r) =>
-                      r.ts > unreadFloor ||
+                      r.created_at > unreadFloor ||
                       (useCursorId &&
-                        r.ts === unreadFloor &&
+                        r.created_at === unreadFloor &&
                         cursor.last_read_message_id !== null &&
                         r.id > cursor.last_read_message_id),
                   ).length,
@@ -4805,16 +4806,24 @@ export async function handleHttp(
         const body = (await readJson(req)) as { last_read_message_id?: string };
         if (!body.last_read_message_id)
           throw new MusterdError('bad_request', 'last_read_message_id required');
-        const row = ctx.db
-          .prepare<[string], { ts: number }>('SELECT ts FROM messages WHERE id = ?')
+        const exists = ctx.db
+          .prepare<[string], { id: string }>('SELECT id FROM messages WHERE id = ?')
           .get(body.last_read_message_id);
-        if (!row) throw new MusterdError('not_found', 'unknown message id');
+        if (!exists) throw new MusterdError('not_found', 'unknown message id');
         const prev = getCursor(ctx.db, member.id);
-        const cursor = setCursor(ctx.db, member.id, body.last_read_message_id, row.ts);
+        // The position is the row's `created_at`, read by setCursor itself — receipt order, never
+        // the envelope's `ts` (see store/cursors.ts).
+        const cursor = setCursor(ctx.db, member.id, body.last_read_message_id);
         // seen_latency (ADR 090): each act this advance crossed was just "seen" — emit the
         // send→seen histogram, the read-side twin of loop_latency. Watermark semantics: every act
         // covered by one advance shares this instant. Scope lives in crossedBySeen (store).
-        for (const m of crossedBySeen(ctx.db, team.id, member.id, prev.last_read_ts, row.ts)) {
+        for (const m of crossedBySeen(
+          ctx.db,
+          team.id,
+          member.id,
+          prev.last_read_ts,
+          cursor.last_read_ts,
+        )) {
           recordSeenLatency(
             slug,
             member.name,

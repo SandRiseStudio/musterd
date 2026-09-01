@@ -305,7 +305,7 @@ describe('messages + inbox', () => {
     expect(listInbox(db, lin.row, { unreadOnly: true, cursorTs: cur.last_read_ts })).toHaveLength(
       1,
     );
-    setCursor(db, lin.row.id, 'm1', 100);
+    setCursor(db, lin.row.id, 'm1');
     cur = getCursor(db, lin.row.id);
     expect(listInbox(db, lin.row, { unreadOnly: true, cursorTs: cur.last_read_ts })).toHaveLength(
       0,

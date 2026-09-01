@@ -710,7 +710,7 @@ function dueReviewWorkOrders(
             SELECT 1 FROM messages v
              WHERE v.team_id = m.team_id AND v.act = 'resolve'
                AND v.thread_id = COALESCE(m.thread_id, m.id))
-        ORDER BY m.ts ASC`,
+        ORDER BY m.created_at ASC`,
     )
     .all(teamId, member.id);
   const out: WakeCandidate[] = [];
@@ -766,7 +766,7 @@ function dueDispatchHandoffWorkOrders(
             SELECT 1 FROM messages v
              WHERE v.team_id = m.team_id AND v.act = 'resolve'
                AND v.thread_id = COALESCE(m.thread_id, m.id))
-        ORDER BY m.ts ASC`,
+        ORDER BY m.created_at ASC`,
     )
     .all(teamId, member.id);
   const out: WakeCandidate[] = [];

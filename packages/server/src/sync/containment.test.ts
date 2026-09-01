@@ -68,7 +68,7 @@ describe('3b-i containment', () => {
 
     // Rewind past v50 and replay the migration tail. v51/v52 add independent auth tables.
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(52);
+    expect(runMigrations(db)).toBe(53);
 
     expect(snapshot(db)).toEqual(before);
     // …and the replay did not drop what was already staged-adjacent: the tables survive it.

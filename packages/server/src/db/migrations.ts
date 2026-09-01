@@ -1290,6 +1290,19 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // The read cursors move off `messages.ts` (the origin's clock, which travels — ADR 335) onto
+    // `created_at` (this daemon's receipt clock) so an event that arrives after a seat last read
+    // but was stamped before it is the next unread rather than invisible forever (the ts-cursor
+    // defect, lane 01M1FAYTHQA881M35PDPXRTGM1). Nothing in messages indexed created_at until now;
+    // every inbox, interrupt-check and unread-count read scans by it from here on.
+    version: 53,
+    up: (db) => {
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_messages_team_created ON messages(team_id, created_at);`,
+      );
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

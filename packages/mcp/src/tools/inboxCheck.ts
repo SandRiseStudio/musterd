@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import type { Envelope } from '@musterd/protocol';
+import { envelopePosition, type Envelope } from '@musterd/protocol';
 import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import { linkReceived } from '../otel.js';
@@ -81,7 +81,10 @@ export function planInboxCheck(
   const byId = new Map<string, Envelope>();
   for (const e of newest) byId.set(e.id, e);
   for (const e of pinned) byId.set(e.id, e);
-  const shown = [...byId.values()].sort((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
+  // Receipt order — the order the cursor walks — so `advanceTo` is the furthest row actually shown.
+  const shown = [...byId.values()].sort(
+    (a, b) => envelopePosition(a) - envelopePosition(b) || a.id.localeCompare(b.id),
+  );
   const elided = ordered.length - shown.length + unreachable;
   return {
     shown,
@@ -113,7 +116,9 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const fetched = await client.fetchInbox(args.unread_only ?? true, args.limit ?? 50);
         const byId = new Map<string, Envelope>();
         for (const e of [...buffered, ...fetched.messages]) byId.set(e.id, e);
-        const ordered = [...byId.values()].sort((a, b) => a.ts - b.ts);
+        const ordered = [...byId.values()].sort(
+          (a, b) => envelopePosition(a) - envelopePosition(b) || a.id.localeCompare(b.id),
+        );
         const plan = planInboxCheck(ordered, args.limit ?? 50, fetched.unread_remaining ?? 0);
         const messages = plan.shown;
 

@@ -552,7 +552,9 @@ describe('HTTP API', () => {
           body: 'x',
           ts: t0 + (tieFrom !== undefined && i >= tieFrom ? tieFrom - 1 : i),
         };
-        insertMessage(server.db, teamRow.id, nick.id, boRow.id, envelope);
+        // Receipt order is what the cursor walks; pin created_at to the same shape as ts so the
+        // tie the fixture constructs is a tie in the order that matters.
+        insertMessage(server.db, teamRow.id, nick.id, boRow.id, envelope, { now: envelope.ts });
       }
       return { boTok: bo.json.human_credential as unknown };
     };
@@ -604,7 +606,7 @@ describe('HTTP API', () => {
       expect(p1.json.messages).toHaveLength(200);
       expect(p1.json.unread_remaining).toBe(220);
 
-      const last = (p1.json.messages as { ts: number }[])[199]!.ts;
+      const last = (p1.json.messages as { received_at: number }[])[199]!.received_at;
       const p2 = await get(`/teams/dawn/inbox?unread=1&since=${last}`, boTok, {
         'x-musterd-no-touch': '1',
       });
@@ -623,14 +625,14 @@ describe('HTTP API', () => {
     it('reaches every message when a ts tie straddles the page boundary', async () => {
       const { boTok } = await teamWithBacklog(220, 200);
       const p1 = await get('/teams/dawn/inbox?unread=1', boTok, { 'x-musterd-no-touch': '1' });
-      const seen = [...(p1.json.messages as { id: string; ts: number }[])];
+      const seen = [...(p1.json.messages as { id: string; received_at: number }[])];
       let page = p1;
       while (page.json.truncated && (page.json.messages as unknown[]).length > 0) {
         const last = seen[seen.length - 1]!;
-        page = await get(`/teams/dawn/inbox?unread=1&since=${last.ts}`, boTok, {
+        page = await get(`/teams/dawn/inbox?unread=1&since=${last.received_at}`, boTok, {
           'x-musterd-no-touch': '1',
         });
-        seen.push(...(page.json.messages as { id: string; ts: number }[]));
+        seen.push(...(page.json.messages as { id: string; received_at: number }[]));
       }
       // Nothing may be stranded by the walk: every message, each exactly once.
       expect(new Set(seen.map((m) => m.id)).size).toBe(220);

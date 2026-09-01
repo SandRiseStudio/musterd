@@ -51,6 +51,8 @@ function msg(
       meta: opts.meta ?? null,
       ts,
     }),
+    // Receipt order IS the fixture's order: the cursor walks created_at, so stamp it with the ts.
+    { now: ts },
   );
 }
 
@@ -72,7 +74,7 @@ describe('actDelivery (ADR 090: the per-act ledger, derived)', () => {
     expect(d.age_ms).toBe(9_000);
 
     // Seen: ada's cursor crosses the act (watermark semantics — seen_by is the cursor update time).
-    setCursor(db, ada.id, 'h1', 1_000);
+    setCursor(db, ada.id, 'h1');
     d = actDelivery(db, team.id, 'h1', 10_000)!;
     expect(d.recipients[0]!.state).toBe('seen');
     expect(d.recipients[0]!.seen_by).not.toBeNull();
@@ -95,7 +97,7 @@ describe('actDelivery (ADR 090: the per-act ledger, derived)', () => {
     msg(db, team, nick, ada, 'handoff', 'h1', 1_000);
     msg(db, team, nick, ada, 'handoff', 'h2', 1_000); // same millisecond, never delivered
 
-    setCursor(db, ada.id, 'h1', 1_000); // ada read h1, and only h1
+    setCursor(db, ada.id, 'h1'); // ada read h1, and only h1
 
     expect(actDelivery(db, team.id, 'h1', 10_000)!.recipients[0]!.state).toBe('seen');
     const tied = actDelivery(db, team.id, 'h2', 10_000)!.recipients[0]!;

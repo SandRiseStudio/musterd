@@ -25,22 +25,24 @@ export function activePresenceBySurface(
  * (addressed to them or team/broadcast, not their own send, past their read cursor). 0 when every
  * member is caught up. This is the "shouting into the void" / backlog signal, derived not stored.
  *
- * "Past their read cursor" is a `(ts, id)` comparison, not a ts one (ADR 290, amended 2026-08-20):
- * a message sharing the cursor row's millisecond used to fall out of the join, so the gauge could
- * report 0 — the caught-up value — while a message waited.
+ * "Past their read cursor" is a `(created_at, id)` comparison, not a ts one (ADR 290, amended
+ * 2026-08-20, re-keyed on receipt by the ts-cursor fix): a message sharing the cursor row's
+ * millisecond used to fall out of the join, so the gauge could report 0 — the caught-up value —
+ * while a message waited. Age is measured from receipt too: how long THIS daemon has held it
+ * unread, which is the only clock the gauge can vouch for.
  */
 export function slowestInboxLagMs(db: Database, now: number = Date.now()): number {
   const row = db
     .prepare<[], { oldest: number | null }>(
-      `SELECT MIN(msg.ts) AS oldest
+      `SELECT MIN(msg.created_at) AS oldest
          FROM members m
          LEFT JOIN inbox_cursors c ON c.member_id = m.id
          JOIN messages msg
            ON msg.team_id = m.team_id
           AND (msg.to_member = m.id OR msg.to_kind IN ('team','broadcast'))
           AND msg.from_member != m.id
-          AND (msg.ts > COALESCE(c.last_read_ts, 0)
-               OR (msg.ts = c.last_read_ts
+          AND (msg.created_at > COALESCE(c.last_read_ts, 0)
+               OR (msg.created_at = c.last_read_ts
                    AND msg.id > COALESCE(c.last_read_message_id, '')))
         WHERE m.left_at IS NULL
         GROUP BY m.id
