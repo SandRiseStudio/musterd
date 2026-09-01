@@ -69,7 +69,7 @@ remediations.
 6. **Presence is deliberately NOT required.** The named seat may be offline. `ghost` was `out` and
    answered within minutes; an ask waiting in an inbox is the normal way an agent seat is reached,
    and requiring liveness would rebuild the gap for exactly the case that motivated this — the
-   deliberately chosen acceptor is often not the one who happens to be live. This is the decision a
+   deliberately chosen acceptor need not be the one who happens to be live. This is the decision a
    later reader is most likely to want to re-litigate, so it is stated here rather than only in a
    function comment.
 
