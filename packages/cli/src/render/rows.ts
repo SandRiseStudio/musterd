@@ -1,5 +1,6 @@
 import {
   eligibleOf,
+  envelopePosition,
   MODEL_UNKNOWN,
   type Activity,
   type Envelope,
@@ -92,7 +93,7 @@ export function renderInbox(
     const by = opts.discharged?.get(m.id);
     out.push(
       renderMessageRow(m, kindOf, {
-        unread: m.ts > opts.cursorTs,
+        unread: envelopePosition(m) > opts.cursorTs,
         ...(by ? { dischargedBy: by } : {}),
       }),
     );

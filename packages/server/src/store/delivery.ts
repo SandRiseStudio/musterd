@@ -335,13 +335,14 @@ function recipientLedger(
   const ownAnswer = eligibleOf(metaOf(msg)) ? anyAnswer(db, msg) : answerBy(db, msg, recipient.id);
   const answered = ownAnswer ?? resolve ?? laneHandoffDischarged(db, msg);
   const cursor = getCursor(db, recipient.id);
-  // The cursor is a `(ts, id)` point, not a ts (ADR 290, amended 2026-08-20). Comparing on ts alone
-  // called an act tied with the cursor row SEEN although the reader was never handed it — while
-  // `listInbox` called that same act unread, so one message was both at once. `>=` on the id is
-  // deliberate: the cursor row itself IS seen, everything tied after it is not.
+  // The cursor is a `(created_at, id)` point, not a ts (ADR 290, amended 2026-08-20; re-keyed from
+  // `ts` to receipt by the ts-cursor fix, see `cursors.ts`). Comparing on ts alone called an act
+  // tied with the cursor row SEEN although the reader was never handed it — while `listInbox`
+  // called that same act unread, so one message was both at once. `>=` on the id is deliberate:
+  // the cursor row itself IS seen, everything tied after it is not.
   const seen =
-    cursor.last_read_ts > msg.ts ||
-    (cursor.last_read_ts === msg.ts &&
+    cursor.last_read_ts > msg.created_at ||
+    (cursor.last_read_ts === msg.created_at &&
       cursor.last_read_message_id !== null &&
       cursor.last_read_message_id >= msg.id);
   const nudges = ccdNudges(db, msg);
@@ -377,7 +378,9 @@ function actDeliveryOf(db: Database, msg: MessageRow, now: number): ActDelivery 
 
 /**
  * The acts a cursor advance from `fromTs` (exclusive) to `toTs` (inclusive) newly marks seen, for
- * the `musterd.coordination.seen_latency` emission (ADR 090). Scope matches the ledger, not the
+ * the `musterd.coordination.seen_latency` emission (ADR 090). Both bounds are cursor positions —
+ * `created_at`, receipt order — while the returned `ts` stays the envelope's own, because the
+ * latency measured from it is send→seen. Scope matches the ledger, not the
  * whole team firehose: acts directed at me, plus team/broadcast **loop-opening** acts
  * (request_help/handoff — their `to_member` is NULL, so a `to_member = me` filter alone silently
  * skips them; bugbot on #114). Never my own sends.
@@ -392,7 +395,7 @@ export function crossedBySeen(
   const rows = db
     .prepare<[string, number, number, string, string], MessageRow>(
       `SELECT * FROM messages
-        WHERE team_id = ? AND ts > ? AND ts <= ?
+        WHERE team_id = ? AND created_at > ? AND created_at <= ?
           AND (to_member = ?
                OR (to_kind IN ('team','broadcast') AND act IN ('request_help','handoff')))
           AND from_member != ?`,

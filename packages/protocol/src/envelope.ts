@@ -81,6 +81,14 @@ export const EnvelopeSchema = z
     thread: z.string().min(1).nullish(),
     meta: z.record(z.unknown()).nullish(),
     ts: z.number().int().nonnegative(),
+    /**
+     * When the daemon that served this envelope first held it — `messages.created_at`, the receipt
+     * clock. `ts` is the origin's clock and travels unchanged through federation (ADR 335), so it is
+     * not the order a reader's cursor walks; this is. Set on the read side only (inbox, history,
+     * live delivery); a client never sends it, and an older daemon omits it, in which case a client
+     * falls back to `ts` — the pre-fix comparison, correct whenever nothing arrived out of order.
+     */
+    received_at: z.number().int().nonnegative().optional(),
   })
   .superRefine(actMetaRules);
 
@@ -331,6 +339,16 @@ export function actMetaRules(
  * the identity-bound fields. The result is validated and returns the parsed
  * envelope (throws ZodError on invalid input).
  */
+/**
+ * Where an envelope sits in the order a read cursor walks: the serving daemon's receipt clock
+ * (`received_at`), falling back to the origin's `ts` when the daemon predates the field. Compare
+ * THIS against `cursor.last_read_ts`, never `ts` on its own — `ts` is the sender's clock and travels
+ * unchanged through federation, so an event can arrive after a seat last read while stamped before.
+ */
+export function envelopePosition(env: Pick<Envelope, 'ts' | 'received_at'>): number {
+  return env.received_at ?? env.ts;
+}
+
 export function makeEnvelope(input: {
   id: string;
   team: string;

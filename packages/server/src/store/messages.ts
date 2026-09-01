@@ -71,6 +71,13 @@ export function insertMessage(
   fromMemberId: string,
   toMemberId: string | null,
   env: Envelope,
+  /**
+   * `now` is the receipt clock the row is stamped with (`created_at`) — the position every read
+   * cursor walks. Injected for the same reason `slowestInboxLagMs(db, now)` is: a fixture that
+   * needs two rows in one millisecond, or one that arrives an hour after it was stamped, cannot
+   * get either from a wall clock. Production callers leave it unset.
+   */
+  opts: { now?: number } = {},
 ): MessageRow {
   return db.transaction((): MessageRow => {
     const node = localNodeForTeam(db, teamId);
@@ -96,7 +103,7 @@ export function insertMessage(
       origin_node: node.id,
       origin_seq: seq,
       ts: env.ts,
-      created_at: Date.now(),
+      created_at: opts.now ?? Date.now(),
     };
     db.prepare(
       `INSERT INTO messages
@@ -172,14 +179,21 @@ export function countOpenLoopsByTeam(db: Database): { team: string; count: numbe
     .all();
 }
 
+/**
+ * Every position in here is in RECEIPT order — `messages.created_at`, this daemon's clock at insert
+ * or fold — never the envelope's `ts`, which is the origin's clock and travels (ADR 335). A cursor
+ * keyed on `ts` never showed an event that arrived after the seat last read but was stamped before
+ * it (the ts-cursor defect, lane 01M1FAYTHQA881M35PDPXRTGM1). `cursorTs` and `since` are both
+ * `created_at` values; the CLI pages with the envelope's `received_at`, which is this column.
+ */
 export interface InboxOpts {
   since?: number;
   unreadOnly?: boolean;
   cursorTs?: number;
   /**
    * The cursor row's id — the TIEBREAK this query already orders by, finally expressed in the
-   * position that walks it. A read cursor is a `(ts, id)` point, not a ts: two messages can share a
-   * millisecond (musterd fan-out sends land sub-millisecond apart), and `ts > cursorTs` drops the
+   * position that walks it. A read cursor is a `(created_at, id)` point, not a ts: two messages can share a
+   * millisecond (musterd fan-out sends land sub-millisecond apart), and `created_at > cursorTs` drops the
    * one that ties. Not "shown late" — never shown, because the cursor only moves forward.
    * Omitted ⇒ the ts-only floor, which is correct whenever nothing ties.
    */
@@ -201,7 +215,7 @@ export interface InboxOpts {
 
 /**
  * A member's inbox: messages in their team addressed to them or to team/broadcast,
- * excluding their own sends. unreadOnly filters by the caller-supplied cursor ts.
+ * excluding their own sends. unreadOnly filters by the caller-supplied cursor position (receipt order).
  */
 export function listInbox(
   db: Database,
@@ -215,24 +229,24 @@ export function listInbox(
   if (opts.unreadOnly) {
     // Both floors apply when both are given: `cursorTs` is what the seat has already read, `since` is
     // how far a paging caller has walked. They are applied SEPARATELY rather than as `max(...)`,
-    // because only one of them carries a tiebreak: the cursor is a `(ts, id)` point and compares as
-    // one, while `since` is a plain ts and stays strict. Collapsing them to a single number is what
+    // because only one of them carries a tiebreak: the cursor is a `(created_at, id)` point and compares
+    // as one, while `since` is a plain created_at and stays strict. Collapsing them to a single number is what
     // made the tied row unreachable — `max()` cannot express half a comparison. With no ties the two
     // forms select exactly the same rows.
     const cursorTs = opts.cursorTs ?? 0;
     if (opts.cursorId) {
-      where += ' AND (ts > ? OR (ts = ? AND id > ?))';
+      where += ' AND (created_at > ? OR (created_at = ? AND id > ?))';
       params.push(cursorTs, cursorTs, opts.cursorId);
     } else {
-      where += ' AND ts > ?';
+      where += ' AND created_at > ?';
       params.push(cursorTs);
     }
     if (typeof opts.since === 'number') {
-      where += ' AND ts > ?';
+      where += ' AND created_at > ?';
       params.push(opts.since);
     }
   } else if (typeof opts.since === 'number') {
-    where += ' AND ts > ?';
+    where += ' AND created_at > ?';
     params.push(opts.since);
   }
   // With a limit, take the NEWEST `limit` (DESC + LIMIT) then re-sort ascending for display — an
@@ -243,7 +257,7 @@ export function listInbox(
       .prepare<
         unknown[],
         MessageRow
-      >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY ts DESC, id DESC LIMIT ?) ORDER BY ts ASC, id ASC`)
+      >(`SELECT * FROM (SELECT * FROM messages ${where} ORDER BY created_at DESC, id DESC LIMIT ?) ORDER BY created_at ASC, id ASC`)
       .all(...params, opts.limit);
     // MCP always sends `limit`, so the newest tail is team broadcasts and an old waiting handoff
     // never appears. The CLI banner reads with no limit and counts it. Pin action-needed unread
@@ -255,7 +269,7 @@ export function listInbox(
         `SELECT * FROM messages ${where} AND (
            act IN ('request_help', 'ask')
            OR (to_kind = 'member' AND act NOT IN ('message', 'resolve'))
-         ) ORDER BY ts ASC, id ASC`,
+         ) ORDER BY created_at ASC, id ASC`,
       )
       .all(...params);
     if (pinned.length === 0) return newest;
@@ -263,15 +277,15 @@ export function listInbox(
     for (const row of newest) byId.set(row.id, row);
     for (const row of pinned) byId.set(row.id, row);
     return [...byId.values()].sort(
-      (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      (a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
     );
   }
   // The prefix read: same order as the unbounded query, simply stopped early — except that it never
   // stops in the MIDDLE OF A TIE. A page cut between two rows sharing a millisecond cannot be walked
-  // by a `ts` cursor: the next request asks for `ts > last` and excludes every tied row, so the
-  // remainder is stranded and the empty page reads as "caught up" (izzo's repro: 220 messages, page
-  // one 200, page two 0, silently reaching 200). Completing the group instead of splitting it makes
-  // `ts > last` exact again for EVERY caller — including one on an older client that has no way to
+  // by a plain cursor: the next request asks for `created_at > last` and excludes every tied row, so
+  // the remainder is stranded and the empty page reads as "caught up" (izzo's repro: 220 messages,
+  // page one 200, page two 0, silently reaching 200). Completing the group instead of splitting it
+  // makes `> last` exact again for EVERY caller — including one on an older client that has no way to
   // send a tiebreak — rather than adding a cursor field the lossy spelling still sits next to.
   //
   // The overshoot is the size of one tie group, so the bound is "about `headLimit`" rather than
@@ -282,7 +296,7 @@ export function listInbox(
       .prepare<
         unknown[],
         MessageRow
-      >(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC LIMIT ?`)
+      >(`SELECT * FROM messages ${where} ORDER BY created_at ASC, id ASC LIMIT ?`)
       .all(...params, opts.headLimit);
     if (head.length < opts.headLimit) return head;
     const last = head[head.length - 1]!;
@@ -290,12 +304,15 @@ export function listInbox(
       .prepare<
         unknown[],
         MessageRow
-      >(`SELECT * FROM messages ${where} AND ts = ? AND id > ? ORDER BY id ASC`)
-      .all(...params, last.ts, last.id);
+      >(`SELECT * FROM messages ${where} AND created_at = ? AND id > ? ORDER BY id ASC`)
+      .all(...params, last.created_at, last.id);
     return tied.length > 0 ? [...head, ...tied] : head;
   }
   return db
-    .prepare<unknown[], MessageRow>(`SELECT * FROM messages ${where} ORDER BY ts ASC, id ASC`)
+    .prepare<
+      unknown[],
+      MessageRow
+    >(`SELECT * FROM messages ${where} ORDER BY created_at ASC, id ASC`)
     .all(...params);
 }
 
@@ -310,7 +327,7 @@ export function countUnread(
   db: Database,
   member: { id: string; team_id: string },
   cursorTs: number,
-  /** The cursor row's id — same `(ts, id)` comparison {@link listInbox} makes, so the count and the
+  /** The cursor row's id — same `(created_at, id)` comparison {@link listInbox} makes, so the count and the
    *  listing can never disagree about a tied row. Without it this returns 0 while one still waits. */
   cursorId?: string | null,
 ): number {
@@ -321,7 +338,7 @@ export function countUnread(
           WHERE team_id = ?
             AND (to_member = ? OR to_kind IN ('team','broadcast'))
             AND from_member != ?
-            AND (ts > ? OR (ts = ? AND id > ?))`,
+            AND (created_at > ? OR (created_at = ? AND id > ?))`,
       )
       .get(member.team_id, member.id, member.id, cursorTs, cursorTs, cursorId);
     return row?.n ?? 0;
@@ -332,7 +349,7 @@ export function countUnread(
         WHERE team_id = ?
           AND (to_member = ? OR to_kind IN ('team','broadcast'))
           AND from_member != ?
-          AND ts > ?`,
+          AND created_at > ?`,
     )
     .get(member.team_id, member.id, member.id, cursorTs);
   return row?.n ?? 0;
@@ -670,5 +687,6 @@ export function rowToEnvelope(
     thread: row.thread_id,
     meta: row.meta ? (JSON.parse(row.meta) as Record<string, unknown>) : null,
     ts: row.ts,
+    received_at: row.created_at,
   };
 }

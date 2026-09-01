@@ -1,5 +1,11 @@
 import { resolveWorkspace } from '@musterd/mcp';
-import { makeEnvelope, type DeferUntil, type Envelope, type MemberKind } from '@musterd/protocol';
+import {
+  envelopePosition,
+  makeEnvelope,
+  type DeferUntil,
+  type Envelope,
+  type MemberKind,
+} from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { watchClaim } from '../client.js';
@@ -134,7 +140,8 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
     while (page.truncated && page.messages.length > 0) {
       page = await http.inbox(team, {
         ...opts,
-        since: page.messages[page.messages.length - 1]!.ts,
+        // Page in the order the daemon serves: receipt position, not the sender's ts.
+        since: envelopePosition(page.messages[page.messages.length - 1]!),
       });
       out.push(...page.messages);
     }
@@ -147,7 +154,7 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   const cursorTs = res.cursor.last_read_ts;
   const total = res.total ?? res.messages.length;
   let rows = await drain(query, res);
-  if (bounded && rows.length > 0 && rows[0]!.ts > cursorTs) {
+  if (bounded && rows.length > 0 && envelopePosition(rows[0]!) > cursorTs) {
     rows = await drain({ unread: true }, await http.inbox(team, { unread: true }));
   }
   const messages = rows.filter((m) => matchesFilter(m, filter));
@@ -175,7 +182,7 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   // Advance the read cursor to the NEWEST UNREAD we actually displayed — never past an unshown unread
   // (the bounded-inbox invariant), and never at all when peeking or filtering (a lens must not consume).
   if (!parsed.flags['peek'] && !filtering) {
-    const newestUnread = [...messages].reverse().find((m) => m.ts > cursorTs);
+    const newestUnread = [...messages].reverse().find((m) => envelopePosition(m) > cursorTs);
     if (newestUnread) await http.markRead(team, newestUnread.id).catch(() => undefined);
   }
   // ADR 211 §5: ADR 117 requires the default view to include every unread, and a deferred act is
@@ -282,7 +289,7 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
 }
 
 function countUnread(messages: Envelope[], cursorTs: number, _self: string): number {
-  return messages.filter((m) => m.ts > cursorTs).length;
+  return messages.filter((m) => envelopePosition(m) > cursorTs).length;
 }
 
 /** `inbox --from <name>` / `--act <act>` narrowing (ADR 067): keep only matching senders/act types. */
@@ -419,7 +426,8 @@ async function waitInbox(
     const pending = await http.inbox(team, { unread: true }).catch(() => undefined);
     if (!pending) return undefined;
     return pending.messages.find(
-      (m) => m.ts > pending.cursor.last_read_ts && wakesWait(m, identity.name, filter),
+      (m) =>
+        envelopePosition(m) > pending.cursor.last_read_ts && wakesWait(m, identity.name, filter),
     );
   };
 

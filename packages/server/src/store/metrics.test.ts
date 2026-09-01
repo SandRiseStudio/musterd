@@ -62,11 +62,12 @@ describe('slowestInboxLagMs', () => {
         body: 'help',
         ts: now - 30_000,
       }),
+      { now: now - 30_000 },
     );
     expect(slowestInboxLagMs(db, now)).toBe(30_000);
 
     // After Ada advances her cursor past it, the inbox is caught up → lag 0.
-    setCursor(db, ada.id, 'm1', now - 30_000);
+    setCursor(db, ada.id, 'm1');
     expect(slowestInboxLagMs(db, now)).toBe(0);
   });
 
@@ -94,10 +95,11 @@ describe('slowestInboxLagMs', () => {
           body: 'help',
           ts: now - 30_000, // both in the same millisecond
         }),
+        { now: now - 30_000 },
       );
     }
     // Ada reads m1 only. m2 shares its ts and is still waiting.
-    setCursor(db, ada.id, 'm1', now - 30_000);
+    setCursor(db, ada.id, 'm1');
     expect(slowestInboxLagMs(db, now)).toBe(30_000);
   });
 });

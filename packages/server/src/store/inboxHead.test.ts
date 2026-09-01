@@ -46,6 +46,8 @@ function seed() {
         meta: null,
         ts: 1_000 + i,
       }),
+      // The cursor walks receipt order (created_at), so the fixture pins it to the same ramp.
+      { now: 1_000 + i },
     );
   }
   return { db, team, ada };
@@ -70,7 +72,7 @@ describe('listInbox headLimit — a bounded read that cannot skip a message', ()
       const rows = listInbox(db, ada, { unreadOnly: true, cursorTs, headLimit: 10 });
       seen.push(...rows.map((r) => r.id));
       // What a client may safely do after a truncated read: advance to the last row it actually saw.
-      cursorTs = rows[rows.length - 1]!.ts;
+      cursorTs = rows[rows.length - 1]!.created_at;
     }
     const all = listInbox(db, ada, { unreadOnly: true, cursorTs: 0 }).map((r) => r.id);
     expect(seen).toEqual(all);
@@ -82,7 +84,7 @@ describe('listInbox headLimit — a bounded read that cannot skip a message', ()
     const next = listInbox(db, ada, {
       unreadOnly: true,
       cursorTs: 0,
-      since: first[first.length - 1]!.ts,
+      since: first[first.length - 1]!.created_at,
       headLimit: 10,
     });
     // Without `since` being honoured alongside `unreadOnly`, this would hand back m00-m09 again and
@@ -104,7 +106,7 @@ describe('listInbox headLimit — a bounded read that cannot skip a message', ()
   it('never pages behind the read cursor — the later of the two floors wins', () => {
     const { db, ada } = seed();
     const all = listInbox(db, ada, { unreadOnly: true, cursorTs: 0 });
-    const cursorTs = all[19]!.ts; // the seat has read through m19
+    const cursorTs = all[19]!.created_at; // the seat has read through m19
     const rows = listInbox(db, ada, { unreadOnly: true, cursorTs, since: 0, headLimit: 5 });
     expect(rows.map((r) => r.id)).toEqual(['m20', 'm21', 'm22', 'm23', 'm24']);
   });
@@ -146,6 +148,7 @@ describe('listInbox limit — pin action-needed unread into the newest tail', ()
         meta: null,
         ts: 1,
       }),
+      { now: 1 },
     );
     for (let i = 0; i < 100; i++) {
       insertMessage(
@@ -164,6 +167,7 @@ describe('listInbox limit — pin action-needed unread into the newest tail', ()
           meta: null,
           ts: 1_000 + i,
         }),
+        { now: 1_000 + i },
       );
     }
     const page = listInbox(db, ada, { unreadOnly: true, cursorTs: 0, limit: 50 });

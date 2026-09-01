@@ -30,6 +30,7 @@ import type { MessageRow } from './rows.js';
 export function listInterruptCandidates(
   db: Database,
   member: { id: string; team_id: string },
+  /** `cursorTs` is the cursor row's `created_at` (see `cursors.ts`) — the window is in receipt order. */
   opts: { cursorTs?: number } = {},
 ): MessageRow[] {
   return db
@@ -38,14 +39,14 @@ export function listInterruptCandidates(
         WHERE team_id = ?
           AND (to_member = ? OR to_kind IN ('team','broadcast'))
           AND from_member != ?
-          AND ts > ?
+          AND created_at > ?
           AND (
             act IN ('steer','resolve','accept','decline')
             OR json_extract(meta, '$.urgent') = 1
             OR json_extract(meta, '$.lane_review') IS NOT NULL
             OR json_extract(meta, '$.eligible') IS NOT NULL
           )
-        ORDER BY ts ASC, id ASC`,
+        ORDER BY created_at ASC, id ASC`,
     )
     .all(member.team_id, member.id, member.id, opts.cursorTs ?? 0);
 }

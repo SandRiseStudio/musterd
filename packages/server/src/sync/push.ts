@@ -137,15 +137,21 @@ export async function pushTeam(
   const pending = unpushed(ctx, team.id, nodeId, cursor);
   if (pending.length === 0) return 0;
 
-  const events: SyncEvent[] = pending.map(({ row, from, to }) => ({
-    envelope: rowToEnvelope(row, team.slug, from, to),
-    origin_node: row.origin_node,
-    origin_seq: row.origin_seq,
-    // Travels because it is an attested fact about the event (ADR 131 §4). `created_at` deliberately
-    // does not: it is local receipt time, and shipping ours would assert a falsehood about when the
-    // hub learned of the event.
-    from_provenance: row.from_provenance,
-  }));
+  const events: SyncEvent[] = pending.map(({ row, from, to }) => {
+    // `received_at` is `created_at` in envelope clothing — the read side's receipt position — and
+    // it is stripped here for the same reason `created_at` itself does not travel (below): the hub
+    // stamps its own on fold, and shipping ours would assert a falsehood about when it learned.
+    const { received_at: _local, ...envelope } = rowToEnvelope(row, team.slug, from, to);
+    return {
+      envelope,
+      origin_node: row.origin_node,
+      origin_seq: row.origin_seq,
+      // Travels because it is an attested fact about the event (ADR 131 §4). `created_at`
+      // deliberately does not: it is local receipt time, and shipping ours would assert a falsehood
+      // about when the hub learned of the event.
+      from_provenance: row.from_provenance,
+    };
+  });
 
   const res = await fetch(new URL(`/teams/${team.slug}/sync/push`, enrollment.hub_url), {
     method: 'POST',
