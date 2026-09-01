@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ConnStatus } from './client';
+import { CaptionPill } from './CaptionPill';
+import type { Caption } from './captions';
 import { stillMode } from './stillMode';
 import type { RoomEntry } from './workingOn';
 
@@ -48,6 +50,7 @@ export function OfficeOverlay({
   entries,
   status,
   caption,
+  captionColor,
   interactive = false,
 }: {
   teamName: string;
@@ -56,7 +59,9 @@ export function OfficeOverlay({
   status: ConnStatus;
   /** The room's narration line (first-five-seconds §2) — the broadcast card carries it now that
    *  the floating lower-third rail is gone (nick, 2026-08-31). */
-  caption?: string | null;
+  caption?: Caption | null;
+  /** The narrating member's colour, resolved by the caller. */
+  captionColor?: string | undefined;
   /** `/live` only. False keeps the passive, non-interactive, aria-hidden chyron `/broadcast` needs. */
   interactive?: boolean;
 }) {
@@ -246,9 +251,14 @@ export function OfficeOverlay({
           </p>
         )}
 
+        {/* This conditional is safe ONLY because this mount is never interactive: `interactive`
+            false means the whole card is `aria-hidden`, so the pill's aria-live region has nothing
+            to announce to. If this card ever goes interactive with a caption, hoist the conditional
+            INSIDE the pill the way WorkStack does — a live region that does not exist until the
+            first caption arrives announces that caption to nobody. (dolly, review of #1126.) */}
         {caption && (
-          <p className="lc-ov__caption" aria-live="polite">
-            {caption}
+          <p className="lc-ov__caption">
+            <CaptionPill caption={caption} color={captionColor} />
           </p>
         )}
 

@@ -6,6 +6,7 @@ import { MusterdWord } from '../brand/MusterdWord';
 import { memberColor } from '../live/format';
 import { OfficeOverlay } from '../live/OfficeOverlay';
 import { isStill } from '../live/stillMode';
+import type { Caption } from '../live/captions';
 import type { RoomEntry } from '../live/workingOn';
 import type { OfficeData, OfficeEvent, OfficeHandle } from '../live/office-scene';
 
@@ -178,7 +179,24 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
     },
   },
 ];
+/** A fixture member's kind, for the caption dot's colour — the pool is the roster here. */
+const kindOfMock = (name: string): Kind => (POOL.find((m) => m.name === name)?.kind ?? 'agent');
+
 const LOOP = 5600;
+
+/**
+ * One narrated moment per act family — the fixture for the caption pill's five tones. Real captions
+ * are composed from real envelopes (`captionFor`), which this route never has: it fires scene events
+ * directly. Written out here so the pill's colours are reachable in the design loop instead of only
+ * when the matching act happens to occur on `/live`.
+ */
+const CAPTIONS: Caption[] = [
+  { text: 'Ada is handing work to Bo', who: 'Ada', tone: 'handoff' },
+  { text: "Cy accepted Dev's work — it's done", who: 'Cy', tone: 'accept' },
+  { text: 'Eli is asking Fen to approve something', who: 'Eli', tone: 'ask' },
+  { text: 'Hana is redirecting the team', who: 'Hana', tone: 'steer' },
+  { text: 'Ivy just walked in', who: 'Ivy', tone: 'presence' },
+];
 
 /* The overlay's fixture reel — real-shaped titles (long, ADR-numbered, the kind that actually
    truncate) plus the quiet cases, so the card is designed against the worst entry and not a tidy
@@ -265,6 +283,8 @@ function OfficePreviewPage() {
     return new Set(pool.map((m) => m.name));
   });
   const [away, setAway] = useState<Set<string>>(() => new Set(['Gus']));
+  // The scene hands the narrated moment out; the chrome renders it (the /live wiring, mirrored here).
+  const [caption, setCaption] = useState<Caption | null>(null);
 
   // `?idle=all` (or a comma list of names) forces members idle on load — the case the leisure furniture
   // exists for, and the one that's tedious to reach by clicking. `?idle=all` empties every desk.
@@ -412,7 +432,12 @@ function OfficePreviewPage() {
          * designer who has the setting turned on.
          */
         const reduced = search.has('reduced');
-        const handle = mountOffice(host, labelHost, reduced, { interactiveLabels: true });
+        const handle = mountOffice(host, labelHost, reduced, {
+          interactiveLabels: true,
+          // The narration is chrome now, so the scene only says what the moment is and the fixture's
+          // own overlay renders it — the same wiring `/live` and `/broadcast` use.
+          onCaption: (next) => setCaption(next),
+        });
         handle.update(dataRef.current());
         handleRef.current = handle;
         (window as unknown as { __office?: OfficeHandle }).__office = handle; // dev-fixture debug handle
@@ -495,6 +520,7 @@ function OfficePreviewPage() {
   }, [buildData]);
 
   const fire = (ev: OfficeEvent) => handleRef.current?.emit(ev);
+  const captionAt = useRef(0);
   const toggle = (set: Set<string>, name: string): Set<string> => {
     const next = new Set(set);
     if (next.has(name)) next.delete(name);
@@ -562,6 +588,20 @@ function OfficePreviewPage() {
           »
         </button>
         <span className="lc__pbtn-sep" />
+        <button
+          className="lc__pbtn"
+          title="narration: cycle the caption tones"
+          onClick={() => {
+            // One of each act family, in order, so the pill's five tones are all reachable from the
+            // fixture. Without this the caption was only observable by waiting for the right real act
+            // to happen on /live, which is not a design loop.
+            const next = CAPTIONS[captionAt.current % CAPTIONS.length]!;
+            captionAt.current += 1;
+            fire({ kind: 'caption', caption: next });
+          }}
+        >
+          💬
+        </button>
         <button
           className="lc__pbtn"
           title="ambient gesture: stretch"
@@ -660,6 +700,8 @@ function OfficePreviewPage() {
             present={present.size}
             entries={REEL.slice(0, reelCount)}
             status="live"
+            caption={caption}
+            captionColor={caption ? memberColor(caption.who, kindOfMock(caption.who)) : undefined}
             interactive
           />
           <p className="lc-office__caption">office choreography preview</p>

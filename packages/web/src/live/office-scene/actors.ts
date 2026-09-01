@@ -77,6 +77,7 @@ const GESTURE_DUR: Record<number, number> = {
   [GESTURE.sip]: 3.2,
   [GESTURE.swivel]: 3.5,
   [GESTURE.roll]: 3.0,
+  [GESTURE.settle]: 5.0, // the longest of them: getting comfortable is not a quick motion
 };
 /** Move `cur` toward `target` at a constant rate (the blend is shaped by `smooth()` where it's consumed). */
 function toward(cur: number, target: number, rate: number): number {
@@ -137,6 +138,7 @@ export function homePoses(
         alpha: 1,
         ...AT_REST,
         sit: 1, // a desk member's home *is* the chair — they belong seated
+        casual: false, // there is a keyboard in front of them; the hands belong on it
       });
     } else if (pl.kind === 'leisure') {
       const spot = LEISURE_SPOTS[pl.spot];
@@ -153,6 +155,9 @@ export function homePoses(
         alpha: 1,
         ...AT_REST,
         sit: spot.sit,
+        // Every seated leisure spot is deskless — couch, meeting chair, waiting chair. The reader at
+        // the shelves stands (`sit: 0`), so the default already excludes them.
+        casual: spot.casual ?? spot.sit > 0,
       });
     } else if (pl.kind === 'nook') {
       const i = nook.indexOf(name);
@@ -588,6 +593,9 @@ export function createActors(): Actors {
         stride: a.stride,
         sit: a.sit, // eased through stands and errand sits alike (see `sitTargetOf`)
         heading: a.head,
+        // An errand sit (eating on the couch) is casual; a beat that holds a desk member in their own
+        // chair is not, and says so on its fabricated spot. Off a sit leg, their home seat decides.
+        casual: leg.sitAt ? (leg.sitAt.casual ?? leg.sitAt.sit > 0) : (homes.get(name)?.casual ?? false),
         // An errand sitter on the couch composite-sorts with it, exactly like a leisure placement.
         ...(leg.sitAt?.depthAt ? { depthAt: leg.sitAt.depthAt } : {}),
       });
@@ -984,7 +992,9 @@ export function createActors(): Actors {
       // walk that never goes anywhere; the facing comes from the leg's `dir`, which the actor system
       // eases into rather than snapping — so this reads as two people swivelling to talk.
       const turn = (self: Pose, other: Pose, lead: boolean): Leg[] => {
-        const seat = { zone: 'lounge' as const, lx: self.lx, ly: self.ly, dir: self.dir, sit: 1 };
+        // `casual: false` — this holds a member seated at their OWN DESK, keyboard and all. The zone
+        // label is only there to satisfy the spot shape; nothing reads it on this path.
+        const seat = { zone: 'lounge' as const, lx: self.lx, ly: self.ly, dir: self.dir, sit: 1, casual: false };
         const face = travelDir(self.lx, self.ly, other.lx, other.ly);
         const beat = (d: number, overlay: number): Leg => ({
           fx: self.lx, fy: self.ly, tx: self.lx, ty: self.ly,

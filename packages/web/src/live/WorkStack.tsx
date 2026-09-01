@@ -1,5 +1,7 @@
 import type { RoomEntry } from './workingOn';
 import { shortLaneState } from './presenceLabel';
+import { CaptionPill } from './CaptionPill';
+import type { Caption } from './captions';
 
 /**
  * Who is working — floats over the office floor (presence-chrome design). Present members with a
@@ -9,12 +11,19 @@ import { shortLaneState } from './presenceLabel';
  * it replaced a floating lower-third element over the scene (nick, 2026-08-31): a transient
  * sentence is chrome, and chrome belongs in the frame, not on the floor.
  */
-export function WorkStack({ entries, caption }: { entries: RoomEntry[]; caption?: string | null }) {
+export function WorkStack({
+  entries,
+  caption,
+  captionColor,
+}: {
+  entries: RoomEntry[];
+  caption?: Caption | null;
+  /** The narrating member's colour, resolved by the caller from the same roster the scene draws. */
+  captionColor?: string | undefined;
+}) {
   const rows = entries.filter((e) => e.title != null);
   const narration = (
-    <span className="lc-workstack__caption" aria-live="polite">
-      {caption ?? ''}
-    </span>
+    <CaptionPill caption={caption ?? null} color={captionColor} className="lc-workstack__caption" />
   );
   if (rows.length === 0) {
     return (

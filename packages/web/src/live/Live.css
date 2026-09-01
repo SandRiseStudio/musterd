@@ -1167,25 +1167,79 @@
    floating lower-third element over the room (nick, 2026-08-31). One line, truncated, quiet:
    the room's own sentence, not a headline. Fades on change; reduced-motion needs no branch
    because the fade is a plain opacity transition. */
-.lc-workstack__caption {
-  flex: 1 1 auto;
+/* ── the narration pill (CaptionPill.tsx) ───────────────────────────────────────────────────────
+   One transient sentence about a real moment. It used to be flat grey italic, which made an
+   acceptance and an urgent ask look identical (nick, 2026-08-31). Now: a dot in the actor's own
+   colour and a tone tint from the act family. Colour is never the only signal — the sentence says
+   the same thing in words, and every tone's INK token is the measured 4.6:1 sibling of its fill
+   (packages/web/AGENTS.md: a fill used as text is the mistake those pairs exist to prevent). */
+.lc-caption {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+.lc-caption__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lc-2, 4px);
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px var(--lc-3, 6px) 2px var(--lc-2, 4px);
+  border: 1px solid color-mix(in srgb, var(--lc-cap-tone) 42%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--lc-cap-tone) 13%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-meta);
+  font-weight: 500;
+  color: var(--lc-cap-ink);
+  animation: lc-caption-in var(--lc-dur-2) ease-out;
+  /* The default tone, so the pill is never unstyled while a new act family is being added. */
+  --lc-cap-tone: var(--lc-info);
+  --lc-cap-ink: var(--lc-info-ink);
+}
+.lc-caption__pill.is-accept {
+  --lc-cap-tone: var(--lc-success);
+  --lc-cap-ink: var(--lc-success-ink);
+}
+.lc-caption__pill.is-ask {
+  --lc-cap-tone: var(--lc-warn);
+  --lc-cap-ink: var(--lc-warn-ink);
+}
+.lc-caption__pill.is-handoff {
+  --lc-cap-tone: var(--lc-handoff);
+  --lc-cap-ink: var(--lc-handoff-ink);
+}
+.lc-caption__pill.is-steer {
+  --lc-cap-tone: var(--lc-steer);
+  --lc-cap-ink: var(--lc-steer-ink);
+}
+.lc-caption__pill.is-presence {
+  --lc-cap-tone: var(--lc-info);
+  --lc-cap-ink: var(--lc-info-ink);
+}
+.lc-caption__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  /* Falls back to the tone when the narrator is not on the roster we can colour from. */
+  background: var(--lc-cap-tone);
+}
+.lc-caption__text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--font-mono, monospace);
-  font-size: var(--lc-type-meta);
-  font-weight: 500;
-  font-style: italic;
-  color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
-  animation: lc-caption-in var(--lc-dur-2) ease-out;
+}
+.lc-workstack__caption {
+  flex: 1 1 auto;
 }
 @keyframes lc-caption-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lc-workstack__caption { animation: none; }
+  .lc-caption__pill { animation: none; }
 }
 .lc-workstack__count,
 .lc-workstack__quiet {
@@ -5447,14 +5501,7 @@
    member reel above it (it replaced the floating lower-third rail, nick 2026-08-31). */
 .lc-ov__caption {
   margin: 2px 0 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono, monospace);
-  font-size: var(--lc-type-meta);
-  font-style: italic;
-  color: var(--lc-paper-dim, rgba(43, 31, 19, 0.72));
-  animation: lc-caption-in var(--lc-dur-2) ease-out;
+  min-width: 0;
 }
 .lc-ov__now {
   display: flex;

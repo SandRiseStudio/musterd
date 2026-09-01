@@ -70,6 +70,38 @@ describe('homePoses', () => {
     expect(poses.has('Gone')).toBe(false);
   });
 
+  it('marks a leisure sitter casual and a desk member not — the deskless-hands read', () => {
+    // `active` posture is what claims the leisure furniture (couch / meeting chairs / waiting chair);
+    // `working` competes for a desk. The flag is what stops an idle member on the couch sitting with
+    // their arms out on a keyboard that is not there (nick, 2026-08-31).
+    const idle = node('Ada');
+    idle.posture = 'active';
+    const { placements, byName } = world([idle, node('Bo')]);
+    const poses = homePoses(placements, byName);
+    expect(placements.get('Ada')).toMatchObject({ kind: 'leisure' });
+    expect(poses.get('Ada')!.casual).toBe(true);
+    expect(placements.get('Bo')).toMatchObject({ kind: 'desk' });
+    expect(poses.get('Bo')!.casual).toBe(false);
+  });
+
+  it('leaves the standing reader alone — browsing the shelves is not sitting', () => {
+    // Fill every seated leisure spot so the next idle member probes onto a `reading` spot, which
+    // stands (`sit: 0`) and must not take the seated-casual pose.
+    const idlers = ['Ada', 'Bo', 'Cy', 'Di', 'Eli', 'Fi', 'Gus', 'Hana'].map((n) => {
+      const m = node(n);
+      m.posture = 'active';
+      return m;
+    });
+    const { placements, byName } = world(idlers);
+    const poses = homePoses(placements, byName);
+    for (const [name, pose] of poses) {
+      const pl = placements.get(name);
+      if (pl?.kind !== 'leisure') continue;
+      // Standing spots are never casual-seated; seated ones always are.
+      expect(pose.casual).toBe(pose.sit > 0);
+    }
+  });
+
   it('queues overflow (past every desk) single-file receding from the entrance', () => {
     // Three more present-and-working members than the floor has desks → 3 spill onto the queue.
     const nodes = Array.from({ length: DESK_SLOTS.length + 3 }, (_, i) => node(`M${String(i).padStart(2, '0')}`));

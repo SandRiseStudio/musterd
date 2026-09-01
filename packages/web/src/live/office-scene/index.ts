@@ -28,7 +28,7 @@ import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS , REC
 import { computeLightEnv, type LightEnv } from './lighting';
 import { isWithinWorkingHours } from './workingHours';
 import { assignSeats, audiblyWorking, type Placement } from './seating';
-import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type CaptionRail } from '../captions';
+import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type Caption, type CaptionRail } from '../captions';
 import { createWelcome, stepWelcome } from './welcome';
 import {
   animatedDeskAnchors,
@@ -206,12 +206,12 @@ export interface OfficeOptions {
    */
   showWorkCues?: boolean;
   /**
-   * The narration line (first-five-seconds §2) — one transient plain-language sentence about what
-   * just happened in the room. Called with the current line, or null when it expires. The rail used
-   * to be a floating lower-third element over the scene; it now reads as chrome, so the CHROME
-   * renders it (WorkStack's header) and the scene only says what the line is (nick, 2026-08-31).
+   * The narration line (first-five-seconds §2) — one transient plain-language moment about what
+   * just happened in the room. Called with the current caption, or null when it expires. The rail
+   * used to be a floating lower-third element over the scene; it now reads as chrome, so the CHROME
+   * renders it (WorkStack's header) and the scene only says what the moment is (nick, 2026-08-31).
    */
-  onCaption?: (line: string | null) => void;
+  onCaption?: (caption: Caption | null) => void;
 }
 
 export function mountOffice(
@@ -320,8 +320,8 @@ export function mountOffice(
       }, CAPTION_HOLD_MS / 4);
     }
   }
-  function pushRail(text: string) {
-    rail = pushCaption(rail, text, Date.now());
+  function pushRail(caption: Caption) {
+    rail = pushCaption(rail, caption, Date.now());
     renderRail();
   }
   let teamName = 'revive';
@@ -1403,12 +1403,17 @@ export function mountOffice(
     const casters = deskSlot !== null && chairKindFor(deskSlot) !== 'stool';
     const mug = deskSlot !== null && deskHasProp(deskSlot, 'coffee');
     const water = deskSlot !== null && deskHasProp(deskSlot, 'water');
+    // A seated LEISURE spot (couch, meeting chair, waiting chair) is a different body: already
+    // reclined with its hands in its lap, and with no desk, no casters and no mug to work against.
+    // So it swaps the desk's `lean` — which would recline someone who is already reclined — for
+    // `settle`, and leans the weights toward the broad, deskless beats (nick, 2026-08-31).
+    const lounging = pl?.kind === 'leisure' && (LEISURE_SPOTS[pl.spot]?.sit ?? 0) > 0;
     const beats: Array<[number, () => boolean]> = [
       [15, () => actors.gestureBeat(who, GESTURE.stretch)],
-      [15, () => actors.gestureBeat(who, GESTURE.glance)],
+      [lounging ? 20 : 15, () => actors.gestureBeat(who, GESTURE.glance)],
       [14, () => actors.gestureBeat(who, GESTURE.scratch)],
-      [14, () => actors.gestureBeat(who, GESTURE.chin)],
-      [14, () => actors.gestureBeat(who, GESTURE.lean)],
+      [lounging ? 18 : 14, () => actors.gestureBeat(who, GESTURE.chin)],
+      [14, () => actors.gestureBeat(who, lounging ? GESTURE.settle : GESTURE.lean)],
       // The errands — real trips with a point to them, so they stay the occasional highlight:
       [15, () => coffeeStroll(who, slot)],
       [9, () => actors.errandPhone(who, slotRng(teamName, slot, 'phone'))], // gets up, takes a call, paces, comes back
@@ -1535,7 +1540,7 @@ export function mountOffice(
       scheduleAmbient();
     }
     if (ev.kind === 'caption') {
-      pushRail(ev.text);
+      pushRail(ev.caption);
       return;
     }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
