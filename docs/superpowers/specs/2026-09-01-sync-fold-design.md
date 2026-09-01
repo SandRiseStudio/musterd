@@ -138,6 +138,12 @@ puller believes a *lower* resume point and refuses one above its own last applie
    `from_member`/`to_member` the ids resolved in 3. **`nodes.next_seq` is never read or written.**
    That is the ADR 331 §Consequences hazard in one sentence, and the first test in
    `fold.test.ts` is its falsifier.
+
+   `created_at` is **this daemon's clock at fold time, never a value from the wire.** The wire has
+   no `created_at` field today, but `SyncEvent` carries `ts` and a careless `created_at:
+   envelope.ts` in the fold would reintroduce §"The ts-cursor defect" under the very column meant
+   to fix it. `fold.test.ts` asserts the folded row's `created_at` is the fold's `now`, not the
+   envelope's `ts`.
 5. **`messages.id` already present with a *different* `(origin_node, origin_seq)`** → stop,
    terminal. ADR 335 scoped `sync_log`'s envelope-id uniqueness to the origin and named this as
    3b-ii's call: two rows in one team may share an id, and `messages.id` is a primary key, so the
@@ -164,10 +170,36 @@ CREATE TABLE IF NOT EXISTS sync_pull_cursor (
   last_hub_seq  INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
+
+-- The read side's future key (§"The ts-cursor defect"). No index on created_at exists anywhere
+-- in messages today (only requests and seed_thread_entries carry one); the readers that move
+-- off ts will scan by it, so the column is indexed here, by the increment that makes it matter.
+CREATE INDEX IF NOT EXISTS idx_messages_team_created ON messages(team_id, created_at);
 ```
 
 The hub uses the same cursor table for its own fold — its "source" is local `sync_log`, but the
 cursor's meaning (last `hub_seq` applied to `messages`) is identical.
+
+## The ts-cursor defect — real, and a hard precondition on the second machine
+
+Raised as lane `01M1FAYTHQA881M35PDPXRTGM1` and second-read by ryder (2026-09-01, re-verified
+on main `ffa0831d`): every inbox and wake cursor keys on `messages.ts`, which is the **origin
+machine's** wall clock — `listInbox` (`messages.ts:206`), the delivered predicate
+(`delivery.ts:343`: `cursor.last_read_ts > msg.ts || …`), the wake queue (`residency.ts:697`,
+ordered by `m.ts ASC`), `metrics.ts:42`, `cursors.ts`. A folded remote event whose `ts` is older
+than a seat's `last_read_ts` is invisible to that seat forever. Ordinary sync lag suffices to
+produce one.
+
+**It does not block this increment.** On one machine there is one writer and `ts` is monotone, so
+every reader is correct. It **must land before a second machine enrolls** — and a sentence has no
+owner, so the enrollment lane carries it as a `depends_on`, not as prose.
+
+The fix is (b): the five readers move from `ts` to `created_at`, local receipt time, which the
+fold guarantees is monotone on this machine by rule 4. Rejected: (a) rewrite `ts` at fold — ADR
+335 has `ts` travel for a reason; (c) a parallel sync-time column — the ADR 331 hazard for nothing
+(b) does not give once `created_at` is indexed. Its falsifier, written before any reader moves:
+fold an event with `ts` one hour below a seat's `last_read_ts` and assert `listInbox` with
+`unreadOnly` returns it — red on today's readers, green only when all five have moved.
 
 ## Errors and refusals
 
