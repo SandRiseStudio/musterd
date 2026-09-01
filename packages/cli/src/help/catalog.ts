@@ -297,7 +297,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'team',
     signature: '<create|add|credential|agent-key|remove|archive|export> …',
     summary:
-      'create a team, add/remove members, recover or re-issue a lost credential or team key, archive a team, export the roster to git',
+      'create a team, add/remove members, manage scoped bootstrap credentials, archive a team, export the roster to git',
     group: 'team',
     primary: true,
     detail:
@@ -312,6 +312,10 @@ export const CATALOG: readonly CommandEntry[] = [
       '                               RECOVERS it — reads it back off the seat bindings already on this\n' +
       '                               machine and re-records it, changing nothing on the team. --rotate mints\n' +
       '                               a new one and invalidates every seat’s (it counts them and needs --yes)\n' +
+      '  bootstrap mint (--seat <name>|--role <name>|--host <label>) [--label <text>] [--expires-in <duration>]\n' +
+      '                               mint one independently revocable bootstrap credential, shown once\n' +
+      '  bootstrap list              show the redacted credential inventory (admin)\n' +
+      '  bootstrap revoke <id>       revoke one scoped bootstrap credential (admin)\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
       '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
       '  export <slug> [--to <dir>]   move the roster onto git-tracked .musterd/ files (ADR 058);\n' +
@@ -319,6 +323,7 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: [
       'musterd team create acme --as nick',
       'musterd team add lin --kind human --role reviewer',
+      'musterd team bootstrap mint --seat ada --expires-in 24h',
       'musterd team agent-key            # `musterd agent` says no team agent key? start here',
     ],
   },

@@ -66,9 +66,9 @@ describe('3b-i containment', () => {
     expect(before.messages).toEqual({ n: 1 });
     expect(before.seqs).toEqual([{ id: expect.any(String), next_seq: 2 }]);
 
-    // Rewind past v50 and replay the migration tail. v51 only adds the independent lease table.
+    // Rewind past v50 and replay the migration tail. v51/v52 add independent auth tables.
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(51);
+    expect(runMigrations(db)).toBe(52);
 
     expect(snapshot(db)).toEqual(before);
     // …and the replay did not drop what was already staged-adjacent: the tables survive it.

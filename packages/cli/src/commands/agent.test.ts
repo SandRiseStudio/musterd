@@ -12,6 +12,10 @@ const h = vi.hoisted(() => ({
     grant: { id: 'g1', target: 'June', scope: 'seat', lifetime: 'standing' },
     token: 'msgr_standing',
   })),
+  mintBootstrapCredential: vi.fn(async () => ({
+    credential: { id: 'bc1', use: 'claim_seat', target: 'June' },
+    agent_key: 'mskey_scoped_june',
+  })),
   saveBinding: vi.fn(),
   saveWorkspaceSpec: vi.fn(),
   writeSeatFile: vi.fn(),
@@ -30,7 +34,12 @@ vi.mock('./helpers.js', () => ({
   resolve: () => ({
     team: 'ritual',
     config: { server: 'http://localhost:4849', agentKeys: h.agentKeys },
-    http: { addMember: h.addMember, roster: h.roster, issueGrant: h.issueGrant },
+    http: {
+      addMember: h.addMember,
+      roster: h.roster,
+      issueGrant: h.issueGrant,
+      mintBootstrapCredential: h.mintBootstrapCredential,
+    },
   }),
 }));
 vi.mock('../config.js', () => ({
@@ -116,7 +125,7 @@ describe('musterd agent <name>', () => {
       expect.objectContaining({
         version: 2,
         team: 'ritual',
-        agent_key: 'mskey_team',
+        agent_key: 'mskey_scoped_june',
         claim: { mode: 'seat', name: 'June' },
       }),
     );
@@ -347,47 +356,28 @@ describe('musterd agent <name>', () => {
   });
 });
 
-describe('the team agent key is a PREFLIGHT, not a late check', () => {
-  // Measured 2026-08-14 on team `revive`: the key check sat *below* `addMember`, so a run that could
-  // never finish still declared the seat. The roster kept a member the operator never got a workspace
-  // for, and the error named none of it. A credential this command cannot proceed without is checked
-  // before the first write, so a failure leaves the team exactly as it found it.
-  it('throws before addMember/writeSeatFile when no key is on this machine', async () => {
+describe('the agent workspace receives its own scoped bootstrap credential', () => {
+  it('does not require the legacy team agent key on this machine', async () => {
     h.agentKeys = {};
     h.rosterHome = { ritual: '/tmp/ritual-home' };
-    await expect(
-      agentCommand(parseArgs(['June']), { infraGate: async () => null }),
-    ).rejects.toThrow(CliError);
-    expect(h.addMember).not.toHaveBeenCalled();
-    expect(h.writeSeatFile).not.toHaveBeenCalled();
-    expect(h.issueGrant).not.toHaveBeenCalled();
-    expect(h.configure).not.toHaveBeenCalled();
-  });
-
-  it('names a repair that works on an EXISTING team — never `team create`', async () => {
-    h.agentKeys = {};
-    const err = await agentCommand(parseArgs(['June']), { infraGate: async () => null }).catch(
-      (e: CliError) => e,
-    );
-    const msg = (err as CliError).message;
-    expect(msg).toContain('musterd team agent-key');
-    // `team create <team>` was the old advice and is wrong for a team that already exists — running
-    // it is the one action an admin in this state must not take.
-    expect(msg).not.toContain('team create');
-  });
-
-  it('accepts MUSTERD_AGENT_KEY as the escape hatch and proceeds', async () => {
-    h.agentKeys = {};
-    process.env['MUSTERD_AGENT_KEY'] = 'mskey_from_env';
-    try {
-      expect(await agentCommand(parseArgs(['June']), { infraGate: async () => null })).toBe(0);
-    } finally {
-      delete process.env['MUSTERD_AGENT_KEY'];
-    }
-    expect(h.addMember).toHaveBeenCalled();
+    expect(await agentCommand(parseArgs(['June']), { infraGate: async () => null })).toBe(0);
+    expect(h.mintBootstrapCredential).toHaveBeenCalledWith('ritual', {
+      use: 'claim_seat',
+      target: 'June',
+      label: expect.any(String),
+    });
     expect(h.saveBinding).toHaveBeenCalledWith(
       h.workspace.dir,
-      expect.objectContaining({ agent_key: 'mskey_from_env' }),
+      expect.objectContaining({ agent_key: 'mskey_scoped_june' }),
+    );
+  });
+
+  it('does not fall back to an ambient legacy key', async () => {
+    process.env['MUSTERD_AGENT_KEY'] = 'mskey_legacy';
+    await agentCommand(parseArgs(['June']), { infraGate: async () => null });
+    expect(h.saveBinding).toHaveBeenCalledWith(
+      h.workspace.dir,
+      expect.objectContaining({ agent_key: 'mskey_scoped_june' }),
     );
   });
 });

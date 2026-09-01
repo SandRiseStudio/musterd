@@ -22,7 +22,7 @@ src/
   args.ts             // argv parser → { command, positionals, flags }
   config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed and same-seat claimed seat_credential (omit = preserve); capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268/340)
   machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
-  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; routine agent HTTP calls re-claim their bound seat in the same Workspace and hold its Presence through the request (ADR 339/340); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
+  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; scoped bootstrap credential admin lifecycle (ADR 344); routine agent HTTP calls re-claim their bound seat in the same Workspace and hold its Presence through the request (ADR 339/340); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   test-auth.ts        // CLI integration-fixture claim helper: bootstrap key → agent-seat credential + Presence-bound lease (ADR 337)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
@@ -143,7 +143,7 @@ src/
     stream.ts         // musterd stream doctor|build|start|stop|status: the one-verb hosted broadcast, absorbing scripts/broadcast/live.sh — `doctor` prints the exact repair per failed precondition; `build` records the pushed DIGEST and `start` runs that (a rebuilt tag can resolve to the previous image) and discovers the tailnet address itself; secrets stay operator-set, presence-checked only
     broadcast-perf.ts // capture-pipeline instrumentation, dark unless MUSTERD_BROADCAST_PERF names a JSONL path: screencast fps/bytes, canvas draw rate, ffmpeg queue depth (its *slope* is the margin metric — `speed=` is pinned ≈1× for a live source), per-tree CPU + load; summarized by scripts/perf/broadcast-baseline.mjs
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
-    team.ts           // team create / add / remove / archive / export (ADR 058 db→file migration)
+    team.ts           // Team/member management, scoped bootstrap credential lifecycle (ADR 344), policy, and roster export
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
     join.ts           // join
     send.ts           // send
@@ -296,7 +296,11 @@ Runs the daemon as a background **service** so it survives a closed terminal/ses
 
 ### `musterd team add <name> --kind <agent|human> [--role <role>] [--lifecycle forever|session|until --until <iso>]`
 
-`POST /teams/:slug/members`. Prints `✓ added <name> (<kind>, <role>)` and the **join token + ready-to-paste connect hint** (the token is shown once). For agents the hint is the MCP/`join` invocation; copy it into the agent's surface. Output: `cmd/team-add`.
+`POST /teams/:slug/members`, then for an agent `POST /teams/:slug/agent-bootstrap-credentials`. Prints `✓ added <name> (<kind>, <role>)` and a ready-to-paste connect hint. An agent receives a shown-once `mskey_` constrained to that seat (ADR 344), never the legacy Team-wide key; a human receives their shown-once `mscr_` credential. Output: `cmd/team-add`.
+
+### `musterd team bootstrap <mint|list|revoke>` (ADR 344)
+
+Admin lifecycle for least-privilege harness bootstrap credentials. `mint` requires exactly one of `--seat <name>`, `--role <name>`, or `--host <label>` and optionally accepts `--label` plus `--expires-in <45s|15m|2h>`; it prints the new `mskey_` once. `list` returns redacted inventory metadata only. `revoke <credential-id>` immediately invalidates one scoped credential without disturbing any successor credential, enabling overlap-first rotation: mint, distribute and verify, then revoke.
 
 ### `musterd team remove <name>`
 

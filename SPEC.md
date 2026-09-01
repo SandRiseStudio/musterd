@@ -160,7 +160,7 @@ A new join/auth handshake is a MAJOR-of-MINOR change; it **landed as the isolate
 
 ## A.2 Credentials
 
-- **Agent join key** — team-scoped secret; authenticates a harness/session; rotatable; hashed. **Not** an identity and **not** sufficient to occupy a seat.
+- **Agent bootstrap credential** — an `mskey_` secret scoped by a server-held record to one seat claim, one declared role-pool claim, or one residency host label (ADR 344). It authenticates only that use, is independently expirable/revocable, and is **not** an identity or sufficient to occupy a seat. Existing Team-wide agent keys remain accepted only as marked legacy records during the compatibility window.
 - **Grant** — admin-issued authorization to occupy a seat/role. Fields: `{ id, team, scope: seat|role, target, issued_by, lifetime: "once"|"ttl"|"standing", expires_at?, single_use?, revoked? }`. **At live approval the admin picks the lifetime** (once / N-hours TTL / until-revoke), so reconnects within the window don't re-prompt while keeping "no silent grant." Seat/role-scoped, expiring, revocable. Every issue/use/revoke is audited.
 - **Human credential** — per-human-seat secret; acts as that human; observes if role permits.
 - **Admin** — capability on a human seat (creator default).
@@ -283,6 +283,9 @@ Delivery is unchanged (at-least-once, cursor-based); **notification tiering** is
 | `POST`   | `/teams/:slug/grants`                 | admin; issue a grant `{ scope, target, lifetime, expires_at?, single_use? }` → grant token                                                                            |
 | `DELETE` | `/teams/:slug/grants/:id`             | admin; revoke                                                                                                                                                         |
 | `POST`   | `/teams/:slug/agent-key/rotate`       | admin                                                                                                                                                                 |
+| `POST`   | `/teams/:slug/agent-bootstrap-credentials` | admin; mint one seat-, role-, or host-scoped bootstrap credential; plaintext returned once                                                                         |
+| `GET`    | `/teams/:slug/agent-bootstrap-credentials` | admin; redacted inventory (no plaintext or hashes)                                                                                                                  |
+| `DELETE` | `/teams/:slug/agent-bootstrap-credentials/:id` | admin; revoke one active scoped credential                                                                                                                        |
 | `POST`   | `/teams/:slug/policy`                 | admin; e.g. `{ allow_pre_issued_grants: bool }`                                                                                                                       |
 | `GET`    | `/teams/:slug/requests`               | admin; pending claim/teammate requests                                                                                                                                |
 | `POST`   | `/teams/:slug/requests/:id/decide`    | admin; `{ decision:'approve', lifetime:'once'\|'ttl'\|'standing', ttl_hours? }` \| `{ decision:'deny' }` — approve issues a grant of the admin-chosen lifetime        |

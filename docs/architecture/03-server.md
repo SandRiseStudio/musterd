@@ -25,7 +25,7 @@ src/
     schema.ts         // SCHEMA_V1_SQL: the DDL from 01-data-model.md as a TS constant (ADR 003)
     seed.ts           // seedDawn(db) test helper
   store/
-    teams.ts          // createTeam, getTeamBySlug, listMembers, archiveTeam
+    teams.ts          // Team CRUD/policy + scoped bootstrap credential mint, lookup, inventory, revoke (ADR 344)
     members.ts        // addMember (issues token), getMember, authMember(token), leaveMember (releases in-flight claims — ADR 196), reapStaleObservers + reapExcessIdleObservers
     messages.ts       // insertMessage, listInbox(memberId, since), listTeamMessages
     presence.ts       // attach, heartbeat, detach/release, listPresence, reapStale, reattestModel (ADR 101), reattestSurface (ADR 275) (kind-scoped single-active, ADR 042)
@@ -230,6 +230,7 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 ## Auth
 
 - `authMember(token)`: `sha256(token)` → lookup `members.token_hash`. Returns the Member or throws `unauthorized`. WS `hello.token` and HTTP `Authorization: Bearer` both go through this. The `unauthorized` message points at the likely cause — a token minted against a _different_ db than this daemon serves (ADR 016).
+- **Scoped bootstrap credentials (ADR 344):** HTTP and WS claim resolve an active, unexpired `mskey_` record by hash before target authorization. `claim_seat` and `claim_role` records fail closed unless the requested target matches the server-held target; `host` records cannot claim. Residency wake lease, progress, turn, and report routes accept a `host` record only when its target matches the request's host or the lease's stored host. Admin-only HTTP operations mint, list a redacted inventory, and revoke scoped credentials; plaintext is returned only by mint and hashes never cross the transport.
 
 ## Diagnostics (ADR 016)
 

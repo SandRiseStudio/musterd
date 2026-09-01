@@ -16,6 +16,23 @@ import type { TeamRow } from './rows.js';
 
 const SLUG_RE = /^[a-z0-9-]{1,32}$/;
 
+export type BootstrapCredentialUse = 'claim_seat' | 'claim_role' | 'host' | 'legacy';
+
+export interface BootstrapCredential {
+  id: string;
+  team_id: string;
+  key_hash: string;
+  use_kind: BootstrapCredentialUse;
+  target: string | null;
+  label: string | null;
+  state: 'active' | 'rotated' | 'revoked';
+  expires_at: number | null;
+  created_by: string | null;
+  created_at: number;
+  rotated_at: number | null;
+  revoked_at: number | null;
+}
+
 export function createTeam(
   db: Database,
   input: {
@@ -117,6 +134,126 @@ export function getAgentKeyHash(db: Database, teamId: string): string | null {
     >('SELECT agent_key_hash FROM teams WHERE id = ?')
     .get(teamId);
   return row?.agent_key_hash ?? null;
+}
+
+/**
+ * Mint a bootstrap credential constrained by a server-held purpose and target (ADR 344).
+ * The caller receives the plaintext once; only its hash is retained.
+ */
+export function mintBootstrapCredential(
+  db: Database,
+  input: {
+    teamId: string;
+    useKind: Exclude<BootstrapCredentialUse, 'legacy'>;
+    target: string;
+    label?: string;
+    expiresAt?: number;
+    createdBy?: string;
+  },
+): { credential: BootstrapCredential; agent_key: string; rotated: string[] } {
+  const agent_key = newSecret(TOKEN_PREFIXES.agent_key);
+  const now = Date.now();
+  const credential: BootstrapCredential = {
+    id: ulid(),
+    team_id: input.teamId,
+    key_hash: hashToken(agent_key),
+    use_kind: input.useKind,
+    target: input.target,
+    label: input.label ?? null,
+    state: 'active',
+    expires_at: input.expiresAt ?? null,
+    created_by: input.createdBy ?? null,
+    created_at: now,
+    rotated_at: null,
+    revoked_at: null,
+  };
+  const rotated = db.transaction(() => {
+    const predecessors = db
+      .prepare<[string, string, string], { id: string }>(
+        `SELECT id FROM agent_bootstrap_credentials
+         WHERE team_id = ? AND use_kind = ? AND target = ? AND state = 'active'`,
+      )
+      .all(input.teamId, input.useKind, input.target)
+      .map((row) => row.id);
+    // A same-scope mint is the explicit start of a staged rotation. The predecessor remains valid
+    // until the admin revokes it, but inventory names the overlap rather than showing two unrelated
+    // active records (ADR 344 §5–6).
+    db.prepare(
+      `UPDATE agent_bootstrap_credentials
+       SET state = 'rotated', rotated_at = ?
+       WHERE team_id = ? AND use_kind = ? AND target = ? AND state = 'active'`,
+    ).run(now, input.teamId, input.useKind, input.target);
+    db.prepare(
+      `INSERT INTO agent_bootstrap_credentials
+        (id, team_id, key_hash, use_kind, target, label, state, expires_at, created_by, created_at, rotated_at, revoked_at)
+       VALUES
+        (@id, @team_id, @key_hash, @use_kind, @target, @label, @state, @expires_at, @created_by, @created_at, @rotated_at, @revoked_at)`,
+    ).run(credential);
+    return predecessors;
+  })();
+  return { credential, agent_key, rotated };
+}
+
+/** Resolve an active, unexpired scoped bootstrap credential by its presented secret. */
+export function findBootstrapCredential(
+  db: Database,
+  teamId: string,
+  agentKey: string,
+): BootstrapCredential | null {
+  return (
+    db
+      .prepare<[string, string, number], BootstrapCredential>(
+        `SELECT * FROM agent_bootstrap_credentials
+         WHERE team_id = ? AND key_hash = ? AND state IN ('active', 'rotated')
+           AND (expires_at IS NULL OR expires_at > ?)
+         LIMIT 1`,
+      )
+      .get(teamId, hashToken(agentKey), Date.now()) ?? null
+  );
+}
+
+/** Resolve a credential record regardless of lifecycle state, for redacted refusal audit only. */
+export function findBootstrapCredentialRecord(
+  db: Database,
+  teamId: string,
+  agentKey: string,
+): BootstrapCredential | null {
+  return (
+    db
+      .prepare<[string, string], BootstrapCredential>(
+        `SELECT * FROM agent_bootstrap_credentials
+         WHERE team_id = ? AND key_hash = ?
+         LIMIT 1`,
+      )
+      .get(teamId, hashToken(agentKey)) ?? null
+  );
+}
+
+/** Revoke one scoped bootstrap credential. Legacy team keys remain on their compatibility path. */
+export function revokeBootstrapCredential(
+  db: Database,
+  teamId: string,
+  credentialId: string,
+): boolean {
+  const result = db
+    .prepare(
+      `UPDATE agent_bootstrap_credentials
+       SET state = 'revoked', revoked_at = ?
+       WHERE id = ? AND team_id = ? AND state IN ('active', 'rotated') AND use_kind <> 'legacy'`,
+    )
+    .run(Date.now(), credentialId, teamId);
+  return result.changes === 1;
+}
+
+/** Admin inventory source. Callers must redact key_hash before crossing a transport boundary. */
+export function listBootstrapCredentials(db: Database, teamId: string): BootstrapCredential[] {
+  return db
+    .prepare<[string], BootstrapCredential>(
+      `SELECT * FROM agent_bootstrap_credentials
+       WHERE team_id = ?
+       ORDER BY created_at DESC, id DESC`,
+    )
+    .all(teamId);
 }
 
 /**
