@@ -155,5 +155,6 @@
   "**15 of the 21 PRs in this window merged with no review recorded on the PR** (2026-09-01; falsify: find a review of any of #1128, #1131–#1135, #1137–#1139, #1141, #1142, #1144, #1145 in a durable record — a PR comment, a musterd act, or a lane acceptance — that this method missed).": "defect",
   "ADR 338's third falsifier did not fire on this window (2026-09-01): every REQUIRED above cites a probe or a pin. Falsify: re-read the four findings and find one whose severity rests on a category claim alone.": "other",
   "`residency.session_captured` / `residency.session_ended` rows (2026-08-28; falsify: query the": "defect",
-  "(2026-08-31; falsify: a dated entry below records it).": "defect"
+  "(2026-08-31; falsify: a dated entry below records it).~~ **Made 2026-09-01 13:26–13:28, seat": "other",
+  "row (2026-09-01, seat `ryder`; falsify: on a build before #1150, POST the route with the binding's": "defect"
 }

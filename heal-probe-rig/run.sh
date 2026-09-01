@@ -31,10 +31,17 @@ date +"start: %H:%M:%S"
 claude -p 'Run this exact Bash command in the FOREGROUND and nothing else, then stop: python3 -c "import time; time.sleep(40)" && echo P1-done' \
   --allowedTools Bash --output-format json >p1.json 2>p1.err &
 P1=$!
+# `claude -p` fires no SessionEnd (measured 2026-09-01: neither probe transcript carries one), so
+# P1 would hold the slot as "live" for the whole LOCAL_SESSION_LIVE_MS window and P2 would never
+# heal. Stamp P1's end the way an interactive exit's SessionEnd hook does, the moment it exits.
+( while kill -0 "$P1" 2>/dev/null; do sleep 1; done; sid=$(python3 -c "import json;print(json.load(open('p1.json'))['session_id'])" 2>/dev/null)
+  date +"p1 exited, stamping end: %H:%M:%S"
+  printf '{"session_id":"%s","transcript_path":"%s","hook_event_name":"SessionEnd","cwd":"%s"}' "$sid" "$HOME/.claude/projects/$(echo "$W" | sed 's#/#-#g')/$sid.jsonl" "$W" | musterd session end --stdin ) &
+STAMP=$!
 sleep 8
 claude -p 'Run this exact Bash command in the FOREGROUND: python3 -c "import time; time.sleep(60)" && echo P2-one. When it completes, run this second exact Bash command: echo P2-two. Then stop.' \
   --allowedTools Bash --output-format json >p2.json 2>p2.err
-wait "$P1" || true
+wait "$STAMP" || true
 
 date +"end: %H:%M:%S"
 for f in p1 p2; do
