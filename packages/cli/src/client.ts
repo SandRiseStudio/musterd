@@ -105,6 +105,8 @@ export interface HttpClientOpts {
   server: string;
   /** Team needed to re-claim an agent Presence for a standalone CLI HTTP request (ADR 339). */
   team?: string;
+  /** Workspace label passed to the command-scoped re-claim (ADR 068/092). */
+  workspace?: string;
   /** The self-identifying Bearer secret: agent-seat (`msac_`) or human (`mscr_`) credential. */
   key?: string;
   /**
@@ -168,7 +170,7 @@ export class HttpClient {
   }
 
   private async claimAgentLease(): Promise<{ lease: string; close: () => void } | undefined> {
-    const { key, seat, surface, team } = this.opts;
+    const { key, seat, surface, team, workspace } = this.opts;
     if (
       !this.opts.reclaimAgentLease ||
       !key?.startsWith(TOKEN_PREFIXES.agent_seat) ||
@@ -185,6 +187,7 @@ export class HttpClient {
         key,
         target: { seat },
         surface,
+        ...(workspace !== undefined ? { workspace } : {}),
         onDeliver: () => {},
         onOccupied: (_seat, _presenceId, _grant, _memory, _credential, sessionLease) => {
           if (!sessionLease) {

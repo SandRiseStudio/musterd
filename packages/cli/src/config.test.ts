@@ -273,6 +273,21 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
     expect(onDisk()['session']).toEqual(newer);
   });
 
+  it('a credential-less write preserves the claimed seat credential', () => {
+    saveBinding(dir, { ...base, seat_credential: 'msac_kept' });
+    saveBinding(dir, { ...base, model: 'claude-test-1' });
+    expect(onDisk()['seat_credential']).toBe('msac_kept');
+  });
+
+  it('does not carry a credential to a different claimed seat', () => {
+    saveBinding(dir, { ...base, seat_credential: 'msac_scout' });
+    saveBinding(dir, {
+      ...base,
+      claim: { mode: 'seat', name: 'nick' },
+    });
+    expect(onDisk()['seat_credential']).toBeUndefined();
+  });
+
   it('an observation-less write preserves the on-disk model observation', () => {
     // Same clobber shape as the capture above, one field over: `musterd claim` / `musterd agent`
     // rebuild the binding from state read before the hook observed anything. If the observation is

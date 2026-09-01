@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import {
   BINDING_DIR,
   BINDING_FILE,
@@ -9,6 +9,7 @@ import {
   type MemberKind,
   type MemberSummary,
 } from '@musterd/protocol';
+import { gitOutput, gitToplevel } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
@@ -34,6 +35,27 @@ export function findWorkspaceDir(startDir: string = process.cwd()): string | nul
     if (parent === dir) return null;
     dir = parent;
   }
+}
+
+/** The same bounded Workspace label the adapter sends on a claim (ADR 014/068). */
+function resolveClaimWorkspace(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const declared = env['MUSTERD_WORKSPACE']?.trim();
+  if (declared) return declared.slice(0, 120);
+
+  const folder = basename(cwd) || cwd;
+  const top = gitToplevel(cwd);
+  const branch = top ? gitOutput(['rev-parse', '--abbrev-ref', 'HEAD'], cwd) : null;
+  const subpath = top ? relative(top, cwd) : '';
+  const qualifier =
+    branch && branch !== 'HEAD'
+      ? branch
+      : subpath === '' || subpath.startsWith('..')
+        ? ''
+        : subpath;
+  return (qualifier ? `${folder}@${qualifier}` : folder).slice(0, 120);
 }
 
 /**
@@ -131,6 +153,7 @@ function gather(flags: Record<string, string | boolean>) {
     server,
     sources,
     team,
+    workspace: resolveClaimWorkspace(),
     asName: flagStr(flags, 'as'),
     model: attestedModel(binding, env),
   };
@@ -170,7 +193,7 @@ export function attestedModel(
  * from silently acting as a real teammate.
  */
 export function resolve(flags: Record<string, string | boolean>): Resolved {
-  const { config, server, sources, team, asName, model } = gather(flags);
+  const { config, server, sources, team, workspace, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -202,6 +225,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     http: new HttpClient({
       server,
       team,
+      workspace,
       key: match.identity.key,
       seat: match.identity.name,
       ...(match.identity.sessionLease !== undefined
@@ -221,7 +245,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
  * refuses on a missing/ambient identity — `status` must still print the (auth-free) roster anywhere.
  */
 export function resolveRead(flags: Record<string, string | boolean>): ResolvedRead {
-  const { config, server, sources, team, asName, model } = gather(flags);
+  const { config, server, sources, team, workspace, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -246,6 +270,7 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
         ? {
             server,
             team,
+            workspace,
             key: identity.key,
             seat: identity.name,
             ...(identity.sessionLease !== undefined ? { sessionLease: identity.sessionLease } : {}),

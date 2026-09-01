@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
-import { HttpClient } from './client.js';
+import { HttpClient, watchClaim } from './client.js';
 import { reachabilityNudge, resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { joinCommand } from './commands/join.js';
@@ -275,6 +275,49 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
 });
 
 describe('agent-side reachability nudge (ADR 046)', () => {
+  it('does not supersede a live same-workspace adapter while re-claiming agent HTTP authority', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const authority = await claimedAgent('dawn', 'Ada');
+    const agentKey = loadConfig().agentKeys['dawn']!;
+    const adapterError = vi.fn();
+    let adapter: ReturnType<typeof watchClaim>;
+    await new Promise<void>((resolve, reject) => {
+      adapter = watchClaim({
+        wsUrl: process.env['MUSTERD_SERVER']!.replace(/^http/, 'ws') + '/ws',
+        team: 'dawn',
+        key: authority.key,
+        target: { seat: 'Ada' },
+        surface: 'claude-code',
+        workspace: basename(cwdDir),
+        onDeliver: () => {},
+        onOccupied: () => resolve(),
+        onError: (message) => {
+          adapterError(message);
+          reject(new Error(message));
+        },
+      });
+    });
+
+    try {
+      saveBinding(cwdDir, {
+        version: 2,
+        server: process.env['MUSTERD_SERVER']!,
+        team: 'dawn',
+        agent_key: agentKey,
+        seat_credential: authority.key,
+        session_lease: 'msls_stale',
+        claim: { mode: 'seat', name: 'Ada' },
+      });
+
+      await resolve({}).http.inbox('dawn', { unread: true });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(adapterError).not.toHaveBeenCalled();
+    } finally {
+      adapter!.close();
+    }
+  });
+
   it('re-claims a bound agent before a routine HTTP read when its stored lease is stale', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
