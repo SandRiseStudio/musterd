@@ -29,6 +29,8 @@ import {
  *   its lane (WIP on the branch) and stopped, never proceeding. Closed, but flagged: a strand is the
  *   honest surface of "this team is missing a reachable admin for a decision it needs."
  * - `resolved` — the ask's thread was resolved without an explicit answer act. Closed.
+ * - `lapsed` — a below-top-tier clock ran out and NOTHING was ever recorded (see `applyTierClock`).
+ *   The only state here the timeline cannot produce: it comes from the clock, not from an envelope.
  */
 export type AskState =
   | 'open'
@@ -38,7 +40,8 @@ export type AskState =
   | 'accepted'
   | 'declined'
   | 'risk_accepted'
-  | 'resolved';
+  | 'resolved'
+  | 'lapsed';
 
 export interface AskView {
   env: Envelope;
@@ -65,6 +68,44 @@ export interface AskView {
 /** True when the ask still wants attention on sight — the strip's "loud" predicate. */
 export function askIsLoud(state: AskState): boolean {
   return state === 'open' || state === 'held';
+}
+
+/**
+ * Apply the tier clock to a timeline-derived list — the second half of an ask's state, and the half
+ * `deriveAsks` cannot know.
+ *
+ * **The defect this retires** (nick, 2026-09-01: "most of the acts on the act bar say timed out —
+ * if they are timed out, should we even show them?"). An ask leaves `open` only when a LATER
+ * envelope references it, and the ADR 147 §4 no-answer envelope (`status_update` +
+ * `meta.ask_outcome`) is the asking agent's honour system. Agents mostly do not send it. Measured on
+ * the live DB, 2026-09-01, over the last 1,000 envelopes (a 138-hour window): 41 asks, **14 of them
+ * never reached a terminal state**, every one hours-to-days past a deadline measured in minutes. All
+ * fourteen sat in the rail as `open`, in danger red, under Approve and Deny buttons.
+ *
+ * **Why silence is not one fact.** The tier already says what a missing answer MEANS (ADR 147 §4):
+ * the top tier holds, every tier below it proceeds and records the risk. So an elapsed clock reads
+ * two opposite ways, and the rail was shouting both in the same words:
+ *
+ * - **holding tier** → `held`. The agent stopped; nothing moves until a human answers. Still the
+ *   loudest thing on the page — this changes only where the state comes from, not what it does.
+ * - **below top** → `lapsed`. The contract fired days ago and the work went on without you. Not
+ *   loud, not answerable, not in the tab-title count, not in the stream rotation.
+ *
+ * **What it may and may not claim.** This reads the tier CONTRACT, never the agent's act. It knows
+ * the ask stopped blocking; it does not know what was decided, and no surface built on it may say
+ * approved. A recorded `risk_accepted` is a different and better fact — one the agent actually
+ * asserted — and this never overwrites it, or any other evidence: only a still-`open` ask moves.
+ *
+ * **Why it is separate from `deriveAsks`.** That derivation is pure over the envelope timeline and
+ * memoised on it. A clock-dependent state computed inside it would be stale exactly when it starts
+ * mattering — the 1s tick re-renders the strip but does not re-run the memo. So callers hold the
+ * clock and apply it at read time, which is also what lets the tests pin `now`.
+ */
+export function applyTierClock(asks: AskView[], now: number = Date.now()): AskView[] {
+  return asks.map((ask) => {
+    if (ask.state !== 'open' || ask.deadline > now) return ask;
+    return { ...ask, state: askTierHolds(ask.tier) ? 'held' : 'lapsed' };
+  });
 }
 
 /** Does this envelope reference the given ask (as answer, deferral, or outcome)? */
@@ -161,6 +202,11 @@ export interface AudienceContext {
 export function answerableCount(asks: AskView[], ctx: AudienceContext): number {
   if (!ctx.you) return 0;
   return asks.filter((a) => {
+    // Loudness is checked HERE and not left to the caller. The strip already passes its `loud` list,
+    // so this looks redundant — but the count is a claim about what is waiting on the reader, and a
+    // lapsed ask (`applyTierClock`) is the exact shape that gets past an audience-only filter while
+    // being unanswerable by anyone. One caller remembering is not the same as the rule holding.
+    if (!askIsLoud(a.state)) return false;
     const audience = askAudience(a, ctx);
     return audience === 'you' || audience === 'team';
   }).length;
