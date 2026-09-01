@@ -46,8 +46,14 @@ export function mintSessionLease(
   return lease;
 }
 
-/** Is this lease (by id) due for renewal — expiring within `aheadMs`, already expired, revoked, or
- *  gone? Read from the store, not from connection memory: revocation and expiry live here. */
+/**
+ * Is this lease (by id) due for renewal — still valid and expiring within `aheadMs`? Read from the
+ * store, not from connection memory, so that a REVOKED lease is never renewed: revocation is ADR 337
+ * §3's list (supersession, release, ban, archive, credential rotation) and a heartbeat must not undo
+ * it — reconnection (§4) is the only way back. A lease that is gone is not renewed either.
+ * dolly's review of #1154 probed the opposite reading: rotate the credential, one heartbeat, and a
+ * live unrevoked lease existed again.
+ */
 export function sessionLeaseDueForRenewal(
   db: Database,
   leaseId: string,
@@ -60,7 +66,7 @@ export function sessionLeaseDueForRenewal(
       { expires_at: number; revoked_at: number | null }
     >('SELECT expires_at, revoked_at FROM session_leases WHERE id = ?')
     .get(leaseId);
-  if (!row || row.revoked_at !== null) return true;
+  if (!row || row.revoked_at !== null) return false;
   return row.expires_at - now <= aheadMs;
 }
 

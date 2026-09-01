@@ -6,6 +6,7 @@ import { createServer, type RunningServer } from '../index.js';
 import {
   AGENT_SESSION_LEASE_RENEW_AHEAD_MS,
   AGENT_SESSION_LEASE_TTL_MS,
+  revokeMemberSessionLeases,
 } from '../store/session-leases.js';
 
 /**
@@ -173,6 +174,25 @@ describe('agent session lease renewal over the live WS (ADR 347)', () => {
       .run(Date.now() - 1, Date.now() + 2000);
     expect(await attestUnder(credential, lease)).toBe(401);
     expect(await attestUnder(credential, renewed.session_lease)).toBe(200);
+    ws.close();
+  });
+
+  it('a revoked lease is never renewed — a heartbeat must not undo ADR 337 §3', async () => {
+    // dolly's probe on #1154: with "revoked ⇒ due", rotating the credential revoked the lease and
+    // the next heartbeat minted a live one. Revocation is a lifecycle verdict; only §4's
+    // reconnection earns a fresh lease.
+    const { ws, lease, credential } = await claimAda();
+    const memberId = server.db
+      .prepare<[string], { id: string }>('SELECT id FROM members WHERE name = ?')
+      .get('Ada')!.id;
+    expect(revokeMemberSessionLeases(server.db, memberId)).toHaveLength(1);
+    ws.send({ type: 'heartbeat', status: 'online' });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(ws.frames.filter((f) => f.type === 'lease')).toHaveLength(0);
+    expect(await attestUnder(credential, lease)).toBe(401);
+    expect(
+      server.db.prepare('SELECT COUNT(*) AS n FROM session_leases WHERE revoked_at IS NULL').get(),
+    ).toEqual({ n: 0 });
     ws.close();
   });
 });
