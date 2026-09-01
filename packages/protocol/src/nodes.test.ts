@@ -12,6 +12,8 @@ describe('the node enrollment vocabulary (ADR 328)', () => {
   it('registers the two new token kinds without disturbing the four that exist', () => {
     expect(TOKEN_PREFIXES.node).toBe('msnode_');
     expect(TOKEN_PREFIXES.node_invite).toBe('msinv_');
+    expect(TOKEN_PREFIXES.agent_seat).toBe('msac_');
+    expect(TOKEN_PREFIXES.session_lease).toBe('msls_');
     // The prefix registry's whole point is that a secret's role is legible on sight, which fails
     // the moment two kinds share a namespace.
     const prefixes = Object.values(TOKEN_PREFIXES);

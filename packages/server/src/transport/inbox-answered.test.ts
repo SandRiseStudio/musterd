@@ -2,6 +2,7 @@ import { makeEnvelope } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
+import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
  * `answered` on `GET /inbox` — which of my open asks I have already replied to.
@@ -26,15 +27,20 @@ import { createServer, type RunningServer } from '../index.js';
 let server: RunningServer;
 let base: string;
 let agentKey: string;
+let adaAuth: AgentHttpAuth;
+let linAuth: AgentHttpAuth;
 let nickCred: string;
 
-function authHeaders(auth?: string, seat?: string): Record<string, string> {
+function authHeaders(auth?: string | AgentHttpAuth, seat?: string): Record<string, string> {
   return {
-    ...(auth ? { authorization: `Bearer ${auth}` } : {}),
-    ...(seat ? { 'x-musterd-seat': seat } : {}),
+    ...(auth ? { authorization: `Bearer ${typeof auth === 'string' ? auth : auth.key}` } : {}),
+    ...(typeof auth === 'object' ? { 'x-musterd-session-lease': auth.sessionLease } : {}),
+    ...((seat ?? (typeof auth === 'object' ? auth.seat : undefined))
+      ? { 'x-musterd-seat': seat ?? (typeof auth === 'object' ? auth.seat : undefined)! }
+      : {}),
   };
 }
-async function post(path: string, body: unknown, auth?: string, seat?: string) {
+async function post(path: string, body: unknown, auth?: string | AgentHttpAuth, seat?: string) {
   const res = await fetch(base + path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders(auth, seat) },
@@ -43,7 +49,7 @@ async function post(path: string, body: unknown, auth?: string, seat?: string) {
   const text = await res.text();
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
 }
-async function get(path: string, auth?: string, seat?: string) {
+async function get(path: string, auth?: string | AgentHttpAuth, seat?: string) {
   const res = await fetch(base + path, { headers: authHeaders(auth, seat) });
   const text = await res.text();
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
@@ -57,6 +63,8 @@ beforeEach(async () => {
   agentKey = team.json.agent_key;
   nickCred = team.json.human_credential;
   await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+  adaAuth = await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Ada');
+  linAuth = adaAuth;
 });
 
 afterEach(async () => {
@@ -66,7 +74,7 @@ afterEach(async () => {
 let clock = 1_000;
 async function send(
   from: string,
-  auth: string,
+  auth: string | AgentHttpAuth,
   seat: string | undefined,
   over: Record<string, unknown>,
 ) {
@@ -95,13 +103,13 @@ const askAda = (body: string) =>
 describe('GET /inbox — answered asks', () => {
   it('reports an ask this seat has replied to, keyed by in_reply_to', async () => {
     const ask = await askAda('judge lane A');
-    await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, {
       to: { kind: 'member', name: 'nick' },
       act: 'accept',
       body: 'accepted',
       meta: { in_reply_to: ask.id },
     });
-    const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada');
+    const inbox = await get('/teams/dawn/inbox', adaAuth);
     expect(inbox.json.answered).toContain(ask.id);
   });
 
@@ -110,20 +118,20 @@ describe('GET /inbox — answered asks', () => {
   // thread. A closure rule keyed on the thread would miss every one of them.
   it('does NOT need the reply to share a thread with the ask', async () => {
     const ask = await askAda('judge lane B');
-    const reply = await send('Ada', agentKey, 'Ada', {
+    const reply = await send('Ada', adaAuth, undefined, {
       to: { kind: 'member', name: 'nick' },
       act: 'accept',
       body: 'accepted',
       meta: { in_reply_to: ask.id },
     });
     expect(reply.thread).toBeNull();
-    const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada');
+    const inbox = await get('/teams/dawn/inbox', adaAuth);
     expect(inbox.json.answered).toContain(ask.id);
   });
 
   it('leaves an unanswered ask out — the list is answers, not asks', async () => {
     const open = await askAda('judge lane C');
-    const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada');
+    const inbox = await get('/teams/dawn/inbox', adaAuth);
     expect(inbox.json.answered ?? []).not.toContain(open.id);
   });
 
@@ -131,21 +139,22 @@ describe('GET /inbox — answered asks', () => {
   // first-person by construction — it is built only from this member's own sends.
   it('does not count another seat’s reply as this seat’s answer', async () => {
     await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, nickCred);
+    linAuth = await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Lin');
     const ask = await send('nick', nickCred, undefined, {
       to: { kind: 'team' },
       act: 'ask',
       body: 'anyone?',
       meta: { species: 'consult', tier: 'advisory' },
     });
-    await send('Lin', agentKey, 'Lin', {
+    await send('Lin', linAuth, undefined, {
       to: { kind: 'member', name: 'nick' },
       act: 'accept',
       body: 'I took it',
       meta: { in_reply_to: ask.id },
     });
-    const ada = await get('/teams/dawn/inbox', agentKey, 'Ada');
+    const ada = await get('/teams/dawn/inbox', adaAuth);
     expect(ada.json.answered ?? []).not.toContain(ask.id);
-    const lin = await get('/teams/dawn/inbox', agentKey, 'Lin');
+    const lin = await get('/teams/dawn/inbox', linAuth);
     expect(lin.json.answered).toContain(ask.id);
   });
 });

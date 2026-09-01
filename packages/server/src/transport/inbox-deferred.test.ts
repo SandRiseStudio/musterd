@@ -4,6 +4,7 @@ import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
 import { getTeamBySlug } from '../store/teams.js';
+import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
  * The deferred-act surface on `GET /inbox` (ADR 211 §3/§5).
@@ -16,16 +17,20 @@ import { getTeamBySlug } from '../store/teams.js';
 let server: RunningServer;
 let base: string;
 let agentKey: string;
+let adaAuth: AgentHttpAuth;
 let nickCred: string;
 
-/** An agent key authenticates the team; `x-musterd-seat` names the seat it acts as (SPEC A.7). */
-function authHeaders(auth?: string, seat?: string): Record<string, string> {
+/** Agent calls carry their self-identifying credential plus the current Presence lease (ADR 337). */
+function authHeaders(auth?: string | AgentHttpAuth, seat?: string): Record<string, string> {
   return {
-    ...(auth ? { authorization: `Bearer ${auth}` } : {}),
-    ...(seat ? { 'x-musterd-seat': seat } : {}),
+    ...(auth ? { authorization: `Bearer ${typeof auth === 'string' ? auth : auth.key}` } : {}),
+    ...(typeof auth === 'object' ? { 'x-musterd-session-lease': auth.sessionLease } : {}),
+    ...((seat ?? (typeof auth === 'object' ? auth.seat : undefined))
+      ? { 'x-musterd-seat': seat ?? (typeof auth === 'object' ? auth.seat : undefined)! }
+      : {}),
   };
 }
-async function post(path: string, body: unknown, auth?: string, seat?: string) {
+async function post(path: string, body: unknown, auth?: string | AgentHttpAuth, seat?: string) {
   const res = await fetch(base + path, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...authHeaders(auth, seat) },
@@ -35,7 +40,7 @@ async function post(path: string, body: unknown, auth?: string, seat?: string) {
 
   return { status: res.status, json: text ? (JSON.parse(text) as any) : null };
 }
-async function get(path: string, auth?: string, seat?: string) {
+async function get(path: string, auth?: string | AgentHttpAuth, seat?: string) {
   const res = await fetch(base + path, { headers: authHeaders(auth, seat) });
   const text = await res.text();
 
@@ -50,6 +55,7 @@ beforeEach(async () => {
   agentKey = team.json.agent_key;
   nickCred = team.json.human_credential;
   await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+  adaAuth = await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Ada');
 });
 
 afterEach(async () => {
@@ -60,7 +66,7 @@ let clock = 1_000;
 /** Send as `from`, with a monotonic ts so the fold's ordering is unambiguous. */
 async function send(
   from: string,
-  auth: string,
+  auth: string | AgentHttpAuth,
   seat: string | undefined,
   over: Parameters<typeof makeEnvelope>[0] extends infer _ ? Record<string, unknown> : never,
 ) {
@@ -79,7 +85,7 @@ async function send(
 }
 
 /** Read the inbox the way a client does: fetch, then advance the cursor past what was shown. */
-async function readInbox(auth: string, seat?: string) {
+async function readInbox(auth: string | AgentHttpAuth, seat?: string) {
   const r = await get('/teams/dawn/inbox', auth, seat);
   expect(r.status).toBe(200);
   const shown = r.json.messages as { id: string; ts: number }[];
@@ -104,7 +110,7 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       body: 'judge this',
       meta: { species: 'approve', tier: 'standard' },
     });
-    await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, {
       act: 'wait',
       body: 'not now',
       meta: { defer_ref: ask.id, until: { reply: true } },
@@ -115,12 +121,12 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       act: 'message',
       body: 'something else',
     });
-    await readInbox(agentKey, 'Ada');
+    await readInbox(adaAuth);
 
     // The UNREAD view is the one that matters: it is what the cursor filters, what feeds the wake
     // candidate set, and what the client counts. The default view is a recent window regardless of
     // read state, so the ask legitimately still appears there.
-    let inbox = await get('/teams/dawn/inbox?unread=1', agentKey, 'Ada').then((r) => r.json);
+    let inbox = await get('/teams/dawn/inbox?unread=1', adaAuth).then((r) => r.json);
     expect(inbox.messages.map((m: { id: string }) => m.id)).not.toContain(ask.id);
     expect(inbox.deferred).toEqual([{ target: ask.id, until: { reply: true }, raised: false }]);
 
@@ -132,7 +138,7 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       thread: ask.id,
     });
 
-    inbox = await get('/teams/dawn/inbox?unread=1', agentKey, 'Ada').then((r) => r.json);
+    inbox = await get('/teams/dawn/inbox?unread=1', adaAuth).then((r) => r.json);
     expect(inbox.messages.map((m: { id: string }) => m.id)).toContain(ask.id);
     expect(inbox.deferred).toEqual([{ target: ask.id, until: { reply: true }, raised: true }]);
   });
@@ -144,14 +150,14 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       body: 'review when it lands',
       meta: { species: 'approve', tier: 'standard' },
     });
-    await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, {
       act: 'wait',
       body: 'blocked on L1',
       meta: { defer_ref: ask.id, until: { lane: 'L1' } },
     });
-    await readInbox(agentKey, 'Ada');
+    await readInbox(adaAuth);
 
-    let inbox = await get('/teams/dawn/inbox', agentKey, 'Ada').then((r) => r.json);
+    let inbox = await get('/teams/dawn/inbox', adaAuth).then((r) => r.json);
     expect(inbox.deferred[0].raised).toBe(false);
 
     await send('nick', nickCred, undefined, {
@@ -160,7 +166,7 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       meta: { lane_state: { lane: 'L1', state: 'done' } },
     });
 
-    inbox = await get('/teams/dawn/inbox?unread=1', agentKey, 'Ada').then((r) => r.json);
+    inbox = await get('/teams/dawn/inbox?unread=1', adaAuth).then((r) => r.json);
     expect(inbox.deferred[0].raised).toBe(true);
     expect(inbox.messages.map((m: { id: string }) => m.id)).toContain(ask.id);
   });
@@ -172,7 +178,7 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       body: 'x',
       meta: { species: 'consult', tier: 'advisory' },
     });
-    await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, {
       act: 'wait',
       body: 'not now, blocked on L1',
       meta: { defer_ref: ask.id, until: { lane: 'L1' } },
@@ -190,8 +196,8 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
   });
 
   it('does not audit a bare wait or a deciding wait as a deferral', async () => {
-    await send('Ada', agentKey, 'Ada', { act: 'wait', body: 'paused' });
-    const ask = await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, { act: 'wait', body: 'paused' });
+    const ask = await send('Ada', adaAuth, undefined, {
       to: { kind: 'member', name: 'nick' },
       act: 'ask',
       body: 'ship it?',
@@ -215,7 +221,7 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       body: 'x',
       meta: { species: 'consult', tier: 'advisory' },
     });
-    await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, {
       act: 'wait',
       body: 'not now',
       meta: { defer_ref: ask.id, until: { lane: 'never-moves' } },
@@ -290,17 +296,17 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       act: 'request_help',
       body: 'anyone free?',
     });
-    await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, {
       act: 'wait',
       body: 'not now',
       meta: { defer_ref: shout.id, until: { reply: true } },
     });
-    const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada').then((r) => r.json);
+    const inbox = await get('/teams/dawn/inbox', adaAuth).then((r) => r.json);
     expect(inbox.deferred).toEqual([{ target: shout.id, until: { reply: true }, raised: false }]);
   });
 
   it('reports an empty deferred list when nothing is deferred', async () => {
-    const inbox = await get('/teams/dawn/inbox', agentKey, 'Ada').then((r) => r.json);
+    const inbox = await get('/teams/dawn/inbox', adaAuth).then((r) => r.json);
     expect(inbox.deferred).toEqual([]);
   });
 
@@ -311,7 +317,7 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       body: 'x',
       meta: { species: 'consult', tier: 'advisory' },
     });
-    await send('Ada', agentKey, 'Ada', {
+    await send('Ada', adaAuth, undefined, {
       act: 'wait',
       body: 'not now',
       meta: { defer_ref: ask.id, until: { reply: true } },
@@ -323,7 +329,7 @@ describe('GET /inbox — deferred acts (ADR 211)', () => {
       thread: ask.id,
     });
 
-    const inbox = await get('/teams/dawn/inbox?unread=1', agentKey, 'Ada').then((r) => r.json);
+    const inbox = await get('/teams/dawn/inbox?unread=1', adaAuth).then((r) => r.json);
     const ids = inbox.messages.map((m: { id: string }) => m.id);
     expect(ids.filter((id: string) => id === ask.id)).toHaveLength(1);
   });

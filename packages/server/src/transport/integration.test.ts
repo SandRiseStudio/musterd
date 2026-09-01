@@ -29,6 +29,8 @@ let wsUrl: string;
 let db: ReturnType<typeof openDb>;
 
 beforeEach(async () => {
+  teamBootstraps.clear();
+  agentAuthorities.clear();
   db = openDb(':memory:');
   server = createServer({ db, port: 0 });
   const { port } = await server.listen();
@@ -51,33 +53,107 @@ async function pollUntil(pred: () => boolean, ms = 1000): Promise<void> {
 }
 
 /**
- * v0.3 auth descriptor (ADR 077, SPEC A.7 §253). A bare string is a self-identifying secret — a human
- * `mscr_` credential. An `{ key, seat }` is an agent acting as a seat: `Bearer <agent_key>` +
- * `x-musterd-seat`, mirroring the production HttpClient (commit 4d11b35).
+ * A bare string is a self-identifying secret — a human `mscr_` credential. Agent fixtures begin
+ * with the bootstrap `mskey_`, then the transport helper claims their named seat and substitutes
+ * the resulting `msac_` credential plus `msls_` Presence proof (ADR 337).
  */
-type Auth = string | { key: string; seat: string };
+type Auth = string | { key: string; seat: string; sessionLease?: string };
+type TeamBootstrap = { agentKey: string; humanCredential: string };
+const teamBootstraps = new Map<string, TeamBootstrap>();
+const agentAuthorities = new Map<string, Auth>();
+
 function authHeaders(auth?: Auth): Record<string, string> {
   if (!auth) return {};
   if (typeof auth === 'string') return { authorization: `Bearer ${auth}` };
-  return { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': auth.seat };
+  return {
+    authorization: `Bearer ${auth.key}`,
+    ...(auth.sessionLease ? { 'x-musterd-session-lease': auth.sessionLease } : {}),
+    'x-musterd-seat': auth.seat,
+  };
+}
+
+async function resolveAuth(path: string, auth?: Auth): Promise<Auth | undefined> {
+  if (!auth || typeof auth === 'string' || !auth.key.startsWith('mskey_')) return auth;
+  const slug = path.match(/^\/teams\/([^/?]+)/)?.[1];
+  if (!slug) return auth;
+  const bootstrap = teamBootstraps.get(slug);
+  if (!bootstrap || bootstrap.agentKey !== auth.key) return auth;
+  const cacheKey = `${slug}:${auth.seat}`;
+  const cached = agentAuthorities.get(cacheKey);
+  if (cached) {
+    Object.assign(auth, cached);
+    return cached;
+  }
+
+  const grantResponse = await fetch(base + `/teams/${slug}/grants`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${bootstrap.humanCredential}`,
+    },
+    body: JSON.stringify({ scope: 'seat', target: auth.seat, lifetime: 'standing' }),
+  });
+  const grant = (await grantResponse.json()) as { token: string };
+  const claimResponse = await fetch(base + `/teams/${slug}/claim`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      key: auth.key,
+      target: { seat: auth.seat },
+      grant: grant.token,
+      surface: 'cli',
+    }),
+  });
+  const claim = (await claimResponse.json()) as { seat_credential: string; session_lease: string };
+  const authority: Auth = {
+    key: claim.seat_credential,
+    seat: auth.seat,
+    sessionLease: claim.session_lease,
+  };
+  agentAuthorities.set(cacheKey, authority);
+  Object.assign(auth, authority);
+  return authority;
+}
+
+async function reattestAgentModel(slug: string, auth: Exclude<Auth, string>, model: string) {
+  const claim = await post(`/teams/${slug}/claim`, {
+    key: auth.key,
+    target: { seat: auth.seat },
+    surface: 'cli',
+    model,
+  });
+  if (claim.status !== 200) throw new Error(`failed to reattest ${auth.seat}: ${claim.status}`);
+  Object.assign(auth, {
+    key: claim.json.seat_credential ?? auth.key,
+    sessionLease: claim.json.session_lease,
+  });
 }
 
 async function post(path: string, body: unknown, auth?: Auth) {
+  const resolvedAuth = await resolveAuth(path, auth);
   const res = await fetch(base + path, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...authHeaders(auth),
+      ...authHeaders(resolvedAuth),
     },
     body: JSON.stringify(body),
   });
-  return { status: res.status, json: (await res.json()) as any };
+  const json = (await res.json()) as any;
+  if (path === '/teams' && res.status === 201) {
+    teamBootstraps.set(json.team.slug, {
+      agentKey: json.agent_key,
+      humanCredential: json.human_credential,
+    });
+  }
+  return { status: res.status, json };
 }
 
 async function get(path: string, auth?: Auth, extraHeaders?: Record<string, string>) {
+  const resolvedAuth = await resolveAuth(path, auth);
   const res = await fetch(base + path, {
     headers: {
-      ...authHeaders(auth),
+      ...authHeaders(resolvedAuth),
       ...(extraHeaders ?? {}),
     },
   });
@@ -86,9 +162,10 @@ async function get(path: string, auth?: Auth, extraHeaders?: Record<string, stri
 
 /** Like `post` but for a JSON-bodied request of any method; parses JSON only when a body is returned. */
 async function req(method: string, path: string, body: unknown, auth?: Auth) {
+  const resolvedAuth = await resolveAuth(path, auth);
   const res = await fetch(base + path, {
     method,
-    headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+    headers: { 'content-type': 'application/json', ...authHeaders(resolvedAuth) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const text = await res.text();
@@ -803,26 +880,31 @@ describe('HTTP API', () => {
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
 
-    // A read carrying the no-touch header (a background poller, e.g. notify) must NOT flip Ada present.
-    await get(
-      '/teams/dawn/inbox',
-      { key: team.json.agent_key, seat: 'Ada' },
-      { 'x-musterd-no-touch': '1' },
-    );
+    // Claiming establishes the lease-bound Presence. A later no-touch read must not alter it.
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await get('/teams/dawn/inbox', ada);
+    const before = await get('/teams/dawn/members', nickTok);
+    const beforeAda = before.json.members.find((m: any) => m.name === 'Ada');
+    await get('/teams/dawn/inbox', ada, { 'x-musterd-no-touch': '1' });
     const after = await get('/teams/dawn/members', nickTok);
-    expect(after.json.members.find((m: any) => m.name === 'Ada')?.activity).toBe('offline');
+    expect(after.json.members.find((m: any) => m.name === 'Ada')?.presences).toEqual(
+      beforeAda.presences,
+    );
   });
 
   it('ambient presence: a status_update reads working, and the surface header is honored (ADR 057)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+    const ada = (await resolveAuth('/teams/dawn/messages', {
+      key: team.json.agent_key,
+      seat: 'Ada',
+    }))!;
     const res = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
         'x-musterd-surface': 'claude-code',
       },
       body: JSON.stringify({
@@ -2492,16 +2574,24 @@ describe('WebSocket', () => {
 
     const a = new TestWs();
     await a.open();
-    await a.claim(
+    const occupied = (await a.claim(
       'dawn',
       team.json.agent_key,
       'Ada',
       'claude-code',
       await standingGrant(team.json.human_credential, 'Ada'),
-    );
+    )) as any;
 
     // Ada unbinds herself with her *own* token (self-only — no target name).
-    const r = await post('/teams/dawn/unbind', {}, { key: team.json.agent_key, seat: 'Ada' });
+    const r = await post(
+      '/teams/dawn/unbind',
+      {},
+      {
+        key: occupied.seat_credential,
+        seat: 'Ada',
+        sessionLease: occupied.session_lease,
+      },
+    );
     expect(r.status).toBe(200);
     expect(r.json.member).toBe('Ada');
 
@@ -2857,14 +2947,18 @@ describe('model attestation (ADR 101)', () => {
     });
     expect(claimed.status).toBe(200);
     expect(claimed.json.type).toBe('occupied');
+    const ada = {
+      key: claimed.json.seat_credential as string,
+      seat: 'Ada',
+      sessionLease: claimed.json.session_lease as string,
+    };
 
     // First one-shot while the claim occupancy is still live — stamp from newest-attested.
     const first = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
         'x-musterd-model': 'qwen2.5:3b-instruct',
       },
       body: JSON.stringify({
@@ -2887,14 +2981,19 @@ describe('model attestation (ADR 101)', () => {
     const adaId = getMemberByName(server.db, getTeamBySlug(server.db, 'dawn')!.id, 'Ada')!.id;
     const removed = server.db.prepare('DELETE FROM presence WHERE member_id = ?').run(adaId);
     expect(removed.changes).toBeGreaterThan(0);
+    const renewed = await post('/teams/dawn/claim', {
+      key: ada.key,
+      target: { seat: ada.seat },
+      surface: 'cli',
+    });
+    Object.assign(ada, { sessionLease: renewed.json.session_lease });
 
     // Without the header: ambient attaches a bare row → stamp drops (the #172 hole).
     const bare = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
       },
       body: JSON.stringify({
         envelope: {
@@ -2914,14 +3013,20 @@ describe('model attestation (ADR 101)', () => {
 
     // Clear again so the next touch is a fresh attach (not COALESCE onto the bare row).
     server.db.prepare('DELETE FROM presence WHERE member_id = ?').run(adaId);
+    const renewedAgain = await post('/teams/dawn/claim', {
+      key: ada.key,
+      target: { seat: ada.seat },
+      surface: 'cli',
+      model: 'qwen2.5:3b-instruct',
+    });
+    Object.assign(ada, { sessionLease: renewedAgain.json.session_lease });
 
     // With x-musterd-model the ambient touch re-attests, so the act keeps the stamp.
     const later = await fetch(base + '/teams/dawn/messages', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${team.json.agent_key}`,
-        'x-musterd-seat': 'Ada',
+        ...authHeaders(ada),
         'x-musterd-model': 'qwen2.5:3b-instruct',
       },
       body: JSON.stringify({
@@ -2941,12 +3046,12 @@ describe('model attestation (ADR 101)', () => {
     expect(((await later.json()) as any).ack.meta.model).toBe('qwen2.5:3b-instruct');
 
     const teamRow = getTeamBySlug(server.db, 'dawn')!;
-    const ambient = listAudit(server.db, teamRow.id).filter((r) => {
+    const renewedClaim = listAudit(server.db, teamRow.id).filter((r) => {
       if (r.action !== 'occupancy.model_attested') return false;
       const d = JSON.parse(r.detail!) as { source: string };
-      return d.source === 'ambient';
+      return d.source === 'claim';
     });
-    expect(ambient.length).toBeGreaterThanOrEqual(1);
+    expect(renewedClaim.length).toBeGreaterThanOrEqual(1);
   });
 
   it('human credential + x-musterd-model does not attest the human occupancy (ADR 121)', async () => {
@@ -3217,14 +3322,12 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const nickTok = team.json.human_credential;
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, nickTok);
+    const ada = { key: team.json.agent_key, seat: 'Ada' };
+    await get('/teams/dawn/inbox', ada);
     // Strip the only admin → the team has zero admins → governance falls back to v0.2 open behaviour.
     setCaps('dawn', 'nick', { is_admin: false });
 
-    const ok = await post(
-      '/teams/dawn/members/Bob/reclaim',
-      {},
-      { key: team.json.agent_key, seat: 'Ada' },
-    );
+    const ok = await post('/teams/dawn/members/Bob/reclaim', {}, ada);
     expect(ok.status).toBe(200);
     const entry = auditRows('dawn').find((r) => r.action === 'member.reclaim');
     expect(entry?.detail).toContain('no-admin');
@@ -3672,6 +3775,10 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
     await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'Mute', kind: 'agent' }, nickTok);
+    const disAuth = { key: team.json.agent_key, seat: 'Dis' };
+    const muteAuth = { key: team.json.agent_key, seat: 'Mute' };
+    await get('/teams/dawn/inbox', disAuth);
+    await get('/teams/dawn/inbox', muteAuth);
 
     setCaps('dawn', 'Dis', {}, 'disabled');
     setCaps('dawn', 'Mute', { can_message: 'none' });
@@ -3689,14 +3796,10 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const disabled = await post(
       '/teams/dawn/messages',
       { envelope: baseEnv('Dis', 'd1') },
-      { key: team.json.agent_key, seat: 'Dis' },
+      disAuth,
     );
     expect(disabled.status).toBe(403);
-    const muted = await post(
-      '/teams/dawn/messages',
-      { envelope: baseEnv('Mute', 'm1') },
-      { key: team.json.agent_key, seat: 'Mute' },
-    );
+    const muted = await post('/teams/dawn/messages', { envelope: baseEnv('Mute', 'm1') }, muteAuth);
     expect(muted.status).toBe(403);
     const audit = auditRows('dawn');
     // An inert account is refused at authentication, before the send route has an action to audit.
@@ -3725,13 +3828,11 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
       const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
       const nickTok = team.json.human_credential;
       await post('/teams/dawn/members', { name: 'Dis', kind: 'agent' }, nickTok);
+      const disAuth = { key: team.json.agent_key as string, seat: 'Dis' };
+      await get('/teams/dawn/inbox', disAuth);
       setCaps('dawn', 'Dis', {}, accountStatus);
 
-      const res = await post(
-        '/teams/dawn/availability',
-        { status: 'away' },
-        { key: team.json.agent_key as string, seat: 'Dis' },
-      );
+      const res = await post('/teams/dawn/availability', { status: 'away' }, disAuth);
       expect(res.status).toBe(403);
     },
   );
@@ -4343,6 +4444,7 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     const nickTok = team.json.human_credential;
     const ada = { key: team.json.agent_key, seat: 'ada' };
     await post('/teams/dawn/members', { name: 'ada', kind: 'agent' }, nickTok);
+    await get('/teams/dawn/inbox', ada);
 
     // Open unowned (no claim), then ada claims it — the self-claim is a team-visible transition.
     const lane = await post('/teams/dawn/lanes', { title: 'eviction fix' }, nickTok);
@@ -4452,15 +4554,16 @@ describe('two-stage close (ADR 169)', () => {
     const nickTok = team.json.human_credential as string;
     await post('/teams/dawn/members', { name: 'ada', kind: 'agent' }, nickTok);
     await post('/teams/dawn/members', { name: 'gee', kind: 'agent' }, nickTok);
-    const ada: Auth = { key: team.json.agent_key, seat: 'ada' };
-    const gee: Auth = { key: team.json.agent_key, seat: 'gee' };
-    // Ambient presence + model attestation (ADR 057/119): one authed touch each, model on the header.
-    await fetch(base + '/teams/dawn/inbox', {
-      headers: { ...authHeaders(ada), 'x-musterd-model': 'claude-opus-5' },
-    });
-    await fetch(base + '/teams/dawn/inbox', {
-      headers: { ...authHeaders(gee), 'x-musterd-model': 'gpt-5.2-codex' },
-    });
+    const ada = (await resolveAuth('/teams/dawn/inbox', {
+      key: team.json.agent_key,
+      seat: 'ada',
+    }))!;
+    const gee = (await resolveAuth('/teams/dawn/inbox', {
+      key: team.json.agent_key,
+      seat: 'gee',
+    }))!;
+    await reattestAgentModel('dawn', ada, 'claude-opus-5');
+    await reattestAgentModel('dawn', gee, 'gpt-5.2-codex');
     await get('/teams/dawn/inbox', nickTok); // nick present too (ADR 057 ambient touch)
     return { nickTok, ada, gee };
   }
@@ -4988,10 +5091,11 @@ describe('two-stage close (ADR 169)', () => {
     const nick3 = t.json.human_credential as string;
     const mk = async (name: string, model: string): Promise<Auth> => {
       await post('/teams/coauth/members', { name, kind: 'agent' }, nick3);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/coauth/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': model },
-      });
+      const auth = (await resolveAuth('/teams/coauth/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('coauth', auth, model);
       return auth;
     };
     const first = await mk('first', 'claude-opus-5'); // opens, owns, writes it
@@ -5099,10 +5203,11 @@ describe('two-stage close (ADR 169)', () => {
     const nick2 = t.json.human_credential as string;
     const mk = async (name: string, model: string): Promise<Auth> => {
       await post(`/teams/grade/members`, { name, kind: 'agent' }, nick2);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/grade/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': model },
-      });
+      const auth = (await resolveAuth('/teams/grade/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('grade', auth, model);
       return auth;
     };
     const worker = await mk('worker', 'claude-opus-5');
@@ -5125,7 +5230,10 @@ describe('two-stage close (ADR 169)', () => {
 
     // The close edge derives the grade too (ADR 188): twin (opus-4.8) confirms worker's (opus-5)
     // lane — verified:true with review_grade cross_model beside it, not a bare boolean.
-    const twin: Auth = { key: t.json.agent_key as string, seat: 'twin' };
+    const twin = (await resolveAuth('/teams/grade/lanes', {
+      key: t.json.agent_key as string,
+      seat: 'twin',
+    }))!;
     const closed = await fetch(base + `/teams/grade/lanes/${lane.json.lane.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', ...authHeaders(twin) },
@@ -5142,10 +5250,11 @@ describe('two-stage close (ADR 169)', () => {
     const n3 = t.json.human_credential as string;
     const mk = async (name: string): Promise<Auth> => {
       await post(`/teams/twins/members`, { name, kind: 'agent' }, n3);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/twins/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': 'claude-opus-5' },
-      });
+      const auth = (await resolveAuth('/teams/twins/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('twins', auth, 'claude-opus-5');
       return auth;
     };
     const a = await mk('alpha');
@@ -5179,10 +5288,11 @@ describe('two-stage close (ADR 169)', () => {
     const n4 = t.json.human_credential as string;
     const mk = async (name: string, model: string): Promise<Auth> => {
       await post('/teams/switch/members', { name, kind: 'agent' }, n4);
-      const auth: Auth = { key: t.json.agent_key as string, seat: name };
-      await fetch(base + '/teams/switch/inbox', {
-        headers: { ...authHeaders(auth), 'x-musterd-model': model },
-      });
+      const auth = (await resolveAuth('/teams/switch/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      await reattestAgentModel('switch', auth, model);
       return auth;
     };
     const worker = await mk('worker', 'claude-opus-5');
@@ -5624,6 +5734,14 @@ describe('two-stage close (ADR 169)', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(Date.now() + 5 * 60_000 + 1_000));
     try {
+      // The 5-minute proof is intentionally expired at this boundary; a real adapter reclaims to
+      // mint a fresh lease before it may close the lane.
+      const refreshed = await post('/teams/dawn/claim', {
+        key: ada.key,
+        target: { seat: ada.seat },
+        surface: 'cli',
+      });
+      Object.assign(ada, { sessionLease: refreshed.json.session_lease });
       await patchLane(lane.json.lane.id, { state: 'done' }, ada);
     } finally {
       vi.useRealTimers();
@@ -5724,14 +5842,16 @@ describe('two-stage close (ADR 169)', () => {
         body: JSON.stringify({ name, kind: 'agent' }),
       });
     }
-    const ada: Auth = { key: team.json.agent_key, seat: 'ada' };
-    const gee: Auth = { key: team.json.agent_key, seat: 'gee' };
-    await fetch(base + '/teams/risky/inbox', {
-      headers: { ...authHeaders(ada), 'x-musterd-model': 'claude-opus-5' },
-    });
-    await fetch(base + '/teams/risky/inbox', {
-      headers: { ...authHeaders(gee), 'x-musterd-model': 'gpt-5.2-codex' },
-    });
+    const ada = (await resolveAuth('/teams/risky/inbox', {
+      key: team.json.agent_key,
+      seat: 'ada',
+    }))!;
+    const gee = (await resolveAuth('/teams/risky/inbox', {
+      key: team.json.agent_key,
+      seat: 'gee',
+    }))!;
+    await reattestAgentModel('risky', ada, 'claude-opus-5');
+    await reattestAgentModel('risky', gee, 'gpt-5.2-codex');
     const mk = await fetch(base + '/teams/risky/lanes', {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...authHeaders(ada) },
@@ -6007,9 +6127,10 @@ describe('releasing a lane — open ⟺ unowned', () => {
     };
   }
   async function patchLane(id: string, body: unknown, auth: Auth) {
+    const resolvedAuth = await resolveAuth('/teams/dusk/lanes', auth);
     const r = await fetch(base + `/teams/dusk/lanes/${id}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json', ...authHeaders(auth) },
+      headers: { 'content-type': 'application/json', ...authHeaders(resolvedAuth) },
       body: JSON.stringify(body),
     });
     return { status: r.status, json: (await r.json()) as Record<string, any> };
@@ -6273,25 +6394,39 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     )) as any;
     expect(occ1.memory).toBeNull();
     w1.close();
+    await w1.closed();
 
-    // Save a note, then a fresh claim carries the envelope (headline + size, never a body).
-    await req('PUT', '/teams/dawn/memory', { headline: 'left off at eviction', body: '€€' }, ada);
+    // Reclaim first: closing w1 revoked its Presence-bound lease. The new claim mints a lease that
+    // authorizes the memory save, and the following claim must carry the saved envelope.
+    Object.assign(ada as Exclude<Auth, string>, {
+      key: occ1.seat_credential,
+      sessionLease: occ1.session_lease,
+    });
     const w2 = new TestWs();
     await w2.open();
-    const occ2 = (await w2.claim(
-      'dawn',
-      team.json.agent_key,
-      'Ada',
-      'cli',
-      await standingGrant(nickTok, 'Ada'),
-    )) as any;
-    expect(occ2.memory).toEqual({
+    const occ2 = (await w2.claim('dawn', (ada as Exclude<Auth, string>).key, 'Ada', 'cli')) as any;
+    Object.assign(ada as Exclude<Auth, string>, {
+      key: occ2.seat_credential ?? (ada as Exclude<Auth, string>).key,
+      sessionLease: occ2.session_lease,
+    });
+    const saved = await req(
+      'PUT',
+      '/teams/dawn/memory',
+      { headline: 'left off at eviction', body: '€€' },
+      ada,
+    );
+    expect(saved.status).toBe(204);
+    const w3 = new TestWs();
+    await w3.open();
+    const occ3 = (await w3.claim('dawn', (ada as Exclude<Auth, string>).key, 'Ada', 'cli')) as any;
+    expect(occ3.memory).toEqual({
       headline: 'left off at eviction',
       saved_at: expect.any(Number),
       size_bytes: 6, // '€€' = 6 UTF-8 bytes
     });
-    expect(occ2.memory.body).toBeUndefined();
     w2.close();
+    expect(occ3.memory.body).toBeUndefined();
+    w3.close();
   });
 
   it('oversize body → 400 naming the 8192 limit; missing headline → 400', async () => {

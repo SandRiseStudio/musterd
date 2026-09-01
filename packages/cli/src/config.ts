@@ -41,6 +41,7 @@ export interface ClaimCredential {
   agentKey: string;
   target: ClaimTarget;
   grant?: string;
+  sessionLease?: string;
   surface: string;
 }
 
@@ -64,6 +65,7 @@ export function claimCredentialFromEnv(
     return null;
   }
   const grant = env['MUSTERD_GRANT'];
+  const sessionLease = env['MUSTERD_SESSION_LEASE'];
   return {
     team,
     credential: {
@@ -71,6 +73,7 @@ export function claimCredentialFromEnv(
       agentKey,
       target,
       ...(grant !== undefined ? { grant } : {}),
+      ...(sessionLease !== undefined ? { sessionLease } : {}),
       // A CLI act is intrinsically `cli` (ADR 286) — env no longer chooses the Surface here. The
       // per-command `--surface` flag remains the deliberate manual override where one exists.
       surface: 'cli',
@@ -80,10 +83,12 @@ export function claimCredentialFromEnv(
 
 export interface Identity {
   name: string;
-  /** The Bearer secret this identity authenticates with (v0.3, ADR 075): a team agent key (`mskey_`)
-   *  for an agent seat, or a human credential (`mscr_`) for a person. Replaces the v0.2 seat `token`. */
+  /** The Bearer secret this identity authenticates with: agent-seat (`msac_`) or human (`mscr_`)
+   * credential. The team agent key (`mskey_`) is only claim bootstrap authority. */
   key: string;
   surface: string;
+  /** Required with an agent-seat credential: proof of its current Presence (ADR 337). */
+  sessionLease?: string;
   /** Optional pre-issued grant (`msgr_`) carried from the binding/env so a *live* claim (the
    *  `inbox --wait`/`--watch` WS handshake) skips the pending lane, matching the one-shot claim path. */
   grant?: string;
@@ -299,6 +304,9 @@ export function identityFromEnv(
       name: target.seat,
       key: cred.credential.agentKey,
       surface: cred.credential.surface,
+      ...(cred.credential.sessionLease !== undefined
+        ? { sessionLease: cred.credential.sessionLease }
+        : {}),
       ...(cred.credential.grant !== undefined ? { grant: cred.credential.grant } : {}),
     },
   };

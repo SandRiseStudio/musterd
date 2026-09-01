@@ -8,10 +8,10 @@ A musterd team protects identities and the work done under them. The defaults ar
 
 Concretely:
 
-1. **Least privilege.** An **agent key** authenticates a harness but cannot _be_ an identity, cannot govern, and cannot occupy a seat alone. A **grant** authorizes exactly one seat/role, expires, and is revocable. Governance requires **admin**. No credential does more than its job.
+1. **Least privilege.** An **agent key** is bootstrap-only claim authentication; it cannot be a Member identity, govern, or reach routine HTTP routes. Each occupied agent instead uses its own rotatable seat credential plus a short-lived lease bound to that Presence. A **grant** authorizes exactly one seat/role, expires, and is revocable. Governance requires **admin**. No credential does more than its job.
 2. **Authorize-then-occupy.** Occupying a seat needs an agent key **and** an admin-issued grant. **Default = live admin approval per claim.** Pre-issued grants are a per-team admin opt-in (`allow_pre_issued_grants`), never the default.
 3. **Everything privileged is audited.** Grant issue/use/revoke, claim/occupy/release, account-status changes, key rotation, policy changes, and request decisions all append to an immutable audit log: `{ ts, actor, action, target, result }`.
-4. **Secrets are hashes at rest, never logged.** Agent keys, grants, and human credentials are stored only as hashes server-side. They never appear in logs (structured logger redacts), errors, or telemetry.
+4. **Secrets are hashes at rest, never logged.** Agent keys, grants, agent-seat credentials, leases, and human credentials are stored only as hashes server-side. They never appear in logs (structured logger redacts), errors, or telemetry.
 5. **Explicit blast-radius control.** Keys and grants are rotatable/revocable; bans reject credentials immediately; archived/disabled seats can't be occupied.
 6. **Capability-scoped, need-to-know.** A seat may do only what its role's capabilities allow (comms, tools, declared resource scopes, visibility) and may _see_ only what it needs. Admins see all; non-admins get a viewer-scoped projection.
 
@@ -62,7 +62,8 @@ Credentials decide _who_; capabilities decide _what_ and _what's visible_. Both 
 
 ## Credential & grant lifecycle
 
-- **Agent key:** minted at `team create`; one per team in v0.2 (per-seat/rotating keys are roadmap). `agent-key rotate` invalidates the old key. Stored hashed.
+- **Agent key:** minted at `team create`; bootstrap-only claim authentication. `agent-key rotate` invalidates the old key. Stored hashed.
+- **Agent-seat credential + session lease:** an authorized agent claim mints a rotatable, self-identifying `msac_` credential once and a fresh short-lived `msls_` lease on each occupancy. Routine agent HTTP requires both. Reclaim, supersession, release, ban, archive, rotation, and expiry invalidate the lease.
 - **Grant:** issued by an admin (live on a request, or pre-issued when policy allows). Carries `scope` (seat|role), `target`, `lifetime`, optional `single_use`. **At live approval the admin picks the lifetime: just-once (single-use), N-hours (TTL), or until-revoke (standing).** This keeps "no silent grant" while sparing the operator a re-prompt on every reconnect. Verified on claim; recorded on use; `revoke` is immediate. Pre-issued grants (team opt-in) follow the same shape but are written into a config before any claim.
 - **Human credential:** minted when a human seat is created/joined; rotatable; rejected when the seat is banned.
 - **Admin:** capability flag on a human seat; creator by default; (multi-admin delegation is roadmap).

@@ -16,11 +16,15 @@ let base: string;
 let agentKey: string;
 let nickCred: string;
 
-type Auth = string | { key: string; seat: string };
+type Auth = string | { key: string; seat: string; sessionLease?: string };
 function authHeaders(auth?: Auth): Record<string, string> {
   if (!auth) return {};
   if (typeof auth === 'string') return { authorization: `Bearer ${auth}` };
-  return { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': auth.seat };
+  return {
+    authorization: `Bearer ${auth.key}`,
+    'x-musterd-seat': auth.seat,
+    ...(auth.sessionLease ? { 'x-musterd-session-lease': auth.sessionLease } : {}),
+  };
 }
 async function post(path: string, body: unknown, auth?: Auth) {
   const res = await fetch(base + path, {
@@ -136,6 +140,106 @@ describe('POST /claim — refusals', () => {
 });
 
 describe('POST /claim — occupancy', () => {
+  it('mints a self-identifying credential and Presence-bound lease for agent HTTP authority', async () => {
+    const grant = await grantFor('Ada');
+    const claim = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'cli',
+    });
+    expect(claim.status).toBe(200);
+    expect(claim.json.seat_credential).toMatch(/^msac_/);
+    expect(claim.json.session_lease).toMatch(/^msls_/);
+
+    const sharedKey = await get('/teams/dawn/inbox', { key: agentKey, seat: 'Ada' });
+    expect(sharedKey.status).toBe(401);
+
+    const noLease = await get('/teams/dawn/inbox', claim.json.seat_credential);
+    expect(noLease.status).toBe(401);
+
+    const valid = await fetch(base + '/teams/dawn/inbox', {
+      headers: {
+        authorization: `Bearer ${claim.json.seat_credential}`,
+        'x-musterd-session-lease': claim.json.session_lease,
+      },
+    });
+    expect(valid.status).toBe(200);
+
+    const impersonation = await fetch(base + '/teams/dawn/inbox', {
+      headers: {
+        authorization: `Bearer ${claim.json.seat_credential}`,
+        'x-musterd-seat': 'nick',
+        'x-musterd-session-lease': claim.json.session_lease,
+      },
+    });
+    expect(impersonation.status).toBe(403);
+
+    server.db.prepare('UPDATE session_leases SET expires_at = ?').run(Date.now() - 1);
+    const expired = await fetch(base + '/teams/dawn/inbox', {
+      headers: {
+        authorization: `Bearer ${claim.json.seat_credential}`,
+        'x-musterd-session-lease': claim.json.session_lease,
+      },
+    });
+    expect(expired.status).toBe(401);
+  });
+
+  it('rotation immediately invalidates an agent credential and all of its leases', async () => {
+    const claim = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant: await grantFor('Ada'),
+      surface: 'cli',
+    });
+    const rotated = await post(
+      '/teams/dawn/members/Ada/agent-seat-credential/rotate',
+      {},
+      nickCred,
+    );
+    expect(rotated.status).toBe(200);
+    expect(rotated.json.seat_credential).toMatch(/^msac_/);
+    expect(rotated.json.seat_credential).not.toBe(claim.json.seat_credential);
+
+    const old = await fetch(base + '/teams/dawn/inbox', {
+      headers: {
+        authorization: `Bearer ${claim.json.seat_credential}`,
+        'x-musterd-session-lease': claim.json.session_lease,
+      },
+    });
+    expect(old.status).toBe(401);
+
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const actions = listAudit(server.db, team.id).map((row) => row.action);
+    expect(actions).toContain('agent_seat_credential.rotated');
+    expect(actions).toContain('agent_session_lease.revoked');
+  });
+
+  it('uses claimed agent authority on the residency session route', async () => {
+    const claim = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant: await grantFor('Ada'),
+      surface: 'cli',
+    });
+    await post(
+      '/teams/dawn/residency/enroll',
+      { seat: 'Ada', harness: 'claude-code', host: 'laptop.local' },
+      nickCred,
+    );
+
+    const session = await post(
+      '/teams/dawn/residency/session',
+      { seat: 'Ada', harness: 'claude-code', event: 'start' },
+      {
+        key: claim.json.seat_credential,
+        seat: 'Ada',
+        sessionLease: claim.json.session_lease,
+      },
+    );
+    expect(session.status).toBe(200);
+  });
+
   it('occupies a seat with a valid grant and attests the model', async () => {
     const grant = await grantFor('Ada');
     const r = await post('/teams/dawn/claim', {
@@ -425,13 +529,13 @@ describe('POST /requests/{id}/decide', () => {
     expect(again.status).toBe(409);
   });
 
-  it('refuses a non-admin caller', async () => {
+  it('refuses the bootstrap team key on an admin decision route', async () => {
     const id = await openPending();
     const r = await post(
       `/teams/dawn/requests/${id}/decide`,
       { decision: 'approve', lifetime: 'once' },
       { key: agentKey, seat: 'Ada' },
     );
-    expect(r.status).toBe(403);
+    expect(r.status).toBe(401);
   });
 });

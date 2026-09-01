@@ -13,6 +13,7 @@ describe('WorkspaceSpec / Binding schemas (strict version 2, ADR 281)', () => {
     ...spec,
     agent_key: 'mskey_x',
     grant: 'msgr_y',
+    seat_credential: 'msac_z',
     model: 'claude-opus-4-8',
     capabilities: {
       is_admin: false,
@@ -49,6 +50,7 @@ describe('WorkspaceSpec / Binding schemas (strict version 2, ADR 281)', () => {
     const parsed = BindingSchema.parse(binding);
     expect(parsed.agent_key).toBe('mskey_x');
     expect(parsed.grant).toBe('msgr_y');
+    expect(parsed.seat_credential).toBe('msac_z');
     expect(parsed.model).toBe('claude-opus-4-8');
     expect(parsed.capabilities?.can_message).toBe('team');
     expect(parsed.session?.id).toBe('sid-1');

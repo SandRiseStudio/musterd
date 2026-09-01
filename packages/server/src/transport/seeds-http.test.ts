@@ -4,14 +4,17 @@ import { createServer, type RunningServer } from '../index.js';
 import { listLanes } from '../store/lanes.js';
 import { createSeedFromRelay } from '../store/seeds.js';
 import { getTeamBySlug } from '../store/teams.js';
+import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
-type Auth = string | { key: string; seat: string };
+type Auth = string | AgentHttpAuth;
 
 let server: RunningServer;
 let base: string;
 let agentKey: string;
 let nickCredential: string;
 let seedId: string;
+let adaAuth: AgentHttpAuth;
+let linAuth: AgentHttpAuth;
 
 const brief = {
   problem: 'A problem',
@@ -28,7 +31,11 @@ const brief = {
 function headers(auth?: Auth): Record<string, string> {
   if (!auth) return {};
   if (typeof auth === 'string') return { authorization: `Bearer ${auth}` };
-  return { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': auth.seat };
+  return {
+    authorization: `Bearer ${auth.key}`,
+    'x-musterd-seat': auth.seat,
+    'x-musterd-session-lease': auth.sessionLease,
+  };
 }
 
 async function request(method: string, path: string, body: unknown, auth?: Auth) {
@@ -54,6 +61,8 @@ beforeEach(async () => {
   nickCredential = created.json.human_credential;
   await request('POST', '/teams/bravo/members', { name: 'Ada', kind: 'agent' }, nickCredential);
   await request('POST', '/teams/bravo/members', { name: 'Lin', kind: 'agent' }, nickCredential);
+  adaAuth = await claimAgentHttp(base, 'bravo', agentKey, nickCredential, 'Ada');
+  linAuth = await claimAgentHttp(base, 'bravo', agentKey, nickCredential, 'Lin');
 
   const team = getTeamBySlug(server.db, 'bravo')!;
   server.db
@@ -74,8 +83,8 @@ afterEach(async () => {
 
 describe('Seed lifecycle HTTP authorization', () => {
   it('allows the explorer to ask and only the submitting Member to answer', async () => {
-    const ada = { key: agentKey, seat: 'Ada' };
-    const lin = { key: agentKey, seat: 'Lin' };
+    const ada = adaAuth;
+    const lin = linAuth;
 
     const claimed = await request('POST', `/teams/bravo/seeds/${seedId}/claim`, {}, ada);
     expect(claimed.status).toBe(200);
@@ -122,10 +131,7 @@ describe('Seed lifecycle HTTP authorization', () => {
       { id: seedId, state: 'open', submitted_by: 'nick', body: 'Which Surface should own this?' },
     ]);
 
-    const read = await request('GET', `/teams/bravo/seeds/${seedId}`, undefined, {
-      key: agentKey,
-      seat: 'Ada',
-    });
+    const read = await request('GET', `/teams/bravo/seeds/${seedId}`, undefined, adaAuth);
     expect(read.status).toBe(200);
     expect(read.json.seed.id).toBe(seedId);
   });
@@ -135,7 +141,7 @@ describe('Seed lifecycle HTTP authorization', () => {
     server.db
       .prepare("UPDATE members SET account_status = 'disabled' WHERE team_id = ? AND name = 'Ada'")
       .run(team.id);
-    const ada = { key: agentKey, seat: 'Ada' };
+    const ada = adaAuth;
 
     expect((await request('GET', '/teams/bravo/seeds', undefined, ada)).status).toBe(403);
     expect((await request('GET', `/teams/bravo/seeds/${seedId}`, undefined, ada)).status).toBe(403);
@@ -150,7 +156,7 @@ describe('Seed lifecycle HTTP authorization', () => {
       'POST',
       `/teams/bravo/seeds/${seedId}/clarification`,
       { body: '' },
-      { key: agentKey, seat: 'Ada' },
+      adaAuth,
     );
     expect(malformed.status).toBe(400);
 
@@ -164,7 +170,7 @@ describe('Seed lifecycle HTTP authorization', () => {
   });
 
   it('submits one exhaustive brief and promotes retry-safely with body-free audit evidence', async () => {
-    const ada = { key: agentKey, seat: 'Ada' };
+    const ada = adaAuth;
     await request('POST', `/teams/bravo/seeds/${seedId}/claim`, {}, ada);
 
     const first = await request(
@@ -222,7 +228,7 @@ describe('Seed lifecycle HTTP authorization', () => {
   });
 
   it('rolls promotion back when its Lane-open activity cannot persist, then retries cleanly', async () => {
-    const ada = { key: agentKey, seat: 'Ada' };
+    const ada = adaAuth;
     await request('POST', `/teams/bravo/seeds/${seedId}/claim`, {}, ada);
     server.db.exec(`
       CREATE TRIGGER refuse_seed_lane_activity BEFORE INSERT ON messages

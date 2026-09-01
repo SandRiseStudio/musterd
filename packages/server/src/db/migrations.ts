@@ -1236,6 +1236,29 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Agent HTTP authority (ADR 337): an agent's durable, self-identifying credential is stored in
+    // the existing per-member credential slot, kind-bound by the auth query. Each successful claim
+    // additionally mints a short-lived lease tied to the exact presence it created. A presence
+    // deletion therefore invalidates its lease even if an eviction path cannot explicitly revoke it.
+    version: 51,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_leases (
+          id          TEXT PRIMARY KEY,
+          team_id     TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          member_id   TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          presence_id TEXT NOT NULL REFERENCES presence(id) ON DELETE CASCADE,
+          token_hash  TEXT NOT NULL UNIQUE,
+          expires_at  INTEGER NOT NULL,
+          revoked_at  INTEGER,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_leases_lookup
+          ON session_leases(team_id, member_id, presence_id, expires_at);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

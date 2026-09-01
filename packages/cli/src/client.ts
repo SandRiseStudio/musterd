@@ -103,8 +103,7 @@ export interface InterruptCheck {
 
 export interface HttpClientOpts {
   server: string;
-  /** The Bearer secret (v0.3, ADR 075): a team agent key (`mskey_`) or human credential (`mscr_`).
-   *  The server dispatches on the prefix → live-presence occupancy; replaces the v0.2 seat token. */
+  /** The self-identifying Bearer secret: agent-seat (`msac_`) or human (`mscr_`) credential. */
   key?: string;
   /**
    * The seat this client acts as (v0.3, ADR 075 / SPEC A.7 §253). An agent key authenticates the
@@ -113,6 +112,8 @@ export interface HttpClientOpts {
    * envelope `from` instead. Unused on the mskd_ token path (the token already is the seat).
    */
   seat?: string;
+  /** Required alongside an `msac_` credential; proves its current Presence (ADR 337). */
+  sessionLease?: string;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
@@ -180,7 +181,7 @@ export class HttpClient {
       // The ADR 121 credential gate is unchanged and outranks all of it: resolving a model more
       // thoroughly must not become a new way for a human shell to stamp an occupancy.
       const attestedModel =
-        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_seat) === true
           ? (this.opts.model ?? resolveAttestedModel(process.env))
           : undefined;
       // ADR 131 §6 (increment 5): provenance rides the same gate as model — a wake-spawned
@@ -188,7 +189,7 @@ export class HttpClient {
       // their ambient touches label the seat `wake` instead of the `session` default (the inc-4
       // mislabel: verify credited a wake against a session-labelled ambient row).
       const attestedProvenance =
-        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_seat) === true
           ? resolveAttestedProvenance(process.env)
           : undefined;
       // ADR 241: the wake correlation token rides the same agent-key gate as provenance, and for
@@ -197,7 +198,7 @@ export class HttpClient {
       // has nothing of this wake's to find. Never on a human credential: a lease token in a human
       // shell would let that shell claim to be a machine's wake.
       const attestedWakeLease =
-        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_key) === true
+        this.opts.key?.startsWith(TOKEN_PREFIXES.agent_seat) === true
           ? resolveAttestedWakeLease(process.env)
           : undefined;
       res = await this.fetchWithRetry(path, {
@@ -206,6 +207,7 @@ export class HttpClient {
           'content-type': 'application/json',
           ...(this.opts.key ? { authorization: `Bearer ${this.opts.key}` } : {}),
           ...(this.opts.seat ? { 'x-musterd-seat': this.opts.seat } : {}),
+          ...(this.opts.sessionLease ? { 'x-musterd-session-lease': this.opts.sessionLease } : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
           ...(attestedModel !== undefined ? { 'x-musterd-model': attestedModel } : {}),
@@ -1096,6 +1098,8 @@ export interface WatchClaimOpts {
     presenceId: string,
     grant?: string,
     memory?: MemoryEnvelope | null,
+    seatCredential?: string,
+    sessionLease?: string,
   ) => void;
   /** No grant — the server opened a claim request (A.5); the socket stays open for the pushed terminal. */
   onPending?: (requestId: string, message: string) => void;
@@ -1171,7 +1175,14 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
         // startup gap — ADR 054) must run that reconciliation against a socket that is already
         // subscribed, or anything landing in between is missed by both paths.
         subscribe();
-        opts.onOccupied?.(o.seat, o.presenceId, o.grant, o.memory);
+        opts.onOccupied?.(
+          o.seat,
+          o.presenceId,
+          o.grant,
+          o.memory,
+          o.seatCredential,
+          o.sessionLease,
+        );
       } else if (o.state === 'refused') {
         opts.onRefused?.(o.code, o.message, o.claimable, o.hint);
       } else {

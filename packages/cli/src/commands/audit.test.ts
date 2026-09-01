@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig } from '../config.js';
+import { claimAgentHttp } from '../test-auth.js';
 import { auditCommand } from './audit.js';
 import { reclaimCommand } from './reclaim.js';
 import { teamCommand } from './team.js';
@@ -149,9 +150,9 @@ describe('audit command', () => {
       name: 'Ada2',
       kind: 'agent',
     });
-    // Post-cutover (ADR 069): a non-admin agent authenticates with the team agent key + its seat.
     const agentKey = loadConfig().agentKeys['dawn']!;
-    const client = new HttpClient({ server: serverUrl, key: agentKey, seat: 'Ada2' });
+    const authority = await claimAgentHttp(serverUrl, 'dawn', agentKey, nickToken, 'Ada2');
+    const client = new HttpClient({ server: serverUrl, ...authority });
     await expect(client.audit('dawn')).rejects.toMatchObject({ exitCode: 5 });
   });
 

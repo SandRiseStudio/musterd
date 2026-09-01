@@ -50,6 +50,11 @@ export type AuditAction =
   // cross-workspace newest-wins path, which does not audit).
   | 'claim.duplicate_workspace'
   | 'claim.superseded'
+  // ADR 337: agent HTTP authority lifecycle. Detail carries opaque ids only, never secret values.
+  | 'agent_seat_credential.minted'
+  | 'agent_seat_credential.rotated'
+  | 'agent_session_lease.revoked'
+  | 'agent_session_lease.minted'
   | 'request.decide'
   | 'request.expired'
   // ADR 088: an interrupt-class act was surfaced to a busy agent at a tool boundary (delivery, not

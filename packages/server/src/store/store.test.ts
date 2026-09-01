@@ -16,6 +16,7 @@ import {
   markSeatReleased,
   markSessionEnded,
   listMembers,
+  mintAgentSeatCredential,
   mintCredential,
   reapExcessIdleObservers,
   reapStaleObservers,
@@ -39,6 +40,7 @@ import {
   release,
   touchAmbientPresence,
 } from './presence.js';
+import { mintSessionLease } from './session-leases.js';
 import { createTeam, rotateAgentKey } from './teams.js';
 
 function freshTeam() {
@@ -129,30 +131,33 @@ describe('teams + members', () => {
   });
 });
 
-// v0.3 P3 (ADR 077, SPEC A.7 §253): authMember dispatches on the secret prefix. The agent key (mskey_)
-// authenticates the harness and names the acting seat out-of-band; the human credential (mscr_) is
-// self-identifying; the legacy per-seat token (mskd_) is untouched. The upgrade is additive.
-describe('authMember v0.3 prefix-dispatch (ADR 077)', () => {
-  it('agent key + acting seat resolves to the named seat', () => {
+// ADR 337 keeps the team key at the claim bootstrap boundary. Routine agent authority is instead
+// self-identifying and bound to the exact Presence that minted its short-lived lease.
+describe('authMember credential and lease dispatch (ADR 337)', () => {
+  it('agent credential plus its live lease resolves only its named seat', () => {
     const { db, team } = freshTeam();
-    addMember(db, team, { name: 'Ada', kind: 'agent' });
-    const { agent_key } = rotateAgentKey(db, team.id);
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const presence = attach(db, ada.row.id, 'cli', null);
+    const { seat_credential } = mintAgentSeatCredential(db, ada.row.id);
+    const { session_lease } = mintSessionLease(db, {
+      teamId: team.id,
+      memberId: ada.row.id,
+      presenceId: presence.id,
+    });
 
-    const ok = authMember(db, 'dawn', agent_key, 'Ada');
+    const ok = authMember(db, 'dawn', seat_credential, 'Ada', session_lease);
     expect(ok.member.name).toBe('Ada');
-    // The agent-key path must NOT depend on bound_at/presence (claim never sets it; gating on it would
-    // regress ADR 057). A freshly-added, never-touched seat authenticates fine.
-    expect(ok.member.bound_at).toBeNull();
+    expect(() => authMember(db, 'dawn', seat_credential, 'Ada')).toThrow(MusterdError);
   });
 
-  it('agent key without an acting seat is unauthorized (the key is not a seat)', () => {
+  it('the team agent key is never routine HTTP authority', () => {
     const { db, team } = freshTeam();
     addMember(db, team, { name: 'Ada', kind: 'agent' });
     const { agent_key } = rotateAgentKey(db, team.id);
     expect(() => authMember(db, 'dawn', agent_key)).toThrow(MusterdError);
   });
 
-  it('agent key naming a non-existent or left seat is unauthorized', () => {
+  it('the team agent key cannot select a non-existent or left seat', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
     const { agent_key } = rotateAgentKey(db, team.id);
@@ -168,17 +173,16 @@ describe('authMember v0.3 prefix-dispatch (ADR 077)', () => {
     expect(() => authMember(db, 'dawn', 'mskey_bogus', 'Ada')).toThrow(MusterdError);
   });
 
-  it('the team agent key cannot act as a HUMAN seat — escalation guard (security focal point 2)', () => {
+  it('the team agent key cannot act as a HUMAN seat — bootstrap-only', () => {
     const { db, team } = freshTeam();
     addMember(db, team, { name: 'nick', kind: 'human' }); // a human admin seat
     const { agent_key } = rotateAgentKey(db, team.id);
-    // The shared agent key naming a human seat must be refused as `forbidden` — otherwise any agent
-    // could set x-musterd-seat:<admin> and impersonate the human admin (privilege escalation).
+    // The bootstrap-only key must be refused before any caller-selected seat is consulted.
     expect(() => authMember(db, 'dawn', agent_key, 'nick')).toThrow(MusterdError);
     try {
       authMember(db, 'dawn', agent_key, 'nick');
     } catch (e) {
-      expect((e as MusterdError).code).toBe('forbidden');
+      expect((e as MusterdError).code).toBe('unauthorized');
     }
   });
 

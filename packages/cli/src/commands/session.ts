@@ -173,13 +173,15 @@ async function defaultOrientationFetcher(
 ): Promise<SessionOrientationInput | null> {
   const binding = dir ? requireUsableBinding(dir) : null;
   const seat = binding ? bindingSeat(binding) : undefined;
-  if (!binding || !seat || !binding.agent_key) return null;
+  const key = binding?.seat_credential ?? binding?.agent_key;
+  if (!binding || !seat || !key) return null;
   const team = binding.team;
   // A CLI act is intrinsically `cli` (ADR 286), matching gather()'s binding branch.
   const http = new HttpClient({
     server: binding.server,
-    key: binding.agent_key,
+    key,
     seat,
+    ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
     surface: 'cli',
     ...(binding.model !== undefined ? { model: binding.model } : {}),
   });
@@ -280,12 +282,14 @@ async function defaultStatuslineFetcher(
 ): Promise<SessionStatuslineInput | null> {
   const binding = dir ? requireUsableBinding(dir) : null;
   const seat = binding ? bindingSeat(binding) : undefined;
-  if (!binding || !seat || !binding.agent_key) return null;
+  const key = binding?.seat_credential ?? binding?.agent_key;
+  if (!binding || !seat || !key) return null;
   const team = binding.team;
   const http = new HttpClient({
     server: binding.server,
-    key: binding.agent_key,
+    key,
     seat,
+    ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
     surface: 'cli',
     ...(binding.model !== undefined ? { model: binding.model } : {}),
   }).presenceNeutral();
@@ -489,11 +493,14 @@ async function pushAttestation(
   event: 'start' | 'end',
 ): Promise<boolean> {
   const seat = bindingSeat(binding);
-  if (!binding.agent_key || !seat) return false;
+  const key = binding.seat_credential ?? binding.agent_key;
+  if (!binding.agent_key || !key || !seat) return false;
   try {
     const http = new HttpClient({
       server: binding.server,
-      key: binding.agent_key,
+      key,
+      seat,
+      ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
     }).presenceNeutral();
     // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
     // token rides the child's env, so it is attested here exactly as the presence-touch path
@@ -727,11 +734,14 @@ export async function observeCursorSession(
 
   if (!same || prior?.ended_at !== undefined) {
     const seat = bindingSeat(binding);
-    if (binding.agent_key && seat) {
+    const key = binding.seat_credential ?? binding.agent_key;
+    if (binding.agent_key && key && seat) {
       try {
         const http = new HttpClient({
           server: binding.server,
-          key: binding.agent_key,
+          key,
+          seat,
+          ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
         }).presenceNeutral();
         const wakeLease = resolveAttestedWakeLease(process.env);
         await http.attestSession(binding.team, {

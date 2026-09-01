@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig } from '../config.js';
+import { claimAgentHttp } from '../test-auth.js';
 import { inboxCommand } from './inbox.js';
 import { teamCommand } from './team.js';
 
@@ -20,7 +21,7 @@ describe('inbox command', () => {
   let server: RunningServer;
   let dir: string;
   let serverUrl: string;
-  let ada: HttpClient; // sends as the agent seat Ada (team agent key + seat header)
+  let ada: HttpClient; // sends as the agent seat Ada (claimed credential + Presence lease)
   let nick: HttpClient; // nick's own credential — for advancing nick's read cursor
   const base = Date.UTC(2026, 6, 7, 12, 0);
 
@@ -37,7 +38,8 @@ describe('inbox command', () => {
     const nickKey = cfg.identities['dawn']!.key;
     const admin = new HttpClient({ server: serverUrl, key: nickKey });
     await admin.addMember('dawn', { name: 'Ada', kind: 'agent' });
-    ada = new HttpClient({ server: serverUrl, key: cfg.agentKeys['dawn']!, seat: 'Ada' });
+    const adaAuth = await claimAgentHttp(serverUrl, 'dawn', cfg.agentKeys['dawn']!, nickKey, 'Ada');
+    ada = new HttpClient({ server: serverUrl, ...adaAuth });
     nick = new HttpClient({ server: serverUrl, key: nickKey, seat: 'nick' });
   });
 

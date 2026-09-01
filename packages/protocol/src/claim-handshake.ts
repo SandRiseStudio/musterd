@@ -134,7 +134,8 @@ export type MemoryEnvelope = z.infer<typeof MemoryEnvelopeSchema>;
 /** `occupied` (server → client) — the claim succeeded; this session holds the seat. `charter` is
  *  identity metadata the server serves but never enforces; `memory` is the seat-scoped continuity
  *  envelope (ADR 093) — headline + age, or null when the seat has saved nothing. The body is fetched
- *  on demand (GET /teams/:slug/memory); it never rides this frame. */
+ *  on demand (GET /teams/:slug/memory); it never rides this frame. An agent occupancy always receives
+ *  its Presence-bound lease; a newly minted or rotated agent credential is returned exactly once. */
 export const OccupiedFrame = z.object({
   type: z.literal('occupied'),
   seat: MemberSchema,
@@ -145,6 +146,11 @@ export const OccupiedFrame = z.object({
   // persists it into `binding.grant` and re-presents it on reconnect to occupy without an approval —
   // the server refreshes its TTL on each clean occupy. Only set on the first-issue (approve) path.
   grant: z.string().optional(),
+  // Per-agent credential shown exactly once, on first mint or explicit rotation (ADR 337).
+  seat_credential: z.string().optional(),
+  // A short-lived Presence-bound agent HTTP proof, freshly minted by every successful agent claim
+  // (ADR 337). Optional in the general frame because human and observer claims do not use it.
+  session_lease: z.string().optional(),
   memory: MemoryEnvelopeSchema.nullable(),
 });
 export type OccupiedFrame = z.infer<typeof OccupiedFrame>;

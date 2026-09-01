@@ -86,6 +86,8 @@ async function performClaim(
     if (fresh && fresh.claim && fresh.claim.mode === 'seat' && fresh.claim.name === target.seat) {
       if (fresh.grant !== undefined) config.grant = fresh.grant;
       if (fresh.agent_key !== undefined) config.agent_key = fresh.agent_key;
+      if (fresh.seat_credential !== undefined) config.seatCredential = fresh.seat_credential;
+      if (fresh.session_lease !== undefined) config.sessionLease = fresh.session_lease;
       // Surface is NOT adopted from disk, ever (ADR 286): it is what the LAUNCHER declared for
       // THIS session, resolved once at startup. v2 identity files carry no surface to adopt.
     }
@@ -136,6 +138,8 @@ function persistBinding(config: McpConfig, seat: string): void {
     server: config.server,
     team: config.team,
     ...(config.agent_key ? { agent_key: config.agent_key } : {}),
+    ...(config.seatCredential ? { seat_credential: config.seatCredential } : {}),
+    ...(config.sessionLease ? { session_lease: config.sessionLease } : {}),
     claim: { mode: 'seat', name: seat },
     ...(config.grant !== undefined ? { grant: config.grant } : {}),
     // Carry the attested model through the rewrite (ADR 101). `config.model` is the resolved ladder

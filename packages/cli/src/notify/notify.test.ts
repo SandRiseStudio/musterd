@@ -9,6 +9,7 @@ import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { notifyCommand } from '../commands/notify.js';
 import { teamCommand } from '../commands/team.js';
+import { claimAgentHttp, type AgentHttpAuth } from '../test-auth.js';
 import { buildNotifyCommand, type NotifyItem } from './os.js';
 import { pendingToNotify, pollOnce, toNotifyItem, type NotifyDeps } from './select.js';
 
@@ -250,18 +251,24 @@ describe('notify against a live daemon', () => {
    * his human credential (mscr_); lin (agent) auths with the team agent key + `seat: 'lin'` — the mskd_
    * `team add` token no longer authenticates.
    */
-  async function setup(): Promise<{ nickToken: string; linToken: string }> {
+  async function setup(): Promise<{ nickToken: string; lin: AgentHttpAuth }> {
     await capture(() => teamCommand(parseArgs(['create', 'dawn', '--as', 'nick'])));
     await capture(() => teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--json'])));
     const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8'));
-    const linToken = cfg.agentKeys.dawn as string; // team agent key — lin sends as { key, seat: 'lin' }
     const nickToken = cfg.identities.dawn.key as string; // nick's credential (mscr_)
-    return { nickToken, linToken };
+    const lin = await claimAgentHttp(
+      serverUrl,
+      'dawn',
+      cfg.agentKeys.dawn as string,
+      nickToken,
+      'lin',
+    );
+    return { nickToken, lin };
   }
 
   it('fires for a request_help to an away human, then self-clears once the inbox is read', async () => {
-    const { nickToken, linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
+    const { nickToken, lin: linAuth } = await setup();
+    const lin = new HttpClient({ server: serverUrl, ...linAuth });
     await lin.send(
       'dawn',
       makeEnvelope({
@@ -314,8 +321,8 @@ describe('notify against a live daemon', () => {
   });
 
   it('away holds a normal request_help but an urgent ping breaks through (ADR 044)', async () => {
-    const { nickToken, linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
+    const { nickToken, lin: linAuth } = await setup();
+    const lin = new HttpClient({ server: serverUrl, ...linAuth });
     const nick = new HttpClient({ server: serverUrl, key: nickToken, seat: 'nick' });
 
     // nick goes away (explicit, never inferred).
@@ -362,8 +369,8 @@ describe('notify against a live daemon', () => {
   });
 
   it('command --once wiring: resolves identity and fires via the injected sink', async () => {
-    const { linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
+    const { lin: linAuth } = await setup();
+    const lin = new HttpClient({ server: serverUrl, ...linAuth });
     await lin.send(
       'dawn',
       makeEnvelope({
@@ -387,8 +394,8 @@ describe('notify against a live daemon', () => {
   });
 
   it('resident loop: fires on the immediate first poll, then stops on SIGINT', async () => {
-    const { linToken } = await setup();
-    const lin = new HttpClient({ server: serverUrl, key: linToken, seat: 'lin' });
+    const { lin: linAuth } = await setup();
+    const lin = new HttpClient({ server: serverUrl, ...linAuth });
     await lin.send(
       'dawn',
       makeEnvelope({

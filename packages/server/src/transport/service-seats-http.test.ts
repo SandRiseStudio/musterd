@@ -139,15 +139,15 @@ describe('service-token auth (ADR 232 §5)', () => {
     expect([401, 403]).toContain(r.status);
   });
 
-  it('the shared agent key can never act as a service seat, and says so by kind', async () => {
+  it('the shared agent key can never act as a service seat', async () => {
     const r = await post(
       '/teams/dawn/messages',
       { envelope: envelope('autorefresh', 'spoofed') },
       agentKey,
       'autorefresh',
     );
-    expect(r.status).toBe(403);
-    expect(JSON.stringify(r.json)).toMatch(/service seat/);
+    // The bootstrap key is refused before a caller-selected seat can be resolved (ADR 337).
+    expect(r.status).toBe(401);
   });
 });
 

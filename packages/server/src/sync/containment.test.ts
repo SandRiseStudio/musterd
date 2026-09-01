@@ -59,16 +59,16 @@ describe('3b-i containment', () => {
     db.close();
   });
 
-  it('leaves the message log and every next_seq untouched when v50 applies', () => {
+  it('leaves the message log and every next_seq untouched when v50 replays', () => {
     const { db } = seed();
     const before = snapshot(db);
     // One message, one local node that has handed out exactly one seq.
     expect(before.messages).toEqual({ n: 1 });
     expect(before.seqs).toEqual([{ id: expect.any(String), next_seq: 2 }]);
 
-    // Rewind past v50 and replay it, which is the only thing this slice does to a live database.
+    // Rewind past v50 and replay the migration tail. v51 only adds the independent lease table.
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(50);
+    expect(runMigrations(db)).toBe(51);
 
     expect(snapshot(db)).toEqual(before);
     // …and the replay did not drop what was already staged-adjacent: the tables survive it.

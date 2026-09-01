@@ -154,18 +154,33 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(r.success).toBe(false);
   });
 
-  it('parses an occupied frame with charter + the reserved null memory seam', () => {
+  it('accepts the fresh agent lease and one-time credential on occupied', () => {
     const f = OccupiedFrame.parse({
       type: 'occupied',
       seat,
       presence_id: '01J',
       server_time: 7,
       charter: 'you ship the CLI',
+      seat_credential: 'msac_once',
+      session_lease: 'msls_live',
       memory: null,
     });
     expect(f.type).toBe('occupied');
     expect(f.memory).toBeNull();
     expect(f.charter).toBe('you ship the CLI');
+    expect(f.seat_credential).toBe('msac_once');
+    expect(f.session_lease).toBe('msls_live');
+
+    // The frame is shared with human/observer claims, which do not require an agent session lease.
+    expect(
+      OccupiedFrame.safeParse({
+        type: 'occupied',
+        seat,
+        presence_id: '01J',
+        server_time: 7,
+        memory: null,
+      }).success,
+    ).toBe(true);
   });
 
   it('parses an occupied frame carrying a memory envelope (ADR 093)', () => {
@@ -174,6 +189,7 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
       seat,
       presence_id: '01J',
       server_time: 7,
+      session_lease: 'msls_live',
       memory: {
         headline: 'mid-refactor of ws.ts eviction, tests red',
         saved_at: 1751830000000,
@@ -189,6 +205,7 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
       seat,
       presence_id: '01J',
       server_time: 7,
+      session_lease: 'msls_live',
       memory: null,
     });
     expect(f.memory).toBeNull();
@@ -197,6 +214,7 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
       seat,
       presence_id: '01J',
       server_time: 7,
+      session_lease: 'msls_live',
       memory: { headline: 'x', saved_at: 1, size_bytes: 1, body: 'nope' },
     });
     expect(bad.success).toBe(false); // envelope is strict: the body never rides occupy
@@ -208,6 +226,7 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
       seat,
       presence_id: '01J',
       server_time: 7,
+      session_lease: 'msls_live',
       memory: { headline: 'x'.repeat(121), saved_at: 1, size_bytes: 1 },
     });
     expect(bad.success).toBe(false);
@@ -256,6 +275,8 @@ describe('claim handshake frames (ADR 078 / SPEC A.3)', () => {
     expect(P3_AUDIT_ACTIONS).toContain('grant.issue');
     expect(P3_AUDIT_ACTIONS).toContain('claim.occupy');
     expect(P3_AUDIT_ACTIONS).toContain('request.decide');
+    expect(P3_AUDIT_ACTIONS).toContain('agent_seat_credential.minted');
+    expect(P3_AUDIT_ACTIONS).toContain('agent_session_lease.minted');
     // A future verb survives the open action field:
     expect(typeof P3_AUDIT_ACTIONS[0]).toBe('string');
   });

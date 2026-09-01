@@ -5,6 +5,7 @@ import { createServer, type RunningServer } from '../index.js';
 import { listAudit } from '../store/audit.js';
 import { openLane } from '../store/lanes.js';
 import { getTeamBySlug, setPolicy } from '../store/teams.js';
+import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
  * Direct HTTP coverage for the ADR 150 enforcement foundation: the member-readable class table
@@ -17,9 +18,15 @@ let server: RunningServer;
 let base: string;
 let agentKey: string;
 let nickCred: string;
+let agentAuthorities: Record<string, AgentHttpAuth>;
 
 function seatHeaders(seat: string): Record<string, string> {
-  return { authorization: `Bearer ${agentKey}`, 'x-musterd-seat': seat };
+  const auth = agentAuthorities[seat]!;
+  return {
+    authorization: `Bearer ${auth.key}`,
+    'x-musterd-seat': seat,
+    'x-musterd-session-lease': auth.sessionLease,
+  };
 }
 async function post(path: string, body: unknown, headers: Record<string, string> = {}) {
   const res = await fetch(base + path, {
@@ -56,6 +63,9 @@ beforeEach(async () => {
   agentKey = team.json.agent_key;
   nickCred = team.json.human_credential;
   await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, bearer(nickCred));
+  agentAuthorities = {
+    Ada: await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Ada'),
+  };
   // Admin sets an enforcement class table (plus a secret webhook, to prove the scoped read hides it).
   await post(
     '/teams/dawn/policy',
@@ -314,6 +324,14 @@ describe('Gate B — policy-classed action→ask (ADR 150) — deny IS emit', ()
       enforcement: { classes: CLASSES as never },
     });
     server.db.prepare('DELETE FROM presence').run();
+    agentAuthorities.Ada = await claimAgentHttp(
+      base,
+      'dawn',
+      agentKey,
+      nickCred,
+      'Ada',
+      agentAuthorities.Ada.key,
+    );
     const r = await forcePush();
     expect(r.json.decision).toBe('deny'); // still non-proceed: strand is a second way of NOT proceeding
     expect(r.json.reason).toContain('STRAND');
@@ -323,6 +341,14 @@ describe('Gate B — policy-classed action→ask (ADR 150) — deny IS emit', ()
     // Guard (ADR 153 eval): the blocked action still never executes — a re-attempt after the strand
     // orders re-adjudicates to deny, not allow.
     server.db.prepare('DELETE FROM presence').run();
+    agentAuthorities.Ada = await claimAgentHttp(
+      base,
+      'dawn',
+      agentKey,
+      nickCred,
+      'Ada',
+      agentAuthorities.Ada.key,
+    );
     const again = await forcePush();
     expect(again.json.decision).toBe('deny');
     expect(again.json.outcome).toBe('denied_awaiting');
@@ -515,6 +541,7 @@ describe('nudge confirmation loop (ADR 167)', () => {
 
   async function sendHintedHandoff(): Promise<{ msgId: string; fingerprint: string }> {
     await post('/teams/dawn/members', { name: 'Bob', kind: 'agent' }, bearer(nickCred));
+    agentAuthorities.Bob = await claimAgentHttp(base, 'dawn', agentKey, nickCred, 'Bob');
     await get('/teams/dawn/inbox', seatHeaders('Bob')); // live ambient presence (ADR 057)
     const envelope = makeEnvelope({
       id: '01HTESTNDGEAAAAAAAAAAAAAAA',

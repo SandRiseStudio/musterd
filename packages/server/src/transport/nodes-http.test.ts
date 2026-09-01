@@ -4,6 +4,7 @@ import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { insertMessage } from '../store/messages.js';
 import { getTeamBySlug } from '../store/teams.js';
+import { claimAgentHttp, type AgentHttpAuth } from './test-auth.js';
 
 /**
  * The node enrollment routes (ADR 328), increment 3a of the ADR 325 federation build.
@@ -19,13 +20,18 @@ let server: RunningServer;
 let base: string;
 let nickCredential: string;
 let adaKey: string;
+let adaAuth: AgentHttpAuth;
 
-type Auth = string | { key: string; seat: string };
+type Auth = string | AgentHttpAuth;
 
 function headers(auth?: Auth): Record<string, string> {
   if (!auth) return {};
   if (typeof auth === 'string') return { authorization: `Bearer ${auth}` };
-  return { authorization: `Bearer ${auth.key}`, 'x-musterd-seat': auth.seat };
+  return {
+    authorization: `Bearer ${auth.key}`,
+    'x-musterd-seat': auth.seat,
+    'x-musterd-session-lease': auth.sessionLease,
+  };
 }
 
 async function request(method: string, path: string, body?: unknown, auth?: Auth) {
@@ -57,6 +63,7 @@ beforeEach(async () => {
   nickCredential = created.json.human_credential;
   adaKey = created.json.agent_key;
   await request('POST', '/teams/bravo/members', { name: 'ada', kind: 'agent' }, nickCredential);
+  adaAuth = await claimAgentHttp(base, 'bravo', adaKey, nickCredential, 'ada');
 });
 
 afterEach(async () => {
@@ -297,7 +304,7 @@ describe('node enrollment routes (ADR 328)', () => {
       // A genuinely AUTHENTICATED non-admin seat — ada, an ordinary agent. The seat header matters:
       // a bare agent key resolves to no member and 401s on every route, which would make this
       // assertion pass without ever exercising the admin gate.
-      const res = await request(method, path, undefined, { key: adaKey, seat: 'ada' });
+      const res = await request(method, path, undefined, adaAuth);
       expect(res.status, `${method} ${path} as non-admin seat`).toBe(403);
     }
   });
