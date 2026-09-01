@@ -2611,9 +2611,24 @@
     opacity: 0.8;
   }
 }
-/* A reclaimable seat isn't as dim as a cold one — it's coming back. */
-.lc-seat--recon {
-  opacity: 0.75;
+/* A reclaimable seat isn't as dim as a cold one — it's coming back. The dim rides the DOT, never
+   the row (matching `.lc-seat--offline` above), because container opacity is not a shade: it
+   composites the whole subtree over the paper, so it lightens the avatar disc AND fades the letter
+   on it at the same time — pushing from both sides at once.
+
+   Measured (miley, 2026-08-31, from CI's own failing rows on #1119): this rule alone produced all
+   nine AA failures on /live connected. The avatar is drawn with `memberAvatar`, deepened to
+   luminance 0.165 precisely so white initials clear 4.88 — and at 0.75 the disc composited to
+   luminance 0.274 while the white went translucent, landing at 2.50. Reproduced to the second
+   decimal against CI's reported #658edb / #509b92 / #52999e. It also dragged `reconnecting`
+   (5.89 designed) to 3.49 and the agent kind tag (6.51 designed) to 3.80. Every one of those
+   colours was chosen correctly; the row dim undid all of them at once.
+
+   `.lc-seat--offline` was converted to a dot-only dim in #781/#789 for exactly this reason. This
+   rule was not converted with it, and the state it governs is one the local a11y fixture never
+   renders — so nothing measured it until CI did. */
+.lc-seat--recon .lc-seat__dot {
+  opacity: 0.8;
 }
 /* ADR 135: this seat's runtime attests a different build than the daemon — quiet amber, details in
    the title (both short SHAs). Same chip anatomy as reconnecting, warn-toned instead of accent. */
