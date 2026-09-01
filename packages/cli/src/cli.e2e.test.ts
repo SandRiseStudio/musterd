@@ -997,15 +997,16 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
   });
 
   /** Bind this folder to agent seat ava with a REVOKED lease — the state every hook one-shot
-   *  (gate check, nudge) wakes up in once any other process has claimed since. */
-  async function bindAvaWithStaleLease(): Promise<void> {
+   *  (gate check, nudge) wakes up in once any other process has claimed since. Returns the LIVE
+   *  claimant (the adapter that superseded it), whose lease is the thing a reclaim would kill. */
+  async function bindAvaWithStaleLease(): Promise<Awaited<ReturnType<typeof claimedAgent>>> {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     await run(teamCommand, ['add', 'ava', '--kind', 'agent']);
     const auth = await claimedAgent('dawn', 'ava');
     // A second claim supersedes the first, revoking the lease we are about to persist — the storm's
     // steady state, reproduced once.
     const stale = auth.sessionLease;
-    await claimedAgent('dawn', 'ava');
+    const live = await claimedAgent('dawn', 'ava');
     const bindingPath = saveBinding(dir, {
       version: 2,
       server: process.env['MUSTERD_SERVER']!,
@@ -1016,6 +1017,9 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
       claim: { mode: 'seat', name: 'ava' },
     });
     process.env['MUSTERD_BINDING'] = bindingPath;
+    // The seat credential is minted on the FIRST claim and stable thereafter — a re-claim returns
+    // only a fresh lease — so the live claimant's authority is that credential + the live lease.
+    return { ...live, key: auth.key };
   }
 
   it('a hook read (reclaimAgentLease: false) presents the stale lease and fails closed — it never claims', async () => {
@@ -1031,8 +1035,48 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
 
   it('an interactive read still reclaims (ADR 339 / #1130 preserved)', async () => {
     await bindAvaWithStaleLease();
-    const { http } = resolveRead({});
+    // Opting IN is now explicit. #1138 pinned this as the DEFAULT, and that default is what let the
+    // storm survive it: every read path that did not think about the flag reclaimed, so the two
+    // callsites #1138 opted out were re-claimed anyway by other reads in the same process
+    // (reachabilityNudge, inbox --interrupt-check, infra-gate). Measured on main @ fcb92af8:
+    // 2 claim.superseded rows per hook invocation, 0 once suppressed.
+    const { http } = resolveRead({}, { reclaimAgentLease: true });
     const res = await http.inbox('dawn', { unread: true, limit: 1 });
+    expect(Array.isArray(res.messages)).toBe(true);
+  });
+
+  it('DEFAULTS to not reclaiming — a read path that never considered the flag cannot storm', async () => {
+    await bindAvaWithStaleLease();
+    const { http, explicit } = resolveRead({});
+    expect(explicit).toBe(true);
+    await expect(http.inbox('dawn', { unread: true, limit: 1 })).rejects.toThrow(
+      /invalid, expired, or revoked/,
+    );
+  });
+
+  // Folded in from #1140 (closed as superseded by this branch). The three cases above pin the
+  // resolveRead default; this one drives the whole PostToolUse one-shot — `inbox --interrupt-check`,
+  // the probe that fires on EVERY tool call — and asserts the harm the storm actually did: the live
+  // claimant's lease is still valid afterwards. Fails on main @ fcb92af8 with the reclaim default on.
+  it("the interrupt-check one-shot stays silent AND leaves the live claimant's lease intact", async () => {
+    const live = await bindAvaWithStaleLease();
+
+    const probe = await run(inboxCommand, ['--interrupt-check']);
+    expect(probe.code).toBe(0);
+    expect(probe.out).toBe('');
+
+    // Pre-fix, the probe's reclaim seized the seat and evicted the live adapter's presence row —
+    // and a session lease is bound to that row (ADR 337), so this read failed with
+    // "invalid, expired, or revoked agent session lease".
+    const liveHttp = new HttpClient({
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      key: live.key,
+      seat: 'ava',
+      sessionLease: live.sessionLease,
+      surface: 'cli',
+    });
+    const res = await liveHttp.inbox('dawn', { unread: true, limit: 1 });
     expect(Array.isArray(res.messages)).toBe(true);
   });
 });

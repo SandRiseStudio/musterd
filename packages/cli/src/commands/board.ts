@@ -73,7 +73,9 @@ export async function boardCommand(parsed: Parsed): Promise<number> {
  * fragment-free URL in scrollback — is identical, because it is the same one-shot relay.
  */
 export async function signinCommand(parsed: Parsed, surface: SigninSurface): Promise<number> {
-  const { team, server, http, identity } = resolveRead(parsed.flags);
+  const { team, server, http, identity } = resolveRead(parsed.flags, {
+    reclaimAgentLease: true,
+  });
   const place = surface === 'live' ? 'the office' : 'the board';
 
   if (!identity) {

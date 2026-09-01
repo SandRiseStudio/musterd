@@ -66,6 +66,14 @@ function defaultSeatWorkspace(seat: string): string | undefined {
 
 async function defaultFetchRoster(flags: Parsed['flags']): Promise<RosterRead | null> {
   try {
+    // Takes the no-reclaim default even though `role list`/`show` are interactive, unlike the other
+    // interactive reads — deliberately, and NOT an oversight to "restore consistency" later. The
+    // opt-in exists so a genuinely interactive read fails CLOSED on a stale lease instead of
+    // flapping the seat; this read cannot fail either way. `GET /teams/:slug/members` authenticates
+    // through the server's `tryAuth`, which swallows a bad lease and downgrades the viewer to
+    // anonymous, and an anonymous roster still carries every seat's `roles` plus the whole role
+    // library — only other seats' member `capabilities` are withheld, which nothing here reads.
+    // So the flag would protect nothing and cost a full WS claim on every invocation.
     const { team, http } = resolveRead(flags); // the status-command read path — auth-free
     const res = await http.roster(team);
     if (!res.roles) return null; // older daemon: no library on the wire — template-only output

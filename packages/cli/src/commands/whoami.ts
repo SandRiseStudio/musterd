@@ -11,7 +11,9 @@ import { resolveRead } from './helpers.js';
  * and flags the ambient config case, which can read but never act.
  */
 export async function whoamiCommand(parsed: Parsed): Promise<number> {
-  const { team, identity, identitySource, explicit } = resolveRead(parsed.flags);
+  const { team, identity, identitySource, explicit } = resolveRead(parsed.flags, {
+    reclaimAgentLease: true,
+  });
 
   if (parsed.flags['json']) {
     process.stdout.write(

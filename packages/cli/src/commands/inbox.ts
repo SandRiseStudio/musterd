@@ -269,6 +269,8 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   await attestSlotIfUnattested();
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
   try {
+    // The interrupt probe is hook-installed and rides every tool call — it takes the default (no
+    // reclaim) for the same reason `gate check` does.
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return 0;
     const res = await http.interruptCheck(team);
