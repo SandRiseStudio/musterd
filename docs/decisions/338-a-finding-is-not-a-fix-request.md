@@ -43,12 +43,15 @@ edge cases**:
   #1115 ("the PR's own wiki page states the rule it violates"), #1110 (ADR number collision against
   `adr-numbers:check`), #1087 ×2 (a spec still teaching the superseded ritual, cited as authority
   by the shipped skill; the ADR's own Decision still teaching the rule the amendment reverses).
-
-(The #1087 rows were first filed here as 2 honesty / 2 pin; miley's review of this ADR recounted
-them against the original findings — 1 honesty / 2 pin / 1 probe-measured — and the correction is
-this paragraph. Totals: honesty 2, named pin 5, probe-measured 5.)
 - **Leaked secrets / AppSec** — none in the sample; the category exists in
   `.github/REVIEW-RULES.md` blocker 2 and the security skill.
+
+The #1087 rows were first filed here as 2 honesty / 2 pin; miley's review of this ADR recounted
+them against the original findings as 1 honesty / 2 pin / 1 probe-measured, and this paragraph is
+the correction, recorded in place. Her recount's totals line then miscounted a column in turn, and
+the re-review corrected the correction — totals as the bullets read: honesty 2, named pin 4,
+probe-measured 6. Two rounds of review on four rows of arithmetic, both errors surviving both
+readers because every wrong split still summed to twelve.
 
 The same sample holds the counter-pattern, done right, twice in one day: the reviewer of #1123
 found a real gate hole (rule 3's before-status window) and recorded it as a carry-forward — it
