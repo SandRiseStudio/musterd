@@ -24,7 +24,8 @@ const USAGE =
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>] [--note <why>]\n' +
   '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high] [--goal <id>]\n' +
-  '  musterd lane submit <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>] [--branch b]\n' +
+  '  musterd lane submit <id> [--to <seat>] [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
+  '                          [--branch b]\n' +
   '  musterd lane ready <id> […]  (deprecated alias for submit)\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '  musterd lanes [--project p] [--mine] [--open] [--json]';
@@ -175,6 +176,13 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
             // reached for it here and were bounced.
             ...(flagStr(parsed.flags, 'branch') !== undefined
               ? { branch: flagStr(parsed.flags, 'branch')! }
+              : {}),
+            // Route the acceptance ask to a seat you name, instead of the daemon's pick. The
+            // acceptance a human routes by hand was previously invisible: the named seat's `accept`
+            // had no server-composed ask to bind to, so the owner ended up self-closing work that
+            // HAD been reviewed. Recorded as `route: 'named'` — never as a pick.
+            ...(submit && flagStr(parsed.flags, 'to') !== undefined
+              ? { acceptor: flagStr(parsed.flags, 'to')! }
               : {}),
           },
     );

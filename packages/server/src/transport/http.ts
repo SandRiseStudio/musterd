@@ -210,6 +210,7 @@ import {
 import {
   ACCEPTANCE_EXEMPT_SAMPLE_RATE,
   acceptanceExemption,
+  namedAcceptor,
   pickHumanReviewer,
   pickWakeReviewer,
   REVIEW_LOOP_BREAKER_N,
@@ -4006,6 +4007,26 @@ export async function handleHttp(
           before.owner_seat !== null &&
           member.name !== before.owner_seat;
         const patch = counterpartTerminal ? { ...body, merged: undefined } : body;
+        // Resolve a named acceptor BEFORE the state write. The routing itself happens after (it
+        // needs the updated lane), but validating there would move the lane into
+        // awaiting_acceptance and *then* refuse — leaving a submitted lane with no ask and no
+        // acceptor, which is the exact silent limbo `acceptor` exists to remove. There is no
+        // rollback on this path: the write is not in a transaction with what follows it.
+        const namedAcceptorPick =
+          body.acceptor !== undefined
+            ? namedAcceptor(ctx.db, team.id, before.owner_seat ?? member.name, body.acceptor)
+            : undefined;
+        if (namedAcceptorPick && 'refused' in namedAcceptorPick) {
+          throw new MusterdError(
+            'bad_request',
+            namedAcceptorPick.refused === 'unknown_seat'
+              ? `no such seat "${body.acceptor}" on this team`
+              : namedAcceptorPick.refused === 'observer'
+                ? `"${body.acceptor}" is an observer — it cannot accept a lane`
+                : `"${body.acceptor}" owns this lane; an owner accepting their own work records ` +
+                  `an unverified close, so naming yourself is refused`,
+          );
+        }
         // ADR 325 prereq: the policy above was decided against `before`, so the write carries that
         // expectation — an ownership/state patch refuses if the lane moved in between, instead of
         // blindly overwriting. Inert while this handler stays synchronous end-to-end; load-bearing
@@ -4181,10 +4202,18 @@ export async function handleHttp(
           // picker's ladder still means exactly what it meant — and it means an exempt submit never
           // leases a wake or trips the review-loop breaker on the way to being skipped.
           const exemption = acceptanceExemption(lane);
-          const peerSelection = exemption.exempt
-            ? { pick: null, snapshot: { selected: null, candidates: [] } }
-            : selectReviewCounterpart(ctx.db, team.id, lane, worker, ctx.config.presenceTimeoutMs);
-          const peerPick = peerSelection.pick;
+          // A named acceptor short-circuits the ladder entirely: the namer has already decided, and
+          // running the picker to overrule (or to "confirm") them would either discard the decision
+          // or dress it up as the picker's. Refusals are loud — see `namedAcceptor`. The named
+          // routing also skips the exemption: naming an acceptor IS asking for one, so a
+          // declared-low lane whose acceptance someone routed by hand gets the ask it asked for.
+          const named =
+            namedAcceptorPick && !('refused' in namedAcceptorPick) ? namedAcceptorPick : undefined;
+          const peerSelection =
+            named || exemption.exempt
+              ? { pick: null, snapshot: { selected: null, candidates: [] } }
+              : selectReviewCounterpart(ctx.db, team.id, lane, worker, ctx.config.presenceTimeoutMs);
+          const peerPick = named ?? peerSelection.pick;
           const humanFallback =
             lane.risk.length > 0 && !peerPick
               ? pickHumanReviewer(ctx.db, team.id, worker, ctx.config.presenceTimeoutMs)

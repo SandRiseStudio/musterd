@@ -176,6 +176,32 @@ describe('lane commands', () => {
     expect(resolved.out).toContain('git branch -D izzo/the-work');
   });
 
+  // The solo-team submit above is the measured case: no eligible acceptor, so the daemon sanctions
+  // a self-close and the ledger records `verified: false` even when a second seat DID review the
+  // work out of band. `--to` gives that routing a door — the named seat gets a real acceptance ask,
+  // which is the only thing an `accept` can bind to.
+  it('submit --to routes the acceptance to the named seat instead of sanctioning self-close', async () => {
+    await capture(() => teamCommand(parseArgs(['add', 'ghost', '--kind', 'agent'])));
+    const id = await openLane(['routed by hand', '--claim', '--branch', 'nick/routed']);
+    const submitted = await capture(() =>
+      laneCommand(parseArgs(['submit', id, '--pr', '9', '--to', 'ghost'])),
+    );
+    expect(submitted.code).toBe(0);
+    expect(submitted.out).toContain('lane submitted for acceptance');
+    expect(submitted.out).toContain('ghost');
+    // The whole point: this lane is NOT told to close itself.
+    expect(submitted.out).not.toContain('self-close sanctioned');
+    // Named, never dressed up as one of the picker's routes.
+    expect(submitted.out).toContain('named');
+  });
+
+  it('submit --to refuses a seat that is not on the team, and says which name', async () => {
+    const id = await openLane(['bad routing', '--claim']);
+    await expect(
+      capture(() => laneCommand(parseArgs(['submit', id, '--pr', '9', '--to', 'nobody']))),
+    ).rejects.toThrow(/no such seat "nobody"/);
+  });
+
   it('submit without --branch leaves the branch the lane already carried', async () => {
     // Never clears: a repeat submit recording a merge SHA must not blank the pointer.
     const id = await openLane(['already pointed', '--claim', '--branch', 'feat/kept']);

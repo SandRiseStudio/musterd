@@ -272,6 +272,7 @@ export function registerLanes(
     sha?: string | undefined;
     authorized_by?: string | undefined;
     branch?: string | undefined;
+    acceptor?: string | undefined;
   }) => {
     try {
       // Merge-verified submit: awaiting_acceptance MEANS landed. The repo is the source of
@@ -319,6 +320,12 @@ export function registerLanes(
         // terminal-or-awaiting lanes carry branch=null, so acceptors routinely get an empty pointer
         // and dig the branch out of a PR link or a status_update.
         ...(args.branch !== undefined ? { branch: args.branch } : {}),
+        // Route the acceptance to a seat you name instead of the picker's choice. Recorded as
+        // `route: 'named'`, never as a pick — the picker is what proves diversity, and it did not
+        // choose this seat. Without this the only way to route acceptance by hand was out of band,
+        // and an out-of-band acceptance binds to nothing: the named seat's `accept` had no
+        // server-composed ask to answer, so the owner self-closed reviewed work as unverified.
+        ...(args.acceptor !== undefined ? { acceptor: args.acceptor } : {}),
       });
       // ADR 235. The old advice — "wait ≤5m; on silence, lane_resolve yourself" — was correct while
       // an unaccepted lane hung forever: self-close was the only escape. With a backstop armed it
@@ -394,6 +401,12 @@ export function registerLanes(
           .optional()
           .describe('the human whose authority the merge ran under'),
         branch: z.string().optional().describe('branch carrying the work'),
+        acceptor: z
+          .string()
+          .optional()
+          .describe(
+            'route the acceptance ask to THIS seat instead of the picker\'s choice; recorded as route "named"',
+          ),
       },
     },
     laneSubmitHandler,

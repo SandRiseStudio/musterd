@@ -5561,6 +5561,101 @@ describe('two-stage close (ADR 169)', () => {
       expect(merged[0].detail.attested_by).toBe('ada');
     });
 
+    // The acceptance a human routes by hand had no door into the ledger. Measured 2026-09-01 on
+    // lane 01M1F9QVG6XCFQAZSH7XSZ13JT: nick routed acceptance to `ghost`, ghost reviewed and sent a
+    // real `accept`, and the close still recorded `verified: false` / self_close — because the
+    // accept auto-targeted a plain `request_help` (meta NULL), `applyAcceptanceVerdict` returns at
+    // its `!replied?.meta` guard, and the lane never left awaiting_acceptance for the owner to do
+    // it themselves. The ask is the only binding, so an ask nobody composed is an acceptance the
+    // ledger cannot see — understating review in exactly the field ADR 056 counts from.
+    it('a submit naming its acceptor routes the ask there, and that seat’s accept closes it verified', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const lane = await post(
+        '/teams/dawn/lanes',
+        { title: 'named acceptor', branch: 'ada/named', claim: true },
+        ada,
+      );
+      const laneId = lane.json.lane.id as string;
+
+      const ready = await patchLane(
+        laneId,
+        {
+          state: 'ready_for_review',
+          acceptor: 'gee',
+          merged: { pr: 11, sha: 'cafe11', authorized_by: 'nick' },
+        },
+        ada,
+      );
+      expect(ready.status).toBe(200);
+      expect(ready.json.review.reviewer).toBe('gee');
+      // `named` is its own route, never folded into a pick. The daemon's picker is what enforces
+      // cross-family eligibility, so recording a hand-routed acceptor as if it had been picked
+      // would feed a diversity claim nobody made into the ADR 056 counts.
+      expect(ready.json.review.route).toBe('named');
+
+      // The named seat gets a real, server-composed lane_review ask — the only thing an accept
+      // can bind to.
+      const inbox = await get('/teams/dawn/inbox?unread=1', gee);
+      const ask = inbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(ask).toBeDefined();
+      expect(ask.meta.lane_review.route).toBe('named');
+
+      expect((await verdict(gee, 'gee', ask.id as string, 'accept')).status).toBe(201);
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const closed = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(closed!.state).toBe('done');
+
+      const rows = await auditRows(nickTok, 'lane.closed');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].detail.closed_by).toBe('gee');
+      expect(rows[0].detail.owner_at_close).toBe('ada');
+      // The whole point: a routed-by-hand acceptance is a confirmed close, not a self_close.
+      expect(rows[0].detail.verified).toBe(true);
+      expect(rows[0].detail.reason).toBe('counterpart_confirm');
+
+      // …and the submit row says the routing was named, so the two reads never disagree.
+      const submitted = await auditRows(nickTok, 'lane.ready_for_review');
+      expect(submitted[0].detail.route).toBe('named');
+      expect(submitted[0].detail.reviewer).toBe('gee');
+    });
+
+    // A refused acceptor must not leave the lane submitted. The name is validated after the state
+    // row is written, so if the refusal did not roll back, the owner would get a 400 telling them
+    // nothing was routed while the lane sat in awaiting_acceptance with no ask — the exact silent
+    // limbo this whole lane exists to remove, reintroduced by the fix for it.
+    it('refuses an unknown acceptor and leaves the lane where it was', async () => {
+      const { nickTok, ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'bad acceptor', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      const bad = await patchLane(laneId, { state: 'ready_for_review', acceptor: 'nobody' }, ada);
+      expect(bad.status).toBe(400);
+      expect(JSON.stringify(bad.json)).toContain('no such seat');
+
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      const still = (lanes.json.lanes as { id: string; state: string }[]).find(
+        (l) => l.id === laneId,
+      );
+      expect(still!.state).toBe('claimed');
+    });
+
+    it('refuses an owner who names themselves — that close could only ever be unverified', async () => {
+      const { ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'self named', claim: true }, ada);
+      const bad = await patchLane(
+        lane.json.lane.id as string,
+        { state: 'ready_for_review', acceptor: 'ada' },
+        ada,
+      );
+      expect(bad.status).toBe(400);
+      expect(JSON.stringify(bad.json)).toContain('unverified close');
+    });
+
     it('sends the lane back to active on decline, and audits the rejection', async () => {
       const { nickTok, ada, gee } = await setup();
       const { laneId, reviewer, auth, askId } = await laneAwaitingAcceptance(nickTok, ada, gee);
