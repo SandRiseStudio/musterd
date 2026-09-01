@@ -479,6 +479,7 @@ export function deriveReviewMetrics(
     no_candidate: 0,
     acceptance_exempt: 0,
     exempt_sampled: 0,
+    named: 0,
     sent_back: 0,
     closed: {
       total: 0,
@@ -502,6 +503,7 @@ export function deriveReviewMetrics(
       no_candidate?: boolean;
       acceptance_exempt?: boolean;
       exempt_sampled?: boolean;
+      route?: string;
       reason?: string;
       human_required_unknown?: boolean;
     } = {};
@@ -520,7 +522,13 @@ export function deriveReviewMetrics(
       // `reviewer` nor `no_candidate`, so without this clause it would land in the abstain bucket
       // and the report would call a designed exemption "predates routing-outcome recording" — an
       // unknown asserted about the one row that knows exactly what it did.
+      // ADR 348: a HAND-ROUTED ask is matched before `routed` and on its own counter, for the same
+      // reason exempt is matched before both. A named row carries a `reviewer`, so without this
+      // clause it lands in `routed` — and `routed` is the catch rate's denominator, a statement
+      // about the picker's asks. izzo's review of #1152 found this the day ADR 348 was written, in
+      // a file that change never touched: decision 4's own first falsifier, firing immediately.
       if (d.acceptance_exempt === true) m.acceptance_exempt++;
+      else if (d.route === 'named') m.named++;
       else if (typeof d.reviewer === 'string' && d.reviewer.length > 0) m.routed++;
       else if (d.no_candidate === true) m.no_candidate++;
       // Orthogonal to the split above: a sampled-in lane ROUTED, and is counted in `routed` too.

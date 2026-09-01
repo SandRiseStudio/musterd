@@ -509,6 +509,13 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   // misleads. The exempt count without the sampled count reads as acceptance quietly eroding; the
   // sampled count is the evidence that the low tier is still being measured, which is the whole
   // condition on which the exemption was allowed to ship early.
+  // ADR 348: hand-routed acceptances get their own line and their own rate. They are real asks and
+  // their catches are real — hiding them would be the opposite error — but they are not the
+  // picker's asks, and the rate above is a statement about the picker. Two numbers, each meaning
+  // exactly one thing, rather than one number meaning neither.
+  if (r.named > 0) {
+    w(`  ${theme.meta(`${r.named} routed by hand (named acceptor, not the picker)`)}\n`);
+  }
   if (r.acceptance_exempt > 0 || r.exempt_sampled > 0) {
     w(
       `  ${theme.meta(`${r.acceptance_exempt} exempt (declared low, no ask) · ${r.exempt_sampled} sampled in and routed anyway`)}\n`,
@@ -520,7 +527,9 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   // `review_timeout` label, which asserts an ask that may never have been sent.
   // ADR 234 increment 2: exempt submits are a KNOWN third outcome and must come out of this
   // subtraction. Left in, every declared-low lane would be reported as predating a 2026-07 fix.
-  const unknown = r.ready - r.routed - r.no_candidate - r.acceptance_exempt;
+  // ADR 348: `named` joins the subtraction for the identical reason exempt did. It is a KNOWN
+  // fourth outcome; left out, every hand-routed lane would be reported as predating a 2026-07 fix.
+  const unknown = r.ready - r.routed - r.no_candidate - r.acceptance_exempt - r.named;
   if (unknown > 0) {
     w(
       `  ${theme.meta(`${unknown} predate routing-outcome recording (ADR 169 follow-up) — their split is unknown, and their closes read as timeouts whether or not an ask was sent`)}\n`,

@@ -291,6 +291,18 @@ export const ReviewMetricsSchema = z.object({
    *  numerator that keeps the low tier producing answer-rate data at all; without it a sampled-in
    *  low lane is indistinguishable from a lane declared `normal`. */
   exempt_sampled: z.number().int().nonnegative(),
+  /**
+   * ADR 348: …and how many were routed to a seat a HUMAN named (`route: 'named'`), which the picker
+   * did not choose. Its own count for the same reason `acceptance_exempt` has one — a fourth
+   * outcome folded into a third is a number that stops meaning what it says.
+   *
+   * Kept out of `routed` because `routed` is the catch rate's denominator and the catch rate is a
+   * statement about the PICKER's asks: hand-routed asks are sent precisely where someone expects a
+   * careful read, so mixing them changes what "caught N%" measures without changing what it claims.
+   * And kept in the report's `unknown` subtraction, because the ADR 234 comment there is the proof
+   * this bites: a known fourth outcome left out of it is reported as predating a 2026-07 fix.
+   */
+  named: z.number().int().nonnegative(),
   /** Reviews where a counterpart sent the lane back — the review catch, the thing being measured. */
   sent_back: z.number().int().nonnegative(),
   /** Every terminal close in the window, by derived reason (ADR 169 §3). */

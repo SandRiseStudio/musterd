@@ -1173,6 +1173,36 @@ describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin cr
     expect(m.sent_back).toBe(0);
   });
 
+  it('counts a HAND-ROUTED ask as its own outcome — out of the picker denominator, not unknown', () => {
+    // ADR 348 decision 4, and it was violated the day the ADR was written (izzo's review of #1152):
+    // a named row carries a `reviewer`, so it landed in `routed` — the catch rate's denominator,
+    // which is a statement about the PICKER's asks. Hand-routed asks go where someone expects a
+    // careful read, so mixing them changes what "caught N%" measures without changing what it says.
+    //
+    // The second assertion is the trap for whoever fixes the first: split `named` out of `routed`
+    // WITHOUT adding it to the report's subtraction and every hand-routed lane is reported as
+    // predating a 2026-07 fix — the exact ADR 234 bug, fourth outcome.
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', { lane: 'a', reviewer: 'ghost', route: 'named' });
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'b',
+      reviewer: 'izzo',
+      route: 'cross_family',
+    });
+    row(db, team.id, 'lane.review_sent_back', { lane: 'b' });
+
+    const m = deriveReport(db, team.id, 'revive').review!;
+    expect(m.ready).toBe(2);
+    expect(m.named).toBe(1);
+    // The picker routed ONE ask, and the catch rate is 1/1 over it — not 1/2 diluted by an ask the
+    // picker never sent.
+    expect(m.routed).toBe(1);
+    expect(m.sent_back).toBe(1);
+    expect(m.no_candidate).toBe(0);
+    // Nothing left "unknown": the report's subtraction must include `named`.
+    expect(m.ready - m.routed - m.no_candidate - m.acceptance_exempt - m.named).toBe(0);
+  });
+
   it('counts an exemption as its own outcome — not routed, not no-candidate, not unknown', () => {
     // ADR 234 increment 2. An exempt ready row carries neither `reviewer` nor `no_candidate`, so
     // without its own clause it would land in the abstain bucket and the report would call a

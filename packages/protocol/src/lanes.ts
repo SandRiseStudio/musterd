@@ -455,6 +455,24 @@ export const UpdateLaneSchema = z.object({
       verification: z.string().optional(),
     })
     .optional(),
+  /**
+   * Route this lane's acceptance ask to a NAMED seat instead of the daemon's pick — meaningful only
+   * on the move into `awaiting_acceptance`, ignored elsewhere.
+   *
+   * The daemon's picker exists to prove diversity, and it is the right default. But an acceptance a
+   * human routes by hand had no door at all: the acceptor got told about the lane out of band, sent
+   * a real `accept`, and it bound to nothing — `applyAcceptanceVerdict` binds only to a
+   * server-composed `lane_review` ask, deliberately. The lane sat in `awaiting_acceptance` until the
+   * owner self-closed, and the ledger recorded `verified: false` for work that HAD been reviewed by
+   * a second seat (measured 2026-09-01, lane `01M1F9QVG6XCFQAZSH7XSZ13JT`, acceptor `ghost`).
+   *
+   * So the routing gets a door, and the door is labelled: a named acceptance records
+   * `route: 'named'`, never a pick route. Recording it as a pick would assert a diversity guarantee
+   * the picker never made — the same corruption `laneClose.ts` refuses for daemon sweeps, running
+   * the other way. Whether the named seat is a good acceptor is the namer's judgement; the ledger's
+   * job is only to say that a human made it.
+   */
+  acceptor: z.string().min(1).optional(),
 });
 export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
 
@@ -481,7 +499,9 @@ export const LaneResultSchema = z.object({
   review: z
     .object({
       reviewer: z.string().optional(),
-      route: z.enum(['human_admin', 'cross_family']).optional(),
+      /** `named` is a seat the submitter routed to by hand (`acceptor`), not one the picker chose —
+       *  kept distinct so no reader mistakes a hand-routed acceptance for a proven-diverse one. */
+      route: z.enum(['human_admin', 'cross_family', 'named']).optional(),
       self_close_sanctioned: z.boolean().optional(),
       /**
        * The lane was ALREADY awaiting acceptance: this is a report of the standing state (who was
