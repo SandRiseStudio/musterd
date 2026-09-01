@@ -44,8 +44,17 @@ function snap(room: Room): RoomSnapshotLike {
   return room.getCurrentSnapshot() as unknown as RoomSnapshotLike;
 }
 
+/**
+ * Ids in tool results are shown WITHOUT the `shape:` prefix (mcp/format.ts strips it), so
+ * every id a caller hands back is accepted in either form. Store records always carry the
+ * full form.
+ */
+function fullId(id: string): string {
+  return id.startsWith('shape:') ? id : `shape:${id}`;
+}
+
 function getShape(room: Room, id: string): ShapeRecord | undefined {
-  const doc = snap(room).documents.find((d) => d.state.id === id);
+  const doc = snap(room).documents.find((d) => d.state.id === fullId(id));
   return doc && doc.state.typeName === 'shape' ? (doc.state as ShapeRecord) : undefined;
 }
 
@@ -99,8 +108,15 @@ export class TldrawProvider implements WhiteboardProvider {
   async add(
     board: string,
     actor: CreatedBy,
-    items: ItemInput[],
+    rawItems: ItemInput[],
   ): Promise<{ ids: string[]; version: number }> {
+    // Accept outline-form ids (prefix stripped) wherever an item references another.
+    const items = rawItems.map((item): ItemInput => {
+      if (item.kind === 'link') return { ...item, from: fullId(item.from), to: fullId(item.to) };
+      if (item.kind === 'note' && item.cluster !== undefined)
+        return { ...item, cluster: fullId(item.cluster) };
+      return item;
+    });
     const { room } = await this.rooms.ensureRoom(board);
     const ids: string[] = [];
     const touchedClusters = new Set<string>();
@@ -269,8 +285,15 @@ export class TldrawProvider implements WhiteboardProvider {
   async edit(
     board: string,
     actor: CreatedBy,
-    ops: EditOp[],
+    rawOps: EditOp[],
   ): Promise<{ version: number; refused: EditRefusal[] }> {
+    // Accept outline-form ids (prefix stripped) on every op.
+    const ops = rawOps.map((op): EditOp => {
+      const normalized = { ...op, id: fullId(op.id) };
+      if (normalized.op === 'move' && normalized.cluster != null)
+        normalized.cluster = fullId(normalized.cluster);
+      return normalized;
+    });
     const { room } = await this.rooms.ensureRoom(board);
     const refused: EditRefusal[] = [];
     const touchedClusters = new Set<string>();

@@ -336,6 +336,35 @@ describe('TldrawProvider', () => {
     expect(outline.items.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('accepts outline-form ids (shape: prefix stripped) everywhere ids are taken', async () => {
+    // The tool results show ids WITHOUT the shape: prefix; everything a caller copies from
+    // a read or an add result must round-trip into edit, link endpoints, and cluster refs.
+    const { ids } = await provider.add('b16', 'seat:izzo', [
+      { kind: 'note', text: 'a' },
+      { kind: 'note', text: 'b' },
+      { kind: 'cluster', title: 'Theme' },
+    ]);
+    const short = ids.map((id) => id.replace(/^shape:/, '')) as [string, string, string];
+    const [noteA, noteB, cluster] = short;
+
+    const { refused } = await provider.edit('b16', 'seat:izzo', [
+      { op: 'move', id: noteA, cluster },
+    ]);
+    expect(refused).toHaveLength(0);
+
+    await provider.add('b16', 'seat:izzo', [
+      { kind: 'link', from: noteA, to: noteB },
+      { kind: 'note', text: 'c', cluster },
+    ]);
+
+    const outline = await provider.read('b16');
+    expect(outline.items.find((i) => i.id === ids[0])!.cluster).toBe(ids[2]);
+    expect(outline.items.find((i) => i.text === 'c')!.cluster).toBe(ids[2]);
+    const link = outline.items.find((i) => i.kind === 'link')!;
+    expect(link.from).toBe(ids[0]);
+    expect(link.to).toBe(ids[1]);
+  });
+
   it('boards persist across close and reopen', async () => {
     await provider.add('b6', 'seat:izzo', [{ kind: 'note', text: 'survives' }]);
     const finalOutline = await provider.close('b6');
