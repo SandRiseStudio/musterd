@@ -1,6 +1,12 @@
-# Launch post — musterd v0.2
+# Launch post — musterd v0.3
 
 > Draft. Adapt for the target platform (X/Twitter, HN, dev.to, LinkedIn). The README's "wedge" and principles sections are the canonical source; this is the post form.
+>
+> Security boundary: v0.3 ships scoped credentials, authorized seat claims, Presence-bound leases,
+> admin-gated governance, and append-only audit records. It does not yet provide sandbox
+> enforcement, database encryption at rest, mTLS, signed audit records, or automatic credential
+> rotation. Private vulnerability reports go through the repository's
+> [security advisory form](https://github.com/SandRiseStudio/musterd/security/advisories/new).
 >
 > ~~**Ship blocker:** as of 2026-08-13 musterd.io serves nothing — do not publish until it
 > resolves.~~ CLEARED 2026-08-13: **musterd.io is live** (Cloudflare Worker `musterd-io`, landing
@@ -13,7 +19,7 @@
 
 ## Short form (X / Bluesky, ~280 chars)
 
-> **musterd v0.2** — muster your agents and humans into persistent named teams, across any harness.
+> **musterd v0.3** — muster your agents and humans into persistent named teams, across any harness.
 >
 > One human + two agents. Three surfaces. One team. Durable inboxes, typed coordination acts, explicit presence.
 >
@@ -38,7 +44,12 @@ Any MCP-capable harness (Claude Code, Cursor, Codex…) joins by running `@muste
 
 MAST found ~79% of multi-agent failures are coordination failures — not capability failures. musterd is exactly that coordination layer.
 
-**v0.2 shipped the minimal trust model**: explicit activation (sessions are dormant until they call `team_join`), single-active per member (no "3 sessions, 1 name"), and a `working` activity state so the human's watch pane shows real progress.
+**v0.3 ships the shared-Team trust model**: scoped and revocable bootstrap credentials, authorized
+seat claims, short-lived Presence-bound leases for routine agent HTTP access, admin-gated
+governance, and an append-only audit log. Sessions remain dormant until explicitly activated.
+
+The boundary is explicit. musterd is local-first and binds to `127.0.0.1` by default. It does not
+yet sandbox agent tools, encrypt its SQLite database at rest, use mTLS, or sign its audit log.
 
 `npx @musterd/cli init` (or `brew install musterd` from the SandRiseStudio tap) gets you from zero to a working team in one command.
 
@@ -50,7 +61,7 @@ Site: https://musterd.io · Repo: https://github.com/SandRiseStudio/musterd
 
 ## Long form (dev.to / blog post)
 
-### musterd v0.2: named, persistent teams for agents and humans
+### musterd v0.3: named, persistent teams for agents and humans
 
 Multi-agent systems are having a moment. Every week there's a new framework for orchestrating LLM agents — CrewAI, LangGraph, AutoGen, you name it. Most of them share an assumption: agents are short-lived, disposable, and stateless between tasks.
 
@@ -93,16 +104,23 @@ Every message carries a typed **act** from the [Co-Gym](https://arxiv.org/abs/24
 
 This isn't just structure for structure's sake. It lets the human — or a future agent — filter, prioritize, and respond to coordination events without parsing free text.
 
-**v0.2: the minimal trust model**
+**v0.3: the shared-Team trust model**
 
 The original v0.1 had a subtle bug: the MCP adapter auto-claimed presence on startup, so three Claude Code sessions bound to "Ada" meant three sessions wearing one identity. Each session was acting as Ada, draining her inbox, sending messages in her name.
 
-v0.2 fixes this with a minimal trust model:
+v0.3 replaces assumed identity with an authenticated and authorized claim:
 
 - **Dormant by default.** Registering the MCP adapter doesn't claim a seat. The agent is dormant until it explicitly calls `team_join`.
-- **Single-active.** A second session trying to join as Ada is refused (`member_busy`). One identity, one live occupant.
+- **Scoped bootstrap credentials.** A bootstrap credential is limited to one seat, one role pool, or one residency host and can be revoked independently.
+- **Authorized claims.** Occupying a seat requires an authorized step. Governance operations require an admin and are recorded.
+- **Presence-bound HTTP authority.** Routine agent HTTP access uses a seat credential plus a short-lived lease tied to the current Presence.
 - **Working activity.** A present agent with a `status_update` resolves to `working` with the task summary in the watch pane — so the human can see real progress, not just "Ada: online."
 - **Clean shutdown.** The adapter drops presence and exits on stdin close / SIGTERM / transport close, so the roster stays accurate.
+
+The safe boundary is narrower than a sandbox. musterd does not yet enforce agent tool or filesystem
+access, encrypt its SQLite database at rest, use mTLS, store secrets in the OS keychain, rotate
+credentials automatically, sign audit records, or rate-limit claims. Those limits are documented in
+[SECURITY.md](../SECURITY.md), alongside private vulnerability reporting.
 
 **Getting started**
 
@@ -123,9 +141,9 @@ musterd inbox --watch
 
 **What's next**
 
-v0.2 is the minimal trust model. v0.3 is the shared-teams governance model — seats, roles, agent key + grant system, approval lanes — designed on paper and waiting for the daemon to stop being localhost-only. The designs are in the repo.
-
-The observability layer (coordination-level OTel tracing, the "batond" product) is on the roadmap.
+The roadmap includes stronger deployment controls and security hardening beyond the current
+local-first boundary. The observability layer (coordination-level OTel tracing, the "batond"
+product) is also on the roadmap.
 
 MIT. Contributions welcome.
 
