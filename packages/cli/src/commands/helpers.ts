@@ -263,6 +263,11 @@ export interface ResolveReadOptions {
    * Defaulting off inverts the failure mode. Forget it on a genuinely interactive read and that
    * read fails closed with a lease error — loud, local, and fixed by one word. Forget it the other
    * way and every seat on the machine flaps silently.
+   *
+   * That fail-closed argument only reaches reads the daemon actually refuses. A read whose endpoint
+   * authenticates through the server's `tryAuth` degrades a bad lease to an anonymous viewer and
+   * answers 200, so opting it in buys no safety and costs a claim — see `role.ts`, which takes the
+   * default for exactly that reason. Interactive is not the test; refusable is.
    */
   reclaimAgentLease?: boolean;
 }
