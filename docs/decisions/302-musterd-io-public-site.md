@@ -49,6 +49,35 @@ muted autoplay) when the section becomes visible. First paint owes Twitch nothin
 click. There is no nav "live" badge: Twitch exposes no unauthenticated liveness endpoint, and a
 liveness proxy would be a server this origin deliberately is not.
 
+## Amendment — 2026-09-01: the public set includes crawler and agent text files
+
+**`robots.txt`, `sitemap.xml`, `llms.txt` and `_headers` ship on this origin**, generated into the
+build by the `musterd-site-files` plugin (`packages/web/scripts/site-files.ts`) and added to
+`PUBLIC_ALLOW`. Measured on production the same day, musterd.io served none of them: `/sitemap.xml`,
+`/llms.txt` and `/.well-known/*` all 404, and `/robots.txt` was Cloudflare's Managed content-signals
+boilerplate — no rules, no `Sitemap:` line, and nothing in this repo produced it.
+
+They are admissible under the original decision rather than an exception to it. The allowlist exists
+to keep daemon-connected surfaces off an origin with no daemon behind them; these are static text
+with no client to boot, so the failure the allowlist guards against cannot occur. `_headers` is read
+by Cloudflare and never served.
+
+The URL list is derived from `DOCS_MANIFEST` and the blog filenames — the same two sources the pages
+come from — so publishing a doc cannot leave it unlisted. `site-files.test.ts` pins every advertised
+path against `PUBLIC_ALLOW`: a sitemap entry the deploy withholds is a 404 we sent a crawler to find.
+
+Two things this cannot do from the repo, both dashboard-only on the musterd.io zone:
+
+1. **Cloudflare's Managed robots.txt overrides the file we ship.** Until it is turned off, our
+   `robots.txt` is inert. `llms.txt` and `sitemap.xml` are unaffected and work immediately.
+2. Cloudflare does not edge-cache these content types by default; without a Cache Rule they serve
+   `DYNAMIC` and the `_headers` TTLs never take effect at the edge.
+
+Deliberately not done here: a `_redirects` file. The duplicate origin worth removing is the
+`workers.dev` one, and `workers_dev: false` in `wrangler.jsonc` removes it outright rather than
+301ing it — a deploy-behaviour change, so it belongs to whoever runs the deploy (ADR 308), not to
+this lane.
+
 ## Consequences
 
 - The launch surfaces (product story, docs, launch post) gain a public home; copy is

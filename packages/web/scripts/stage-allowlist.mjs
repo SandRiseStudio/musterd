@@ -4,7 +4,21 @@
  * exactly this set and refuses anything unexpected; `stage-site.test.ts` pins the two lists
  * disjoint.
  */
-export const PUBLIC_ALLOW = ['index.html', 'assets', 'roadmap', 'docs', 'blog'];
+export const PUBLIC_ALLOW = [
+  'index.html',
+  'assets',
+  'roadmap',
+  'docs',
+  'blog',
+  // Crawler- and agent-facing text, generated into the build by the `musterd-site-files` plugin in
+  // vite.config.ts (see scripts/site-files.ts). These are safe where the daemon routes are not, for
+  // the same reason the rest of this list is: static text with no client to boot. `_headers` is read
+  // by Cloudflare and never served.
+  'robots.txt',
+  'sitemap.xml',
+  'llms.txt',
+  '_headers',
+];
 
 /**
  * Daemon-connected surfaces that must NEVER reach the public origin: with no daemon behind them
