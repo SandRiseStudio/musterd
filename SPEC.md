@@ -222,6 +222,9 @@ Rules:
   routine Member HTTP authority. An agent's routine HTTP request MUST present its self-identifying
   `msac_` seat credential and the fresh `msls_` lease bound to its claimed Presence. Servers MUST
   reject a missing, expired, revoked, or displaced lease; ambient presence touches do not renew it.
+- A standalone CLI invocation that needs routine agent HTTP authority re-claims its bound seat with
+  its `msac_` credential, keeps that Presence live through the HTTP work, then closes it. A later
+  invocation re-claims again; a lease from the prior closed Presence is not reusable (ADR 339).
 - **`memory`** carries the seat's continuity envelope (ADR 093) — `{ headline (≤120 chars), saved_at, size_bytes }` — or `null` when the seat has saved nothing. It is the seat-scoped working note an occupant saved before wrapping up; the body is fetched **on demand** over `GET /teams/:slug/memory` (seat-authenticated), never delivered on this frame. Additive and back-compat: a client that ignores `memory` loses nothing.
 
 ## A.4 Release & grace
