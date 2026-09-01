@@ -278,6 +278,12 @@ export interface Harness {
   refreshHooks?: {
     applies: (dir: string) => boolean;
     run: (dir: string) => { files: string[]; warnings: string[] };
+    /**
+     * The refusable surfaces (ADR 332 names) this refresh installs. The driver resurrects a
+     * tombstone only when some present harness claims its surface — announcing "re-installed" for
+     * a name nothing installs is a lie about the folder. Omitted means "none".
+     */
+    surfaces?: () => string[];
   };
   /**
    * Observe the model this harness is *actually* running for the current session. An observation
