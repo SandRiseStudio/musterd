@@ -116,6 +116,67 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
     expect(out).toContain('surface decline'); // how to refuse again
   });
 
+  // The two dishonest resurrection lines (#1089's carried-forward finding): "re-installed X" must
+  // only be said about a surface a present harness's refresh actually installs, and only when that
+  // refresh was not refused. Both paths below used to print the same confident line.
+  it('leaves a tombstone nothing in this refresh installs, and says so', () => {
+    h.folderBinding = { team: 'revive' };
+    seedProvisioned();
+    declineSurface(cwd, 'gone-harness:oldChip', 'nick');
+    const said: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+      said.push(String(c));
+      return true;
+    });
+
+    expect(runRefreshHooks(cwd)).toBe(0);
+
+    // The refusal record survives: clearing it would recreate the absence-carries-no-intent state
+    // for a surface this refresh cannot bring back.
+    expect(isDeclined(cwd, 'gone-harness:oldChip')).toBe(true);
+    const out = said.join('');
+    expect(out).not.toContain('re-installed gone-harness:oldChip');
+    expect(out).toContain('gone-harness:oldChip');
+    expect(out).toContain('nothing in this refresh installs it');
+    expect(out).toContain('surface accept'); // the honest way to clear the record anyway
+  });
+
+  it('does not claim "re-installed" for a harness whose refresh was refused (ADR 168)', () => {
+    h.folderBinding = { team: 'revive' };
+    seedProvisioned();
+    declineSurface(cwd, SURFACE_STATUSLINE, 'nick');
+    // A NEWER build's machine-wide SessionStart hook: the downgrade guard will refuse this run.
+    mkdirSync(globalDir, { recursive: true });
+    writeFileSync(
+      globalSettings(),
+      JSON.stringify({
+        hooks: {
+          SessionStart: [
+            {
+              hooks: [{ type: 'command', command: 'x # musterd-sessionstart-hook e999999' }],
+            },
+          ],
+        },
+      }),
+      'utf8',
+    );
+    const said: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+      said.push(String(c));
+      return true;
+    });
+
+    expect(runRefreshHooks(cwd)).toBe(1); // the refusal still exits non-zero
+
+    const out = said.join('');
+    // The tombstone was cleared on the user's explicit ask, but part of the refresh did not land —
+    // so the line hedges instead of claiming an install it cannot vouch for.
+    expect(isDeclined(cwd, SURFACE_STATUSLINE)).toBe(false);
+    expect(out).not.toContain('re-installed');
+    expect(out).toContain('cleared the refusal of ' + SURFACE_STATUSLINE);
+    expect(out).toContain('refused');
+  });
+
   it('says nothing about refusals when there were none', () => {
     h.folderBinding = { team: 'revive' };
     seedProvisioned();

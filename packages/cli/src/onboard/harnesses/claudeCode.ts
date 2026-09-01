@@ -1044,6 +1044,9 @@ export const claudeCode: Harness = {
       files: [settingsLocalPath(dir), globalSettingsPath()],
       warnings: installMusterdHooks(dir),
     }),
+    // installMusterdHooks installs every one of these (the chip rides the same install), so a
+    // cleared tombstone for any of them genuinely comes back on this path.
+    surfaces: () => claudeRefusableSurfaces(),
   },
 };
 

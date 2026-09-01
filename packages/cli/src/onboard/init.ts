@@ -195,7 +195,13 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
   // every tombstone in this folder — but never silently. A surface reappearing with no explanation is
   // how someone finds the chip returned and has no idea why, which is the same absence-carries-no-
   // intent defect one direction over. Routine drift checks still honour a refusal; only this does not.
-  const resurrected = readDeclined(dir);
+  // Only tombstones some present harness's refresh actually installs are resurrected. "re-installed
+  // X" for a name nothing here installs is a lie about the folder — the record stays, and the line
+  // says why (the honesty finding carried forward from #1089).
+  const installable = new Set(present.flatMap((h) => h.refreshHooks!.surfaces?.() ?? []));
+  const tombstones = readDeclined(dir);
+  const resurrected = tombstones.filter((t) => installable.has(t.surface));
+  const left = tombstones.filter((t) => !installable.has(t.surface));
   for (const t of resurrected) acceptSurface(dir, t.surface);
 
   let refused = 0;
@@ -212,10 +218,26 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
     }
   }
   for (const t of resurrected) {
+    const declined = `which was declined ${t.at.slice(0, 10)}` + `${t.by ? ` by ${t.by}` : ''} — `;
+    const again = theme.meta('`musterd surface decline ' + t.surface + '` to refuse it again.');
+    // With a refusal above, part of this refresh did not land, and per-surface attribution of which
+    // part is the harness's business — so the line vouches only for what this driver did (clear the
+    // record), not for an install it cannot confirm.
     process.stdout.write(
-      `${theme.warn('↑')} re-installed ${t.surface}, which was declined ${t.at.slice(0, 10)}` +
-        `${t.by ? ` by ${t.by}` : ''} — ` +
-        `${theme.meta('`musterd surface decline ' + t.surface + '` to refuse it again.')}\n`,
+      refused > 0
+        ? `${theme.warn('↑')} cleared the refusal of ${t.surface}, ${declined}` +
+            `part of this refresh was refused (above), so verify with \`musterd init --check\`. ${again}\n`
+        : `${theme.warn('↑')} re-installed ${t.surface}, ${declined}${again}\n`,
+    );
+  }
+  for (const t of left) {
+    process.stdout.write(
+      `${theme.meta(
+        `left ${t.surface} declined (${t.at.slice(0, 10)}) — nothing in this refresh installs it; ` +
+          '`musterd surface accept ' +
+          t.surface +
+          '` clears the record anyway.',
+      )}\n`,
     );
   }
   return refused > 0 ? 1 : 0;
