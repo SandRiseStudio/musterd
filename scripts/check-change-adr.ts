@@ -106,14 +106,27 @@ const adrSlug = (path: string) => path.replace(/^docs\/decisions\/\d{3}-/, '');
  * identical (falsify: `git log --diff-filter=R --name-status -M -- docs/decisions`). Deterministic,
  * and it does not care how much of the body moved.
  */
-for (const entry of changed) {
-  if (entry.status !== 'A' || !ADR_PATH.test(entry.path)) continue;
-  const slug = adrSlug(entry.path);
-  const deleted = changed.filter(
-    (c) => c.status === 'D' && ADR_PATH.test(c.path) && adrSlug(c.path) === slug,
-  );
-  // Exactly one candidate, or the pairing is a guess — and a guess here accuses the wrong file.
-  if (deleted.length === 1) entry.fromPath = deleted[0]?.path ?? null;
+const adrsBySlug = (status: string) => {
+  const by = new Map<string, typeof changed>();
+  for (const c of changed) {
+    if (c.status !== status || !ADR_PATH.test(c.path)) continue;
+    const slug = adrSlug(c.path);
+    by.set(slug, [...(by.get(slug) ?? []), c]);
+  }
+  return by;
+};
+
+const addedBySlug = adrsBySlug('A');
+const deletedBySlug = adrsBySlug('D');
+for (const [slug, added] of addedBySlug) {
+  const deleted = deletedBySlug.get(slug) ?? [];
+  // Exactly one candidate ON EACH SIDE, or the pairing is a guess — and a guess here accuses the
+  // wrong file of rewriting a Decision it never held. Two adds sharing a retired slug is the case
+  // that made the one-sided guard wrong (dolly, #1136 review): both were judged against the same
+  // before side, so a genuinely new ADR reusing the slug was refused.
+  if (added.length !== 1 || deleted.length !== 1) continue;
+  const entry = added[0];
+  if (entry) entry.fromPath = deleted[0]?.path ?? null;
 }
 
 if (changed.length === 0) {

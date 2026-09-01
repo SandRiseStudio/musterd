@@ -76,6 +76,7 @@ const LONG_DECISION = Array.from(
 
 const OLD_PATH = 'docs/decisions/502-a-fixture-decision.md';
 const NEW_PATH = 'docs/decisions/503-a-fixture-decision.md';
+const THIRD_PATH = 'docs/decisions/504-a-fixture-decision.md';
 
 /**
  * Commit the fixture ADR at `OLD_PATH` with the given status and Decision; return that base.
@@ -185,6 +186,42 @@ describe('rule 3 follows a rename — a `git mv` does not lift the freeze', () =
     // git's own "fatal: path ... does not exist" from the probing reads must not reach the operator:
     // printed immediately above a refusal it reads as a crash, not a verdict.
     expect(r.out).not.toContain('fatal:');
+  });
+
+  // The guard was one-sided: exactly one DELETED candidate, but nothing stopped two ADDED files
+  // sharing that slug, and both would then be judged against the same before side — so a genuinely
+  // new ADR that happens to reuse a retired slug gets accused of rewriting a Decision it never held.
+  // dolly's non-blocking note on #1136. Ambiguity is skipped on both sides for the same reason: a
+  // guess here names the wrong file.
+  it('PASSES when two added ADRs share the deleted one’s slug — an ambiguous pairing is not guessed', () => {
+    // Both adds must stay under the `-M` threshold, or git pairs one of them itself and the delete
+    // never reaches the slug loop — which is how the first version of this test passed on the
+    // unfixed gate, proving nothing.
+    const base = baseAt('accepted', LONG_DECISION);
+    git('rm', '-q', OLD_PATH);
+    mkdirSync(join(repo, 'docs', 'decisions'), { recursive: true });
+    writeFileSync(
+      join(repo, NEW_PATH),
+      adr('503 — a fixture decision', 'accepted', 'ONE NEW DOCUMENT REUSING THE RETIRED SLUG.'),
+    );
+    writeFileSync(
+      join(repo, THIRD_PATH),
+      adr('504 — a fixture decision', 'accepted', 'ANOTHER NEW DOCUMENT REUSING THE RETIRED SLUG.'),
+    );
+    git('add', '-A');
+    git('commit', '-qm', 'retire 502 and add two ADRs carrying its slug');
+
+    expect(
+      git('diff', '--name-status', '-M', `${base}...HEAD`),
+      'fixture must leave the delete unpaired by -M, else the slug loop is never reached',
+    ).not.toContain('R');
+
+    const r = gate(base);
+    expect(r.code).toBe(0);
+
+    rmSync(join(repo, THIRD_PATH), { force: true });
+    git('add', '-A');
+    git('commit', '-qm', 'clear the third fixture path');
   });
 
   // The #739 restoration escape has to survive the rename too, and it reads the file's history by
