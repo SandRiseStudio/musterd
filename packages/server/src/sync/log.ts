@@ -162,3 +162,21 @@ export function ingestBatch(
     return { accepted, hub_seq_high: hubHead(db, teamId) };
   })();
 }
+
+/**
+ * Is this daemon a hub for the team — does any OTHER node hold a live credential here? The loopback
+ * predicate for the hub's own staging (3b-ii). False for every single-machine install, so they pay
+ * nothing; flips true at the first enrollment and the push cursor (starting at 0) backfills the
+ * hub's whole history through the same gapless path a joiner uses.
+ */
+export function hasEnrolledJoiners(db: Database, teamId: string, localNodeId: string): boolean {
+  return Boolean(
+    db
+      .prepare<[string, string], { one: number }>(
+        `SELECT 1 AS one FROM nodes
+          WHERE team_id = ? AND id != ? AND credential_hash IS NOT NULL AND revoked_at IS NULL
+          LIMIT 1`,
+      )
+      .get(teamId, localNodeId),
+  );
+}

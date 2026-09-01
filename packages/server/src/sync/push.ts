@@ -5,6 +5,7 @@ import { readNodeState } from '../node/state.js';
 import { rowToEnvelope } from '../store/messages.js';
 import type { MessageRow } from '../store/rows.js';
 import { listActiveTeams } from '../store/teams.js';
+import { hasEnrolledJoiners, ingestBatch, SyncGapError } from './log.js';
 
 /**
  * The daemon's half of the sync surface (ADR 325 increment 3b-i): push this machine's own
@@ -124,14 +125,23 @@ export async function pushTeam(
   team: { id: string; slug: string },
   now: number = Date.now(),
 ): Promise<number> {
-  const enrollment = readNodeState().nodes[team.slug];
-  // Not enrolled: the single-machine case, which is every musterd install today. Not an error.
-  if (!enrollment) return 0;
-
   const nodeId = localNodeId(ctx, team.id);
   // No local row means this daemon has stamped no origin for the team, so it has nothing of its own
   // to push — and must not mint an identity just to discover that.
   if (!nodeId) return 0;
+  // An enrollment is THIS daemon's only if it names this daemon's node row: node.json is keyed by
+  // team slug, and a record minted for another node (two daemons sharing one state file, as the
+  // through-DB tests do) must not make a hub believe it is a joiner.
+  const record = readNodeState().nodes[team.slug];
+  const enrollment = record && record.node_id === nodeId ? record : undefined;
+
+  // Three cases. Enrolled: push to the hub over HTTP (below). Not enrolled but hosting enrolled
+  // joiners: this daemon IS the hub, and its own traffic must reach sync_log or the log it serves
+  // is missing every event it minted itself — stage in-process through the same ingestBatch the
+  // route calls (spec 2026-09-01 §Finding 1). Neither: a single-machine install, which is every
+  // musterd install today. Not an error.
+  const loopback = !enrollment && hasEnrolledJoiners(ctx.db, team.id, nodeId);
+  if (!enrollment && !loopback) return 0;
 
   const cursor = readCursor(ctx, team.id, nodeId);
   const pending = unpushed(ctx, team.id, nodeId, cursor);
@@ -153,6 +163,38 @@ export async function pushTeam(
     };
   });
 
+  if (loopback) {
+    try {
+      const result = ingestBatch(ctx.db, team.id, nodeId, events, now);
+      advanceCursor(ctx, team.id, nodeId, pending[pending.length - 1]!.row.origin_seq, now);
+      return result.accepted;
+    } catch (err) {
+      // A gap here means the push cursor and sync_log disagree about this node — the cursor was
+      // lost or rolled back. Believe the log (it is the authority on what it holds), bounded by
+      // this node's own head exactly as the HTTP path bounds a hub's resume point.
+      if (err instanceof SyncGapError) {
+        const head = localHead(ctx, team.id, nodeId);
+        if (err.expectedSeq > head + 1) {
+          log.error({
+            msg: 'sync_loopback_impossible_resume',
+            team: team.slug,
+            resume_at: err.expectedSeq,
+            head,
+            detail:
+              'sync_log holds more of this node than the allocator ever minted; it needs operator attention',
+          });
+          throw err;
+        }
+        advanceCursor(ctx, team.id, nodeId, err.expectedSeq - 1, now);
+        log.warn({ msg: 'sync_loopback_gap', team: team.slug, resume_at: err.expectedSeq });
+        return 0;
+      }
+      throw err;
+    }
+  }
+
+  // Not loopback, so enrolled — the narrowing TypeScript cannot see through the two booleans above.
+  if (!enrollment) return 0;
   const res = await fetch(new URL(`/teams/${team.slug}/sync/push`, enrollment.hub_url), {
     method: 'POST',
     headers: {
