@@ -579,10 +579,8 @@ export function namedAcceptor(
   const grade =
     member.kind === 'human'
       ? ('human' as const)
-      : (reviewGrade(
-          memberModelByName(db, teamId, worker),
-          latestAttestedModel(db, member.id),
-        ) ?? 'same_model');
+      : (reviewGrade(memberModelByName(db, teamId, worker), latestAttestedModel(db, member.id)) ??
+        'same_model');
   return {
     reviewer: member.name,
     route: 'named',

@@ -514,9 +514,7 @@ async function reviewReport(parsed: Parsed): Promise<number> {
   // picker's asks, and the rate above is a statement about the picker. Two numbers, each meaning
   // exactly one thing, rather than one number meaning neither.
   if (r.named > 0) {
-    w(
-      `  ${theme.meta(`${r.named} routed by hand (named acceptor, not the picker)`)}\n`,
-    );
+    w(`  ${theme.meta(`${r.named} routed by hand (named acceptor, not the picker)`)}\n`);
   }
   if (r.acceptance_exempt > 0 || r.exempt_sampled > 0) {
     w(

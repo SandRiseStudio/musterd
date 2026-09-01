@@ -1184,7 +1184,11 @@ describe('deriveReviewMetrics (ADR 169) — the review eval, without an admin cr
     // predating a 2026-07 fix — the exact ADR 234 bug, fourth outcome.
     const { db, team } = seed();
     row(db, team.id, 'lane.ready_for_review', { lane: 'a', reviewer: 'ghost', route: 'named' });
-    row(db, team.id, 'lane.ready_for_review', { lane: 'b', reviewer: 'izzo', route: 'cross_family' });
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'b',
+      reviewer: 'izzo',
+      route: 'cross_family',
+    });
     row(db, team.id, 'lane.review_sent_back', { lane: 'b' });
 
     const m = deriveReport(db, team.id, 'revive').review!;

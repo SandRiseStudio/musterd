@@ -4212,7 +4212,13 @@ export async function handleHttp(
           const peerSelection =
             named || exemption.exempt
               ? { pick: null, snapshot: { selected: null, candidates: [] } }
-              : selectReviewCounterpart(ctx.db, team.id, lane, worker, ctx.config.presenceTimeoutMs);
+              : selectReviewCounterpart(
+                  ctx.db,
+                  team.id,
+                  lane,
+                  worker,
+                  ctx.config.presenceTimeoutMs,
+                );
           const peerPick = named ?? peerSelection.pick;
           const humanFallback =
             lane.risk.length > 0 && !peerPick
