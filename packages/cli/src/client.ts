@@ -103,6 +103,8 @@ export interface InterruptCheck {
 
 export interface HttpClientOpts {
   server: string;
+  /** Team needed to re-claim an agent Presence for a standalone CLI HTTP request (ADR 339). */
+  team?: string;
   /** The self-identifying Bearer secret: agent-seat (`msac_`) or human (`mscr_`) credential. */
   key?: string;
   /**
@@ -114,6 +116,8 @@ export interface HttpClientOpts {
   seat?: string;
   /** Required alongside an `msac_` credential; proves its current Presence (ADR 337). */
   sessionLease?: string;
+  /** Re-claim an agent seat and hold its Presence through this HTTP request (ADR 339). */
+  reclaimAgentLease?: boolean;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
@@ -163,9 +167,49 @@ export class HttpClient {
     }
   }
 
+  private async claimAgentLease(): Promise<{ lease: string; close: () => void } | undefined> {
+    const { key, seat, surface, team } = this.opts;
+    if (
+      !this.opts.reclaimAgentLease ||
+      !key?.startsWith(TOKEN_PREFIXES.agent_seat) ||
+      !team ||
+      !seat ||
+      !surface
+    ) {
+      return undefined;
+    }
+    return new Promise((resolve, reject) => {
+      const session = watchClaim({
+        wsUrl: this.opts.server.replace(/^http/, 'ws') + '/ws',
+        team,
+        key,
+        target: { seat },
+        surface,
+        onDeliver: () => {},
+        onOccupied: (_seat, _presenceId, _grant, _memory, _credential, sessionLease) => {
+          if (!sessionLease) {
+            session.close();
+            reject(new CliError('agent claim did not return a session lease', 4));
+            return;
+          }
+          resolve({ lease: sessionLease, close: () => session.close() });
+        },
+        onRefused: (_code, message) => {
+          session.close();
+          reject(new CliError(message, 4));
+        },
+        onError: (message) => {
+          session.close();
+          reject(new CliError(message, 4));
+        },
+      });
+    });
+  }
+
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async request(method: string, path: string, body?: unknown): Promise<any> {
+    const claim = await this.claimAgentLease();
     let res: Response;
     try {
       // ADR 119: re-attest on every ambient HTTP touch when the env declares a model, so
@@ -207,7 +251,9 @@ export class HttpClient {
           'content-type': 'application/json',
           ...(this.opts.key ? { authorization: `Bearer ${this.opts.key}` } : {}),
           ...(this.opts.seat ? { 'x-musterd-seat': this.opts.seat } : {}),
-          ...(this.opts.sessionLease ? { 'x-musterd-session-lease': this.opts.sessionLease } : {}),
+          ...((claim?.lease ?? this.opts.sessionLease)
+            ? { 'x-musterd-session-lease': claim?.lease ?? this.opts.sessionLease }
+            : {}),
           ...(this.opts.surface ? { 'x-musterd-surface': this.opts.surface } : {}),
           ...(this.opts.noTouch ? { 'x-musterd-no-touch': '1' } : {}),
           ...(attestedModel !== undefined ? { 'x-musterd-model': attestedModel } : {}),
@@ -223,6 +269,7 @@ export class HttpClient {
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
     } catch (err) {
+      claim?.close();
       if (isConnRefused(err)) {
         throw new CliError(
           `can't reach team server at ${this.opts.server} — is the daemon running? (musterd serve)`,
@@ -231,6 +278,7 @@ export class HttpClient {
       }
       throw err;
     }
+    claim?.close();
     const text = await res.text();
     const json = text ? JSON.parse(text) : {};
     if (!res.ok) {

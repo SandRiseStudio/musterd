@@ -201,12 +201,14 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     explicit: true,
     http: new HttpClient({
       server,
+      team,
       key: match.identity.key,
       seat: match.identity.name,
       ...(match.identity.sessionLease !== undefined
         ? { sessionLease: match.identity.sessionLease }
         : {}),
       surface: match.identity.surface,
+      reclaimAgentLease: true,
       ...(model !== undefined ? { model } : {}),
     }),
   };
@@ -243,10 +245,12 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
       identity
         ? {
             server,
+            team,
             key: identity.key,
             seat: identity.name,
             ...(identity.sessionLease !== undefined ? { sessionLease: identity.sessionLease } : {}),
             surface: identity.surface,
+            reclaimAgentLease: true,
             ...(model !== undefined ? { model } : {}),
           }
         : { server },

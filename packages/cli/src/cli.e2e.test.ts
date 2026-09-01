@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
+import { HttpClient } from './client.js';
 import { reachabilityNudge, resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { joinCommand } from './commands/join.js';
@@ -274,6 +275,35 @@ describe('thread-close clears the comeback summary (ADR 025)', () => {
 });
 
 describe('agent-side reachability nudge (ADR 046)', () => {
+  it('re-claims a bound agent before a routine HTTP read when its stored lease is stale', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
+    const authority = await claimedAgent('dawn', 'Ada');
+    const agentKey = loadConfig().agentKeys['dawn']!;
+
+    saveBinding(cwdDir, {
+      version: 2,
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      agent_key: agentKey,
+      seat_credential: authority.key,
+      session_lease: 'msls_stale',
+      claim: { mode: 'seat', name: 'Ada' },
+    });
+
+    await expect(
+      new HttpClient({
+        server: process.env['MUSTERD_SERVER']!,
+        key: authority.key,
+        seat: 'Ada',
+        sessionLease: 'msls_stale',
+      }).inbox('dawn', { unread: true }),
+    ).rejects.toMatchObject({ exitCode: 4 });
+
+    const restored = await resolve({}).http.inbox('dawn', { unread: true });
+    expect(restored.messages).toEqual([]);
+  });
+
   it('surfaces a directed act on an unrelated command, then self-clears once the inbox is read', async () => {
     // nick creates dawn and adds Ada (a heads-down agent).
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
