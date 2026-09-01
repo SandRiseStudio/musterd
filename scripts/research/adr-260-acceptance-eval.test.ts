@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CONCENTRATION_PREDICTION,
   concentration,
+  evaluate,
   familyOf,
   judgeConcentration,
   majorityFamily,
@@ -119,6 +120,89 @@ describe('concentration', () => {
     const c = concentration(rows as never, fam);
     expect(c.boundary).toBe(3000);
     expect(c.boundarySeat).toBe('gptbot');
+  });
+
+  // A hand-routed acceptance (ADR 260 amendment 2026-09-01, dolly's #1152) is not a pick. The
+  // prediction is about what the LADDER does with the asks; a human naming an acceptor is the
+  // experimenter reaching into the population, and counting it would let a person move the
+  // instrument's primary number by hand.
+  const named = (ts: number, reviewer: string) => ({
+    ts,
+    d: {
+      lane: `l${ts}`,
+      owner: 'izzo',
+      reviewer,
+      route: 'named',
+      review_grade: 'same_model',
+    },
+  });
+
+  it('does not let a NAMED route open the boundary — the picker never chose that seat', () => {
+    const rows = [row(1000, 'wanderer'), row(2000, 'stanley'), named(3000, 'gptbot')];
+    expect(concentration(rows as never, fam).boundary).toBeNull();
+  });
+
+  it('keeps a named row out of the after-boundary population entirely', () => {
+    const rows = [
+      row(1000, 'wanderer'),
+      row(2000, 'stanley'),
+      row(3000, 'gptbot'),
+      named(4000, 'gptbot'),
+      named(5000, 'gptbot'),
+    ];
+    const after = concentration(rows as never, fam).periods.find((p) => p.label === 'AFTER')!;
+    // Only the picked row at 3000 survives; the two hand-routed ones would otherwise have tripled
+    // gptbot's count and driven topShare to 100% without the picker doing anything.
+    expect(after.n).toBe(1);
+  });
+});
+
+describe('evaluate — the named route stays out of the denominator', () => {
+  const picked = (ts: number, reviewer: string, grade: string) => ({
+    ts,
+    d: { lane: `l${ts}`, owner: 'izzo', reviewer, review_grade: grade },
+  });
+  const named = (ts: number, reviewer: string) => ({
+    ts,
+    d: { lane: `l${ts}`, owner: 'izzo', reviewer, route: 'named', review_grade: 'same_model' },
+  });
+
+  it('does not dilute crossFamilyShare with hand-routed abstentions', () => {
+    // Two picked submits, both cross_family: the picker went two for two.
+    const picks = [
+      picked(1000, 'wanderer', 'cross_family'),
+      picked(2000, 'gptbot', 'cross_family'),
+    ];
+    expect(evaluate('picked only', picks as never).crossFamilyShare).toBe(1);
+    // Adding two hand-routed same_model rows must not restate that as 50%.
+    const withNamed = [...picks, named(3000, 'stanley'), named(4000, 'stanley')];
+    const r = evaluate('with named', withNamed as never);
+    expect(r.liveRouted).toBe(2);
+    expect(r.crossFamilyShare).toBe(1);
+  });
+
+  it('keeps the mix line summing — a bucket that leaves liveRouted must still be counted', () => {
+    // dolly's catch on #1156: excluding `named` without printing it makes the mix stop adding up,
+    // and a reader attributes the gap to whichever bucket they already suspect. Exactly the ADR 234
+    // shape this PR flagged in her report.ts, reproduced in the file that flagged it.
+    const rows = [
+      picked(1000, 'wanderer', 'cross_family'),
+      named(2000, 'stanley'),
+      named(3000, 'stanley'),
+    ];
+    const r = evaluate('mix', rows as never);
+    expect(r.named).toBe(2);
+    expect(r.liveRouted + r.wakeQueued + r.noCandidate + r.exempt + r.named).toBe(r.submits);
+  });
+
+  it('does not let a hand-routed acceptor become the top reviewer', () => {
+    const rows = [
+      picked(1000, 'wanderer', 'cross_family'),
+      named(2000, 'stanley'),
+      named(3000, 'stanley'),
+      named(4000, 'stanley'),
+    ];
+    expect(evaluate('named flood', rows as never).topReviewer).toEqual(['wanderer', 1]);
   });
 });
 

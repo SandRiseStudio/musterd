@@ -92,6 +92,23 @@ function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 
   return { db, submits, seatFamily };
 }
 
+/**
+ * The population this instrument is entitled to reason about: submits the LADDER routed.
+ *
+ * `route: 'named'` (dolly's #1152, 2026-09-01) is excluded, and the exclusion is the load-bearing
+ * line rather than a tidy-up. Every other filter here removes a submit the picker could not act on
+ * — exempt, human-required, no candidate, queued to a wake. A named row is the opposite case: the
+ * picker was ABLE and was overruled, because a human named the acceptor by hand. Counting it would
+ * grade the ladder on a decision the ladder did not make, in both directions at once — a person
+ * repeatedly routing to one trusted seat reads as the picker concentrating (the primary
+ * pre-registered metric), and the honest `same_model` abstention a named route records would drag
+ * `crossFamilyShare` down as if the ladder had settled for it.
+ *
+ * The general rule, which outlives this instance: an experimenter's hand in the population is not
+ * data. Any future route value that means "chosen by something other than the ladder" belongs on
+ * this exclusion list on arrival, BEFORE its first row lands — see the dated amendment beside
+ * CONCENTRATION_PREDICTION.
+ */
 const liveRouted = (rs: Submit[]) =>
   rs.filter(
     (r) =>
@@ -99,6 +116,7 @@ const liveRouted = (rs: Submit[]) =>
       !r.d.human_required &&
       !r.d.no_candidate &&
       !r.d.wake_queued &&
+      r.d.route !== 'named' &&
       r.d.reviewer,
   );
 
@@ -109,6 +127,11 @@ export interface WindowResult {
   wakeQueued: number;
   noCandidate: number;
   exempt: number;
+  /** Hand-routed submits (ADR 348). Out of `liveRouted` by design — but counted, because a bucket
+   *  that leaves the population without appearing in the mix makes the mix stop summing, and a
+   *  reader then attributes the gap to whichever bucket they already suspect. dolly's catch on
+   *  #1156, and the same ADR 234 shape this PR flagged in her report.ts. */
+  named: number;
   good: number;
   confirms: number;
   jumped: number;
@@ -164,6 +187,7 @@ export function evaluate(name: string, rs: Submit[]): WindowResult {
     wakeQueued: rs.filter((r) => r.d.wake_queued).length,
     noCandidate: rs.filter((r) => r.d.no_candidate).length,
     exempt: rs.filter((r) => r.d.acceptance_exempt).length,
+    named: rs.filter((r) => r.d.route === 'named' && !r.d.acceptance_exempt).length,
     good,
     confirms,
     jumped,
@@ -477,6 +501,38 @@ export function concentration(
  *       claim in ADR 260 is wrong, and the next suspect is the quiescence filter or grading, not
  *       the sort. A FAIL is the informative outcome and must be recorded as a disproof.
  * INCONCLUSIVE: fewer than 20 submits after the boundary, or the second seat never accepts.
+ *
+ * ---
+ * AMENDED 2026-09-01, before any affected row exists — the thresholds above are UNCHANGED and the
+ * population they range over is narrowed by one value.
+ *
+ * dolly's #1152 gives a human a way to route an acceptance to a named seat, recorded as
+ * `route: 'named'`. That row satisfies every clause of `liveRouted` as it stood — not exempt, not
+ * human-required, has a reviewer, no candidate-failure flag — so it would have entered the very
+ * population this prediction ranges over, and the prediction is about what the LADDER does with
+ * the asks. Two ways it would have broken, both measured against the code rather than supposed:
+ *
+ *   - CONCENTRATION (primary). A person hand-routing repeatedly to one trusted seat drives
+ *     top-reviewer share up with no involvement from the sort. That is indistinguishable, in this
+ *     number, from the ladder failing to disperse the asks — so the FAIL arm could have fired on
+ *     a mechanism claim that was never tested.
+ *   - crossFamilyShare (secondary, the context line printed beside it). A named route grades
+ *     `same_model` when the pairing cannot be proved better, honestly, so each one would have
+ *     lowered a figure that claims to describe the picker's achieved diversity.
+ *
+ * `liveRouted` therefore excludes `named`, and this note is the pre-registration of that exclusion.
+ * It is written while the count of named rows in the ledger is ZERO (#1152 unmerged as of writing),
+ * which is the only condition under which such a narrowing is not a fitted result: after the first
+ * named submit lands, no amendment can distinguish "excluded because it is not ladder data" from
+ * "excluded because it moved the number the wrong way", and the window would be contaminated
+ * permanently. Falsifier for that claim of zero: `select count(*) from audit where action =
+ * 'lane.ready_for_review' and detail like '%"route":"named"%'` — a non-zero count at this commit
+ * means this amendment was written too late and the window must be restarted, not patched.
+ *
+ * What this amendment does NOT do: it does not remove hand-routed acceptances from the ledger, and
+ * it takes no position on whether naming an acceptor is good practice. They are recorded, they are
+ * real reviews, and ADR 056 diversity claims read the CLOSE row, not this one. They are simply not
+ * evidence about a picker that did not pick them.
  */
 export const CONCENTRATION_PREDICTION = {
   passAtOrBelow: 0.4,
@@ -539,7 +595,7 @@ function main() {
   for (const r of results) {
     console.log(`\n=== ${r.name} — ${r.submits} submits ===`);
     console.log(
-      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt}`,
+      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt} | hand-routed ${r.named}`,
     );
     console.log(
       `  [1] good <=10m ${r.good}/${r.liveRouted} = ${pct(r.goodRate)}   (any confirm ${r.confirms}/${r.liveRouted})`,
