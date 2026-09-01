@@ -58,6 +58,26 @@ index access or optional property that merely _looks_ safe often isn't.
   `user`, `session`-meaning-Member, `event`-meaning-Act.
 - `any` needs a `// reason:` comment.
 
+## A finding is not a fix request ([ADR 338](../docs/decisions/338-a-finding-is-not-a-fix-request.md))
+
+The test for a blocking finding (a REQUIRED, for a seat review): would the spec have demanded it
+**before anyone opened the diff?** Discovery adds information, not obligation.
+
+- REQUIRED is reserved for four categories: **honesty** (a false claim in the PR or its docs),
+  **leaked secrets**, a **probe-measured regression** (reproduced against this head — reasoning
+  about a failure is a note, reproducing it is a REQUIRED), and a **named pin** (a falsifier in the
+  lane or spec, an ADR clause, a doc/code disagreement, a rule the PR's own text states, or an
+  in-tree convention cited with file and line — quoted or cited in the finding itself). A category
+  claim with no probe and no pin is a note.
+- Everything else — hypotheticals, edge cases the spec never named, hardening ideas — is **noted,
+  not blocking**. A note worth keeping becomes a Seed or a lane with the finder's name on it.
+- Authors **decline** a REQUIRED outside the four categories, citing ADR 338, and do not expand the
+  lane to clear it. A decline names the category the finding fails and routes it to the board as a
+  note under the finder's name — the finding survives being wrong about its severity. Taking a
+  noted finding anyway is allowed — as a recorded decision, measured first, never as compliance.
+- AppSec is exempt: probe-measured security findings accepted by nick stay REQUIRED regardless of
+  what the spec named. Demonstrated, not merely labeled.
+
 ## Output
 
 Few high-confidence findings, not a list. For each, give the input and the resulting failure — a
