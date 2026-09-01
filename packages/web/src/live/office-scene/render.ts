@@ -1,4 +1,5 @@
 import { canvasFont } from '../canvasFont';
+import { initials } from '../format';
 import type { WorkingHours } from '@musterd/protocol';
 import type { Appearance } from './appearance';
 import { drawCharacter } from './character';
@@ -3689,6 +3690,34 @@ function deskWedge(
   // anyone who needs the word. 9px is the floor for letterspaced bold caps on canvas.
   const ENGRAVE_MIN_PX = 9;
   const engraved = px >= ENGRAVE_MIN_PX;
+  // ...and below THAT, two letters rather than nothing (nick, 2026-09-01, after looking at #1127 on
+  // the real /live). The bar says a desk is owned but not by whom, and /live's usual panel width is
+  // exactly where the bar renders — so the plate was mute on the one surface that matters.
+  //
+  // Length was never what stopped the words: /live has 19.3px of `cap` and two 9px caps need ~11px.
+  // HEIGHT stopped them — the bar is 15*s, so 7.9px there, and a 9px glyph does not fit inside it.
+  // The desk's side face is DESK_UP * s = 19px at that scale, so the bar was using 42% of the room
+  // it had. The initials plate takes what it needs of the rest.
+  //
+  // The glyphs are drawn AT the legibility floor, not scaled: their whole purpose is to be the
+  // largest legible thing a desk this size can carry, so a proportional size would just re-create
+  // the smear one band lower. That is not a return of #1126's clamp — above this band the name is
+  // still fully desk-proportional, and the two plates meet almost exactly in height at the
+  // handover (9 + 3 = 12.0px here against px + 4*s = 12.3px there), so nothing jumps.
+  const INITIALS_PX = ENGRAVE_MIN_PX;
+  const INITIALS_HIGH = INITIALS_PX + 3;
+  // The floor for initials is geometric, not typographic — the glyphs are 9px wherever they draw, so
+  // what fails first is the PLATE's proportion to its desk, not the letters. 75% of the desk's side
+  // face is the most a plate may claim; past that it stops being desk trim and becomes a billboard
+  // on a doll's desk, and the colour bar returns instead.
+  //
+  // 75% and not the 70% measured first: /live's office panel is 617x848 on a 1440x900 window, which
+  // is scale 0.465, and 70% put the cut at 0.476 — a hair ABOVE the surface this whole change
+  // exists to fix. (The 0.527 in #1127's notes was a larger window; 0.465 is the ordinary one.)
+  // The cut now sits at 0.444, so both real /live widths engrave and a genuinely cramped panel
+  // still degrades.
+  const initialed = !engraved && INITIALS_HIGH <= 0.75 * DESK_UP * s;
+  const glyphs = initials(node.name);
   // The DESK wins the argument about size (live lesson, 2026-08-27): the side face is only DESK_D
   // deep, and the plate is capped well inside it. `fm` is already the desk's own projected length,
   // so this cap has always scaled correctly — it was the type, not the cap, that stopped.
@@ -3736,6 +3765,19 @@ function deskWedge(
     }
     len = Math.min(nameW * textSx + 8 * s + capW, cap); // screen px along the plate
     high = px + (sub ? px * 0.86 : 0) + 4 * s; // face height, screen px
+  } else if (initialed) {
+    // A compact badge, not a bar: two letters need ~11px of a 19px cap, so the plate shrinks to fit
+    // them rather than spanning the desk. The colour tab returns to its engraved-plate width — at
+    // this size the letters are the identity, so colour goes back to accenting rather than carrying.
+    ctx.font = canvasFont(INITIALS_PX, '--font-display', 700);
+    // The tab keeps the glint's 2px floor, for the glint's reason (izzo's REQUIRED on #1127): the
+    // engraved plate's 3.4*s is 1.6px here, which is not a quiet accent but an invisible one, and a
+    // mark nobody can see is worse than no mark. It still carries real meaning at this size — it is
+    // what separates the two seats whose initials collide (stanley/streamwatch), so it may shrink
+    // out of the way of the letters but not out of existence.
+    capW = Math.max(2, 3.4 * s);
+    len = Math.min(ctx.measureText(glyphs).width + 7 * s + capW, cap);
+    high = INITIALS_HIGH;
   } else {
     // The bar takes the plate's FULL allowance — `cap` is already 68% of the desk's side face, so
     // this is desk-proportional by construction and can never overhang. (Half of it was measured
@@ -3839,7 +3881,9 @@ function deskWedge(
   // Skipped entirely on the bar form: there is no legible size to draw it at (see `engraved` above).
   // NOT an early return — the disconnected glint below is an ADR 315 presence claim, and the bar
   // keeps every claim the full plate makes except the ones that are words.
-  if (engraved) {
+  if (engraved || initialed) {
+  const engravePx = engraved ? px : INITIALS_PX;
+  const engraveText = engraved ? name : glyphs;
   const mid = P(capW / 2, top + high * (sub ? 0.38 : 0.5));
   const angle = Math.atan2(uF.y, uF.x);
   ctx.save();
@@ -3850,12 +3894,12 @@ function deskWedge(
   ctx.scale(textSx, 1);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = canvasFont(px, '--font-display', 700);
+  ctx.font = canvasFont(engravePx, '--font-display', 700);
   ctx.letterSpacing = track;
   ctx.fillStyle = 'rgba(9, 12, 16, 0.55)';
-  ctx.fillText(name, 0, 0.8);
+  ctx.fillText(engraveText, 0, 0.8);
   ctx.fillStyle = '#f2eee6';
-  ctx.fillText(name, 0, 0);
+  ctx.fillText(engraveText, 0, 0);
   ctx.letterSpacing = '0px';
   if (sub) {
     // Declared absence, said in words on the plate — a jacket alone is decoration, not a claim.
