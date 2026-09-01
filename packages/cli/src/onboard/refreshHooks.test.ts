@@ -177,6 +177,32 @@ describe('runRefreshHooks — hooks only, never identity (ADR 168)', () => {
     expect(out).toContain('refused');
   });
 
+  // The mixed case pins the partition and the line ordering: one tombstone resurrects, the other
+  // stays, and the resurrection lines print before the left-in-place lines.
+  it('partitions a mixed pair — one re-installed, one left declined', () => {
+    h.folderBinding = { team: 'revive' };
+    seedProvisioned();
+    declineSurface(cwd, SURFACE_STATUSLINE, 'nick');
+    declineSurface(cwd, 'gone-harness:oldChip', 'nick');
+    const said: string[] = [];
+    vi.spyOn(process.stdout, 'write').mockImplementation((c: string | Uint8Array) => {
+      said.push(String(c));
+      return true;
+    });
+
+    expect(runRefreshHooks(cwd)).toBe(0);
+
+    expect(isDeclined(cwd, SURFACE_STATUSLINE)).toBe(false);
+    expect(isDeclined(cwd, 'gone-harness:oldChip')).toBe(true);
+    const out = said.join('');
+    expect(out).toContain('re-installed ' + SURFACE_STATUSLINE);
+    expect(out).not.toContain('re-installed gone-harness:oldChip');
+    expect(out).toContain('nothing in this refresh installs it');
+    expect(out.indexOf('re-installed ' + SURFACE_STATUSLINE)).toBeLessThan(
+      out.indexOf('gone-harness:oldChip'),
+    );
+  });
+
   it('says nothing about refusals when there were none', () => {
     h.folderBinding = { team: 'revive' };
     seedProvisioned();

@@ -97,7 +97,13 @@ inside an amendment is how vocabulary gets invented badly.
 
 6. **The override.** `musterd init --refresh-hooks` clears every tombstone in the folder — an
    explicit install command *is* the user asking for these surfaces back — and prints one line per
-   resurrection naming the surface, the date it was declined, and how to refuse it again. Routine
+   resurrection naming the surface, the date it was declined, and how to refuse it again.
+   _(Amended 2026-08-31: it clears only the tombstones some present harness's refresh actually
+   installs — this clause's own "back"/"resurrection" language presumes the surface can return, and
+   "re-installed" for a name nothing here installs is a lie about the folder. A tombstone nothing
+   installs is left in place and named, with `surface accept` as the explicit way to clear the
+   record anyway; a run the ADR 168 downgrade guard refused hedges to "cleared the refusal" and
+   points at `init --check`. #1124.)_ Routine
    drift checks never override. A silent resurrection is how someone finds the chip returned with no
    idea why, which is the same absence-carries-no-intent defect pointing the other way.
 
@@ -125,7 +131,11 @@ inside an amendment is how vocabulary gets invented badly.
   and what has been, with the date and who. A refusal for a surface this build does not recognise
   still lists, marked as such: hiding it would make `accept` unspellable for a name nothing lists.
   `init --refresh-hooks` emits one line per tombstone it clears, naming the surface, the date it was
-  declined, and how to refuse it again. `init --check` emits *nothing* for a declined surface — the
+  declined, and how to refuse it again. _(Amended 2026-08-31: also one line per tombstone it
+  **leaves**, saying nothing in this refresh installs it — so a tombstone's silence still means
+  exactly "declined and honoured", never "skipped". The clear-line's meaning moves with amended
+  decision (6): "re-installed" is said only when the install happened; a refused run says "cleared
+  the refusal" instead. #1124.)_ `init --check` emits *nothing* for a declined surface — the
   absence of a line is the signal, which is why the two falsifiers below are both about silence.
 - **Eval:** dataset is this repo's own seat workspaces — 13 folders provisioned for Claude Code, each
   carrying between 4 and 5 project-local hooks plus the chip, so 5-6 refusable surfaces apiece.
