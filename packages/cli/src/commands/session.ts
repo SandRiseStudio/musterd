@@ -26,7 +26,7 @@ import {
   localSessionLiveness,
   type LocalSessionLiveness,
 } from '../session/liveness.js';
-import { findWorkspaceDir } from './helpers.js';
+import { findWorkspaceDir, resolveClaimWorkspace } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
 import { composeSessionStatusline, type SessionStatuslineInput } from './sessionStatusline.js';
 
@@ -491,35 +491,80 @@ async function pushAttestation(
   binding: Binding,
   session: SessionCapture,
   event: 'start' | 'end',
+  dir: string,
+  harness: 'claude-code' | 'cursor' = CAPTURE_HARNESS,
 ): Promise<boolean> {
   const seat = bindingSeat(binding);
   const key = binding.seat_credential ?? binding.agent_key;
   if (!binding.agent_key || !key || !seat) return false;
-  try {
-    const http = new HttpClient({
+  // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
+  // token rides the child's env, so it is attested here exactly as the presence-touch path
+  // attests it. Never defaulted — an ordinary session has no `MUSTERD_WAKE_LEASE` and says
+  // nothing (ADR 236). This is what lets a lease that dies `lease_expired` still be known to
+  // have PAID for a session: the captured row names the lease by identity, not by timing.
+  const wakeLease = resolveAttestedWakeLease(process.env);
+  const body = {
+    seat,
+    harness,
+    event,
+    session_digest: sessionDigest(binding.agent_key, session.id),
+    ...(wakeLease ? { wake_lease: wakeLease } : {}),
+  };
+  // A CLI hook is intrinsically `cli` (ADR 286); the workspace label is what keeps a claim from
+  // this one-shot from evicting the live adapter in the same worktree (ADR 340, #1131).
+  const client = (sessionLease: string | undefined) =>
+    new HttpClient({
       server: binding.server,
+      team: binding.team,
+      workspace: resolveClaimWorkspace(process.env, dir),
       key,
       seat,
-      ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
+      surface: 'cli',
+      ...(sessionLease !== undefined ? { sessionLease } : {}),
     }).presenceNeutral();
-    // The wake lease (ADR 241/252), when this process was spawned by a wake: the correlation
-    // token rides the child's env, so it is attested here exactly as the presence-touch path
-    // attests it. Never defaulted — an ordinary session has no `MUSTERD_WAKE_LEASE` and says
-    // nothing (ADR 236). This is what lets a lease that dies `lease_expired` still be known to
-    // have PAID for a session: the captured row names the lease by identity, not by timing.
-    const wakeLease = resolveAttestedWakeLease(process.env);
-    await http.attestSession(binding.team, {
-      seat,
-      harness: CAPTURE_HARNESS,
-      event,
-      session_digest: sessionDigest(binding.agent_key, session.id),
-      ...(wakeLease ? { wake_lease: wakeLease } : {}),
-    });
+  try {
+    await client(binding.session_lease).attestSession(binding.team, body);
+    return true;
+  } catch (err) {
+    // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
+    if (!isSessionLeaseRefusal(err)) return false;
+  }
+  // The stored lease was refused, not the credential. `binding.session_lease` is minted once, at
+  // claim, and lives five minutes (ADR 337); every hook after that presented a dead lease and this
+  // path swallowed the refusal with "unreachable" — local slot written, ledger silent (lane
+  // 01M1F92X69, measured on seat ryder 2026-09-01). ADR 337 §4 is the remedy: one fresh claim, in
+  // reply to the refusal and never before it (a claim per hook is the 2026-09-01 storm, #1138).
+  //
+  // The minted lease is deliberately NOT written back to the binding. It is bound to the Presence
+  // this claim holds, and closing the socket releases that Presence (`held_until`, ws.ts cleanup),
+  // which `hasValidSessionLease` reads as dead — measured 2026-09-01: a second hook presenting the
+  // lease the first had just minted was refused in ~1 of 4 runs, the other 3 being the close still
+  // in flight. A one-shot cannot leave a live lease behind; a lease that outlives its claim is a
+  // server decision, not a client one.
+  let claim: { lease: string; close: () => void };
+  try {
+    claim = await client(undefined).claimSessionLease();
+  } catch {
+    return false; // the seat is someone else's, or the daemon went away mid-way: not ours to force
+  }
+  try {
+    await client(claim.lease).attestSession(binding.team, body);
     return true;
   } catch {
-    // unreachable daemon / auth drift — the local capture stands; `residency status` names drift
     return false;
+  } finally {
+    claim.close();
   }
+}
+
+/** The server's two lease refusals (`missing` / `invalid, expired, or revoked agent session lease`)
+ *  — as opposed to a refused credential, a refused seat, or no daemon, none of which a claim fixes. */
+function isSessionLeaseRefusal(err: unknown): boolean {
+  return (
+    err instanceof CliError &&
+    err.code === 'unauthorized' &&
+    /agent session lease/.test(err.message)
+  );
 }
 
 /**
@@ -554,7 +599,7 @@ export async function attestSlotIfUnattested(dirHint?: string): Promise<void> {
     const session = binding?.session;
     if (!binding || !session) return;
     if (session.ended_at !== undefined || session.attested_at !== undefined) return;
-    if (!(await pushAttestation(binding, session, 'start'))) return;
+    if (!(await pushAttestation(binding, session, 'start', dir))) return;
     // Re-read: the push is awaited, and a concurrent hook may have rewritten the slot meanwhile.
     // Stamping a slot that has since changed id would mark a DIFFERENT session as announced.
     const fresh = findBinding(dir, {});
@@ -659,7 +704,7 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // returns early, so an `ended` push always carries the digest of the capture it belongs to.
   // `start` records the landing so the tool boundary knows this slot is already announced; a failed
   // push leaves `attested_at` absent, which is what makes {@link attestSlotIfUnattested} retry.
-  if ((await pushAttestation(binding, session, event)) && event === 'start') {
+  if ((await pushAttestation(binding, session, event, dir)) && event === 'start') {
     // Re-read: the push is awaited, and a concurrent writer (a slot heal, a model observation) may
     // have rewritten the binding meanwhile. Stamping from the pre-await copy would revert it.
     const fresh = findBinding(dir, {});
@@ -733,28 +778,8 @@ export async function observeCursorSession(
   }
 
   if (!same || prior?.ended_at !== undefined) {
-    const seat = bindingSeat(binding);
-    const key = binding.seat_credential ?? binding.agent_key;
-    if (binding.agent_key && key && seat) {
-      try {
-        const http = new HttpClient({
-          server: binding.server,
-          key,
-          seat,
-          ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
-        }).presenceNeutral();
-        const wakeLease = resolveAttestedWakeLease(process.env);
-        await http.attestSession(binding.team, {
-          seat,
-          harness: 'cursor',
-          event: 'start',
-          session_digest: sessionDigest(binding.agent_key, session.id),
-          ...(wakeLease ? { wake_lease: wakeLease } : {}),
-        });
-      } catch {
-        /* daemon unreachable — local capture stands */
-      }
-    }
+    // Best-effort like the claude-code path, refused-lease reclaim included; local capture stands.
+    await pushAttestation(binding, session, 'start', dir, 'cursor');
   }
 
   return observed && !current ? observed : undefined;
