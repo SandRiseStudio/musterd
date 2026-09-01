@@ -46,7 +46,11 @@ import {
   resolveCapabilities,
   toMember,
 } from '../store/rows.js';
-import { mintSessionLease } from '../store/session-leases.js';
+import {
+  AGENT_SESSION_LEASE_RENEW_AHEAD_MS,
+  mintSessionLease,
+  sessionLeaseDueForRenewal,
+} from '../store/session-leases.js';
 import { getAgentKeyHash, getPolicy, requireTeam } from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
@@ -75,6 +79,10 @@ interface ConnState {
   /** Pending same-workspace-predecessor reap this (successor) connection scheduled (ADR 092). Cleared
    * on close so a successor that drops within the grace never reaps on behalf of a dead session. */
   evictionTimer?: NodeJS.Timeout;
+  /** The agent session lease this connection's Presence currently backs (ADR 337/347): renewed over
+   * the socket before it expires, so a long-lived adapter never presents a dead one. Absent on human
+   * and observer connections, which carry no HTTP lease. */
+  lease?: { id: string };
 }
 
 /**
@@ -618,6 +626,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               memberId: targetMember.id,
               presenceId: presence.id,
             });
+            state.lease = { id: lease.id };
             if (credential) {
               appendAudit(ctx.db, team.id, {
                 actor: targetMember.name,
@@ -757,6 +766,38 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           case 'heartbeat': {
             if (presenceById(ctx.db, conn.presenceId)) {
               heartbeat(ctx.db, conn.presenceId, frame.status);
+              // ADR 347: renew the agent session lease over the live socket before it expires. The
+              // adapter's HTTP tools present `config.sessionLease`, which was minted once at claim
+              // and lived five minutes — after which every tool call was refused until a reconnect
+              // happened to mint another (lane 01M1FC77F2, 2026-09-01). The old lease is not
+              // revoked: it dies at its own expiry, so a call in flight under it still lands.
+              if (
+                state.lease &&
+                sessionLeaseDueForRenewal(
+                  ctx.db,
+                  state.lease.id,
+                  AGENT_SESSION_LEASE_RENEW_AHEAD_MS,
+                )
+              ) {
+                const renewed = mintSessionLease(ctx.db, {
+                  teamId: conn.teamId,
+                  memberId: conn.memberId,
+                  presenceId: conn.presenceId,
+                });
+                appendAudit(ctx.db, conn.teamId, {
+                  actor: conn.memberName,
+                  action: 'agent_session_lease.renewed',
+                  target: conn.memberName,
+                  result: 'allow',
+                  detail: { previous: state.lease.id, lease: renewed.id, source: 'heartbeat' },
+                });
+                state.lease = { id: renewed.id };
+                send(ws, {
+                  type: 'lease',
+                  session_lease: renewed.session_lease,
+                  expires_at: renewed.expires_at,
+                });
+              }
               // ADR 101 re-attestation: a mid-occupancy model switch rides the heartbeat. Only a
               // real change writes + audits (occupancy.model_attested, old → new).
               if (frame.model) {

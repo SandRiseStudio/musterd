@@ -55,6 +55,7 @@ export type AuditAction =
   | 'agent_seat_credential.rotated'
   | 'agent_session_lease.revoked'
   | 'agent_session_lease.minted'
+  | 'agent_session_lease.renewed'
   | 'request.decide'
   | 'request.expired'
   // ADR 088: an interrupt-class act was surfaced to a busy agent at a tool boundary (delivery, not

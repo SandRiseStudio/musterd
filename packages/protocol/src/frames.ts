@@ -114,6 +114,19 @@ export const ErrorFrame = z.object({
   same_workspace: z.boolean().optional(),
 });
 
+/**
+ * `lease` (server → client) — a renewed agent session lease (ADR 337 §5, amended by ADR 347). The
+ * daemon mints it for the Presence this connection holds and pushes it before the current lease
+ * expires; the adapter adopts it for its HTTP calls. The old lease stays valid to its own expiry, so
+ * an HTTP call in flight under it still lands. Never sent on a human or observer connection.
+ */
+export const LeaseFrame = z.object({
+  type: z.literal('lease'),
+  session_lease: z.string(),
+  expires_at: z.number().int(),
+});
+export type LeaseFrame = z.infer<typeof LeaseFrame>;
+
 export const WSServerFrame = z.discriminatedUnion('type', [
   WelcomeFrame,
   OccupiedFrame,
@@ -124,5 +137,6 @@ export const WSServerFrame = z.discriminatedUnion('type', [
   DeliverFrame,
   PresenceEvtFrame,
   ErrorFrame,
+  LeaseFrame,
 ]);
 export type WSServerFrame = z.infer<typeof WSServerFrame>;

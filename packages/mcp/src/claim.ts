@@ -132,6 +132,19 @@ export async function adoptIdentity(
 }
 
 /** Persist the resolved seat as this folder's standing claim policy (so a re-launch re-occupies it). */
+/**
+ * Write a lease the daemon renewed over the socket (ADR 347) into the binding of the seat that holds
+ * it — so a CLI hook in this worktree presents a live lease too — and nowhere else. Same seat on
+ * disk, or nothing is written: an adapter whose binding was re-provisioned to another seat must not
+ * hand that seat its authority.
+ */
+export function persistRenewedLease(config: McpConfig): void {
+  if (!config.member || !config.bindingDir || !config.sessionLease) return;
+  const onDisk = findBinding(config.bindingDir);
+  if (!onDisk?.claim || onDisk.claim.mode !== 'seat' || onDisk.claim.name !== config.member) return;
+  persistBinding(config, config.member);
+}
+
 function persistBinding(config: McpConfig, seat: string): void {
   const binding: Binding = {
     version: 2,
