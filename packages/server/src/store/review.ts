@@ -3,6 +3,7 @@ import {
   CloseReasonSchema,
   modelFamily,
   MODEL_UNKNOWN,
+  normalizeModelId,
   wakeabilityFromFacts,
   type FamilyPosture,
   type FamilyPostureState,
@@ -84,6 +85,12 @@ export type ReviewSelectionExclusion =
   | 'no_live_presence'
   | 'not_agent'
   | 'busy'
+  /** The WORKER's live occupancy attests nothing, so no candidate can be graded against it. This is
+   *  a fact about the asker, filed once per candidate so the set stays complete; it is NOT the
+   *  candidate's own `unknown_grade`. Before 2026-09-01 the two were conflated and an unattested
+   *  worker read as "the team had nobody" (10 of 129 no_candidate rows, every candidate a known
+   *  family). */
+  | 'worker_unattested'
   | 'unknown_grade'
   | 'same_model'
   | 'lower_grade'
@@ -106,6 +113,9 @@ export interface ReviewSelectionCandidate {
 /** Decision-time evidence persisted with `lane.ready_for_review` (ADR 303). */
 export interface ReviewSelectionSnapshot {
   selected: { reviewer: string; grade: ReviewGrade } | null;
+  /** The asker's live family at decision time (`unknown` when its occupancy attests nothing). The
+   *  close row carries the same value later; here so the ready row is readable on its own. */
+  worker_family: string;
   candidates: ReviewSelectionCandidate[];
 }
 
@@ -446,6 +456,10 @@ export function selectReviewCounterpart(
   const now = Date.now();
   const workerSeat = listMembers(db, teamId).find((x) => x.name === worker);
   const workerModel = workerSeat ? latestAttestedModel(db, workerSeat.id) : null;
+  const worker_family = workerSeat ? memberFamily(db, workerSeat) : MODEL_UNKNOWN;
+  // A worker whose live occupancy attests nothing cannot be graded against ANY candidate. That is
+  // one fact about the asker, not a fact about each candidate — see `worker_unattested`.
+  const workerUnattested = normalizeModelId(workerModel) === MODEL_UNKNOWN;
   const candidates: ReviewSelectionCandidate[] = [];
   const selectable: Array<{ index: number; member: MemberRow; grade: ReviewGrade }> = [];
 
@@ -481,9 +495,17 @@ export function selectReviewCounterpart(
       candidate.exclusion = 'busy';
       continue;
     }
-    const grade = reviewGrade(workerModel, latestAttestedModel(db, member.id));
+    const candidateModel = latestAttestedModel(db, member.id);
+    const grade = reviewGrade(workerModel, candidateModel);
     if (grade === null) {
-      candidate.exclusion = 'unknown_grade';
+      // Attribute the null to the side that owns it. A candidate that attests nothing is its own
+      // `unknown_grade` whatever the worker did; only a gradeable candidate can be blinded by the
+      // worker. The behaviour is unchanged either way — nothing routes (ADR 188 grades nothing from
+      // an unknown model) — but the row now says WHY nobody was asked.
+      candidate.exclusion =
+        workerUnattested && normalizeModelId(candidateModel) !== MODEL_UNKNOWN
+          ? 'worker_unattested'
+          : 'unknown_grade';
       continue;
     }
     if (grade === 'same_model') {
@@ -497,7 +519,7 @@ export function selectReviewCounterpart(
   // Stable sort preserves roster order for an equal-grade tie, which is the pre-ADR-303 policy.
   selectable.sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
   const best = selectable[0];
-  if (!best) return { pick: null, snapshot: { selected: null, candidates } };
+  if (!best) return { pick: null, snapshot: { selected: null, worker_family, candidates } };
 
   for (const option of selectable) {
     const candidate = candidates[option.index]!;
@@ -517,7 +539,11 @@ export function selectReviewCounterpart(
   };
   return {
     pick,
-    snapshot: { selected: { reviewer: pick.reviewer, grade: best.grade }, candidates },
+    snapshot: {
+      selected: { reviewer: pick.reviewer, grade: best.grade },
+      worker_family,
+      candidates,
+    },
   };
 }
 
