@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig } from '../config.js';
+import { claimAgentHttp } from '../test-auth.js';
 import { requestsCommand } from './requests.js';
 import { teamCommand } from './team.js';
 
@@ -165,7 +166,14 @@ describe('requests command', () => {
       server: serverUrl,
       key: loadConfig().identities['dawn']!.key,
     }).addMember('dawn', { name: 'Bo', kind: 'agent' });
-    const client = new HttpClient({ server: serverUrl, key: agentKey, seat: 'Bo' });
+    const authority = await claimAgentHttp(
+      serverUrl,
+      'dawn',
+      agentKey,
+      loadConfig().identities['dawn']!.key,
+      'Bo',
+    );
+    const client = new HttpClient({ server: serverUrl, ...authority });
     await expect(client.requests('dawn')).rejects.toMatchObject({ exitCode: 5 });
   });
 });

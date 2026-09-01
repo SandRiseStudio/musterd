@@ -77,6 +77,8 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       '01J',
       undefined,
       null,
+      undefined,
+      undefined,
     );
     // next frame after the claim is the subscribe
     const frames = sock.sent.map((s) => JSON.parse(s));
@@ -126,6 +128,8 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       '01J',
       'msgr_resume123',
       null,
+      undefined,
+      undefined,
     );
   });
 
@@ -142,6 +146,8 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       '01J',
       undefined,
       memory,
+      undefined,
+      undefined,
     );
   });
 
@@ -190,6 +196,8 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
       '01J',
       undefined,
       null,
+      undefined,
+      undefined,
     );
     expect(sock.sent.map((s) => JSON.parse(s))).toContainEqual(
       expect.objectContaining({ type: 'subscribe' }),

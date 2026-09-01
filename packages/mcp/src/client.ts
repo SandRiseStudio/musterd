@@ -279,12 +279,15 @@ export class MusterdClient {
           method,
           headers: {
             'content-type': 'application/json',
-            // v0.3 (ADR 075): authenticate with the team agent key (Bearer); the server dispatches on the
-            // prefix → the live-presence occupancy this session holds. Roster/health stay auth-optional.
-            ...(this.config.agent_key ? { authorization: `Bearer ${this.config.agent_key}` } : {}),
-            // The agent key authenticates the harness, not a seat — reads carry the occupied seat so the
-            // server can assert occupancy (SPEC A.7 §253). A send conveys it via the envelope `from`.
+            // Agent HTTP authority is self-identifying and Presence-bound (ADR 337). Before an
+            // occupancy exists this omits auth; the bootstrap team key never reaches routine routes.
+            ...(this.config.seatCredential
+              ? { authorization: `Bearer ${this.config.seatCredential}` }
+              : {}),
             ...(this.config.member ? { 'x-musterd-seat': this.config.member } : {}),
+            ...(this.config.sessionLease
+              ? { 'x-musterd-session-lease': this.config.sessionLease }
+              : {}),
             // Ambient occupancy (ADR 275 / ADR 057): label the one-shot touch with the surface
             // this adapter attests — capture, not a stale binding declaration. Honored only when
             // no resident WS session owns liveness (`touchAmbientPresence` is a no-op under one).
@@ -621,7 +624,7 @@ export class MusterdClient {
    */
   join(timeoutMs?: number): Promise<void> {
     if (this.joinedFlag) return Promise.resolve();
-    if (!this.config.agent_key) {
+    if (!this.config.agent_key && !this.config.seatCredential) {
       return Promise.reject(
         new Error('no agent key — set MUSTERD_AGENT_KEY (the team agent key) to claim a seat'),
       );
@@ -790,7 +793,7 @@ export class MusterdClient {
           type: 'claim',
           v: PROTOCOL_VERSION,
           team: this.config.team,
-          key: this.config.agent_key,
+          key: this.config.seatCredential ?? this.config.agent_key,
           target: this.claimTarget(),
           ...(includeGrant && this.config.grant !== undefined ? { grant: this.config.grant } : {}),
           surface: this.config.surface,
@@ -837,6 +840,8 @@ export class MusterdClient {
         this.pendingRequestId = null;
         this.waitOnPending = false;
         this.config.member = frame.seat.name;
+        if (frame.seat_credential) this.config.seatCredential = frame.seat_credential;
+        if (frame.session_lease) this.config.sessionLease = frame.session_lease;
         this.charterText = frame.charter?.trim() || null;
         // The continuity envelope (ADR 093): headline + age, never the body — team_join renders it
         // as the one-line pointer; the body is fetched only by an explicit team_memory_read.

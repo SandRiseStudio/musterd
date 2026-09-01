@@ -86,17 +86,21 @@ function gather(flags: Record<string, string | boolean>) {
   const sources: { team: string; identity: Identity; source: IdentitySource }[] = [];
   if (envId) sources.push({ team: envId.team, identity: envId.identity, source: 'env' });
   // A binding yields a ready identity only when it pins a fixed seat (the name is known up front) AND
-  // carries the team agent key (v0.3, ADR 075). A role-pool / chat / keyless binding has no
-  // client-side seat — the claim flow (`musterd claim`/`join`) resolves it and caches the result.
+  // carries claimed agent authority. A role-pool / chat / bootstrap-only binding has no routine
+  // client-side identity — the claim flow (`musterd claim`/`join`) resolves it and caches the result.
   const boundSeat = binding ? bindingSeat(binding) : undefined;
-  if (binding && boundSeat && binding.agent_key) {
+  const bindingCredential = binding?.seat_credential ?? binding?.agent_key;
+  if (binding && boundSeat && bindingCredential) {
     sources.push({
       team: binding.team,
       identity: {
         name: boundSeat,
-        key: binding.agent_key,
+        key: bindingCredential,
         // A CLI act is intrinsically `cli` (ADR 286) — identity files no longer declare a surface.
         surface: 'cli',
+        ...(bindingCredential === binding.seat_credential && binding.session_lease !== undefined
+          ? { sessionLease: binding.session_lease }
+          : {}),
         ...(binding.grant !== undefined ? { grant: binding.grant } : {}),
       },
       source: 'binding',
@@ -111,7 +115,12 @@ function gather(flags: Record<string, string | boolean>) {
     if (config.identities[si.team]?.name === si.name) continue; // already added as the active one
     sources.push({
       team: si.team,
-      identity: { name: si.name, key: si.key, surface: si.surface },
+      identity: {
+        name: si.name,
+        key: si.key,
+        surface: si.surface,
+        ...(si.sessionLease !== undefined ? { sessionLease: si.sessionLease } : {}),
+      },
       source: 'config',
     });
   }
@@ -194,6 +203,9 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
       server,
       key: match.identity.key,
       seat: match.identity.name,
+      ...(match.identity.sessionLease !== undefined
+        ? { sessionLease: match.identity.sessionLease }
+        : {}),
       surface: match.identity.surface,
       ...(model !== undefined ? { model } : {}),
     }),
@@ -233,6 +245,7 @@ export function resolveRead(flags: Record<string, string | boolean>): ResolvedRe
             server,
             key: identity.key,
             seat: identity.name,
+            ...(identity.sessionLease !== undefined ? { sessionLease: identity.sessionLease } : {}),
             surface: identity.surface,
             ...(model !== undefined ? { model } : {}),
           }

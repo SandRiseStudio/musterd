@@ -412,7 +412,17 @@ export function selectReviewCounterpart(
   presenceTimeoutMs: number,
 ): ReviewSelection {
   const lastWork = lastActionByActor(db, teamId, {
-    excludeActions: ['occupancy.model_attested'],
+    // Claims, credentials, and leases establish authority/Presence; none is work that should make
+    // a counterpart busy. This keeps review selection orthogonal to the lease-bound HTTP authority.
+    excludeActions: [
+      'occupancy.model_attested',
+      'claim.occupied',
+      'claim.reseated',
+      'claim.superseded',
+      'agent_seat_credential.minted',
+      'agent_seat_credential.rotated',
+      'agent_session_lease.minted',
+    ],
   });
   const now = Date.now();
   const workerSeat = listMembers(db, teamId).find((x) => x.name === worker);

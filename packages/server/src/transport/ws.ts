@@ -23,6 +23,7 @@ import {
   hashToken,
   isHeld,
   markBound,
+  mintAgentSeatCredential,
 } from '../store/members.js';
 import { memoryEnvelope } from '../store/memory.js';
 import {
@@ -45,6 +46,7 @@ import {
   resolveCapabilities,
   toMember,
 } from '../store/rows.js';
+import { mintSessionLease } from '../store/session-leases.js';
 import { getAgentKeyHash, getPolicy, requireTeam } from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
 import type { Connection } from './hub.js';
@@ -211,7 +213,8 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           }
           const team = requireTeam(ctx.db, frame.team);
 
-          // Step 1: authenticate the key — agent key (mskey_) or human credential (mscr_).
+          // Step 1: authenticate the bootstrap key or a self-identifying seat credential. An agent
+          // seat credential is accepted only to reconnect through this claim handshake (ADR 337).
           let authenticatedAs: import('../store/rows.js').MemberRow | null = null;
           const keyHash = getAgentKeyHash(ctx.db, team.id);
           if (keyHash && hashToken(frame.key) === keyHash) {
@@ -224,16 +227,17 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                 .prepare<
                   [string, string],
                   import('../store/rows.js').MemberRow
-                >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+                >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind IN ('human', 'agent')")
                 .get(team.id, credHash) ?? null;
             if (!authenticatedAs) {
               const claimable = claimableSeats(ctx, team.id);
               send(ws, {
                 type: 'refused',
                 code: 'forbidden',
-                message: 'invalid key — present a valid agent key or human credential',
+                message:
+                  'invalid key — present a valid agent key, agent-seat credential, or human credential',
                 claimable,
-                hint: `musterd claim <seat> --key <mskey_...>`,
+                hint: `musterd claim <seat> --key <mskey_...|msac_...>`,
               });
               appendAudit(ctx.db, team.id, {
                 actor: null,
@@ -603,6 +607,38 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
           // First occupancy stamps the durable *held* marker (ADR 058) — the claim path is the v0.3
           // successor to the v0.2 first-token-touch that used to do this; keeps the ADR 070 derivation.
           markBound(ctx.db, targetMember.id);
+          let agentAuthority: { seat_credential?: string; session_lease?: string } = {};
+          if (targetMember.kind === 'agent' && targetMember.observer === 0) {
+            const credential =
+              targetMember.credential_hash === null
+                ? mintAgentSeatCredential(ctx.db, targetMember.id).seat_credential
+                : undefined;
+            const lease = mintSessionLease(ctx.db, {
+              teamId: team.id,
+              memberId: targetMember.id,
+              presenceId: presence.id,
+            });
+            if (credential) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'agent_seat_credential.minted',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { source: 'claim' },
+              });
+            }
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'agent_session_lease.minted',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { lease_id: lease.id, presence_id: presence.id },
+            });
+            agentAuthority = {
+              ...(credential ? { seat_credential: credential } : {}),
+              session_lease: lease.session_lease,
+            };
+          }
           const conn: Connection = {
             connId: state.connId,
             memberId: targetMember.id,
@@ -628,6 +664,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             presence_id: presence.id,
             server_time: Date.now(),
             charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthority,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
           if (!conn.observer) emitPresence(ctx, conn, 'online', frame.surface);

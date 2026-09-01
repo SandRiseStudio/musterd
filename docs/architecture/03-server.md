@@ -54,6 +54,7 @@ src/
     signinHandoff.ts  // sign-in handoff relay: stageHandoff/redeemHandoff — memory-only, single-use 60s nonces so `musterd board` hands the browser a handle, never a credential (ADR 170)
     gateAsk.ts        // Gate B (ADR 150) ask-lifecycle reads: findGateAsk (fingerprint dedup — one ask per re-attempted costly action) + gateAskHumanAnswer (human-only accept/decline release); pure reads over the ADR 147 ask-stream log
     grants.ts         // grant store: issueGrant/validateGrant/consumeGrant/revokeGrant (ADR 076, P3.1)
+    session-leases.ts // Presence-bound agent HTTP lease mint/verification/revocation; only hashes persist (ADR 337)
     reachability.ts   // ADR 153 unblocker-reachable projection: adminHumanReachable (present-or-notifiable settle term) OR liveTeammateExists × teammateRouteOpen (item-2-gated route-around term); pure read of members + presence + enforcement policy, gates the top-tier hold's terminal (held vs stranded)
     requests.ts       // claim-request store: createRequest/decideRequest/expireRequests/listRequests (ADR 076-077, P3.1-P3.2)
     review.ts         // outcome-acceptance picker (ADR 169 mechanics / ADR 192 vocab): selectReviewCounterpart captures decision-time candidate evidence for the ready audit (ADR 303); pickReviewCounterpart is its compatibility wrapper, agents-only (ADR 253), and drops busy agents (ADR 260, quiescence 120s, unknown kept) — non-risky never asks a human; risk-tagged → peer first, then pickHumanReviewer (ADR 188/172). Ask body carries intent/principles/usable/feel checklist. Also pickWakeReviewer / reviewLoopBounceCount (ADR 191: offline wakeable pick + circuit breaker; non-risky breaker does not fall through to a human, ADR 253) + memberFamily/workerFamily + teamFamilyPosture (ADR 172/187/189: idle wake_pool carries family + wakeability mark from residency — mark-not-filter)
@@ -73,6 +74,7 @@ src/
     http.ts           // HTTP route table (02-protocol HTTP API), including POST /wake-context's recipient-only body-free index (ADR 209; allow+deny `residency.context_read` audit); authTouch ambient presence (ADR 057) + x-musterd-model re-attest for agent seats only (ADR 119/121) + x-musterd-build for all credentials (ADR 135); counterpart terminal PATCH strips merged (ADR 305)
     ws.ts             // WS upgrade, handshake state machine, frame dispatch
     hub.ts            // in-memory connection registry: member -> Set<conn>; broadcast/deliver
+    test-auth.ts      // HTTP-test fixture: claim a named agent seat and return its msac_ credential plus msls_ Presence proof (ADR 337)
   presence/
     reaper.ts         // setInterval: presence timeout, request/wake expiry, departed-seat claim release + observer TTL/cap (ADR 064/196); emit offline events
   footprint/

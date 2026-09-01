@@ -55,5 +55,9 @@ export const P3_AUDIT_ACTIONS = [
   'key.rotate',
   'policy.change',
   'account_status.change',
+  'agent_seat_credential.minted',
+  'agent_seat_credential.rotated',
+  'agent_session_lease.minted',
+  'agent_session_lease.revoked',
 ] as const;
 export type P3AuditAction = (typeof P3_AUDIT_ACTIONS)[number];

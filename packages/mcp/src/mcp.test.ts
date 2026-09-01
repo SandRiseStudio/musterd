@@ -430,9 +430,10 @@ describe('MCP adapter', () => {
     s1.leave();
     expect(s1.memory).toBeNull(); // occupy-scoped: released with the seat
 
+    const authority = (s1 as unknown as { config: { seatCredential?: string } }).config;
     s1.close();
 
-    const s2 = new MusterdClient(adaConfig());
+    const s2 = new MusterdClient({ ...adaConfig(), seatCredential: authority.seatCredential });
     await s2.join();
     expect(s2.memory).toEqual({
       headline: 'mid-refactor, tests red',
@@ -761,8 +762,8 @@ describe('MCP adapter', () => {
  * adapter refuses an operation that would have succeeded, and blames the agent's identity for a
  * transport blip. miley lost a handoff note to exactly this.
  */
-describe('seat drop — a closed socket is not a lost seat', () => {
-  it('acts still work over HTTP while the socket is down, so refusing them is gratuitous', async () => {
+describe('seat drop — agent HTTP authority renews with its Presence', () => {
+  it('renews through a fresh claim before sending after the socket is down', async () => {
     const client = new MusterdClient(adaConfig());
     await bind(client);
     await client.join();
@@ -778,7 +779,7 @@ describe('seat drop — a closed socket is not a lost seat', () => {
     // adapter says you never joined.
     expect(client.member).toBe('Ada');
 
-    // And the act the tool would have refused succeeds over HTTP, with the socket still down.
+    // The lease is Presence-bound, so the reconnect claim renews it before the HTTP act.
     const envelope = {
       id: '01JZZZZZZZZZZZZZZZZZZZZZZZ',
       v: PROTOCOL_VERSION,
@@ -789,6 +790,7 @@ describe('seat drop — a closed socket is not a lost seat', () => {
       body: 'sent while the websocket was closed',
       ts: Date.now(),
     };
+    await client.join();
     await expect(client.sendEnvelope(envelope as never)).resolves.toBeDefined();
 
     client.close();

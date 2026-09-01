@@ -13,7 +13,8 @@ import { MusterdError } from '../errors.js';
 import { releaseInFlightClaimsForSeat } from './lanes.js';
 import type { MemberRow, TeamRow } from './rows.js';
 import { parseRoles, resolveAccountStatus, resolveCapabilities } from './rows.js';
-import { getAgentKeyHash, requireTeam } from './teams.js';
+import { hasValidSessionLease } from './session-leases.js';
+import { requireTeam } from './teams.js';
 
 export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -128,6 +129,22 @@ export function mintCredential(db: Database, memberId: string): CredentialMint {
   const credential = newSecret(TOKEN_PREFIXES.credential);
   setCredentialHash(db, memberId, hashToken(credential));
   return { credential };
+}
+
+/** Mint a fresh self-identifying credential for an agent Member (ADR 337). */
+export function mintAgentSeatCredential(
+  db: Database,
+  memberId: string,
+): { seat_credential: string } {
+  const member = getMemberById(db, memberId);
+  if (!member || member.kind !== 'agent' || member.observer === 1)
+    throw new MusterdError(
+      'bad_request',
+      'agent-seat credentials may only be minted for agent seats',
+    );
+  const seat_credential = newSecret(TOKEN_PREFIXES.agent_seat);
+  setCredentialHash(db, memberId, hashToken(seat_credential));
+  return { seat_credential };
 }
 
 export interface AddMemberInput {
@@ -289,12 +306,18 @@ export function authMember(
   teamSlug: string,
   token: string,
   actingSeat?: string,
+  sessionLease?: string,
 ): { team: TeamRow; member: MemberRow } {
   const team = requireTeam(db, teamSlug);
   let member: MemberRow;
 
   if (token.startsWith(TOKEN_PREFIXES.agent_key)) {
-    member = authByAgentKey(db, team, token, actingSeat);
+    throw new MusterdError(
+      'unauthorized',
+      'the team agent key is bootstrap-only — claim an agent seat and present its seat credential',
+    );
+  } else if (token.startsWith(TOKEN_PREFIXES.agent_seat)) {
+    member = authByAgentSeatCredential(db, team, token, actingSeat, sessionLease);
   } else if (token.startsWith(TOKEN_PREFIXES.credential)) {
     member = authByCredential(db, team, token, actingSeat);
   } else if (token.startsWith(TOKEN_PREFIXES.seat)) {
@@ -316,34 +339,31 @@ export function authMember(
   return { team, member };
 }
 
-/**
- * Agent-key (`mskey_`) auth: a valid team agent key + an acting seat the caller names (SPEC A.7 §253).
- * The key authorizes "an authorized harness on this team"; the seat is the identity it is acting as.
- */
-function authByAgentKey(
+/** Agent HTTP proof is self-identifying and inseparable from its current Presence lease (ADR 337). */
+function authByAgentSeatCredential(
   db: Database,
   team: TeamRow,
-  key: string,
+  credential: string,
   actingSeat: string | undefined,
+  sessionLease: string | undefined,
 ): MemberRow {
-  const keyHash = getAgentKeyHash(db, team.id);
-  if (!keyHash || hashToken(key) !== keyHash)
-    throw new MusterdError('unauthorized', `invalid agent key for team "${team.slug}"`);
-  if (!actingSeat)
+  const member = db
+    .prepare<
+      [string, string],
+      MemberRow
+    >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'agent'")
+    .get(team.id, hashToken(credential));
+  if (!member)
+    throw new MusterdError('unauthorized', `invalid agent-seat credential for team "${team.slug}"`);
+  if (actingSeat && actingSeat !== member.name)
     throw new MusterdError(
-      'unauthorized',
-      'agent-key auth must name the acting seat — set the Envelope `from` (send) or the `x-musterd-seat` ' +
-        'header (reads), per SPEC A.7 §253',
+      'forbidden',
+      `agent-seat credential identifies "${member.name}", not "${actingSeat}"`,
     );
-  const member = getMemberByName(db, team.id, actingSeat);
-  if (!member || member.left_at !== null)
-    throw new MusterdError('unauthorized', `no active seat "${actingSeat}" in team "${team.slug}"`);
-  // SECURITY — occupancy binds key→seat (focal point 2). The team agent key is **shared** across all the
-  // team's agent harnesses, so it must NOT be able to act as a *human* seat: otherwise any agent could
-  // set `x-musterd-seat: <admin>` and impersonate the human admin → privilege escalation (admin ops).
-  // A human seat is reachable only via that human's own `mscr_` credential (authByCredential, kind-bound).
-  if (member.kind !== 'agent')
-    throw new MusterdError('forbidden', agentKeySeatKindRefusal(actingSeat, member.kind).message);
+  if (!sessionLease?.startsWith(TOKEN_PREFIXES.session_lease))
+    throw new MusterdError('unauthorized', 'missing agent session lease');
+  if (!hasValidSessionLease(db, { teamId: team.id, memberId: member.id, token: sessionLease }))
+    throw new MusterdError('unauthorized', 'invalid, expired, or revoked agent session lease');
   return member;
 }
 
@@ -351,10 +371,8 @@ function authByAgentKey(
  * SECURITY — the one statement of the agent-key seat-kind rule: **the shared team agent key may only
  * reach an AGENT seat.**
  *
- * It lives here, beside `authByAgentKey`, because three surfaces enforce it and they must not drift:
- * `authByAgentKey` (acting as a seat), the HTTP claim path, and both WebSocket claim branches. The
- * claim surfaces enforced it nowhere until this was extracted — `authByAgentKey` blocked *acting* as
- * a human seat, but claim resolves its target separately, so an agent key aimed at the human admin
+ * It lives here because the HTTP and WebSocket claim surfaces enforce it and must not drift. The
+ * claim surfaces enforced it nowhere until this was extracted: an agent key aimed at the human admin
  * seat was accepted and queued as a pending request (observed: HTTP 202) for an admin to approve.
  * That is the privilege-escalation path the acting check exists to close, reached one step earlier.
  *
@@ -376,10 +394,9 @@ export function agentKeyMayOccupy(member: Pick<MemberRow, 'kind' | 'observer'>):
  *
  * Deliberately states what is *refused* rather than what is allowed, because the two callers enforce
  * slightly different rules and one enumeration cannot be true for both: the claim surfaces admit
- * agent **and** observer seats ({@link agentKeyMayOccupy}), while `authByAgentKey` admits agent seats
- * only — an observer is `kind: 'human'` and read-only, so it may be *occupied* with the team key but
- * never *acted as*. Naming the refused seat is accurate on both paths; naming the permitted set is
- * not.
+ * agent **and** observer seats ({@link agentKeyMayOccupy}). An observer is `kind: 'human'` and
+ * read-only, so it may be *occupied* with the team key but never use it for a routine action.
+ * Naming the refused seat is accurate on both claim surfaces; naming the permitted set is not.
  */
 export function agentKeySeatKindRefusal(
   seat: string,

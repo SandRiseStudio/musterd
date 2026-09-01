@@ -40,6 +40,10 @@ export interface McpConfig {
    * with — the Bearer secret + what the `claim` frame presents. From `MUSTERD_AGENT_KEY` / the binding.
    */
   agent_key?: string | undefined;
+  /** Per-agent self-identifying HTTP credential, minted at first authorized occupancy (ADR 337). */
+  seatCredential?: string | undefined;
+  /** Short-lived lease for the current agent Presence, refreshed by each successful claim (ADR 337). */
+  sessionLease?: string | undefined;
   /**
    * The **resolved** seat, once this session has occupied one (set from the `occupied` frame). A session
    * starts unclaimed (undefined ⇒ pending presence: reachable, holding no seat) and fills this in when it
@@ -249,6 +253,8 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   // `occupied` frame), so `member` starts undefined — the target lives in the claim policy below.
   // agent_key/grant are secrets → env or binding.json only, NEVER the committed spec.
   const agentKey = env['MUSTERD_AGENT_KEY'] ?? binding?.agent_key;
+  const seatCredential = binding?.seat_credential;
+  const sessionLease = binding?.session_lease;
   const grant = env['MUSTERD_GRANT'] ?? binding?.grant;
   if (!team) {
     throw new Error('musterd MCP: no team — set MUSTERD_TEAM or provide a .musterd/binding.json');
@@ -285,6 +291,8 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     server,
     team,
     ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
+    ...(seatCredential !== undefined ? { seatCredential } : {}),
+    ...(sessionLease !== undefined ? { sessionLease } : {}),
     ...(grant !== undefined ? { grant } : {}),
     surface,
     markerGeneration,

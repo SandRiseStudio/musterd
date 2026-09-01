@@ -26,12 +26,14 @@ export type ClaimSeatTarget = { seat: string } | { role: string };
 
 /**
  * `musterd claim <name>` / `--role <x>` — the v0.3 claim handshake (SPEC A.3, ADR 075). The folder's
- * harness presents the **team agent key** (`mskey_`, from `--key`/`MUSTERD_AGENT_KEY`/the binding) and
- * asks to occupy a seat; the server resolves it (a role pool assigns the next free `<role>-<n>`
+ * harness presents the **team agent key** (`mskey_`, from `--key`/`MUSTERD_AGENT_KEY`/the binding) for
+ * bootstrap, or its own claimed authority when reoccupying its bound seat; the server resolves it (a
+ * role pool assigns the next free `<role>-<n>`
  * server-side) and returns the `occupied` seat — or `pending` (an admin must approve) / `refused` (with
  * a no-dead-end hint, ADR 055). The resolved seat is written into `.musterd/binding.json` as the
  * folder's standing claim policy so both the CLI and a (re)launched adapter re-occupy it. No per-seat
- * token is minted — the agent key is the authenticator and a `grant` (`msgr_`) skips the approval lane.
+ * agent-seat credential and Presence lease are minted for routine HTTP authority; a grant (`msgr_`)
+ * skips the approval lane.
  */
 export async function claimCommand(parsed: Parsed): Promise<number> {
   const flags = parsed.flags;
@@ -47,18 +49,22 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     throw new CliError('no team — run init, or pass --team <slug>', 2);
   }
 
-  // v0.3: claiming presents the TEAM AGENT KEY (mskey_), not a per-seat mint. Resolve it from
-  // --key / MUSTERD_AGENT_KEY / this folder's binding.
+  // Bootstrap claims present the team agent key. A reoccupy of this binding's exact seat may present
+  // its claimed agent credential; never use that credential to target a different member.
   const agentKey = flagStr(flags, 'key') ?? process.env['MUSTERD_AGENT_KEY'] ?? binding?.agent_key;
-  if (!agentKey) {
+  const grant = flagStr(flags, 'grant') ?? process.env['MUSTERD_GRANT'] ?? binding?.grant;
+  const target = resolveTarget(parsed, binding);
+  const boundSeat = binding ? bindingSeat(binding) : undefined;
+  const reoccupyingBoundSeat =
+    'seat' in target && boundSeat !== undefined && target.seat === boundSeat;
+  const claimKey = (reoccupyingBoundSeat ? binding?.seat_credential : undefined) ?? agentKey;
+  if (!claimKey) {
     throw new CliError(
-      'no agent key — claiming a seat needs the team agent key. Set MUSTERD_AGENT_KEY or pass ' +
-        '--key mskey_… (get it from `musterd team create` or a team admin).',
+      'no agent authority — bootstrap claiming needs a team agent key; reconnecting needs this ' +
+        'workspace’s agent-seat credential.',
       4,
     );
   }
-  const grant = flagStr(flags, 'grant') ?? process.env['MUSTERD_GRANT'] ?? binding?.grant;
-  const target = resolveTarget(parsed, binding);
   // A CLI claim is intrinsically `cli` (ADR 286) — identity files no longer declare a surface.
   // `--surface` stays a deliberate manual override (headless/testing), never a stored default.
   const surface = (flagStr(flags, 'surface') ?? 'cli') as Surface;
@@ -71,7 +77,6 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   // bound seat is already live *in this workspace* is a "who am I" confirmation, not a re-claim — print
   // the identity and stop, folding whoami into the one verb an agent reaches for. An explicit target, or
   // a seat that's offline or live in another workspace, still runs the claim handshake below.
-  const boundSeat = binding ? bindingSeat(binding) : undefined;
   const bareClaim = !parsed.positionals[0] && flagStr(flags, 'role') === undefined;
   if (bareClaim && boundSeat) {
     const liveHere = members
@@ -172,12 +177,19 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     const session = watchClaim({
       wsUrl: wsBase(server) + '/ws',
       team,
-      key: agentKey,
+      key: claimKey,
       target,
       surface,
       workspace,
       ...(grant !== undefined ? { grant } : {}),
-      onOccupied: (occupiedSeat, _presenceId, resumeGrant, memory) => {
+      onOccupied: (
+        occupiedSeat,
+        _presenceId,
+        resumeGrant,
+        memory,
+        seatCredential,
+        sessionLease,
+      ) => {
         const seat = occupiedSeat.name;
         // Prefer a freshly-delivered resume token (ADR 087, first approval) over any grant we claimed
         // with, so `binding.grant` carries the reusable token that re-occupies this seat silently.
@@ -186,7 +198,11 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
           version: 2,
           server,
           team,
-          agent_key: agentKey,
+          ...(agentKey !== undefined ? { agent_key: agentKey } : {}),
+          ...((seatCredential ?? binding?.seat_credential)
+            ? { seat_credential: seatCredential ?? binding?.seat_credential }
+            : {}),
+          ...(sessionLease !== undefined ? { session_lease: sessionLease } : {}),
           // Record the resolved seat as the folder's standing policy so re-launches re-occupy it.
           claim: { mode: 'seat', name: seat },
           ...(effectiveGrant !== undefined ? { grant: effectiveGrant } : {}),

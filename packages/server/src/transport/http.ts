@@ -141,6 +141,7 @@ import {
   listMembers,
   markBound,
   markSeatReleased,
+  mintAgentSeatCredential,
   markSessionEnded,
   mintCredential,
   newSecret,
@@ -236,6 +237,7 @@ import {
   promoteSeed,
   submitSeedBrief,
 } from '../store/seeds.js';
+import { mintSessionLease, revokeMemberSessionLeases } from '../store/session-leases.js';
 import { redeemHandoff, stageHandoff } from '../store/signinHandoff.js';
 import { staleLaneWarnings } from '../store/staleness.js';
 import { searchInsights } from '../store/teamMemory.js';
@@ -608,6 +610,13 @@ function actingSeat(req: IncomingMessage): string | undefined {
   return v && v.length > 0 ? v : undefined;
 }
 
+/** The short-lived agent HTTP lease (ADR 337). It has no authority without the matching credential. */
+function agentSessionLease(req: IncomingMessage): string | undefined {
+  const h = req.headers['x-musterd-session-lease'];
+  const v = Array.isArray(h) ? h[0] : h;
+  return v && v.length > 0 ? v : undefined;
+}
+
 /**
  * Defense-in-depth (banned = inert): a `disabled`/`banned`/`archived` seat can't READ message content
  * either — the send gate (route.ts) already blocks its sends, this closes the residual inbox/firehose
@@ -810,7 +819,7 @@ function authTouch(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req), agentSessionLease(req));
   // Observer seats (ADR 063) watch without participating — never flip present, no presence event.
   if (auth.member.observer === 1) return auth;
   // A background poller (the notifier reads inbox on an away human's behalf) opts out: marking them
@@ -1117,7 +1126,7 @@ function authAdmin(
   slug: string,
   req: IncomingMessage,
 ): { team: TeamRow; member: MemberRow } {
-  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req), agentSessionLease(req));
   if (!resolveCapabilities(auth.member).is_admin)
     throw new MusterdError('forbidden', 'this resource is admin-only (visibility_level: admin)');
   return auth;
@@ -1140,6 +1149,18 @@ function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage): TeamRow
     );
   }
   return team;
+}
+
+/** Authorize an agent's routine HTTP action with its credential and live Presence lease (ADR 337). */
+function authClaimedAgent(
+  ctx: Ctx,
+  slug: string,
+  req: IncomingMessage,
+): { team: TeamRow; member: MemberRow } {
+  const auth = authMember(ctx.db, slug, bearer(req), actingSeat(req), agentSessionLease(req));
+  if (auth.member.kind !== 'agent' || auth.member.observer === 1)
+    throw new MusterdError('forbidden', 'this operation requires a claimed agent seat');
+  return auth;
 }
 
 /**
@@ -1204,7 +1225,13 @@ function tryAuth(ctx: Ctx, slug: string, req: IncomingMessage): MemberRow | null
   const h = req.headers['authorization'];
   if (!h || !h.startsWith('Bearer ')) return null;
   try {
-    return authMember(ctx.db, slug, h.slice('Bearer '.length).trim(), actingSeat(req)).member;
+    return authMember(
+      ctx.db,
+      slug,
+      h.slice('Bearer '.length).trim(),
+      actingSeat(req),
+      agentSessionLease(req),
+    ).member;
   } catch {
     return null;
   }
@@ -1949,6 +1976,38 @@ export async function handleHttp(
               model_source: existing.model ? (existing.model_source ?? null) : null,
             },
           );
+          let agentAuthority: { seat_credential?: string; session_lease?: string } = {};
+          if (targetMember.kind === 'agent' && targetMember.observer === 0) {
+            const credential =
+              targetMember.credential_hash === null
+                ? mintAgentSeatCredential(ctx.db, targetMember.id).seat_credential
+                : undefined;
+            const lease = mintSessionLease(ctx.db, {
+              teamId: team.id,
+              memberId: targetMember.id,
+              presenceId: presence.id,
+            });
+            if (credential) {
+              appendAudit(ctx.db, team.id, {
+                actor: targetMember.name,
+                action: 'agent_seat_credential.minted',
+                target: targetMember.name,
+                result: 'allow',
+                detail: { source: 'request.approve' },
+              });
+            }
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'agent_session_lease.minted',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { lease_id: lease.id, presence_id: presence.id },
+            });
+            agentAuthority = {
+              ...(credential ? { seat_credential: credential } : {}),
+              session_lease: lease.session_lease,
+            };
+          }
           if (!existing.model && displacedModel && sameWorkspacePredecessors.length === 0) {
             appendAudit(ctx.db, team.id, {
               actor: targetMember.name,
@@ -1977,6 +2036,7 @@ export async function handleHttp(
             server_time: Date.now(),
             ...(resumeToken ? { grant: resumeToken } : {}),
             charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthority,
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
 
@@ -2489,16 +2549,21 @@ export async function handleHttp(
 
       // The resumable attestation (ADR 131 §5, increment 4): `musterd session start|end --stdin`
       // pushes harness CLASS + event + a one-way correlation digest — never a session id, never a
-      // transcript path (the body schema still has no field for either). Agent-key auth like the
-      // other host-side residency routes;
+      // transcript path (the body schema still has no field for either). It is a routine action
+      // by the named agent seat, so its self-identifying credential and Presence lease are required;
       // presence-neutral by nature (this handler touches no presence row) and it never claims —
       // a hook must never displace the live occupant (ADR 108).
       if (method === 'POST' && rest === '/residency/session') {
-        const team = authAgentKeyOnly(ctx, slug, req);
+        const { team, member } = authClaimedAgent(ctx, slug, req);
         const body = parseOrBadRequest(SessionAttestationBodySchema, await readJson(req));
         const target = getMemberByName(ctx.db, team.id, body.seat);
         if (!target || target.left_at !== null)
           throw new MusterdError('not_found', `no seat "${body.seat}" in team "${slug}"`);
+        if (target.id !== member.id)
+          throw new MusterdError(
+            'forbidden',
+            `agent-seat credential identifies "${member.name}", not "${body.seat}"`,
+          );
         const enrolled =
           body.event === 'start'
             ? recordSessionAttestation(ctx.db, team.id, target.id, body.harness)
@@ -2551,7 +2616,8 @@ export async function handleHttp(
         const body = parseOrBadRequest(ClaimBody, await readJson(req));
         const team = requireTeam(ctx.db, slug);
 
-        // Step 1: verify key (agent key or human credential).
+        // Step 1: verify bootstrap key, human credential, or an agent's own credential. The latter
+        // is valid only here to reconnect and obtain a fresh Presence lease (ADR 337).
         let authenticatedMember: MemberRow | null = null;
         const keyHash = getAgentKeyHash(ctx.db, team.id);
         if (!keyHash || hashToken(body.key) !== keyHash) {
@@ -2560,15 +2626,16 @@ export async function handleHttp(
               .prepare<
                 [string, string],
                 MemberRow
-              >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind = 'human'")
+              >("SELECT * FROM members WHERE team_id = ? AND credential_hash = ? AND left_at IS NULL AND kind IN ('human', 'agent')")
               .get(team.id, hashToken(body.key)) ?? null;
           if (!authenticatedMember) {
             return sendJson(res, 403, {
               type: 'refused',
               code: 'forbidden',
-              message: 'invalid key — present a valid agent key or human credential',
+              message:
+                'invalid key — present a valid agent key, agent-seat credential, or human credential',
               claimable: [],
-              hint: `POST /teams/${slug}/claim with a valid mskey_ or mscr_ key`,
+              hint: `POST /teams/${slug}/claim with a valid mskey_, msac_, or mscr_ key`,
             });
           }
         }
@@ -2710,6 +2777,40 @@ export async function handleHttp(
           }
           recordClaimAttestation(ctx.db, team.id, targetMember, presenceId, model);
         };
+        const agentAuthorityFor = (
+          presenceId: string,
+        ): { seat_credential?: string; session_lease?: string } => {
+          if (targetMember.kind !== 'agent' || targetMember.observer === 1) return {};
+          const credential =
+            targetMember.credential_hash === null
+              ? mintAgentSeatCredential(ctx.db, targetMember.id).seat_credential
+              : undefined;
+          const lease = mintSessionLease(ctx.db, {
+            teamId: team.id,
+            memberId: targetMember.id,
+            presenceId,
+          });
+          if (credential) {
+            appendAudit(ctx.db, team.id, {
+              actor: targetMember.name,
+              action: 'agent_seat_credential.minted',
+              target: targetMember.name,
+              result: 'allow',
+              detail: { source: 'claim' },
+            });
+          }
+          appendAudit(ctx.db, team.id, {
+            actor: targetMember.name,
+            action: 'agent_session_lease.minted',
+            target: targetMember.name,
+            result: 'allow',
+            detail: { lease_id: lease.id, presence_id: presenceId },
+          });
+          return {
+            ...(credential ? { seat_credential: credential } : {}),
+            session_lease: lease.session_lease,
+          };
+        };
 
         // Step 5: grant path — validate + consume, then occupy.
         if (body.grant) {
@@ -2774,6 +2875,7 @@ export async function handleHttp(
             presence_id: presence.id,
             server_time: Date.now(),
             charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthorityFor(presence.id),
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -2812,6 +2914,7 @@ export async function handleHttp(
             presence_id: presence.id,
             server_time: Date.now(),
             charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthorityFor(presence.id),
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -2857,6 +2960,7 @@ export async function handleHttp(
             presence_id: presence.id,
             server_time: Date.now(),
             charter: getRoleCharter(ctx.db, team.id, targetMember.role) ?? undefined,
+            ...agentAuthorityFor(presence.id),
             memory: memoryEnvelope(ctx.db, targetMember.id),
           });
         }
@@ -4481,7 +4585,13 @@ export async function handleHttp(
       }
 
       if (method === 'POST' && rest === '/presence') {
-        const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         const body = parseOrBadRequest(PresenceBody, await readJson(req));
         const p = attach(ctx.db, member.id, body.surface, null, {
           provenance: body.provenance ?? null,
@@ -4516,7 +4626,13 @@ export async function handleHttp(
       // cross-seat read path (team admins included, ADR 093 §4). `authMember` resolves the seat from
       // the presented token; a mismatched/absent token is its own 401/403.
       if (method === 'PUT' && rest === '/memory') {
-        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         assertSeatCanRead(member); // inert seats (disabled/banned/archived) can't touch memory either
         const parsed = parseOrBadRequest(MemorySaveBody, await readJson(req));
         const input = { headline: parsed.headline, body: parsed.body ?? '' };
@@ -4539,7 +4655,13 @@ export async function handleHttp(
       // the ADR 093 §3 delivery shape for surfaces that render the one-line pointer without occupying
       // (`musterd status`). The bare GET stays the explicit full-body read.
       if (method === 'GET' && rest === '/memory') {
-        const { member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         assertSeatCanRead(member);
         if (url.searchParams.get('envelope') === '1') {
           const env = memoryEnvelope(ctx.db, member.id);
@@ -4552,7 +4674,13 @@ export async function handleHttp(
       }
 
       if (method === 'DELETE' && rest === '/memory') {
-        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         assertSeatCanRead(member);
         const existed = clearMemory(ctx.db, member.id);
         // Idempotent: DELETE always 204s. Only audit an actual clear (nothing happened otherwise).
@@ -4612,7 +4740,13 @@ export async function handleHttp(
       // `remove` (deletes the seat) and `reclaim` (operator force-frees someone else's).
       if (method === 'POST' && rest === '/unbind') {
         // authMember (not authTouch) so we don't write an ambient presence row we're about to clear.
-        const { team, member } = authMember(ctx.db, slug, bearer(req), actingSeat(req));
+        const { team, member } = authMember(
+          ctx.db,
+          slug,
+          bearer(req),
+          actingSeat(req),
+          agentSessionLease(req),
+        );
         for (const old of ctx.hub.connsForMember(member.id)) {
           old.close?.();
           ctx.hub.remove(old.connId);
@@ -4650,6 +4784,42 @@ export async function handleHttp(
        * credential to lose; minting one for it would manufacture exactly the human-seat authority the
        * claim-kind guard refuses.
        */
+      const agentCredentialRotateMatch = rest.match(
+        /^\/members\/([^/]+)\/agent-seat-credential\/rotate$/,
+      );
+      if (method === 'POST' && agentCredentialRotateMatch) {
+        const team = requireTeam(ctx.db, slug);
+        authProvision(ctx, slug, req);
+        const targetName = decodeURIComponent(agentCredentialRotateMatch[1]!);
+        const target = getMemberByName(ctx.db, team.id, targetName);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no member "${targetName}" in ${slug}`);
+        if (target.kind !== 'agent' || target.observer === 1)
+          throw new MusterdError('bad_request', `"${target.name}" is not an agent seat`);
+        const { seat_credential } = mintAgentSeatCredential(ctx.db, target.id);
+        const revoked = revokeMemberSessionLeases(ctx.db, target.id);
+        const actor = tryAuth(ctx, slug, req)?.name ?? null;
+        appendAudit(ctx.db, team.id, {
+          actor,
+          action: 'agent_seat_credential.rotated',
+          target: target.name,
+          result: 'allow',
+          detail: {
+            via: isLocalPeer(req.socket.remoteAddress, ctx.config.trustProxy) ? 'local' : 'admin',
+          },
+        });
+        for (const leaseId of revoked) {
+          appendAudit(ctx.db, team.id, {
+            actor,
+            action: 'agent_session_lease.revoked',
+            target: target.name,
+            result: 'allow',
+            detail: { lease_id: leaseId, reason: 'credential_rotated' },
+          });
+        }
+        return sendJson(res, 200, { member: target.name, seat_credential });
+      }
+
       const credentialRotateMatch = rest.match(/^\/members\/([^/]+)\/credential\/rotate$/);
       if (method === 'POST' && credentialRotateMatch) {
         const team = requireTeam(ctx.db, slug);

@@ -86,6 +86,10 @@ export type ClaimOutcome =
       charter?: string;
       /** A resume token (ADR 087) delivered on first approval — persisted into `binding.grant`. */
       grant?: string;
+      /** Newly minted agent-seat credential, returned once and persisted in the local binding. */
+      seatCredential?: string;
+      /** Fresh Presence-bound agent HTTP lease, persisted in the local binding. */
+      sessionLease?: string;
       /** The seat's memory envelope (ADR 093) — headline + age + size, never the body; null when the
        *  seat has saved nothing. Rendered by `musterd claim` as the one-line continuity pointer. */
       memory: OccupiedFrame['memory'];
@@ -111,6 +115,8 @@ export function parseClaimResponse(raw: unknown): ClaimOutcome {
       serverTime: f.server_time,
       ...(f.charter !== undefined ? { charter: f.charter } : {}),
       ...(f.grant !== undefined ? { grant: f.grant } : {}),
+      ...(f.seat_credential !== undefined ? { seatCredential: f.seat_credential } : {}),
+      ...(f.session_lease !== undefined ? { sessionLease: f.session_lease } : {}),
       memory: f.memory,
     };
   }

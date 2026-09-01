@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig, saveBinding } from '../config.js';
+import { claimAgentHttp, type AgentHttpAuth } from '../test-auth.js';
 import { seedCommand } from './seed.js';
 import { teamCommand } from './team.js';
 
 describe('seed command', () => {
   let server: RunningServer;
   let dir: string;
+  let adaAuth: AgentHttpAuth;
   const seedId = '01SEED00000000000000000000';
 
   beforeEach(async () => {
@@ -29,11 +31,20 @@ describe('seed command', () => {
       key: config.identities['dawn']!.key,
       seat: 'nick',
     }).addMember('dawn', { name: 'Ada', kind: 'agent' });
+    adaAuth = await claimAgentHttp(
+      process.env['MUSTERD_SERVER']!,
+      'dawn',
+      config.agentKeys['dawn']!,
+      config.identities['dawn']!.key,
+      'Ada',
+    );
     saveBinding(dir, {
       version: 2,
       server: process.env['MUSTERD_SERVER']!,
       team: 'dawn',
       agent_key: config.agentKeys['dawn']!,
+      seat_credential: adaAuth.key,
+      session_lease: adaAuth.sessionLease,
       claim: { mode: 'seat', name: 'Ada' },
     });
 
@@ -80,6 +91,9 @@ describe('seed command', () => {
       server: process.env['MUSTERD_SERVER']!,
       team: 'dawn',
       agent_key: name === 'Ada' ? config.agentKeys['dawn']! : config.identities['dawn']!.key,
+      ...(name === 'Ada'
+        ? { seat_credential: adaAuth.key, session_lease: adaAuth.sessionLease }
+        : {}),
       claim: { mode: 'seat', name },
     });
   }

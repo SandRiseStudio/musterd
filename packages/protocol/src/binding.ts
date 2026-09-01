@@ -113,13 +113,17 @@ export const ModelObservationSchema = z.object({
 
 export type ModelObservation = z.infer<typeof ModelObservationSchema>;
 
-/** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus the two secrets.
+/** The full workspace binding — the secret-free {@link WorkspaceSpecSchema} plus local secrets.
  *  Strict like the spec (version 2, ADR 281): unknown keys are rejected, never carried along. */
 export const BindingSchema = WorkspaceSpecSchema.extend({
   /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
   agent_key: z.string().optional(),
   /** Optional pre-issued grant (msgr_) that skips the pending/admin-approval lane (ADR 075). */
   grant: z.string().optional(),
+  /** Per-agent, self-identifying HTTP credential (msac_, ADR 337). Never committed. */
+  seat_credential: z.string().optional(),
+  /** Current short-lived Presence-bound HTTP lease (msls_, ADR 337). Never committed. */
+  session_lease: z.string().optional(),
   /** Optional harness-attested model id (ADR 101) — the model this seat runs, declared at provisioning
    *  (`musterd agent --model` / `init` capturing ambient `MUSTERD_MODEL`/`ANTHROPIC_MODEL`). Read by the
    *  MCP adapter as a fallback under the env, so the seat attests by default instead of rotting to

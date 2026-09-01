@@ -24,6 +24,10 @@ export const TOKEN_PREFIXES = {
   grant: 'msgr_',
   /** A human credential — what a person presents to authenticate. */
   credential: 'mscr_',
+  /** Per-agent-seat credential — self-identifies one agent Member for routine HTTP authority (ADR 337). */
+  agent_seat: 'msac_',
+  /** Short-lived proof that an agent-seat credential currently holds a specific Presence (ADR 337). */
+  session_lease: 'msls_',
   /**
    * A machine credential (ADR 328) — what an admitted daemon presents on the sync surface, and
    * nothing else. Deliberately not a seat credential: a machine being *admitted* and a seat being

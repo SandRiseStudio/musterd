@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
 import { HttpClient } from '../client.js';
 import { loadConfig, rememberIdentity, saveConfig } from '../config.js';
+import { claimAgentHttp } from '../test-auth.js';
 import { doneCommand } from './done.js';
 import { laneCommand, lanesCommand } from './lane.js';
 import { nextCommand } from './next.js';
@@ -68,11 +69,19 @@ describe('next / done commands', () => {
     );
     await capture(() => teamCommand(parseArgs(['add', 'izzo', '--kind', 'agent'])));
     const cfg = loadConfig();
+    const authority = await claimAgentHttp(
+      serverUrl,
+      'dawn',
+      cfg.agentKeys['dawn'] as string,
+      cfg.identities['dawn']!.key,
+      'izzo',
+    );
     rememberIdentity(cfg, {
       team: 'dawn',
       name: 'izzo',
-      key: cfg.agentKeys['dawn'] as string,
+      key: authority.key,
       surface: 'cli',
+      sessionLease: authority.sessionLease,
     });
     saveConfig(cfg);
     await capture(() =>
