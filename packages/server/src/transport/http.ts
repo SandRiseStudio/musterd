@@ -72,6 +72,8 @@ import {
   NodeJoinRequestSchema,
   NodeJoinResponseSchema,
   NodeListSchema,
+  SYNC_PULL_MAX_BATCH,
+  SyncPullResponseSchema,
   SyncPushRequestSchema,
   SyncPushResponseSchema,
 } from '@musterd/protocol';
@@ -266,7 +268,14 @@ import {
   setPolicy,
 } from '../store/teams.js';
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
-import { ingestBatch, SyncDuplicateIdError, SyncGapError, SyncOriginError } from '../sync/log.js';
+import {
+  hubHead,
+  ingestBatch,
+  readStaged,
+  SyncDuplicateIdError,
+  SyncGapError,
+  SyncOriginError,
+} from '../sync/log.js';
 import {
   recordCcdNudge,
   recordNudgeDecision,
@@ -3663,6 +3672,50 @@ export async function handleHttp(
           }
           throw err;
         }
+      }
+
+      // The pull side (3b-ii): one page of the canonical order after a hub_seq. Same credential,
+      // same refusal shape. The fold that consumes it runs on the puller (sync/pull.ts).
+      if (method === 'GET' && rest === '/sync/pull') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        const after = Number(url.searchParams.get('after') ?? '0');
+        const limit = Math.min(
+          Number(url.searchParams.get('limit') ?? SYNC_PULL_MAX_BATCH),
+          SYNC_PULL_MAX_BATCH,
+        );
+        if (!Number.isInteger(after) || after < 0 || !Number.isInteger(limit) || limit < 1) {
+          throw new MusterdError(
+            'bad_request',
+            'after must be a non-negative integer and limit a positive one',
+          );
+        }
+        const head = hubHead(ctx.db, team.id);
+        // Mirrors push's 409/expected_seq: the hub is the authority on what it holds, and a puller
+        // asking to resume past that is out of step with it — hand back the head so it can re-anchor.
+        if (after > head) {
+          return sendJson(res, 409, {
+            error: {
+              code: 'conflict',
+              message: `hub head is ${head}; cannot resume after ${after}`,
+            },
+            hub_seq_high: head,
+          });
+        }
+        return sendJson(
+          res,
+          200,
+          SyncPullResponseSchema.parse({
+            events: readStaged(ctx.db, team.id, after, limit),
+            hub_seq_high: head,
+          }),
+        );
       }
 
       // ── Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × surface } board. All

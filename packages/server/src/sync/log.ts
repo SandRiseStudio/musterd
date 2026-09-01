@@ -1,4 +1,4 @@
-import type { SyncEvent } from '@musterd/protocol';
+import type { SyncEvent, SyncPullEvent } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 
 /**
@@ -179,4 +179,23 @@ export function hasEnrolledJoiners(db: Database, teamId: string, localNodeId: st
       )
       .get(teamId, localNodeId),
   );
+}
+
+/**
+ * One page of the team's canonical order after `after`, oldest first. This is the walk
+ * `idx_sync_log_hub` was declared UNIQUE for (3b-i). `payload` was stored as the SyncEvent verbatim,
+ * so it parses back without a second shape — the hub_seq rides beside it for the puller's cursor.
+ */
+export function readStaged(
+  db: Database,
+  teamId: string,
+  after: number,
+  limit: number,
+): SyncPullEvent[] {
+  return db
+    .prepare<[string, number, number], { hub_seq: number; payload: string }>(
+      'SELECT hub_seq, payload FROM sync_log WHERE team_id = ? AND hub_seq > ? ORDER BY hub_seq LIMIT ?',
+    )
+    .all(teamId, after, limit)
+    .map((r) => ({ ...(JSON.parse(r.payload) as SyncEvent), hub_seq: r.hub_seq }));
 }
