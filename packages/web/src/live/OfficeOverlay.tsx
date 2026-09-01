@@ -251,6 +251,11 @@ export function OfficeOverlay({
           </p>
         )}
 
+        {/* This conditional is safe ONLY because this mount is never interactive: `interactive`
+            false means the whole card is `aria-hidden`, so the pill's aria-live region has nothing
+            to announce to. If this card ever goes interactive with a caption, hoist the conditional
+            INSIDE the pill the way WorkStack does — a live region that does not exist until the
+            first caption arrives announces that caption to nobody. (dolly, review of #1126.) */}
         {caption && (
           <p className="lc-ov__caption">
             <CaptionPill caption={caption} color={captionColor} />
