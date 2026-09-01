@@ -11,7 +11,7 @@ import type { MessageRow } from '../store/rows.js';
  *
  *  - **`nodes.next_seq` is never touched.** A folded row keeps the stamp its origin minted; the
  *    local allocator belongs to `insertMessage` alone. `fold.test.ts`'s first case is the falsifier.
- *  - **Idempotent on `(origin_node, origin_seq)`**, held by `idx_messages_origin` (v52) — not on
+ *  - **Idempotent on `(origin_node, origin_seq)`**, held by `idx_messages_origin` (v54) — not on
  *    `messages.id`, which ADR 335 deliberately left unique-per-origin only.
  *  - **Block, don't skip.** The first event that cannot be fully resolved stops the cursor AT that
  *    event; everything before it commits. Out-of-order application would make "everything up to N

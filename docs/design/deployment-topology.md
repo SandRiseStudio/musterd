@@ -139,7 +139,7 @@ footprint, schema meta — and `local_node`, below). Roster identity stays on gi
 | 2 | The ordering substrate — `(origin_node, origin_seq)` stamped from the first message, migration v47 | landed 2026-08-27 (`5c1b35f0`, [ADR 331](../decisions/331-ordering-substrate.md)) |
 | 3a | The machine credential — `msnode_`, `msinv_` enrollment, rotation, revocation | landed 2026-08-28 (#1100, `3b8415cf`, [ADR 328](../decisions/328-machine-credential.md)) |
 | 3b-i | Sync wire format and push — `sync_log` staging under a canonical `hub_seq` | landed 2026-08-31 (`46707cb5`, [ADR 335](../decisions/335-sync-wire-format.md)) |
-| **3b-ii** | **Pull by cursor, the fold into `messages`, read-side gap detection; the hub stages its own history** | **this build** (migration v52, spec `docs/superpowers/specs/2026-09-01-sync-fold-design.md`) |
+| **3b-ii** | **Pull by cursor, the fold into `messages`, read-side gap detection; the hub stages its own history** | **this build** (migration v54, spec `docs/superpowers/specs/2026-09-01-sync-fold-design.md`) |
 | 3c | Hub-authoritative claim CAS, seat→node residence binding | not started — needs this increment plus a lane-replication slice (its lane's declared dep on 3a alone is wrong) |
 
 The hub storage engine needs no decision: ADR 325 defines a hub by the surface it speaks, and a

@@ -155,7 +155,7 @@ Rule 3's shape is the subtle one. "Block the cursor" means the cursor stops *at*
 the batch is all-or-nothing: all-or-nothing re-walks the same applied prefix every tick forever,
 while stopping at the blocker makes the retry cheap and the stall precisely locatable.
 
-### Schema, migration v52
+### Schema, migration v54
 
 ```sql
 -- The fold's idempotence key. v47 added the columns; nothing yet enforces the pair's uniqueness in

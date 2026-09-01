@@ -280,6 +280,55 @@ describe('the pull loop', () => {
     expect(await pullTeam(hubCtx(), hubTeam())).toBe(1);
   });
 
+  /**
+   * dolly's #1155 F1. The fold classifies an act this build cannot name (`unknown_act`: "upgrade
+   * this daemon", valid prefix applied, retried each tick). But over the WIRE that stop was
+   * unreachable: the hub re-parsed its own page with an `Act`-enum schema, so one poisoned row made
+   * `GET /sync/pull` answer 500 with a raw ZodError to every puller, which logged `sync_pull_failed`
+   * (indistinguishable from offline) and applied nothing — not even the rows before it. The
+   * loopback feeder skipped the parse and reached the stop, so the two feeders diverged on the
+   * same log. The wire now carries what the log holds; both feeders converge on the fold's stop.
+   */
+  it('an act this build cannot name reaches the fold over the wire — prefix applied, stop classified, no 500', async () => {
+    send(hub, 'h-1');
+    send(hub, 'h-2');
+    send(hub, 'h-3');
+    send(joiner, 'j-1'); // the joiner needs a node row before it can enroll
+    await enrollJoiner();
+    await pushTeam(hubCtx(), hubTeam()); // hub stages its own history
+    // A hub on a newer build staged h-2 with an act this puller's ActSchema does not hold.
+    hub.db
+      .prepare(
+        "UPDATE sync_log SET payload = json_set(payload, '$.envelope.act', 'frobnicate') WHERE team_id = ? AND json_extract(payload, '$.envelope.id') = 'h-2'",
+      )
+      .run(hubTeam().id);
+
+    const lines = await captureLogs(() => pullTeam(joinerCtx, joinerTeam()));
+    const unknown = lines.filter((l) => l['msg'] === 'sync_fold_unknown_act');
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0]).toMatchObject({ level: 'error', act: 'frobnicate' });
+    // The prefix before the blocker landed; the blocker and what follows did not.
+    const held = (id: string) =>
+      (
+        joiner.db.prepare('SELECT COUNT(*) AS n FROM messages WHERE id = ?').get(id) as {
+          n: number;
+        }
+      ).n;
+    expect(held('h-1')).toBe(1);
+    expect(held('h-2')).toBe(0);
+    expect(held('h-3')).toBe(0);
+    // Same stop next tick: no second line, and still not a transport failure.
+    const again = await captureLogs(() => pullTeam(joinerCtx, joinerTeam()));
+    expect(again.filter((l) => l['msg'] === 'sync_fold_unknown_act')).toHaveLength(0);
+    // Once "upgraded" — the staged act is one this build knows — the fold resumes past it.
+    hub.db
+      .prepare(
+        "UPDATE sync_log SET payload = json_set(payload, '$.envelope.act', 'message') WHERE team_id = ? AND json_extract(payload, '$.envelope.id') = 'h-2'",
+      )
+      .run(hubTeam().id);
+    expect(await pullTeam(joinerCtx, joinerTeam())).toBe(2);
+  });
+
   it('a puller refuses a hub head below its own cursor as impossible', async () => {
     send(joiner, 'j-0');
     await enrollJoiner();

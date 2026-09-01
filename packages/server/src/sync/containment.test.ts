@@ -13,7 +13,7 @@ import { createTeam } from '../store/teams.js';
  * 3b-ii: nothing writes `messages` but `insertMessage` and `foldBatch` (sync/fold.ts) — and ONLY
  * `insertMessage` moves `nodes.next_seq`. The fold copies the origin's stamp verbatim and never
  * touches the allocator; `fold.test.ts`'s first case is that falsifier. This file keeps holding
- * that the staging tables carry no counter tied to `next_seq`, and that a v50–v52 replay leaves the
+ * that the staging tables carry no counter tied to `next_seq`, and that a v50–v54 replay leaves the
  * log and every allocator alone.
  */
 
@@ -76,7 +76,7 @@ describe('sync containment', () => {
     db.close();
   });
 
-  it('v52 holds (origin_node, origin_seq) unique in messages and adds the pull cursor', () => {
+  it('v54 holds (origin_node, origin_seq) unique in messages and adds the pull cursor', () => {
     const { db, team } = seed();
     const row = db
       .prepare<

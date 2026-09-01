@@ -64,10 +64,20 @@ export const SyncPushResponseSchema = z.object({
 export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;
 
 /**
- * The pull side (3b-ii). `SyncEvent` is reused verbatim; `hub_seq` rides beside it because the
- * puller's cursor IS a hub_seq — the team's canonical order, assigned at ingest (ADR 335 §3).
+ * The pull side (3b-ii). `SyncEvent`'s shape, with `hub_seq` beside it because the puller's cursor
+ * IS a hub_seq — the team's canonical order, assigned at ingest (ADR 335 §3).
+ *
+ * One deliberate loosening: `envelope.act` is a string here, not the `Act` enum. The push side
+ * validates the act on ingest against the HUB's build, but the log outlives builds — a hub rolled
+ * back, or a puller behind the hub, meets an act it cannot name. Classifying that is the FOLD's job
+ * (its `unknown_act` stop: "upgrade this daemon", retried each tick, valid prefix applied). With the
+ * enum here, the hub's own response re-parse refused the page and answered 500 to every puller,
+ * which the puller logged as `sync_pull_failed` — indistinguishable from offline — and applied
+ * nothing, not even the prefix before the poisoned event (dolly, #1155 review F1). The wire carries
+ * what the log holds; the reader decides what it can apply.
  */
 export const SyncPullEventSchema = SyncEventSchema.extend({
+  envelope: EnvelopeSchema.innerType().extend({ act: z.string().min(1) }),
   hub_seq: z.number().int().positive(),
 });
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;

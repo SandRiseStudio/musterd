@@ -156,6 +156,23 @@ describe('foldBatch', () => {
     db.close();
   });
 
+  it('skips its own origin even when nothing local holds that (origin, seq) — Rule 1 on its own', () => {
+    // The test above passes with Rule 1 deleted: seq 1 IS already in messages, so Rule 2 (the
+    // idempotence check) skips it first and masks the missing rule. An own-origin event with a seq
+    // this daemon never allocated is the one only Rule 1 catches — and it must still be skipped,
+    // because applying it would write a row under OUR origin stamp that WE never sent (dolly, #1155
+    // review F2).
+    const { db, team } = seed();
+    const local = db
+      .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+      .get(team.id)!.node_id;
+    const own: SyncPullEvent = { ...foreign('local-99', 99, 7), origin_node: local };
+    const res = foldBatch(db, team.id, [own]);
+    expect(res).toEqual({ applied: 0, skipped: 1, last_hub_seq: 7, stop: null });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM messages').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
   it('is idempotent on (origin_node, origin_seq) — a replay applies nothing and advances the cursor', () => {
     const { db, team } = seed();
     foldBatch(db, team.id, [foreign('f-1', 1, 1)]);

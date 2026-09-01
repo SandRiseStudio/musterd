@@ -20,8 +20,24 @@ import { hasEnrolledJoiners, readStaged } from './log.js';
 export const SYNC_PULL_INTERVAL_MS = 60_000;
 const PULL_TIMEOUT_MS = 10_000;
 
-/** Blockers already reported, so a stall logs once and not every tick. Cleared when the fold moves. */
-const reported = new Set<string>();
+/**
+ * Blockers already reported, so a stall logs once and not every tick. Cleared when the fold moves.
+ * Keyed per daemon (`Ctx`), not per module: two in-process daemons on one slug — the two-daemon
+ * acceptance, or any test that runs a hub and a joiner in one process — must not share a
+ * suppression set, or the second daemon's first stall is silently "already reported" by the first
+ * (dolly, #1155 review F3).
+ */
+const reportedByDb = new WeakMap<Ctx['db'], Set<string>>();
+function reportedFor(ctx: Ctx): Set<string> {
+  // Keyed on the database handle, not the Ctx object: the handle IS the daemon's identity, and a
+  // Ctx may be re-assembled around it (tests build one per call).
+  let set = reportedByDb.get(ctx.db);
+  if (!set) {
+    set = new Set<string>();
+    reportedByDb.set(ctx.db, set);
+  }
+  return set;
+}
 
 function localNodeId(ctx: Ctx, teamId: string): string | null {
   return (
@@ -31,7 +47,8 @@ function localNodeId(ctx: Ctx, teamId: string): string | null {
   );
 }
 
-function reportStop(team: string, stop: FoldStop): void {
+function reportStop(ctx: Ctx, team: string, stop: FoldStop): void {
+  const reported = reportedFor(ctx);
   const key = `${team}:${JSON.stringify(stop)}`;
   if (reported.has(key)) return;
   reported.add(key);
@@ -135,8 +152,9 @@ export async function pullTeam(
 
   const result = foldBatch(ctx.db, team.id, page, now);
   if (result.stop) {
-    reportStop(team.slug, result.stop);
+    reportStop(ctx, team.slug, result.stop);
   } else {
+    const reported = reportedFor(ctx);
     for (const key of reported) if (key.startsWith(`${team.slug}:`)) reported.delete(key);
   }
   return result.applied;
