@@ -51,7 +51,17 @@ export function opencodeWakeEnv(
   leaseId?: string,
   pinnedDir?: string,
 ): NodeJS.ProcessEnv {
-  const allowed = ['HOME', 'PATH', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM'];
+  const allowed = [
+    'HOME',
+    'PATH',
+    'TMPDIR',
+    'LANG',
+    'LC_ALL',
+    'LC_CTYPE',
+    'TERM',
+    'MUSTERD_MODEL',
+    'ANTHROPIC_MODEL',
+  ];
   const env: NodeJS.ProcessEnv = {};
   for (const key of allowed) if (base[key] !== undefined) env[key] = base[key];
   return wakeEnv(env, pinnedDir, leaseId);

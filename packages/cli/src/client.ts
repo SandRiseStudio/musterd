@@ -221,6 +221,7 @@ export class HttpClient {
         target: { seat },
         surface,
         ...(workspace !== undefined ? { workspace } : {}),
+        ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
         onDeliver: () => {},
         onOccupied: (_seat, _presenceId, _grant, _memory, _credential, sessionLease) => {
           if (!sessionLease) {
@@ -1048,8 +1049,15 @@ export class HttpClient {
   ): Promise<ClaimOutcome> {
     // Validate the frame shape against the protocol schema (ADR 078); send the HTTP body Cleo's
     // endpoint expects ({ key, target, grant?, surface } — no WS type/v).
-    // Model attestation (ADR 101): resolved from the env; absent reads as `unknown`.
-    const model = resolveAttestedModel(process.env);
+    // Model attestation (ADR 246): the full ladder `observed > env > binding` is already
+    // resolved by the caller into `this.opts.model` (see `helpers.ts:attestedModel`), so use it
+    // when present; fall back to the env declaration alone for callers that have no binding.
+    const model = this.opts.model ?? resolveAttestedModel(process.env);
+    if (process.env['MUSTERD_DEBUG_ATTEST']) {
+      console.error(
+        `[musterd debug] HttpClient.claim model: opts=${this.opts.model ?? 'none'} env=${resolveAttestedModel(process.env) ?? 'none'} => ${model ?? 'none'}`,
+      );
+    }
     const frame = buildClaimFrame({
       team: slug,
       key: input.key,
