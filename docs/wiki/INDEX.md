@@ -4,6 +4,7 @@
 
 - [Acceptance routing](acceptance-routing.md) — Who gets asked to accept a lane, why it is nearly always the same seat, and how to measure any of it without fooling yourself.
 - [ADR 296 terminology eval](adr-296-terminology-eval.md) — The recorded eval for ADR 296's pre-registered claim — the burn-down numbers, the suppression census, the confusion test, and the one trip — measured 2026-08-24 at f125a735, so the burn-down has something to burn down from and the claim has something to be judged against.
+- [ADR 338 drift re-run](adr-338-drift-rerun.md) — The first re-run of ADR 338's Eval: every REQUIRED on the reviewed PRs merged after the charter landed, classified by the same method as its baseline — 4 REQUIREDs, 0 speculative, and a sample too small and too concentrated to call it a drift check.
 - [The ADR flip window](adr-flip-window.md) — The one diff that flips an ADR `proposed` → `accepted` decides what Decision text gets frozen, and until 2026-09-01 the gate could not see it.
 - [Rule 3 across a rename](adr-rename-tracking.md) — Renaming an ADR used to take the whole of `change-adr:check` rule 3 off it, because a rename reaches a diff as an unrelated delete plus add and the add has no before side to judge.
 - [Agent permission-enforcement patterns](agent-permission-enforcement-patterns.md) — A 2026-08 Reddit discussion on where agent authorization should live, distilled because its arguments map onto decisions musterd has already made (and two it has not).
