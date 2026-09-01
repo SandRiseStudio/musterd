@@ -62,3 +62,22 @@ export const SyncPushResponseSchema = z.object({
   hub_seq_high: z.number().int().nonnegative(),
 });
 export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;
+
+/**
+ * The pull side (3b-ii). `SyncEvent` is reused verbatim; `hub_seq` rides beside it because the
+ * puller's cursor IS a hub_seq — the team's canonical order, assigned at ingest (ADR 335 §3).
+ */
+export const SyncPullEventSchema = SyncEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;
+
+/** Same bound as push, for the same reason: a legitimate catch-up must not allocate unboundedly. */
+export const SYNC_PULL_MAX_BATCH = SYNC_PUSH_MAX_BATCH;
+
+export const SyncPullResponseSchema = z.object({
+  events: z.array(SyncPullEventSchema).max(SYNC_PULL_MAX_BATCH),
+  /** The hub's head, so a puller can compute lag (`hub_head − cursor`) without a second call. */
+  hub_seq_high: z.number().int().nonnegative(),
+});
+export type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
