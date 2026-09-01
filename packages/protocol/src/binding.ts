@@ -84,6 +84,13 @@ export const SessionCaptureSchema = z.object({
    * entire two-hour life, because SessionStart was the only moment that could ever have told anyone.
    */
   attested_at: z.number().int().optional(),
+  /**
+   * When a hook last spent its one session-lease claim on this slot (lane 01M1F92X69). Local-only.
+   * A refused lease is answered with exactly one fresh claim per session event; the tool boundary,
+   * which runs on every tool call, may attest with what it holds but never claims again once this is
+   * set — a claim per tool call is the 2026-09-01 storm's traffic shape. Cleared with the slot.
+   */
+  claim_attempted_at: z.number().int().optional(),
 });
 
 export type SessionCapture = z.infer<typeof SessionCaptureSchema>;

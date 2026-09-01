@@ -493,6 +493,9 @@ async function pushAttestation(
   event: 'start' | 'end',
   dir: string,
   harness: 'claude-code' | 'cursor' = CAPTURE_HARNESS,
+  // Whether a refused lease may be answered with a claim. A session event (start/end) may; the
+  // tool boundary may only while this slot has never spent its claim — see `claim_attempted_at`.
+  mayClaim = true,
 ): Promise<boolean> {
   const seat = bindingSeat(binding);
   const key = binding.seat_credential ?? binding.agent_key;
@@ -535,6 +538,19 @@ async function pushAttestation(
   // 01M1F92X69, measured on seat ryder 2026-09-01). ADR 337 §4 is the remedy: one fresh claim, in
   // reply to the refusal and never before it (a claim per hook is the 2026-09-01 storm, #1138).
   //
+  // Once per slot, not once per tool call: `attestSlotIfUnattested` rides every tool call, and a
+  // claim that succeeds while the attest still fails — or a claim the daemon refuses — would
+  // otherwise be retried at the storm's cadence against an occupied seat. The slot remembers that
+  // its claim was spent; only a fresh session event gets another.
+  if (!mayClaim) return false;
+  stampClaimAttempted(dir, session.id);
+  // Never evict. Two worktrees bound to one seat is the ordinary shape here, and a claim from this
+  // worktree SUPERSEDES an adapter live in the other (`claim.superseded {same_workspace:false}` —
+  // the storm's own audit row), leaving that adapter running on a dead lease. Same-workspace
+  // coexistence is the server's (ADR 340, #1131); elsewhere is refused here, before the socket
+  // opens, and the slot stays unattested — an undercount that says so beats a silent eviction.
+  if (await heldElsewhere(client(undefined), binding, dir)) return false;
+  //
   // The minted lease is deliberately NOT written back to the binding. It is bound to the Presence
   // this claim holds, and closing the socket releases that Presence (`held_until`, ws.ts cleanup),
   // which `hasValidSessionLease` reads as dead — measured 2026-09-01: a second hook presenting the
@@ -555,6 +571,35 @@ async function pushAttestation(
   } finally {
     claim.close();
   }
+}
+
+/**
+ * Is this seat live in a workspace other than `dir`'s? Read from the roster, which answers an
+ * anonymous or stale-lease caller too (`tryAuth`) — the whole point is to ask BEFORE holding any
+ * authority. `away` counts as live: the adapter is still connected and a claim would still evict it.
+ * A roster the daemon will not give us is read as "held elsewhere": refusing to claim is the safe
+ * miss, an eviction is not.
+ */
+async function heldElsewhere(http: HttpClient, binding: Binding, dir: string): Promise<boolean> {
+  const seat = bindingSeat(binding);
+  const here = resolveClaimWorkspace(process.env, dir);
+  try {
+    const { members } = await http.roster(binding.team);
+    const me = members.find((m) => m.name === seat);
+    if (!me) return true;
+    return me.presences.some(
+      (p) => p.status !== 'offline' && p.workspace != null && p.workspace !== here,
+    );
+  } catch {
+    return true;
+  }
+}
+
+/** Remember that this slot's one claim was spent, whatever came of it. Re-read, same id, or nothing. */
+function stampClaimAttempted(dir: string, sessionId: string): void {
+  const fresh = findBinding(dir, {});
+  if (!fresh?.session || fresh.session.id !== sessionId) return;
+  saveBinding(dir, { ...fresh, session: { ...fresh.session, claim_attempted_at: Date.now() } });
 }
 
 /** The server's two lease refusals (`missing` / `invalid, expired, or revoked agent session lease`)
@@ -599,7 +644,8 @@ export async function attestSlotIfUnattested(dirHint?: string): Promise<void> {
     const session = binding?.session;
     if (!binding || !session) return;
     if (session.ended_at !== undefined || session.attested_at !== undefined) return;
-    if (!(await pushAttestation(binding, session, 'start', dir))) return;
+    const mayClaim = session.claim_attempted_at === undefined;
+    if (!(await pushAttestation(binding, session, 'start', dir, CAPTURE_HARNESS, mayClaim))) return;
     // Re-read: the push is awaited, and a concurrent hook may have rewritten the slot meanwhile.
     // Stamping a slot that has since changed id would mark a DIFFERENT session as announced.
     const fresh = findBinding(dir, {});
