@@ -182,6 +182,11 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
   const fit = fitFloor(1200, 900);
 
   function bakeTexts(n: OfficeNode): string[] {
+    return bakeTextsAt(fit, n);
+  }
+
+  /** `bakeTexts` at an arbitrary fit — the plate's size behaviour is a function of `fit.scale`. */
+  function bakeTextsAt(atFit: ReturnType<typeof fitFloor>, n: OfficeNode): string[] {
     const texts: string[] = [];
     const ctx = new Proxy(
       {},
@@ -199,7 +204,7 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
     ) as unknown as CanvasRenderingContext2D;
     const members = new Map([[n.name, n]]);
     const placements = assignSeats([n]);
-    renderScene(ctx, fit, placements, members, homePoses(placements, members), 0);
+    renderScene(ctx, atFit, placements, members, homePoses(placements, members), 0);
     return texts;
   }
 
@@ -219,7 +224,14 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
   });
 
   it('an away member\'s desk says stepped away — declared absence, desk kept (\u00a74 lane 4)', () => {
-    const texts = bakeTexts({ ...node('sleeper', 'working'), presence: 'away', posture: 'away' });
+    // At a size that can carry the words. This describe's own fit is scale 0.905, where the name is
+    // legible (10.0px) but the 9*scale sub-line would be 8.1px — see "gives the stepped-away words
+    // their own floor" below for why that band draws the name and not the words.
+    const texts = bakeTextsAt(fitFloor(1920, 1080), {
+      ...node('sleeper', 'working'),
+      presence: 'away',
+      posture: 'away',
+    });
     expect(texts).toContain('SLEEPER');
     expect(texts).toContain('stepped away');
   });
@@ -232,6 +244,101 @@ describe('owned empty desks (presence-honesty \u00a74)', () => {
     const texts = bakeTexts(node('worker', 'working'));
     expect(texts).toContain('WORKER');
     expect(texts).not.toContain('stepped away');
+  });
+
+  /**
+   * The plate is DESK-PROPORTIONAL (nick, 2026-08-31, after looking at #1126 on the real /live).
+   *
+   * #1126 clamped the type at a literal 11px, so once `fit.scale` fell below 1 the desk kept
+   * shrinking and the plate did not — it read proportionally LARGER on /live's ~699px office panel
+   * (scale 0.527) than in the 1600px preview it was tuned in, which is the inverse of the problem
+   * #1126 was fixing. Scaling it honestly puts the type at 5.8px there and 3.6px on a narrow window,
+   * and that is not small type, it is a smear.
+   *
+   * So the plate scales all the way down and the ENGRAVING drops out below legibility, leaving a
+   * graphite bar with the member's colour. These tests pin the drop-out, because a tuning pass that
+   * nudges the base size is exactly how a smear gets reintroduced without anyone seeing it.
+   */
+  describe('scales with the desk', () => {
+    const namesAt = (w: number, h: number) =>
+      bakeTextsAt(fitFloor(w, h), node('worker', 'working'));
+
+    it('engraves the name where the desk is big enough to carry it', () => {
+      expect(namesAt(1920, 1080)).toContain('WORKER'); // /broadcast, scale ~1.17
+      expect(namesAt(1568, 880)).toContain('WORKER'); // /office-preview, scale ~0.95
+    });
+
+    it('drops the engraving rather than smearing it on a small panel', () => {
+      // /live's real office panel, measured 2026-08-31: 699x948 → scale 0.527 → 5.8px type.
+      expect(namesAt(699, 948)).not.toContain('WORKER');
+      // A narrow window is worse still (scale 0.324, 3.6px) and must not draw either.
+      expect(namesAt(430, 700)).not.toContain('WORKER');
+    });
+
+    /**
+     * The sub-line's floor BINDS HARDER than the name's, not softer (dolly's REQUIRED on #1127).
+     * It draws at `9 * scale`, so across the engraved band — which opens at scale 0.818, where the
+     * 11px name first clears 9 — it was rendering between 7.4px and 9.0px: a legible name with
+     * illegible words under it, on /office-preview among others. It is also mono lowercase at 66%
+     * alpha against the name's letterspaced bold caps at full strength, so if anything it needs
+     * MORE room, not less.
+     */
+    it('gives the stepped-away words their own floor — a legible name is not a licence', () => {
+      const away = { ...node('worker', 'working'), presence: 'away' as const, posture: 'away' as const };
+      // scale 1.167: 9*s = 10.5px, the words draw.
+      expect(bakeTextsAt(fitFloor(1920, 1080), away)).toContain('stepped away');
+      // scale 0.951 — the name is legible here (10.5px) and the words would be 8.6px. This is the
+      // exact band the REQUIRED named, and it must NOT draw them.
+      const preview = bakeTextsAt(fitFloor(1568, 880), away);
+      expect(preview).toContain('WORKER');
+      expect(preview).not.toContain('stepped away');
+      // and below the name's own floor neither survives — the jacket carries the claim.
+      const live = bakeTextsAt(fitFloor(699, 948), away);
+      expect(live).not.toContain('WORKER');
+      expect(live).not.toContain('stepped away');
+    });
+
+    /**
+     * The disconnected glint keeps its 2px floor even though the plate lost all of its (izzo's
+     * REQUIRED on #1127). It is ADR 315's one alarming flavor, at bar size it is the only alarm
+     * left — the words are gone — and a 2px dot cannot overhang a desk, so "no floors, the plate
+     * is desk-proportional" does not apply to it.
+     */
+    it('keeps the disconnected glint at 2px minimum where the plate has already gone to bar', () => {
+      const radiiAt = (w: number, h: number): number[] => {
+        const radii: number[] = [];
+        let amber = false;
+        const ctx = new Proxy(
+          {},
+          {
+            get(_t, prop) {
+              if (prop === 'canvas') return { width: w, height: h };
+              if (prop === 'createLinearGradient' || prop === 'createRadialGradient')
+                return () => ({ addColorStop() {} });
+              if (prop === 'measureText') return () => ({ width: 0 });
+              if (prop === 'arc')
+                return (_x: number, _y: number, r: number) => void (amber && radii.push(r));
+              return () => undefined;
+            },
+            set: (_t, prop, v) => {
+              if (prop === 'fillStyle') amber = v === '#d9a13c';
+              return true;
+            },
+          },
+        ) as unknown as CanvasRenderingContext2D;
+        const n = { ...offlineNode({ name: 'worker' }), offline_reason: 'disconnected' as const };
+        const members = new Map([[n.name, n]]);
+        const placements = assignSeats([n]);
+        renderScene(ctx, fitFloor(w, h), placements, members, homePoses(placements, members), 0);
+        return radii;
+      };
+      // scale 0.324 — the narrow window where an unfloored glint measured 0.71px.
+      const narrow = radiiAt(430, 700);
+      expect(narrow.length).toBeGreaterThan(0);
+      for (const r of narrow) expect(r).toBeGreaterThanOrEqual(2);
+      // and at broadcast scale it still grows past the floor like everything else.
+      expect(Math.max(...radiiAt(1920, 1080))).toBeGreaterThan(2.2);
+    });
   });
 });
 

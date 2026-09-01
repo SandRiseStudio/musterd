@@ -124,7 +124,11 @@ keep every desk.
   nameplate. Away is declared absence; a body loitering on a rug contradicts the claim.
   (This also un-crowds the nook: today `away` clusters on the same rug the couch sits
   on, so idle-on-couch and away-in-nook were one picture.) The nook keeps its megaphone
-  stage job.
+  stage job. _Amendment 2026-08-31 (#1127): the words appear only while the plate is
+  engraved (nameplate type at or above its 9px legibility floor). Below that the plate is
+  a colour bar with no legible size to say them at, and the **jacket** is the surviving
+  carrier of the stepped-away claim — not the status light-pipe, which is unlit for away,
+  offline and stepped-away owners alike and so distinguishes nothing._
 
 ## 5. Stream reading and rollout
 
