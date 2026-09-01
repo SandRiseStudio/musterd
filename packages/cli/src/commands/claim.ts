@@ -1,5 +1,12 @@
 import { resolveWorkspace } from '@musterd/mcp';
-import { bindingSeat, type Binding, type ClaimPolicy, type Surface } from '@musterd/protocol';
+import {
+  bindingSeat,
+  type Binding,
+  type ClaimPolicy,
+  resolveAttestation,
+  resolveAttestedModel,
+  type Surface,
+} from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
 import { loadConfig, requireUsableBinding, saveBinding, wsBase } from '../config.js';
@@ -174,6 +181,11 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     };
     process.on('SIGINT', onSigint);
 
+    const model = resolveAttestation({
+      observed: binding?.model_observed,
+      env: resolveAttestedModel(process.env),
+      binding: binding?.model,
+    }).model;
     const session = watchClaim({
       wsUrl: wsBase(server) + '/ws',
       team,
@@ -182,6 +194,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
       surface,
       workspace,
       ...(grant !== undefined ? { grant } : {}),
+      ...(model !== undefined ? { model } : {}),
       onOccupied: (
         occupiedSeat,
         _presenceId,

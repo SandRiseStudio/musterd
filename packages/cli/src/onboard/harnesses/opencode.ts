@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -108,10 +109,32 @@ export const opencode: Harness = {
   // (same story as .cursor/mcp.json; secretPath is set in configure).
   entryScope: 'folder',
 
-  // ADR 321 §8: no hook channel exists, so there is nothing to observe from — `undefined` is the
-  // contract's honest degradation ("this harness cannot tell us right now"), and the model then
-  // attests from spawn arguments (`musterd host` wakes) or the binding declaration, never a guess.
-  observeModel: () => undefined,
+  // ADR 321 §8: no hook channel exists for live model events, but the opencode session DB
+  // (`~/.local/share/opencode/opencode.db`) records the model for every session. Reading the most
+  // recent session for this workspace gives an `observed` attestation that outranks the declared
+  // `binding.model` tier — so a `muse-spark` session attests as `observed` rather than `binding`.
+  // Falls back to `undefined` (honest degradation) when the DB is absent or unreadable.
+  observeModel: () => {
+    try {
+      const dbPath = join(homedir(), '.local', 'share', 'opencode', 'opencode.db');
+      if (!existsSync(dbPath)) return undefined;
+      const cwd = process.cwd();
+      const out = execFileSync(
+        'sqlite3',
+        [
+          dbPath,
+          `SELECT model FROM session WHERE directory='${cwd.replace(/'/g, "''")}' ORDER BY time_updated DESC LIMIT 1;`,
+        ],
+        { encoding: 'utf8', timeout: 1000 },
+      ).trim();
+      if (!out) return undefined;
+      const parsed = JSON.parse(out) as { id?: string; modelID?: string; model?: string };
+      const id = parsed.id ?? parsed.modelID ?? parsed.model;
+      return typeof id === 'string' && id.trim() ? id.trim().slice(0, 120) : undefined;
+    } catch {
+      return undefined;
+    }
+  },
 
   async detect() {
     const installed =
