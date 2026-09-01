@@ -121,6 +121,15 @@ refused to make acceptance a code review, and this ADR refuses to make review a 
 - Real vulnerabilities start arriving as notes — the AppSec exemption was swallowed; restore it
   loudly.
 
+## Observability & Evaluation
+
+- **Traces**: none added — review threads live on GitHub PRs, which is already the durable record
+  this ADR's baseline was measured from.
+- **Eval**: the dataset is the REQUIRED findings on reviewed PRs; the baseline is the 2026-08-31
+  count above (12/12 in the four categories, 0 speculative, PRs #1087–#1123). Re-run the same
+  classification over a later PR window to detect drift — the third falsifier names the trigger.
+- **Experiment**: n/a — a norms document; the falsifiers above are its observable failure modes.
+
 ## Consequences
 
 - `.github/REVIEW-RULES.md` gains the operational form of rules 1–5 (same PR), keeping ADR 180's
