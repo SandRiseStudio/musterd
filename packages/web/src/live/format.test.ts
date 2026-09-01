@@ -10,7 +10,6 @@ import {
   formatClock,
   goalEvent,
   initial,
-  initials,
   isFeatureBehind,
   memberAvatar,
   memberColor,
@@ -643,48 +642,30 @@ describe('memberInk — the identity colour as TEXT on paper', () => {
   });
 });
 
-describe('initials — the desk plate’s two-letter identity', () => {
-  it('takes the first letter of each of the first two parts of a separated name', () => {
-    expect(initials('big-body')).toBe('BB');
-    expect(initials('claude code')).toBe('CC');
-    expect(initials('a_b')).toBe('AB');
+/**
+ * `initial()` — the room's one-letter glyph, on every avatar circle, rail dot and roster row.
+ *
+ * It kept no tests of its own until 2026-09-01: its only coverage was one assertion inside the desk
+ * plate's `initials()` block, and it went out with the plate. The glyph itself is live in ten
+ * components, so it gets its own.
+ */
+describe('initial — the one-letter avatar glyph', () => {
+  it('takes the first letter, upper-cased', () => {
+    expect(initial('miley')).toBe('M');
+    expect(initial('Dolly')).toBe('D');
   });
 
-  it('takes the first two letters of a single word', () => {
-    expect(initials('miley')).toBe('MI');
-    expect(initials('gptbot')).toBe('GP');
-    expect(initials('izzo')).toBe('IZ');
+  it('ignores leading whitespace rather than rendering a blank circle', () => {
+    expect(initial('  stanley')).toBe('S');
   });
 
-  /* The reason two letters was chosen over reusing `initial()`: one letter puts four seats on G and
-   * three on S, and on a desk plate the whole claim is WHOSE desk this is. */
-  it('separates the seats a single letter collides', () => {
-    const g = ['grokbot', 'gptbot', 'guardian', 'ghost'].map(initials);
-    expect(new Set(g).size).toBe(4);
-    expect(initials('sloane')).not.toBe(initials('stanley'));
+  it('never renders nothing — an empty name still gets a glyph', () => {
+    expect(initial('')).toBe('?');
+    expect(initial('   ')).toBe('?');
   });
 
-  /* The one residual collision, recorded rather than hidden: two single words sharing a prefix.
-   * Colour stays the separator there, exactly as the wordless bar does today — so it is not a
-   * regression, and a roster-dependent derivation that fixed it would make plates change letters
-   * when someone joined, which is worse. */
-  it('still collides for single words sharing a prefix, by design', () => {
-    expect(initials('streamwatch')).toBe(initials('stanley'));
-  });
-
-  it('never invents a letter it was not given', () => {
-    expect(initials('x')).toBe('X');
-    expect(initials('')).toBe('?');
-    expect(initials('   ')).toBe('?');
-    expect(initials('-')).toBe('?');
-  });
-
-  it('ignores separators that lead, trail or repeat', () => {
-    expect(initials('  dolly  ')).toBe('DO');
-    expect(initials('-big--body-')).toBe('BB');
-  });
-
-  it('agrees with initial() on its first letter, for every seat in the room', () => {
-    for (const name of NAMES) expect(initials(name)[0]).toBe(initial(name));
+  it('gives every seat in the room a glyph', () => {
+    for (const name of NAMES) expect(initial(name)).toHaveLength(1);
   });
 });
+

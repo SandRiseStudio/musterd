@@ -98,11 +98,20 @@ expanding.
 **Owned empty desks.** Every offline member except `left_team` keeps a desk: chair in,
 monitor dark, a small desk nameplate *baked into the canvas* (static paint; floating
 labels stay present-only, so label cost doesn't grow). `left_team` members leave the room
-entirely — `left_at` is the line, not presence. Flavor texture, all static paint keyed to
+entirely — `left_at` is the line, not presence.
+
+> _Amendment 2026-09-01 (ADR 345): the desk nameplate is **retired**._ The desk is still
+> kept and still reads as owned — chair in, dark monitor, warm-screen afterglow, no lamp —
+> but it no longer says *whose*. Six reworks in five days never produced a form that
+> survived a live review, and at `/live`'s real canvas (scale 0.465) the plate could carry
+> only two letters, which collide on this roster. Who owns an empty desk is now a roster
+> read. This does not affect present members: their floating chip is the identity. Flavor texture, all static paint keyed to
 data refreshes (still-mode safe by construction, no new rAF):
 
 - **warm desk** — screen glow fades with `last_seen_at` over the first ~hour.
-- **disconnected** — a small amber warning glint on the desk nameplate.
+- **disconnected** — ~~a small amber warning glint on the desk nameplate~~. _Retired
+  2026-09-01 with the plate that carried it (ADR 345); the roster row still reads
+  `disconnected`, the desk no longer flags it._
 - **off shift** — desk lamp off, cold screen; whole-team off-shift composes with the
   day-cycle-lighting increment into "the office at night".
 
