@@ -283,7 +283,11 @@ async function gateCheck(parsed: Parsed): Promise<number> {
         justMarked,
       );
     }
-    const { http, team, identity, explicit } = resolveRead(parsed.flags);
+    // Hook one-shot: never reclaim the seat — a gate rides EVERY tool call, and a reclaim here
+    // evicts the live adapter's presence and kills its lease (see ResolveReadOptions).
+    const { http, team, identity, explicit } = resolveRead(parsed.flags, {
+      reclaimAgentLease: false,
+    });
     if (!explicit || !identity) return; // ambient/unbound folder — no seat to gate → allow
     // ADR 163 — actor attestation, BEFORE the class table and independent of it. Deliberately not
     // awaited: nothing downstream reads the result, and an observer on the critical path would be the

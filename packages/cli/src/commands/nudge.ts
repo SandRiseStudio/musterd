@@ -19,7 +19,10 @@ import { pendingActionSummary, resolveRead } from './helpers.js';
 export async function nudgeCommand(parsed: Parsed): Promise<number> {
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
   try {
-    const { http, team, identity, explicit } = resolveRead(parsed.flags);
+    // Hook one-shot (Notification hook): never reclaim the seat — see ResolveReadOptions.
+    const { http, team, identity, explicit } = resolveRead(parsed.flags, {
+      reclaimAgentLease: false,
+    });
     // Only an explicit actor (a bound seat / env / `--as`) — never an ambient global-config read
     // (ADR 036) — has an inbox to surface.
     if (!explicit || !identity) return 0;
