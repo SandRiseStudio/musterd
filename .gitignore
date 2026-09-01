@@ -80,3 +80,8 @@ workers/*/.wrangler/
 
 # Build-prep output of packages/web/scripts/gen-site-content.ts (ADR 302) — regenerated every build.
 packages/web/src/content/generated/
+
+# Playwright MCP scratch output — page-*.yml snapshots, console-*.log and screenshots, written on
+# every browser verification. They accumulated to 102 files / 5.4 MB in this worktree, and 16 of the
+# .yml were swept into unrelated PRs (#960, #996) by `git add -A` because nothing ignored them.
+.playwright-mcp/
