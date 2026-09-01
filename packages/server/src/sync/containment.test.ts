@@ -66,13 +66,45 @@ describe('3b-i containment', () => {
     expect(before.messages).toEqual({ n: 1 });
     expect(before.seqs).toEqual([{ id: expect.any(String), next_seq: 2 }]);
 
-    // Rewind past v50 and replay the migration tail. v51-v55 add independent auth/evidence state.
+    // Rewind past v50 and replay the migration tail. v51–v53 add independent tables and an index;
+    // v54 adds the origin index and the pull cursor, and touches no row; v55 adds guarded columns.
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
     expect(runMigrations(db)).toBe(55);
 
     expect(snapshot(db)).toEqual(before);
     // …and the replay did not drop what was already staged-adjacent: the tables survive it.
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 0 });
+    db.close();
+  });
+
+  it('v52 holds (origin_node, origin_seq) unique in messages and adds the pull cursor', () => {
+    const { db, team } = seed();
+    const row = db
+      .prepare<[string], { origin_node: string; origin_seq: number }>(
+        'SELECT origin_node, origin_seq FROM messages WHERE team_id = ? LIMIT 1',
+      )
+      .get(team.id)!;
+    const author = db.prepare<[], { id: string }>('SELECT id FROM members LIMIT 1').get()!.id;
+    // A second row under the SAME origin pair must be refused by the schema, not by convention:
+    // the fold (3b-ii) is a second writer, and its idempotence key is this pair, not messages.id.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO messages (id, team_id, from_member, to_kind, to_member, act, body, ts,
+                                 created_at, origin_node, origin_seq)
+           VALUES ('dup', ?, ?, 'team', NULL, 'message', 'x', 1, 1, ?, ?)`,
+        )
+        .run(team.id, author, row.origin_node, row.origin_seq),
+    ).toThrow(/UNIQUE|constraint/i);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_pull_cursor').get()).toEqual({ n: 0 });
+    // The read side's future key (spec §"The ts-cursor defect") is indexed by the same migration.
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_team_created'",
+        )
+        .get(),
+    ).toBeDefined();
     db.close();
   });
 
