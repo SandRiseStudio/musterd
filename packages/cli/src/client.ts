@@ -139,6 +139,8 @@ export interface HttpClientOpts {
    * away/idle human look present and so silence the very notification they were owed.
    */
   noTouch?: boolean;
+  /** Test seam: inject a ClaimSocket factory for the reclaim WS (lane 01M1F7Y4N). */
+  createClaimSocket?: (url: string) => ClaimSocket;
 }
 
 export interface BootstrapCredentialSummary {
@@ -193,7 +195,14 @@ export class HttpClient {
     ) {
       return undefined;
     }
-    return this.claimSessionLease();
+    try {
+      return await this.claimSessionLease();
+    } catch {
+      // Reclaim is best-effort for the HTTP read path (lane 01M1F7Y4N): a daemon bounce closes the WS
+      // with code 1001 (no 'error' fired) and would otherwise hang the promise forever. Degrade to the
+      // stored sessionLease — the server still validates fail-closed, so this is safe and visible.
+      return undefined;
+    }
   }
 
   /**
@@ -214,6 +223,23 @@ export class HttpClient {
       );
     }
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        session.close();
+        reject(new CliError('agent claim timed out — daemon may be restarting', 7));
+      }, CLAIM_LEASE_TIMEOUT_MS);
+      // The timer must not keep a one-shot CLI hanging after success.
+      (timer as unknown as { unref?: () => void }).unref?.();
+
+      const done = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn();
+      };
+
       const session = watchClaim({
         wsUrl: this.opts.server.replace(/^http/, 'ws') + '/ws',
         team,
@@ -222,22 +248,29 @@ export class HttpClient {
         surface,
         ...(workspace !== undefined ? { workspace } : {}),
         ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
+        ...(this.opts.createClaimSocket ? { createSocket: this.opts.createClaimSocket } : {}),
         onDeliver: () => {},
         onOccupied: (_seat, _presenceId, _grant, _memory, _credential, sessionLease) => {
           if (!sessionLease) {
-            session.close();
-            reject(new CliError('agent claim did not return a session lease', 4));
+            done(() => {
+              session.close();
+              reject(new CliError('agent claim did not return a session lease', 4));
+            });
             return;
           }
-          resolve({ lease: sessionLease, close: () => session.close() });
+          done(() => resolve({ lease: sessionLease, close: () => session.close() }));
         },
         onRefused: (_code, message) => {
-          session.close();
-          reject(new CliError(message, 4));
+          done(() => {
+            session.close();
+            reject(new CliError(message, 4));
+          });
         },
         onError: (message) => {
-          session.close();
-          reject(new CliError(message, 4));
+          done(() => {
+            session.close();
+            reject(new CliError(message, 4));
+          });
         },
       });
     });
@@ -1183,10 +1216,13 @@ export function watch(opts: WatchOpts): { close: () => void } {
 
 /** Minimal socket surface `watchClaim` drives — the `ws` WebSocket shape it uses. Injectable for tests. */
 export interface ClaimSocket {
-  on(event: 'open' | 'message' | 'error', cb: (arg?: unknown) => void): void;
+  on(event: 'open' | 'message' | 'error' | 'close', cb: (arg?: unknown) => void): void;
   send(data: string): void;
   close(): void;
 }
+
+/** How long a short-lived reclaim may wait for the daemon before degrading (lane 01M1F7Y4N). */
+export const CLAIM_LEASE_TIMEOUT_MS = 3_000;
 
 export interface WatchClaimOpts {
   wsUrl: string;
@@ -1246,6 +1282,7 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
   const attestedModel = opts.model ?? resolveAttestedModel(process.env);
   let heartbeat: NodeJS.Timeout | undefined;
   let subscribed = false;
+  let terminal = false;
 
   const subscribe = () => {
     if (subscribed) return;
@@ -1289,6 +1326,7 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     if (raw.type === 'occupied' || raw.type === 'refused' || raw.type === 'pending') {
       const o = parseClaimResponse(raw);
       if (o.state === 'occupied') {
+        terminal = true;
         // Subscribe FIRST, then hand control to the caller. The order is load-bearing: a caller that
         // reconciles durable state in `onOccupied` (as `inbox --wait` does, to close the drain/socket
         // startup gap — ADR 054) must run that reconciliation against a socket that is already
@@ -1303,8 +1341,10 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           o.sessionLease,
         );
       } else if (o.state === 'refused') {
+        terminal = true;
         opts.onRefused?.(o.code, o.message, o.claimable, o.hint);
       } else {
+        // pending is NOT terminal — the same socket later delivers the pushed occupied/refused
         opts.onPending?.(o.requestId, o.message);
       }
       return;
@@ -1323,10 +1363,24 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
     }
   });
 
-  ws.on('error', (err) => opts.onError?.((err as Error)?.message ?? String(err)));
+  ws.on('error', (err) => {
+    terminal = true;
+    opts.onError?.((err as Error)?.message ?? String(err));
+  });
+
+  ws.on('close', (code) => {
+    if (terminal) return;
+    // A graceful daemon shutdown (code 1001) emits ONLY 'close', never 'error' — without this the
+    // claim promise never settles and the CLI hangs forever (lane 01M1F7Y4N). Surface it as an error
+    // so the reclaim can degrade to the stored lease instead of hanging.
+    terminal = true;
+    const detail = typeof code === 'number' ? `code ${code}` : String(code ?? 'unknown');
+    opts.onError?.(`claim socket closed before settlement (${detail})`);
+  });
 
   return {
     close: () => {
+      terminal = true;
       if (heartbeat) clearInterval(heartbeat);
       ws.close();
     },

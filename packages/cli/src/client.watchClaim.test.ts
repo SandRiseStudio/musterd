@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { watchClaim, type ClaimSocket } from './client.js';
 
-/** Minimal fake socket: records sent frames + lets the test emit open/message/error. */
+/** Minimal fake socket: records sent frames + lets the test emit open/message/error/close. */
 class FakeSocket implements ClaimSocket {
   handlers: Record<string, Array<(arg?: unknown) => void>> = {};
   sent: string[] = [];
@@ -15,7 +15,7 @@ class FakeSocket implements ClaimSocket {
   close(): void {
     this.closed = true;
   }
-  emit(event: 'open' | 'message' | 'error', arg?: unknown): void {
+  emit(event: 'open' | 'message' | 'error' | 'close', arg?: unknown): void {
     (this.handlers[event] ?? []).forEach((cb) => cb(arg));
   }
 }
@@ -233,5 +233,90 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
     const { sock, opts } = harness();
     sock.emit('error', new Error('boom'));
     expect(opts.onError).toHaveBeenCalledWith('boom');
+  });
+
+  it('a graceful daemon close (code 1001) before settlement → onError via close (lane 01M1F7Y4N)', () => {
+    // ws `close` emits ONLY 'close', never 'error' — without a close handler the promise never settles
+    const { sock, opts } = harness();
+    sock.emit('open');
+    sock.emit('close', 1001 as unknown as undefined);
+    expect(opts.onError).toHaveBeenCalledWith(expect.stringContaining('code 1001'));
+    expect(opts.onOccupied).not.toHaveBeenCalled();
+    expect(opts.onRefused).not.toHaveBeenCalled();
+  });
+
+  it('close after pending (not yet terminal) → onError', () => {
+    const { sock, opts } = harness();
+    sock.emit('open');
+    sock.emit(
+      'message',
+      JSON.stringify({ type: 'pending', request_id: '01J', message: 'asked admins' }),
+    );
+    sock.emit('close', 1001 as unknown as undefined);
+    expect(opts.onError).toHaveBeenCalledWith(expect.stringContaining('code 1001'));
+  });
+
+  it('close AFTER occupied is terminal — no onError', () => {
+    const { sock, opts } = harness();
+    sock.emit('open');
+    sock.emit(
+      'message',
+      JSON.stringify({ type: 'occupied', seat, presence_id: '01J', server_time: 7, memory: null }),
+    );
+    vi.clearAllMocks();
+    sock.emit('close', 1001 as unknown as undefined);
+    expect(opts.onError).not.toHaveBeenCalled();
+  });
+
+  it('close after refused is terminal — no onError', () => {
+    const { sock, opts } = harness();
+    sock.emit('open');
+    sock.emit(
+      'message',
+      JSON.stringify({
+        type: 'refused',
+        code: 'claim_conflict',
+        message: 'taken',
+        claimable: [],
+        hint: '',
+      }),
+    );
+    vi.clearAllMocks();
+    sock.emit('close', 1001 as unknown as undefined);
+    expect(opts.onError).not.toHaveBeenCalled();
+  });
+
+  it('explicit handle.close() marks terminal — subsequent server close does not fire onError', () => {
+    const { sock, opts } = harness();
+    sock.emit('open');
+    sock.emit(
+      'message',
+      JSON.stringify({ type: 'occupied', seat, presence_id: '01J', server_time: 7, memory: null }),
+    );
+    const { handle } = harness();
+    // harness already called watchClaim; use a fresh one to test close->close ordering
+    const sock2 = new FakeSocket();
+    const opts2 = {
+      ...base,
+      createSocket: () => sock2,
+      onOccupied: vi.fn(),
+      onPending: vi.fn(),
+      onRefused: vi.fn(),
+      onError: vi.fn(),
+      onPresence: vi.fn(),
+    };
+    const handle2 = watchClaim(opts2);
+    sock2.emit('open');
+    sock2.emit(
+      'message',
+      JSON.stringify({ type: 'occupied', seat, presence_id: '01J', server_time: 7, memory: null }),
+    );
+    handle2.close();
+    sock2.emit('close', 1001 as unknown as undefined);
+    expect(opts2.onError).not.toHaveBeenCalled();
+    expect(sock2.closed).toBe(true);
+    // silence unused warnings
+    void handle;
+    void opts;
   });
 });
