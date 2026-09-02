@@ -16,7 +16,6 @@ import {
   type McpServerEntry,
 } from '../mcpEntry.js';
 import { STANDARD_FLOOR } from '../permissions.js';
-import type { FsSeam } from '../reconcile/context.js';
 import {
   canonicalFingerprint,
   folderResourceKey,
@@ -24,6 +23,7 @@ import {
 } from '../reconcile/fragments.js';
 import {
   hasServer,
+  readServer,
   readServerEnv,
   removeServers,
   upsertServer,
@@ -319,7 +319,7 @@ export const grok: Harness = {
     toml = upsertServer(toml, 'musterd', toTomlServer(entry));
     toml = ensureCursorHooksOff(toml);
     const sl = ensureStatusline(toml, process.cwd());
-    toml = sl.toml;
+    toml = mergePermissionFloor(sl.toml);
     writeText(path, toml);
     const hookWarnings = installMusterdGrokHooks();
     const warnings = [...hookWarnings, ...(sl.warning ? [sl.warning] : [])];
@@ -341,7 +341,8 @@ export const grok: Harness = {
       if (toml.length > 0) {
         toml = ensureCursorHooksOff(toml);
         const sl = ensureStatusline(toml, dir);
-        writeText(projectConfigPath(dir), sl.toml);
+        toml = mergePermissionFloor(sl.toml);
+        writeText(projectConfigPath(dir), toml);
         if (sl.warning) warnings.push(sl.warning);
       }
       return { files: [projectHooksPath(dir), projectConfigPath(dir)], warnings };
@@ -383,12 +384,6 @@ interface MusterdGrokPayload {
   command: string;
   args: string[];
   env: Record<string, string>;
-}
-
-function readTomlSeam(fs: FsSeam, path: string): string | null | undefined {
-  const raw = fs.readFile(path);
-  if (raw === null) return undefined;
-  return raw;
 }
 
 export const grokAdapter: HarnessAdapter = {
@@ -438,25 +433,14 @@ export const grokAdapter: HarnessAdapter = {
 
   async observe(ctx, intent) {
     if (intent.fragmentKey !== 'mcp.musterd') return { state: 'absent' };
-    const path = join(ctx.worktreeRoot, '.grok', 'config.toml');
-    const toml = readTomlSeam(ctx.fs, path);
-    if (toml === undefined) return { state: 'absent' };
-    if (toml === null) {
-      return {
-        state: 'invalid-container',
-        issues: [{ path: '<.grok/config.toml>', message: 'unreadable' }],
-      };
-    }
-    if (!hasServer(toml, 'musterd')) return { state: 'absent' };
-    const env = readServerEnv(toml, 'musterd');
-    const payload: MusterdGrokPayload = {
-      command: '',
-      args: [],
-      env,
-    };
-    // Fingerprint env only for marker generation; presence is enough for configured.
-    const fingerprint = canonicalFingerprint(payload.env);
-    return markerGenerationOfEnv(env) !== 'launch'
+    const toml = ctx.fs.readFile(join(ctx.worktreeRoot, '.grok', 'config.toml'));
+    if (toml === null) return { state: 'absent' };
+    const entry = readServer(toml, 'musterd');
+    if (!entry) return { state: 'absent' };
+    // Same payload as desiredFragments — command + args + env — so a write observes as itself
+    // (Cursor/Codex/OpenCode). Hashing env alone made every applied entry look drifted.
+    const fingerprint = canonicalFingerprint(entry);
+    return markerGenerationOfEnv(entry.env) !== 'launch'
       ? { state: 'legacy-launch-marker', fingerprint }
       : { state: 'present', fingerprint };
   },
@@ -470,6 +454,15 @@ export const grokAdapter: HarnessAdapter = {
     let toml = existing;
     if (mutation.kind === 'remove') {
       toml = removeServers(toml, ['musterd']);
+    } else if (mutation.kind === 'repair-launch-marker') {
+      const observed = readServer(toml, 'musterd');
+      if (!observed) return;
+      const { ['MUSTERD_SURFACE']: _retired, ...rest } = observed.env;
+      toml = upsertServer(toml, 'musterd', {
+        command: observed.command,
+        args: observed.args,
+        env: { ...rest, ...launchEntryEnv(GROK_SURFACE) },
+      });
     } else {
       const payload = mutation.intent.payload as MusterdGrokPayload;
       toml = upsertServer(toml, 'musterd', {
@@ -477,8 +470,8 @@ export const grokAdapter: HarnessAdapter = {
         args: payload.args,
         env: payload.env,
       });
-      toml = ensureCursorHooksOff(toml);
     }
+    if (mutation.kind !== 'remove') toml = ensureCursorHooksOff(toml);
     ctx.fs.mkdirp(dirname(path));
     ctx.fs.writeFile(path, toml.endsWith('\n') ? toml : `${toml}\n`, 0o644);
   },

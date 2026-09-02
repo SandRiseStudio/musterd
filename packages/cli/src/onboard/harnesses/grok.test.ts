@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildEntry } from '../mcpEntry.js';
+import { STANDARD_FLOOR } from '../permissions.js';
 import { GATE_MARKER, INTERRUPT_MARKER, grok, inspectGrokHookDrift } from './grok.js';
 
 const binding = {
@@ -75,6 +76,24 @@ describe('grok.configure', () => {
     expect(toml).not.toContain('musterd-grok-statusline');
     expect(result.warnings?.some((w) => /status_line/.test(w))).toBe(true);
   });
+
+  it('installs the standard permission floor when [permission] is absent', async () => {
+    await grok.configure(buildEntry(binding), binding);
+    const toml = readFileSync(cfgPath(), 'utf8');
+    expect(toml).toContain('[permission]');
+    for (const entry of STANDARD_FLOOR.allow) {
+      expect(toml).toContain(JSON.stringify(entry));
+    }
+  });
+
+  it('does not overwrite an existing [permission] table', async () => {
+    mkdirSync(join(cwd, '.grok'), { recursive: true });
+    writeFileSync(cfgPath(), '[permission]\nallow = ["Read"]\n');
+    await grok.configure(buildEntry(binding), binding);
+    const toml = readFileSync(cfgPath(), 'utf8');
+    expect(toml).toMatch(/\[permission\]\s*allow = \["Read"\]/);
+    expect(toml).not.toContain(JSON.stringify('Bash(git status *)'));
+  });
 });
 
 describe('grok hooks (Claude-parity set)', () => {
@@ -101,5 +120,32 @@ describe('grok hooks (Claude-parity set)', () => {
     writeFileSync(hooksPath(), JSON.stringify(file));
     const drift = inspectGrokHookDrift(cwd);
     expect(drift.some((d) => d.includes('PreToolUse'))).toBe(true);
+  });
+});
+
+describe('grok.refreshHooks', () => {
+  it('installs hooks, statusline, and the permission floor without rewriting MCP', () => {
+    mkdirSync(join(cwd, '.grok'), { recursive: true });
+    writeFileSync(
+      cfgPath(),
+      [
+        '[mcp_servers.musterd]',
+        'command = "/keep/node"',
+        'args = ["/keep/adapter.js"]',
+        '',
+        '[mcp_servers.musterd.env]',
+        'MUSTERD_LAUNCH_SURFACE = "grok"',
+        '',
+      ].join('\n'),
+    );
+    const res = grok.refreshHooks!.run(cwd);
+    expect(res.files).toContain(hooksPath());
+    expect(existsSync(hooksPath())).toBe(true);
+    const toml = readFileSync(cfgPath(), 'utf8');
+    expect(toml).toContain('command = "/keep/node"');
+    expect(toml).toContain('MUSTERD_LAUNCH_SURFACE = "grok"');
+    expect(toml).toContain('musterd-grok-statusline');
+    expect(toml).toContain('[permission]');
+    expect(toml).toMatch(/\[compat\.cursor\][\s\S]*hooks\s*=\s*false/);
   });
 });
