@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
-import { listAudit } from './audit.js';
+import { appendLaneEventRequired, appendReplicatedEvent, listAudit } from './audit.js';
 import { getCursor, setCursor } from './cursors.js';
 import { getLane, openLane } from './lanes.js';
 import {
@@ -811,6 +811,34 @@ describe('activity (two-clocks)', () => {
       }),
     );
     expect(latestStatusUpdate(db, ada.row.id)).toEqual({ state: 'refactoring auth', ts: 200 });
+  });
+});
+
+describe('replicated audit (presence replication, 2026-09-02)', () => {
+  it('appendReplicatedEvent stamps a presence.* row from the node allocator, densely with lane rows', () => {
+    const { db, team } = freshTeam();
+    appendReplicatedEvent(db, team.id, {
+      actor: 'ada',
+      action: 'presence.attached',
+      target: 'ada',
+      result: 'allow',
+      detail: { presence: 'p1' },
+    });
+    appendLaneEventRequired(db, team.id, {
+      actor: 'ada',
+      action: 'lane.opened',
+      target: 'l1',
+      result: 'allow',
+      detail: { lane: 'l1' },
+    });
+    const seqs = db
+      .prepare<
+        [],
+        { origin_seq: number; action: string }
+      >('SELECT origin_seq, action FROM audit WHERE origin_seq > 0 ORDER BY origin_seq')
+      .all();
+    expect(seqs.map((r) => r.origin_seq)).toEqual([1, 2]);
+    expect(seqs[0]!.action).toBe('presence.attached');
   });
 });
 
