@@ -31,6 +31,22 @@ routes `same_model`, so an unattested worker routes nowhere either way. What was
 reason, and reasons are what ADR 234's reads aggregate: those rows were counted as fleet
 degradation ("nobody eligible") when they were an attestation gap on the asker.
 
+## The series did not end at 10 (re-measured 2026-09-02)
+
+Ten was the count at the time of the fix, not the end of the series. Re-read from the live
+`audit` table on 2026-09-02 the same query returns 12 rows, and the two new ones are the expected
+shape of the *healthy* state, not the storm: big-body at 23:40 and 23:47 UTC on 2026-09-01, both
+after the storm ended at 21:57 UTC, in a window where big-body's occupancy logged no
+`model_attested` event at all — its next claim attested `claude-opus-5` at 00:09 UTC (falsify:
+`SELECT count(*)` of the "How to read it" query is not 12, or the `audit` table shows a big-body
+`occupancy.model_attested` row between 22:30 and 00:09 UTC). The storm explains the six same-day
+rows in the section below. It does not explain these two, and it will not explain the next ones:
+a worker whose surface attests nothing at the moment it calls `lane_ready` files a
+`worker_unattested` row whether or not anything is wrong with the fleet. Post-fix those rows are
+labelled honestly, and the first `no_candidate` rows on the fixed daemon (2026-09-02 02:54 and
+03:09 UTC) carry `worker_family = 'claude'` — the team's gap, not the asker's. Count
+`worker_unattested` rows as a measure of the asker's attestation seam, never as fleet degradation.
+
 ## Why six in one day: the claim storm nulled live attestations
 
 The 2026-09-01 rows were not seats that never attested. They were seats whose attestation had been
