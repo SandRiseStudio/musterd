@@ -43,6 +43,8 @@ key as routine authority.
 - The command layer owns the WS-to-HTTP lifetime bridge. No server migration,
   protocol schema change, or relaxed authorization predicate is required.
 
+_Amended 2026-09-01 (lane 01M1F7Y4N):_ a failed or timed-out reclaim degrades to the stored lease (fail-soft on the read path). The HTTP request still runs; if the stored lease is stale the server rejects it, but the CLI never hangs. This is the correct inversion of #1143's default-off: forgetting the opt-in fails loud and local, forgetting a close handler failed silent and global. `watchClaim` now settles on `close` (1001 probe) and `claimSessionLease` times out after 3 s (`CLAIM_LEASE_TIMEOUT_MS`).
+
 ## Observability & Evaluation
 
 - Traces: existing claim and HTTP request logs record the normal attachment and
@@ -52,3 +54,4 @@ key as routine authority.
   path re-claims and succeeds while the old lease alone remains rejected.
 - Experiment: none. The regression has a deterministic local reproduction and
   is covered by the command-level test.
+- Amendment 2026-09-01 (lane 01M1F7Y4N): `watchClaim` now settles on `close` (1001 probe: `ws` emits only `close` on graceful shutdown) and `claimSessionLease` times out after 3 s; `claimAgentLease` degrades to the stored lease. Covered by `client.watchClaim.test.ts` (close-before-settlement + close-after-terminal) and `client.test.ts` (timeout + degraded fetch), 7 new cases red-first on `e9067451`.
