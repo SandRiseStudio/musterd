@@ -16,7 +16,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import type { AuditRow } from './audit.js';
+import { appendAuditRequired, type AuditRow } from './audit.js';
 import { listGoals } from './goals.js';
 import { getPolicy } from './teams.js';
 
@@ -742,6 +742,41 @@ export function boardWarnings(
 const RELEASE_ON_DEPART = "('claimed','active','blocked')" as const;
 
 /**
+ * The system as a releaser, named the way `SYSTEM_CLOSER` names the sweep. A departure release has
+ * no seat behind it, and `null` would read as "actor unknown" — which is the defect this fixes.
+ */
+const SYSTEM_RELEASER = 'musterd';
+
+/**
+ * Release one lane back to `open` AND leave the `lane.released` row the PATCH path leaves
+ * (`transport/http.ts`, same `detail` shape plus a `reason`). Increment 1 of ADR 325 made every
+ * lane transition leave a durable row so a replicating daemon can fold history back out; these two
+ * departure paths were the exceptions — the only places a lane changed hands with no record of who
+ * or why (lane-replication spec §Finding 3). `appendAuditRequired`, not `appendAudit`: the release
+ * and its record are one transaction, so a peer can never see the first without the second.
+ */
+function releaseLaneWithRecord(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  ownerBefore: string,
+  reason: 'seat_left' | 'seat_departed_sweep',
+  now: number,
+): void {
+  db.prepare(
+    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
+     WHERE team_id = ? AND id = ?`,
+  ).run(now, teamId, laneId);
+  appendAuditRequired(db, teamId, {
+    actor: SYSTEM_RELEASER,
+    action: 'lane.released',
+    target: laneId,
+    result: 'allow',
+    detail: { lane: laneId, released_by: SYSTEM_RELEASER, owner_before: ownerBefore, reason },
+  });
+}
+
+/**
  * Release a seat's in-flight lanes back to `open` (ADR 196 / open ⟺ unowned). Used when the seat
  * soft-leaves the roster so the board cannot assert ownership for a name every list filter drops.
  * Returns the released lane ids + prior state for logging/audit.
@@ -759,12 +794,8 @@ export function releaseInFlightClaimsForSeat(
     )
     .all(teamId, seatName);
   if (rows.length === 0) return [];
-  const upd = db.prepare(
-    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
-     WHERE team_id = ? AND id = ?`,
-  );
   db.transaction(() => {
-    for (const r of rows) upd.run(now, teamId, r.id);
+    for (const r of rows) releaseLaneWithRecord(db, teamId, r.id, seatName, 'seat_left', now);
   })();
   return rows.map((r) => ({ id: r.id, state_before: r.state }));
 }
@@ -787,12 +818,9 @@ export function releaseDepartedSeatClaims(
     )
     .all();
   if (rows.length === 0) return [];
-  const upd = db.prepare(
-    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
-     WHERE team_id = ? AND id = ?`,
-  );
   db.transaction(() => {
-    for (const r of rows) upd.run(now, r.team_id, r.lane);
+    for (const r of rows)
+      releaseLaneWithRecord(db, r.team_id, r.lane, r.seat, 'seat_departed_sweep', now);
   })();
   return rows;
 }

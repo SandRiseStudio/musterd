@@ -423,6 +423,59 @@ describe('departed-seat claim release (ADR 196)', () => {
       owner_seat: null,
     });
   });
+
+  // Lane-replication slice (spec 2026-09-01-lane-replication-design.md §Finding 3, hole 1): these
+  // two paths were the only places a lane changed hands with no record of who or why. Increment 1
+  // made every transition leave a `lane.*` audit row precisely so a replicating daemon can fold
+  // history back out — a release that leaves no trace cannot replicate under any design, and a
+  // peer would keep showing a holder this machine already released.
+  const releasedRows = (db: ReturnType<typeof openDb>, laneId: string) =>
+    db
+      .prepare<[string], { actor: string | null; detail: string }>(
+        "SELECT actor, detail FROM audit WHERE action = 'lane.released' AND target = ?",
+      )
+      .all(laneId)
+      .map((r) => ({ actor: r.actor, detail: JSON.parse(r.detail) as Record<string, unknown> }));
+
+  it('releaseInFlightClaimsForSeat leaves a lane.released row per lane, naming the departed holder', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'wip', claim: true });
+
+    releaseInFlightClaimsForSeat(db, team.id, 'June');
+
+    expect(releasedRows(db, lane.id)).toEqual([
+      {
+        actor: 'musterd',
+        detail: {
+          lane: lane.id,
+          released_by: 'musterd',
+          owner_before: 'June',
+          reason: 'seat_left',
+        },
+      },
+    ]);
+  });
+
+  it('releaseDepartedSeatClaims leaves a lane.released row per swept lane', () => {
+    const { db, team } = seed();
+    const june = addMember(db, team, { name: 'June', kind: 'agent' });
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'ghost wip', claim: true });
+    db.prepare('UPDATE members SET left_at = ? WHERE id = ?').run(Date.now(), june.row.id);
+
+    releaseDepartedSeatClaims(db);
+
+    expect(releasedRows(db, lane.id)).toEqual([
+      {
+        actor: 'musterd',
+        detail: {
+          lane: lane.id,
+          released_by: 'musterd',
+          owner_before: 'June',
+          reason: 'seat_departed_sweep',
+        },
+      },
+    ]);
+  });
 });
 
 describe('deriveHandoffLane (ADR 231) — a handoff act names the lane it hands off', () => {
