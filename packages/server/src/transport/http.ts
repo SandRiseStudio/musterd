@@ -75,6 +75,7 @@ import {
   SYNC_PULL_MAX_BATCH,
   SyncPullResponseSchema,
   SyncClaimRequestSchema,
+  SyncTrustRequestSchema,
   SyncPushRequestSchema,
   SyncPushResponseSchema,
   wakeabilityFromFacts,
@@ -278,6 +279,7 @@ import {
 } from '../store/teams.js';
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
 import {
+  applyTrust,
   arbitrateClaim,
   assertSeatResident,
   claimAtHub,
@@ -286,6 +288,8 @@ import {
   joinerEnrollment,
   localNodeWithLabel,
   SeatBoundElsewhereError,
+  trustAtHub,
+  TrustRefusedError,
 } from '../sync/claim.js';
 import {
   hubHead,
@@ -345,6 +349,15 @@ const INBOX_DEFAULT_LIMIT = 200;
  * the bind that failed. Compared by identity and never surfaced — the caller gets one 409.
  */
 const ENROLL_REFUSED = Symbol('enrollment refused');
+
+/** A refused trust act (ADR 358): the envelope plus the bound node when there is one to name. */
+function sendTrustRefusal(res: ServerResponse, err: TrustRefusedError): void {
+  const status = err.code === 'bound_elsewhere' || err.code === 'forbidden' ? 403 : 404;
+  return sendJson(res, status, {
+    error: { code: err.code, message: err.message },
+    ...(err.nodeId ? { node_id: err.nodeId, node_label: err.nodeLabel ?? '' } : {}),
+  });
+}
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -3720,6 +3733,62 @@ export async function handleHttp(
               node_label: err.nodeLabel,
             });
           }
+          throw err;
+        }
+      }
+
+      // ADR 358, hub side: a joiner forwards its resident human's trust act. The authenticated
+      // node is the speaker and must already be in the seat's set — the check that stops a fresh
+      // machine, or any admitted credential, from widening a seat it does not hold.
+      if (method === 'POST' && rest === '/sync/trust') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        const body = parseOrBadRequest(SyncTrustRequestSchema, await readJson(req));
+        const seat = getMemberByName(ctx.db, team.id, body.seat);
+        if (!seat) throw new MusterdError('not_found', `no seat "${body.seat}" on this roster`);
+        try {
+          return sendJson(res, 200, applyTrust(ctx.db, team.id, seat, node, body.node_id));
+        } catch (err) {
+          if (err instanceof TrustRefusedError) return sendTrustRefusal(res, err);
+          throw err;
+        }
+      }
+
+      // ADR 358, the seat-facing act: "trust this node for my seat". Authenticated as the seat, for
+      // the caller's own seat only; the daemon this request lands on is the vouching node. On an
+      // enrolled joiner it is forwarded to the hub (the binding lives there); otherwise it is
+      // decided here with the local row as speaker.
+      if (method === 'POST' && rest === '/nodes/trust') {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(
+          SyncTrustRequestSchema.pick({ node_id: true }),
+          await readJson(req),
+        );
+        const enrollment = joinerEnrollment(ctx.db, team.id, team.slug);
+        try {
+          if (enrollment) {
+            const trusted = await trustAtHub(enrollment, team.slug, {
+              seat: member.name,
+              node_id: body.node_id,
+            });
+            return sendJson(res, 200, trusted);
+          }
+          return sendJson(
+            res,
+            200,
+            applyTrust(ctx.db, team.id, member, localNodeWithLabel(ctx.db, team.id), body.node_id),
+          );
+        } catch (err) {
+          if (err instanceof TrustRefusedError) return sendTrustRefusal(res, err);
+          if (err instanceof HubUnreachableError)
+            throw new MusterdError('hub_unreachable', err.message);
           throw err;
         }
       }

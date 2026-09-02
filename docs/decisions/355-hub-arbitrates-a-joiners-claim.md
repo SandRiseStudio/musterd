@@ -122,6 +122,9 @@ footnote here. **Kind-scoping**: the binding applies to human seats too, as ADR 
 human who works from two laptops will meet `bound_elsewhere` on the second, and the unbind is the
 release valve; whether humans should fan out across nodes the way ADR 042 lets them fan out across
 surfaces is the evidence question ADR 328 left open, and the refusals are how it gets answered.
+**Answered by [ADR 358](358-human-seat-trusts-a-set-of-machines.md), 2026-09-02:** a human seat
+holds a set of nodes, widened only by an explicit act from a node already in the set; agents stay
+one-node.
 
 Falsifiers, in `sync/claim.test.ts`: a seat that claimed on the hub is refused when the joiner
 claims as it, with the hub's node named and the lane untouched; after an admin unbind the joiner's

@@ -2,8 +2,11 @@ import {
   type Lane,
   LaneSchema,
   SeatBoundElsewhereRefusalSchema,
+  type SeatNodeTrusted,
+  SeatNodeTrustedSchema,
   type SyncClaimRequest,
   SyncClaimRefusalSchema,
+  type SyncTrustRequest,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import type { Ctx } from '../context.js';
@@ -13,7 +16,7 @@ import { appendAudit } from '../store/audit.js';
 import { getLane, LaneConflictError, updateLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { localNodeForTeam } from '../store/messages.js';
-import { bindSeatToNode, seatBinding } from '../store/nodes.js';
+import { bindSeatToNode, seatBinding, trustNodeForSeat } from '../store/nodes.js';
 import { hasLivePresence } from '../store/presence.js';
 
 /**
@@ -62,6 +65,86 @@ export class SeatBoundElsewhereError extends Error {
     );
     this.name = 'SeatBoundElsewhereError';
   }
+}
+
+/** The trust act was refused for a reason a retry does not clear (ADR 358). */
+export class TrustRefusedError extends Error {
+  constructor(
+    readonly code: 'bound_elsewhere' | 'forbidden' | 'not_found',
+    message: string,
+    readonly nodeId: string | null = null,
+    readonly nodeLabel: string | null = null,
+  ) {
+    super(message);
+    this.name = 'TrustRefusedError';
+  }
+}
+
+/**
+ * ADR 358, the act itself — runs wherever the binding lives: on the hub for a forwarded request,
+ * on a single-machine daemon for its own residents. `speaker` is the node vouching (the hub's
+ * authenticated joiner, or the local row); it must already hold the seat. Writes `seat.node_trusted`
+ * on a fresh row and nothing on an idempotent repeat. A refusal is a `seat.bound_elsewhere` deny row
+ * when the speaker is not resident — the same ADR 328 §Experiment signal a bad claim leaves.
+ */
+export function applyTrust(
+  db: Database,
+  teamId: string,
+  seat: { id: string; name: string; kind: string },
+  speaker: { id: string; label: string },
+  targetNodeId: string,
+  now: number = Date.now(),
+): SeatNodeTrusted {
+  const result = trustNodeForSeat(db, teamId, seat, speaker.id, targetNodeId, now);
+  if (result.trusted) {
+    if (!result.already) {
+      appendAudit(db, teamId, {
+        actor: seat.name,
+        action: 'seat.node_trusted',
+        target: seat.name,
+        result: 'allow',
+        detail: { node: targetNodeId, by_node: speaker.id, by_label: speaker.label },
+      });
+    }
+    return { seat: seat.name, node_id: targetNodeId, already: result.already };
+  }
+  if (result.reason === 'not_human') {
+    throw new TrustRefusedError(
+      'forbidden',
+      `"${seat.name}" is an agent seat — agents stay bound to one node (ADR 042 kind scope, ADR 358); ` +
+        'an admin unbind is the only way to move one.',
+    );
+  }
+  if (result.reason === 'unknown_node') {
+    throw new TrustRefusedError(
+      'not_found',
+      `node "${targetNodeId}" is not an enrolled, unrevoked node of this team — enroll it first ` +
+        '(musterd node invite / join), then trust it.',
+    );
+  }
+  const holder = seatBinding(db, seat.id);
+  appendAudit(db, teamId, {
+    actor: seat.name,
+    action: 'seat.bound_elsewhere',
+    target: seat.name,
+    result: 'deny',
+    detail: {
+      node: speaker.id,
+      bound_to: holder?.node_id ?? null,
+      bound_label: holder?.label ?? null,
+      act: 'trust',
+    },
+  });
+  throw new TrustRefusedError(
+    'bound_elsewhere',
+    holder
+      ? `only a session on a machine "${seat.name}" already lives on can trust another — this ` +
+          `one (${speaker.label}) is not in the set; run it from "${holder.label}".`
+      : `"${seat.name}" is not bound to any machine yet, so no session can vouch for another — ` +
+          'act as the seat from this machine once (a claim, a presence) and it binds here first.',
+    holder?.node_id ?? null,
+    holder?.label ?? null,
+  );
 }
 
 /**
@@ -268,4 +351,51 @@ export async function claimAtHub(
     throw new Error(`the hub answered ${res.status} to the claim: ${JSON.stringify(body)}`);
   }
   return LaneSchema.parse((body as { lane: unknown }).lane);
+}
+
+/**
+ * Joiner side of the trust act: ask the hub, write nothing. The hub's set is the fact; the joiner
+ * has no row of its own for it. Refusals relay verbatim with the hub's code.
+ */
+export async function trustAtHub(
+  enrollment: { hub_url: string; credential: string },
+  slug: string,
+  req: SyncTrustRequest,
+): Promise<SeatNodeTrusted> {
+  let res: Response;
+  try {
+    res = await fetch(new URL(`/teams/${slug}/sync/trust`, enrollment.hub_url), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${enrollment.credential}`,
+      },
+      body: JSON.stringify(req),
+      signal: AbortSignal.timeout(CLAIM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    log.warn({ msg: 'sync_trust_hub_unreachable', team: slug, seat: req.seat, err: String(err) });
+    throw new HubUnreachableError(enrollment.hub_url, String(err));
+  }
+  const body: unknown = await res.json().catch(() => null);
+  if (res.status === 403 || res.status === 404) {
+    const b = body as {
+      error?: { code?: string; message?: string };
+      node_id?: string;
+      node_label?: string;
+    } | null;
+    const code = b?.error?.code;
+    if (code === 'bound_elsewhere' || code === 'forbidden' || code === 'not_found') {
+      throw new TrustRefusedError(
+        code,
+        b?.error?.message ?? '',
+        b?.node_id ?? null,
+        b?.node_label ?? null,
+      );
+    }
+  }
+  if (!res.ok) {
+    throw new Error(`the hub answered ${res.status} to the trust act: ${JSON.stringify(body)}`);
+  }
+  return SeatNodeTrustedSchema.parse(body);
 }

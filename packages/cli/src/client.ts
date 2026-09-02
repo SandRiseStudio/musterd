@@ -6,6 +6,8 @@ import {
   GoalListSchema,
   NodeInviteMintSchema,
   NodeListSchema,
+  type SeatNodeTrusted,
+  SeatNodeTrustedSchema,
   type NodeInviteMint,
   type NodeList,
   GoalSchema,
@@ -857,6 +859,17 @@ export class HttpClient {
       'POST',
       `/teams/${slug}/nodes/${encodeURIComponent(nodeId)}/revoke`,
     )) as { revoked: boolean };
+  }
+
+  /**
+   * ADR 358: trust `nodeId` for the caller's own seat. Decided by the daemon this CLI talks to
+   * (or forwarded to its hub) — the machine running the command is the one vouching.
+   */
+  async nodeTrust(slug: string, nodeId: string): Promise<SeatNodeTrusted> {
+    const json = await this.request('POST', `/teams/${slug}/nodes/trust`, { node_id: nodeId });
+    const parsed = SeatNodeTrustedSchema.safeParse(json);
+    if (!parsed.success) throw new CliError('trust response did not match the protocol schema', 1);
+    return parsed.data;
   }
 
   async nodes(slug: string): Promise<NodeList> {
