@@ -148,7 +148,16 @@ export function routeUnclaimedIncidents(
       continue;
     }
 
-    const assigned = updateLane(db, teamId, lane.id, teamSlug, { owner_seat: owner.name }, now);
+    const assigned = updateLane(
+      db,
+      teamId,
+      lane.id,
+      teamSlug,
+      { owner_seat: owner.name },
+      now,
+      undefined,
+      { actor: null },
+    );
     if (!assigned) continue;
     appendAudit(db, teamId, {
       actor: null,
@@ -202,9 +211,16 @@ export function recordBlockedReport(
 
   if (open) {
     insert(open.id);
-    const appended = updateLane(db, teamId, open.id, teamSlug, {
-      detail: `${open.detail ?? ''}\n${detailLine(seat, report)}`.trim(),
-    });
+    const appended = updateLane(
+      db,
+      teamId,
+      open.id,
+      teamSlug,
+      { detail: `${open.detail ?? ''}\n${detailLine(seat, report)}`.trim() },
+      Date.now(),
+      undefined,
+      { actor: seat },
+    );
     appendAudit(db, teamId, {
       actor: seat,
       action: 'incident.report_appended',

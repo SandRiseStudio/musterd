@@ -200,7 +200,9 @@ call the unguarded form.
 
 ## Hole 3, decided: the `lane.*` rows move inside the lane write's transaction
 
-*Added 2026-09-02 after holes 1 and 2 landed on #1173.*
+*Added 2026-09-02 after holes 1 and 2 landed on #1173. Built the same night as #1178, stacked on
+#1173; the falsifier below is `lanes.test.ts` "a transition whose record cannot be written does not
+happen".*
 
 Hole 1 was closed by writing the release and its row in one transaction with
 `appendAuditRequired`. That is the shape every `lane.*` row needs and none of the others has:

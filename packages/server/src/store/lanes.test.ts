@@ -502,6 +502,105 @@ describe('laneFieldDiff — the values behind a lane.updated row', () => {
   });
 });
 
+// Lane-replication slice (spec §Hole 3): a lane.* row IS the transition, so the store writes it
+// inside the same transaction as the lane row, with the required append. If the record cannot be
+// written, the transition does not happen.
+describe('lane.* rows are written by the store, inside the write', () => {
+  const rows = (db: ReturnType<typeof openDb>, laneId: string) =>
+    db
+      .prepare<[string], { actor: string | null; action: string; detail: string }>(
+        'SELECT actor, action, detail FROM audit WHERE target = ? ORDER BY rowid',
+      )
+      .all(laneId)
+      .map((r) => ({ actor: r.actor, action: r.action, detail: JSON.parse(r.detail) }));
+
+  it('openLane with claim writes lane.claimed at_open', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'born owned', claim: true }, 1, {
+      actor: 'June',
+    });
+    expect(rows(db, lane.id)).toEqual([
+      {
+        actor: 'June',
+        action: 'lane.claimed',
+        detail: {
+          lane: lane.id,
+          owner: 'June',
+          previous_owner: null,
+          kind: 'claim',
+          at_open: true,
+        },
+      },
+    ]);
+  });
+
+  it('updateLane writes claimed / updated / state_changed / released for their edges', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 't' });
+    const audit = { actor: 'June' };
+
+    updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'June' }, 2, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { branch: 'b' }, 3, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'active' }, 4, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'Cleo' }, 5, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'open' }, 6, undefined, { actor: 'Cleo' });
+
+    expect(rows(db, lane.id)).toEqual([
+      {
+        actor: 'June',
+        action: 'lane.claimed',
+        detail: { lane: lane.id, owner: 'June', previous_owner: null, kind: 'claim' },
+      },
+      {
+        actor: 'June',
+        action: 'lane.updated',
+        detail: { lane: lane.id, fields: ['branch'], changes: { branch: { from: null, to: 'b' } } },
+      },
+      {
+        actor: 'June',
+        action: 'lane.state_changed',
+        detail: { lane: lane.id, from: 'claimed', to: 'active' },
+      },
+      {
+        actor: 'June',
+        action: 'lane.claimed',
+        detail: {
+          lane: lane.id,
+          owner: 'Cleo',
+          previous_owner: 'June',
+          kind: 'handoff',
+          takeover_of_offline_owner: true,
+        },
+      },
+      {
+        actor: 'Cleo',
+        action: 'lane.released',
+        detail: { lane: lane.id, released_by: 'Cleo', owner_before: 'Cleo' },
+      },
+    ]);
+  });
+
+  it('a transition whose record cannot be written does not happen', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 't', branch: 'before' });
+    db.exec('DROP TABLE audit');
+
+    expect(() =>
+      updateLane(db, team.id, lane.id, 'bravo', { branch: 'after' }, 2, undefined, {
+        actor: 'June',
+      }),
+    ).toThrow();
+    expect(getLane(db, team.id, lane.id, 'bravo')?.branch).toBe('before');
+  });
+
+  it('without an audit option nothing is written (callers that own their own verb)', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 't' });
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'active' });
+    expect(rows(db, lane.id)).toEqual([]);
+  });
+});
+
 describe('deriveHandoffLane (ADR 231) — a handoff act names the lane it hands off', () => {
   it('attaches when the sender holds exactly one live lane', () => {
     const { db, team } = seed();
