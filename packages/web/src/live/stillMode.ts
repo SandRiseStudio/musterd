@@ -43,31 +43,42 @@
  */
 
 /**
- * The pure reader — takes a search string so it is testable without a DOM (this repo's vitest
- * environment is `node`).
+ * Both flags below are presence tests over the query string, and they share this reader for a
+ * reason beyond tidiness: they ship in /live's EAGER graph, where the budget is measured in
+ * hundreds of bytes (ADR 183). Two hand-rolled copies of the same try/catch is a duplication the
+ * viewer pays for.
  *
  * `URLSearchParams.has` rather than a substring test, deliberately: `?stillwater` and `?distill`
  * must not turn a measurement mode on for a page someone is trying to watch move. Presence, not
  * value, so the gate's bare `&still` keeps working the day someone writes `&still=1`.
+ *
+ * A malformed search is a page that renders, not a page that white-screens — this is read on the
+ * mount path of every consumer.
  */
-export function isStill(search: string): boolean {
+function hasFlag(search: string, name: string): boolean {
   try {
-    return new URLSearchParams(search).has('still');
+    return new URLSearchParams(search).has(name);
   } catch {
-    /* A malformed search is a page that renders, not a page that white-screens — this is read on
-       the mount path of every consumer. */
     return false;
   }
 }
 
-/** The same question against the live location. Safe under SSR/prerender, where there is no window. */
-export function stillMode(): boolean {
+/**
+ * The same question against the live location, for either flag. Safe under SSR/prerender, where
+ * there is no window.
+ */
+function flagHere(name: string): boolean {
   try {
-    return isStill(window.location.search);
+    return hasFlag(window.location.search, name);
   } catch {
     return false; /* no window/search available (SSR, tests) — the page behaves normally */
   }
 }
+
+/** The pure reader — takes a search string so it is testable without a DOM (vitest runs `node`). */
+export const isStill = (search: string): boolean => hasFlag(search, 'still');
+
+export const stillMode = (): boolean => flagHere('still');
 
 /**
  * `?asks-open` — MEASUREMENT MODE for a surface that is closed by default.
@@ -88,19 +99,6 @@ export function stillMode(): boolean {
  * Scope: it sets the sheet's INITIAL state only. The reader can still close it, and nothing else
  * about the strip changes — same cards, same copy, same inks.
  */
-export function isAsksOpen(search: string): boolean {
-  try {
-    return new URLSearchParams(search).has('asks-open');
-  } catch {
-    return false;
-  }
-}
+export const isAsksOpen = (search: string): boolean => hasFlag(search, 'asks-open');
 
-/** The same question against the live location. Safe under SSR/prerender, where there is no window. */
-export function asksOpenMode(): boolean {
-  try {
-    return isAsksOpen(window.location.search);
-  } catch {
-    return false;
-  }
-}
+export const asksOpenMode = (): boolean => flagHere('asks-open');

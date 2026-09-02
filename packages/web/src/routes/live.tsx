@@ -6,7 +6,6 @@ import brandCss from '../brand/brand.css?url';
 import { MusterdWord } from '../brand/MusterdWord';
 import { AsksStrip } from '../live/AsksStrip';
 import { MemberSignInFields, MemberSignInToggle, type AdvancedState } from '../live/MemberSignIn';
-import { BoardOverlay, preloadBoard } from '../live/BoardOverlay';
 import { OfficeScene } from '../live/OfficeScene';
 import { RosterPanel } from '../live/RosterPanel';
 import { scrollToMessage, Stream } from '../live/Stream';
@@ -37,6 +36,24 @@ import { roomEntries } from '../live/workingOn';
 const LazySeedsTray = lazy(() =>
   import('../live/SeedsTray').then((module) => ({ default: module.SeedsTray })),
 );
+
+/**
+ * The board overlay, lazy — its own header has always said it is "kept out of /live's eager graph"
+ * (ADR 151), but only the heavy `Board` inside it ever was. The 219-line modal shell, and with it
+ * `useBoardData`, `goalGrid` and `boardOverlayMath`, rode the entry chunk on a route that renders
+ * none of it until someone reaches for the wall. Measured 2026-09-02: moving the shell out returned
+ * more than #1158 borrowed, which is what paid that PR's perf debt back instead of raising the
+ * ceiling to meet it.
+ *
+ * `preloadBoardOverlay` keeps the hover promise the old `preloadBoard` made, and now covers both
+ * halves: the shell first, then the board it wraps. By the time a click lands, both are usually here.
+ */
+const LazyBoardOverlay = lazy(() =>
+  import('../live/BoardOverlay').then((module) => ({ default: module.BoardOverlay })),
+);
+function preloadBoardOverlay(): void {
+  void import('../live/BoardOverlay').then((module) => module.preloadBoard());
+}
 
 export const Route = createFileRoute('/live')({
   head: () => ({
@@ -481,7 +498,7 @@ function LivePage() {
               onCollapse={() => toggleCollapse('office')}
               onActClick={onActClick}
               onBoardOpen={openBoard}
-              onBoardHover={preloadBoard}
+              onBoardHover={preloadBoardOverlay}
               // The asks & approvals rail (ADR 149) rides the top of the room itself — the office
               // frames its own asks (nick, 2026-07-28). Still renders nothing until an ask exists.
               topSlot={
@@ -517,15 +534,17 @@ function LivePage() {
             />
           </div>
           {boardOpen && (
-            <BoardOverlay
-              cfg={cfg}
-              roster={roster}
-              base={board}
-              goals={report?.goals ?? []}
-              origin={boardOrigin}
-              focusLane={boardLane}
-              onClose={closeBoard}
-            />
+            <Suspense fallback={null}>
+              <LazyBoardOverlay
+                cfg={cfg}
+                roster={roster}
+                base={board}
+                goals={report?.goals ?? []}
+                origin={boardOrigin}
+                focusLane={boardLane}
+                onClose={closeBoard}
+              />
+            </Suspense>
           )}
           {seedsOpen && (
             <Suspense fallback={null}>
