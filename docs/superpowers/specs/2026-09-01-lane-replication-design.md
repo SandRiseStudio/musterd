@@ -77,6 +77,43 @@ wearing an event's clothes: it is the thing ADR 325 excluded, and it would give 
 insert path with all of ADR 331 §Consequences' hazards, to reach a state the log can already
 express.
 
+## Finding 3 — increment 1 already built a transition log FOR this slice, and it has three holes
+
+The survey turned up something better than either candidate assumed. Increment 1 (`cf7b7926`, #1071)
+did not only make the claim a guarded CAS; it made every lane transition leave an audit row, and it
+said why in the code (`transport/http.ts:4226-4231`):
+
+> every lane transition now leaves a durable row — the property a replicating daemon folds history
+> back out of
+
+So the substrate this slice needs was deliberately laid a month ago, and it is the **audit** log,
+not the message log. Seven verbs cover the edges — `lane.claimed` carrying `previous_owner → owner`
+plus a claim/handoff discriminator, `lane.state_changed` carrying `{from, to}`, `lane.released`,
+`lane.ready_for_review`, `lane.closed`, and two review verbs — and their emission is exclusive by
+construction, with `lane.state_changed` explicitly excluding the four edges that own their own verb.
+
+**Three holes make it insufficient as it stands, and finding them is this increment's real result.**
+
+1. **Two release paths write no event at all.** `releaseInFlightClaimsForSeat` (`store/lanes.ts:749`,
+   on `leaveMember`) and `releaseDepartedSeatClaims` (`store/lanes.ts:776`, on the reaper tick) both
+   move `claimed|active|blocked → open` and null `owner_seat` with a hardcoded UPDATE that bypasses
+   `updateLane`, writes no `lane.released` row, and names no actor. A release that leaves no trace
+   cannot replicate under **any** design on this page. A peer folding history would go on showing a
+   holder who was released here — which is precisely "building in a lane you do not own", the
+   failure ADR 325 says musterd exists to prevent, arriving through the back door.
+2. **`lane.updated` records field names, never values** (`http.ts:4239`, diffed by
+   `laneFieldChanges`, `lanes.ts:348-352`). Ten audited fields, and the row says only which ones
+   moved. History can prove a lane's scope changed; it cannot say to what. Content edits are
+   unreconstructable from audit alone.
+3. **`appendAudit` swallows its own failures** (`store/audit.ts:393-399`) — "best-effort
+   observability, never a gate." That is the correct posture for observability and the wrong one
+   for a replication substrate. A log that may silently drop a row cannot carry a fold's
+   at-least-once guarantee without that property changing, and changing it makes an audit failure
+   able to fail a lane write.
+
+`stakes_provenance` and `kind` are in no audit diff set at all, and incident-driven lane writes are
+audited under `incident.*` rather than `lane.*` — two smaller instances of the same shape.
+
 ## The design question this slice exists to settle
 
 Two candidates, and the increment's real work is choosing with evidence rather than taste.
@@ -85,9 +122,19 @@ Two candidates, and the increment's real work is choosing with evidence rather t
 transition rather than a three-field announcement, and derive lane state on every daemon by folding
 the log — `goals.ts`'s posture, ADR 325's named precedent. `lanes` becomes a cache of a projection
 rather than an authority. No new wire kind, no new migration for origin stamps, no second insert
-path. The costs are real and must be measured, not waved at: every lane read becomes a scan unless
-the projection is materialised, the corpus is 541 lanes against 5,518 messages today, and `goals.ts`
-is already the slowest read on the board.
+path.
+
+It is also the codebase's dominant idiom rather than a novelty. The federation data census
+(`wiki/federation-data-census.md:40-45`, measured 2026-08-25) counts **18 store modules that write
+nothing at all** — pure read-time derivation — and names ADR 048's "derive everything else" as the
+prevailing rule. Two of them are `laneSweep.ts` and `laneClose.ts`, so parts of lane behaviour
+already derive rather than store. The census also names the two argued exceptions, `wake_leases` and
+`requests`, where ADR 131 allowed stored state to bear correctness. That is the bar B has to clear.
+
+The cost is the open risk and it is **unmeasured**. Every lane read becomes a scan unless the
+projection is materialised, against 541 lanes and 5,518 messages at the 2026-08-18 census. No
+benchmark for `listGoals` exists, so "projections are affordable here" is an assumption this
+increment must test, not inherit.
 
 **B. Stamp and fold the rows.** `lanes` gets `(origin_node, origin_seq)` per ADR 331, drawn from the
 same `nodes.next_seq` allocator — never a second counter, because ADR 335 §8 already depends on one
@@ -116,6 +163,40 @@ being the answer.
   string on the pull wire so a build-skewed act reaches the fold rather than 500-ing the page. A
   lane transition carrying an unknown *state* is the same shape and deserves the same deliberate
   answer, not a reflex copy.
+
+## What Finding 3 does to the choice
+
+Neither candidate survives unamended, and the order of work changes.
+
+**Close the holes first, whichever design wins.** The two silent releases must emit a transition
+before anything folds them, and that is a fix worth landing on its own merits — an unaudited
+ownership change is a defect in a single-machine musterd too, since `lanes.ts:749` and `:776` are
+the only two places a lane changes hands with no record of who did it or why. This is the first
+buildable unit of this lane and it does not depend on settling A versus B.
+
+**Then the choice narrows.** With the transition log complete, A stops being "invent a lane event"
+and becomes "replicate the events increment 1 already writes" — which is why increment 1 wrote them.
+B's remaining advantage shrinks to content edits (Finding 3's second hole), where a row carries
+values that an audit row does not. That points at a hybrid the original two candidates missed:
+**transitions replicate as events; the lane's declared content rides its `lane.updated` event with
+values added.** Whether that is one design or two is the question the implementation settles.
+
+**One correction to the lane's opening description.** It asserted lanes have "a local insert path"
+that a fold would double. The survey shows one insert path exactly (`openLane`, `lanes.ts:98-156`) —
+the same single-chokepoint property `insertMessage` has — so ADR 331's second-writer hazard applies
+in the same shape and is no worse here. It also shows `lanes` has **no** unique index beyond its
+primary key, so B would need one before a fold could be idempotent, exactly as v54 added
+`idx_messages_origin` once the fold became a second writer.
+
+**One note for 3c, recorded here so it is not rediscovered.** The claim CAS is not a SQL `WHERE`
+clause — it is an in-transaction predicate re-reading the row inside the transaction
+(`lanes.ts:225-235`), guarded by SQLite's single-writer lock. The handler comment
+(`http.ts:4177-4180`) says the guard is "inert while this handler stays synchronous end-to-end;
+load-bearing the moment an await (or a second writer) lands between the read and here." Federation
+is that second writer. 3c does not add a guard to an unguarded path; it makes an already-written
+guard start mattering. And exactly one of the five `updateLane` callers arms it: the PATCH handler,
+and only for ownership or state patches. The acceptance path, the sweep and both incident writes all
+call the unguarded form.
 
 ## Falsifier to write first
 
