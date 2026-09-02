@@ -51,17 +51,29 @@ const ctx: BackendContext = {
 };
 
 describe('Codex residency argv', () => {
-  it('uses the workspace flag only for fresh exec and never passes a bypass', () => {
-    expect(buildCodexFreshArgs('line', '/ws')).toEqual(['exec', '--json', '-C', '/ws', 'line']);
+  it('uses the workspace flag only for fresh exec, and both forms bypass hook trust (ADR 359)', () => {
+    expect(buildCodexFreshArgs('line', '/ws')).toEqual([
+      'exec',
+      '--json',
+      '--dangerously-bypass-hook-trust',
+      '-C',
+      '/ws',
+      'line',
+    ]);
     expect(buildCodexResumeArgs('line', 'thread')).toEqual([
       'exec',
       'resume',
       '--json',
+      '--dangerously-bypass-hook-trust',
       'thread',
       'line',
     ]);
+    // ADR 359: musterd authors the hooks.json being trusted, so bypassing the interactive
+    // hook-trust prompt (which a headless wake spawn could never show anyway) is deliberate — a
+    // fresh/resume args build that silently drops the flag would go right back to hooks never
+    // firing, exactly as invisible as the bug this fixed.
     for (const args of [buildCodexFreshArgs('line', '/ws'), buildCodexResumeArgs('line', 'thread')])
-      expect(args.join(' ')).not.toMatch(/dangerously|bypass|approval|ignore-user-config/i);
+      expect(args).toContain('--dangerously-bypass-hook-trust');
   });
   it('accepts only a typed thread.started JSONL record', () => {
     expect(parseCodexThreadLine('{"type":"thread.started","thread_id":"t"}')).toBe('t');
