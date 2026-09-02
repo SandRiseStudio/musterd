@@ -67,11 +67,17 @@ The MCP adapter reads the file under two conditions, both required:
    that forwards it — Claude Code — never evaluates the file, so nothing changes there. An explicit
    `MUSTERD_PROVENANCE=session` is an assertion by whoever launched the adapter, and the file does
    not out-argue it.
-2. **Only when `spawner_pid` is the adapter's own parent process, and the file is unexpired.** The
-   adapter's parent is the harness process the actuator spawned (the `ppid` rung in
-   `sessionLiveness.ts` already rests on this). A human session opened in the same workspace during
-   the wake window has a different parent and reads nothing. That condition is what makes the file
-   an attestation with a source rather than a default — ADR 236's line, kept.
+2. **Only when `spawner_pid` is in the adapter's own ancestry (a bounded walk, six hops), and the
+   file is unexpired.** ~~Only when `spawner_pid` is the adapter's own parent process~~ — CORRECTED
+   2026-09-02 by the first live falsifier (lease `01M1HXRG…`, 13:43): the pid the actuator spawns
+   is not always the harness. `codex` on this machine resolves to `@openai/codex/bin/codex.js`, a
+   Node script that `spawn`s the native binary, so the actuator's child is the MCP server's
+   *grandparent*, and the parent-only check refused a file that was written correctly. The walk
+   covers a launcher wrapper or a sandbox shim; a human session opened in the same workspace during
+   the wake window shares no ancestor with the actuator's child and still reads nothing. That
+   condition is what makes the file an attestation with a source rather than a default — ADR 236's
+   line, kept. The walk costs one `ps` per hop and runs only after a file has been found, parsed,
+   and found unexpired, so the common case pays nothing.
 
 The actuator clears the file when the run settles, success or failure, and only if it still carries
 the same lease (a slow settle must not delete a newer wake's file). `expires_at` is the work order's
@@ -96,6 +102,12 @@ Rejected:
   and the priced rail (lane `01M1G310Y7`) sees it.
 - The lease file is a new artefact in `.musterd/`. It is `0600`, contains no secret (a lease id is a
   daemon-minted opaque correlation token, ADR 241), and is short-lived by construction.
+- Priced and accepted (ryder's review of #1187): an actuator that dies without settling leaves a
+  file that stays honourable until `expires_at` — a work order's 30 minutes. It is pid-gated, so the
+  residual is pid reuse inside that window on the same machine, by a process that is also a musterd
+  adapter launched by a harness that strips env. Low enough to carry; a daemon-side
+  `wake_lease_source: env | file` on the claim row would make the two channels distinguishable after
+  the fact, and is the follow-up if this residual is ever observed.
 - A residual, named rather than fixed: even with attestation right, the actuator's not-mine path
   kills a session the actuator itself spawned ninety seconds earlier, in its own workspace, whose
   thread id it just wrote into `binding.json`. That evidence exists and is not consulted before the

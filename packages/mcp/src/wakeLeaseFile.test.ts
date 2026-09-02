@@ -41,14 +41,37 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe('readWakeLeaseFile — the actuator-written lease, honoured only by the process it spawned', () => {
-  it('returns the lease when the file names this process’s parent and is unexpired', () => {
+  it('returns the lease when the file names an ANCESTOR of this process and is unexpired', () => {
+    // Grandparent, not parent, on purpose: `codex` is a Node wrapper that spawns the native binary,
+    // so the pid the actuator spawned is one generation above the MCP server's parent. The first
+    // live falsifier for #1187 (lease 01M1HXRG…, 2026-09-02 13:43) refused on exactly that hop.
     write(valid);
-    const r = readWakeLeaseFile(dir, { now: NOW, ppid: 4242 });
+    const r = readWakeLeaseFile(dir, { now: NOW, ancestors: () => [7, 4242, 80] });
     expect(r).toEqual({ lease_id: valid.lease_id, harness: 'codex' });
   });
 
+  it('also honours the file when the spawner is the direct parent', () => {
+    write(valid);
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: () => [4242] })).toEqual({
+      lease_id: valid.lease_id,
+      harness: 'codex',
+    });
+  });
+
+  it('does not walk ancestry at all for a missing or expired file — the walk costs a ps per hop', () => {
+    let walked = 0;
+    const counting = () => {
+      walked++;
+      return [4242];
+    };
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: counting })).toBeUndefined();
+    write({ ...valid, expires_at: NOW - 1 });
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: counting })).toBeUndefined();
+    expect(walked).toBe(0);
+  });
+
   it('is undefined when there is no file — the common case, and it must cost nothing', () => {
-    expect(readWakeLeaseFile(dir, { now: NOW, ppid: 4242 })).toBeUndefined();
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: () => [7, 4242, 80] })).toBeUndefined();
   });
 
   it('refuses a file whose spawner is NOT this process’s parent — a human session in the same workspace', () => {
@@ -56,20 +79,20 @@ describe('readWakeLeaseFile — the actuator-written lease, honoured only by the
     // during the wake window would attest a lease it knows nothing about — ADR 236's forbidden
     // assertion, made from a file instead of an env default.
     write(valid);
-    expect(readWakeLeaseFile(dir, { now: NOW, ppid: 9999 })).toBeUndefined();
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: () => [9999, 8888, 1] })).toBeUndefined();
   });
 
   it('refuses an expired file — a wake that ended leaves no lease for the next occupant', () => {
     write({ ...valid, expires_at: NOW - 1 });
-    expect(readWakeLeaseFile(dir, { now: NOW, ppid: 4242 })).toBeUndefined();
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: () => [7, 4242, 80] })).toBeUndefined();
   });
 
   it('refuses malformed JSON and a wrong shape, quietly — a bad file is a page that renders', () => {
     write('{not json');
-    expect(readWakeLeaseFile(dir, { now: NOW, ppid: 4242 })).toBeUndefined();
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: () => [7, 4242, 80] })).toBeUndefined();
     write({ ...valid, provenance: 'session' });
-    expect(readWakeLeaseFile(dir, { now: NOW, ppid: 4242 })).toBeUndefined();
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: () => [7, 4242, 80] })).toBeUndefined();
     write({ ...valid, lease_id: '' });
-    expect(readWakeLeaseFile(dir, { now: NOW, ppid: 4242 })).toBeUndefined();
+    expect(readWakeLeaseFile(dir, { now: NOW, ancestors: () => [7, 4242, 80] })).toBeUndefined();
   });
 });

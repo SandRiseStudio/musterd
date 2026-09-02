@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BINDING_DIR, WAKE_LEASE_FILE, type WakeLeaseFile } from '@musterd/protocol';
 
@@ -15,9 +15,11 @@ import { BINDING_DIR, WAKE_LEASE_FILE, type WakeLeaseFile } from '@musterd/proto
 export function writeWakeLeaseFile(workspace: string, lease: WakeLeaseFile): void {
   try {
     mkdirSync(join(workspace, BINDING_DIR), { recursive: true });
-    writeFileSync(join(workspace, BINDING_DIR, WAKE_LEASE_FILE), JSON.stringify(lease) + '\n', {
-      mode: 0o600,
-    });
+    const path = join(workspace, BINDING_DIR, WAKE_LEASE_FILE);
+    writeFileSync(path, JSON.stringify(lease) + '\n', { mode: 0o600 });
+    // `mode` on writeFileSync applies only when the file is CREATED. A file left world-readable by
+    // an older build keeps its mode across the rewrite unless tightened explicitly.
+    chmodSync(path, 0o600);
   } catch {
     /* best-effort: the env channel is still in place */
   }
