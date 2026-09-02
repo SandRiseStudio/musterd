@@ -90,5 +90,11 @@ WHERE action = 'lane.ready_for_review'
 
 then check each `unknown_grade` candidate's `family`: known means the worker was the unknown side.
 
-Whether an unattested worker should route at all, and at what grade, is a separate decision this
-page does not make; the honest label is the prerequisite for it.
+Whether an unattested worker should route at all, and at what grade, was a separate decision this
+page did not make; the honest label was the prerequisite for it. Made 2026-09-02:
+[ADR 351](../decisions/351-unattested-worker-routes-ungraded.md) routes the unattested worker to a
+live attested peer at the rung below the ladder, `ungraded`, with its own `route` value and the
+close-edge abstention counted. From that landing the shape above should stop producing
+`no_candidate` rows and start producing `route: 'ungraded'` ones (falsify: a `no_candidate` row
+after the ADR 351 daemon bounce whose `worker_family` is `unknown` and whose candidates include a
+live attested agent).

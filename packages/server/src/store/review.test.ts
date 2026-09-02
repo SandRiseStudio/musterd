@@ -485,35 +485,67 @@ describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', (
   // of those nulls as the CANDIDATE's `unknown_grade` — so one unattested asker knocked out every
   // eligible reviewer, and the row read as "the team had nobody" (10 of 129 no_candidate rows,
   // measured 2026-09-01: worker unattested in all 10, every excluded candidate a known family).
-  it('an unattested worker is recorded as such — not as every candidate being ungradeable', async () => {
+  //
+  // ADR 351 (2026-09-02): an unattested worker now ROUTES, at the bottom rung `ungraded`. The
+  // pairing proves nothing about diversity and says so — the grade is not one of ADR 188's three,
+  // the route is its own value so the ADR 260 eval keeps it out of `liveRouted`, and the close edge
+  // abstains (`review_grade_unknown`). An ungraded review beats no review; a false grade beats neither.
+  it('an unattested worker routes to a live attested reviewer at the `ungraded` rung (ADR 351)', async () => {
     const { openLane } = await import('./lanes.js');
     const { selectReviewCounterpart } = await import('./review.js');
     const { db, team } = seed();
     const { row: worker } = addMember(db, team, { kind: 'agent', name: 'worker', role: '' });
-    attach(db, worker.id, 'cli', 'conn-worker'); // live, attests nothing (the claim-storm shape)
-    agent(db, team, 'gptbot', 'gpt-5.6-sol'); // live, attested, would be cross_family
-    agent(db, team, 'dolly', 'claude-opus-4-8'); // live, attested, would be cross_model or same
+    attach(db, worker.id, 'cli', 'conn-worker'); // live, attests nothing (the bare-CLI-claim shape)
+    agent(db, team, 'gptbot', 'gpt-5.6-sol'); // live, attested — would be cross_family if we knew
+    agent(db, team, 'dolly', 'claude-opus-4-8'); // live, attested — could be cross_model or same
     const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
     attach(db, unknown.id, 'cli', 'conn-unknown'); // a candidate that is itself unattested
-    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
 
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
     const selection = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
-    // Still no route: ADR 188 grades nothing from an unknown worker, and never routes same_model.
-    expect(selection.pick).toBeNull();
+    // Roster order among equals: gptbot was added first. No rung above `ungraded` is claimable
+    // because nothing can be graded against an unknown worker — gptbot's gpt family is NOT a
+    // cross_family claim here, and the pick must not say it is.
+    expect(selection.pick).toMatchObject({
+      reviewer: 'gptbot',
+      route: 'ungraded',
+      grade: 'ungraded',
+      reviewer_family: 'gpt',
+    });
     expect(selection.snapshot).toMatchObject({
-      selected: null,
+      selected: { reviewer: 'gptbot', grade: 'ungraded' },
       worker_family: 'unknown',
       candidates: expect.arrayContaining([
         { member: 'worker', family: 'unknown', eligible: false, exclusion: 'self' },
-        { member: 'gptbot', family: 'gpt', eligible: false, exclusion: 'worker_unattested' },
-        { member: 'dolly', family: 'claude', eligible: false, exclusion: 'worker_unattested' },
-        // A candidate that attests nothing is still its own `unknown_grade` — the two are separable.
+        { member: 'gptbot', family: 'gpt', eligible: true, grade: 'ungraded' },
+        { member: 'dolly', family: 'claude', eligible: false, exclusion: 'tie_break' },
+        // A candidate that attests nothing is still its own `unknown_grade` — never routed, at
+        // any rung: two unknowns prove even less than one.
         { member: 'unknown', family: 'unknown', eligible: false, exclusion: 'unknown_grade' },
       ]),
     });
     // The attested snapshot names the worker's family too, so a reader need not join the close row.
     const attested = selectReviewCounterpart(db, team.id, lane, 'gptbot', TIMEOUT);
     expect(attested.snapshot.worker_family).toBe('gpt');
+  });
+
+  it('`ungraded` is a bottom rung, never a substitute: an attested worker still grades every candidate (ADR 351)', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team } = seed();
+    agent(db, team, 'worker', 'claude-opus-5');
+    agent(db, team, 'twin', 'claude-opus-5'); // same_model — must stay excluded, not fall to ungraded
+    const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
+    attach(db, unknown.id, 'cli', 'conn-unknown');
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
+    const selection = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(selection.pick).toBeNull();
+    expect(selection.snapshot.candidates).toEqual(
+      expect.arrayContaining([
+        { member: 'twin', family: 'claude', eligible: false, exclusion: 'same_model' },
+        { member: 'unknown', family: 'unknown', eligible: false, exclusion: 'unknown_grade' },
+      ]),
+    );
   });
 });
 
