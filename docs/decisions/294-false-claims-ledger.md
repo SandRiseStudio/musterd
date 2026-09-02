@@ -66,9 +66,10 @@ designed against, explicitly, with nick:
    read, the published badness ordering of channels is: self-caught is the *least* bad way to have
    been wrong, then peer, acceptance, challenge, human, and collision-days-later worst. If the
    ledger ever makes a seat regret posting a retraction, it has failed at its one job. If stated
-   confidence is ever added to claims, scoring uses a proper scoring rule (Brier-style), under
-   which honest confidence is the optimal strategy — that is the design north star: the cheapest
-   way to game the metric must be identical to the behavior the metric wants.
+   confidence is ever added to claims _(Amended 2026-09-02: it has been — see Consequences,
+   "Stated confidence")_, scoring uses a proper scoring rule (Brier-style), under which honest
+   confidence is the optimal strategy — that is the design north star: the cheapest way to game
+   the metric must be identical to the behavior the metric wants.
 
 6. **Visibility holdback, with an expiry the ADR itself records.** Raw entries are public in git
    from day one (they must be — the corrector commits them). Computed per-seat and per-model cuts
@@ -98,6 +99,45 @@ designed against, explicitly, with nick:
   holdback lifts — with decision 4's confounds attached.
 - A recurring false-claim generator (the retrospective's stale-dist family) becomes visible across
   entries, turning "be more careful" into "build the control".
+
+### Stated confidence (amendment, 2026-09-02 — izzo, from seeds 01M0XTXN6C / 01M0XVFZ41)
+
+Decision 5 reserved a place for stated confidence and named the scoring rule. This amendment adds
+the field, and nothing else — no scoring code, no new store, no cut before the checkpoint.
+
+1. **Confidence is a field on the claim, not on musterd.** A claim record is
+   `{statement, confidence, claimant, made_at, ref}`. A musterd act is one *carrier* of it
+   (`meta.confidence`); a PR description, a cookoff judge's output, a foreign harness's log are
+   others. The seat is the first target; the record is harness-agnostic by construction, because
+   the field says nothing about how the number was produced — a Claude seat's self-estimate, a
+   codex seat's, and a deterministic probe's (`guardian` could state 0.99 on `daemon_down`) are
+   scored identically.
+2. **Optional, a probability in (0, 1], on any act.** The envelope refuses a malformed value
+   (`actMetaRules`, `packages/protocol/src/envelope.ts`) so nothing unscoreable reaches the ledger.
+   A claim-bearing act is the natural place — a `lane_submit` claim, an acceptance verdict, a
+   `status_update` assertion — but nothing mandates it anywhere: a required field is the
+   claim-registration tax of §Problem 1, and seats would route around it.
+3. **Omission is absent, never 1.0.** An unstated confidence is not scored, and the share of
+   claims that carry one is its own denominator in every cut (decision 4 shape). If omission read
+   as certainty, omission would be the cheapest hedge — §Problem 3 in a new costume.
+4. **Scored only by a proper scoring rule, against ledger outcomes.** A claim's outcome is "an
+   entry was minted against it" or "it stood"; Brier over `(confidence, outcome)` pairs, computed
+   at the checkpoint (decision 6 — 2026-10-01 or 100 forward entries, whichever first), per model
+   and per seat, with the detection-channel breakdown attached. Nothing reads it before then; the
+   holdback is unchanged.
+5. **Ledger entries record the stated confidence** (`claim_confidence` in `docs/claims/README.md`,
+   `unstated` when the claim carried none) so the join needs no second store.
+
+Expectation, stated so it can fail: LLM self-reported confidence is poorly calibrated out of the
+box. The first cut will likely show over-confidence on the `absence` class in particular. That is
+the finding the field exists to produce, per model, on real work — the ADR 056 question — not a
+reason to withhold the field. What would make this amendment wrong: if by the checkpoint fewer
+than ~10% of claim-bearing acts carry a confidence at all, the field is paperwork nobody pays
+(§Problem 1) and it should be retired rather than mandated. The seeds' other two ideas — pass@k
+on lanes and a multi-acceptor panel — were considered in the same exploration and rejected for
+musterd's run-once regime (each lane runs once; acceptance's binding constraint is attention, not
+supply — `docs/wiki/acceptance-routing.md`); their musterd forms are per-act-class discharge rate
+and disagreement rate per claim class, both readable from this ledger at the same checkpoint.
 
 ## Observability & Evaluation
 

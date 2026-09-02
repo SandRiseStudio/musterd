@@ -86,6 +86,23 @@ describe('EnvelopeSchema', () => {
     expect(makeEnvelope({ ...base, act: 'message' }).meta).toBeNull();
   });
 
+  it('meta.confidence is an optional probability in (0, 1] on any act (ADR 294 decision 5)', () => {
+    const ok = makeEnvelope({ ...base, act: 'status_update', meta: { confidence: 0.8 } });
+    expect(ok.meta).toMatchObject({ confidence: 0.8 });
+    expect(
+      makeEnvelope({ ...base, act: 'accept', meta: { in_reply_to: 'm', confidence: 1 } }).meta,
+    ).toMatchObject({ confidence: 1 });
+    // Absent is absent — never coerced to 1.0, never required. Omission must not be the cheapest hedge.
+    expect(makeEnvelope({ ...base, act: 'status_update' }).meta).toBeNull();
+    // Malformed values are refused rather than silently carried into the ledger.
+    for (const bad of [0, -0.1, 1.01, 2, NaN, '0.8', 'high', true, null]) {
+      expect(
+        () => makeEnvelope({ ...base, act: 'status_update', meta: { confidence: bad } }),
+        String(bad),
+      ).toThrow(/meta\.confidence/);
+    }
+  });
+
   it('round-trips the steering acts steer/challenge (ADR 103)', () => {
     expect(makeEnvelope({ ...base, act: 'steer', body: 'use v2' }).act).toBe('steer');
     expect(makeEnvelope({ ...base, act: 'challenge', body: 'why this task?' }).act).toBe(
