@@ -262,7 +262,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(55); // runs v18…v55 (including bootstrap cutover evidence)
+    expect(runMigrations(db)).toBe(55); // runs v18…v55 (including the pull cursor and bootstrap cutover evidence)
 
     const scope = (id: string) =>
       db

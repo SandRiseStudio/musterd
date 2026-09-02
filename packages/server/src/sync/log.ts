@@ -1,4 +1,4 @@
-import type { SyncEvent } from '@musterd/protocol';
+import type { SyncEvent, SyncPullEvent } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 
 /**
@@ -161,4 +161,41 @@ export function ingestBatch(
 
     return { accepted, hub_seq_high: hubHead(db, teamId) };
   })();
+}
+
+/**
+ * Is this daemon a hub for the team — does any OTHER node hold a live credential here? The loopback
+ * predicate for the hub's own staging (3b-ii). False for every single-machine install, so they pay
+ * nothing; flips true at the first enrollment and the push cursor (starting at 0) backfills the
+ * hub's whole history through the same gapless path a joiner uses.
+ */
+export function hasEnrolledJoiners(db: Database, teamId: string, localNodeId: string): boolean {
+  return Boolean(
+    db
+      .prepare<[string, string], { one: number }>(
+        `SELECT 1 AS one FROM nodes
+          WHERE team_id = ? AND id != ? AND credential_hash IS NOT NULL AND revoked_at IS NULL
+          LIMIT 1`,
+      )
+      .get(teamId, localNodeId),
+  );
+}
+
+/**
+ * One page of the team's canonical order after `after`, oldest first. This is the walk
+ * `idx_sync_log_hub` was declared UNIQUE for (3b-i). `payload` was stored as the SyncEvent verbatim,
+ * so it parses back without a second shape — the hub_seq rides beside it for the puller's cursor.
+ */
+export function readStaged(
+  db: Database,
+  teamId: string,
+  after: number,
+  limit: number,
+): SyncPullEvent[] {
+  return db
+    .prepare<[string, number, number], { hub_seq: number; payload: string }>(
+      'SELECT hub_seq, payload FROM sync_log WHERE team_id = ? AND hub_seq > ? ORDER BY hub_seq LIMIT ?',
+    )
+    .all(teamId, after, limit)
+    .map((r) => ({ ...(JSON.parse(r.payload) as SyncEvent), hub_seq: r.hub_seq }));
 }

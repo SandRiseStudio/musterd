@@ -62,3 +62,32 @@ export const SyncPushResponseSchema = z.object({
   hub_seq_high: z.number().int().nonnegative(),
 });
 export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;
+
+/**
+ * The pull side (3b-ii). `SyncEvent`'s shape, with `hub_seq` beside it because the puller's cursor
+ * IS a hub_seq — the team's canonical order, assigned at ingest (ADR 335 §3).
+ *
+ * One deliberate loosening: `envelope.act` is a string here, not the `Act` enum. The push side
+ * validates the act on ingest against the HUB's build, but the log outlives builds — a hub rolled
+ * back, or a puller behind the hub, meets an act it cannot name. Classifying that is the FOLD's job
+ * (its `unknown_act` stop: "upgrade this daemon", retried each tick, valid prefix applied). With the
+ * enum here, the hub's own response re-parse refused the page and answered 500 to every puller,
+ * which the puller logged as `sync_pull_failed` — indistinguishable from offline — and applied
+ * nothing, not even the prefix before the poisoned event (dolly, #1155 review F1). The wire carries
+ * what the log holds; the reader decides what it can apply.
+ */
+export const SyncPullEventSchema = SyncEventSchema.extend({
+  envelope: EnvelopeSchema.innerType().extend({ act: z.string().min(1) }),
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;
+
+/** Same bound as push, for the same reason: a legitimate catch-up must not allocate unboundedly. */
+export const SYNC_PULL_MAX_BATCH = SYNC_PUSH_MAX_BATCH;
+
+export const SyncPullResponseSchema = z.object({
+  events: z.array(SyncPullEventSchema).max(SYNC_PULL_MAX_BATCH),
+  /** The hub's head, so a puller can compute lag (`hub_head − cursor`) without a second call. */
+  hub_seq_high: z.number().int().nonnegative(),
+});
+export type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;

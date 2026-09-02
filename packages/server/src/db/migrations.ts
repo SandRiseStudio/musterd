@@ -1304,6 +1304,29 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
+    // Federation 3b-ii (spec 2026-09-01-sync-fold-design.md §Schema). v47 added the origin pair to
+    // messages; nothing enforced its uniqueness because insertMessage was the only writer and it
+    // allocates gaplessly. The fold is a second writer, so the schema holds the invariant now.
+    // The fold's idempotence key = this index. NOT messages.id (ADR 335 scoped id uniqueness to the
+    // origin, so two origins may legitimately stage one id in one team). The created_at index the
+    // spec put here landed as v53 (ADR 349, the ts-cursor fix) — this migration adds only its own.
+    version: 54,
+    up: (db) => {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_origin ON messages(origin_node, origin_seq);
+
+        -- Local-only (ADR 325 residence 3), like sync_push_cursor: this daemon's memory of how far
+        -- it has applied the team's canonical order to its own messages. One row per team — a
+        -- daemon is a puller for a team or it is not. The hub uses the same row for its own fold.
+        CREATE TABLE IF NOT EXISTS sync_pull_cursor (
+          team_id       TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          last_hub_seq  INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        );
+      `);
+    },
+  },
+  {
     // v54 is reserved by the open federation 3b-ii branch. Gaps are valid; using v55 avoids the
     // collision that would make the second same-number migration silently never run.
     // ADR 350: persist migration provenance, first scoped use, and per-Team legacy cutover.

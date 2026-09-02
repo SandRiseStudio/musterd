@@ -7,15 +7,14 @@ import { insertMessage } from '../store/messages.js';
 import { createTeam } from '../store/teams.js';
 
 /**
- * The 3b-i containment property, and the reason the slice boundary is real rather than asserted.
+ * The containment property, narrowed by 3b-ii.
  *
- * ADR 331 §Consequences warned that a second insert path — one reaching `messages` without going
- * through `insertMessage` — would break the gaplessness the whole ordering substrate rests on.
- * This slice's answer is to not build one: pushed events land in `sync_log` and stop there. The
- * fold into `messages` is 3b-ii, one implementation run by hub and puller alike.
- *
- * Written BEFORE any ingest exists, so it cannot be retrofitted to whatever the code turned out to
- * do. When 3b-ii adds the fold, this file is what says the fold is the ONLY such path.
+ * 3b-i: nothing writes `messages` but `insertMessage`, and pushed events stop in `sync_log`.
+ * 3b-ii: nothing writes `messages` but `insertMessage` and `foldBatch` (sync/fold.ts) — and ONLY
+ * `insertMessage` moves `nodes.next_seq`. The fold copies the origin's stamp verbatim and never
+ * touches the allocator; `fold.test.ts`'s first case is that falsifier. This file keeps holding
+ * that the staging tables carry no counter tied to `next_seq`, and that a v50–v54 replay leaves the
+ * log and every allocator alone.
  */
 
 /** The local state 3b-i must leave alone: the message log, and every origin's next-seq counter. */
@@ -48,7 +47,7 @@ function seed() {
   return { db, team };
 }
 
-describe('3b-i containment', () => {
+describe('sync containment', () => {
   it('has the three staging tables, and they start empty', () => {
     const { db } = seed();
 
@@ -66,13 +65,46 @@ describe('3b-i containment', () => {
     expect(before.messages).toEqual({ n: 1 });
     expect(before.seqs).toEqual([{ id: expect.any(String), next_seq: 2 }]);
 
-    // Rewind past v50 and replay the migration tail. v51-v55 add independent auth/evidence state.
+    // Rewind past v50 and replay the migration tail. v51–v53 add independent tables and an index;
+    // v54 adds the origin index and the pull cursor, and touches no row; v55 adds guarded columns.
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
     expect(runMigrations(db)).toBe(55);
 
     expect(snapshot(db)).toEqual(before);
     // …and the replay did not drop what was already staged-adjacent: the tables survive it.
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 0 });
+    db.close();
+  });
+
+  it('v54 holds (origin_node, origin_seq) unique in messages and adds the pull cursor', () => {
+    const { db, team } = seed();
+    const row = db
+      .prepare<
+        [string],
+        { origin_node: string; origin_seq: number }
+      >('SELECT origin_node, origin_seq FROM messages WHERE team_id = ? LIMIT 1')
+      .get(team.id)!;
+    const author = db.prepare<[], { id: string }>('SELECT id FROM members LIMIT 1').get()!.id;
+    // A second row under the SAME origin pair must be refused by the schema, not by convention:
+    // the fold (3b-ii) is a second writer, and its idempotence key is this pair, not messages.id.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO messages (id, team_id, from_member, to_kind, to_member, act, body, ts,
+                                 created_at, origin_node, origin_seq)
+           VALUES ('dup', ?, ?, 'team', NULL, 'message', 'x', 1, 1, ?, ?)`,
+        )
+        .run(team.id, author, row.origin_node, row.origin_seq),
+    ).toThrow(/UNIQUE|constraint/i);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM sync_pull_cursor').get()).toEqual({ n: 0 });
+    // The read side's future key (spec §"The ts-cursor defect") is indexed by the same migration.
+    expect(
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_messages_team_created'",
+        )
+        .get(),
+    ).toBeDefined();
     db.close();
   });
 
@@ -98,9 +130,10 @@ describe('3b-i containment', () => {
     }
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 2 });
 
-    // …and `messages.id` is a PRIMARY KEY, so 3b-ii's fold can write exactly one of them. What was
-    // one node's push loop failing has become the whole team's fold failing. Standing here, in
-    // 3b-i, that is a consequence to state; 3b-ii owns choosing what the fold does about it.
+    // …and `messages.id` is a PRIMARY KEY, so the fold can write exactly one of them. 3b-ii's
+    // answer (spec §"The fold's rule" 5): the second is an id_collision STOP — terminal, logged at
+    // error with both origins, never silently dropped. The raw INSERT below is what the fold
+    // refuses to do; it is here to show the constraint is real.
     const author = db.prepare<[], { id: string }>('SELECT id FROM members LIMIT 1').get()!.id;
     const fold = (origin: string) =>
       db

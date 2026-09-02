@@ -427,3 +427,41 @@ describe('the push loop', () => {
     expect(origins[0]!.origin_node).not.toBe('node-peer');
   });
 });
+
+describe('the hub pushes to itself (3b-ii loopback)', () => {
+  const hubCtx = () => ({ db: hub.db, hub: new Hub(), config: resolveConfig(), rosterRoots: [] });
+  const hubStaged = () =>
+    hub.db
+      .prepare<
+        [],
+        { origin_node: string; origin_seq: number; hub_seq: number }
+      >('SELECT origin_node, origin_seq, hub_seq FROM sync_log ORDER BY hub_seq')
+      .all();
+
+  it('stages nothing while the team has no enrolled joiner (single-machine install)', async () => {
+    send(hub, 'h-1');
+    expect(await pushTeam(hubCtx(), getTeamBySlug(hub.db, 'bravo')!)).toBe(0);
+    expect(hubStaged()).toEqual([]);
+  });
+
+  it('stages its own history through ingestBatch once a joiner is enrolled, dense hub_seq', async () => {
+    send(hub, 'h-1');
+    send(hub, 'h-2');
+    // The joiner needs its own node row before it can enroll (minted on its first logged act).
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    const team = getTeamBySlug(hub.db, 'bravo')!;
+    expect(await pushTeam(hubCtx(), team)).toBe(2);
+    const local = hub.db
+      .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+      .get(team.id)!.node_id;
+    expect(hubStaged()).toEqual([
+      { origin_node: local, origin_seq: 1, hub_seq: 1 },
+      { origin_node: local, origin_seq: 2, hub_seq: 2 },
+    ]);
+    // Idempotent: a second pass stages nothing new and the cursor holds.
+    expect(await pushTeam(hubCtx(), team)).toBe(0);
+    // And the hub's own messages table is untouched by staging (containment still holds).
+    expect(hub.db.prepare('SELECT COUNT(*) AS n FROM messages').get()).toEqual({ n: 2 });
+  });
+});

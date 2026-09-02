@@ -138,9 +138,9 @@ footprint, schema meta — and `local_node`, below). Roster identity stays on gi
 | 1 | Prereq hardening — guarded lane CAS, per-field `updateLane`, transition events | landed (#1071) |
 | 2 | The ordering substrate — `(origin_node, origin_seq)` stamped from the first message, migration v47 | landed 2026-08-27 (`5c1b35f0`, [ADR 331](../decisions/331-ordering-substrate.md)) |
 | 3a | The machine credential — `msnode_`, `msinv_` enrollment, rotation, revocation | landed 2026-08-28 (#1100, `3b8415cf`, [ADR 328](../decisions/328-machine-credential.md)) |
-| **3b-i** | **Sync wire format and push — `sync_log` staging under a canonical `hub_seq`** | **this build** (migration v50) |
-| 3b-ii | The fold — applying staged events to `messages`, run by hub and puller alike | not started |
-| 3c | Hub-authoritative claim CAS, seat→node residence binding | not started |
+| 3b-i | Sync wire format and push — `sync_log` staging under a canonical `hub_seq` | landed 2026-08-31 (`46707cb5`, [ADR 335](../decisions/335-sync-wire-format.md)) |
+| **3b-ii** | **Pull by cursor, the fold into `messages`, read-side gap detection; the hub stages its own history** | **this build** (migration v54, spec `docs/superpowers/specs/2026-09-01-sync-fold-design.md`) |
+| 3c | Hub-authoritative claim CAS, seat→node residence binding | not started — needs this increment plus a lane-replication slice (its lane's declared dep on 3a alone is wrong) |
 
 The hub storage engine needs no decision: ADR 325 defines a hub by the surface it speaks, and a
 promoted daemon on SQLite satisfies the CAS — one process, one writer.
@@ -187,15 +187,28 @@ promoted daemon on SQLite satisfies the CAS — one process, one writer.
   unreachable hub into permanent silent loss. Offline is the expected state for a laptop, not an
   error: the pass logs `sync_push_failed` and retries next tick.
 
+### What increment 3b-ii added
+
+- **Events apply remotely.** A joiner pulls `GET /teams/:slug/sync/pull` by `hub_seq` cursor and
+  folds foreign-origin events into its own `messages`; the hub folds joiner events from its own
+  `sync_log`. One implementation (`sync/fold.ts`), two feeders. The fold copies the origin stamp
+  verbatim and never touches `nodes.next_seq` — `insertMessage` remains the only allocator.
+  `created_at` on a folded row is *this* machine's receipt time, never the envelope's `ts`.
+- **The hub's own history is in the log it serves.** A hub never enrolls with itself, so before this
+  its own traffic never reached `sync_log`; now it pushes to itself in-process through `ingestBatch`
+  once a joiner is enrolled, backfilling through the same gapless path. A hub that has never sent
+  still folds — hosting is defined by who is enrolled with it, not by whether it has spoken.
+- **The fold blocks, never skips.** An event naming a seat this roster does not yet hold (git lag),
+  an act this build does not know, an envelope id already held under another origin, or an
+  origin-sequence gap stops the cursor *at* that event with its own `error` line, once per distinct
+  blocker; the prefix is applied. Roster and build stalls clear themselves; the other two are
+  terminal.
+
 ### Not yet true
 
-**Nothing applies remotely.** Pushed events land in `sync_log` and stop there — no staged event is
-written to `messages`, and no `nodes.next_seq` moves on ingest. That is deliberate, and it is the
-whole shape of the 3b split: the fold is a *second insert path* into `messages`, the one ADR 331
-§Consequences warned would break gaplessness, so it is built once in 3b-ii as one implementation run
-by hub and puller alike, and reviewed as its own slice. `packages/server/src/sync/containment.test.ts`
-holds the line meanwhile.
-
-So a team spanning two machines today has **one merged log on the hub** — `sync_log`, in a single
-canonical order across every origin — and **two local logs** that each still see only their own
-traffic. Lane claims stay local until 3c.
+**Folded events are not pushed to open sockets.** They are in `messages`, so inbox reads see them;
+live WebSocket delivery of a remote event is a follow-up. **The inbox and wake cursors still key on
+`ts`** — the origin's clock — so a folded event older than a seat's last read is invisible to that
+seat; the readers move to `created_at` in their own lane, a hard precondition before a second
+machine enrolls (spec §"The ts-cursor defect"). **Lanes, goals and audit do not replicate**
+(ADR 331 §Decision 5), so lane claims stay local until 3c — which now has what it was missing.
