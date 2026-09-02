@@ -1,0 +1,56 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v musterd >/dev/null 2>&1 && musterd nudge >/dev/null 2>&1 || true # musterd-grok-notify"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check >/dev/null 2>&1 || true # musterd-grok-interrupt"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|run_terminal_command|search_replace",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v musterd >/dev/null 2>&1 && musterd gate check --stdin >/dev/null 2>&1 || true # musterd-grok-gate",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v musterd >/dev/null 2>&1 && musterd session start --stdin 2>/dev/null || true # musterd-grok-capture"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v musterd >/dev/null 2>&1 && musterd session end --stdin >/dev/null 2>&1 || true # musterd-grok-end"
+          }
+        ]
+      }
+    ]
+  }
+}
