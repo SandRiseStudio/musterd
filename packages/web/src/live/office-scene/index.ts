@@ -12,6 +12,7 @@ import {
 import { stillMode } from '../stillMode';
 import { surfaceGlyph } from '../surfaceGlyph';
 import { createActors, deskNeighbourPairs, type Actors } from './actors';
+import { helpWalks } from './mapping';
 import {
   ambientFrameBudgetMs,
   DEFAULT_CAPTURE_FPS,
@@ -871,8 +872,10 @@ export function mountOffice(
     // and measurement mode.
     if (addressee) {
       const chip = document.createElement('span');
-      chip.className = 'lc-speech__to';
-      chip.textContent = `→ ${addressee.name}`;
+      // A set chip drops the single-name width clamp: at 3-4 names the clamp ellipsises, and a chip
+      // that names the set and then hides part of it is the failure this whole path exists to end.
+      chip.className = addressee.names.length > 1 ? 'lc-speech__to lc-speech__to--set' : 'lc-speech__to';
+      chip.textContent = `→ ${addressee.label}`;
       inner.appendChild(chip);
     }
     const textEl = document.createElement('span');
@@ -946,14 +949,25 @@ export function mountOffice(
     // (ADR 285) where a moving line would make the contrast sweep nondeterministic. A recipient who
     // isn't on the floor (offline, or capped out of the render) has no desk to point at, so the
     // chip stands alone.
-    const target = addressee?.tether ? heads.get(addressee.name) : undefined;
-    if (target && !reduced && !STILL) {
-      const trace = drawTether(head, target);
-      labelHost.appendChild(trace);
-      s.cancels.push(() => trace.remove());
+    //
+    // An ADR 254 eligible set names 2–4 seats, any one of whom discharges the act, so it gets a
+    // trace to EACH of their desks rather than a picked one: the room shows the same ambiguity the
+    // ledger holds. A sender inside their own set is skipped here for the same reason a self-
+    // addressed member act drops its tether.
+    const targets = addressee?.tether
+      ? addressee.names.filter((n) => n !== who).map((n) => heads.get(n))
+      : [];
+    const drawn = targets.filter((t): t is NonNullable<typeof t> => t !== undefined);
+    if (drawn.length > 0 && !reduced && !STILL) {
+      for (const target of drawn) {
+        const trace = drawTether(head, target);
+        labelHost.appendChild(trace);
+        s.cancels.push(() => trace.remove());
+      }
       // The whoosh deliberately follows the tether's own gate (E4 spec §2): a sweep describing
-      // motion that is not drawing would be a lie. Pan rides sender → addressee with the trace.
-      roomTone.moment('whoosh', screenPan(head.x, width), screenPan(target.x, width));
+      // motion that is not drawing would be a lie. Pan rides sender → addressee with the trace, and
+      // stays ONE sweep however many traces drew — four whooshes for one act is noise, not weight.
+      roomTone.moment('whoosh', screenPan(head.x, width), screenPan(drawn[0]!.x, width));
     }
 
     // enter on the next frame so the hidden initial state paints first → the CSS transition actually runs
@@ -1549,7 +1563,9 @@ export function mountOffice(
       // An ask lands with acoustic weight in the room (E3 spec §2): one soft held tone, panned to
       // the asked member's desk when directed, soft-centre for a team ask. Stateless by design.
       if (ev.act === 'ask') {
-        const at = ev.addressee ? heads.get(ev.addressee.name) : undefined;
+        // `ask` is deliberately not an ELIGIBLE_ACT (envelope.ts), so an ask's addressee is always
+        // the single routed member — the first name is the only name.
+        const at = ev.addressee ? heads.get(ev.addressee.names[0]!) : undefined;
         roomTone.moment('askbell', at ? screenPan(at.x, width) : 0);
       }
       return;
@@ -1564,18 +1580,37 @@ export function mountOffice(
       case 'screen-pulse':
         pushCue(ev.who, toneColor(ev.tone), '');
         break;
+      // `to` is a list on the three ELIGIBLE_ACTS: one name normally, 2-4 for an ADR 254 set. Each
+      // name gets the identical treatment a single recipient gets — the room must not rank them,
+      // because the ledger does not (nick, 2026-09-02).
       case 'note':
-        pushCue(ev.to, toneColor(ev.tone), '');
         pushCue(ev.from, toneColor(ev.tone), '');
-        pushThread(ev.from, ev.to, toneColor(ev.tone));
+        for (const to of ev.to) {
+          pushCue(to, toneColor(ev.tone), '');
+          pushThread(ev.from, to, toneColor(ev.tone));
+        }
         break;
-      case 'walk-help':
-        pushThread(ev.from, ev.to);
-        // A real walk-over; fall back to an in-place cue only if the walk can't play (target gone).
-        if (!actors.walk(ev.from, { kind: 'help', to: ev.to, urgent: ev.tier === 'urgent' })) {
+      case 'walk-help': {
+        // The sender walks to EVERY name, one desk after another: `actors.walk` queues per call —
+        // one trip in flight plus three pending, so a set at the MAX_ELIGIBLE cap of four fits
+        // exactly, WITH NO HEADROOM. A sender who already has a walk running loses the tail of a
+        // four-name set to the backlog guard, silently. Measured in the browser 2026-09-02: the
+        // /office-preview script re-fires faster than an ~8.5s round trip drains, so from its
+        // second loop on the guard refuses legs — including the single-recipient `Ada -> Bo` walk
+        // that predates eligible sets entirely. That makes it a property of the queue depth and the
+        // act rate, not of this fan-out; on /live, acts arrive far enough apart that it has room.
+        // The fallback cue fires only if NO leg could play — one unreachable desk among several is
+        // not a failed act, it is a shorter trip.
+        let walked = false;
+        for (const req of helpWalks(ev)) {
+          pushThread(ev.from, req.to);
+          if (actors.walk(ev.from, req)) walked = true;
+        }
+        if (!walked) {
           pushCue(ev.from, '#f4cf52', ev.tier === 'urgent' ? '!' : '', ev.tier === 'urgent');
         }
         break;
+      }
       case 'walk-handoff':
         pushThread(ev.from, ev.to, toneColor('handoff'));
         if (!actors.walk(ev.from, { kind: 'handoff', to: ev.to, urgent: false })) {
@@ -1629,7 +1664,7 @@ export function mountOffice(
         // party when it's directed. Urgent only when flagged (bolder ring + glyph then).
         const col = toneColor('challenge');
         pushCue(ev.from, col, '?', ev.urgent);
-        if (ev.to) pushCue(ev.to, col, '?', ev.urgent);
+        for (const to of ev.to) pushCue(to, col, '?', ev.urgent);
         break;
       }
       case 'defer':

@@ -169,7 +169,8 @@ describe('speechAddressee', () => {
   it('names the member a directed act is aimed at', () => {
     // The bug this fixes: "You were right, I will take the handoff…" floating with no "you".
     expect(speechAddressee({ kind: 'member', name: 'ryder' }, 'miley')).toEqual({
-      name: 'ryder',
+      names: ['ryder'],
+      label: 'ryder',
       tether: true,
     });
   });
@@ -185,7 +186,8 @@ describe('speechAddressee', () => {
   it('keeps the chip but drops the tether when a seat addresses itself', () => {
     // A zero-length arc from a desk back to the same desk is a smudge, not a signal.
     expect(speechAddressee({ kind: 'member', name: 'miley' }, 'miley')).toEqual({
-      name: 'miley',
+      names: ['miley'],
+      label: 'miley',
       tether: false,
     });
   });
@@ -193,8 +195,61 @@ describe('speechAddressee', () => {
   it('is case-sensitive about self-addressing only on an exact seat-name match', () => {
     // Seat names are exact identifiers; "Miley" is not "miley" and must not be collapsed.
     expect(speechAddressee({ kind: 'member', name: 'Miley' }, 'miley')).toEqual({
-      name: 'Miley',
+      names: ['Miley'],
+      label: 'Miley',
       tether: true,
     });
+  });
+});
+
+/**
+ * ADR 254 eligible sets. An act addressed to 2-4 seats travels as `to: {kind:'team'}` with the
+ * names in `meta.eligible`, so every surface reading `to` alone saw it as unaddressed — 35 acts in
+ * the live corpus, 28 of them review routing, drawn as a megaphone to nobody while the CLI printed
+ * the names. These cases are the whole of what makes the chip and trace fire for them.
+ */
+describe('speechAddressee — the eligible set', () => {
+  const TEAM = { kind: 'team' } as const;
+
+  it('names every seat in the set, not one of them', () => {
+    // eligible[0] would be a single addressee the ledger does not have: any of them discharges it.
+    expect(speechAddressee(TEAM, 'miley', ['ryder', 'sloane'])).toEqual({
+      names: ['ryder', 'sloane'],
+      label: 'ryder or sloane',
+      tether: true,
+    });
+  });
+
+  it('reads as a list at the cap of four', () => {
+    expect(speechAddressee(TEAM, 'miley', ['ryder', 'sloane', 'dolly', 'stanley'])?.label).toBe(
+      'ryder, sloane, dolly or stanley',
+    );
+  });
+
+  it('keeps the sender in the label but never lets a lone self-address stand', () => {
+    // A set that names the sender alongside others is honest — they really are eligible — but a
+    // "set" whose only other member is the sender has no arc worth drawing.
+    expect(speechAddressee(TEAM, 'miley', ['miley', 'ryder'])?.names).toEqual(['miley', 'ryder']);
+    expect(speechAddressee(TEAM, 'miley', ['miley', 'miley'])).toBeNull();
+  });
+
+  it('ignores a one-name set — that is a member act that took the wrong road', () => {
+    expect(speechAddressee(TEAM, 'miley', ['ryder'])).toBeNull();
+  });
+
+  it('still says nothing for a plain team or broadcast act', () => {
+    // The default audience. Only an eligible set earns a chip on a non-member act.
+    expect(speechAddressee(TEAM, 'miley', null)).toBeNull();
+    expect(speechAddressee(TEAM, 'miley')).toBeNull();
+    expect(speechAddressee({ kind: 'broadcast' }, 'miley', ['ryder', 'sloane'])?.label).toBe(
+      'ryder or sloane',
+    );
+  });
+
+  it('lets a member recipient win over any eligible set on the same envelope', () => {
+    // Both shapes present is a protocol contradiction; `to` is the routed truth, so it decides.
+    expect(speechAddressee({ kind: 'member', name: 'ryder' }, 'miley', ['dolly', 'sloane'])).toEqual(
+      { names: ['ryder'], label: 'ryder', tether: true },
+    );
   });
 });

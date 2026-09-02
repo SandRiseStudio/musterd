@@ -1,4 +1,4 @@
-import type { Envelope } from '@musterd/protocol';
+import { eligibleOf, type Envelope } from '@musterd/protocol';
 import { laneEvent } from './format';
 
 /**
@@ -30,7 +30,21 @@ export interface Caption {
 /** Plain-sentence caption for a notable act — `null` for everything that should stay quiet. */
 export function captionFor(env: Envelope): Caption | null {
   const from = env.from;
-  const to = env.to.kind === 'member' ? env.to.name : null;
+  /**
+   * Who the act is for, as a phrase the sentence can drop in.
+   *
+   * An ADR 254 eligible set travels as `to: {kind:'team'}` with the names in `meta.eligible`, so
+   * reading `to` alone left the 28 review-routing `request_help`s in the live corpus with NO
+   * caption at all — `if (!to) return null` swallowed the most consequential directed act the team
+   * sends. `eligibleOf` is the protocol's single reader of that shape.
+   */
+  const eligible = eligibleOf(env.meta);
+  const to =
+    env.to.kind === 'member'
+      ? env.to.name
+      : eligible && eligible.length > 1
+        ? `${eligible.slice(0, -1).join(', ')} or ${eligible[eligible.length - 1]}`
+        : null;
   const say = (text: string, tone: CaptionTone): Caption => ({ text, who: from, tone });
   if (laneEvent(env) === 'lane_handoff' && to) return say(`${from} is handing work to ${to}`, 'handoff');
   switch (env.act) {

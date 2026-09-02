@@ -146,11 +146,23 @@ export function shapeSpeech(raw: string, act?: string): ShapedSpeech {
 
 /** What the bubble should say about its recipient, or `null` when naming one would be noise. */
 export interface Addressee {
-  /** The recipient seat's name, rendered as a chip on the bubble's leading edge. */
-  name: string;
-  /** Whether to draw the light-trace toward that member's desk. False when there is no meaningful
-   * arc to draw — the scene additionally drops it when the recipient isn't on the floor. */
+  /**
+   * Every seat this act is for, in the order the sender named them — one name for a `member` act,
+   * 2–4 for an ADR 254 eligible set. Plural because the scene must not pick one: any of them
+   * discharges the act, so the trace goes to all of them and the chip says so.
+   */
+  names: string[];
+  /** What the chip reads: `ryder`, or `ryder or sloane`. */
+  label: string;
+  /** Whether to draw the light-trace toward those members' desks. False when there is no meaningful
+   * arc to draw — the scene additionally drops it for anyone who isn't on the floor. */
   tether: boolean;
+}
+
+/** `ryder` · `ryder or sloane` · `ryder, sloane or dolly` — short enough for a 720p chip. */
+function joinOr(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
 }
 
 /**
@@ -160,10 +172,33 @@ export interface Addressee {
  * would be chrome rather than information. A member act always names them — that is the whole point
  * — but a seat addressing itself gets the chip without the tether, because an arc from a desk back
  * to the same desk is a smudge, not a signal.
+ *
+ * ── The eligible set (ADR 254) ──────────────────────────────────────────────────────────────────
+ *
+ * An act addressed to 2–4 named seats travels as `to: {kind:'team'}` with the names in
+ * `meta.eligible` — the recipient field is deliberately unchanged, because routing still fans out
+ * to the team. Read `to` alone and the act looks unaddressed, which is exactly what every web
+ * surface did until 2026-09-02: 35 acts in the live corpus, 28 of them the review-routing
+ * `request_help`s, drew as a megaphone to nobody while the CLI printed `ryder | sloane`.
+ *
+ * All of them are named, and none of them is THE recipient. Picking `eligible[0]` would draw a
+ * single addressee the ledger does not have — a nicer-looking version of the same lie — so the
+ * chip names the set and the scene traces to each desk. Nobody walks: a courier can only walk to
+ * one desk, and there is no one desk.
  */
-export function speechAddressee(to: Recipient, from: string): Addressee | null {
-  if (to.kind !== 'member') return null;
-  return { name: to.name, tether: to.name !== from };
+export function speechAddressee(
+  to: Recipient,
+  from: string,
+  eligible?: string[] | null,
+): Addressee | null {
+  if (to.kind === 'member') {
+    return { names: [to.name], label: to.name, tether: to.name !== from };
+  }
+  // A one-name "set" is not a set — it is a member act that took the wrong road, and the sender
+  // addressing only themselves is a soliloquy with no arc to draw.
+  const named = eligible?.filter((n) => n !== from) ?? [];
+  if (!eligible || eligible.length < 2 || named.length === 0) return null;
+  return { names: eligible, label: joinOr(eligible), tether: true };
 }
 
 /** Per-character typewriter cadence in ms — quicker for longer text, clamped comfortable. Tuned so a
