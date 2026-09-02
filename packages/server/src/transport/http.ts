@@ -77,6 +77,7 @@ import {
   SyncClaimRequestSchema,
   SyncPushRequestSchema,
   SyncPushResponseSchema,
+  wakeabilityFromFacts,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
@@ -209,6 +210,9 @@ import {
   enrollResidency,
   getResidency,
   listResidency,
+  recordHostSeen,
+  seatWakeabilityFacts,
+  wakeabilityInputs,
   markWakeSpawned,
   recordSessionAttestation,
   revokeResidency,
@@ -1356,9 +1360,11 @@ function summarize(
   // Seats enrolled in harness residency (ADR 131) — offline reads `offline · wakeable`, and the
   // capture timestamp feeds the `resumable` badge (inc 5: a timestamp, so renderers apply the GC
   // freshness instead of trusting a stale boolean). One listResidency pass covers both facts.
-  const residency = new Map(
-    listResidency(ctx.db, teamId).map((r) => [r.member_id, r.resumable_at] as const),
-  );
+  // ADR 357: the same pass now carries host liveness (from the actuator's poll heartbeat) and
+  // workspace readability (from the last wake report), so the roster can say WHY an enrolled seat
+  // is not wakeable instead of labelling enrolment as reachability.
+  const rosterNow = Date.now();
+  const residency = seatWakeabilityFacts(ctx.db, teamId, rosterNow);
   // Steering marks you present (ADR 155 Inc 1): the humans named as `driver` on a live agent seat.
   // Derived here at read time — no synthetic presence row for the steering human (ADR 155 decision 1).
   const liveDrivers = listLiveDrivers(ctx.db, teamId, ctx.config.presenceTimeoutMs);
@@ -1410,7 +1416,25 @@ function summarize(
       ...(offlineReason ? { offline_reason: offlineReason } : {}),
       reclaimable: isReclaimable,
       wakeable: residency.has(s.member.id),
-      resumable_at: residency.get(s.member.id) ?? null,
+      resumable_at: residency.get(s.member.id)?.resumable_at ?? null,
+      // ADR 357: the ADR 189 enum beside the boolean. `wakeable` stays "enrolled" for every
+      // consumer that reads it today; `wakeability` is the honest answer to "can a directed act
+      // reach this seat right now" — and it is the SAME derivation the ADR 191 offline-acceptor
+      // pick uses (review.ts), so the roster and the picker cannot disagree.
+      wakeability: wakeabilityFromFacts({
+        enrolled: residency.has(s.member.id),
+        ...wakeabilityInputs(residency.get(s.member.id)),
+        ...(lastAction.get(s.member.name) === undefined
+          ? {}
+          : {
+              seat_quiet:
+                resolveQuiescence(
+                  lastAction.get(s.member.name) ?? null,
+                  quiescenceNow,
+                  QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
+                ).state === 'quiet',
+            }),
+      }),
       quiescence: resolveQuiescence(
         lastAction.get(s.member.name) ?? null,
         quiescenceNow,
@@ -2665,6 +2689,10 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/residency/wake-leases') {
         const body = parseOrBadRequest(WakeLeasesBodySchema, await readJson(req));
         const team = authAgentKeyOnly(ctx, slug, req, body.host);
+        // ADR 357: this poll is the host's heartbeat. Recorded before the lease claim so a host
+        // that polls and gets nothing still counts as alive — the roster's `enrolled_host_stale`
+        // is derived from it.
+        recordHostSeen(ctx.db, team.id, body.host, Date.now());
         const orders = claimWakeLeases(
           ctx.db,
           team.id,
