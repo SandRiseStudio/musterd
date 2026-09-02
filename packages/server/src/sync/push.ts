@@ -298,10 +298,11 @@ export async function pushTeam(
   }
 
   if (res.status === 403) {
-    // ADR 328 §4 at ingest (presence replication spec §2): a presence event in this batch names a
-    // seat bound to another node, and the hub refused the whole batch. Decision 7 again (ADR 335
-    // §7): a refusal must be distinguishable from offline, and this one repeats every tick until
-    // an admin unbinds the seat or the session attaches from where the seat lives.
+    // ADR 328 §4 at ingest (presence replication spec §2; every kind since push-level residence,
+    // 2026-09-02): an event in this batch names a seat bound to another node, and the hub refused
+    // the whole batch. Decision 7 again (ADR 335 §7): a refusal must be distinguishable from
+    // offline, and this one repeats every tick until the seat trusts this node (ADR 358), an admin
+    // unbinds it, or the session acts from where the seat lives.
     const body = (await res.json().catch(() => null)) as {
       seat?: unknown;
       node_label?: unknown;
@@ -312,7 +313,7 @@ export async function pushTeam(
       seat: typeof body?.seat === 'string' ? body.seat : null,
       bound_to: typeof body?.node_label === 'string' ? body.node_label : null,
       detail:
-        'a presence event names a seat bound to another node; unbind it or attach from where it lives',
+        'an event names a seat bound to another node; trust this node from where it lives (musterd node trust), unbind it, or act from there',
     });
     throw new Error(`hub refused the batch (403 bound_elsewhere)`);
   }
