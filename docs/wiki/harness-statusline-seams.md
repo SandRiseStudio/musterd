@@ -1,6 +1,6 @@
 # Harness statusline seams
 
-Which harnesses can host a musterd seat chip: Claude Code can, and as of 2026-08-26 Codex, Cursor and opencode cannot — surveyed against upstream source and docs, with a falsifier per verdict.
+Which harnesses can host a musterd seat chip: Claude Code can, Grok CLI can (2026-09-02), and Codex, Cursor and opencode cannot — surveyed against upstream source and docs, with a falsifier per verdict.
 
 ## Why this page exists
 
@@ -19,6 +19,8 @@ So the question is narrow: **does each harness expose a slot that runs a command
 | Codex CLI | status line (TUI) | no | no |
 | Cursor | none | n/a | no |
 | opencode | none | n/a | no (toast only) |
+| Grok CLI (interactive) | `[ui.status_line] type = "command"` | yes | **yes — ADR 352** |
+| Grok CLI (headless `-p`) | none — no TUI | n/a | no |
 
 The Claude Code row splits by **driver**, not just harness: a statusline needs a TUI, and headless has none. The [driver support matrix](driver-support-matrix.md) carries the per-driver cells, including a `persistent seat indicator` row pointing back here.
 
@@ -50,11 +52,17 @@ That is a real but different affordance: a toast is a one-shot notification, not
 
 > opencode has no persistent statusline slot, only a transient toast (2026-08-26; falsify: find a config key or plugin API in opencode docs that renders text which survives past its triggering event).
 
+### Grok CLI — yes, command-driven (2026-09-02)
+
+Grok's `[ui.status_line]` accepts `type = "command"` and pipes JSON to a script, painting stdout as a persistent row (`~/.grok/docs/user-guide/25-status-line.md`, Grok 1.0.13). ADR 352 writes that slot in project `.grok/config.toml` when absent, never overwriting a foreign builtin.
+
+> Grok CLI can host the seat chip via `[ui.status_line] type = "command"` (2026-09-02; falsify: that key gone from Grok's status-line docs, or `type = "command"` refused).
+
 ## What follows from this
 
-**No adapter work is justified today.** Three of four harnesses have no seam, and the one nearest miss (opencode's toast) delivers a different thing than the chip does. Seats on Codex, Cursor and opencode keep the ADR 326 status quo: the primer text and the wake line, no user-facing seat indicator.
+~~**No adapter work is justified today.** Three of four harnesses have no seam~~ FIXED 2026-09-02 by ADR 352: Grok CLI has the same class of command slot Claude Code does, and the adapter writes it. Codex, Cursor and opencode still have no seam; seats on those keep the ADR 326 status quo: the primer text and the wake line, no user-facing seat indicator.
 
-The asymmetry is worth stating plainly, because it is a **product** fact and not only an engineering one: a musterd seat is meaningfully more legible to its human on Claude Code than on the other three, and that gap is imposed by the harnesses, not by musterd.
+The remaining asymmetry is a **product** fact: a musterd seat is meaningfully more legible to its human on Claude Code and Grok CLI than on Codex/Cursor/opencode, and that gap is imposed by those harnesses, not by musterd.
 
 If it ever needs closing, the two candidates in order of cost are opencode's `session.created` → `tui.toast.show` greeting, and upstream feature requests for a custom status line item in Codex.
 

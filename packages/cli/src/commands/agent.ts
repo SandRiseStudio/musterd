@@ -21,7 +21,7 @@ import { resolve } from './helpers.js';
  * of that harness in the printed folder then *is* that agent, with no binding thrash against your own
  * seat.
  *
- * `--harness <claude-code|cursor|codex>` picks the harness to wire (default claude-code) — the same
+ * `--harness <claude-code|cursor|codex|opencode|grok>` picks the harness to wire (default claude-code) — the same
  * pluggable adapters `musterd init` uses (ADR 038/085), so a Cursor or Codex user gets a genuinely
  * wired workspace, not a Claude-Code-only one. `--here` keeps the legacy single-folder behavior;
  * `--path <dir>` targets an explicit folder.
@@ -36,7 +36,7 @@ export async function agentCommand(
   const name = parsed.positionals[0];
   if (!name || /\s/.test(name)) {
     throw new CliError(
-      'usage: musterd agent <name> [--role <label>] [--profile <profile>] [--model <id>] [--harness <claude-code|cursor|codex>] [--driver <you>] [--here | --path <dir>]',
+      'usage: musterd agent <name> [--role <label>] [--profile <profile>] [--model <id>] [--harness <claude-code|cursor|codex|opencode|grok>] [--driver <you>] [--here | --path <dir>]',
       2,
     );
   }

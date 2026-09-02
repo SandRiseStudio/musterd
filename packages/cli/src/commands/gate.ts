@@ -72,18 +72,34 @@ export function parseToolCall(raw: string): GateToolCall | null {
     const json: unknown = JSON.parse(raw);
     if (typeof json !== 'object' || json === null) return null;
     const o = json as Record<string, unknown>;
-    const tool = typeof o['tool_name'] === 'string' ? o['tool_name'] : undefined;
-    if (!tool) return null;
-    const input =
+    const rawTool =
+      typeof o['tool_name'] === 'string'
+        ? o['tool_name']
+        : typeof o['toolName'] === 'string'
+          ? o['toolName']
+          : undefined;
+    if (!rawTool) return null;
+    const inputRaw =
       typeof o['tool_input'] === 'object' && o['tool_input'] !== null
         ? (o['tool_input'] as Record<string, unknown>)
-        : {};
+        : typeof o['toolInput'] === 'object' && o['toolInput'] !== null
+          ? (o['toolInput'] as Record<string, unknown>)
+          : {};
+    // Grok CLI names (ADR 352): map onto the class-table vocabulary Claude already uses.
+    const grokAlias: Record<string, string> = {
+      run_terminal_command: 'Bash',
+      search_replace: 'Edit',
+    };
+    const tool = grokAlias[rawTool] ?? rawTool;
+    const input = inputRaw;
     const path =
       typeof input['file_path'] === 'string'
         ? input['file_path']
         : typeof input['notebook_path'] === 'string'
           ? input['notebook_path']
-          : undefined;
+          : typeof input['target_file'] === 'string'
+            ? input['target_file']
+            : undefined;
     const command = typeof input['command'] === 'string' ? input['command'] : undefined;
     // ADR 163 — the payload ENVELOPE, not the tool input. `agent_id`/`agent_type` are present only on a
     // subagent's own tool calls and absent on the parent seat's; measured on Claude Code 2.1.220. On a
@@ -133,7 +149,8 @@ export function parseEnvelopeSessionId(raw: string): string | undefined {
   try {
     const json: unknown = JSON.parse(raw);
     if (typeof json !== 'object' || json === null) return undefined;
-    const id = (json as Record<string, unknown>)['session_id'];
+    const o = json as Record<string, unknown>;
+    const id = typeof o['session_id'] === 'string' ? o['session_id'] : o['sessionId'];
     return typeof id === 'string' && id ? id : undefined;
   } catch {
     return undefined;

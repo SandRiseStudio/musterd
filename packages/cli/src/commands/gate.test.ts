@@ -27,6 +27,25 @@ describe('parseToolCall (ADR 150 PreToolUse payload)', () => {
     expect(call).toEqual({ tool: 'Bash', command: 'gh pr merge 320' });
   });
 
+  it('maps Grok CLI camelCase payloads onto the class-table vocabulary (ADR 352)', () => {
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          toolName: 'run_terminal_command',
+          toolInput: { command: 'gh pr merge 320' },
+        }),
+      ),
+    ).toEqual({ tool: 'Bash', command: 'gh pr merge 320' });
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          toolName: 'search_replace',
+          toolInput: { target_file: 'src/x.ts' },
+        }),
+      ),
+    ).toEqual({ tool: 'Edit', path: 'src/x.ts' });
+  });
+
   it('extracts an Edit/Write file path', () => {
     expect(
       parseToolCall(JSON.stringify({ tool_name: 'Write', tool_input: { file_path: 'src/x.ts' } })),

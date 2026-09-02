@@ -33,6 +33,21 @@ it behave otherwise, then invalidate-date the cell (wiki rule 4).
 | Config entry scope | repo-shared (keys by repo root) | same | same | per-folder, secret inside the tree | same | per-folder; plus machine-global `~/.codex/config.toml` that no repair reaches (`registeredElsewhere`, measured 2026-08-05) |
 | Hook drift detection (doctor) | markers checked, missing hooks named | same | same | not populated | not populated | the only harness that populates `hookDrift` today (2026-08-24; falsify: grep `hookDrift` in `harnesses/*`) |
 
+### Grok CLI (added 2026-09-02, ADR 352)
+
+Observed against Grok 1.0.13 docs on this machine. Parity target is Claude Code where Grok exposes the seam.
+
+| Feature | Grok CLI (terminal) | Grok CLI (headless `-p`) |
+| --- | --- | --- |
+| Session labeling | terminal OSC 0 only — no sidebar write API | none |
+| Hook capture | Notification, PostToolUse interrupt, PreToolUse gate, SessionStart/End. **No** ADR 167 observer (Grok has no peer-session tool). UserPromptSubmit additionalContext is discarded, so no repeating orient-nudge | same hook files if the harness runs them |
+| Skills / guidance | `.grok/skills/musterd/` + `.grok/commands` + AGENTS.md (native) | same files |
+| Persistent seat indicator | `[ui.status_line] type = "command"` — yes (falsify: that key gone from Grok status-line docs) | **none** — no TUI |
+| Model attestation | `summary.json` `current_model_id` + hook `sessionId` | same files |
+| Session capture | `$GROK_HOME/sessions/<encoded-cwd>/<id>/summary.json` | same |
+| Config entry scope | per-folder `.grok/config.toml` | same |
+| Hook drift detection | `inspectGrokHookDrift` populates `hookDrift` | same |
+
 Where a Claude Code column says "same", the feature is harness-level and the driver does not change
 it — the driver-sensitive rows are labeling (needs a sidebar or a tty) and capture (paths differ by
 driver on Cursor). The doctor already narrates the labeling row per capability and deliberately
