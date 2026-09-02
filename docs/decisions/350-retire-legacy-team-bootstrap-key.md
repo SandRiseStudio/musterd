@@ -1,6 +1,6 @@
 # 350 — Retire the legacy Team bootstrap key
 
-- Status: proposed — 2026-09-01
+- Status: accepted — 2026-09-01
 - Date: 2026-09-01
 - Lane: `01M1FPJ6JYRRWNF817AYFX94K1`
 

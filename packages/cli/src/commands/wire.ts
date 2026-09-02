@@ -92,6 +92,9 @@ export async function wireCommand(parsed: Parsed, deps?: WireDeps): Promise<numb
       process.stdout.write(
         `${theme.dim('the shown-once credential was written directly to this binding and was not printed.')}\n`,
       );
+      process.stdout.write(
+        `${theme.dim('reclaim this seat once with the scoped credential to satisfy cutover readiness:')} musterd claim ${seat}\n`,
+      );
     }
     return 0;
   }

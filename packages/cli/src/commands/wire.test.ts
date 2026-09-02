@@ -207,6 +207,9 @@ describe('musterd wire --migrate-bootstrap (ADR 350)', () => {
     });
     expect(statSync(join(cwd, BINDING_DIR, BINDING_FILE)).mode & 0o777).toBe(0o600);
     expect(result.out).not.toContain('mskey_scoped');
+    expect(result.out).toContain(
+      'reclaim this seat once with the scoped credential to satisfy cutover readiness',
+    );
   });
 
   it('keeps the legacy binding intact when atomic publication fails', async () => {
