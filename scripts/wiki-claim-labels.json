@@ -163,5 +163,6 @@
   "(2026-09-01; falsify: find a `lane.ready_for_review` row with `review_selection.outcome =": "defect",
   "## Blind spot 1 — `perf:check` does not build (2026-09-02; falsify: run `pnpm perf:check` twice around a web change without rebuilding and watch the number not move)": "defect",
   "## Blind spot 2 — a PR at exactly N KB / N KB on its own gates reads over on main (2026-09-01; falsify: the `gates` run on `db1099de` is green)": "defect",
-  "its own rows (2026-09-02; falsify: `sqlite3 ~/.musterd/musterd.db \"select count(*) from audit where": "other"
+  "its own rows (2026-09-02; falsify: `sqlite3 ~/.musterd/musterd.db \"select count(*) from audit where": "other",
+  "## The measurement flags are 86 B, and every route to removing them is worse than keeping them (2026-09-02, lane 01M1HHP0ED; falsify: stub `stillMode.ts`'s four exports to `false`, `pnpm --filter @musterd/web build`, and diff the gzip of `/live`'s eager set)": "other"
 }

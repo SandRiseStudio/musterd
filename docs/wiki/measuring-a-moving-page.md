@@ -50,3 +50,19 @@ Rejected on measurement while chasing the same number: emitting the preview scri
 `MEASURED MID-FLIGHT` is a real, hard-won signal: the settle check finally seeing motion is what #880 bought. But it fired on **every single run** of `/office-preview` for two days, because the room never stopped — and a qualifier that is always present is one nobody reads. "A true signal that gets read as noise" is the same family of failure as a silent wrong green, and it is the reason the residual motion had to be held rather than documented and accepted.
 
 When a new honesty marker starts firing constantly, that is not the marker working. Fix what it is pointing at, or the next reader learns to skip the line.
+
+## The measurement flags are 86 B, and every route to removing them is worse than keeping them (2026-09-02, lane 01M1HHP0ED; falsify: stub `stillMode.ts`'s four exports to `false`, `pnpm --filter @musterd/web build`, and diff the gzip of `/live`'s eager set)
+
+`?still` and `?asks-open` are harness scaffolding that ships in `/live`'s eager bundle to every viewer, forever. That reads like a category error — product bytes and harness bytes should not be the same bytes — and it has now been raised twice as something to pay off ([#1168](https://github.com/SandRiseStudio/musterd/pull/1168)'s stated first lever, then dolly at its acceptance). Measure it before you build anything.
+
+**Both flags, and every branch they gate, are worth 86 bytes gzipped** — 153,390 B → 153,304 B across `/live`'s 13 eager chunks. `?asks-open` alone is a fraction of that. The earlier attempt to shave them by deduplicating their two readers into `hasFlag`/`flagHere` returned **4 bytes**, because gzip had already collapsed the duplicate.
+
+Against that, each route out costs something real:
+
+- **A build-time define stripped from production** makes the a11y gate measure an artifact that is not the one that ships. For a gate whose entire claim is "something has looked at what viewers get", that is a weakening, not a refactor — and it buys CI a second build.
+- **The sweep setting `data-open` itself** looks free and is not. The attribute is React-controlled (`data-open={open || undefined}` beside `inert={!open}` in `AsksStrip.tsx`), so any re-render clobbers it, and the injected state is *open + inert* — a pairing no reader ever sees. Trading a deterministic page-side flag for an attribute race is the exact failure [ADR 285](../decisions/285-the-page-declares-its-own-transience.md) exists to end.
+- **The sweep clicking "see all"** was already rejected by ADR 285, on timing inference the sweep has six guards' worth of.
+
+So the principle is sound in general and simply does not clear its price here. The flags stay. **Do not re-open this without a new argument** — a second gate wanting a third flag would be one, since the cost this page measures is for two.
+
+The general form, and the reason this is filed under measurement rather than perf: *"harness code in the product bundle"* is a smell, not a quantity. Price the smell before you spend a design on it. 86 B bought at the cost of a gate that no longer measures the shipped artifact is a bad trade in any direction you run it.
