@@ -18,6 +18,8 @@ export interface TeamRow {
   archived_at: number | null;
   /** v0.3 P3 (ADR 076): sha256 of the team's rotatable agent key. NULL until an admin sets one. */
   agent_key_hash: string | null;
+  /** ADR 350: when this Team transactionally disabled its legacy Team-wide bootstrap key. */
+  bootstrap_cutover_at: number | null;
   /** v0.3 P3 (ADR 076): team governance policy as JSON (`{ allow_pre_issued_grants }`). NULL ⇒ defaults. */
   policy: string | null;
   /** Recurring Team schedule, JSON-encoded; null means no Team default (ADR 206). */

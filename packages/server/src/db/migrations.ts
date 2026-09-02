@@ -1303,6 +1303,42 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // v54 is reserved by the open federation 3b-ii branch. Gaps are valid; using v55 avoids the
+    // collision that would make the second same-number migration silently never run.
+    // ADR 350: persist migration provenance, first scoped use, and per-Team legacy cutover.
+    version: 55,
+    up: (db) => {
+      // Guard ALTERs for the version-rewind migration tests, which replay the tail against an
+      // already-widened schema. The production runner still applies this exactly once.
+      const credentialCols = db
+        .prepare("SELECT name FROM pragma_table_info('agent_bootstrap_credentials')")
+        .pluck()
+        .all();
+      if (!credentialCols.includes('migration_target_member_id')) {
+        db.exec(
+          'ALTER TABLE agent_bootstrap_credentials ' +
+            'ADD COLUMN migration_target_member_id TEXT REFERENCES members(id)',
+        );
+      }
+      if (!credentialCols.includes('first_used_at')) {
+        db.exec('ALTER TABLE agent_bootstrap_credentials ADD COLUMN first_used_at INTEGER');
+      }
+      const teamCols = db.prepare("SELECT name FROM pragma_table_info('teams')").pluck().all();
+      if (!teamCols.includes('bootstrap_cutover_at')) {
+        db.exec('ALTER TABLE teams ADD COLUMN bootstrap_cutover_at INTEGER');
+      }
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_bootstrap_migration_target
+        ON agent_bootstrap_credentials(
+          team_id,
+          migration_target_member_id,
+          state,
+          first_used_at
+        );
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

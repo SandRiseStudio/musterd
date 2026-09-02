@@ -31,6 +31,10 @@ export interface BootstrapCredential {
   created_at: number;
   rotated_at: number | null;
   revoked_at: number | null;
+  /** ADR 350: the Member proven by the `msac_` used to create this migration successor. */
+  migration_target_member_id: string | null;
+  /** ADR 350: first successful scoped claim/host authentication; minting alone is not readiness. */
+  first_used_at: number | null;
 }
 
 export function createTeam(
@@ -65,6 +69,7 @@ export function createTeam(
     default_lifecycle: input.defaultLifecycle ?? 'forever',
     archived_at: null,
     agent_key_hash: null,
+    bootstrap_cutover_at: null,
     policy: null,
     working_hours: input.workingHours ? JSON.stringify(input.workingHours) : null,
     created_at: now,
@@ -166,6 +171,8 @@ export function mintBootstrapCredential(
     created_at: now,
     rotated_at: null,
     revoked_at: null,
+    migration_target_member_id: null,
+    first_used_at: null,
   };
   const rotated = db.transaction(() => {
     const predecessors = db
