@@ -124,6 +124,11 @@ export type AuditAction =
   // to }) — e.g. active↔blocked, or acceptance sent back by its owner.
   | 'lane.updated'
   | 'lane.state_changed'
+  // Lane-replication slice, Finding 4: the log had no first event. `lane.opened` is written by
+  // `openLane` inside the insert transaction and carries the whole declaration (title, project,
+  // scope, depends_on, branch, goal_id, risk, stakes, …) so a folding peer knows what a lane IS,
+  // not only what happened to it. Precedes `lane.claimed at_open` on a claimed birth.
+  | 'lane.opened'
   // ADR 291 / 311 / 312: shared-Seed ingest and lifecycle decisions. Details carry only Seed/Lane
   // ids, state edges, result kind, and skipped-research metadata — never raw content, Slack identity,
   // clarification text, briefs, or conclusions. Ingest state lives in `seeds_ingest_cursor`, never

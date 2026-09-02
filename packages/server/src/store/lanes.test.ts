@@ -514,12 +514,66 @@ describe('lane.* rows are written by the store, inside the write', () => {
       .all(laneId)
       .map((r) => ({ actor: r.actor, action: r.action, detail: JSON.parse(r.detail) }));
 
+  // Finding 4: the log had no first event. `lane.opened` carries the whole declaration so a peer
+  // folding the log knows what a lane IS, not only what happened to it.
+  it('openLane writes lane.opened carrying the full declaration, before any claim row', () => {
+    const { db, team } = seed();
+    const lane = openLane(
+      db,
+      team.id,
+      'bravo',
+      'June',
+      {
+        title: 'declared',
+        project: 'musterd',
+        detail: 'why',
+        scope: ['packages/server/**'],
+        depends_on: ['01DEP'],
+        branch: 'june/x',
+        goal_id: 'launch',
+        risk: ['schema'],
+        stakes: 'high',
+        claim: true,
+      },
+      7,
+      { actor: 'June' },
+    );
+    expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened', 'lane.claimed']);
+    expect(rows(db, lane.id)[0]).toEqual({
+      actor: 'June',
+      action: 'lane.opened',
+      detail: {
+        lane: lane.id,
+        title: 'declared',
+        project: 'musterd',
+        detail: 'why',
+        kind: null,
+        role: null,
+        scope: ['packages/server/**'],
+        depends_on: ['01DEP'],
+        branch: 'june/x',
+        goal_id: 'launch',
+        risk: ['schema'],
+        stakes: 'high',
+        stakes_provenance: 'declared',
+        created_by: 'June',
+        created_at: 7,
+      },
+    });
+  });
+
+  it('an unclaimed open still writes lane.opened, and nothing else', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'unowned' }, 7, { actor: 'June' });
+    expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened']);
+  });
+
   it('openLane with claim writes lane.claimed at_open', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'bravo', 'June', { title: 'born owned', claim: true }, 1, {
       actor: 'June',
     });
-    expect(rows(db, lane.id)).toEqual([
+    expect(rows(db, lane.id).slice(1)).toEqual([
       {
         actor: 'June',
         action: 'lane.claimed',
