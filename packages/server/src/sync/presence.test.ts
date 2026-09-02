@@ -9,7 +9,7 @@ import { openDb, type Database } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { readNodeState } from '../node/state.js';
 import { getLane, updateLane } from '../store/lanes.js';
-import { addMember, getMemberByName } from '../store/members.js';
+import { addMember, getMemberByName, mintCredential } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { unbindSeat } from '../store/nodes.js';
 import {
@@ -43,6 +43,8 @@ let hubBase: string;
 let joinerBase: string;
 let nickOnHub: string;
 let nickOnJoiner: string;
+/** A hub-resident seat that opens the shared lanes, so nick's residence stays the tests' to decide. */
+let hanaOnHub: string;
 let dir: string;
 let joinerCtx: Ctx;
 
@@ -104,7 +106,11 @@ const presenceOf = (db: Database, teamId: string, name: string) =>
 
 /** A lane born on the hub, unowned, visible on both machines. */
 async function laneOnBoth(title = 'shared'): Promise<string> {
-  const opened = await post(hubBase, '/teams/bravo/lanes', { title }, nickOnHub);
+  // Opened by hana, not nick: since push-level residence (2026-09-02) every kind binds at ingest,
+  // so a lane nick opened here would bind nick to the hub at the loopback push and the joiner's
+  // claim as nick would be `bound_elsewhere` — the rule working, against a premise these cases
+  // set differently (nick lives on the joiner).
+  const opened = await post(hubBase, '/teams/bravo/lanes', { title }, hanaOnHub);
   expect(opened.status).toBe(201);
   const id: string = opened.json.lane.id;
   await pushTeam(hubCtx(), hubTeam());
@@ -136,6 +142,11 @@ beforeEach(async () => {
   // Roster identity replicates via git (ADR 058): the same second seat exists on both.
   addMember(hub.db, hubTeam(), { name: 'ada', kind: 'agent' });
   addMember(joiner.db, joinerTeam(), { name: 'ada', kind: 'agent' });
+  hanaOnHub = mintCredential(
+    hub.db,
+    addMember(hub.db, hubTeam(), { name: 'hana', kind: 'human' }).row.id,
+  ).credential;
+  addMember(joiner.db, joinerTeam(), { name: 'hana', kind: 'human' });
   // The joiner's node row is minted on its first logged act; enrollment needs it to exist.
   const jt = joinerTeam();
   insertMessage(

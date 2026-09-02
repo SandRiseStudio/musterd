@@ -9,7 +9,7 @@ import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { readNodeState, saveNodeEnrollment } from '../node/state.js';
-import { addMember } from '../store/members.js';
+import { addMember, mintCredential } from '../store/members.js';
 import { insertMessage, localNodeForTeam } from '../store/messages.js';
 import { bindSeatToNode, seatBinding } from '../store/nodes.js';
 import { attach } from '../store/presence.js';
@@ -466,6 +466,98 @@ describe('the hub pushes to itself (3b-ii loopback)', () => {
     expect(await pushTeam(hubCtx(), team)).toBe(0);
     // And the hub's own messages table is untouched by staging (containment still holds).
     expect(hub.db.prepare('SELECT COUNT(*) AS n FROM messages').get()).toEqual({ n: 2 });
+  });
+});
+
+describe("push-level residence — every kind, not only presence (ADR 355 §5's named next increment, 2026-09-02)", () => {
+  const hubTeam = () => getTeamBySlug(hub.db, 'bravo')!;
+  const memberId = (server: RunningServer, name: string) =>
+    server.db
+      .prepare<
+        [string, string],
+        { id: string }
+      >('SELECT id FROM members WHERE team_id = ? AND name = ?')
+      .get(getTeamBySlug(server.db, 'bravo')!.id, name)!.id;
+
+  it('a MESSAGE from a seat bound to another node is refused whole; the cursor does not move', async () => {
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id);
+    bindSeatToNode(hub.db, hubTeam().id, memberId(hub, 'nick'), hubNode.id);
+    const cursorBefore = cursor();
+    const lines = await captureLogs(() => pushTeam(joinerCtx, joinerTeam()));
+    await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/bound_elsewhere|403/);
+    expect(cursor()).toBe(cursorBefore);
+    expect(stagedOnHub()).toEqual({ n: 0 });
+    expect(
+      lines.some((l) => l['msg'] === 'sync_push_refused_residence' && l['seat'] === 'nick'),
+    ).toBe(true);
+  });
+
+  it('a LANE transition naming a seat bound elsewhere is refused, and the rollback binds nobody from the same batch', async () => {
+    send(joiner, 'j-0'); // nick, unbound anywhere
+    await enrollJoiner();
+    const hanaOnJoiner = mintCredential(
+      joiner.db,
+      addMember(joiner.db, joinerTeam(), { name: 'hana', kind: 'human' }).row.id,
+    ).credential;
+    addMember(hub.db, hubTeam(), { name: 'hana', kind: 'human' });
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id);
+    bindSeatToNode(hub.db, hubTeam().id, memberId(hub, 'hana'), hubNode.id);
+    // hana opens a lane on the joiner: a lane.opened row with hana as its actor, behind nick's message.
+    const opened = await post(joinerBase, '/teams/bravo/lanes', { title: 'x' }, hanaOnJoiner);
+    expect(opened.status).toBe(201);
+    await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/bound_elsewhere|403/);
+    expect(stagedOnHub()).toEqual({ n: 0 });
+    // The message before the refused lane row would have bound nick to the joiner; the batch rolled
+    // back, so it did not.
+    expect(seatBinding(hub.db, memberId(hub, 'nick'))).toBeUndefined();
+  });
+
+  it('a first message binds an unbound seat to the pusher, the way a first presence does', async () => {
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    await pushTeam(joinerCtx, joinerTeam());
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    expect(seatBinding(hub.db, memberId(hub, 'nick'))?.node_id).toBe(joinerNode);
+  });
+
+  it('a service seat (ADR 232) is resident everywhere: its events are accepted from any node and bind nothing', async () => {
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    const svcOnJoiner = addMember(joiner.db, joinerTeam(), {
+      name: 'autorefresh',
+      kind: 'service',
+    }).row;
+    addMember(hub.db, hubTeam(), { name: 'autorefresh', kind: 'service' });
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id);
+    // The hub's own autorefresh has spoken there first — an ordinary two-machine install.
+    bindSeatToNode(hub.db, hubTeam().id, memberId(hub, 'autorefresh'), hubNode.id);
+    insertMessage(
+      joiner.db,
+      joinerTeam().id,
+      svcOnJoiner.id,
+      null,
+      makeEnvelope({
+        id: 'svc-1',
+        team: 'bravo',
+        from: 'autorefresh',
+        to: { kind: 'team' as const },
+        act: 'status_update',
+        body: 'bounced the daemon on the joiner',
+        ts: 1001,
+      }),
+    );
+    await expect(pushTeam(joinerCtx, joinerTeam())).resolves.toBe(2);
+    expect(seatBinding(hub.db, memberId(hub, 'autorefresh'))?.node_id).toBe(hubNode.id);
+    expect(
+      hub.db
+        .prepare<
+          [string],
+          { n: number }
+        >('SELECT COUNT(*) AS n FROM seat_nodes WHERE member_id = ?')
+        .get(memberId(hub, 'autorefresh')),
+    ).toEqual({ n: 1 });
   });
 });
 

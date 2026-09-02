@@ -99,6 +99,17 @@ export function syncEventTeam(event: SyncEvent): string {
 }
 
 /**
+ * The seat the event speaks AS — the residence check's subject (ADR 328 §4 at ingest, every kind):
+ * the envelope's sender for a message, the audit row's actor for a lane or presence transition.
+ * Null when the row has no seat behind it (a system-authored lane release, say); the hub then has
+ * nothing to bind and nothing to refuse.
+ */
+export function syncEventActor(event: SyncEvent): string | null {
+  if (event.kind === 'lane' || event.kind === 'presence') return event.event.actor ?? null;
+  return event.envelope.from;
+}
+
+/**
  * One push is bounded. The route is authenticated by `msnode_`, but a credential-holding machine
  * that has fallen behind is the ordinary case, not the adversarial one — an unbounded batch would
  * let a legitimate catch-up allocate arbitrarily on the hub.

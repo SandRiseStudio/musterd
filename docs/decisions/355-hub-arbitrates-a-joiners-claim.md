@@ -118,7 +118,8 @@ under admin authority — the pair ADR 328 §Experiment pre-registered as its si
 Two things this deliberately does not do. **Push-level residence**: a node can still push messages,
 lane transitions and (after the presence slice) presence events naming any seat; ingest checks the
 team, not the seat. That is the general form of this same rule and it is the next increment, not a
-footnote here. **Kind-scoping**: the binding applies to human seats too, as ADR 328 wrote it. A
+footnote here. **Closed by [ADR 360](360-push-level-residence.md), 2026-09-02** (presence first,
+by ADR 356 §2; every kind by 360). **Kind-scoping**: the binding applies to human seats too, as ADR 328 wrote it. A
 human who works from two laptops will meet `bound_elsewhere` on the second, and the unbind is the
 release valve; whether humans should fan out across nodes the way ADR 042 lets them fan out across
 surfaces is the evidence question ADR 328 left open, and the refusals are how it gets answered.

@@ -1,4 +1,10 @@
-import { syncEventId, syncEventTeam, type SyncEvent, type SyncPullEvent } from '@musterd/protocol';
+import {
+  syncEventActor,
+  syncEventId,
+  syncEventTeam,
+  type SyncEvent,
+  type SyncPullEvent,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { getMemberByName } from '../store/members.js';
 import { bindSeatToNode } from '../store/nodes.js';
@@ -42,18 +48,23 @@ export class SyncDuplicateIdError extends Error {
 }
 
 /**
- * A presence event names a seat bound to ANOTHER node (ADR 328 §4, enforced at ingest — presence
- * replication spec §2). The batch is refused whole and the pusher's cursor stays: a node may speak
- * for the seats that live on it and for no other, and a session attached elsewhere is exactly the
- * hole the residence binding closes. The way out is an admin unbind, or attaching where it lives.
+ * An event names a seat bound to ANOTHER node (ADR 328 §4, enforced at ingest — presence
+ * replication spec §2 for the presence kind; every kind since push-level residence, 2026-09-02).
+ * The batch is refused whole and the pusher's cursor stays: a node may speak for the seats that
+ * live on it and for no other, and a message, a lane transition or a session attached elsewhere
+ * are the same hole. The way out is `musterd node trust` from where the seat lives (ADR 358), an
+ * admin unbind, or acting from where it lives.
  */
 export class SyncResidenceError extends Error {
   constructor(
     readonly seat: string,
     readonly boundTo: string,
     readonly boundLabel: string,
+    readonly kind: 'message' | 'lane' | 'presence' = 'presence',
   ) {
-    super(`seat "${seat}" is bound to node "${boundLabel}"; this node may not speak for it`);
+    super(
+      `a ${kind} event names seat "${seat}", which is bound to node "${boundLabel}"; this node may not speak for it`,
+    );
     this.name = 'SyncResidenceError';
   }
 }
@@ -117,6 +128,16 @@ export function ingestBatch(
       throw new SyncOriginError('node is not a member of this team');
     }
 
+    // Push-level residence (2026-09-02): the hub never refuses ITSELF. A loopback push carries rows
+    // the hub wrote under a seat credential it authenticated, or on a joiner's behalf after binding
+    // the seat to that joiner at arbitration (ADR 355 §5) — a machine credential was never the
+    // authority for any of them. It still binds an unbound seat to the hub, so a hub resident who
+    // has only ever messaged here is the hub's before a joiner can name them.
+    const loopback =
+      db
+        .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+        .get(teamId)?.node_id === nodeId;
+
     let expected = highestContiguousSeq(db, nodeId) + 1;
     let accepted = 0;
 
@@ -130,18 +151,27 @@ export function ingestBatch(
         throw new SyncOriginError('event names a team other than the one it is pushed into');
       }
 
-      // Residence at ingest (presence replication §2): the first `presence.*` a node pushes for a
-      // seat binds the seat to it, first-writer-wins under the same guarded CAS a claim uses; a
-      // seat already bound elsewhere refuses the batch. Runs on every presence event, replay or
-      // not, and before the replay check on purpose: the binding is a fact about who may speak,
-      // not about which seq was stored. An unknown seat is the fold's problem (`unresolved_seat`);
-      // residence needs a member id. This transaction rolls the whole batch back on the throw, so
-      // a refused batch binds nothing.
-      if (event.kind === 'presence') {
-        const seat = getMemberByName(db, teamId, event.event.actor ?? '');
-        if (seat) {
-          const bound = bindSeatToNode(db, teamId, seat.id, nodeId, now);
-          if (!bound.bound) throw new SyncResidenceError(seat.name, bound.node_id, bound.label);
+      // Residence at ingest, every kind (ADR 355 §5's named next increment, 2026-09-02; the
+      // presence kind since ADR 356 §2): the first event a node pushes AS a seat binds the seat to
+      // it, first-writer-wins under the same guarded CAS a claim uses; a seat already bound
+      // elsewhere refuses the batch. Runs on every event, replay or not, and before the replay
+      // check on purpose: the binding is a fact about who may speak, not about which seq was
+      // stored. An unknown seat is the fold's problem (`unresolved_seat`); residence needs a
+      // member id. A service seat (ADR 232) is machinery that runs on every machine as ONE roster
+      // name — `autorefresh` bounces each daemon — so it is resident everywhere: no binding, no
+      // refusal. This transaction rolls the whole batch back on the throw, so a refused batch
+      // binds nothing.
+      const actor = syncEventActor(event);
+      const seat = actor ? getMemberByName(db, teamId, actor) : undefined;
+      if (seat && seat.kind !== 'service') {
+        const bound = bindSeatToNode(db, teamId, seat.id, nodeId, now);
+        if (!bound.bound && !loopback) {
+          throw new SyncResidenceError(
+            seat.name,
+            bound.node_id,
+            bound.label,
+            event.kind ?? 'message',
+          );
         }
       }
 
