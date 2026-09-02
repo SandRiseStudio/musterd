@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { findBinding, saveBinding } from '../../config.js';
 import { resolveOpencodeBin } from '../../opencodeBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
-import type { ActuatorBackend, BackendContext, WakeActuation, WakeSpec } from '../backend.js';
+import type {
+  ActuatorBackend,
+  BackendContext,
+  WakeActuation,
+  WakeCompletion,
+  WakeSpec,
+} from '../backend.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
 
 const KILL_GRACE_MS = 10_000;
@@ -117,7 +123,9 @@ interface Attempt {
   occupied: boolean;
   exactCleanWithoutPresence: boolean;
   reason: string;
-  settled: Promise<undefined>;
+  /** Resolves when the child finishes, carrying the HOST-measured wall clock for the supplementary
+   *  wake-cost report — same shape and same reason as the codex backend (lane 01M1G310Y7). */
+  settled: Promise<WakeCompletion | undefined>;
   /** ADR 238: the seat is held by a session this wake did not create — defer, never charge. */
   deferred?: boolean;
 }
@@ -172,9 +180,14 @@ async function attempt(
       resolve(null);
     });
   });
-  const settled = exited.then(() => {
+  const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
     clearTimeout(watchdog);
-    return undefined;
+    const duration_ms = Date.now() - startedAt;
+    ctx.log(
+      `run for ${spec.order.seat} (${label}) settled: exit=${code ?? 'error'}` +
+        `${timedOut ? ' (watchdog)' : ''} wall=${(duration_ms / 1000).toFixed(1)}s`,
+    );
+    return { duration_ms };
   });
   const verified = await Promise.race([
     ctx.verifyOccupied(

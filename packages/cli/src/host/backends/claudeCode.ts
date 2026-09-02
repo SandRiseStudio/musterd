@@ -333,10 +333,15 @@ function runAttempt(
     );
     // The completion record (increment 5): harness-reported cost + measured wall clock. Cost only
     // exists at exit — the loop posts it as a supplementary report against the settled lease.
-    if (!summary) return undefined;
+    //
+    // A run with NO parseable summary still settles WITH a completion (lane 01M1G310Y7). Until
+    // 2026-09-02 this returned undefined here, so a watchdog kill, an `exit=error`, or a clean exit
+    // that printed no JSON produced no `residency.wake_cost` row at all — 55 of 171 claude-code
+    // settles on the live host log, and the watchdog case is the MOST expensive shape a wake can
+    // take. The child's cost needs the child's cooperation; the host's wall clock does not.
     return {
-      ...(summary.cost_usd !== undefined ? { cost_usd: summary.cost_usd } : {}),
-      duration_ms: summary.duration_ms ?? Date.now() - spawnedAt,
+      ...(summary?.cost_usd !== undefined ? { cost_usd: summary.cost_usd } : {}),
+      duration_ms: summary?.duration_ms ?? Date.now() - spawnedAt,
     };
   });
 
