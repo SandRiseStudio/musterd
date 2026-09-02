@@ -99,7 +99,7 @@ Grok's `[permission]` allow/ask/deny tables accept Claude-style `Bash(...)` rule
 
 If project `.grok/config.toml` has no `[ui.status_line]`, write `type = "command"` / `command = "musterd session statusline --stdin"` (Grok pipes JSON, same as Claude). Never overwrite a user's builtin or custom row. Marker in the command so unprovision removes only ours.
 
-`.gitignore` `.grok/config.toml` (machine launch paths). Commit the hooks file and guidance shells.
+`.gitignore` `.grok/config.toml` (machine launch paths). User projects commit the hooks file and guidance shells. This product repo commits the hooks file (portable `musterd` PATH commands) and gitignores the shells (they stamp the local team name, same class as `.claude/`).
 
 ## Consequences
 
@@ -109,6 +109,7 @@ If project `.grok/config.toml` has no `[ui.status_line]`, write `type = "command
 - A Grok session in a folder that still has Cursor MCP **and** a native Grok entry attests `grok` because config.toml wins on the `musterd` name. Cursor sessions in the same workspace still attest `cursor` (their own entry). Multi-harness workspaces stay legal (ADR 281).
 - Stdio MCP does not respawn on a list refresh (measured 2026-09-02: PID started before the rebuild kept attesting the old stamp). Activation copy names disable+enable or a session restart.
 - Architecture trees, SPEC, wiki matrix, and harness-residency table update in the same commits that land the files (`arch-trees:check`, hard rule 3).
+- This product repo gitignores `.grok/skills/` and `.grok/commands/` because `writeGuidance` stamps the dogfood team name into them. User projects follow §9 and commit those shells.
 
 ## Observability & Evaluation
 

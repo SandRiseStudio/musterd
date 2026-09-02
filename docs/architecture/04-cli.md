@@ -132,7 +132,7 @@ src/
     wire.ts           // musterd wire: headless fragment reconcile, plus --migrate-bootstrap atomic replacement of a Workspace's legacy Team key while Presence stays occupied (ADR 080/282/350)
     harness.ts        // musterd harness configure|status: the ONE desired-set editor/legacy converter + the read-only fragment inspection (ADR 281/282/286)
     codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249); start also emits the ADR 326 orientation block on stdout (ADR 333)
-    agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
+    agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex|opencode|grok]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
     residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)

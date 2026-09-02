@@ -123,6 +123,24 @@ describe('grok hooks (Claude-parity set)', () => {
   });
 });
 
+describe('grok.unprovision', () => {
+  it('removes named servers and leaves [compat.cursor] hooks = false', async () => {
+    await grok.configure(buildEntry(binding), binding);
+    await grok.provision!({
+      servers: [{ name: 'figma', command: 'npx', args: [], env: {} }],
+      permissions: { allow: [], ask: [], deny: [] },
+    });
+    await grok.unprovision!({
+      servers: ['figma'],
+      permissions: { allow: [], ask: [], deny: [] },
+    });
+    const toml = readFileSync(cfgPath(), 'utf8');
+    expect(toml).toContain('[mcp_servers.musterd]');
+    expect(toml).not.toContain('[mcp_servers.figma]');
+    expect(toml).toMatch(/\[compat\.cursor\][\s\S]*hooks\s*=\s*false/);
+  });
+});
+
 describe('grok.refreshHooks', () => {
   it('installs hooks, statusline, and the permission floor without rewriting MCP', () => {
     mkdirSync(join(cwd, '.grok'), { recursive: true });

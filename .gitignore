@@ -48,6 +48,11 @@ coverage/
 .codex/config.toml
 # Grok CLI project MCP / statusline / permission floor (ADR 352) — machine launch paths.
 .grok/config.toml
+# Grok CLI provisioned guidance shells (ADR 085) — team-stamped, same class as `.claude/`.
+# User projects commit these (ADR 352 §9); this product repo cannot (they carry the dogfood
+# team name). The hooks file is portable (`musterd` on PATH) and IS committed.
+.grok/skills/
+.grok/commands/
 
 # musterd-provisioned Cursor guidance (ADR 085) — the skill rule + slash commands `musterd init` writes
 # for Cursor, the counterpart to the `.claude/` skill/commands above. Surgical (only musterd's stamped
