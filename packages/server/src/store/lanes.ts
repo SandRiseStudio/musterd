@@ -241,6 +241,28 @@ export function openLane(
   );
   db.transaction(() => {
     insert.run(row);
+    // Finding 4 (lane-replication spec): the birth is the first event, and it carries the whole
+    // declaration — the fields `lane.updated` will later diff against. Without it the log describes
+    // what happened to a lane and never what the lane is.
+    if (audit) {
+      laneAuditRow(db, teamId, audit, 'lane.opened', row.id, {
+        lane: row.id,
+        title: row.title,
+        project: row.project,
+        detail: row.detail,
+        kind: row.kind,
+        role: row.role,
+        scope: input.scope ?? [],
+        depends_on: input.depends_on ?? [],
+        branch: row.branch,
+        goal_id: row.goal_id,
+        risk: input.risk ?? [],
+        stakes,
+        stakes_provenance: row.stakes_provenance ?? 'declared',
+        created_by: createdBy,
+        created_at: now,
+      });
+    }
     // A lane born owned is the most common acquisition of all (ADR 203). No collision is possible —
     // the lane did not exist — so no guard: just the row, `at_open` so a reader can tell a birth
     // from a takeover.
