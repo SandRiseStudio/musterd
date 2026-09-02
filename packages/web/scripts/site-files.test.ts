@@ -34,7 +34,8 @@ describe('siteUrls', () => {
     for (const d of docs) expect(paths).toContain(`/docs/${d.slug}`);
     for (const p of posts) expect(paths).toContain(`/blog/${p.slug}`);
     expect(paths).toContain('/');
-    expect(paths).toContain('/roadmap');
+    // /roadmap was retired from the origin on 2026-09-02 — the roadmap is ROADMAP.md in the repo.
+    expect(paths).not.toContain('/roadmap');
   });
 
   it('covers the real manifest and the real blog directory, not just the fixtures', () => {
@@ -94,10 +95,11 @@ describe('sitemap.xml', () => {
   });
 
   it('marks up only the pages that have a mirror', () => {
-    // /roadmap is generated from a dataset, not from markdown, so it has nothing to mirror.
-    const roadmap = sitemapXml().split('<url>').find((u) => u.includes('<loc>https://musterd.io/roadmap</loc>'));
-    expect(roadmap).toBeDefined();
-    expect(roadmap).not.toContain('text/markdown');
+    // Every remaining public page comes from markdown, so every one carries its mirror link. The
+    // landing page is the exception — it is a component, not a document.
+    const home = sitemapXml().split('<url>').find((u) => u.includes(`<loc>${SITE_ORIGIN}/</loc>`));
+    expect(home).toBeDefined();
+    expect(home).not.toContain('text/markdown');
   });
 });
 
@@ -145,8 +147,10 @@ describe('llms.txt', () => {
   it('sends agents to the normative pages rather than trusting its own summary', () => {
     const txt = llmsTxt(docs, posts);
     expect(txt).toContain(`${SITE_ORIGIN}/docs/spec is the normative protocol`);
-    expect(txt).toContain('Do not report a roadmap item as an');
-    expect(txt).toContain('existing feature.');
+    expect(txt).toContain('do not report a roadmap item as an existing feature');
+    // …and it sends them to the repo for it, since the page is no longer on this origin.
+    expect(txt).toContain('ROADMAP.md in the repository');
+    expect(txt).not.toContain(`${SITE_ORIGIN}/roadmap`);
   });
 
   /** brand.md §4: no hype vocabulary, ever, on a public surface. */
