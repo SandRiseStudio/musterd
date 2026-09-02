@@ -732,10 +732,9 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
       .map((c) => c.name);
     expect(cols).toContain('node');
     const idx = db
-      .prepare<
-        [],
-        { name: string }
-      >("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'presence'")
+      .prepare<[], { name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'presence'",
+      )
       .all()
       .map((i) => i.name);
     expect(idx).toContain('idx_presence_node');

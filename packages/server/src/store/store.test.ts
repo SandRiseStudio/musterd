@@ -903,10 +903,9 @@ describe('presence', () => {
     attach(db, ada.row.id, 'claude-code', 'c3');
     clearMemberPresence(db, ada.row.id);
     const reasons = db
-      .prepare<
-        [],
-        { detail: string }
-      >("SELECT detail FROM audit WHERE action = 'presence.detached' ORDER BY origin_seq")
+      .prepare<[], { detail: string }>(
+        "SELECT detail FROM audit WHERE action = 'presence.detached' ORDER BY origin_seq",
+      )
       .all()
       .map((r) => JSON.parse(r.detail).reason);
     expect(reasons).toEqual(['reaped', 'displaced', 'cleared']);

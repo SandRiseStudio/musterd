@@ -91,6 +91,9 @@ and nothing about today's deployment changes.
 3. **Local-only, never replicated:** presence, wake leases, footprint, schema meta. Presence is
    meaningful only on its host (ADR 058's live tier); each daemon reports a *summary* of its local
    presence upward as ordinary events, which is how the roster view of a remote machine is built.
+   *Amended by [ADR 356](356-presence-replication.md), 2026-09-02:* presence **transitions**
+   (`presence.attached|detached|reattested`) replicate as residence 2 — they are the summary;
+   heartbeats, grace, `conn_id` and wake leases stay here.
 
 Roster identity stays on git (ADR 058, unchanged): the hub does not sync `members` — the repo
 does, and each daemon's reconciler converges on it. `id`/`token_hash` remain daemon-private
