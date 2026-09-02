@@ -60,6 +60,10 @@ export type AuditAction =
   | 'bootstrap_credential.refused'
   | 'bootstrap_credential.expired'
   | 'bootstrap_credential.revoked'
+  // ADR 350: per-Workspace successor exchange, safe retry cleanup, and per-Team legacy cutover.
+  | 'bootstrap_credential.migrated'
+  | 'bootstrap_credential.migration_replaced'
+  | 'bootstrap_credential.cutover'
   | 'agent_session_lease.revoked'
   | 'agent_session_lease.minted'
   | 'agent_session_lease.renewed'

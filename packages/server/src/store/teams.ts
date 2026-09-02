@@ -12,7 +12,7 @@ import { ulid } from 'ulid';
 import type { z } from 'zod';
 import { MusterdError } from '../errors.js';
 import { hashToken, newSecret } from './members.js';
-import type { TeamRow } from './rows.js';
+import { resolveAccountStatus, type MemberRow, type TeamRow } from './rows.js';
 
 const SLUG_RE = /^[a-z0-9-]{1,32}$/;
 
@@ -36,6 +36,12 @@ export interface BootstrapCredential {
   /** ADR 350: first successful scoped claim/host authentication; minting alone is not readiness. */
   first_used_at: number | null;
 }
+
+export type BootstrapMigrationResult = {
+  credential: BootstrapCredential;
+  agent_key: string;
+  replaced_credential_id: string | null;
+};
 
 export function createTeam(
   db: Database,
@@ -261,6 +267,143 @@ export function listBootstrapCredentials(db: Database, teamId: string): Bootstra
        ORDER BY created_at DESC, id DESC`,
     )
     .all(teamId);
+}
+
+/**
+ * Exchange legacy Team-wide bootstrap authority for a successor restricted to the agent seat proven
+ * by its independent `msac_`. Team and Member are derived from stored credential hashes; callers do
+ * not declare either identity (ADR 350).
+ */
+export function migrateLegacyBootstrapCredential(
+  db: Database,
+  input: { legacyKey: string; seatCredential: string; now?: number },
+): BootstrapMigrationResult {
+  return db.transaction(() => {
+    const now = input.now ?? Date.now();
+    const legacy = db
+      .prepare<[string, number], BootstrapCredential>(
+        `SELECT * FROM agent_bootstrap_credentials
+         WHERE key_hash = ? AND use_kind = 'legacy' AND state = 'active'
+           AND (expires_at IS NULL OR expires_at > ?)
+         LIMIT 1`,
+      )
+      .get(hashToken(input.legacyKey), now);
+    if (!legacy) {
+      throw new MusterdError('unauthorized', 'invalid or inactive legacy bootstrap credential');
+    }
+
+    const team = db
+      .prepare<[string], TeamRow>('SELECT * FROM teams WHERE id = ?')
+      .get(legacy.team_id);
+    if (!team || team.archived_at !== null) {
+      throw new MusterdError(
+        'forbidden',
+        'legacy bootstrap credential belongs to an archived Team',
+      );
+    }
+
+    const member = db
+      .prepare<[string], MemberRow>(
+        `SELECT * FROM members
+         WHERE credential_hash = ? AND kind = 'agent' AND observer = 0 AND left_at IS NULL
+         LIMIT 1`,
+      )
+      .get(hashToken(input.seatCredential));
+    if (!member) {
+      throw new MusterdError('unauthorized', 'invalid or inactive agent seat credential');
+    }
+    if (member.team_id !== legacy.team_id) {
+      throw new MusterdError(
+        'forbidden',
+        'legacy bootstrap and agent seat credential must identify the same Team',
+      );
+    }
+    const accountStatus = resolveAccountStatus(member);
+    if (
+      accountStatus === 'disabled' ||
+      accountStatus === 'banned' ||
+      accountStatus === 'archived'
+    ) {
+      throw new MusterdError('forbidden', `seat "${member.name}" is ${accountStatus}`);
+    }
+
+    const usedSuccessor = db
+      .prepare<[string, string], { id: string }>(
+        `SELECT id FROM agent_bootstrap_credentials
+         WHERE team_id = ? AND migration_target_member_id = ? AND first_used_at IS NOT NULL
+         ORDER BY first_used_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(legacy.team_id, member.id);
+    if (usedSuccessor) {
+      throw new MusterdError(
+        'conflict',
+        `seat "${member.name}" already migrated to a scoped bootstrap credential`,
+      );
+    }
+
+    const unused = db
+      .prepare<[string, string], { id: string }>(
+        `SELECT id FROM agent_bootstrap_credentials
+         WHERE team_id = ? AND migration_target_member_id = ?
+           AND state = 'active' AND first_used_at IS NULL
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(legacy.team_id, member.id);
+    if (unused) {
+      db.prepare(
+        `UPDATE agent_bootstrap_credentials
+         SET state = 'revoked', revoked_at = ?
+         WHERE id = ? AND state = 'active' AND first_used_at IS NULL`,
+      ).run(now, unused.id);
+    }
+
+    const agent_key = newSecret(TOKEN_PREFIXES.agent_key);
+    const credential: BootstrapCredential = {
+      id: ulid(),
+      team_id: legacy.team_id,
+      key_hash: hashToken(agent_key),
+      use_kind: 'claim_seat',
+      target: member.name,
+      label: 'legacy-migration',
+      state: 'active',
+      expires_at: null,
+      created_by: member.name,
+      created_at: now,
+      rotated_at: null,
+      revoked_at: null,
+      migration_target_member_id: member.id,
+      first_used_at: null,
+    };
+    db.prepare(
+      `INSERT INTO agent_bootstrap_credentials
+        (id, team_id, key_hash, use_kind, target, label, state, expires_at, created_by,
+         created_at, rotated_at, revoked_at, migration_target_member_id, first_used_at)
+       VALUES
+        (@id, @team_id, @key_hash, @use_kind, @target, @label, @state, @expires_at, @created_by,
+         @created_at, @rotated_at, @revoked_at, @migration_target_member_id, @first_used_at)`,
+    ).run(credential);
+
+    return {
+      credential,
+      agent_key,
+      replaced_credential_id: unused?.id ?? null,
+    };
+  })();
+}
+
+/** Record adoption evidence once; legacy compatibility authentication never satisfies readiness. */
+export function recordBootstrapCredentialUse(
+  db: Database,
+  credentialId: string,
+  now = Date.now(),
+): void {
+  db.prepare(
+    `UPDATE agent_bootstrap_credentials
+     SET first_used_at = COALESCE(first_used_at, ?)
+     WHERE id = ? AND use_kind <> 'legacy'`,
+  ).run(now, credentialId);
 }
 
 /**

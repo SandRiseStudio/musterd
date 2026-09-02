@@ -44,7 +44,9 @@ import { mintSessionLease } from './session-leases.js';
 import {
   createTeam,
   findBootstrapCredential,
+  migrateLegacyBootstrapCredential,
   mintBootstrapCredential,
+  recordBootstrapCredentialUse,
   revokeBootstrapCredential,
   rotateAgentKey,
 } from './teams.js';
@@ -55,7 +57,176 @@ function freshTeam() {
   return { db, team };
 }
 
+function legacyBootstrap(db: ReturnType<typeof openDb>, teamId: string) {
+  const { agent_key } = rotateAgentKey(db, teamId);
+  const keyHash = db
+    .prepare<[string], { agent_key_hash: string }>('SELECT agent_key_hash FROM teams WHERE id = ?')
+    .get(teamId)!.agent_key_hash;
+  db.prepare(
+    `INSERT INTO agent_bootstrap_credentials
+       (id, team_id, key_hash, use_kind, target, state, created_at)
+     VALUES (?, ?, ?, 'legacy', NULL, 'active', ?)`,
+  ).run(`legacy-${teamId}`, teamId, keyHash, Date.now());
+  return agent_key;
+}
+
 describe('teams + members', () => {
+  it('migrates a legacy key only to the seat proven by its agent-seat credential (ADR 350)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const { seat_credential } = mintAgentSeatCredential(db, ada.row.id);
+    const legacyKey = legacyBootstrap(db, team.id);
+
+    const migrated = migrateLegacyBootstrapCredential(db, {
+      legacyKey,
+      seatCredential: seat_credential,
+    });
+
+    expect(migrated.credential).toMatchObject({
+      team_id: team.id,
+      use_kind: 'claim_seat',
+      target: 'Ada',
+      migration_target_member_id: ada.row.id,
+      first_used_at: null,
+    });
+    expect(migrated.agent_key).toMatch(/^mskey_/);
+    expect(migrated.replaced_credential_id).toBeNull();
+  });
+
+  it('replaces only an unused migration successor and never one with scoped use (ADR 350)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const { seat_credential } = mintAgentSeatCredential(db, ada.row.id);
+    const legacyKey = legacyBootstrap(db, team.id);
+
+    const first = migrateLegacyBootstrapCredential(db, {
+      legacyKey,
+      seatCredential: seat_credential,
+    });
+    const second = migrateLegacyBootstrapCredential(db, {
+      legacyKey,
+      seatCredential: seat_credential,
+    });
+    expect(second.replaced_credential_id).toBe(first.credential.id);
+    expect(findBootstrapCredential(db, team.id, first.agent_key)).toBeNull();
+
+    recordBootstrapCredentialUse(db, second.credential.id, 1234);
+    expect(() =>
+      migrateLegacyBootstrapCredential(db, {
+        legacyKey,
+        seatCredential: seat_credential,
+      }),
+    ).toThrow(/already migrated/);
+    expect(findBootstrapCredential(db, team.id, second.agent_key)?.first_used_at).toBe(1234);
+  });
+
+  it('refuses cross-Team and inactive seat proofs without minting a successor (ADR 350)', () => {
+    const { db, team } = freshTeam();
+    const other = createTeam(db, { slug: 'dusk' });
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const lin = addMember(db, other, { name: 'Lin', kind: 'agent' });
+    const adaCredential = mintAgentSeatCredential(db, ada.row.id).seat_credential;
+    const linCredential = mintAgentSeatCredential(db, lin.row.id).seat_credential;
+    const legacyKey = legacyBootstrap(db, team.id);
+
+    expect(() =>
+      migrateLegacyBootstrapCredential(db, {
+        legacyKey,
+        seatCredential: linCredential,
+      }),
+    ).toThrow(/same Team/);
+    leaveMember(db, ada.row.id);
+    expect(() =>
+      migrateLegacyBootstrapCredential(db, {
+        legacyKey,
+        seatCredential: adaCredential,
+      }),
+    ).toThrow(/agent seat credential/);
+    expect(
+      db
+        .prepare<
+          [],
+          { count: number }
+        >("SELECT COUNT(*) AS count FROM agent_bootstrap_credentials WHERE use_kind = 'claim_seat'")
+        .get()?.count,
+    ).toBe(0);
+  });
+
+  it.each(['disabled', 'banned', 'archived'] as const)(
+    'refuses a %s agent seat without minting a successor (ADR 350)',
+    (status) => {
+      const { db, team } = freshTeam();
+      const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+      const seatCredential = mintAgentSeatCredential(db, ada.row.id).seat_credential;
+      const legacyKey = legacyBootstrap(db, team.id);
+      db.prepare('UPDATE members SET account_status = ? WHERE id = ?').run(status, ada.row.id);
+
+      expect(() => migrateLegacyBootstrapCredential(db, { legacyKey, seatCredential })).toThrow(
+        new RegExp(status),
+      );
+      expect(
+        db
+          .prepare<
+            [],
+            { count: number }
+          >("SELECT COUNT(*) AS count FROM agent_bootstrap_credentials WHERE use_kind = 'claim_seat'")
+          .get()?.count,
+      ).toBe(0);
+    },
+  );
+
+  it('refuses human, non-legacy, revoked, and expired migration proofs (ADR 350)', () => {
+    const humanCase = freshTeam();
+    const nick = addMember(humanCase.db, humanCase.team, { name: 'Nick', kind: 'human' });
+    const humanCredential = mintCredential(humanCase.db, nick.row.id).credential;
+    const humanLegacy = legacyBootstrap(humanCase.db, humanCase.team.id);
+    expect(() =>
+      migrateLegacyBootstrapCredential(humanCase.db, {
+        legacyKey: humanLegacy,
+        seatCredential: humanCredential,
+      }),
+    ).toThrow(/agent seat credential/);
+
+    const scopedCase = freshTeam();
+    const ada = addMember(scopedCase.db, scopedCase.team, { name: 'Ada', kind: 'agent' });
+    const seatCredential = mintAgentSeatCredential(scopedCase.db, ada.row.id).seat_credential;
+    const scopedKey = mintBootstrapCredential(scopedCase.db, {
+      teamId: scopedCase.team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    }).agent_key;
+    expect(() =>
+      migrateLegacyBootstrapCredential(scopedCase.db, {
+        legacyKey: scopedKey,
+        seatCredential,
+      }),
+    ).toThrow(/legacy bootstrap/);
+
+    for (const state of ['revoked', 'expired'] as const) {
+      const credentialCase = freshTeam();
+      const member = addMember(credentialCase.db, credentialCase.team, {
+        name: 'Ada',
+        kind: 'agent',
+      });
+      const credential = mintAgentSeatCredential(credentialCase.db, member.row.id).seat_credential;
+      const legacy = legacyBootstrap(credentialCase.db, credentialCase.team.id);
+      credentialCase.db
+        .prepare(
+          state === 'revoked'
+            ? "UPDATE agent_bootstrap_credentials SET state = 'revoked' WHERE use_kind = 'legacy'"
+            : "UPDATE agent_bootstrap_credentials SET expires_at = 1 WHERE use_kind = 'legacy'",
+        )
+        .run();
+      expect(() =>
+        migrateLegacyBootstrapCredential(credentialCase.db, {
+          legacyKey: legacy,
+          seatCredential: credential,
+          now: 2,
+        }),
+      ).toThrow(/legacy bootstrap/);
+    }
+  });
+
   it('mints and resolves a target-scoped bootstrap credential', () => {
     const { db, team } = freshTeam();
     const minted = mintBootstrapCredential(db, {
