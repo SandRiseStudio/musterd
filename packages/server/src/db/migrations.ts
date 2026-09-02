@@ -1469,6 +1469,21 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Presence replication (spec 2026-09-02, ADR 356): a presence row folded from another machine
+    // carries the `nodes.id` it lives on; NULL is a local row (a socket or an ambient touch animates
+    // it). Every reader's liveness predicate branches on this column (store/presence.ts
+    // LIVE_PRESENCE_SQL), and the reaper's heartbeat cutoff applies to local rows only.
+    version: 61,
+    up: (db) => {
+      const cols = db
+        .prepare<[], { name: string }>('PRAGMA table_info(presence)')
+        .all()
+        .map((c) => c.name);
+      if (!cols.includes('node')) db.exec('ALTER TABLE presence ADD COLUMN node TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_presence_node ON presence(node)');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { addMember } from './members.js';
-import { bindSeatToNode, seatBinding, unbindSeat } from './nodes.js';
+import {
+  bindSeatToNode,
+  listNodeLiveness,
+  seatBinding,
+  touchNode,
+  unbindSeat,
+  upsertForeignNode,
+} from './nodes.js';
 import { createTeam } from './teams.js';
 
 /**
@@ -50,5 +57,25 @@ describe('seat→node residence binding (ADR 328 §4)', () => {
     expect(unbindSeat(db, ada.id)).toBeNull();
     expect(bindSeatToNode(db, team.id, ada.id, 'nB', 12)).toEqual({ bound: true });
     expect(seatBinding(db, ada.id)?.node_id).toBe('nB');
+  });
+});
+
+describe('node liveness (presence replication, 2026-09-02)', () => {
+  it('touchNode stamps last_seen_at; upsertForeignNode never touches next_seq or credentials', () => {
+    const { db, team } = seed();
+    upsertForeignNode(db, team.id, { id: 'nX', label: 'x', last_seen_at: 5 });
+    db.prepare('UPDATE nodes SET next_seq = 40, credential_hash = ? WHERE id = ?').run('h', 'nX');
+    upsertForeignNode(db, team.id, { id: 'nX', label: 'x2', last_seen_at: 9 });
+    touchNode(db, 'nX', 11);
+    expect(
+      db
+        .prepare('SELECT label, next_seq, credential_hash, last_seen_at FROM nodes WHERE id = ?')
+        .get('nX'),
+    ).toEqual({ label: 'x2', next_seq: 40, credential_hash: 'h', last_seen_at: 11 });
+    expect(listNodeLiveness(db, team.id)).toContainEqual({
+      id: 'nX',
+      label: 'x2',
+      last_seen_at: 11,
+    });
   });
 });

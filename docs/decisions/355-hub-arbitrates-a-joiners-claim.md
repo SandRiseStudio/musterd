@@ -95,7 +95,7 @@ presence only, so a seat resident on a joiner has no presence at the hub and rea
 its lane is displaceable by any seat, as an offline seat's is today. This is the staleness the ADR
 named, taken at its word: the ownership decision is linearizable, the liveness it consults is not
 yet whole. Presence summaries reported upward (residence 3) are the slice that closes it, and until
-they land the topology doc says so in the increments table.
+they land the topology doc says so in the increments table. **Closed by [ADR 356](356-presence-replication.md), 2026-09-02.**
 
 ### 5. Residence is enforced, not merely recorded (amendment, 2026-09-02)
 

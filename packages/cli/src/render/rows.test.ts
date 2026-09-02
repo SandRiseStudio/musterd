@@ -119,6 +119,27 @@ describe('renderRoster', () => {
     created_at: 0,
   };
 
+  it('a seat on another machine shows its node label after the surface (presence replication)', () => {
+    const remote: MemberSummary = {
+      ...base,
+      id: 'ada',
+      name: 'ada',
+      kind: 'agent',
+      role: '',
+      presence: 'online',
+      activity: 'active',
+      presences: [
+        { surface: 'codex', status: 'online', last_seen_at: 0, node: 'nB', node_label: 'laptop-b' },
+      ],
+    };
+    expect(renderRoster([remote], 0, 120)).toContain('codex @ laptop-b');
+    const local: MemberSummary = {
+      ...remote,
+      presences: [{ surface: 'codex', status: 'online', last_seen_at: 0 }],
+    };
+    expect(renderRoster([local], 0, 120)).not.toContain('@');
+  });
+
   // ADR 135: a member whose attested build differs from the daemon gets a warn facet; matching or
   // unknown builds are silence (the roster must not turn into a wall of hashes).
   it('marks a member whose build differs from the daemon, stays silent when matching/unknown', () => {

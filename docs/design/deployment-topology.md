@@ -140,7 +140,8 @@ footprint, schema meta — and `local_node`, below). Roster identity stays on gi
 | 3a | The machine credential — `msnode_`, `msinv_` enrollment, rotation, revocation | landed 2026-08-28 (#1100, `3b8415cf`, [ADR 328](../decisions/328-machine-credential.md)) |
 | 3b-i | Sync wire format and push — `sync_log` staging under a canonical `hub_seq` | landed 2026-08-31 (`46707cb5`, [ADR 335](../decisions/335-sync-wire-format.md)) |
 | **3b-ii** | **Pull by cursor, the fold into `messages`, read-side gap detection; the hub stages its own history** | **this build** (migration v54, spec `docs/superpowers/specs/2026-09-01-sync-fold-design.md`) |
-| 3c | Hub-authoritative claim CAS, seat→node residence binding | landed 2026-09-02 (ADR 355): a joiner's self-claim is decided by the hub's guarded CAS; refusals name the holder; an unreachable hub refuses with `hub_unreachable`. Residence is a hub-minted `seat_nodes` binding (v59, ADR 355 §5 amendment after gptbot's review): first node to claim as a seat holds it, a claim for a seat bound elsewhere is `403 bound_elsewhere`, an admin unbind is the explicit re-bind act; the `node` on `lane.claimed` is the trace. Push-level residence (ingest checks the seat, not just the team) is its own increment. Presence replication (the displacement rule's input for remote seats) is the next slice |
+| 3c | Hub-authoritative claim CAS, seat→node residence binding | landed 2026-09-02 (ADR 355): a joiner's self-claim is decided by the hub's guarded CAS; refusals name the holder; an unreachable hub refuses with `hub_unreachable`. Residence is a hub-minted `seat_nodes` binding (v59, ADR 355 §5 amendment after gptbot's review): first node to claim as a seat holds it, a claim for a seat bound elsewhere is `403 bound_elsewhere`, an admin unbind is the explicit re-bind act; the `node` on `lane.claimed` is the trace. Push-level residence (ingest checks the seat, not just the team) is its own increment. Presence replication is 3d |
+| 3d | Presence replication — `presence.*` as the third replicated kind, node liveness on the pull, roster everywhere | landed 2026-09-02 ([ADR 356](../decisions/356-presence-replication.md)): migration v61 `presence.node`, epoch 18; a remote row is live while its node's last sync contact is within `REMOTE_PRESENCE_TTL_MS`; residence enforced for the presence kind at ingest. Closes ADR 355 §4 |
 
 The hub storage engine needs no decision: ADR 325 defines a hub by the surface it speaks, and a
 promoted daemon on SQLite satisfies the CAS — one process, one writer.
@@ -217,8 +218,9 @@ rides the push/pull wire beside messages; the fold projects it into the peer's `
 sees a joiner's, and since 3c (ADR 355) a self-claim on a joiner is decided by the hub's guarded CAS:
 the second of two claims for one lane is refused naming the holder, and a claim the hub cannot be
 asked about refuses with `hub_unreachable` rather than landing provisionally. Handoffs, releases
-and closes still apply locally and replicate; the displacement rule consults the hub's own
-presence, so a seat resident on another machine reads as not live until presence summaries land. **Precondition for a second machine:** a joiner folds a log whose lanes
+and closes still apply locally and replicate. Since 3d (ADR 356) presence transitions replicate
+too, so the displacement rule consults every machine's seats: a remote seat is live while its node's
+last sync contact is within `REMOTE_PRESENCE_TTL_MS`. **Precondition for a second machine:** a joiner folds a log whose lanes
 older than 2026-09-02 have no `lane.opened`; a transition for such a lane blocks the fold as
 `lane_unborn` until the origin's history is reconciled by hand. Goals stay a projection of
 messages and need nothing; the rest of `audit` does not replicate (ADR 331 §Decision 5).

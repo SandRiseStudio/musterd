@@ -53,6 +53,14 @@ export function resolveQuiescence(
 }
 
 /**
+ * `presence.*` audit rows (presence replication, 2026-09-02) are session transitions — a socket
+ * attaching, a model re-attesting, a reap — replicated through the ledger so peers can fold them.
+ * They are liveness, which the `presence` table already carries, and never work: counting one
+ * would make every seat look busy the moment it connected. Both readers here exclude them.
+ */
+const NOT_PRESENCE_SQL = "a.action NOT LIKE 'presence.%'";
+
+/**
  * Per-seat newest audited action for one team: `actor name → ts`. One query for the whole roster —
  * the caller renders every member, and a per-member query would turn a roster read into N of them.
  *
@@ -80,7 +88,7 @@ export function lastActionByActor(
           .prepare<[string, number], { actor: string; last_ts: number }>(
             `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
                FROM audit a
-              WHERE a.team_id = ? AND a.ts > ?
+              WHERE a.team_id = ? AND a.ts > ? AND ${NOT_PRESENCE_SQL}
               GROUP BY a.actor`,
           )
           .all(teamId, now - lookback)
@@ -88,7 +96,7 @@ export function lastActionByActor(
           .prepare<[string, number, ...string[]], { actor: string; last_ts: number }>(
             `SELECT a.actor AS actor, MAX(a.ts) AS last_ts
                FROM audit a
-              WHERE a.team_id = ? AND a.ts > ?
+              WHERE a.team_id = ? AND a.ts > ? AND ${NOT_PRESENCE_SQL}
                 AND a.action NOT IN (${exclude.map(() => '?').join(', ')})
               GROUP BY a.actor`,
           )
@@ -118,7 +126,7 @@ export function quietestBusyMs(
       `SELECT MAX(a.ts) AS last_ts
        FROM audit a
        JOIN members m ON m.team_id = a.team_id AND m.name = a.actor
-       WHERE a.ts > ?
+       WHERE a.ts > ? AND ${NOT_PRESENCE_SQL}
          AND m.kind = 'agent'
          AND EXISTS (
            SELECT 1 FROM presence p

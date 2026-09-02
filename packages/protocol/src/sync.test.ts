@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { SYNC_PUSH_MAX_BATCH, SyncEventSchema, SyncPushRequestSchema } from './sync.js';
+import {
+  SYNC_PUSH_MAX_BATCH,
+  SyncEventSchema,
+  SyncPullResponseSchema,
+  SyncPushRequestSchema,
+  syncEventId,
+  syncEventTeam,
+} from './sync.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 /**
@@ -82,5 +89,36 @@ describe('the sync wire format (ADR 325)', () => {
     ).toHaveLength(SYNC_PUSH_MAX_BATCH);
     // An empty push is legal and is what an idle daemon sends: nothing to say is not an error.
     expect(SyncPushRequestSchema.parse({ events: [] }).events).toEqual([]);
+  });
+
+  it('a presence event parses under its tag and keys on the audit row id (presence replication)', () => {
+    const ev = SyncEventSchema.parse({
+      kind: 'presence',
+      team: 'bravo',
+      origin_node: 'n1',
+      origin_seq: 3,
+      event: {
+        id: 'a1',
+        ts: 1,
+        actor: 'ada',
+        action: 'presence.attached',
+        target: 'ada',
+        result: 'allow',
+        detail: { presence: 'p1' },
+      },
+    });
+    expect(syncEventId(ev)).toBe('a1');
+    expect(syncEventTeam(ev)).toBe('bravo');
+  });
+
+  it('the pull response carries node liveness, defaulting to none for an older hub', () => {
+    expect(SyncPullResponseSchema.parse({ events: [], hub_seq_high: 0 }).nodes).toEqual([]);
+    expect(
+      SyncPullResponseSchema.parse({
+        events: [],
+        hub_seq_high: 0,
+        nodes: [{ id: 'n', label: 'l', last_seen_at: null }],
+      }).nodes,
+    ).toHaveLength(1);
   });
 });

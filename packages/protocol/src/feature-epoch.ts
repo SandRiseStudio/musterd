@@ -87,5 +87,9 @@
 // presence INSERT server-side — the same enum-vs-storage drift v39/v44 closed for `musterd` /
 // `opencode` — so a grok seat must not attest that surface against one. An older web bundle
 // renders the row under the generic label.
-export const FEATURE_EPOCH = 17 as const;
+// Epoch 18 — presence replication (spec 2026-09-02, ADR 356): presence.* is the third replicated
+// kind and `presence.node` exists (migration 61). An older hub refuses a `kind: 'presence'` push
+// (422); an older joiner stops on the unknown kind. Hub before joiners, as every federation
+// increment.
+export const FEATURE_EPOCH = 18 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

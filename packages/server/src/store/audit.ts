@@ -84,6 +84,12 @@ export type AuditAction =
   // occupancy's model-switch history (the ADR keeps no history column). `ambient` is ADR 119: a
   // CLI/HTTP one-shot carrying `x-musterd-model` after the claim presence expired.
   | 'occupancy.model_attested'
+  // Presence replication (spec 2026-09-02): the three session transitions, stamped and replicated.
+  // `detail.presence` is the presence row's ULID — the key every reader joins on. Heartbeats never
+  // write here. A node emits these for rows it wrote (`presence.node IS NULL`) and for no other.
+  | 'presence.attached'
+  | 'presence.detached'
+  | 'presence.reattested'
   // ADR 109: a lane carrying a branch reached a terminal state — the seat attests the landed merge.
   // actor = the resolving seat, target = the branch, `detail` carries the attested (never verified)
   // `{ pr, sha, authorized_by }` — the join table between seats, main SHAs, and authorizing humans.
@@ -380,23 +386,24 @@ export interface AuditRow {
   result: 'allow' | 'deny';
   detail: string | null;
   created_at: number;
-  /** The ADR 331 ordering pair (v58), stamped only on `lane.*` rows — the replicated kind. Every
+  /** The ADR 331 ordering pair (v58), stamped only on replicated rows (`lane.*`, `presence.*`). Every
    *  other row keeps `''`/`0` and reads as "not replicated". Server-stamped, never wire-fed. */
   origin_node: string;
   origin_seq: number;
 }
 
 /**
- * Append a `lane.*` row as a REPLICATED event (lane-replication spec §"The wire, decided"): the
- * required append, plus `(origin_node, origin_seq)` drawn from the same `nodes.next_seq` allocator
- * `insertMessage` uses — one allocator for every replicated kind (ADR 335 §8), so a node's sequence
- * is dense across messages and lane transitions alike. Opens its own transaction (a SAVEPOINT
- * inside the caller's), so the number and the row are one unit: a throw burns no seq.
+ * Append an audit row as a REPLICATED event — any replicated kind: `lane.*` (lane-replication spec
+ * §"The wire, decided") and `presence.*` (presence replication, 2026-09-02). The required append,
+ * plus `(origin_node, origin_seq)` drawn from the same `nodes.next_seq` allocator `insertMessage`
+ * uses — one allocator for every replicated kind (ADR 335 §8), so a node's sequence is dense across
+ * messages, lane transitions and presence transitions alike. Opens its own transaction (a
+ * SAVEPOINT inside the caller's), so the number and the row are one unit: a throw burns no seq.
  *
- * Every `lane.*` writer goes through here. A lane row written through the plain append would be a
- * transition the origin holds and no peer ever sees — exactly the hole this slice closes.
+ * Every `lane.*` and `presence.*` writer goes through here. A row written through the plain append
+ * would be a transition the origin holds and no peer ever sees — exactly the hole this closes.
  */
-export function appendLaneEventRequired(db: Database, teamId: string, entry: AuditEntry): void {
+export function appendReplicatedEvent(db: Database, teamId: string, entry: AuditEntry): void {
   db.transaction(() => {
     const node = localNodeForTeam(db, teamId);
     const seq = db
@@ -425,6 +432,9 @@ export function appendLaneEventRequired(db: Database, teamId: string, entry: Aud
     ).run(row);
   })();
 }
+
+/** `lane.*` writers keep their name; the allocator and the SAVEPOINT are the same. */
+export const appendLaneEventRequired = appendReplicatedEvent;
 
 /** Insert an audit row and surface failure when the caller's transaction requires the evidence. */
 export function appendAuditRequired(db: Database, teamId: string, entry: AuditEntry): void {

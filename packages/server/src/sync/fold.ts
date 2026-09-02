@@ -1,6 +1,7 @@
 import { ActSchema, type SyncPullEvent, type SyncPullLaneEvent } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { getMemberByName } from '../store/members.js';
+import { upsertForeignNode } from '../store/nodes.js';
 import type { MessageRow } from '../store/rows.js';
 
 /**
@@ -33,7 +34,14 @@ export type FoldStop =
   // `lane_unborn` is a transition for a lane this daemon never saw born: the origin's lane predates
   // `lane.opened` (2026-09-02) or the log has a hole. Applying it would mint a row with no title.
   | { kind: 'unknown_lane_event'; action: string; hub_seq: number }
-  | { kind: 'lane_unborn'; lane: string; action: string; hub_seq: number };
+  | { kind: 'lane_unborn'; lane: string; action: string; hub_seq: number }
+  // Presence events (presence replication, 2026-09-02): the same two shapes for the third kind.
+  // `unknown_presence_event` also covers a surface this build's CHECK cannot store — the origin
+  // runs a newer build. `presence_unborn` is a re-attestation for a session this daemon never saw
+  // attach: a hole, not a fact to invent a row from. (A detach for one is a no-op that advances —
+  // the same fact arriving after our stale-node sweep.)
+  | { kind: 'unknown_presence_event'; action: string; hub_seq: number }
+  | { kind: 'presence_unborn'; presence: string; action: string; hub_seq: number };
 
 /** The `lane.*` verbs the fold can project. Anything else stops as `unknown_lane_event`. */
 const LANE_VERBS = new Set([
@@ -184,6 +192,99 @@ function projectLaneEvent(
   }
 }
 
+const PRESENCE_VERBS = new Set(['presence.attached', 'presence.detached', 'presence.reattested']);
+
+/** The surfaces this build's `presence` CHECK admits (migration 57). Keep in step with it. */
+const STORABLE_SURFACES = new Set([
+  'cli',
+  'claude-code',
+  'codex',
+  'opencode',
+  'grok',
+  'cursor',
+  'web',
+  'ios',
+  'slack',
+  'other',
+  'musterd',
+]);
+
+/**
+ * Project one replicated presence transition into this daemon's `presence` (spec §2). `node` is
+ * the origin; `conn_id`/`held_until`/`wake_lease` are NULL: nothing here heartbeats, holds, or
+ * verifies a lease for a session on another machine. A detach for a row we no longer hold is the
+ * same fact arriving after our stale-node sweep — applied as a no-op. A reattest for a row we never
+ * held is a hole, and stops.
+ */
+function projectPresenceEvent(
+  db: Database,
+  teamId: string,
+  originNode: string,
+  event: SyncPullLaneEvent['event'],
+): 'applied' | 'unborn' | 'unknown' {
+  const d = (event.detail ?? {}) as Record<string, unknown>;
+  const presenceId = typeof d['presence'] === 'string' ? d['presence'] : '';
+  if (!presenceId) return 'unknown';
+  const str = (k: string): string | null => (typeof d[k] === 'string' ? (d[k] as string) : null);
+  switch (event.action) {
+    case 'presence.attached': {
+      const surface = str('surface');
+      if (!surface || !STORABLE_SURFACES.has(surface)) return 'unknown';
+      const member = getMemberByName(db, teamId, event.actor ?? '');
+      if (!member) return 'unknown'; // the caller resolved the seat already; defensive
+      // Two origins minting one presence id cannot happen (ULIDs); a held row here is a replay
+      // that slipped the pair check, so keep ours.
+      if (db.prepare('SELECT 1 FROM presence WHERE id = ?').get(presenceId)) return 'applied';
+      const model = str('model');
+      db.prepare(
+        `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, wake_lease, node, created_at)
+         VALUES (?, ?, ?, 'online', NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+      ).run(
+        presenceId,
+        member.id,
+        surface,
+        event.ts,
+        str('provenance'),
+        str('workspace'),
+        str('driver'),
+        model,
+        model ? str('model_source') : null,
+        str('build'),
+        typeof d['epoch'] === 'number' ? d['epoch'] : null,
+        originNode,
+        event.ts,
+      );
+      return 'applied';
+    }
+    case 'presence.detached':
+      db.prepare('DELETE FROM presence WHERE id = ? AND node = ?').run(presenceId, originNode);
+      return 'applied';
+    case 'presence.reattested': {
+      const surface = str('surface');
+      if (surface && !STORABLE_SURFACES.has(surface)) return 'unknown';
+      const model = str('model');
+      const r = db
+        .prepare(
+          'UPDATE presence SET model = ?, model_source = ?, surface = COALESCE(?, surface) WHERE id = ? AND node = ?',
+        )
+        .run(model, model ? str('model_source') : null, surface, presenceId, originNode);
+      return r.changes === 0 ? 'unborn' : 'applied';
+    }
+    default:
+      return 'unknown';
+  }
+}
+
+/** The pull response's `nodes` summary, applied before the events it accompanies (spec §3). */
+export function foldNodeLiveness(
+  db: Database,
+  teamId: string,
+  nodes: { id: string; label: string; last_seen_at: number | null }[],
+): void {
+  // Safe for the local node too: `upsertForeignNode` touches only label and last_seen_at.
+  for (const n of nodes) upsertForeignNode(db, teamId, n);
+}
+
 export interface FoldResult {
   applied: number;
   skipped: number;
@@ -307,6 +408,56 @@ export function foldBatch(
           hub_seq: event.hub_seq,
         };
         return finish();
+      }
+
+      // The third kind: a presence transition. Same discipline as the lane kind — project first,
+      // then hold the row in `audit` with its stamp — plus the message rule for the seat: a
+      // presence for a seat this roster lacks is git lag, not a fact to drop.
+      if (event.kind === 'presence') {
+        const e = event.event;
+        if (!PRESENCE_VERBS.has(e.action)) {
+          stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        if (!getMemberByName(db, teamId, e.actor ?? '')) {
+          stop = { kind: 'unresolved_seat', seat: e.actor ?? '', hub_seq: event.hub_seq };
+          return finish();
+        }
+        const outcome = projectPresenceEvent(db, teamId, event.origin_node, e);
+        if (outcome === 'unknown') {
+          stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        if (outcome === 'unborn') {
+          const presenceId =
+            typeof e.detail?.['presence'] === 'string' ? (e.detail['presence'] as string) : '';
+          stop = {
+            kind: 'presence_unborn',
+            presence: presenceId,
+            action: e.action,
+            hub_seq: event.hub_seq,
+          };
+          return finish();
+        }
+        db.prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          e.id,
+          teamId,
+          e.ts,
+          e.actor,
+          e.action,
+          e.target,
+          e.result,
+          e.detail ? JSON.stringify(e.detail) : null,
+          now,
+          event.origin_node,
+          event.origin_seq,
+        );
+        applied += 1;
+        cursor = event.hub_seq;
+        continue;
       }
 
       // The second kind: a lane transition. Held in `audit` with its stamp verbatim, then projected

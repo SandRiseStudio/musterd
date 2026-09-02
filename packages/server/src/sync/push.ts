@@ -23,7 +23,8 @@ import { hasEnrolledJoiners, ingestBatch, SyncGapError } from './log.js';
  */
 
 /** How often the daemon offers its unpushed events. Idle cost is one conditional per team per tick;
- *  the outbound fetch happens only for teams this machine has actually enrolled. */
+ *  the outbound fetch happens only for teams this machine has actually enrolled. If this changes,
+ *  change `REMOTE_PRESENCE_TTL_MS` in config.ts — it budgets two of these. */
 export const SYNC_PUSH_INTERVAL_MS = 60_000;
 
 /** Abandon a slow hub rather than let it stack ticks. */
@@ -135,8 +136,11 @@ function unpushed(ctx: Ctx, teamId: string, nodeId: string, after: number): Pend
 function toSyncEvent(pending: Pending, slug: string): SyncEvent {
   if (pending.kind === 'lane') {
     const { row } = pending;
+    // The action prefix decides the tag: one allocator, one query, three kinds (presence
+    // replication, 2026-09-02). The hub and the fold branch on the tag, never on the prefix.
+    const kind: 'lane' | 'presence' = row.action.startsWith('presence.') ? 'presence' : 'lane';
     return {
-      kind: 'lane',
+      kind,
       team: slug,
       event: {
         id: row.id,
@@ -291,6 +295,26 @@ export async function pushTeam(
         'the hub refused the batch without a usable resume point; it needs operator attention',
     });
     throw new Error(`hub refused the batch (409) without a usable resume point`);
+  }
+
+  if (res.status === 403) {
+    // ADR 328 §4 at ingest (presence replication spec §2): a presence event in this batch names a
+    // seat bound to another node, and the hub refused the whole batch. Decision 7 again (ADR 335
+    // §7): a refusal must be distinguishable from offline, and this one repeats every tick until
+    // an admin unbinds the seat or the session attaches from where the seat lives.
+    const body = (await res.json().catch(() => null)) as {
+      seat?: unknown;
+      node_label?: unknown;
+    } | null;
+    log.error({
+      msg: 'sync_push_refused_residence',
+      team: team.slug,
+      seat: typeof body?.seat === 'string' ? body.seat : null,
+      bound_to: typeof body?.node_label === 'string' ? body.node_label : null,
+      detail:
+        'a presence event names a seat bound to another node; unbind it or attach from where it lives',
+    });
+    throw new Error(`hub refused the batch (403 bound_elsewhere)`);
   }
 
   if (res.status === 422) {

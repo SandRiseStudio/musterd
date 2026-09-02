@@ -20,8 +20,8 @@ describe('SURFACES (ADR 352)', () => {
   });
 });
 
-describe('FEATURE_EPOCH (ADR 352)', () => {
-  it('is 17 — grok occupancy must not attest against an older daemon', () => {
-    expect(FEATURE_EPOCH).toBe(17);
+describe('FEATURE_EPOCH (presence replication, ADR 356)', () => {
+  it('is 18 — presence.* pushes must not reach an older hub', () => {
+    expect(FEATURE_EPOCH).toBe(18);
   });
 });

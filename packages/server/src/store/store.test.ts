@@ -1,9 +1,10 @@
 import { makeEnvelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
+import { REMOTE_PRESENCE_TTL_MS } from '../config.js';
 import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
-import { listAudit } from './audit.js';
+import { appendLaneEventRequired, appendReplicatedEvent, listAudit } from './audit.js';
 import { getCursor, setCursor } from './cursors.js';
 import { getLane, openLane } from './lanes.js';
 import {
@@ -25,8 +26,11 @@ import { insertMessage, latestStatusUpdate, listInbox, listTeamMessages } from '
 import {
   attach,
   clearMemberPresence,
+  clearPresenceById,
   countLivePresences,
   currentAttestedModel,
+  detach,
+  heartbeat,
   reattestModel,
   reattestSurface,
   hasActivePresence,
@@ -814,7 +818,166 @@ describe('activity (two-clocks)', () => {
   });
 });
 
+describe('replicated audit (presence replication, 2026-09-02)', () => {
+  it('appendReplicatedEvent stamps a presence.* row from the node allocator, densely with lane rows', () => {
+    const { db, team } = freshTeam();
+    appendReplicatedEvent(db, team.id, {
+      actor: 'ada',
+      action: 'presence.attached',
+      target: 'ada',
+      result: 'allow',
+      detail: { presence: 'p1' },
+    });
+    appendLaneEventRequired(db, team.id, {
+      actor: 'ada',
+      action: 'lane.opened',
+      target: 'l1',
+      result: 'allow',
+      detail: { lane: 'l1' },
+    });
+    const seqs = db
+      .prepare<
+        [],
+        { origin_seq: number; action: string }
+      >('SELECT origin_seq, action FROM audit WHERE origin_seq > 0 ORDER BY origin_seq')
+      .all();
+    expect(seqs.map((r) => r.origin_seq)).toEqual([1, 2]);
+    expect(seqs[0]!.action).toBe('presence.attached');
+  });
+});
+
 describe('presence', () => {
+  it('presence transitions are stamped audit rows: attach, reattest, detach — and a heartbeat is not', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const row = attach(db, ada.row.id, 'claude-code', 'c1', {
+      model: 'claude-opus-5',
+      model_source: 'observed',
+      workspace: '~/x',
+      driver: 'nick',
+    });
+    heartbeat(db, row.id);
+    reattestModel(db, row.id, 'claude-sonnet-5', 'observed');
+    detach(db, row.id);
+    const rows = db
+      .prepare<
+        [],
+        { action: string; actor: string; detail: string; origin_seq: number }
+      >("SELECT action, actor, detail, origin_seq FROM audit WHERE action LIKE 'presence.%' ORDER BY origin_seq")
+      .all();
+    expect(rows.map((r) => r.action)).toEqual([
+      'presence.attached',
+      'presence.reattested',
+      'presence.detached',
+    ]);
+    expect(rows.every((r) => r.actor === 'Ada' && r.origin_seq > 0)).toBe(true);
+    expect(JSON.parse(rows[0]!.detail)).toMatchObject({
+      presence: row.id,
+      surface: 'claude-code',
+      model: 'claude-opus-5',
+      model_source: 'observed',
+      workspace: '~/x',
+      driver: 'nick',
+    });
+    expect(JSON.parse(rows[0]!.detail)).not.toHaveProperty('wake_lease');
+    expect(JSON.parse(rows[1]!.detail)).toMatchObject({
+      presence: row.id,
+      model: 'claude-sonnet-5',
+      model_source: 'observed',
+      surface: 'claude-code',
+    });
+    expect(JSON.parse(rows[2]!.detail)).toEqual({ presence: row.id, reason: 'goodbye' });
+  });
+
+  it('every removal path names its reason; release into grace is not a detach; reap of the grace is', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const a = attach(db, ada.row.id, 'claude-code', 'c1');
+    release(db, a.id, 0);
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'presence.detached'").get(),
+    ).toEqual({ n: 0 });
+    reapStale(db, 45_000); // held_until already passed
+    const b = attach(db, ada.row.id, 'claude-code', 'c2');
+    clearPresenceById(db, b.id);
+    attach(db, ada.row.id, 'claude-code', 'c3');
+    clearMemberPresence(db, ada.row.id);
+    const reasons = db
+      .prepare<[], { detail: string }>(
+        "SELECT detail FROM audit WHERE action = 'presence.detached' ORDER BY origin_seq",
+      )
+      .all()
+      .map((r) => JSON.parse(r.detail).reason);
+    expect(reasons).toEqual(['reaped', 'displaced', 'cleared']);
+  });
+
+  it('an ambient touch emits attached when it creates a row and nothing when it refreshes one', () => {
+    const { db, team } = freshTeam();
+    const cy = addMember(db, team, { name: 'Cy', kind: 'agent' });
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, {});
+    touchAmbientPresence(db, cy.row.id, 'cli', 45_000, {});
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'presence.attached'").get(),
+    ).toEqual({ n: 1 });
+  });
+
+  it('a remote row is never the subject of a locally emitted transition', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    db.prepare(
+      "INSERT INTO nodes (id, team_id, label, next_seq, last_seen_at) VALUES ('nB', ?, 'B', 1, 0)",
+    ).run(team.id);
+    db.prepare(
+      "INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, created_at, node) VALUES ('rB', ?, 'codex', 'online', NULL, 1, 1, 'nB')",
+    ).run(ada.row.id);
+    clearMemberPresence(db, ada.row.id);
+    reapStale(db, 45_000);
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM audit WHERE action = 'presence.detached'").get(),
+    ).toEqual({ n: 0 });
+    // The stale-node sweep removed it silently.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM presence WHERE id = 'rB'").get()).toEqual({
+      n: 0,
+    });
+  });
+
+  it('a remote row is live while its node is, and reads its node label (presence replication §3)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const now = Date.now();
+    db.prepare(
+      'INSERT INTO nodes (id, team_id, label, next_seq, last_seen_at) VALUES (?, ?, ?, 1, ?)',
+    ).run('nB', team.id, 'laptop-b', now);
+    db.prepare(
+      "INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, created_at, node, model, driver, workspace) VALUES ('rB', ?, 'codex', 'online', NULL, ?, ?, 'nB', 'gpt-5', 'nick', '~/b')",
+    ).run(ada.row.id, now - 10 * 60_000, now - 10 * 60_000); // a stale heartbeat would be dead locally
+    expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(true);
+    const p = listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')!;
+    expect(p.status).toBe('online');
+    expect(p.presences[0]).toMatchObject({
+      node: 'nB',
+      node_label: 'laptop-b',
+      model: 'gpt-5',
+      driver: 'nick',
+      workspace: '~/b',
+    });
+    expect(listLiveDrivers(db, team.id, 45_000).has('nick')).toBe(true);
+    expect(countLivePresences(db, 45_000)).toBe(1);
+    // The node goes quiet past the TTL: the same row is not live.
+    db.prepare('UPDATE nodes SET last_seen_at = ? WHERE id = ?').run(
+      now - REMOTE_PRESENCE_TTL_MS - 1,
+      'nB',
+    );
+    expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
+    expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')!.status).toBe(
+      'offline',
+    );
+    // A local row folded nowhere still reads node: null on the roster.
+    attach(db, ada.row.id, 'claude-code', 'c1');
+    const local = listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')!;
+    expect(local.presences[0]).toMatchObject({ node: null, node_label: null });
+  });
+
   it('reports online while fresh and offline after reap', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
@@ -930,7 +1093,10 @@ describe('presence', () => {
     const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
     const born = attach(db, bo.row.id, 'cli', null);
     expect(recordUnattestedOccupancy(db, team.id, bo.row, born.id, 'claim')).toBe(false);
-    expect(listAudit(db, team.id, { limit: 10 })).toHaveLength(0);
+    // The attach itself is a replicated `presence.attached` row; the de-attestation is what's absent.
+    expect(
+      listAudit(db, team.id, { limit: 10 }).filter((r) => !r.action.startsWith('presence.')),
+    ).toHaveLength(0);
   });
 
   it('the de-attestation never resurrects the old model as evidence (ADR 187)', () => {

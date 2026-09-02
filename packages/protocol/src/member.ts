@@ -90,6 +90,10 @@ export const PresenceSchema = z.object({
    * older clients. Absence must never be read as a match (ADR 236: absence is not an assertion).
    */
   wake_lease: z.string().nullish(),
+  /** The machine this presence lives on (presence replication, 2026-09-02): a `nodes.id`, or
+   *  null/absent for a row on this daemon. `node_label` is that node's human label. */
+  node: z.string().nullish(),
+  node_label: z.string().nullish(),
 });
 export type Presence = z.infer<typeof PresenceSchema>;
 

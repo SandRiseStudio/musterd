@@ -9,7 +9,10 @@ import type { Ctx } from '../context.js';
 import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { readNodeState, saveNodeEnrollment } from '../node/state.js';
-import { insertMessage } from '../store/messages.js';
+import { addMember } from '../store/members.js';
+import { insertMessage, localNodeForTeam } from '../store/messages.js';
+import { bindSeatToNode, seatBinding } from '../store/nodes.js';
+import { attach } from '../store/presence.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { Hub } from '../transport/hub.js';
 import { pushTeam } from './push.js';
@@ -463,5 +466,70 @@ describe('the hub pushes to itself (3b-ii loopback)', () => {
     expect(await pushTeam(hubCtx(), team)).toBe(0);
     // And the hub's own messages table is untouched by staging (containment still holds).
     expect(hub.db.prepare('SELECT COUNT(*) AS n FROM messages').get()).toEqual({ n: 2 });
+  });
+});
+
+describe('presence replication on the push (spec 2026-09-02)', () => {
+  const hubTeam = () => getTeamBySlug(hub.db, 'bravo')!;
+  const memberId = (server: RunningServer, name: string) =>
+    server.db
+      .prepare<
+        [string, string],
+        { id: string }
+      >('SELECT id FROM members WHERE team_id = ? AND name = ?')
+      .get(getTeamBySlug(server.db, 'bravo')!.id, name)!.id;
+
+  it('a presence.* row rides the push under kind presence, and the hub stamps the node as seen', async () => {
+    send(joiner, 'j-0'); // mints the joiner's node row; enrollment needs it
+    await enrollJoiner();
+    addMember(joiner.db, joinerTeam(), { name: 'ada', kind: 'agent' });
+    addMember(hub.db, hubTeam(), { name: 'ada', kind: 'agent' });
+    attach(joiner.db, memberId(joiner, 'ada'), 'codex', 'c1', { model: 'gpt-5' });
+    const before = Date.now();
+    await pushTeam(joinerCtx, joinerTeam(), before);
+    const staged = hub.db
+      .prepare<[], { payload: string }>('SELECT payload FROM sync_log ORDER BY hub_seq')
+      .all()
+      .map((r) => JSON.parse(r.payload));
+    expect(
+      staged.some((e) => e.kind === 'presence' && e.event.action === 'presence.attached'),
+    ).toBe(true);
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    expect(
+      hub.db
+        .prepare<[string], { last_seen_at: number }>('SELECT last_seen_at FROM nodes WHERE id = ?')
+        .get(joinerNode)!.last_seen_at,
+    ).toBeGreaterThanOrEqual(before);
+  });
+
+  it('the hub binds an unbound seat to the pusher on its first attached (ADR 328 §4 at ingest)', async () => {
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    addMember(joiner.db, joinerTeam(), { name: 'ada', kind: 'agent' });
+    addMember(hub.db, hubTeam(), { name: 'ada', kind: 'agent' });
+    attach(joiner.db, memberId(joiner, 'ada'), 'codex', 'c1');
+    await pushTeam(joinerCtx, joinerTeam());
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    expect(seatBinding(hub.db, memberId(hub, 'ada'))?.node_id).toBe(joinerNode);
+  });
+
+  it('the hub refuses a presence event for a seat bound to another node; the cursor does not move (spec §2)', async () => {
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    // nick is bound to the hub's own node, as a local claim on the hub would leave it (#1195).
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id);
+    expect(bindSeatToNode(hub.db, hubTeam().id, memberId(hub, 'nick'), hubNode.id)).toEqual({
+      bound: true,
+    });
+    // The joiner attaches nick anyway and pushes.
+    attach(joiner.db, memberId(joiner, 'nick'), 'codex', 'c1');
+    const cursorBefore = cursor();
+    const lines = await captureLogs(() => pushTeam(joinerCtx, joinerTeam()));
+    await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/bound_elsewhere|403/);
+    expect(cursor()).toBe(cursorBefore);
+    expect(stagedOnHub()).toEqual({ n: 0 });
+    expect(
+      lines.some((l) => l['msg'] === 'sync_push_refused_residence' && l['seat'] === 'nick'),
+    ).toBe(true);
   });
 });

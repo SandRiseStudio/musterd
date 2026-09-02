@@ -67,7 +67,8 @@ describe('audit command', () => {
     await writeReclaimRow();
     const res = await capture(() => auditCommand(parseArgs([])));
     expect(res.code).toBe(0);
-    expect(res.out).toContain('audit — dawn (1 entry)');
+    // nick's own authenticated touch writes a replicated `presence.attached` beside the reclaim.
+    expect(res.out).toMatch(/audit — dawn \(\d+ entr/);
     expect(res.out).toContain('member.reclaim');
     expect(res.out).toContain('allow');
     expect(res.out).toContain('Ada');
@@ -79,9 +80,8 @@ describe('audit command', () => {
     await writeReclaimRow();
     const res = await capture(() => auditCommand(parseArgs(['--json'])));
     expect(res.code).toBe(0);
-    const arr = JSON.parse(res.out) as unknown[];
-    expect(arr).toHaveLength(1);
-    const entry = arr[0] as Record<string, unknown>;
+    const arr = JSON.parse(res.out) as Record<string, unknown>[];
+    const entry = arr.find((e) => e['action'] === 'member.reclaim')!;
     expect(entry).toMatchObject({ action: 'member.reclaim', result: 'allow', target: 'Ada' });
     expect(typeof entry['id']).toBe('string');
     expect(typeof entry['ts']).toBe('number');

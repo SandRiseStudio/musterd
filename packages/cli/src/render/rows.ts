@@ -349,7 +349,12 @@ function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): str
   if (build && daemonBuild && build !== daemonBuild) {
     parts.push(theme.warn(`build ${build.slice(0, 7)}`));
   }
-  if (group !== 'out' && m.presences[0]?.surface) parts.push(m.presences[0]!.surface);
+  if (group !== 'out' && m.presences[0]?.surface) {
+    const p = m.presences[0];
+    // A seat on another machine says so (presence replication, ADR 356): `codex @ laptop-b`. A
+    // local row is silent — the machine you are on is not news.
+    parts.push(p.node_label ? `${p.surface} @ ${p.node_label}` : p.surface);
+  }
   if (m.lifecycle === 'session') parts.push('session');
   // `!= null`, not truthiness: an epoch-0 timestamp is falsy and would silently drop the date.
   if (m.lifecycle === 'until' && m.lifecycle_until != null) {
