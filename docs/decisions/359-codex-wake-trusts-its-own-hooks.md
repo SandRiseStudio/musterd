@@ -1,4 +1,4 @@
-# 357 — Codex wake trusts its own hooks: `--dangerously-bypass-hook-trust` is safe when musterd wrote the hooks
+# 359 — Codex wake trusts its own hooks: `--dangerously-bypass-hook-trust` is safe when musterd wrote the hooks
 
 - Status: proposed — 2026-09-02. Authored by ryder on lane `01M1J1M1419ZRCCSCMGNW99VXT` (codex
   hooks never fire), from a direct instruction from nick this session ("im fine to use untrusted
@@ -92,6 +92,18 @@ actuated wake path only.
   observation.
 - Sibling lane `01M1J1KC6H` (roster `wakeable` → ADR 189 host liveness) is a separate mechanism and
   must not be conflated with this one; neither substitutes for the other.
+
+## Observability & Evaluation
+
+- **Traces.** `codex-hook` audit rows (`musterd codex-hook start/end/post-tool-use`) begin appearing
+  on codex wakes once the flag ships — their presence at all is the trace that hooks are firing.
+  `residency` rows for codex seats carry `resumable_harness`/`model` fields that should track the
+  live session instead of staying frozen on the last claude-code observation.
+- **Eval.** No dataset — this is a mechanical actuator-args change, not a model-facing behavior.
+  The landed-outcome falsifier above (one live codex wake on gptbot produces a hook-originated audit
+  row within seconds, and its residency row's `resumable_harness`/model fields flip to codex) is the
+  concrete check; `codex.test.ts`'s flipped guard test is the regression net going forward.
+- **Experiment.** n/a — a config/args fix with a direct falsifier, not a policy under experimentation.
 
 ## Limitations
 
