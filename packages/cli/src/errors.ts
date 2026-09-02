@@ -32,6 +32,9 @@ const CODE_EXIT: Record<ErrorCode, number> = {
   // Federation 3c (ADR 355): the hub could not be asked to arbitrate a claim. Its own exit so a
   // script can tell "refused" (9) from "could not be decided" — retry later, never claim anyway.
   hub_unreachable: 12,
+  // ADR 328 §4 (ADR 355 amendment): the seat lives on another machine. Not a conflict (9) and not
+  // "could not be decided" (12): the fix is an admin unbind or claiming from where the seat lives.
+  bound_elsewhere: 13,
 };
 
 export function exitForCode(code: ErrorCode): number {

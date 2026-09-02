@@ -173,6 +173,7 @@ import {
   mintInvite,
   revokeNode,
   rotateNode,
+  unbindSeat,
 } from '../store/nodes.js';
 import { deriveNext } from '../store/orientation.js';
 import {
@@ -271,10 +272,13 @@ import {
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
 import {
   arbitrateClaim,
+  assertSeatResident,
   claimAtHub,
   ClaimRefusedError,
   HubUnreachableError,
   joinerEnrollment,
+  localNodeWithLabel,
+  SeatBoundElsewhereError,
 } from '../sync/claim.js';
 import {
   hubHead,
@@ -3674,8 +3678,36 @@ export async function handleHttp(
               state: err.state,
             });
           }
+          if (err instanceof SeatBoundElsewhereError) {
+            return sendJson(res, 403, {
+              error: { code: 'bound_elsewhere', message: err.message },
+              node_id: err.nodeId,
+              node_label: err.nodeLabel,
+            });
+          }
           throw err;
         }
+      }
+
+      // ADR 328 §4's explicit re-bind act: an admin drops a seat's residence binding so the next
+      // node to speak for it may take it. Idempotent — `unbound: null` for a seat nobody held.
+      const unbindMatch = rest.match(/^\/nodes\/bindings\/([^/]+)$/);
+      if (method === 'DELETE' && unbindMatch) {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const seatName = decodeURIComponent(unbindMatch[1]!);
+        const seat = getMemberByName(ctx.db, team.id, seatName);
+        if (!seat) throw new MusterdError('not_found', `no seat "${seatName}" on this roster`);
+        const unbound = unbindSeat(ctx.db, seat.id);
+        if (unbound) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'seat.unbound',
+            target: seat.name,
+            result: 'allow',
+            detail: { node: unbound.node_id, by: member.name },
+          });
+        }
+        return sendJson(res, 200, { seat: seat.name, unbound: unbound?.node_id ?? null });
       }
 
       if (method === 'POST' && rest === '/sync/push') {
@@ -4174,6 +4206,13 @@ export async function handleHttp(
                 state: err.state,
               });
             }
+            if (err instanceof SeatBoundElsewhereError) {
+              return sendJson(res, 403, {
+                error: { code: 'bound_elsewhere', message: err.message },
+                node_id: err.nodeId,
+                node_label: err.nodeLabel,
+              });
+            }
             if (err instanceof HubUnreachableError)
               throw new MusterdError('hub_unreachable', err.message);
             throw err;
@@ -4181,6 +4220,23 @@ export async function handleHttp(
           // Best effort: pull the hub's decision now so the caller's next read agrees with the
           // answer they were just given. A failed pull changes nothing — the claim already holds.
           await pullTeam(ctx, team).catch(() => undefined);
+        } else if (claimingForSelf) {
+          // ADR 328 §4 on the local path: a self-claim decided here binds the seat to THIS node,
+          // first-writer-wins, so a hub's own residents are bound to it before any joiner can
+          // speak for them — and a seat a joiner has bound is refused here with the same code.
+          // On a single-machine install this is a no-op in effect and a binding in the record.
+          try {
+            assertSeatResident(ctx.db, team.id, member, localNodeWithLabel(ctx.db, team.id));
+          } catch (err) {
+            if (err instanceof SeatBoundElsewhereError) {
+              return sendJson(res, 403, {
+                error: { code: 'bound_elsewhere', message: err.message },
+                node_id: err.nodeId,
+                node_label: err.nodeLabel,
+              });
+            }
+            throw err;
+          }
         }
         const takingForSelf =
           !enrollment &&

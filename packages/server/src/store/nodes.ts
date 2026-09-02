@@ -202,6 +202,65 @@ export function authenticateNode(
 }
 
 /**
+ * The seat→node residence binding, minted (ADR 328 §4): "seat X binds to node N the first time N
+ * speaks for X", first-writer-wins. `{ bound: true }` when this node holds the seat — freshly, or
+ * already; `{ bound: false, node_id, label }` names the node that does, so the refusal means
+ * something a caller can act on ("this seat is bound to laptop-a", not "no residency row").
+ *
+ * The primary key is the CAS: `ON CONFLICT DO NOTHING` plus a read-back, the `bindNode` shape,
+ * never a read-then-write. Two nodes racing one unbound seat serialise on SQLite's single writer
+ * and exactly one inserts. Re-binding is `unbindSeat` under admin authority — an explicit act,
+ * the way ADR 328 required, so a seat that moved laptops is a refusal followed by a decision,
+ * never a silent overwrite by whoever spoke last.
+ *
+ * Applies to every seat kind, as ADR 328 wrote it. Human seats fan out across surfaces (ADR 042)
+ * but a *claim* is an act with one author, and the hole this closes — an admitted node claiming as
+ * any roster seat — is no smaller for human names. The tension with a human on two machines is
+ * real and named in ADR 355's amendment; `unbindSeat` is the release valve until the evidence ADR
+ * 328 §Experiment asks for arrives.
+ */
+export function bindSeatToNode(
+  db: Database,
+  teamId: string,
+  memberId: string,
+  nodeId: string,
+  now: number = Date.now(),
+): { bound: true } | { bound: false; node_id: string; label: string } {
+  db.prepare(
+    `INSERT INTO seat_nodes (member_id, team_id, node_id, bound_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(member_id) DO NOTHING`,
+  ).run(memberId, teamId, nodeId, now);
+  const holder = seatBinding(db, memberId)!;
+  if (holder.node_id === nodeId) return { bound: true };
+  return { bound: false, node_id: holder.node_id, label: holder.label };
+}
+
+/** Where the hub believes this seat lives, or undefined when no node has spoken for it yet. */
+export function seatBinding(
+  db: Database,
+  memberId: string,
+): { node_id: string; label: string; bound_at: number } | undefined {
+  return db
+    .prepare<[string], { node_id: string; label: string; bound_at: number }>(
+      `SELECT s.node_id, n.label, s.bound_at FROM seat_nodes s JOIN nodes n ON n.id = s.node_id
+        WHERE s.member_id = ?`,
+    )
+    .get(memberId);
+}
+
+/** The explicit re-bind act (ADR 328 §4): drop the binding so the next node to speak may take it. */
+export function unbindSeat(db: Database, memberId: string): { node_id: string } | null {
+  return (
+    db
+      .prepare<
+        [string],
+        { node_id: string }
+      >('DELETE FROM seat_nodes WHERE member_id = ? RETURNING node_id')
+      .get(memberId) ?? null
+  );
+}
+
+/**
  * Admin listing. The hash never leaves the store — `credential_prefix` is the token *kind*, not a
  * leading slice of the secret, so it says "enrolled" without handing over anything to start from.
  * Unenrolled rows (this daemon's own, and any minted-but-never-joined) list with nulls: "enrolled"

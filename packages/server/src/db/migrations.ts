@@ -1446,6 +1446,29 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // ADR 328 §4, enforced (ADR 355 amendment, 2026-09-02): the hub-minted seat→node residence
+    // binding. "Seat X binds to node N the first time N speaks for X", first-writer-wins — the
+    // primary key on `member_id` IS the guarded CAS (`INSERT … ON CONFLICT DO NOTHING`, the
+    // `bindNode` shape). Re-binding is an explicit act (a DELETE under admin authority), never a
+    // silent overwrite. Hub-local: `member_id` is this daemon's private anchor (ADR 325), which is
+    // exactly right for a table only the arbitrating daemon reads. On a single-machine install
+    // every seat binds to the local node on its first self-claim, so when a second machine enrolls
+    // the seats that have been building here are already the hub's — the honest reading of "where
+    // does this seat live" and the case ADR 328 §Experiment watches.
+    version: 59,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS seat_nodes (
+          member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+          team_id   TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          node_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+          bound_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_seat_nodes_node ON seat_nodes(node_id);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

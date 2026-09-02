@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('58');
+    expect(ver?.value).toBe('59');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -262,7 +262,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(58); // runs v18…v56 (including the pull cursor and bootstrap cutover evidence)
+    expect(runMigrations(db)).toBe(59); // runs v18…v56 (including the pull cursor and bootstrap cutover evidence)
 
     const scope = (id: string) =>
       db
@@ -326,7 +326,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(58);
+    expect(runMigrations(db)).toBe(59);
 
     const policy = (id: string) =>
       db
@@ -658,7 +658,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(58);
+    expect(runMigrations(db)).toBe(59);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
     db.close();
@@ -673,7 +673,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
     db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
 
-    expect(runMigrations(db)).toBe(58);
+    expect(runMigrations(db)).toBe(59);
 
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
@@ -689,7 +689,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
   it('v58 stamps audit with the origin pair, unique only where a stamp exists', () => {
     const db = withRemoteNode();
     db.prepare("UPDATE schema_meta SET value = '57' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(58);
+    expect(runMigrations(db)).toBe(59);
 
     const insert = db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)

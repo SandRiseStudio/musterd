@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -235,6 +235,85 @@ describe('federation 3c — the hub arbitrates a claim', () => {
     );
     expect(res.status).toBe(200);
     expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.owner_seat).toBe('ada');
+  });
+
+  it('a claim binds the seat to the claiming node; a claim for a seat bound elsewhere is refused 403 naming that node (ADR 328 §4)', async () => {
+    const laneA = await laneOnBoth('a');
+    const laneB = await laneOnBoth('b');
+    // nick claims locally on the hub first: nick now lives on the hub's node.
+    const onHub = await patch(
+      hubBase,
+      `/teams/bravo/lanes/${laneA}`,
+      { owner_seat: 'nick' },
+      nickOnHub,
+    );
+    expect(onHub.status).toBe(200);
+    // The joiner, an admitted node, asks to claim AS nick. Before this fix the hub said yes.
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneB}`,
+      { owner_seat: 'nick' },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(403);
+    expect(res.json.error.code).toBe('bound_elsewhere');
+    expect(res.json.node_label).toBe(hostname());
+    expect(getLane(hub.db, hubTeam().id, laneB, 'bravo')!.owner_seat).toBeNull();
+    // The binding is a hub fact, and the ledger says so.
+    expect(
+      hub.db
+        .prepare<
+          [],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM audit WHERE action = 'seat.bound_elsewhere'")
+        .get(),
+    ).toEqual({ n: 1 });
+  });
+
+  it('unbinding (the explicit re-bind act, admin-only) lets the seat move: the next claim binds it to the joiner', async () => {
+    const laneA = await laneOnBoth('a');
+    const laneB = await laneOnBoth('b');
+    await patch(hubBase, `/teams/bravo/lanes/${laneA}`, { owner_seat: 'nick' }, nickOnHub);
+    const unbound = await call(
+      hubBase,
+      'DELETE',
+      '/teams/bravo/nodes/bindings/nick',
+      undefined,
+      nickOnHub,
+    );
+    expect(unbound.status).toBe(200);
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneB}`,
+      { owner_seat: 'nick' },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(200);
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    const nick = hub.db
+      .prepare<
+        [string],
+        { id: string }
+      >("SELECT id FROM members WHERE team_id = ? AND name = 'nick'")
+      .get(hubTeam().id)!;
+    expect(
+      hub.db
+        .prepare<
+          [string],
+          { node_id: string }
+        >('SELECT node_id FROM seat_nodes WHERE member_id = ?')
+        .get(nick.id),
+    ).toEqual({ node_id: joinerNode });
+    // Now the hub's own local claim as nick is the one refused.
+    const laneC = await laneOnBoth('c');
+    const local = await patch(
+      hubBase,
+      `/teams/bravo/lanes/${laneC}`,
+      { owner_seat: 'nick' },
+      nickOnHub,
+    );
+    expect(local.status).toBe(403);
+    expect(local.json.error.code).toBe('bound_elsewhere');
   });
 
   it('the hub refuses a claim from a node for a lane it has not yet folded, so the joiner retries after sync', async () => {

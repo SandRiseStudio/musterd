@@ -68,9 +68,11 @@ exist on the hub (its `lane.opened` must have folded — "not yet replicated, re
 with the joiner's `expect`. A `LaneConflictError` becomes a refusal naming the holder and state.
 
 The hub writes the `lane.claimed` row as the seat, from the hub's allocator, with one field added:
-`node`, the joiner's node id. **That is the seat→node residence binding** — in the replicated log,
-on the row that records the acquisition, rather than in a table nothing else reads. A reader that
-wants "which machine does this seat build on" folds it from the newest `lane.claimed` rows.
+`node`, the joiner's node id. That is the residence *trace* in the replicated log, on the row that
+records the acquisition. ~~That is the seat→node residence binding … rather than in a table nothing
+else reads.~~ **Corrected by §5 (2026-09-02):** a trace is not a binding. The binding ADR 328 §4
+requires is a hub-minted table the claim consults *before* it decides, and this ADR as first landed
+had none — see §5.
 
 The hub stages its own history immediately after arbitrating (a loopback push) so the joiner's pull
 finds the row it was just told about.
@@ -95,6 +97,37 @@ named, taken at its word: the ownership decision is linearizable, the liveness i
 yet whole. Presence summaries reported upward (residence 3) are the slice that closes it, and until
 they land the topology doc says so in the increments table.
 
+### 5. Residence is enforced, not merely recorded (amendment, 2026-09-02)
+
+gptbot's acceptance review of #1190 found the hole in §2 as first landed: `/sync/claim`
+authenticated the *node* and then accepted any `seat` the body named, so an admitted joiner
+credential could claim as any roster seat. ADR 328 §4 had already decided the rule — "an admitted
+node speaks for the seats resident on it, and only those", with residence a **hub-minted binding**,
+first-writer-wins under a guarded CAS, re-bound only by an explicit act — and §2 above recorded the
+residence on the `lane.claimed` row without ever consulting it.
+
+The binding is now a table, `seat_nodes` (migration v59, `member_id` primary key as the CAS, the
+`bindNode` shape). `assertSeatResident` runs in `arbitrateClaim` before anything about the lane is
+read, and on every daemon's *local* self-claim path with the local node as the speaker, so a hub's
+own residents are bound to it before any joiner can name them. A claim for a seat bound to another
+node is `403 bound_elsewhere` (CLI exit 13) carrying `node_id` and `node_label`, relayed verbatim
+by a joiner. The ledger holds `seat.bound` on first bind, `seat.bound_elsewhere` (deny) on each
+refusal, and `seat.unbound` for the explicit re-bind act, `DELETE /teams/:slug/nodes/bindings/:seat`
+under admin authority — the pair ADR 328 §Experiment pre-registered as its signal.
+
+Two things this deliberately does not do. **Push-level residence**: a node can still push messages,
+lane transitions and (after the presence slice) presence events naming any seat; ingest checks the
+team, not the seat. That is the general form of this same rule and it is the next increment, not a
+footnote here. **Kind-scoping**: the binding applies to human seats too, as ADR 328 wrote it. A
+human who works from two laptops will meet `bound_elsewhere` on the second, and the unbind is the
+release valve; whether humans should fan out across nodes the way ADR 042 lets them fan out across
+surfaces is the evidence question ADR 328 left open, and the refusals are how it gets answered.
+
+Falsifiers, in `sync/claim.test.ts`: a seat that claimed on the hub is refused when the joiner
+claims as it, with the hub's node named and the lane untouched; after an admin unbind the joiner's
+claim binds the seat to the joiner and the hub's own local claim as that seat is the one refused.
+The store-level race — two nodes binding one seat, exactly one wins — is `store/nodes.residence.test.ts`.
+
 ## Alternatives considered
 
 - **Provisional local claim, reconciled on reconnect.** Refused by ADR 325 in advance, for the
@@ -102,9 +135,10 @@ they land the topology doc says so in the increments table.
   data: the 2026-08-01 double claim (two seats, one lane, six minutes apart) is what ADR 203 was
   written for, and a provisional claim reintroduces it across machines.
 - **Fold `hub_unreachable` into `conflict`.** One code fewer, one wrong next move for every caller.
-- **A residence table on the hub, written at claim.** A second store of a fact the log already
-  holds; it would need its own migration and its own replication. The `node` field on the claimed
-  row is the same fact, already replicated, already ordered.
+- **A residence table on the hub, written at claim.** ~~Refused as a second store of a fact the log
+  already holds.~~ **Reversed by §5:** the log holds the trace, but a claim cannot consult a fold of
+  its own future output, and the guard has to run before the row is written. The table is the
+  binding; the row stays the trace. It needs no replication — it is the hub's own decision input.
 - **Arbitrate every ownership edge in this increment.** Handoffs and releases are less racy (a
   handoff names a recipient; a release lets go) and each has a wake on the far end to think about.
   One edge, done properly and falsified, is the increment; the others follow it.
@@ -122,7 +156,11 @@ they land the topology doc says so in the increments table.
   Opening with `claim: true` stays local and is not arbitrated — a birth has no incumbent — so the
   common "open and take it" case is unaffected.
 - Protocol: `SyncClaimRequestSchema`, `SyncClaimRefusalSchema`, and the `hub_unreachable` error code
-  (HTTP 503, CLI exit 12). The message and lane sync events are untouched.
+  (HTTP 503, CLI exit 12). The message and lane sync events are untouched. §5 adds
+  `SeatBoundElsewhereRefusalSchema` and `bound_elsewhere` (HTTP 403, CLI exit 13).
+- §5: on a single-machine install every seat that self-claims is bound to the local node from the
+  first claim after v59. Nothing changes in effect until a second machine enrolls; then the seats
+  that have been building here are the hub's, and a seat that wants to move is one admin unbind.
 
 ## Observability & Evaluation
 

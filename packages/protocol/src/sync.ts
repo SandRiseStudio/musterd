@@ -170,6 +170,19 @@ export const SyncClaimRefusalSchema = z.object({
 });
 export type SyncClaimRefusal = z.infer<typeof SyncClaimRefusalSchema>;
 
+/**
+ * ADR 328 §4, enforced: the seat is bound to another node. 403 with the bound node beside the
+ * envelope, the way a claim refusal carries `holder` — the caller can act on a machine name (claim
+ * from there, or ask an admin to unbind) where it cannot act on a sentence. Relayed verbatim by
+ * a joiner to its caller.
+ */
+export const SeatBoundElsewhereRefusalSchema = z.object({
+  error: z.object({ code: z.literal('bound_elsewhere'), message: z.string() }),
+  node_id: z.string().min(1),
+  node_label: z.string(),
+});
+export type SeatBoundElsewhereRefusal = z.infer<typeof SeatBoundElsewhereRefusalSchema>;
+
 export const SyncPullResponseSchema = z.object({
   events: z.array(SyncPullEventSchema).max(SYNC_PULL_MAX_BATCH),
   /** The hub's head, so a puller can compute lag (`hub_head − cursor`) without a second call. */
