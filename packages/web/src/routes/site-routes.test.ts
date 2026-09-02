@@ -6,7 +6,6 @@ import { siteUrls } from '../../scripts/site-files';
 const read = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
 
 const CONTENT_ROUTES = [
-  'roadmap.tsx',
   'docs.index.tsx',
   'docs.$slug.tsx',
   'blog.index.tsx',
@@ -23,7 +22,6 @@ function routeFileFor(path: string): string {
   if (path === '/') return 'index.tsx';
   const [, section, slug] = path.split('/');
   if (!section) throw new Error(`unroutable public path ${path}`);
-  if (section === 'roadmap') return 'roadmap.tsx';
   return slug ? `${section}.$slug.tsx` : `${section}.index.tsx`;
 }
 
@@ -75,7 +73,6 @@ describe('structured data and canonical coverage', () => {
       'docs.$slug.tsx',
       'docs.index.tsx',
       'index.tsx',
-      'roadmap.tsx',
     ]);
   });
 

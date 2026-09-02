@@ -1,7 +1,12 @@
 /**
  * Build-prep content pipeline (ADR 302): render the docs manifest, the blog posts, and the
- * repo-root roadmap data to HTML strings in a generated module, so the client bundle carries no
- * markdown runtime and no roadmap dataset. Runs before `vite build` (see package.json `build`).
+ * markdown to HTML strings in a generated module, so the client bundle carries no markdown
+ * runtime. Runs before `vite build` (see package.json `build`).
+ *
+ * The repo-root roadmap dataset used to be rendered here too, for the public /roadmap page. That
+ * page was retired on 2026-09-02 (nick): the roadmap lives in ROADMAP.md, in the repository, and
+ * the public origin is the product. `content/roadmap.data.ts` stays — its other three consumers
+ * (gen-roadmap, check-roadmap-truth, the steward drift scan) are what write ROADMAP.md.
  *
  * Invariants this script owns:
  *   - a manifest entry whose source file is missing FAILS the build (a publish decision must not
@@ -13,7 +18,6 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { marked } from 'marked';
-import { ROADMAP, STATUS_META, STATUS_ORDER } from '../../../content/roadmap.data.ts';
 import { DOCS_MANIFEST } from '../content/docs.manifest.ts';
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -53,8 +57,6 @@ export function renderPage(md: string): { title: string; html: string } {
   return { title, html: wrapTables(html) };
 }
 
-const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
 const ENTITIES: Record<string, string> = {
   amp: '&',
   lt: '<',
@@ -86,16 +88,6 @@ export function excerpt(html: string): string {
   if (text.length <= MAX_DESCRIPTION) return text;
   const cut = text.slice(0, MAX_DESCRIPTION - 1);
   return `${cut.slice(0, cut.lastIndexOf(' ')).trimEnd()}…`;
-}
-
-export function renderRoadmap(): { status: string; label: string; html: string }[] {
-  return STATUS_ORDER.map((status) => ({
-    status,
-    label: STATUS_META[status].label,
-    html: `<ul>\n${ROADMAP.filter((i) => i.status === status)
-      .map((i) => `<li><strong>${esc(i.title)}</strong> — ${esc(i.blurb)}</li>`)
-      .join('\n')}\n</ul>`,
-  }));
 }
 
 function main() {
@@ -131,7 +123,6 @@ function main() {
     })
     .sort((a, b) => b.date.localeCompare(a.date));
 
-  const roadmapSections = renderRoadmap();
 
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(
@@ -142,12 +133,11 @@ function main() {
       'export interface BlogPost extends SitePage { date: string }',
       `export const docsPages: (SitePage & { source: string })[] = ${JSON.stringify(docsPages, null, 2)};`,
       `export const blogPosts: BlogPost[] = ${JSON.stringify(blogPosts, null, 2)};`,
-      `export const roadmapSections: { status: string; label: string; html: string }[] = ${JSON.stringify(roadmapSections, null, 2)};`,
       '',
     ].join('\n'),
   );
   console.log(
-    `gen-site-content: ${docsPages.length} docs page(s), ${blogPosts.length} blog post(s), ${roadmapSections.length} roadmap section(s) → src/content/generated/site-content.ts`,
+    `gen-site-content: ${docsPages.length} docs page(s), ${blogPosts.length} blog post(s) → src/content/generated/site-content.ts`,
   );
 }
 

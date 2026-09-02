@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as RoadmapRouteImport } from './routes/roadmap'
 import { Route as OfficePreviewRouteImport } from './routes/office-preview'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as CharacterSheetRouteImport } from './routes/character-sheet'
@@ -23,11 +22,6 @@ import { Route as BlogIndexRouteImport } from './routes/blog.index'
 import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
 import { Route as BlogSlugRouteImport } from './routes/blog.$slug'
 
-const RoadmapRoute = RoadmapRouteImport.update({
-  id: '/roadmap',
-  path: '/roadmap',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const OfficePreviewRoute = OfficePreviewRouteImport.update({
   id: '/office-preview',
   path: '/office-preview',
@@ -98,7 +92,6 @@ export interface FileRoutesByFullPath {
   '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
-  '/roadmap': typeof RoadmapRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/blog/': typeof BlogIndexRoute
@@ -113,7 +106,6 @@ export interface FileRoutesByTo {
   '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
-  '/roadmap': typeof RoadmapRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/blog': typeof BlogIndexRoute
@@ -129,7 +121,6 @@ export interface FileRoutesById {
   '/character-sheet': typeof CharacterSheetRoute
   '/live': typeof LiveRoute
   '/office-preview': typeof OfficePreviewRoute
-  '/roadmap': typeof RoadmapRoute
   '/blog/$slug': typeof BlogSlugRoute
   '/docs/$slug': typeof DocsSlugRoute
   '/blog/': typeof BlogIndexRoute
@@ -146,7 +137,6 @@ export interface FileRouteTypes {
     | '/character-sheet'
     | '/live'
     | '/office-preview'
-    | '/roadmap'
     | '/blog/$slug'
     | '/docs/$slug'
     | '/blog/'
@@ -161,7 +151,6 @@ export interface FileRouteTypes {
     | '/character-sheet'
     | '/live'
     | '/office-preview'
-    | '/roadmap'
     | '/blog/$slug'
     | '/docs/$slug'
     | '/blog'
@@ -176,7 +165,6 @@ export interface FileRouteTypes {
     | '/character-sheet'
     | '/live'
     | '/office-preview'
-    | '/roadmap'
     | '/blog/$slug'
     | '/docs/$slug'
     | '/blog/'
@@ -192,7 +180,6 @@ export interface RootRouteChildren {
   CharacterSheetRoute: typeof CharacterSheetRoute
   LiveRoute: typeof LiveRoute
   OfficePreviewRoute: typeof OfficePreviewRoute
-  RoadmapRoute: typeof RoadmapRoute
   BlogSlugRoute: typeof BlogSlugRoute
   DocsSlugRoute: typeof DocsSlugRoute
   BlogIndexRoute: typeof BlogIndexRoute
@@ -201,13 +188,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/roadmap': {
-      id: '/roadmap'
-      path: '/roadmap'
-      fullPath: '/roadmap'
-      preLoaderRoute: typeof RoadmapRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/office-preview': {
       id: '/office-preview'
       path: '/office-preview'
@@ -304,7 +284,6 @@ const rootRouteChildren: RootRouteChildren = {
   CharacterSheetRoute: CharacterSheetRoute,
   LiveRoute: LiveRoute,
   OfficePreviewRoute: OfficePreviewRoute,
-  RoadmapRoute: RoadmapRoute,
   BlogSlugRoute: BlogSlugRoute,
   DocsSlugRoute: DocsSlugRoute,
   BlogIndexRoute: BlogIndexRoute,

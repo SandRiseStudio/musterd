@@ -6,7 +6,7 @@ import { NAV_LINKS } from './SiteNav';
 describe('site nav', () => {
   it('links every public surface and GitHub, nothing daemon-connected', () => {
     const hrefs = NAV_LINKS.map((l) => l.href);
-    expect(hrefs).toEqual(['/docs', '/blog', '/roadmap', 'https://github.com/SandRiseStudio/musterd']);
+    expect(hrefs).toEqual(['/docs', '/blog', 'https://github.com/SandRiseStudio/musterd']);
     for (const h of hrefs) expect(h).not.toMatch(/live|board|audit|approvals|broadcast/);
   });
 

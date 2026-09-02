@@ -7,7 +7,6 @@
 export const PUBLIC_ALLOW = [
   'index.html',
   'assets',
-  'roadmap',
   'docs',
   'blog',
   // Crawler- and agent-facing text, generated into the build by the `musterd-site-files` plugin in

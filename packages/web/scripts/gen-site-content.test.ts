@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { excerpt, parsePostFilename, renderPage, renderRoadmap } from './gen-site-content';
+import { excerpt, parsePostFilename, renderPage } from './gen-site-content';
 
 describe('parsePostFilename', () => {
   it('extracts date and slug', () =>
@@ -70,10 +70,6 @@ describe('renderPage — wide content scrolls in its own box', () => {
   });
 });
 
-describe('renderRoadmap', () => {
-  it('emits one section per status, in STATUS_ORDER, each with items', () => {
-    const sections = renderRoadmap();
-    expect(sections.map((s) => s.status)).toEqual(['shipped', 'near-term', 'reserved', 'out-of-scope']);
-    for (const s of sections) expect(s.html).toContain('<li');
-  });
-});
+/* `renderRoadmap` was retired with the public /roadmap page on 2026-09-02. The dataset it read,
+   content/roadmap.data.ts, is untouched — ROADMAP.md is still generated from it by `gen-roadmap`,
+   whose own tests cover that path. */

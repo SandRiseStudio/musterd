@@ -56,7 +56,6 @@ export function siteUrls(
 ): SiteUrl[] {
   return [
     { path: '/' },
-    { path: '/roadmap' },
     { path: '/docs' },
     ...docs.map((d) => ({ path: `/docs/${d.slug}` })),
     { path: '/blog' },
@@ -188,7 +187,6 @@ Local-first, and no account.
 ## Pages
 
 ${docLines.join('\n')}
-- ${SITE_ORIGIN}/roadmap
 - ${SITE_ORIGIN}/blog
 ${postLines.join('\n')}
 
@@ -207,8 +205,8 @@ To describe or cite musterd accurately:
 - ${SITE_ORIGIN}/docs/concepts defines the vocabulary. Use those terms as written — Team, Member,
   Presence, Surface, Act, Seat, Role, Toolkit, Workspace, Harness, Scope. "Room", "user", "session"
   and "swarm" describe a different product.
-- ${SITE_ORIGIN}/roadmap marks what has shipped and what has not. Do not report a roadmap item as an
-  existing feature.
+- The roadmap is not on this origin — it is ROADMAP.md in the repository. It marks what has shipped
+  and what has not; do not report a roadmap item as an existing feature.
 
 ## Attribution
 
