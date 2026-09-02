@@ -26,7 +26,7 @@ import {
   localSessionLiveness,
   type LocalSessionLiveness,
 } from '../session/liveness.js';
-import { findWorkspaceDir, resolveClaimWorkspace } from './helpers.js';
+import { attestedModel, findWorkspaceDir, resolveClaimWorkspace } from './helpers.js';
 import { composeSessionOrientation, type SessionOrientationInput } from './sessionOrientation.js';
 import { composeSessionStatusline, type SessionStatuslineInput } from './sessionStatusline.js';
 
@@ -198,6 +198,9 @@ async function defaultOrientationFetcher(
   const key = binding?.seat_credential ?? binding?.agent_key;
   if (!binding || !seat || !key) return null;
   const team = binding.team;
+  // The ADR 246 ladder (observed > env > declared), not the bare declaration: what this client
+  // attests is what a reclaim would stamp on the seat.
+  const model = attestedModel(binding, process.env);
   // A CLI act is intrinsically `cli` (ADR 286), matching gather()'s binding branch.
   const http = new HttpClient({
     server: binding.server,
@@ -205,7 +208,7 @@ async function defaultOrientationFetcher(
     seat,
     ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
     surface: 'cli',
-    ...(binding.model !== undefined ? { model: binding.model } : {}),
+    ...(model !== undefined ? { model } : {}),
   });
   const [inboxRes, brief, memory] = await Promise.all([
     http.inbox(team, { unread: true }),
@@ -307,13 +310,14 @@ async function defaultStatuslineFetcher(
   const key = binding?.seat_credential ?? binding?.agent_key;
   if (!binding || !seat || !key) return null;
   const team = binding.team;
+  const model = attestedModel(binding, process.env); // ADR 246 ladder, same as every one-shot
   const http = new HttpClient({
     server: binding.server,
     key,
     seat,
     ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
     surface: 'cli',
-    ...(binding.model !== undefined ? { model: binding.model } : {}),
+    ...(model !== undefined ? { model } : {}),
   }).presenceNeutral();
   const [inboxRes, brief] = await Promise.all([
     http.inbox(team, { unread: true, limit: STATUSLINE_INBOX_LIMIT }),
@@ -538,6 +542,15 @@ async function pushAttestation(
   };
   // A CLI hook is intrinsically `cli` (ADR 286); the workspace label is what keeps a claim from
   // this one-shot from evicting the live adapter in the same worktree (ADR 340, #1131).
+  //
+  // The model rides too, through the ADR 246 ladder (observed > env > declared). The reclaim below
+  // is a real seat claim, and a claim is where a Presence gets its model: built without one it
+  // minted a `cli` row attesting nothing — the newest non-held row, so the seat read `unknown` to
+  // the ADR 188 picker until something else attested. Measured 2026-09-02: the two big-body
+  // `worker_unattested` rows that survived the claim storm each sat 4s after a bare `cli` claim,
+  // and post-storm the seats made 244 `cli` claims to 50 `claude-code`. The hook holds the
+  // harness's own observation in `binding.model_observed`; sending it is not a declaration.
+  const model = attestedModel(binding, process.env);
   const client = (sessionLease: string | undefined) =>
     new HttpClient({
       server: binding.server,
@@ -547,6 +560,7 @@ async function pushAttestation(
       seat,
       surface: 'cli',
       ...(sessionLease !== undefined ? { sessionLease } : {}),
+      ...(model !== undefined ? { model } : {}),
     }).presenceNeutral();
   try {
     await client(binding.session_lease).attestSession(binding.team, body);
