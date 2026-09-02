@@ -68,3 +68,39 @@ export function stillMode(): boolean {
     return false; /* no window/search available (SSR, tests) — the page behaves normally */
   }
 }
+
+/**
+ * `?asks-open` — MEASUREMENT MODE for a surface that is closed by default.
+ *
+ * Same bargain as `?still` above and the same reason for existing page-side: the sweep can only
+ * measure what is RENDERED, and it skips anything at `visibility: hidden` or `opacity: 0`
+ * (contrast-sweep.mjs:570). The asks sheet is both while closed, so **every card in it has always
+ * gone unmeasured** — the lapsed note this flag was added for, and equally the deferred note and
+ * the answer buttons that predate it. A gate that has never seen a surface is not a gate that
+ * approved it.
+ *
+ * The alternative was to have the sweep click the "see all" button. Rejected on the ADR 285
+ * argument, which applies here unchanged: driving a page from outside means inferring when it has
+ * finished opening, and the sweep already carries six guards' worth of that inference. The page
+ * knows whether its sheet is open. It can simply say so, and land in the DOM open on the first
+ * paint with no transition to race.
+ *
+ * Scope: it sets the sheet's INITIAL state only. The reader can still close it, and nothing else
+ * about the strip changes — same cards, same copy, same inks.
+ */
+export function isAsksOpen(search: string): boolean {
+  try {
+    return new URLSearchParams(search).has('asks-open');
+  } catch {
+    return false;
+  }
+}
+
+/** The same question against the live location. Safe under SSR/prerender, where there is no window. */
+export function asksOpenMode(): boolean {
+  try {
+    return isAsksOpen(window.location.search);
+  } catch {
+    return false;
+  }
+}

@@ -405,6 +405,20 @@ if (!process.argv.includes('--static-only')) {
         12,
       );
     }
+    /* The asks SHEET, open (`?asks-open`). It is `visibility: hidden; opacity: 0` while closed, so
+       the sweep's own visibility filter skipped every card in it on every run this gate has ever
+       made — the answer buttons, the deferred note, and the lapsed note the fixture now seeds. The
+       rail above it was measured all along, which is exactly why the gap was easy to miss: /live
+       reported ~215 rows and looked thorough.
+
+       One lighting value, not the bracket: the sheet floats OVER the canvas on its own paper, so
+       its inks do not vary with the room's light the way the rail's do — a second pass would
+       measure the same pairs twice and cost ~15s of fixture time for nothing. */
+    report(
+      await sweep(`${base}/live?team=${team}&light=${SCENE_LIGHTS[0]}${SCENE_STILL}&asks-open`),
+      '/live (connected, asks sheet open)',
+      12,
+    );
   } finally {
     await sh(['down']);
   }

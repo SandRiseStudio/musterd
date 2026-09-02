@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol';
 import {
+  applyTierClock,
   askIsLoud,
   byUrgency,
   deriveAsks,
@@ -38,10 +39,23 @@ export function AsksReel({
   /** The lane board the page already holds — feeds the review queue into the rotation. */
   board?: LaneBoard | null;
 }) {
-  const asks = useMemo(() => deriveAsks(envelopes), [envelopes]);
-  const loud = asks.filter((a) => askIsLoud(a.state)).sort((a, b) => byUrgency(a, b));
+  // One clock drives the rotation, the countdowns, and which side of its tier contract an
+  // unanswered ask fell on — declared first because the derivation now reads it.
+  const [mountedAt] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+
+  const derived = useMemo(() => deriveAsks(envelopes), [envelopes]);
+  /**
+   * A stream has no cursor, so anything the reel rotates is the whole of what a viewer can ever see —
+   * which makes rotating dead cards worse here than on /live, not better. An ask past a below-top
+   * tier deadline was answered by the contract days ago (`applyTierClock`); it leaves the rotation
+   * and is counted, dimmed, as `elapsed`.
+   */
+  const asks = useMemo(() => applyTierClock(derived, now), [derived, now]);
+  const loud = asks.filter((a) => askIsLoud(a.state)).sort((a, b) => byUrgency(a, b, now));
   const deferred = asks.filter((a) => a.state === 'deferred');
-  const settled = asks.length - loud.length - deferred.length;
+  const lapsed = asks.filter((a) => a.state === 'lapsed');
+  const settled = asks.length - loud.length - deferred.length - lapsed.length;
   const reviews = useMemo(
     () => (board ? deriveReviewQueue(board.lanes, asks) : []),
     [board, asks],
@@ -53,15 +67,20 @@ export function AsksReel({
     [asks, reviews],
   );
 
-  // One clock drives both the rotation and the countdowns. It ticks only while something is loud —
-  // idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs for hours.
-  const [mountedAt] = useState(() => Date.now());
-  const [now, setNow] = useState(() => Date.now());
+  // The tick. Idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs
+  // for hours — so it runs only when something on screen actually changes with time: a countdown
+  // (`loud`), or a rotation with more than one card to turn.
+  //
+  // The second half of that condition is not decoration. Before `applyTierClock`, every stale ask
+  // was loud, so a board with anything on it ticked. Now a stage can hold nothing but lanes in
+  // review — nothing loud at all — and gating on `loud` alone would freeze the reel on whichever
+  // card it first drew, for the length of the broadcast.
+  const rotates = cards.length > 1;
   useEffect(() => {
-    if (loud.length === 0) return;
+    if (loud.length === 0 && !rotates) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [loud.length]);
+  }, [loud.length, rotates]);
 
   // Null only when the timeline holds no asks at all — same rule as /live's strip. With everything
   // settled, /live shows a quiet "nothing waiting" row rather than vanishing, and the stream keeps
@@ -100,6 +119,9 @@ export function AsksReel({
         {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
         {reviews.length > 0 && <span className="bc-reel__meta">{reviews.length} in review</span>}
         {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
+        {lapsed.length > 0 && (
+          <span className="bc-reel__meta bc-reel__meta--dim">{lapsed.length} elapsed</span>
+        )}
         {settled > 0 && <span className="bc-reel__meta bc-reel__meta--dim">{settled} settled</span>}
         {shown !== null && cards.length > 1 && (
           <span className="bc-reel__dots" aria-hidden="true">

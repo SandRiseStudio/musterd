@@ -5259,6 +5259,19 @@
   font-size: 11px;
   color: var(--lc-info-ink);
 }
+/* A lapsed ask (`applyTierClock`) is the one note on this card that is not news: it explains why
+   nothing is waiting on you. So it drops from the info ink to the roster's muted neutral — the same
+   colour the rail's counts use, which the a11y sweep already measures as text — while the card
+   itself keeps the plain surface, since only `--open` and `--held` earn the accent tint. Quiet is
+   the whole design: the reader should be able to skim past it, and find it when they want it.
+
+   Deliberately NOT `opacity` (the broadcast reel's dimming idiom). Contrast here is measured in the
+   browser, on the painted pixel — a translucent text layer over the sheet is exactly the stack
+   `pnpm a11y:contrast` exists to score honestly, and dimming would spend contrast rather than
+   change hue. */
+.lc-ask__note--lapsed {
+  color: var(--lc-muted);
+}
 
 /* ─── the office overlay (shared by /live and /broadcast) ─────────────────
    Broadcast chrome, not dashboard chrome: this sits over a rendered canvas that a stranger may land
