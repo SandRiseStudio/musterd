@@ -1,5 +1,6 @@
 import { makeEnvelope } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
+import { REMOTE_PRESENCE_TTL_MS } from '../config.js';
 import { openDb } from '../db/open.js';
 import { MusterdError } from '../errors.js';
 import { resolveActivity } from './activity.js';
@@ -939,6 +940,43 @@ describe('presence', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM presence WHERE id = 'rB'").get()).toEqual({
       n: 0,
     });
+  });
+
+  it('a remote row is live while its node is, and reads its node label (presence replication §3)', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const now = Date.now();
+    db.prepare(
+      'INSERT INTO nodes (id, team_id, label, next_seq, last_seen_at) VALUES (?, ?, ?, 1, ?)',
+    ).run('nB', team.id, 'laptop-b', now);
+    db.prepare(
+      "INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, created_at, node, model, driver, workspace) VALUES ('rB', ?, 'codex', 'online', NULL, ?, ?, 'nB', 'gpt-5', 'nick', '~/b')",
+    ).run(ada.row.id, now - 10 * 60_000, now - 10 * 60_000); // a stale heartbeat would be dead locally
+    expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(true);
+    const p = listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')!;
+    expect(p.status).toBe('online');
+    expect(p.presences[0]).toMatchObject({
+      node: 'nB',
+      node_label: 'laptop-b',
+      model: 'gpt-5',
+      driver: 'nick',
+      workspace: '~/b',
+    });
+    expect(listLiveDrivers(db, team.id, 45_000).has('nick')).toBe(true);
+    expect(countLivePresences(db, 45_000)).toBe(1);
+    // The node goes quiet past the TTL: the same row is not live.
+    db.prepare('UPDATE nodes SET last_seen_at = ? WHERE id = ?').run(
+      now - REMOTE_PRESENCE_TTL_MS - 1,
+      'nB',
+    );
+    expect(hasLivePresence(db, ada.row.id, 45_000)).toBe(false);
+    expect(listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')!.status).toBe(
+      'offline',
+    );
+    // A local row folded nowhere still reads node: null on the roster.
+    attach(db, ada.row.id, 'claude-code', 'c1');
+    const local = listPresence(db, team.id, 45_000).find((s) => s.member.name === 'Ada')!;
+    expect(local.presences[0]).toMatchObject({ node: null, node_label: null });
   });
 
   it('reports online while fresh and offline after reap', () => {

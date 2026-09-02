@@ -260,6 +260,40 @@ export function unbindSeat(db: Database, memberId: string): { node_id: string } 
   );
 }
 
+/** The hub's stamp on every authenticated sync contact (push, pull, claim): the node is alive now. */
+export function touchNode(db: Database, nodeId: string, now: number): void {
+  db.prepare('UPDATE nodes SET last_seen_at = ? WHERE id = ?').run(now, nodeId);
+}
+
+/**
+ * A node this daemon learned of from the hub's pull summary (presence replication, 2026-09-02).
+ * Writes identity and liveness ONLY: `next_seq` is an allocator this daemon must never mint from
+ * for a foreign node, and the credential columns are the hub's business (ADR 328).
+ */
+export function upsertForeignNode(
+  db: Database,
+  teamId: string,
+  node: { id: string; label: string; last_seen_at: number | null },
+): void {
+  db.prepare(
+    `INSERT INTO nodes (id, team_id, label, next_seq, last_seen_at) VALUES (?, ?, ?, 1, ?)
+     ON CONFLICT(id) DO UPDATE SET label = excluded.label, last_seen_at = excluded.last_seen_at`,
+  ).run(node.id, teamId, node.label, node.last_seen_at);
+}
+
+/** Every node of the team with its liveness stamp — the pull response's `nodes`. */
+export function listNodeLiveness(
+  db: Database,
+  teamId: string,
+): { id: string; label: string; last_seen_at: number | null }[] {
+  return db
+    .prepare<
+      [string],
+      { id: string; label: string; last_seen_at: number | null }
+    >('SELECT id, label, last_seen_at FROM nodes WHERE team_id = ? ORDER BY id')
+    .all(teamId);
+}
+
 /**
  * Admin listing. The hash never leaves the store — `credential_prefix` is the token *kind*, not a
  * leading slice of the secret, so it says "enrolled" without handing over anything to start from.

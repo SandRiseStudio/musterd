@@ -23,7 +23,8 @@ import { hasEnrolledJoiners, ingestBatch, SyncGapError } from './log.js';
  */
 
 /** How often the daemon offers its unpushed events. Idle cost is one conditional per team per tick;
- *  the outbound fetch happens only for teams this machine has actually enrolled. */
+ *  the outbound fetch happens only for teams this machine has actually enrolled. If this changes,
+ *  change `REMOTE_PRESENCE_TTL_MS` in config.ts — it budgets two of these. */
 export const SYNC_PUSH_INTERVAL_MS = 60_000;
 
 /** Abandon a slow hub rather than let it stack ticks. */

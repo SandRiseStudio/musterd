@@ -19,7 +19,22 @@ export interface PresenceSummary {
     build: string | null;
     epoch: number | null;
     wake_lease: string | null;
+    /** The machine this row lives on (presence replication, 2026-09-02); null = this daemon. */
+    node: string | null;
+    node_label: string | null;
   }[];
+}
+
+/**
+ * The one definition of "live", node-aware (presence replication spec §3): a local row by its own
+ * heartbeat, a remote row by its node's last sync contact. Bind `[cutoffLocal, cutoffRemote]` in
+ * that order. Requires `presence p LEFT JOIN nodes n ON n.id = p.node` in the FROM clause.
+ */
+export const LIVE_PRESENCE_SQL =
+  'p.held_until IS NULL AND ((p.node IS NULL AND p.last_seen_at > ?) OR (p.node IS NOT NULL AND n.last_seen_at > ?))';
+
+function liveCutoffs(timeoutMs: number, now = Date.now()): [number, number] {
+  return [now - timeoutMs, now - REMOTE_PRESENCE_TTL_MS];
 }
 
 /** Attach-time context the client may supply (musterd/0.2, ADR 014 + ADR 021 + ADR 101). */
@@ -382,13 +397,13 @@ export function touchAmbientPresence(
 
 /** Does this member currently have any live presence (within timeout, not a release hold)? */
 export function hasLivePresence(db: Database, memberId: string, timeoutMs: number): boolean {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   const row = db
     .prepare<
-      [string, number],
+      [string, number, number],
       { n: number }
-    >('SELECT COUNT(*) AS n FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ?')
-    .get(memberId, cutoff);
+    >(`SELECT COUNT(*) AS n FROM presence p LEFT JOIN nodes n ON n.id = p.node WHERE p.member_id = ? AND ${LIVE_PRESENCE_SQL}`)
+    .get(memberId, l, r);
   return (row?.n ?? 0) > 0;
 }
 
@@ -400,14 +415,14 @@ export function hasLivePresence(db: Database, memberId: string, timeoutMs: numbe
  * session. Mirrors the live filter used by the roster (fresh heartbeat, not a release hold).
  */
 export function countLivePresences(db: Database, timeoutMs: number): number {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   // Observer seats (ADR 063) watch without participating — never counted as live sessions.
   const row = db
     .prepare<
-      [number],
+      [number, number],
       { n: number }
-    >('SELECT COUNT(DISTINCT p.member_id) AS n FROM presence p JOIN members m ON m.id = p.member_id WHERE p.held_until IS NULL AND p.last_seen_at > ? AND m.observer = 0')
-    .get(cutoff);
+    >(`SELECT COUNT(DISTINCT p.member_id) AS n FROM presence p JOIN members m ON m.id = p.member_id LEFT JOIN nodes n ON n.id = p.node WHERE m.observer = 0 AND ${LIVE_PRESENCE_SQL}`)
+    .get(l, r);
   return row?.n ?? 0;
 }
 
@@ -419,19 +434,19 @@ export function countLivePresences(db: Database, timeoutMs: number): number {
  * Same live filter as the roster (fresh heartbeat, not a release hold), scoped to the team.
  */
 export function listLiveDrivers(db: Database, teamId: string, timeoutMs: number): Set<string> {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   const rows = db
     .prepare<
-      [string, number],
+      [string, number, number],
       { driver: string }
-    >('SELECT DISTINCT p.driver AS driver FROM presence p JOIN members m ON m.id = p.member_id WHERE m.team_id = ? AND p.driver IS NOT NULL AND p.held_until IS NULL AND p.last_seen_at > ?')
-    .all(teamId, cutoff);
+    >(`SELECT DISTINCT p.driver AS driver FROM presence p JOIN members m ON m.id = p.member_id LEFT JOIN nodes n ON n.id = p.node WHERE m.team_id = ? AND p.driver IS NOT NULL AND ${LIVE_PRESENCE_SQL}`)
+    .all(teamId, l, r);
   return new Set(rows.map((r) => r.driver));
 }
 
 /** Roster presence summary for a team. A member is online if any fresh presence; else offline. */
 export function listPresence(db: Database, teamId: string, timeoutMs: number): PresenceSummary[] {
-  const cutoff = Date.now() - timeoutMs;
+  const [l, r] = liveCutoffs(timeoutMs);
   const members = db
     .prepare<
       [string],
@@ -441,10 +456,10 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
   return members.map((member) => {
     const presences = db
       .prepare<
-        [string, number],
-        PresenceRow
-      >('SELECT * FROM presence WHERE member_id = ? AND held_until IS NULL AND last_seen_at > ? ORDER BY last_seen_at DESC')
-      .all(member.id, cutoff);
+        [string, number, number],
+        PresenceRow & { node_label: string | null }
+      >(`SELECT p.*, n.label AS node_label FROM presence p LEFT JOIN nodes n ON n.id = p.node WHERE p.member_id = ? AND ${LIVE_PRESENCE_SQL} ORDER BY p.last_seen_at DESC`)
+      .all(member.id, l, r);
     const status: PresenceStatus =
       presences.length === 0
         ? 'offline'
@@ -465,6 +480,8 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         build: p.build ?? null,
         epoch: p.epoch ?? null,
         wake_lease: p.wake_lease ?? null,
+        node: p.node ?? null,
+        node_label: p.node_label ?? null,
       })),
     };
   });
