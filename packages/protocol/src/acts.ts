@@ -45,13 +45,14 @@ export const ActSchema = z.enum(ACTS);
 
 /** Surfaces a Member can be present on. v0.1 implements cli/claude-code/codex; the rest are
  *  reserved. `musterd` (ADR 131 §7) is the native harness — the agent loop hosted in `musterd host`.
- *  `opencode` (ADR 321) is a first-class harness like its CLI siblings — enumeration, wake, and
- *  provisioning all speak its name. */
+ *  `opencode` (ADR 321) and `grok` (ADR 352) are first-class CLI harnesses — enumeration, wake, and
+ *  provisioning all speak their names. */
 export const SURFACES = [
   'cli',
   'claude-code',
   'codex',
   'opencode',
+  'grok',
   'cursor',
   'web',
   'ios',

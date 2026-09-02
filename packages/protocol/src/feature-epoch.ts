@@ -82,5 +82,10 @@
 // the RENAME epoch, not the previous number: the fleet was verified at 14+ on 2026-08-25, and any
 // epoch-14+ counterpart already reads and writes canonical `scope` (14 dual-sends it), so both
 // skew directions hold regardless of the ADR 321 epoch landing in between.
-export const FEATURE_EPOCH = 16 as const;
+// Epoch 17 — ADR 352: `grok` joins the Surface enum as a first-class harness. The daemon at this
+// epoch stores grok presences (migration 57 widens the CHECK); an older daemon refuses the
+// presence INSERT server-side — the same enum-vs-storage drift v39/v44 closed for `musterd` /
+// `opencode` — so a grok seat must not attest that surface against one. An older web bundle
+// renders the row under the generic label.
+export const FEATURE_EPOCH = 17 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;

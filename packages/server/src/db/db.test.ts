@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('56');
+    expect(ver?.value).toBe('57');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -262,7 +262,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(56); // runs v18…v56 (including the pull cursor and bootstrap cutover evidence)
+    expect(runMigrations(db)).toBe(57); // runs v18…v57 (including grok on the presence CHECK)
 
     const scope = (id: string) =>
       db
@@ -326,7 +326,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(56);
+    expect(runMigrations(db)).toBe(57);
 
     const policy = (id: string) =>
       db
@@ -396,6 +396,34 @@ describe('v44 — the presence surface CHECK admits `opencode` (ADR 321 §2)', (
     expect(() => insert('definitely-not-a-surface')).toThrow();
     // model_source (migration 42) postdates v39's rebuilt column list; the enumerated copy must
     // have carried it or this read comes back empty (and openDb itself would have thrown).
+    const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
+    expect(cols).toContain('model_source');
+    db.close();
+  });
+});
+
+describe('v57 — the presence surface CHECK admits `grok` (ADR 352 §2)', () => {
+  it('accepts a grok presence, and still refuses an unknown surface', () => {
+    const db = openDb(':memory:');
+    db.prepare(
+      "INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t1','dawn',1,1)",
+    ).run();
+    db.prepare(
+      `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+       VALUES ('m1','t1','wanderer','agent','','forever',0,1,1)`,
+    ).run();
+    const insert = (surface: string) =>
+      db
+        .prepare(
+          `INSERT INTO presence (id, member_id, surface, status, last_seen_at, created_at)
+           VALUES (?, 'm1', ?, 'online', 1, 1)`,
+        )
+        .run(`p-${surface}`, surface);
+
+    expect(() => insert('grok')).not.toThrow();
+    expect(() => insert('opencode')).not.toThrow();
+    expect(() => insert('musterd')).not.toThrow();
+    expect(() => insert('definitely-not-a-surface')).toThrow();
     const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
     expect(cols).toContain('model_source');
     db.close();
@@ -658,7 +686,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(56);
+    expect(runMigrations(db)).toBe(57);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
     db.close();
@@ -673,7 +701,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
     db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
 
-    expect(runMigrations(db)).toBe(56);
+    expect(runMigrations(db)).toBe(57);
 
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),

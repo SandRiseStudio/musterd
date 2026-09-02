@@ -1380,6 +1380,47 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // ADR 352: `grok` joins the Surface enum. SQLite cannot ALTER a CHECK, so rebuild presence
+    // the way v39 (`musterd`) and v44 (`opencode`) did. Column list matches the live table
+    // (v44 + model_source from v42); v1 DDL in schema.ts is deliberately left stale.
+    version: 57,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE presence_new (
+          id            TEXT PRIMARY KEY,
+          member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          surface       TEXT NOT NULL CHECK (surface IN
+                          ('cli','claude-code','codex','opencode','grok','cursor','web','ios','slack',
+                           'other','musterd')),
+          status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
+          conn_id       TEXT,
+          last_seen_at  INTEGER NOT NULL,
+          created_at    INTEGER NOT NULL,
+          held_until    INTEGER,
+          provenance    TEXT,
+          workspace     TEXT,
+          driver        TEXT,
+          model         TEXT,
+          build         TEXT,
+          epoch         INTEGER,
+          wake_lease    TEXT,
+          model_source  TEXT
+        );
+        INSERT INTO presence_new (id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                                  held_until, provenance, workspace, driver, model, build, epoch,
+                                  wake_lease, model_source)
+          SELECT id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                 held_until, provenance, workspace, driver, model, build, epoch,
+                 wake_lease, model_source
+          FROM presence;
+        DROP TABLE presence;
+        ALTER TABLE presence_new RENAME TO presence;
+        CREATE INDEX idx_presence_member ON presence(member_id);
+        CREATE INDEX idx_presence_last_seen ON presence(last_seen_at);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

@@ -6,6 +6,7 @@ const SURFACE_SHORT: Record<string, string> = {
   cursor: 'cursor',
   codex: 'codex',
   opencode: 'opencode',
+  grok: 'grok',
   cli: 'cli',
   web: 'web',
   ios: 'ios',
