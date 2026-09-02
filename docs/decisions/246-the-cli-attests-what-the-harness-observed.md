@@ -132,6 +132,16 @@ than one uniformly incomplete: a reader can reason about the second and not the 
   `review.ts` already did, which is what made this shape the obvious one rather than a new action.
 - The CLI and the MCP adapter now attest identically. They should be kept that way: a third surface
   that resolves its own ladder re-opens this defect in a new place.
+- **2026-09-02 — a third resolver, found and closed.** The consequence above ("a third surface that
+  resolves its own ladder re-opens this defect in a new place") happened inside the CLI itself:
+  `session.ts` built its hook client from `binding.model` alone (orientation, statusline) or from
+  nothing (`pushAttestation`), and the ADR 339 reclaim that client performs on a refused lease is a
+  real seat claim — so a late hook minted a `cli` Presence attesting nothing. Measured after the
+  2026-09-01 claim storm ended: the two surviving `worker_unattested` picker rows each sat 4 s
+  after a bare `cli` claim; 244 `cli` claims to 50 `claude-code` in the same window. Fixed on lane
+  `01M1G4P6GD8SHFAZJYQ2KJ2A10`: all three clients resolve through `attestedModel` (observed >
+  env > declared), and a test pins the reclaim's carried model. The rung [ADR 351](351-unattested-worker-routes-ungraded.md)
+  added the same day is what catches whatever this still misses.
 - Not fixed here, and deliberately: the presence table still has no session identity, so nothing
   distinguishes "the same session touching again" from "a new session in the same folder". Half 2
   records the consequence rather than removing the ambiguity. ADR 241's `wake_lease` is the only

@@ -178,6 +178,49 @@ describe('musterd session (capture)', () => {
       expect(after.session_lease).toBe('msls_stale');
     });
 
+    // The reclaim is a real seat claim, and a claim is where a Presence gets its model. Built with
+    // no model, it minted a `cli` Presence attesting nothing — the newest non-held row, so the seat
+    // read `unknown` to the ADR 188 picker for as long as that row was the newest (ADR 246's exact
+    // shape, one path over). Post-storm on 2026-09-02: 244 `cli` claims to 50 `claude-code`, and
+    // every `worker_unattested` row of the day sat seconds after one. The hook holds the harness's
+    // own observation in `binding.model_observed`; the claim must carry it through the same ladder
+    // every other CLI one-shot uses (`attestedModel`: observed > env > declared).
+    it('the reclaim carries the observed model, never a bare claim (ADR 246)', async () => {
+      const savedModel = process.env['MUSTERD_MODEL'];
+      delete process.env['MUSTERD_MODEL'];
+      try {
+        writeBinding(
+          wsA,
+          bindingOf({
+            seat_credential: 'msac_scout',
+            session_lease: 'msls_stale',
+            model: 'claude-test-1', // the declaration — outranked by what the harness observed
+            model_observed: {
+              model: 'claude-opus-4-8',
+              harness: 'claude-code',
+              observed_at: Date.now() - 5_000,
+            },
+          }),
+        );
+        vi.spyOn(HttpClient.prototype, 'attestSession')
+          .mockRejectedValueOnce(leaseRefused())
+          .mockResolvedValueOnce(undefined as never);
+        const seen: Array<string | undefined> = [];
+        vi.spyOn(HttpClient.prototype, 'claimSessionLease').mockImplementation(async function (
+          this: HttpClient,
+        ) {
+          seen.push((this as unknown as { opts: { model?: string } }).opts.model);
+          return { lease: 'msls_fresh', close: vi.fn() };
+        });
+
+        await captureSession('start', { session_id: 'observed-hook', cwd: wsA });
+        expect(seen).toEqual(['claude-opus-4-8']);
+      } finally {
+        if (savedModel === undefined) delete process.env['MUSTERD_MODEL'];
+        else process.env['MUSTERD_MODEL'] = savedModel;
+      }
+    });
+
     it("the tool boundary spends the slot's one claim, then attests with what it holds", async () => {
       const startedAt = Date.now() - 60_000;
       writeBinding(
