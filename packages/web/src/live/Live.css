@@ -4718,6 +4718,12 @@
  * canvas cannot lend back. */
 .lc-asks {
   position: relative;
+  /* The rail's degradation ladder queries THIS box, not the window — see the ladder below for the
+     measurement. `position: relative` was already here for the sheet, so the containment that comes
+     with `container-type` changes no containing block: the sheet's `left:0; right:0` still resolves
+     against exactly the same element it always did. Named so the queries say what they ask about,
+     and cannot be answered by some other inline-size container that happens to be an ancestor. */
+  container: asks / inline-size;
   z-index: var(--lc-z-overlay);
   flex: none;
   margin: var(--lc-4) var(--lc-6) 0;
@@ -5016,14 +5022,48 @@
     transform: translateY(6px);
   }
 }
-/* Narrow: the rail sheds context before it sheds the answer. The gist goes first, then the
-   settled/deciding counts, then the seat-approvals link — accept/decline are the last to leave. */
-@media (max-width: 900px) {
+/* ─── the degradation ladder ───────────────────────────────────────────────────────────────────
+ *
+ * The ORDER here is unchanged and was never the problem: the rail sheds context before it sheds the
+ * answer — the gist goes first, then the settled/deciding counts and the seat-approvals link, and
+ * accept/decline are the last to leave. What changed is the QUESTION each step asks.
+ *
+ * These were `@media (max-width: …)`, which asks about the WINDOW. The rail does not live in the
+ * window; it lives in the office panel, whose track is `2.05fr` of a three-column grid. Measured
+ * 2026-09-02 at a 1440px viewport: the rail box is 551px and its content wants 850px — so it was
+ * short by 299px while every step of its own ladder sat there unfired, because 1440 is not below
+ * 900. The chips did not degrade gracefully, they degraded into stubs:
+ *
+ *     "1 in review"       23px of 57      → "1i…"
+ *     "1 elapsed"         21px of 51      → "1…"
+ *     "seat approvals →"  42px of 95      → "seat …"
+ *
+ * A clipped COUNT is worse than an absent one — a number cut below its own text invites being read
+ * as a different number, and that is the one thing a count must not do. (The clipping itself stays
+ * as the backstop it is: `.lc-asks__meta`/`__link` still `flex-shrink` and ellipsis, and must still
+ * CLIP rather than WRAP — see the 2026-08-14 defect at the shrink rule. The backstop was doing its
+ * job. It was being asked to do the ladder's job as well, because the ladder could not fire.)
+ *
+ * And it could not fire ANYWHERE: `.lc-office` is `display: none` below 880px, so the 720px and
+ * 560px steps could never execute on the one route that renders this rail. They were dead rules
+ * describing a responsive behaviour the product did not have. The same viewport is also why the
+ * office column's width is not a function of the window at all — `.lc__canvas--companion` hands the
+ * office the full page, so the identical 1440px viewport gives this rail 553px or ~1440px depending
+ * on a collapse the media query cannot see.
+ *
+ * The thresholds are the measured content, not the old numbers rescaled. Natural widths at the same
+ * measurement: gist 154, the two counts 108, the link 96, verb 84, tier 66, and 8px of gap between
+ * each. So the rail needs ~850 whole; ~696 once the gist is out; ~476 once the counts and link go
+ * too. Each step fires just below the width at which the previous arrangement stopped fitting.
+ *
+ * Precedent for the mechanism is two rules down the same file (`.lc-ov`, `@container (max-width:
+ * 420px)`) and in `.lc-office__work` — both containers for the same reason, both inside this panel. */
+@container asks (max-width: 850px) {
   .lc-asks__gist {
     display: none;
   }
 }
-@media (max-width: 720px) {
+@container asks (max-width: 700px) {
   .lc-asks__meta,
   .lc-asks__link {
     display: none;
@@ -5032,12 +5072,13 @@
     gap: var(--lc-3);
   }
 }
-/* Phone: the name, the clock, and the two answers. Nothing else earns the width — the tier pill goes
-   too, because a clock reading "timed out — agent holding" in danger red has already said it, and the
-   expander drops to a bare chevron so the WHO never gets squeezed out by chrome. Approve and Deny
-   keep their words at every width: they are the two irreversible answers, and this is the size where
-   a mis-tap is most likely. */
-@media (max-width: 560px) {
+/* Narrowest: the name, the clock, and the two answers. Nothing else earns the width — the tier pill
+   goes too, because a clock reading "timed out — agent holding" in danger red has already said it,
+   and the expander drops to a bare chevron so the WHO never gets squeezed out by chrome. Approve and
+   Deny keep their words at every width: they are the two irreversible answers, and this is the size
+   where a mis-tap is most likely. At the office panel's 553px this step does NOT fire, which is the
+   point — verb and tier outrank the counts, and now the ladder can say so. */
+@container asks (max-width: 480px) {
   .lc-asks__verb,
   .lc-asks__restcount,
   .lc-asks__morelabel,
@@ -5276,8 +5317,14 @@
   }
 }
 /* Narrow: the row unstacks into the old card shape rather than crushing three columns. The clock
-   rides up beside the first line instead of floating mid-paragraph. */
-@media (max-width: 760px) {
+   rides up beside the first line instead of floating mid-paragraph.
+   Container, not viewport, for the same reason as the rail's ladder above: the sheet is `left: 0;
+   right: 0` inside `.lc-asks`, so it is exactly as wide as the rail — 551px measured — and a 760px
+   VIEWPORT rule could never fire on the only route that renders it. The threshold is deliberately
+   BELOW today's width rather than a straight port of 760: measured at 551 the card is not squeezed
+   (columns 410/64, nothing clipped), so re-siting this rule must not restack a card that is fine —
+   it makes a dead rule live again without changing what renders now. */
+@container asks (max-width: 520px) {
   .lc-ask {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: start;
