@@ -1,12 +1,11 @@
 # Review rules for musterd
 
-These are the rules the automated PR reviewer applies (`.github/workflows/review.yml`). They are also
-the checklist for a human or seat doing a manual review.
+These are the rules for a human or seat reviewing a PR. They were also the prompt for the
+automated advisory reviewer ADR 180 kept — retired 2026-09-02 after its own Eval read 0 of 55
+findings acted on (see `docs/wiki/adr-180-reviewer-eval.md`); the checklist outlives the job.
 
-The reviewer runs on a **cheap model, single-pass, on a small slice of PRs** — only diffs touching
-`packages/protocol/src` or `packages/server/src`. Its budget is a handful of findings, so it must
-spend them on semantic invariants no test can catch. It is advisory: it comments, it never blocks a
-merge.
+A reviewer's budget is a handful of findings, so spend them on semantic invariants no test can
+catch. Review is advisory: it comments, `gates` decides.
 
 ## Already enforced — never report
 
