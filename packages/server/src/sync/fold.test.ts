@@ -452,7 +452,9 @@ describe('foldBatch — the presence kind', () => {
     });
     expect(
       db
-        .prepare("SELECT COUNT(*) AS n FROM audit WHERE action LIKE 'presence.%' AND origin_node = ?")
+        .prepare(
+          "SELECT COUNT(*) AS n FROM audit WHERE action LIKE 'presence.%' AND origin_node = ?",
+        )
         .get(FOREIGN),
     ).toEqual({ n: 3 });
     // The allocator never moved for any of it.
@@ -466,7 +468,11 @@ describe('foldBatch — the presence kind', () => {
       presence: 'ghost',
       reason: 'reaped',
     });
-    expect(foldBatch(db, team.id, [det])).toMatchObject({ stop: null, applied: 1, last_hub_seq: 1 });
+    expect(foldBatch(db, team.id, [det])).toMatchObject({
+      stop: null,
+      applied: 1,
+      last_hub_seq: 1,
+    });
     const re = foreignPresence('p-2', 2, 2, 'presence.reattested', {
       presence: 'ghost',
       model: 'x',

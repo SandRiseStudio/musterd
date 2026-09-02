@@ -178,9 +178,10 @@ export function arbitrateClaim(
       'unknown',
     );
   }
-  // ADR 203's rule, evaluated where the deciding input lives: the hub's presence. A seat that
-  // resides on another machine has no presence here and reads as not live — the staleness ADR
-  // 325 §Consequences names; presence summaries are the slice that closes it.
+  // ADR 203's rule, evaluated where the deciding input lives: the hub's presence — which, since
+  // presence replication (spec 2026-09-02, ADR 356), holds every machine's seats. A remote row is
+  // live while its node is (REMOTE_PRESENCE_TTL_MS); that is the staleness ADR 325 §Consequences
+  // priced, and the falsifier is sync/presence.test.ts cases 2 and 3.
   if (before.owner_seat !== null && before.owner_seat !== req.seat) {
     const incumbent = getMemberByName(ctx.db, team.id, before.owner_seat);
     const incumbentLive =

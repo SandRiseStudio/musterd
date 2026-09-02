@@ -473,7 +473,10 @@ describe('presence replication on the push (spec 2026-09-02)', () => {
   const hubTeam = () => getTeamBySlug(hub.db, 'bravo')!;
   const memberId = (server: RunningServer, name: string) =>
     server.db
-      .prepare<[string, string], { id: string }>('SELECT id FROM members WHERE team_id = ? AND name = ?')
+      .prepare<
+        [string, string],
+        { id: string }
+      >('SELECT id FROM members WHERE team_id = ? AND name = ?')
       .get(getTeamBySlug(server.db, 'bravo')!.id, name)!.id;
 
   it('a presence.* row rides the push under kind presence, and the hub stamps the node as seen', async () => {
@@ -488,9 +491,9 @@ describe('presence replication on the push (spec 2026-09-02)', () => {
       .prepare<[], { payload: string }>('SELECT payload FROM sync_log ORDER BY hub_seq')
       .all()
       .map((r) => JSON.parse(r.payload));
-    expect(staged.some((e) => e.kind === 'presence' && e.event.action === 'presence.attached')).toBe(
-      true,
-    );
+    expect(
+      staged.some((e) => e.kind === 'presence' && e.event.action === 'presence.attached'),
+    ).toBe(true);
     const joinerNode = readNodeState().nodes['bravo']!.node_id;
     expect(
       hub.db
@@ -525,8 +528,8 @@ describe('presence replication on the push (spec 2026-09-02)', () => {
     await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/bound_elsewhere|403/);
     expect(cursor()).toBe(cursorBefore);
     expect(stagedOnHub()).toEqual({ n: 0 });
-    expect(lines.some((l) => l['msg'] === 'sync_push_refused_residence' && l['seat'] === 'nick')).toBe(
-      true,
-    );
+    expect(
+      lines.some((l) => l['msg'] === 'sync_push_refused_residence' && l['seat'] === 'nick'),
+    ).toBe(true);
   });
 });
