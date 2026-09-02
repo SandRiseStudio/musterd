@@ -128,6 +128,23 @@ export function actMetaRules(
       });
     }
   }
+  // Stated confidence (ADR 294 decision 5, amended 2026-09-02): `meta.confidence` is an OPTIONAL
+  // probability in (0, 1] that the act's claim holds, on any act. It is a field on the claim, not on
+  // musterd — a PR body or a foreign harness's log may carry the same number — and the act is only one
+  // carrier. Absent is absent: never defaulted to 1.0, never required (an omission that read as certainty
+  // would make omission the cheapest hedge, the exact gaming ADR 294 §Problem 3 designs against). A
+  // malformed value is refused here rather than carried into the ledger as a number nobody can score.
+  if ('confidence' in meta && meta['confidence'] !== undefined) {
+    const c = meta['confidence'];
+    if (typeof c !== 'number' || !Number.isFinite(c) || c <= 0 || c > 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'confidence'],
+        message:
+          'meta.confidence must be a number in (0, 1] — the probability the claim holds; omit it rather than guess',
+      });
+    }
+  }
   // `defer` (ADR 103) is a plan mutation on the Goal spine: it MUST name the Goal it moves via a
   // non-empty `meta.goal_id`. Since ADR 257 it has one meaning — shelve the Goal (`wave: 'later'`).
   // A pre-257 `meta.wave: <n>` still parses, but reorders nothing; the numeric rank is retired.

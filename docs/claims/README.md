@@ -42,6 +42,7 @@ overturned in place with a dated note (wiki rule 4 shape), never deleted.
 | `claimant_model` | model attestation of the claiming message/PR; `unknown` if unresolvable; `none (deterministic probe)` for instruments |
 | `claim_ref` | message id / file+PR / lane id where the claim was made; `unresolved (quoted in correction)` when the original is off-stream |
 | `claim_class` | `measurement` \| `causal` \| `defect` \| `absence` \| `record` (see below) |
+| `claim_confidence` | the probability the claimant stated, in (0, 1], or `unstated` (ADR 294 amendment 2026-09-02). Never infer one; an absent confidence is absent, not 1.0 |
 | `claimed_at` / `falsified_at` | dates (UTC) |
 | `detection_channel` | `self` \| `peer` \| `acceptance` \| `challenge` \| `human` \| `collision` (see below) |
 | `detection_latency` | how long the claim stood |
@@ -95,6 +96,7 @@ By process stage, in roughly increasing order of badness:
     claimant_model: <model | unknown | none (deterministic probe)>
     claim_ref: <msg id | file + PR | unresolved (quoted in correction)>
     claim_class: <measurement | causal | defect | absence | record>
+    claim_confidence: <0.xx | unstated>
     claimed_at: <YYYY-MM-DD>
     falsified_at: <YYYY-MM-DD>
     detection_channel: <self | peer | acceptance | challenge | human | collision>
