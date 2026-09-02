@@ -251,6 +251,9 @@ export function parseRunSummary(
 interface AttemptResult {
   occupied: boolean;
   provenance?: string | null;
+  /** ADR 241: the seat is occupied by a session this wake did not create — a deferral, never a
+   *  failure (no attempt budget) and never a success (no delivery claimed). */
+  deferred?: boolean;
   /** Host-composed failure summary; null when occupied. */
   reason: string | null;
   /** Resolves when the spawned run finishes (exit or watchdog kill), carrying the run's parsed
@@ -356,6 +359,27 @@ function runAttempt(
         .then(() => new Promise((r) => setTimeout(r, 2_000)))
         .then(() => ctx.verifyOccupied(seat, opts.verifyWindowMs, spawnedAt)),
     ]);
+
+    // ADR 241 increment 3 (2026-09-02, lane 01M1HQC9JJ): the success bar is `lease_matched` — a
+    // fresh row attesting THIS lease's token — not `occupied`. This was the last of five backends
+    // to gate on occupancy alone, so a presence row belonging to ANOTHER session (a human in the
+    // worktree; a prior wake still inside its 30m timeout) was credited as this wake's own: the act
+    // reported delivered to a session that never received it, and the child spawned here kept
+    // running beside the real occupant. `occupied && !lease_matched` is the contract's deferral
+    // (backend.ts): nothing about the act or the host is wrong, so it must not be charged — kill
+    // what we spawned and let the act wait for the session that holds the seat.
+    if (verified.occupied && !verified.lease_matched) {
+      killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
+      return {
+        occupied: false,
+        deferred: true,
+        reason: `the seat is held by another session (not lease ${spec.order.lease_id})`.slice(
+          0,
+          200,
+        ),
+        settled,
+      };
+    }
 
     if (verified.occupied) {
       // Confirmation beat (first live fallback rehearsal, 2026-07-13): a stale-id `--resume` died
@@ -634,6 +658,25 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
               settled: settleAll(),
             };
           }
+          if (resumed.deferred) {
+            // The seat is someone else's. A fresh fallback here would be a second process aimed
+            // into a worktree another session is sitting in — the exact duplicate this increment
+            // exists to stop. Defer the whole wake; the act waits for the occupant.
+            ctx.log(
+              `resume deferred for ${seat} (${resumed.reason ?? 'unknown'}) — no fresh fallback`,
+            );
+            return {
+              outcome: {
+                occupied: false,
+                deferred: true,
+                session: 'resumed',
+                ...(deliveryTracked ? { delivery_outcome: 'resumed' as const } : {}),
+                ...deliveryMetadata(),
+                ...(resumed.reason ? { reason: resumed.reason } : {}),
+              },
+              settled: settleAll(),
+            };
+          }
           ctx.log(
             `resume failed for ${seat} (${resumed.reason ?? 'unknown'}) — ` +
               `fresh fallback in the same lease`,
@@ -720,6 +763,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
         return {
           outcome: {
             occupied: healedOutcome.occupied,
+            ...(healedOutcome.deferred ? { deferred: true } : {}),
             session: 'fresh',
             ...(deliveryTracked
               ? {
@@ -739,6 +783,7 @@ export function claudeCodeBackend(deps: ClaudeCodeDeps = {}): ActuatorBackend {
       return {
         outcome: {
           occupied: outcome.occupied,
+          ...(outcome.deferred ? { deferred: true } : {}),
           session: 'fresh',
           ...(deliveryTracked
             ? {
