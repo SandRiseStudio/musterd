@@ -1,0 +1,186 @@
+import {
+  type Lane,
+  LaneSchema,
+  type SyncClaimRequest,
+  SyncClaimRefusalSchema,
+} from '@musterd/protocol';
+import type { Database } from 'better-sqlite3';
+import type { Ctx } from '../context.js';
+import { log } from '../log.js';
+import { readNodeState } from '../node/state.js';
+import { getLane, LaneConflictError, updateLane } from '../store/lanes.js';
+import { getMemberByName } from '../store/members.js';
+import { hasLivePresence } from '../store/presence.js';
+
+/**
+ * Federation increment 3c: the hub-authoritative claim (ADR 325 §Authority split, residence 1).
+ *
+ * Two halves of one act. `arbitrateClaim` runs ON THE HUB: the same guarded CAS and the same
+ * live-incumbent rule the local PATCH applies, against the hub's row, writing the `lane.claimed`
+ * event from the hub's allocator so it reaches every machine through the fold. `claimAtHub` runs
+ * ON A JOINER: it asks, and it never writes — the joiner's row converges from the hub's log, which
+ * is what makes "exactly one holder" a fact rather than a race between two machines each sure of
+ * itself.
+ *
+ * Offline follows ADR 325 §Offline semantics: a claim that cannot reach the hub REFUSES, with its
+ * own code. A provisional claim that might lose on reconnect invites building in a lane you do not
+ * own — the exact failure musterd exists to prevent.
+ */
+
+const CLAIM_TIMEOUT_MS = 10_000;
+
+/** The hub said no, and said why: the lane moved, or the seat/lane is not resolvable there yet. */
+export class ClaimRefusedError extends Error {
+  constructor(
+    message: string,
+    readonly holder: string | null,
+    readonly state: string,
+  ) {
+    super(message);
+    this.name = 'ClaimRefusedError';
+  }
+}
+
+/** The hub could not be asked. Distinct from a refusal by construction, never folded into one. */
+export class HubUnreachableError extends Error {
+  constructor(hubUrl: string, cause: string) {
+    super(`the hub at ${hubUrl} could not be reached to arbitrate this claim (${cause})`);
+    this.name = 'HubUnreachableError';
+  }
+}
+
+/** This daemon's enrollment for the team, if it is a joiner (the push/pull rule: node.json names OUR node row). */
+export function joinerEnrollment(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+): { hub_url: string; credential: string; node_id: string } | null {
+  const local = db
+    .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+    .get(teamId);
+  const record = readNodeState().nodes[teamSlug];
+  if (!local || !record || record.node_id !== local.node_id) return null;
+  return record;
+}
+
+/**
+ * Hub side. Throws `ClaimRefusedError` for every "no" the caller can act on; anything else is a
+ * fault. The three refusals, in the order they are checked:
+ *  - the seat is not on this roster yet (git lag) — retry after the roster reconciles;
+ *  - the lane is not here yet (the origin's `lane.opened` has not folded) — retry after sync;
+ *  - the CAS: the lane moved since the joiner read it, or a live incumbent holds it (ADR 203).
+ */
+export function arbitrateClaim(
+  ctx: Ctx,
+  team: { id: string; slug: string },
+  node: { id: string },
+  req: SyncClaimRequest,
+  now: number = Date.now(),
+): Lane {
+  const seat = getMemberByName(ctx.db, team.id, req.seat);
+  if (!seat) {
+    throw new ClaimRefusedError(
+      `seat "${req.seat}" is not on the hub's roster yet — the roster reconciles from git; retry`,
+      null,
+      'unknown',
+    );
+  }
+  if (seat.kind === 'service') {
+    throw new ClaimRefusedError(
+      `"${req.seat}" is a service seat — ledger seats never claim or hold lanes (ADR 232)`,
+      null,
+      'unknown',
+    );
+  }
+  const before = getLane(ctx.db, team.id, req.lane, team.slug);
+  if (!before) {
+    throw new ClaimRefusedError(
+      `lane "${req.lane}" is not yet replicated to the hub — its birth has not folded here; ` +
+        'retry after the next sync',
+      null,
+      'unknown',
+    );
+  }
+  // ADR 203's rule, evaluated where the deciding input lives: the hub's presence. A seat that
+  // resides on another machine has no presence here and reads as not live — the staleness ADR
+  // 325 §Consequences names; presence summaries are the slice that closes it.
+  if (before.owner_seat !== null && before.owner_seat !== req.seat) {
+    const incumbent = getMemberByName(ctx.db, team.id, before.owner_seat);
+    const incumbentLive =
+      incumbent !== undefined &&
+      hasLivePresence(ctx.db, incumbent.id, ctx.config.presenceTimeoutMs);
+    if (incumbentLive) {
+      throw new ClaimRefusedError(
+        `lane "${req.lane}" is owned by ${before.owner_seat}, who is live — claiming it would ` +
+          `duplicate their work. Pick another lane, or ask them to hand it over.`,
+        before.owner_seat,
+        before.state,
+      );
+    }
+  }
+  try {
+    return updateLane(
+      ctx.db,
+      team.id,
+      req.lane,
+      team.slug,
+      { owner_seat: req.seat },
+      now,
+      req.expect,
+      { actor: req.seat, node: node.id },
+    )!;
+  } catch (err) {
+    if (err instanceof LaneConflictError) {
+      throw new ClaimRefusedError(
+        `lane "${req.lane}" changed since it was read — it is now ` +
+          `${err.actual.owner_seat ? `owned by ${err.actual.owner_seat}` : 'unowned'} ` +
+          `(${err.actual.state}). Re-read the lane and retry.`,
+        err.actual.owner_seat,
+        err.actual.state,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Joiner side. Returns the hub's lane on success. Throws `ClaimRefusedError` on a 409 with the
+ * hub's holder/state, `HubUnreachableError` when no answer came, and a plain Error for anything the
+ * hub answered that is neither — an upgrade skew, say — so it surfaces as a fault, not a refusal.
+ */
+export async function claimAtHub(
+  enrollment: { hub_url: string; credential: string },
+  slug: string,
+  req: SyncClaimRequest,
+): Promise<Lane> {
+  let res: Response;
+  try {
+    res = await fetch(new URL(`/teams/${slug}/sync/claim`, enrollment.hub_url), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${enrollment.credential}`,
+      },
+      body: JSON.stringify(req),
+      signal: AbortSignal.timeout(CLAIM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    log.warn({ msg: 'sync_claim_hub_unreachable', team: slug, lane: req.lane, err: String(err) });
+    throw new HubUnreachableError(enrollment.hub_url, String(err));
+  }
+  const body: unknown = await res.json().catch(() => null);
+  if (res.status === 409) {
+    const refusal = SyncClaimRefusalSchema.safeParse(body);
+    if (refusal.success) {
+      throw new ClaimRefusedError(
+        refusal.data.error.message,
+        refusal.data.holder,
+        refusal.data.state,
+      );
+    }
+  }
+  if (!res.ok) {
+    throw new Error(`the hub answered ${res.status} to the claim: ${JSON.stringify(body)}`);
+  }
+  return LaneSchema.parse((body as { lane: unknown }).lane);
+}

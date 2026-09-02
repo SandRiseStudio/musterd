@@ -106,6 +106,12 @@ const CONTENDING: ReadonlySet<string> = LANE_CONTENDING_STATES;
  */
 export interface LaneAudit {
   actor: string | null;
+  /**
+   * Federation 3c: the node the claiming seat resides on, when the claim was arbitrated by the hub
+   * on a joiner's behalf. Recorded on the `lane.claimed` row — the seat→node residence binding
+   * lives in the replicated log, not in a table nothing else reads. Absent for a local claim.
+   */
+  node?: string;
 }
 
 function laneAuditRow(
@@ -142,6 +148,7 @@ function recordLaneEdges(
     ownerPatched && after.owner_seat !== null && after.owner_seat !== before.owner_seat;
   if (claimed) {
     laneAuditRow(db, teamId, audit, 'lane.claimed', after.id, {
+      ...(audit.node !== undefined ? { node: audit.node } : {}),
       lane: after.id,
       owner: after.owner_seat,
       previous_owner: before.owner_seat,
