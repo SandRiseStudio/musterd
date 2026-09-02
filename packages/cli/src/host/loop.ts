@@ -9,7 +9,7 @@ import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../session/liveness.js';
 import type { ActuatorBackend, WakeBounds, WakeOutcome } from './backend.js';
-import { loadHostRegistry, type HostRegistryEntry } from './registry.js';
+import { canonicalServer, loadHostRegistry, type HostRegistryEntry } from './registry.js';
 
 /**
  * The host poll loop (ADR 131 §1) — the actuator half of harness residency, in the `musterd notify`
@@ -156,8 +156,13 @@ function pollGroups(
   >();
   for (const entry of entries) {
     const host = hostLabel ?? entry.host;
-    const key = `${entry.server}\u0000${entry.team}\u0000${host}`;
-    const group = groups.get(key) ?? { server: entry.server, team: entry.team, host, entries: [] };
+    // Lane 01M1J2V4EJ: group on the DAEMON, not on the spelling a binding happened to carry.
+    // `localhost` and `127.0.0.1` in two entries put one seat in a group of its own; the other
+    // group's poll claimed its lease first and reported the seat unregistered. Entries written
+    // before the registry normalised on write are still on disk, so the fold happens here too.
+    const server = canonicalServer(entry.server);
+    const key = `${server}\u0000${entry.team}\u0000${host}`;
+    const group = groups.get(key) ?? { server, team: entry.team, host, entries: [] };
     group.entries.push(entry);
     groups.set(key, group);
   }
@@ -239,14 +244,19 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
         const wakeability = registered
           ? wakeabilityFromFacts({ enrolled: true, workspace_readable: false })
           : wakeabilityFromFacts({ enrolled: false });
-        await report({
-          occupied: false,
-          wakeability,
-          reason: registered
-            ? `workspace ${registered.workspace} is missing or has no binding — the registry entry ` +
-              `outlived it; re-run \`musterd residency on --as <admin>\` in the seat's real workspace`
-            : 'seat not in this machine’s host registry — re-run `musterd residency on` in its workspace',
-        });
+        const reason = registered
+          ? `workspace ${registered.workspace} is missing or has no binding — the registry entry ` +
+            `outlived it; re-run \`musterd residency on --as <admin>\` in the seat's real workspace`
+          : 'seat not in this machine’s host registry — re-run `musterd residency on` in its workspace';
+        // DEFERRED, not failed (lane 01M1J2V4EJ, 2026-09-02; ADR 221's line). Both faults are
+        // properties of this machine's bookkeeping — nothing spawned, nothing was paid, and the fix
+        // is a local command. Reported as failures they charged `attempt_cap` and `hourly_cap`:
+        // two "not in registry" rows 46s apart spent sloane's 2/h and 2 of the act's 3 attempts,
+        // on a diagnosis that named the wrong thing. A deferral keeps the act due and the seat's
+        // budget whole; the explicit log line below keeps the rail loud (`report` is quiet on
+        // deferrals by design — that silence is for the local-session guard, not for this).
+        deps.log(`wake deferred: ${order.seat} — ${reason}`);
+        await report({ occupied: false, deferred: true, wakeability, reason });
         continue;
       }
       const backend = deps.backends.get(entry.harness);

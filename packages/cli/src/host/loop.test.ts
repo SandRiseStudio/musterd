@@ -171,26 +171,38 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(lines.join('\n')).not.toMatch(/clamped/);
   });
 
-  it('an order for a seat this machine does not hold is reported failed, never dropped', async () => {
+  /**
+   * Lane 01M1J2V4EJ (2026-09-02): a pre-actuation fault is a property of THIS MACHINE, not of the
+   * act — nothing spawned, nothing was paid, and the operator's fix is local. Reported as a failure
+   * it burned `attempt_cap` and `hourly_cap` (sloane: two "not in registry" rows in 46s spent 2 of
+   * 2/h and 2 of the act's 3 attempts, on a diagnosis that named the wrong thing). ADR 221's line
+   * applies: defer, budget-neutral, and stay loud in the host log.
+   */
+  it('an order for a seat this machine does not hold is DEFERRED (not failed) and stays loud', async () => {
     const { client, calls } = fakeClient([order({ seat: 'ghost', lease_id: 'L9' })]);
+    const lines: string[] = [];
     await pollHostOnce(
       deps({
         backends: new Map(),
         loadRegistry: () => ({ entries: [entryOf()] }),
         clientFor: () => client,
+        log: (l) => lines.push(l),
       }),
     );
     expect(calls.reports).toHaveLength(1);
     expect(calls.reports[0]).toMatchObject({
       lease_id: 'L9',
       occupied: false,
+      deferred: true,
       wakeability: 'not_enrolled',
     });
     expect(calls.reports[0]!.reason).toMatch(/host registry/);
+    expect(lines.join('\n')).toMatch(/wake deferred: ghost.*host registry/);
   });
 
-  it('a registered seat whose workspace is unreadable reports enrolled_dead_workspace (ADR 189)', async () => {
+  it('a registered seat whose workspace is unreadable DEFERS as enrolled_dead_workspace (ADR 189)', async () => {
     const { client, calls } = fakeClient([order({ seat: 'ghost', lease_id: 'L8' })]);
+    const lines: string[] = [];
     await pollHostOnce(
       deps({
         backends: new Map(),
@@ -200,14 +212,51 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
         }),
         readAgentKey: (ws) => (ws === '/ws/ghost' ? undefined : 'mskey_x'),
         clientFor: () => client,
+        log: (l) => lines.push(l),
       }),
     );
     expect(calls.reports[0]).toMatchObject({
       lease_id: 'L8',
       occupied: false,
+      deferred: true,
       wakeability: 'enrolled_dead_workspace',
     });
     expect(calls.reports[0]!.reason).toMatch(/missing or has no binding/);
+    expect(lines.join('\n')).toMatch(/wake deferred: ghost.*missing or has no binding/);
+  });
+
+  /**
+   * Lane 01M1J2V4EJ (2026-09-02): the poll groups entries by the daemon URL STRING. sloane's
+   * binding said `http://localhost:4849` where every sibling said `http://127.0.0.1:4849` — the same
+   * socket — so sloane polled alone, the siblings' group claimed its lease first, found no entry
+   * for it in THEIR group, and reported "seat not in this machine's host registry" for a seat that
+   * was registered and whose operator had already followed the advice. Two entries that differ only
+   * in the spelling of the daemon must be one group: one poll, one claim, the right workspace.
+   */
+  it('entries whose server differs only in spelling (localhost vs 127.0.0.1) are ONE poll group', async () => {
+    const { client, calls } = fakeClient([order({ seat: 'sloane', lease_id: 'L7' })]);
+    const { backend, specs } = fakeBackend();
+    const servers: string[] = [];
+    await pollHostOnce(
+      deps({
+        backends: new Map([['claude-code', backend]]),
+        loadRegistry: () => ({
+          entries: [
+            entryOf({ server: 'http://127.0.0.1:4849' }),
+            entryOf({ server: 'http://localhost:4849/', seat: 'sloane', workspace: '/ws/sloane' }),
+          ],
+        }),
+        clientFor: (server) => {
+          servers.push(server);
+          return client;
+        },
+      }),
+    );
+    expect(calls.leases).toHaveLength(1); // one poll, not one per spelling
+    expect(servers).toEqual(['http://127.0.0.1:4849']); // the canonical spelling is what gets dialled
+    expect(specs).toHaveLength(1);
+    expect(specs[0]!.workspace).toBe('/ws/sloane');
+    expect(calls.reports).toEqual([{ lease_id: 'L7', occupied: true, session: 'fresh' }]);
   });
 
   it('an order for a harness with no backend is reported failed with the harness named', async () => {
@@ -304,7 +353,8 @@ describe('pollHostOnce (ADR 131 inc 3 — lease → actuate → report)', () => 
     expect(dead?.occupied).toBe(false);
     expect(dead?.reason).toMatch(/workspace/i);
     expect(dead?.reason).toContain('/ws/gone');
-    expect(lines.join('\n')).toMatch(/wake FAILED for izzo/);
+    expect(dead?.deferred).toBe(true); // lane 01M1J2V4EJ: a dead workspace is this machine's fault
+    expect(lines.join('\n')).toMatch(/wake deferred: izzo/);
   });
 
   it('roster verify: offline → live-with-wake-provenance resolves occupied with the provenance', async () => {
