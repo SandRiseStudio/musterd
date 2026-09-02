@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { FEATURE_EPOCH } from './feature-epoch.js';
 import { SURFACES, SurfaceSchema } from './acts.js';
+import { FEATURE_EPOCH } from './feature-epoch.js';
 
 describe('SURFACES (ADR 352)', () => {
   it('admits grok as a first-class Surface', () => {

@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
-import { HARNESSES } from './harnesses/index.js';
 import { grok } from './harnesses/grok.js';
+import { HARNESSES } from './harnesses/index.js';
 import { opencode } from './harnesses/opencode.js';
 import { buildEntry, buildMcpEnv } from './mcpEntry.js';
 import {

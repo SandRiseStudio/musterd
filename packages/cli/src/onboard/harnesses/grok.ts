@@ -2,13 +2,13 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { grokCandidates } from '../../grokBin.js';
+import { isDeclined } from '../declined.js';
 import {
   registeredFromEnv,
   type Harness,
   type ProvisionPlan,
   type UnprovisionPlan,
 } from '../harness.js';
-import { isDeclined } from '../declined.js';
 import {
   launchEntryEnv,
   markerGenerationOfEnv,

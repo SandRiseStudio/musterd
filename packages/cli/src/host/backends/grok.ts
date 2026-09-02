@@ -2,7 +2,7 @@ import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { findBinding, saveBinding } from '../../config.js';
 import { resolveGrokBin } from '../../grokBin.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
-import type { ActuatorBackend, BackendContext, WakeActuation, WakeSpec } from '../backend.js';
+import type { ActuatorBackend, WakeActuation } from '../backend.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
 
 const KILL_GRACE_MS = 10_000;

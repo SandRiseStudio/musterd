@@ -4,8 +4,8 @@ import { registryOrder } from '../reconcile/fragments.js';
 import { claudeCode, claudeCodeAdapter } from './claudeCode.js';
 import { codex, codexAdapter } from './codex.js';
 import { cursor, cursorAdapter } from './cursor.js';
-import { musterdAdapter } from './musterd.js';
 import { grok, grokAdapter } from './grok.js';
+import { musterdAdapter } from './musterd.js';
 import { opencode, opencodeAdapter } from './opencode.js';
 
 /** The registry of onboarding-supported harnesses (pluggable; add more here). */
