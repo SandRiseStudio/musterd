@@ -1815,6 +1815,7 @@ describe('WebSocket', () => {
       useKind: 'claim_seat',
       target: 'Ada',
     });
+    expect(scoped.credential.first_used_at).toBeNull();
 
     const mismatch = new TestWs();
     await mismatch.open();
@@ -1838,6 +1839,14 @@ describe('WebSocket', () => {
       'cli',
       await standingGrant(nickTok, 'Ada'),
     );
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(scoped.credential.id)?.first_used_at,
+    ).toEqual(expect.any(Number));
     matched.close();
   });
 

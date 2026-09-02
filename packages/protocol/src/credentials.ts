@@ -44,6 +44,23 @@ export type TokenKind = keyof typeof TOKEN_PREFIXES;
 export const AgentKeyMintSchema = z.object({ agent_key: z.string() });
 export type AgentKeyMint = z.infer<typeof AgentKeyMintSchema>;
 
+/** Exchange a legacy Team key for the seat scope independently proven by `msac_` (ADR 350). */
+export const BootstrapMigrationRequestSchema = z
+  .object({
+    legacy_key: z.string().startsWith(TOKEN_PREFIXES.agent_key),
+    seat_credential: z.string().startsWith(TOKEN_PREFIXES.agent_seat),
+  })
+  .strict();
+export type BootstrapMigrationRequest = z.infer<typeof BootstrapMigrationRequestSchema>;
+
+/** Administrator acknowledgement when disabling one Team's legacy compatibility authority. */
+export const BootstrapCutoverRequestSchema = z
+  .object({
+    force: z.boolean().default(false),
+  })
+  .strict();
+export type BootstrapCutoverRequest = z.infer<typeof BootstrapCutoverRequestSchema>;
+
 /** A minted human credential, shown **once** (issued alongside a human seat). */
 export const CredentialMintSchema = z.object({ credential: z.string() });
 export type CredentialMint = z.infer<typeof CredentialMintSchema>;

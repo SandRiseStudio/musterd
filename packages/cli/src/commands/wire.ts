@@ -1,5 +1,6 @@
 import { type Binding, bindingSeat, type ClaimPolicy } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
+import { HttpClient, type BootstrapCredentialSummary } from '../client.js';
 import { findBinding, loadConfig, loadWorkspace, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
 import type { Harness } from '../onboard/harness.js';
@@ -30,6 +31,13 @@ import { theme } from '../render/theme.js';
 export interface WireDeps {
   ctx?: HarnessContext;
   registry?: HarnessAdapter[];
+  saveBinding?: typeof saveBinding;
+  http?: {
+    migrateBootstrapCredential(body: {
+      legacy_key: string;
+      seat_credential: string;
+    }): Promise<{ credential: BootstrapCredentialSummary; agent_key: string }>;
+  };
 }
 
 const CONFIGURE_REPAIR =
@@ -38,6 +46,55 @@ const CONFIGURE_REPAIR =
 export async function wireCommand(parsed: Parsed, deps?: WireDeps): Promise<number> {
   const flags = parsed.flags;
   const cwd = process.cwd();
+
+  if (flags['migrate-bootstrap'] === true) {
+    const binding = findBinding(cwd, {});
+    if (!binding) {
+      throw new CliError('no usable Workspace binding here to migrate', 6);
+    }
+    const seat = bindingSeat(binding);
+    if (!seat) {
+      throw new CliError('bootstrap migration requires a binding with a resolved seat claim', 6);
+    }
+    if (!binding.agent_key) {
+      throw new CliError('this binding has no legacy Team key to migrate', 6);
+    }
+    if (!binding.seat_credential) {
+      throw new CliError(
+        'bootstrap migration requires this seat’s existing agent-seat credential',
+        6,
+      );
+    }
+
+    const http = deps?.http ?? new HttpClient({ server: binding.server });
+    const migrated = await http.migrateBootstrapCredential({
+      legacy_key: binding.agent_key,
+      seat_credential: binding.seat_credential,
+    });
+    try {
+      (deps?.saveBinding ?? saveBinding)(cwd, { ...binding, agent_key: migrated.agent_key });
+    } catch {
+      throw new CliError(
+        'could not publish the scoped credential; the legacy key remains in this binding. ' +
+          'Rerun `musterd wire --migrate-bootstrap` to replace the unused successor safely.',
+        1,
+      );
+    }
+
+    if (flags['json']) {
+      process.stdout.write(
+        JSON.stringify({ migrated: true, credential: migrated.credential }) + '\n',
+      );
+    } else {
+      process.stdout.write(
+        `${theme.ok('✓')} replaced this Workspace’s legacy Team key with a seat-scoped credential for ${theme.memberName(seat, 'agent')}\n`,
+      );
+      process.stdout.write(
+        `${theme.dim('the shown-once credential was written directly to this binding and was not printed.')}\n`,
+      );
+    }
+    return 0;
+  }
 
   // ── Require valid v2 local state; never prompt, never convert (ADR 281 clean break). ──────────
   const workspace = loadWorkspace(cwd);

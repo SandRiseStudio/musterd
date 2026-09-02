@@ -138,15 +138,18 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'wire',
-    signature: '[--autojoin] [--key mskey_…]',
+    signature: '[--autojoin] [--key mskey_…] [--migrate-bootstrap]',
     summary: 'headless self-wire from a committed .musterd/workspace.json',
     group: 'setup',
     detail:
       'Headless setup for a fresh clone: reconcile this workspace’s SAVED harness selection from the ' +
       'committed .musterd/workspace.json + provisioned.json with no prompts and no seat claim (pass ' +
       '`--autojoin` to also claim). Never edits the selection and never converts pre-ADR-281 state — ' +
-      'a folder without a valid selection exits 6 and names `musterd harness configure` as the fix.',
-    examples: ['musterd wire', 'musterd wire --autojoin'],
+      'a folder without a valid selection exits 6 and names `musterd harness configure` as the fix. ' +
+      '`--migrate-bootstrap` replaces this Workspace’s legacy Team key with a seat-scoped credential; ' +
+      'it requires the existing seat credential, preserves active Presence, and is safe to retry after ' +
+      'a local write failure.',
+    examples: ['musterd wire', 'musterd wire --autojoin', 'musterd wire --migrate-bootstrap'],
   },
   {
     name: 'harness',
@@ -295,7 +298,7 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Team & seats ───────────────────────────────────────────────────────────────────────────
   {
     name: 'team',
-    signature: '<create|add|credential|agent-key|remove|archive|export> …',
+    signature: '<create|add|credential|agent-key|bootstrap|remove|archive|export> …',
     summary:
       'create a team, add/remove members, manage scoped bootstrap credentials, archive a team, export the roster to git',
     group: 'team',
@@ -316,6 +319,9 @@ export const CATALOG: readonly CommandEntry[] = [
       '                               mint one independently revocable bootstrap credential, shown once\n' +
       '  bootstrap list              show the redacted credential inventory (admin)\n' +
       '  bootstrap revoke <id>       revoke one scoped bootstrap credential (admin)\n' +
+      '  bootstrap cutover [--force] [--yes]\n' +
+      '                               disable the legacy Team key after every held seat and enrolled host\n' +
+      '                               proves scoped use; --force bypasses readiness, --yes confirmation\n' +
       '  remove <name>                soft-remove a member (history is kept)\n' +
       '  archive <slug> [--as <admin>]  soft-archive a whole team — off status/rosters, history kept (admin)\n' +
       '  export <slug> [--to <dir>]   move the roster onto git-tracked .musterd/ files (ADR 058);\n' +
@@ -324,6 +330,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'musterd team create acme --as nick',
       'musterd team add lin --kind human --role reviewer',
       'musterd team bootstrap mint --seat ada --expires-in 24h',
+      'musterd team bootstrap cutover',
       'musterd team agent-key            # `musterd agent` says no team agent key? start here',
     ],
   },

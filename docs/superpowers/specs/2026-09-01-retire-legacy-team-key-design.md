@@ -190,3 +190,8 @@ Rollout order:
 
 The live verification records target IDs and credential IDs only. It never records plaintext
 credentials or local paths.
+
+## Implementation
+
+Implemented under [ADR 350](../../decisions/350-retire-legacy-team-bootstrap-key.md). Operators use
+the [legacy bootstrap cutover runbook](../../operations/legacy-bootstrap-cutover.md).

@@ -83,6 +83,36 @@ async function claimAda(): Promise<void> {
 }
 
 describe('host-scoped bootstrap credentials', () => {
+  it.each([
+    ['/teams/dawn/residency/wake-leases', { host: 'laptop.local' }],
+    ['/teams/dawn/residency/wake-progress', { lease_id: 'missing' }],
+    [
+      '/teams/dawn/residency/wake-turn',
+      { lease_id: 'missing', turn: 1, usage: { input_tokens: 1, output_tokens: 1 } },
+    ],
+    [
+      '/teams/dawn/residency/wake-report',
+      { lease_id: 'missing', occupied: false, reason: 'failed' },
+    ],
+  ] as const)(
+    'rejects the retired legacy key on %s before residency effects (ADR 350)',
+    async (path, body) => {
+      const before = server.db
+        .prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM wake_leases')
+        .get()!.count;
+      const cutover = await post('/teams/dawn/agent-bootstrap-cutover', { force: true }, nickCred);
+      expect(cutover.status).toBe(200);
+
+      const refused = await post(path, body, agentKey);
+      expect(refused.status).toBe(401);
+      expect(refused.json.error.message).toContain('musterd team bootstrap mint --seat <name>');
+      expect(
+        server.db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM wake_leases').get()!
+          .count,
+      ).toBe(before);
+    },
+  );
+
   it('accepts only its recorded host label for wake lease polling', async () => {
     const team = getTeamBySlug(server.db, 'dawn')!;
     const hostKey = mintBootstrapCredential(server.db, {
@@ -97,6 +127,14 @@ describe('host-scoped bootstrap credentials', () => {
       hostKey.agent_key,
     );
     expect(allowed.status).toBe(200);
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(hostKey.credential.id)?.first_used_at,
+    ).toEqual(expect.any(Number));
 
     const refused = await post(
       '/teams/dawn/residency/wake-leases',
@@ -1011,6 +1049,7 @@ describe('POST /teams/:slug/residency/wake-progress (ADR 262)', () => {
       useKind: 'host',
       target: 'laptop.local',
     });
+    expect(hostKey.credential.first_used_at).toBeNull();
 
     const allowed = await post(
       '/teams/dawn/residency/wake-progress',
@@ -1018,6 +1057,14 @@ describe('POST /teams/:slug/residency/wake-progress (ADR 262)', () => {
       hostKey.agent_key,
     );
     expect(allowed.status).toBe(200);
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(hostKey.credential.id)?.first_used_at,
+    ).toEqual(expect.any(Number));
 
     const turn = await post(
       '/teams/dawn/residency/wake-turn',

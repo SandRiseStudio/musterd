@@ -56,6 +56,7 @@ import {
   findBootstrapCredentialRecord,
   getAgentKeyHash,
   getPolicy,
+  recordBootstrapCredentialUse,
   requireTeam,
 } from '../store/teams.js';
 import { recordError, recordPresenceChurn } from '../telemetry.js';
@@ -441,6 +442,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             return;
           }
           if (bootstrapCredential) {
+            recordBootstrapCredentialUse(ctx.db, bootstrapCredential.id);
             appendAudit(ctx.db, team.id, {
               actor: null,
               action: 'bootstrap_credential.used',

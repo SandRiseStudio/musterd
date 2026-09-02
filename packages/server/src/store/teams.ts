@@ -11,6 +11,7 @@ import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import type { z } from 'zod';
 import { MusterdError } from '../errors.js';
+import { appendAuditRequired } from './audit.js';
 import { hashToken, newSecret } from './members.js';
 import { resolveAccountStatus, type MemberRow, type TeamRow } from './rows.js';
 
@@ -40,7 +41,14 @@ export interface BootstrapCredential {
 export type BootstrapMigrationResult = {
   credential: BootstrapCredential;
   agent_key: string;
+  predecessor_credential_id: string;
   replaced_credential_id: string | null;
+};
+
+export type BootstrapCutoverReadiness = {
+  already_cut_over: boolean;
+  unmet_seats: Array<{ member_id: string; name: string }>;
+  unmet_hosts: string[];
 };
 
 export function createTeam(
@@ -127,12 +135,38 @@ export function requireTeam(db: Database, slug: string): TeamRow {
  * plaintext **once**. Any prior key is invalidated by the overwrite.
  */
 export function rotateAgentKey(db: Database, teamId: string): AgentKeyMint {
+  const team = db
+    .prepare<
+      [string],
+      { bootstrap_cutover_at: number | null }
+    >('SELECT bootstrap_cutover_at FROM teams WHERE id = ?')
+    .get(teamId);
+  if (!team) throw new MusterdError('not_found', 'Team not found');
+  if (team.bootstrap_cutover_at !== null) {
+    throw new MusterdError('conflict', 'legacy bootstrap authority is already cut over');
+  }
   const agentKey = newSecret(TOKEN_PREFIXES.agent_key);
-  db.prepare('UPDATE teams SET agent_key_hash = ?, updated_at = ? WHERE id = ?').run(
-    hashToken(agentKey),
-    Date.now(),
-    teamId,
-  );
+  const now = Date.now();
+  const keyHash = hashToken(agentKey);
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE agent_bootstrap_credentials
+       SET state = 'revoked', revoked_at = ?
+       WHERE team_id = ? AND use_kind = 'legacy' AND state IN ('active', 'rotated')`,
+    ).run(now, teamId);
+    db.prepare('UPDATE teams SET agent_key_hash = ?, updated_at = ? WHERE id = ?').run(
+      keyHash,
+      now,
+      teamId,
+    );
+    db.prepare(
+      `INSERT INTO agent_bootstrap_credentials
+        (id, team_id, key_hash, use_kind, target, label, state, expires_at, created_by,
+         created_at, rotated_at, revoked_at, migration_target_member_id, first_used_at)
+       VALUES (?, ?, ?, 'legacy', NULL, 'team-key-compatibility', 'active', NULL, NULL,
+               ?, NULL, NULL, NULL, NULL)`,
+    ).run(ulid(), teamId, keyHash, now);
+  })();
   return { agent_key: agentKey };
 }
 
@@ -388,6 +422,7 @@ export function migrateLegacyBootstrapCredential(
     return {
       credential,
       agent_key,
+      predecessor_credential_id: legacy.id,
       replaced_credential_id: unused?.id ?? null,
     };
   })();
@@ -404,6 +439,107 @@ export function recordBootstrapCredentialUse(
      SET first_used_at = COALESCE(first_used_at, ?)
      WHERE id = ? AND use_kind <> 'legacy'`,
   ).run(now, credentialId);
+}
+
+/** Derive legacy-key cutover readiness only from durable Team state and observed scoped use. */
+export function bootstrapCutoverReadiness(
+  db: Database,
+  teamId: string,
+  now = Date.now(),
+): BootstrapCutoverReadiness {
+  const team = db.prepare<[string], TeamRow>('SELECT * FROM teams WHERE id = ?').get(teamId);
+  if (!team) throw new MusterdError('not_found', 'Team not found');
+
+  const unmet_seats = db
+    .prepare<[string, number], { member_id: string; name: string }>(
+      `SELECT m.id AS member_id, m.name
+       FROM members m
+       WHERE m.team_id = ?
+         AND m.kind = 'agent'
+         AND m.observer = 0
+         AND m.bound_at IS NOT NULL
+         AND m.left_at IS NULL
+         AND (m.account_status IS NULL OR m.account_status NOT IN ('disabled', 'banned', 'archived'))
+         AND NOT EXISTS (
+           SELECT 1
+           FROM agent_bootstrap_credentials c
+           WHERE c.team_id = m.team_id
+             AND c.use_kind = 'claim_seat'
+             AND c.target = m.name
+             AND c.state = 'active'
+             AND (c.expires_at IS NULL OR c.expires_at > ?)
+             AND c.first_used_at IS NOT NULL
+         )
+       ORDER BY m.name, m.id`,
+    )
+    .all(teamId, now);
+
+  const unmet_hosts = db
+    .prepare<[string, number], { host: string }>(
+      `SELECT DISTINCT r.host
+       FROM residency r
+       JOIN members m ON m.id = r.member_id
+       WHERE r.team_id = ?
+         AND m.left_at IS NULL
+         AND (m.account_status IS NULL OR m.account_status NOT IN ('disabled', 'banned', 'archived'))
+         AND NOT EXISTS (
+           SELECT 1
+           FROM agent_bootstrap_credentials c
+           WHERE c.team_id = r.team_id
+             AND c.use_kind = 'host'
+             AND c.target = r.host
+             AND c.state = 'active'
+             AND (c.expires_at IS NULL OR c.expires_at > ?)
+             AND c.first_used_at IS NOT NULL
+         )
+       ORDER BY r.host`,
+    )
+    .all(teamId, now)
+    .map((row) => row.host);
+
+  return {
+    already_cut_over: team.bootstrap_cutover_at !== null,
+    unmet_seats,
+    unmet_hosts,
+  };
+}
+
+/** Transactionally disable one Team's legacy bootstrap authority after its scoped targets are ready. */
+export function cutoverLegacyBootstrap(
+  db: Database,
+  input: { teamId: string; actor: string; force: boolean; now?: number },
+): BootstrapCutoverReadiness {
+  return db.transaction(() => {
+    const now = input.now ?? Date.now();
+    const readiness = bootstrapCutoverReadiness(db, input.teamId, now);
+    if (readiness.already_cut_over) return readiness;
+    if (!input.force && (readiness.unmet_seats.length > 0 || readiness.unmet_hosts.length > 0)) {
+      throw new MusterdError('conflict', 'legacy bootstrap cutover is not ready');
+    }
+
+    db.prepare(
+      `UPDATE agent_bootstrap_credentials
+       SET state = 'revoked', revoked_at = ?
+       WHERE team_id = ? AND use_kind = 'legacy' AND state IN ('active', 'rotated')`,
+    ).run(now, input.teamId);
+    db.prepare(
+      `UPDATE teams
+       SET agent_key_hash = NULL, bootstrap_cutover_at = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(now, now, input.teamId);
+    appendAuditRequired(db, input.teamId, {
+      actor: input.actor,
+      action: 'bootstrap_credential.cutover',
+      target: input.teamId,
+      result: 'allow',
+      detail: {
+        force: input.force,
+        unmet_member_ids: readiness.unmet_seats.map((seat) => seat.member_id),
+        unmet_hosts: readiness.unmet_hosts,
+      },
+    });
+    return readiness;
+  })();
 }
 
 /**

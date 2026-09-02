@@ -68,6 +68,41 @@ async function grantFor(seat: string, lifetime = 'standing'): Promise<string> {
 }
 
 describe('agent bootstrap credential lifecycle', () => {
+  it('exchanges legacy plus seat proofs without creating another Presence (ADR 350)', async () => {
+    const occupied = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant: await grantFor('Ada'),
+      surface: 'cli',
+    });
+    expect(occupied.status).toBe(200);
+    const before = server.db
+      .prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM presence')
+      .get()!.count;
+
+    const migrated = await post('/agent-bootstrap-migrations', {
+      legacy_key: agentKey,
+      seat_credential: occupied.json.seat_credential,
+    });
+    expect(migrated.status).toBe(201);
+    expect(migrated.json.agent_key).toMatch(/^mskey_/);
+    expect(migrated.json.credential).toMatchObject({
+      use: 'claim_seat',
+      target: 'Ada',
+      state: 'active',
+    });
+    expect(migrated.json.credential).not.toHaveProperty('key_hash');
+    expect(
+      server.db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM presence').get()!
+        .count,
+    ).toBe(before);
+
+    const audit = listAudit(server.db, getTeamBySlug(server.db, 'dawn')!.id);
+    expect(audit.map((row) => row.action)).toContain('bootstrap_credential.migrated');
+    expect(JSON.stringify(audit)).not.toContain(agentKey);
+    expect(JSON.stringify(audit)).not.toContain(occupied.json.seat_credential);
+  });
+
   it('lets an admin mint, inventory, and revoke one scoped credential without exposing its hash', async () => {
     const minted = await post(
       '/teams/dawn/agent-bootstrap-credentials',
@@ -154,6 +189,90 @@ describe('agent bootstrap credential lifecycle', () => {
     );
     expect(denied.status).toBe(403);
   });
+
+  it('reports readiness to admins and refuses incomplete cutover without force (ADR 350)', async () => {
+    const occupied = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant: await grantFor('Ada'),
+      surface: 'cli',
+    });
+    expect(occupied.status).toBe(200);
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickCred);
+
+    expect((await get('/teams/dawn/agent-bootstrap-cutover')).status).toBe(401);
+    expect(
+      (await get('/teams/dawn/agent-bootstrap-cutover', bob.json.human_credential)).status,
+    ).toBe(403);
+    const readiness = await get('/teams/dawn/agent-bootstrap-cutover', nickCred);
+    expect(readiness.status).toBe(200);
+    expect(readiness.json).toEqual({
+      already_cut_over: false,
+      unmet_seats: [
+        {
+          member_id: expect.any(String),
+          name: 'Ada',
+        },
+      ],
+      unmet_hosts: [],
+    });
+
+    const refused = await post('/teams/dawn/agent-bootstrap-cutover', {}, nickCred);
+    expect(refused.status).toBe(409);
+  });
+
+  it('forces cutover idempotently and rejects the old key before claim effects (ADR 350)', async () => {
+    const occupied = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      grant: await grantFor('Ada'),
+      surface: 'cli',
+    });
+    expect(occupied.status).toBe(200);
+
+    const cutover = await post('/teams/dawn/agent-bootstrap-cutover', { force: true }, nickCred);
+    expect(cutover.status).toBe(200);
+    expect(cutover.json).toMatchObject({
+      ok: true,
+      already_cut_over: false,
+      forced: true,
+      readiness: {
+        already_cut_over: false,
+        unmet_seats: [{ member_id: expect.any(String), name: 'Ada' }],
+        unmet_hosts: [],
+      },
+    });
+
+    const beforeRequests = server.db
+      .prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM requests')
+      .get()!.count;
+    const beforePresence = server.db
+      .prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM presence')
+      .get()!.count;
+    const refused = await post('/teams/dawn/claim', {
+      key: agentKey,
+      target: { seat: 'Ada' },
+      surface: 'cli',
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.json.hint).toContain('musterd team bootstrap mint --seat <name>');
+    expect(
+      server.db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM requests').get()!
+        .count,
+    ).toBe(beforeRequests);
+    expect(
+      server.db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM presence').get()!
+        .count,
+    ).toBe(beforePresence);
+
+    const repeated = await post('/teams/dawn/agent-bootstrap-cutover', {}, nickCred);
+    expect(repeated.status).toBe(200);
+    expect(repeated.json).toMatchObject({
+      ok: true,
+      already_cut_over: true,
+      forced: false,
+    });
+  });
 });
 
 describe('POST /claim — refusals', () => {
@@ -229,6 +348,7 @@ describe('POST /claim — refusals', () => {
       useKind: 'claim_seat',
       target: 'Ada',
     });
+    expect(scoped.credential.first_used_at).toBeNull();
 
     const r = await post('/teams/dawn/claim', {
       key: scoped.agent_key,
@@ -246,6 +366,14 @@ describe('POST /claim — refusals', () => {
     );
     expect(refusalAudit).toMatchObject({ target: scoped.credential.id });
     expect(JSON.parse(refusalAudit!.detail!)).toMatchObject({ reason: 'target_mismatch' });
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(scoped.credential.id)?.first_used_at,
+    ).toBeNull();
   });
 
   it('accepts a seat-scoped bootstrap credential for its target', async () => {
@@ -264,6 +392,14 @@ describe('POST /claim — refusals', () => {
     });
 
     expect(r.status).toBe(200);
+    expect(
+      server.db
+        .prepare<
+          [string],
+          { first_used_at: number | null }
+        >('SELECT first_used_at FROM agent_bootstrap_credentials WHERE id = ?')
+        .get(scoped.credential.id)?.first_used_at,
+    ).toEqual(expect.any(Number));
   });
 
   it('accepts a role credential only through its declared role pool and never as a seat key', async () => {

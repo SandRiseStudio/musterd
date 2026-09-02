@@ -20,9 +20,9 @@ src/
   bin.ts              // shebang entry; parse argv; dispatch; map errors -> exit codes
   help.ts             // re-exports the plain `HELP` string (from help/plain.ts) so guidance:check can import it; ADR 085
   args.ts             // argv parser → { command, positionals, flags }
-  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed and same-seat claimed seat_credential (omit = preserve); capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268/340)
+  config.ts           // load/save ~/.musterd/config.json; per-folder binding lookup; saveBinding merge-guards hook-written session + model_observed and same-seat claimed seat_credential (omit = preserve), with atomic publication seam for migration recovery; capture writers pass { drop: { model_observed: true } } to clear on session-id change (ADR 268/340/350)
   machinePaths.ts     // machine-wide path resolvers; VITEST refuses unset overrides (ADR 190)
-  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; scoped bootstrap credential admin lifecycle (ADR 344); routine agent HTTP calls re-claim their bound seat in the same Workspace and hold its Presence through the request (ADR 339/340); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
+  client.ts           // HttpClient + WsClient wrappers over the 02-protocol API; scoped bootstrap lifecycle, Workspace migration, and Team cutover (ADR 344/350); routine agent HTTP calls re-claim their bound seat in the same Workspace and hold its Presence through the request (ADR 339/340); forwards resolveAttestedModel as x-musterd-model for agent keys only (ADR 119/121); wakeProgress stamps spawn without settling (ADR 262)
   claim-client.ts     // pure v0.3 claim handshake client: buildClaimFrame + parseClaimResponse + MUSTERD_CLAIM parser (ADR 075/078; live — claim/join/inbox --watch ride watchClaim)
   test-auth.ts        // CLI integration-fixture claim helper: bootstrap key → agent-seat credential + Presence-bound lease (ADR 337)
   claudeBin.ts        // PATH-robust `claude` binary resolution, shared by init/doctor detection and the wake actuator (launchd's minimal PATH; ADR 131 inc 3)
@@ -125,7 +125,7 @@ src/
     git.ts            // RepoFacts extractor over git plumbing; actor identity = ADR 109 attribution
   commands/
     init.ts           // musterd init (delegates to onboard/init.ts); --check → onboard/doctor.ts drift report; --check --fix → `wire` for entry drift, full init otherwise (ADR 165)
-    wire.ts           // musterd wire: headless, desire-preserving fragment reconcile from the committed spec + saved v2 selection; exit 6 without one, never converts legacy (ADR 080/282)
+    wire.ts           // musterd wire: headless fragment reconcile, plus --migrate-bootstrap atomic replacement of a Workspace's legacy Team key while Presence stays occupied (ADR 080/282/350)
     harness.ts        // musterd harness configure|status: the ONE desired-set editor/legacy converter + the read-only fragment inspection (ADR 281/282/286)
     codexHook.ts      // musterd codex-hook start|end|post-tool-use --stdin: causal local session/model evidence (ADR 249); start also emits the ADR 326 orientation block on stdout (ADR 333)
     agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
@@ -143,7 +143,7 @@ src/
     stream.ts         // musterd stream doctor|build|start|stop|status: the one-verb hosted broadcast, absorbing scripts/broadcast/live.sh — `doctor` prints the exact repair per failed precondition; `build` records the pushed DIGEST and `start` runs that (a rebuilt tag can resolve to the previous image) and discovers the tailnet address itself; secrets stay operator-set, presence-checked only
     broadcast-perf.ts // capture-pipeline instrumentation, dark unless MUSTERD_BROADCAST_PERF names a JSONL path: screencast fps/bytes, canvas draw rate, ffmpeg queue depth (its *slope* is the margin metric — `speed=` is pinned ≈1× for a live source), per-tree CPU + load; summarized by scripts/perf/broadcast-baseline.mjs
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
-    team.ts           // Team/member management, scoped bootstrap credential lifecycle (ADR 344), policy, and roster export
+    team.ts           // Team/member management, scoped bootstrap lifecycle + readiness-gated legacy cutover (ADR 344/350), policy, and roster export
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
     join.ts           // join
     send.ts           // send

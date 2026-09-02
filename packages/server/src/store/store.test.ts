@@ -42,11 +42,15 @@ import {
 } from './presence.js';
 import { mintSessionLease } from './session-leases.js';
 import {
+  bootstrapCutoverReadiness,
   createTeam,
+  cutoverLegacyBootstrap,
   findBootstrapCredential,
+  getAgentKeyHash,
   migrateLegacyBootstrapCredential,
   mintBootstrapCredential,
   recordBootstrapCredentialUse,
+  requireTeam,
   revokeBootstrapCredential,
   rotateAgentKey,
 } from './teams.js';
@@ -58,19 +62,20 @@ function freshTeam() {
 }
 
 function legacyBootstrap(db: ReturnType<typeof openDb>, teamId: string) {
-  const { agent_key } = rotateAgentKey(db, teamId);
-  const keyHash = db
-    .prepare<[string], { agent_key_hash: string }>('SELECT agent_key_hash FROM teams WHERE id = ?')
-    .get(teamId)!.agent_key_hash;
-  db.prepare(
-    `INSERT INTO agent_bootstrap_credentials
-       (id, team_id, key_hash, use_kind, target, state, created_at)
-     VALUES (?, ?, ?, 'legacy', NULL, 'active', ?)`,
-  ).run(`legacy-${teamId}`, teamId, keyHash, Date.now());
-  return agent_key;
+  return rotateAgentKey(db, teamId).agent_key;
 }
 
 describe('teams + members', () => {
+  it('records the compatibility Team key as an explicit active legacy credential', () => {
+    const { db, team } = freshTeam();
+    const legacyKey = legacyBootstrap(db, team.id);
+    expect(findBootstrapCredential(db, team.id, legacyKey)).toMatchObject({
+      team_id: team.id,
+      use_kind: 'legacy',
+      state: 'active',
+    });
+  });
+
   it('migrates a legacy key only to the seat proven by its agent-seat credential (ADR 350)', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
@@ -225,6 +230,137 @@ describe('teams + members', () => {
         }),
       ).toThrow(/legacy bootstrap/);
     }
+  });
+
+  it('requires successful scoped use for every held agent seat and enrolled host (ADR 350)', () => {
+    const { db, team } = freshTeam();
+    legacyBootstrap(db, team.id);
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const grace = addMember(db, team, { name: 'Grace', kind: 'agent' });
+    const unheld = addMember(db, team, { name: 'Lin', kind: 'agent' });
+    const disabled = addMember(db, team, { name: 'Dormant', kind: 'agent' });
+    db.prepare('UPDATE members SET bound_at = 1 WHERE id IN (?, ?, ?)').run(
+      ada.row.id,
+      grace.row.id,
+      disabled.row.id,
+    );
+    db.prepare("UPDATE members SET account_status = 'disabled' WHERE id = ?").run(disabled.row.id);
+
+    const insertResidency = db.prepare(
+      `INSERT INTO residency
+        (id, team_id, member_id, harness, host, created_at, updated_at)
+       VALUES (?, ?, ?, 'cursor', ?, 1, 1)`,
+    );
+    insertResidency.run('res-ada', team.id, ada.row.id, 'mac-studio');
+    insertResidency.run('res-grace', team.id, grace.row.id, 'mac-studio');
+
+    const adaKey = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Ada',
+    });
+    const graceKey = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'claim_seat',
+      target: 'Grace',
+    });
+    const hostKey = mintBootstrapCredential(db, {
+      teamId: team.id,
+      useKind: 'host',
+      target: 'mac-studio',
+    });
+    void unheld;
+    recordBootstrapCredentialUse(db, graceKey.credential.id, 10);
+
+    expect(bootstrapCutoverReadiness(db, team.id)).toEqual({
+      already_cut_over: false,
+      unmet_seats: [{ member_id: ada.row.id, name: 'Ada' }],
+      unmet_hosts: ['mac-studio'],
+    });
+
+    recordBootstrapCredentialUse(db, adaKey.credential.id, 11);
+    recordBootstrapCredentialUse(db, hostKey.credential.id, 12);
+    expect(bootstrapCutoverReadiness(db, team.id)).toEqual({
+      already_cut_over: false,
+      unmet_seats: [],
+      unmet_hosts: [],
+    });
+  });
+
+  it('refuses incomplete cutover unless forced and makes repeated cutover idempotent (ADR 350)', () => {
+    const { db, team } = freshTeam();
+    legacyBootstrap(db, team.id);
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    db.prepare('UPDATE members SET bound_at = 1 WHERE id = ?').run(ada.row.id);
+
+    expect(() =>
+      cutoverLegacyBootstrap(db, { teamId: team.id, actor: 'Nick', force: false, now: 100 }),
+    ).toThrow(/not ready/);
+    expect(getAgentKeyHash(db, team.id)).not.toBeNull();
+
+    const forced = cutoverLegacyBootstrap(db, {
+      teamId: team.id,
+      actor: 'Nick',
+      force: true,
+      now: 101,
+    });
+    expect(forced).toEqual({
+      already_cut_over: false,
+      unmet_seats: [{ member_id: ada.row.id, name: 'Ada' }],
+      unmet_hosts: [],
+    });
+    expect(getAgentKeyHash(db, team.id)).toBeNull();
+    expect(requireTeam(db, team.slug).bootstrap_cutover_at).toBe(101);
+    expect(() => rotateAgentKey(db, team.id)).toThrow(/already cut over/);
+    expect(
+      db
+        .prepare<
+          [],
+          { count: number }
+        >("SELECT COUNT(*) AS count FROM agent_bootstrap_credentials WHERE use_kind = 'legacy' AND state IN ('active', 'rotated')")
+        .get()!.count,
+    ).toBe(0);
+
+    expect(
+      cutoverLegacyBootstrap(db, {
+        teamId: team.id,
+        actor: 'Nick',
+        force: false,
+        now: 102,
+      }),
+    ).toEqual({
+      already_cut_over: true,
+      unmet_seats: [{ member_id: ada.row.id, name: 'Ada' }],
+      unmet_hosts: [],
+    });
+    expect(requireTeam(db, team.slug).bootstrap_cutover_at).toBe(101);
+  });
+
+  it('rolls back legacy cutover when its audit write fails (ADR 350)', () => {
+    const { db, team } = freshTeam();
+    legacyBootstrap(db, team.id);
+    db.exec(`
+      CREATE TRIGGER fail_bootstrap_cutover_audit
+      BEFORE INSERT ON audit
+      WHEN NEW.action = 'bootstrap_credential.cutover'
+      BEGIN
+        SELECT RAISE(ABORT, 'injected audit failure');
+      END
+    `);
+
+    expect(() =>
+      cutoverLegacyBootstrap(db, { teamId: team.id, actor: 'Nick', force: false, now: 100 }),
+    ).toThrow(/injected audit failure/);
+    expect(getAgentKeyHash(db, team.id)).not.toBeNull();
+    expect(requireTeam(db, team.slug).bootstrap_cutover_at).toBeNull();
+    expect(
+      db
+        .prepare<
+          [],
+          { count: number }
+        >("SELECT COUNT(*) AS count FROM agent_bootstrap_credentials WHERE use_kind = 'legacy' AND state = 'active'")
+        .get()!.count,
+    ).toBe(1);
   });
 
   it('mints and resolves a target-scoped bootstrap credential', () => {

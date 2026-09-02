@@ -116,6 +116,63 @@ describe('team policy command', () => {
     ).rejects.toThrow(/exactly one/);
   });
 
+  it('reports deterministic unmet targets and refuses cutover without force', async () => {
+    await capture(() => teamCommand(parseArgs(['add', 'Grace', '--kind', 'agent'])));
+    await capture(() => teamCommand(parseArgs(['add', 'Ada', '--kind', 'agent'])));
+    const team = server.db.prepare<[], { id: string }>('SELECT id FROM teams').get()!;
+    server.db
+      .prepare("UPDATE members SET bound_at = 1 WHERE team_id = ? AND kind = 'agent'")
+      .run(team.id);
+    const members = server.db
+      .prepare<
+        [string],
+        { id: string; name: string }
+      >("SELECT id, name FROM members WHERE team_id = ? AND kind = 'agent' ORDER BY name")
+      .all(team.id);
+    const insertResidency = server.db.prepare(
+      `INSERT INTO residency
+        (id, team_id, member_id, harness, host, created_at, updated_at)
+       VALUES (?, ?, ?, 'cursor', ?, 1, 1)`,
+    );
+    insertResidency.run('res-ada', team.id, members[0]!.id, 'mac-studio');
+
+    const result = await capture(() => teamCommand(parseArgs(['bootstrap', 'cutover'])));
+    expect(result.code).toBe(1);
+    expect(result.out).toBe(
+      'legacy bootstrap cutover is not ready\n' +
+        '  seats: Ada, Grace\n' +
+        '  hosts: mac-studio\n' +
+        'repair: migrate each Workspace and verify each host credential in use\n',
+    );
+    expect(
+      server.db
+        .prepare<
+          [],
+          { bootstrap_cutover_at: number | null }
+        >('SELECT bootstrap_cutover_at FROM teams')
+        .get()!.bootstrap_cutover_at,
+    ).toBeNull();
+  });
+
+  it('forces non-interactive cutover only with both --force and --yes', async () => {
+    await capture(() => teamCommand(parseArgs(['add', 'Ada', '--kind', 'agent'])));
+    server.db.prepare("UPDATE members SET bound_at = 1 WHERE kind = 'agent'").run();
+
+    await expect(teamCommand(parseArgs(['bootstrap', 'cutover', '--force']))).rejects.toThrow(
+      /--force.*--yes/,
+    );
+
+    const result = await capture(() =>
+      teamCommand(parseArgs(['bootstrap', 'cutover', '--force', '--yes', '--json'])),
+    );
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.out)).toMatchObject({
+      ok: true,
+      already_cut_over: false,
+      forced: true,
+    });
+  });
+
   it('turns the dispatch loop on and reads it back', async () => {
     const set = await capture(() => teamCommand(parseArgs(['policy', '--dispatch-loop', 'on'])));
     expect(set.code).toBe(0);

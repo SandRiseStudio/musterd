@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
+import * as p from '@clack/prompts';
 import {
   type Binding,
   bindingSeat,
@@ -128,8 +129,80 @@ async function teamBootstrap(parsed: Parsed): Promise<number> {
     return 0;
   }
 
+  if (action === 'cutover') {
+    const readiness = await http.bootstrapCutoverReadiness(team);
+    const force = parsed.flags['force'] === true;
+    const yes = parsed.flags['yes'] === true;
+    const hasUnmet = readiness.unmet_seats.length > 0 || readiness.unmet_hosts.length > 0;
+
+    if (readiness.already_cut_over) {
+      const result = { ok: true, already_cut_over: true, forced: false, readiness };
+      if (json) process.stdout.write(JSON.stringify(result) + '\n');
+      else process.stdout.write(success(`legacy bootstrap already cut over on ${team}`) + '\n');
+      return 0;
+    }
+
+    if (hasUnmet && !force) {
+      if (json) {
+        process.stdout.write(JSON.stringify({ ok: false, readiness }) + '\n');
+      } else {
+        process.stdout.write('legacy bootstrap cutover is not ready\n');
+        process.stdout.write(
+          `  seats: ${readiness.unmet_seats.map((seat) => seat.name).join(', ') || 'none'}\n`,
+        );
+        process.stdout.write(`  hosts: ${readiness.unmet_hosts.join(', ') || 'none'}\n`);
+        process.stdout.write(
+          'repair: migrate each Workspace and verify each host credential in use\n',
+        );
+      }
+      return 1;
+    }
+
+    if (!yes) {
+      if (!process.stdin.isTTY) {
+        throw new CliError(
+          force
+            ? 'non-interactive forced cutover requires both --force and --yes'
+            : 'non-interactive cutover requires --yes',
+          2,
+        );
+      }
+      const targets = hasUnmet
+        ? ` Unmet targets: ${[
+            ...readiness.unmet_seats.map((seat) => seat.name),
+            ...readiness.unmet_hosts,
+          ].join(', ')}.`
+        : '';
+      const answer = await p.confirm({
+        message: `Permanently disable "${team}"'s legacy Team-wide bootstrap key?${targets}`,
+        initialValue: false,
+      });
+      if (p.isCancel(answer) || answer !== true) {
+        process.stdout.write(theme.meta('cutover cancelled; nothing changed') + '\n');
+        return 0;
+      }
+    }
+
+    const result = await http.cutoverLegacyBootstrap(team, force);
+    if (json) process.stdout.write(JSON.stringify(result) + '\n');
+    else {
+      process.stdout.write(success(`retired "${team}"'s legacy Team bootstrap key`) + '\n');
+      if (force && hasUnmet) {
+        process.stdout.write(
+          theme.warn(
+            `${sym.warn} forced with unmet targets: ${[
+              ...readiness.unmet_seats.map((seat) => seat.name),
+              ...readiness.unmet_hosts,
+            ].join(', ')}`,
+          ) + '\n',
+        );
+      }
+    }
+    return 0;
+  }
+
   throw new CliError(
-    'usage: musterd team bootstrap <mint|list|revoke> [--seat|--role|--host ...]',
+    'usage: musterd team bootstrap <mint|list|revoke|cutover> [--seat|--role|--host ...]',
     2,
   );
 }
