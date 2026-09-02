@@ -22,6 +22,7 @@ const USAGE =
   '  musterd node join <hub-url> <msinv_code>\n' +
   '  musterd node rotate <node-id>\n' +
   '  musterd node revoke <node-id>\n' +
+  '  musterd node trust <node-id>\n' +
   '  musterd node list [--json]';
 
 function renderNode(n: NodeSummary): string {
@@ -110,6 +111,26 @@ export async function nodeCommand(parsed: Parsed): Promise<number> {
                 '  lanes its seats hold are NOT released — that stays a human call.\n',
             )
         : theme.meta(`nothing to do — node ${nodeId} is already revoked or unknown\n`),
+    );
+    return 0;
+  }
+
+  if (sub === 'trust') {
+    const nodeId = parsed.positionals[1];
+    if (!nodeId) throw new CliError(USAGE, 2);
+    // `resolve`: the act is authorised by the seat — and by running it from a machine the seat
+    // already lives on, which is what the daemon checks (ADR 358). No admin needed.
+    const { team, http } = resolve(parsed.flags);
+    const trusted = await http.nodeTrust(team, nodeId);
+    process.stdout.write(
+      trusted.already
+        ? theme.meta(`nothing to do — ${trusted.seat} already trusts node ${trusted.node_id}\n`)
+        : success(
+            `${trusted.seat} now trusts node ${trusted.node_id} — claims from it speak as you`,
+            {
+              next: 'musterd node list  (to see the set); an admin unbind clears it',
+            },
+          ) + '\n',
     );
     return 0;
   }

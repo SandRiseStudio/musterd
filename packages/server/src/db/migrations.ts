@@ -1484,6 +1484,45 @@ export const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_presence_node ON presence(node)');
     },
   },
+  {
+    // ADR 357: the host actuator's `POST /residency/wake-leases` poll is its heartbeat. One row per
+    // (team, host), newest sighting wins — the fact `enrolled_host_stale` was always waiting for.
+    // Not replicated (ADR 331): a host's liveness is a fact about THIS daemon's reachability.
+    version: 62,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS host_liveness (
+          team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          host    TEXT NOT NULL,
+          seen_at INTEGER NOT NULL,
+          PRIMARY KEY (team_id, host)
+        );
+      `);
+    },
+  },
+  {
+    // ADR 358: a human seat trusts a SET of machines. The key widens from `member_id` to
+    // `(member_id, node_id)`; first-writer-wins still holds for an EMPTY set (the insert is the CAS
+    // in `bindSeatToNode`), and a second row is minted only by the explicit trust act from a node
+    // already in the set. Agents stay one-node by rule in the store, not by the schema. Rebuilt
+    // rather than altered: SQLite cannot change a primary key in place.
+    version: 63,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE seat_nodes_new (
+          member_id TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          team_id   TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          node_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+          bound_at  INTEGER NOT NULL,
+          PRIMARY KEY (member_id, node_id)
+        );
+        INSERT INTO seat_nodes_new SELECT member_id, team_id, node_id, bound_at FROM seat_nodes;
+        DROP TABLE seat_nodes;
+        ALTER TABLE seat_nodes_new RENAME TO seat_nodes;
+        CREATE INDEX IF NOT EXISTS idx_seat_nodes_node ON seat_nodes(node_id);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

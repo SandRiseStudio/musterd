@@ -205,6 +205,25 @@ export const SeatBoundElsewhereRefusalSchema = z.object({
 });
 export type SeatBoundElsewhereRefusal = z.infer<typeof SeatBoundElsewhereRefusalSchema>;
 
+/**
+ * ADR 358: the explicit trust act, forwarded by a joiner to the hub the way a claim is. The
+ * authenticated node is the SPEAKER and must already be in `seat`'s set; `node_id` is the machine
+ * being added. The hub answers `{ seat, node_id, already }`.
+ */
+export const SyncTrustRequestSchema = z.object({
+  seat: z.string().min(1),
+  node_id: z.string().min(1),
+});
+export type SyncTrustRequest = z.infer<typeof SyncTrustRequestSchema>;
+
+export const SeatNodeTrustedSchema = z.object({
+  seat: z.string().min(1),
+  node_id: z.string().min(1),
+  /** True when the node was already in the set — the act was idempotent, nothing was written. */
+  already: z.boolean(),
+});
+export type SeatNodeTrusted = z.infer<typeof SeatNodeTrustedSchema>;
+
 export const SyncPullResponseSchema = z.object({
   events: z.array(SyncPullEventSchema).max(SYNC_PULL_MAX_BATCH),
   /** The hub's head, so a puller can compute lag (`hub_head − cursor`) without a second call. */

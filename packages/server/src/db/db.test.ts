@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('61');
+    expect(ver?.value).toBe('63');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -262,7 +262,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(61); // runs v18…v56 (including the pull cursor and bootstrap cutover evidence)
+    expect(runMigrations(db)).toBe(63); // runs v18…v63 (including the pull cursor, bootstrap cutover evidence, host_liveness, and the seat_nodes set key)
 
     const scope = (id: string) =>
       db
@@ -326,7 +326,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(61);
+    expect(runMigrations(db)).toBe(63);
 
     const policy = (id: string) =>
       db
@@ -658,7 +658,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(61);
+    expect(runMigrations(db)).toBe(63);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
     db.close();
@@ -673,7 +673,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
     db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
 
-    expect(runMigrations(db)).toBe(61);
+    expect(runMigrations(db)).toBe(63);
 
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
@@ -689,7 +689,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
   it('v58 stamps audit with the origin pair, unique only where a stamp exists', () => {
     const db = withRemoteNode();
     db.prepare("UPDATE schema_meta SET value = '57' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(61);
+    expect(runMigrations(db)).toBe(63);
 
     const insert = db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
@@ -738,6 +738,36 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
       .all()
       .map((i) => i.name);
     expect(idx).toContain('idx_presence_node');
+    db.close();
+  });
+
+  it('v63 rekeys seat_nodes to (member_id, node_id), carrying every existing binding over (ADR 358)', () => {
+    const db = openDb(':memory:');
+    // Rebuild the v59 shape with a row in it, then replay v60+ over it.
+    db.exec(`
+      DROP TABLE seat_nodes;
+      CREATE TABLE seat_nodes (
+        member_id TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+        team_id   TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+        node_id   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+        bound_at  INTEGER NOT NULL
+      );
+      INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t', 'alpha', 1, 1);
+      INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
+        VALUES ('m', 't', 'nick', 'human', '', 'forever', 0, 1, 1);
+      INSERT INTO nodes (id, team_id, label, next_seq) VALUES ('nA', 't', 'a', 1), ('nB', 't', 'b', 1);
+      INSERT INTO seat_nodes VALUES ('m', 't', 'nA', 5);
+    `);
+    db.prepare("UPDATE schema_meta SET value = '62' WHERE key = 'schema_version'").run();
+    expect(runMigrations(db)).toBe(63);
+    expect(db.prepare('SELECT member_id, node_id, bound_at FROM seat_nodes').all()).toEqual([
+      { member_id: 'm', node_id: 'nA', bound_at: 5 },
+    ]);
+    // The set: a second node for the same seat is now a row, not a conflict.
+    db.prepare("INSERT INTO seat_nodes VALUES ('m', 't', 'nB', 6)").run();
+    expect(() => db.prepare("INSERT INTO seat_nodes VALUES ('m', 't', 'nB', 7)").run()).toThrow(
+      /UNIQUE|PRIMARY KEY/,
+    );
     db.close();
   });
 });

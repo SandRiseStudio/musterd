@@ -1,4 +1,5 @@
 import type {
+  WakeabilityFacts,
   Envelope,
   LoopEdge,
   Residency,
@@ -427,6 +428,132 @@ export function listResidency(db: Database, teamId: string): ResidencyRow[] {
       ResidencyRow
     >('SELECT * FROM residency WHERE team_id = ? ORDER BY created_at ASC, id ASC')
     .all(teamId);
+}
+
+/**
+ * How long a host may go silent before its seats read `enrolled_host_stale` (ADR 357).
+ *
+ * ~~60 s — six missed 10 s polls~~ CORRECTED 2026-09-02 by the first live falsifier: the actuator
+ * polls every 10 s only while IDLE. `pollHostOnce` is serial — an actuation suspends polling for
+ * its whole verify window, and the first codex wake after #1197 went 94 s between requests
+ * (15:50:02 → 15:51:36) while doing exactly what it should. At 60 s every enrolled seat read
+ * `enrolled_host_stale` during a healthy wake. Five minutes is above the longest silence a serial
+ * actuation can produce (a 30 s resume window plus a lease-TTL fresh window) and still shows a
+ * dead LaunchAgent inside the time an ADR 191 ask would otherwise wait on it. Every
+ * host-authenticated residency request (poll, progress, turn, report) now stamps the sighting, so a
+ * busy host refreshes at report time even mid-actuation.
+ */
+export const HOST_STALE_MS = 300_000;
+
+/**
+ * The host's poll IS its heartbeat (ADR 357). Every `POST /residency/wake-leases` names the host;
+ * the daemon received that every 10 s since ADR 131 and never wrote it down, which is why
+ * `enrolled_host_stale` could only ever appear on a wake report after the wake had failed. Newest
+ * wins; an out-of-order old poll never moves a sighting backwards.
+ */
+export function recordHostSeen(db: Database, teamId: string, host: string, now: number): void {
+  db.prepare(
+    `INSERT INTO host_liveness (team_id, host, seen_at) VALUES (?, ?, ?)
+     ON CONFLICT(team_id, host) DO UPDATE SET seen_at = MAX(seen_at, excluded.seen_at)`,
+  ).run(teamId, host, now);
+}
+
+/** Every host this team has ever heard from, and when — nearest reading of "is the actuator up". */
+export function listHostSeen(db: Database, teamId: string): Map<string, number> {
+  const rows = db
+    .prepare<
+      [string],
+      { host: string; seen_at: number }
+    >('SELECT host, seen_at FROM host_liveness WHERE team_id = ?')
+    .all(teamId);
+  return new Map(rows.map((r) => [r.host, r.seen_at]));
+}
+
+/**
+ * The facts `wakeabilityFromFacts` (ADR 189) needs, per enrolled member — the two it was never given
+ * (ADR 357): `host_reachable` from the host's last poll, `workspace_readable` from the last wake
+ * report. Absent from the map ⇒ not enrolled.
+ *
+ * `workspace_readable` is false only when the newest `residency.wake_failed` for the seat carries a
+ * still-true wakeability (`enrolled_dead_workspace` — the ADR 262 set) AND no `residency.woke` has
+ * landed since. The daemon cannot stat a path on the host's filesystem; it can read what the host
+ * last reported and whether anything newer contradicts it.
+ */
+export interface SeatWakeabilityFacts {
+  enrolled: true;
+  host: string;
+  /** Undefined when this daemon has never heard from the host at all — unknown, not stale (ADR
+   *  236: absence is not an assertion). A host that HAS polled and stopped is `false`. */
+  host_reachable: boolean | undefined;
+  workspace_readable: boolean;
+  resumable_at: number | null;
+}
+
+/**
+ * The `wakeabilityFromFacts` inputs for one seat's facts, omitting `host_reachable` when it is
+ * unknown — the enum function treats an absent fact as "no evidence to demote on", which is
+ * exactly what never-heard-from means (ADR 236).
+ */
+export function wakeabilityInputs(
+  facts: SeatWakeabilityFacts | undefined,
+): Pick<WakeabilityFacts, 'host_reachable' | 'workspace_readable'> {
+  if (!facts) return {};
+  return {
+    workspace_readable: facts.workspace_readable,
+    ...(facts.host_reachable !== undefined ? { host_reachable: facts.host_reachable } : {}),
+  };
+}
+
+export function seatWakeabilityFacts(
+  db: Database,
+  teamId: string,
+  now: number,
+): Map<string, SeatWakeabilityFacts> {
+  const hosts = listHostSeen(db, teamId);
+  const lastFailure = db.prepare<[string, string], { detail: string; ts: number }>(
+    `SELECT detail, ts FROM audit
+      WHERE team_id = ? AND action = 'residency.wake_failed' AND target = ?
+      ORDER BY ts DESC, id DESC LIMIT 1`,
+  );
+  const lastWoke = db.prepare<[string, string], { ts: number }>(
+    `SELECT ts FROM audit
+      WHERE team_id = ? AND action = 'residency.woke' AND target = ?
+      ORDER BY ts DESC, id DESC LIMIT 1`,
+  );
+  const out = new Map<string, SeatWakeabilityFacts>();
+  for (const r of listResidency(db, teamId)) {
+    const member = getMemberById(db, r.member_id);
+    const seen = hosts.get(r.host);
+    // Never heard from ⇒ unknown, and unknown never demotes: a fresh install, an older host build,
+    // or a registry entry nobody has polled for yet all read exactly as they did before this table
+    // existed. Only a host that HAS polled and then stopped for HOST_STALE_MS is stale — that is
+    // an observed silence, not an assumed one.
+    const host_reachable = seen === undefined ? undefined : now - seen < HOST_STALE_MS;
+    let workspace_readable = true;
+    if (member) {
+      const failed = lastFailure.get(teamId, member.name);
+      if (failed) {
+        let wakeability: string | undefined;
+        try {
+          wakeability = (JSON.parse(failed.detail) as { wakeability?: string }).wakeability;
+        } catch {
+          /* unreadable detail is not evidence of anything */
+        }
+        if (wakeability === 'enrolled_dead_workspace') {
+          const woke = lastWoke.get(teamId, member.name);
+          workspace_readable = woke !== undefined && woke.ts > failed.ts;
+        }
+      }
+    }
+    out.set(r.member_id, {
+      enrolled: true,
+      host: r.host,
+      host_reachable,
+      workspace_readable,
+      resumable_at: r.resumable_at,
+    });
+  }
+  return out;
 }
 
 /** Member ids enrolled in residency — the roster's `wakeable` flag (`offline · wakeable`). */

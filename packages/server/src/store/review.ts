@@ -20,7 +20,7 @@ import {
   resolveQuiescence,
   QUIESCENCE_DEFAULT_QUIET_AFTER_MS,
 } from './quiescence.js';
-import { listWakeableMemberIds } from './residency.js';
+import { listWakeableMemberIds, seatWakeabilityFacts, wakeabilityInputs } from './residency.js';
 import { type MemberRow } from './rows.js';
 
 /**
@@ -257,6 +257,7 @@ export function teamFamilyPosture(
   const wake_pool: WakeCandidate[] = [];
   const durable = durableAttestations(db, teamId);
   const enrolled = listWakeableMemberIds(db, teamId);
+  const facts = seatWakeabilityFacts(db, teamId, Date.now());
   // ADR 219: the wake pool is built from seats PRESENCE calls offline — but presence lapses
   // for reasons other than going away, and a seat whose audit trail shows it acting seconds ago is
   // not idle, it is mid-something with a stale heartbeat. Waking it is not a remedy, it is a
@@ -291,8 +292,12 @@ export function teamFamilyPosture(
         seat: m.name,
         family: modelFamily(last.model),
         attested_at: last.at,
+        // ADR 357: host liveness and workspace readability come from the residency facts — the
+        // two inputs this call never had, which is why a dead host still read `wakeable` here and
+        // ADR 191 could spend a lease on it.
         wakeability: wakeabilityFromFacts({
           enrolled: enrolled.has(m.id),
+          ...wakeabilityInputs(facts.get(m.id)),
           ...(actedAt === undefined
             ? {}
             : {

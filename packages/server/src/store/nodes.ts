@@ -204,20 +204,18 @@ export function authenticateNode(
 /**
  * The seat→node residence binding, minted (ADR 328 §4): "seat X binds to node N the first time N
  * speaks for X", first-writer-wins. `{ bound: true }` when this node holds the seat — freshly, or
- * already; `{ bound: false, node_id, label }` names the node that does, so the refusal means
+ * already; `{ bound: false, node_id, label }` names a node that does, so the refusal means
  * something a caller can act on ("this seat is bound to laptop-a", not "no residency row").
  *
- * The primary key is the CAS: `ON CONFLICT DO NOTHING` plus a read-back, the `bindNode` shape,
- * never a read-then-write. Two nodes racing one unbound seat serialise on SQLite's single writer
- * and exactly one inserts. Re-binding is `unbindSeat` under admin authority — an explicit act,
- * the way ADR 328 required, so a seat that moved laptops is a refusal followed by a decision,
- * never a silent overwrite by whoever spoke last.
+ * Since ADR 358 a seat's binding is a SET of nodes, keyed `(member_id, node_id)`. The first-writer
+ * CAS is the guarded insert: `INSERT … WHERE NOT EXISTS (any row for this seat)`, so two nodes
+ * racing one unbound seat serialise on SQLite's single writer and exactly one inserts. A seat that
+ * already has rows accepts only a node in its set; the way a second node JOINS the set is
+ * `trustNodeForSeat` — an explicit act from a node already in it — never by speaking first.
+ * `unbindSeat` under admin authority clears the whole set and is the release valve.
  *
- * Applies to every seat kind, as ADR 328 wrote it. Human seats fan out across surfaces (ADR 042)
- * but a *claim* is an act with one author, and the hole this closes — an admitted node claiming as
- * any roster seat — is no smaller for human names. The tension with a human on two machines is
- * real and named in ADR 355's amendment; `unbindSeat` is the release valve until the evidence ADR
- * 328 §Experiment asks for arrives.
+ * Applies to every seat kind. Human seats fan out across surfaces (ADR 042) and, after ADR 358,
+ * across the machines they have trusted; agents stay one-node, which `trustNodeForSeat` enforces.
  */
 export function bindSeatToNode(
   db: Database,
@@ -227,37 +225,86 @@ export function bindSeatToNode(
   now: number = Date.now(),
 ): { bound: true } | { bound: false; node_id: string; label: string } {
   db.prepare(
-    `INSERT INTO seat_nodes (member_id, team_id, node_id, bound_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(member_id) DO NOTHING`,
-  ).run(memberId, teamId, nodeId, now);
-  const holder = seatBinding(db, memberId)!;
-  if (holder.node_id === nodeId) return { bound: true };
-  return { bound: false, node_id: holder.node_id, label: holder.label };
+    `INSERT INTO seat_nodes (member_id, team_id, node_id, bound_at)
+     SELECT ?, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM seat_nodes WHERE member_id = ?)`,
+  ).run(memberId, teamId, nodeId, now, memberId);
+  const holders = seatBindings(db, memberId);
+  if (holders.some((h) => h.node_id === nodeId)) return { bound: true };
+  const first = holders[0]!;
+  return { bound: false, node_id: first.node_id, label: first.label };
 }
 
-/** Where the hub believes this seat lives, or undefined when no node has spoken for it yet. */
+/** Where the hub believes this seat lives — the first-bound node — or undefined when unbound. */
 export function seatBinding(
   db: Database,
   memberId: string,
 ): { node_id: string; label: string; bound_at: number } | undefined {
+  return seatBindings(db, memberId)[0];
+}
+
+/** Every node the seat is bound to, earliest first; empty when no node has spoken for it yet. */
+export function seatBindings(
+  db: Database,
+  memberId: string,
+): { node_id: string; label: string; bound_at: number }[] {
   return db
     .prepare<[string], { node_id: string; label: string; bound_at: number }>(
       `SELECT s.node_id, n.label, s.bound_at FROM seat_nodes s JOIN nodes n ON n.id = s.node_id
-        WHERE s.member_id = ?`,
+        WHERE s.member_id = ? ORDER BY s.bound_at, s.node_id`,
     )
-    .get(memberId);
+    .all(memberId);
 }
 
-/** The explicit re-bind act (ADR 328 §4): drop the binding so the next node to speak may take it. */
+/**
+ * The explicit trust act (ADR 358): a node already in a human seat's set adds another. The speaker
+ * must be in the set — that is the whole rule; a fresh machine cannot self-trust, and an admitted
+ * credential cannot widen a seat it does not hold. Idempotent when the target is already trusted.
+ *
+ *  - `not_resident`: the speaking node is not in the seat's set (or the set is empty — a seat
+ *    nobody has spoken for yet has no session that could vouch).
+ *  - `not_human`: agents stay one-node (ADR 042's kind scope, carried to machines).
+ *  - `unknown_node`: the target is not an unrevoked node of this team.
+ */
+export function trustNodeForSeat(
+  db: Database,
+  teamId: string,
+  seat: { id: string; kind: string },
+  speakingNodeId: string,
+  targetNodeId: string,
+  now: number = Date.now(),
+):
+  | { trusted: true; already: boolean }
+  | { trusted: false; reason: 'not_resident' | 'not_human' | 'unknown_node' } {
+  if (seat.kind !== 'human') return { trusted: false, reason: 'not_human' };
+  const holders = seatBindings(db, seat.id);
+  if (!holders.some((h) => h.node_id === speakingNodeId)) {
+    return { trusted: false, reason: 'not_resident' };
+  }
+  const target = db
+    .prepare<
+      [string, string],
+      { id: string }
+    >('SELECT id FROM nodes WHERE id = ? AND team_id = ? AND revoked_at IS NULL')
+    .get(targetNodeId, teamId);
+  if (!target) return { trusted: false, reason: 'unknown_node' };
+  if (holders.some((h) => h.node_id === targetNodeId)) return { trusted: true, already: true };
+  db.prepare(
+    `INSERT INTO seat_nodes (member_id, team_id, node_id, bound_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(member_id, node_id) DO NOTHING`,
+  ).run(seat.id, teamId, targetNodeId, now);
+  return { trusted: true, already: false };
+}
+
+/** The explicit re-bind act (ADR 328 §4): drop every binding so the next node to speak may take it. */
 export function unbindSeat(db: Database, memberId: string): { node_id: string } | null {
-  return (
-    db
-      .prepare<
-        [string],
-        { node_id: string }
-      >('DELETE FROM seat_nodes WHERE member_id = ? RETURNING node_id')
-      .get(memberId) ?? null
-  );
+  const rows = db
+    .prepare<
+      [string],
+      { node_id: string }
+    >('DELETE FROM seat_nodes WHERE member_id = ? RETURNING node_id')
+    .all(memberId);
+  return rows[0] ?? null;
 }
 
 /** The hub's stamp on every authenticated sync contact (push, pull, claim): the node is alive now. */
