@@ -5,6 +5,8 @@ import viteReact from '@vitejs/plugin-react';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { defineConfig, type Plugin } from 'vite';
 
+import { siteFiles } from './scripts/site-files.ts';
+
 // In dev, the /live dashboard talks to the daemon same-origin and Vite proxies the daemon paths
 // (/teams, /ws, /health) to it — set MUSTERD_DAEMON to point at a daemon (default :4849). We strip
 // the browser Origin on the way out so the daemon's ADR 040 upgrade gate sees a non-browser loopback
@@ -30,6 +32,24 @@ function buildId(): string {
   const sha = r.status === 0 ? r.stdout.trim() : '';
   // Outside a checkout the timestamp still changes every build, which is all convergence needs.
   return /^[0-9a-f]{40}$/.test(sha) ? sha : `t${Date.now().toString(36)}`;
+}
+
+/**
+ * Emit the crawler- and agent-facing text files (robots.txt, sitemap.xml, llms.txt, _headers) into
+ * the build. They are generated rather than checked into a `public/` folder because the URL set is
+ * derived from DOCS_MANIFEST and the blog filenames — see scripts/site-files.ts for why that
+ * matters. `stage-allowlist.mjs` decides they may ship; this only puts them in the build.
+ */
+function siteTextFiles(): Plugin {
+  return {
+    name: 'musterd-site-files',
+    apply: 'build',
+    generateBundle() {
+      for (const [fileName, source] of Object.entries(siteFiles())) {
+        this.emitFile({ type: 'asset', fileName, source });
+      }
+    },
+  };
 }
 
 /** Emit `build.json` into every build output; only the client dist (the published web-root) is read. */
@@ -100,6 +120,7 @@ export default defineConfig(({ command }) => {
     }),
     viteReact(),
     ...(id ? [buildStamp(id)] : []),
+    siteTextFiles(),
   ],
   };
 });
