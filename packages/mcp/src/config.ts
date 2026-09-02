@@ -7,6 +7,7 @@ import {
   type ClaimPolicy,
   type Provenance,
   resolveAttestation,
+  resolveAttestedProvenance,
   type Surface,
 } from '@musterd/protocol';
 import { readBuildStamp } from '@musterd/protocol/build-stamp';
@@ -17,6 +18,7 @@ import {
   resolveBindingDir,
   warnForeignAdapterWorkspace,
 } from './binding.js';
+import { readWakeLeaseFile } from './wakeLeaseFile.js';
 import {
   resolveDriver,
   resolveModel,
@@ -243,7 +245,16 @@ export function resolveLaunchSurface(env: NodeJS.ProcessEnv): {
  * spec (plus an env-supplied `MUSTERD_AGENT_KEY`) still resolves its identity. Secrets (`agent_key`,
  * `grant`) are **never** read from the spec — only env or the gitignored binding.json.
  */
-export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
+/** Test seams for the wake-lease file fallback (ADR 354); production reads the real clock and pid. */
+export interface LoadMcpConfigDeps {
+  now?: () => number;
+  ppid?: () => number;
+}
+
+export function loadMcpConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  deps: LoadMcpConfigDeps = {},
+): McpConfig {
   const binding = findBinding(process.cwd(), env);
   const spec = findWorkspaceSpec(process.cwd(), env);
   const server =
@@ -287,6 +298,21 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
   const bindingDir = resolveBindingDir(process.cwd(), env);
   // ADR 213 — reverse of ADR 143: binary under seat A, identity under seat B.
   warnForeignAdapterWorkspace(import.meta.url, bindingDir);
+  // ADR 354: the wake-lease FILE is consulted only when the env is silent on BOTH provenance and
+  // lease — env always wins, so a harness that forwards it (Claude Code) never reaches this line.
+  // Codex launches MCP servers with a sanitized env (measured 2026-09-02: twelve variables, no
+  // `MUSTERD_*`), so on that harness this is the only way the adapter can learn it was woken, and
+  // without it the actuator read its own session as "held by another" and killed it. The reader
+  // honours the file only from the process the actuator spawned (spawner_pid === our ppid) and only
+  // while unexpired — an attestation with a source, never a default (ADR 236).
+  const envSilent =
+    resolveAttestedProvenance(env) === undefined && resolveWakeLease(env) === undefined;
+  const fromFile = envSilent
+    ? readWakeLeaseFile(bindingDir, {
+        now: deps.now?.() ?? Date.now(),
+        ppid: deps.ppid?.() ?? process.ppid,
+      })
+    : undefined;
   return {
     server,
     team,
@@ -296,8 +322,8 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv = process.env): McpConfig {
     ...(grant !== undefined ? { grant } : {}),
     surface,
     markerGeneration,
-    provenance: resolveProvenance(env),
-    wakeLease: resolveWakeLease(env),
+    provenance: fromFile ? 'wake' : resolveProvenance(env),
+    wakeLease: resolveWakeLease(env) ?? fromFile?.lease_id,
     workspace,
     // Per-worktree fields moved out of the shared harness entry (ADR 165 inc 2): env stays the
     // manual override (headless/CI), the binding is what provisioning writes.

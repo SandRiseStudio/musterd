@@ -63,6 +63,7 @@ src/
     backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
     loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred)
     pinnedBin.ts      // every spawned-harness wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
+    wakeLeaseFile.ts  // the wake lease on DISK (ADR 354): written beside binding.json at spawn naming the harness child's pid, cleared at settle — for harnesses that sanitize the MCP env (codex: 12 vars, no MUSTERD_*), where the env channel ADR 241 relies on stops at the child
     engine.ts         // the AgentLoopEngine seam (ADR 251 §3): prompt + tools + bounds → turns/usage/end-reason, provider-neutral; the named insertion point for a second provider (ADR 101/110), with per-turn observation for capture/telemetry
     engines/
       anthropic.ts    // the one shipping engine: `client.beta.messages.toolRunner` drives the loop; ALL Claude-specific knowledge (pricing table, error classification) bounded to this file; cost computed by the harness from per-turn usage, unknown models price to honest absence (ADR 251 §6)

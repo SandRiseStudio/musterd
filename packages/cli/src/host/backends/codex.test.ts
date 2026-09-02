@@ -388,6 +388,101 @@ describe('codexBackend', () => {
 });
 
 /**
+ * The wake-lease FILE (lane 01M1HM8EEK, ADR 354). Codex launches its MCP stdio servers with a
+ * sanitized environment — twelve variables, measured 2026-09-02 on 0.150.1, none `MUSTERD_*` — so
+ * `codexWakeEnv`'s MUSTERD_PROVENANCE/MUSTERD_WAKE_LEASE reach the codex process and stop there.
+ * The adapter then attested `provenance: session` with no lease, ADR 241 read the seat as held by
+ * another session, and this backend's not-mine path killed the review it had spawned ninety seconds
+ * earlier. Every codex wake since 2026-08-27 died this way (13 such deferrals in the three days to
+ * 2026-09-02, zero `residency.woke`).
+ *
+ * The backend now hands the lease over on disk as well: written beside binding.json right after
+ * spawn, naming the CHILD's pid so only a process spawned by that codex can honour it, and cleared
+ * when the run settles.
+ */
+describe('the wake-lease file — a second channel for a harness that strips the first', () => {
+  const harness = (child: Child) => {
+    const writes: Array<{ workspace: string; lease: Record<string, unknown> }> = [];
+    const clears: Array<{ workspace: string; lease_id: string }> = [];
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      spawn: (() => child) as never,
+      recordFreshThread: () => undefined,
+      writeWakeLease: (workspace, lease) => {
+        writes.push({ workspace, lease: lease as unknown as Record<string, unknown> });
+      },
+      clearWakeLease: (workspace, lease_id) => {
+        clears.push({ workspace, lease_id });
+      },
+    });
+    return { backend, writes, clears };
+  };
+
+  it('writes the lease naming the spawned child’s pid, before verification can conclude', async () => {
+    const child = new Child();
+    child.pid = 4242;
+    const { backend, writes } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    // Written at spawn — the adapter autojoins ~15s in, long before this attempt settles.
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.workspace).toBe('/ws');
+    expect(writes[0]!.lease).toMatchObject({
+      lease_id: 'l',
+      provenance: 'wake',
+      harness: 'codex',
+      spawner_pid: 4242,
+    });
+    expect(writes[0]!.lease['expires_at']).toBeGreaterThan(Date.now());
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(true);
+    child.exit(0);
+    await result.settled;
+  });
+
+  it('clears the file when the run settles — the next occupant inherits nothing', async () => {
+    const child = new Child();
+    child.pid = 4242;
+    const { backend, clears } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(clears).toHaveLength(0);
+    child.exit(0);
+    await result.settled;
+    expect(clears).toEqual([{ workspace: '/ws', lease_id: 'l' }]);
+  });
+
+  it('clears on a failed run too — a killed wake must not leave its lease for a human to pick up', async () => {
+    const child = new Child();
+    child.pid = 4242;
+    const { backend, clears } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    child.exit(1);
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(false);
+    await result.settled;
+    expect(clears).toEqual([{ workspace: '/ws', lease_id: 'l' }]);
+  });
+
+  it('a spawn that never produced a pid writes nothing — there is no process to bind to', async () => {
+    const child = new Child(); // pid undefined
+    const { backend, writes } = harness(child);
+    const wake = backend.wake(spec, ctx);
+    await Promise.resolve();
+    expect(writes).toHaveLength(0);
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    child.exit(0);
+    await result.settled;
+  });
+});
+
+/**
  * The completion record (lane 01M1G310Y7). Until 2026-09-02 this backend's `settled` was typed
  * `Promise<undefined>` — it resolved with nothing, on every run, so the loop's supplementary
  * wake-cost report had nothing to post and the daemon never wrote a `residency.wake_cost` row for a
