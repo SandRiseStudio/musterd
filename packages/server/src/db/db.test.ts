@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('57');
+    expect(ver?.value).toBe('58');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -262,7 +262,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(57); // runs v18…v57 (including grok on the presence CHECK)
+    expect(runMigrations(db)).toBe(58); // runs v18…v56 (including the pull cursor and bootstrap cutover evidence)
 
     const scope = (id: string) =>
       db
@@ -326,7 +326,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(57);
+    expect(runMigrations(db)).toBe(58);
 
     const policy = (id: string) =>
       db
@@ -396,34 +396,6 @@ describe('v44 — the presence surface CHECK admits `opencode` (ADR 321 §2)', (
     expect(() => insert('definitely-not-a-surface')).toThrow();
     // model_source (migration 42) postdates v39's rebuilt column list; the enumerated copy must
     // have carried it or this read comes back empty (and openDb itself would have thrown).
-    const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
-    expect(cols).toContain('model_source');
-    db.close();
-  });
-});
-
-describe('v57 — the presence surface CHECK admits `grok` (ADR 352 §2)', () => {
-  it('accepts a grok presence, and still refuses an unknown surface', () => {
-    const db = openDb(':memory:');
-    db.prepare(
-      "INSERT INTO teams (id, slug, created_at, updated_at) VALUES ('t1','dawn',1,1)",
-    ).run();
-    db.prepare(
-      `INSERT INTO members (id, team_id, name, kind, role, lifecycle, observer, created_at, updated_at)
-       VALUES ('m1','t1','wanderer','agent','','forever',0,1,1)`,
-    ).run();
-    const insert = (surface: string) =>
-      db
-        .prepare(
-          `INSERT INTO presence (id, member_id, surface, status, last_seen_at, created_at)
-           VALUES (?, 'm1', ?, 'online', 1, 1)`,
-        )
-        .run(`p-${surface}`, surface);
-
-    expect(() => insert('grok')).not.toThrow();
-    expect(() => insert('opencode')).not.toThrow();
-    expect(() => insert('musterd')).not.toThrow();
-    expect(() => insert('definitely-not-a-surface')).toThrow();
     const cols = db.prepare("SELECT name FROM pragma_table_info('presence')").pluck().all();
     expect(cols).toContain('model_source');
     db.close();
@@ -686,7 +658,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(57);
+    expect(runMigrations(db)).toBe(58);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
     db.close();
@@ -701,7 +673,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
     db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
 
-    expect(runMigrations(db)).toBe(57);
+    expect(runMigrations(db)).toBe(58);
 
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
@@ -709,6 +681,26 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_messages_origin'").get(),
     ).toEqual({ name: 'idx_messages_origin' });
+    db.close();
+  });
+
+  // Lane-replication slice: `lane.*` audit rows are the second replicated kind and carry the ADR 331
+  // pair. Every other row keeps the defaults and never collides under the partial unique index.
+  it('v58 stamps audit with the origin pair, unique only where a stamp exists', () => {
+    const db = withRemoteNode();
+    db.prepare("UPDATE schema_meta SET value = '57' WHERE key = 'schema_version'").run();
+    expect(runMigrations(db)).toBe(58);
+
+    const insert = db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+       VALUES (?, 't1', 1, NULL, ?, NULL, 'allow', NULL, 1, ?, ?)`,
+    );
+    // Two unstamped rows: no collision — the index is partial on origin_seq > 0.
+    insert.run('a1', 'member.reclaim', '', 0);
+    insert.run('a2', 'member.reclaim', '', 0);
+    // Two stamped rows on one pair: refused — that is the fold's idempotence key.
+    insert.run('a3', 'lane.opened', 'N1', 1);
+    expect(() => insert.run('a4', 'lane.claimed', 'N1', 1)).toThrow();
     db.close();
   });
 

@@ -1,4 +1,4 @@
-import type { SyncEvent, SyncPullEvent } from '@musterd/protocol';
+import { syncEventId, syncEventTeam, type SyncEvent, type SyncPullEvent } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 
 /**
@@ -103,12 +103,12 @@ export function ingestBatch(
 
     for (const event of events) {
       if (event.origin_node !== nodeId) throw new SyncOriginError();
-      // The hub authenticated the TEAM, so the envelope does not get to name a different one.
-      // Nothing in 3b-i reads `envelope.team`; 3b-ii's fold is the reader, and a row whose team_id
-      // says one team while its payload says another is a contradiction the staging layer already
-      // had the information to refuse (dolly, 2026-08-28).
-      if (event.envelope.team !== node.slug) {
-        throw new SyncOriginError('envelope names a team other than the one it is pushed into');
+      // The hub authenticated the TEAM, so the event does not get to name a different one — for
+      // either kind. Nothing in 3b-i reads `envelope.team`; 3b-ii's fold is the reader, and a row
+      // whose team_id says one team while its payload says another is a contradiction the staging
+      // layer already had the information to refuse (dolly, 2026-08-28).
+      if (syncEventTeam(event) !== node.slug) {
+        throw new SyncOriginError('event names a team other than the one it is pushed into');
       }
 
       // A replay of something already held is a no-op, not a gap: the pusher resending after a lost
@@ -138,7 +138,7 @@ export function ingestBatch(
           `INSERT INTO sync_log (id, team_id, origin_node, origin_seq, hub_seq, payload, received_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
         ).run(
-          event.envelope.id,
+          syncEventId(event),
           teamId,
           nodeId,
           event.origin_seq,
@@ -151,7 +151,7 @@ export function ingestBatch(
         // pusher as a bare 500, which it cannot tell from a hub that is merely down — so it retries
         // the identical poison batch every tick, silently, forever.
         if (err instanceof Error && /idx_sync_log_origin_id|sync_log\.id/.test(err.message)) {
-          throw new SyncDuplicateIdError(event.envelope.id);
+          throw new SyncDuplicateIdError(syncEventId(event));
         }
         throw err;
       }

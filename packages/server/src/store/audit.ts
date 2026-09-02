@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { log } from '../log.js';
+import { localNodeForTeam } from './messages.js';
 
 /**
  * The v0.3 governance audit log (ADR 071, P2 of ADR 069). Append-only: every governed decision writes one
@@ -371,6 +372,50 @@ export interface AuditRow {
   result: 'allow' | 'deny';
   detail: string | null;
   created_at: number;
+  /** The ADR 331 ordering pair (v58), stamped only on `lane.*` rows — the replicated kind. Every
+   *  other row keeps `''`/`0` and reads as "not replicated". Server-stamped, never wire-fed. */
+  origin_node: string;
+  origin_seq: number;
+}
+
+/**
+ * Append a `lane.*` row as a REPLICATED event (lane-replication spec §"The wire, decided"): the
+ * required append, plus `(origin_node, origin_seq)` drawn from the same `nodes.next_seq` allocator
+ * `insertMessage` uses — one allocator for every replicated kind (ADR 335 §8), so a node's sequence
+ * is dense across messages and lane transitions alike. Opens its own transaction (a SAVEPOINT
+ * inside the caller's), so the number and the row are one unit: a throw burns no seq.
+ *
+ * Every `lane.*` writer goes through here. A lane row written through the plain append would be a
+ * transition the origin holds and no peer ever sees — exactly the hole this slice closes.
+ */
+export function appendLaneEventRequired(db: Database, teamId: string, entry: AuditEntry): void {
+  db.transaction(() => {
+    const node = localNodeForTeam(db, teamId);
+    const seq = db
+      .prepare<
+        [string],
+        { seq: number }
+      >('UPDATE nodes SET next_seq = next_seq + 1 WHERE id = ? RETURNING next_seq - 1 AS seq')
+      .get(node.id)!.seq;
+    const now = Date.now();
+    const row: AuditRow = {
+      id: ulid(),
+      team_id: teamId,
+      ts: now,
+      actor: entry.actor,
+      action: entry.action,
+      target: entry.target,
+      result: entry.result,
+      detail: entry.detail ? JSON.stringify(entry.detail) : null,
+      created_at: now,
+      origin_node: node.id,
+      origin_seq: seq,
+    };
+    db.prepare(
+      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+       VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at, @origin_node, @origin_seq)`,
+    ).run(row);
+  })();
 }
 
 /** Insert an audit row and surface failure when the caller's transaction requires the evidence. */
@@ -386,6 +431,8 @@ export function appendAuditRequired(db: Database, teamId: string, entry: AuditEn
     result: entry.result,
     detail: entry.detail ? JSON.stringify(entry.detail) : null,
     created_at: now,
+    origin_node: '',
+    origin_seq: 0,
   };
   db.prepare(
     `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
