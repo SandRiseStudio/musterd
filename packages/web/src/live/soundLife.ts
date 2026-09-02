@@ -35,14 +35,33 @@ export function shouldChime(now: number, last: number, minGapMs = BROADCAST_CUE_
  * where the stapler fires as often as the typing is a cartoon. Weights sum to 1; the gated events'
  * weight is REDISTRIBUTED (by renormalising over what is available) when their condition fails, so
  * an empty office is not simply quieter by the chatter slots.
+ *
+ * ── TWO EVENTS ARE DELIBERATELY ABSENT, and adding either back is a regression ─────────────────
+ *
+ * `chime` and `creak` were removed on 2026-09-02 (nick). The rule they broke: **the room tone may
+ * never make a noise a viewer could mistake for a musterd cue.** The bed says "the office is
+ * inhabited"; the cues (`FirehoseSound.chime`, and the `askbell` moment) say "something arrived
+ * for you". A viewer who cannot tell those apart has to check the room every time the room
+ * breathes, which is the exact opposite of what ambience is for.
+ *
+ * · `chime` was a chat-app ping at a neighbouring desk — its own doc comment said so — built from
+ *   two soft sine notes 90 ms apart in the 523–988 Hz band. `CUES` is *also* soft sine notes, two
+ *   or three of them, 120 ms apart, in the 392–784 Hz band. They were the same instrument playing
+ *   the same figure; nothing but volume separated "somebody else got a Slack message" from "an act
+ *   landed for you". No weight tuning fixes that — the collision is in the synthesis.
+ * · `creak` was a chair taking somebody's weight: a narrow (Q 7) noise band gliding 520 → 300 Hz
+ *   over 0.42 s. That is the same downward sweep gesture as the `whoosh` moment, and at gain 0.16
+ *   it was the loudest thing in the whole life table.
+ *
+ * The 0.08 they held went back to `keys` and `murmur` — the work-and-talk majority the mix is
+ * built around — rather than being spread thin over the seasoning, which would have quietly made
+ * the stapler and the drawer a third more common than they were ever tuned to be.
  */
 export const LIFE_EVENTS: ReadonlyArray<{ name: string; weight: number }> = [
-  { name: 'keys', weight: 0.34 },
-  { name: 'murmur', weight: 0.17 },
+  { name: 'keys', weight: 0.39 },
+  { name: 'murmur', weight: 0.2 },
   { name: 'whisper', weight: 0.04 },
   { name: 'tap', weight: 0.07 },
-  { name: 'creak', weight: 0.05 },
-  { name: 'chime', weight: 0.03 },
   { name: 'softTap', weight: 0.03 },
   { name: 'stapler', weight: 0.03 },
   { name: 'drawer', weight: 0.03 },
@@ -63,8 +82,9 @@ export const LIFE_EVENTS: ReadonlyArray<{ name: string; weight: number }> = [
 
 const CHATTER = new Set(['murmur', 'whisper']);
 const DOG_EVENTS = new Set(['paws', 'jingle', 'yawn', 'bark']);
-/** The "somebody is doing something" family — gated on evidenced work, placed at a working desk. */
-const WORK_EVENTS = new Set(['keys', 'tap', 'softTap', 'creak', 'drawer', 'stapler']);
+/** The "somebody is doing something" family — gated on evidenced work, placed at a working desk.
+ *  (`creak` was one of these; see the removal note on LIFE_EVENTS.) */
+const WORK_EVENTS = new Set(['keys', 'tap', 'softTap', 'drawer', 'stapler']);
 
 // ── the think/type phase ─────────────────────────────────────────────────────────────────────────
 

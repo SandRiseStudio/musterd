@@ -159,8 +159,24 @@
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   overflow: hidden;
-  /* daylight horizon: soft morning cream → warm gold (matches --sky, tokens.css light) */
-  background: linear-gradient(178deg, #e9d9c3 0%, #f3e7d4 44%, #ffe9c8 100%);
+  /* ── THE FRAME IS COOL; THE ROOM IS WARM ──────────────────────────────────────────────────────
+     (nick, 2026-09-02: "did we overrotate with the musterd colors?")
+
+     Yes — on the frame, not on the room. This gradient was cream → warm gold, the topbar was cream,
+     the paper chrome is warm card stock and the office floor is sunlit tan: FOUR surfaces in the
+     same 30–45° band, stacked. The room's own art was never the problem — blue-grey walls, green
+     plants, twelve member hues — but it was ringed by its own colour, so the office read as a beige
+     sticker on a beige page rather than as a lit room standing in a space.
+
+     The fix costs the room nothing: not one paper token, floor colour or scene value moves. Only
+     the ground behind the canvas cools to a desaturated putty, and the warm room now has something
+     to be warm AGAINST. Mustard goes back to being an accent — the mark, the LIVE dot, the focus
+     ring — instead of the ground it was competing with.
+
+     Still a horizon rather than a flat fill, and still very slightly warm at the base: a cold flat
+     panel behind a sunlit isometric room reads as a screenshot pasted on a wall. The gradient is
+     what keeps it reading as air. */
+  background: linear-gradient(178deg, #cfd3d6 0%, #dfe0dd 46%, #ece5d9 100%);
 }
 .lc ::selection {
   background: color-mix(in srgb, var(--lc-accent) 34%, transparent);
@@ -169,7 +185,11 @@
   color: var(--lc-text);
 }
 
-/* ─── top bar (glass over the dusk) ───────────────────────────────────── */
+/* ─── top bar (glass over the ground) ─────────────────────────────────────
+   Follows the frame, not the room: a near-white glass with the warmth taken out, so the bar reads
+   as part of the cool surround rather than as one more cream band above a cream page. It keeps its
+   backdrop blur — the topbar is chrome that never appears on the /broadcast capture, so the
+   office-block no-blur rule does not reach it. */
 .lc__topbar {
   display: flex;
   align-items: center;
@@ -177,7 +197,7 @@
   height: 52px;
   padding: 0 var(--lc-7);
   border-bottom: 1px solid var(--lc-border);
-  background: rgba(255, 250, 240, 0.6);
+  background: rgba(250, 251, 252, 0.68);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   flex: 0 0 auto;
@@ -1459,8 +1479,32 @@
      pop out more but i dont want too dark of colors"): paper-2 is a step of lightness, not a
      darkening, and `--lc-paper-ink` measures 10.99 on it against 12.60 on paper — both far above AA,
      so the recede costs the name nothing it needs. */
-  background: var(--lc-paper-2);
-  border: 1px solid color-mix(in srgb, var(--lc-accent) 26%, var(--lc-paper-rim));
+  /* The glass, at the plate's scale (nick, 2026-09-02). Same two limits as the bubble — no
+     backdrop-filter (this paints on the /broadcast capture) and the stock stays essentially opaque
+     — but the dose is SMALLER here, and deliberately so: at 8px this is the smallest text on the
+     surface and the least able to spend contrast, and unlike a bubble it is pinned to a character
+     who may be walking, so whatever bleeds through is also MOVING. 4%, and the read comes almost
+     entirely from the specular band and the rim light. */
+  background:
+    linear-gradient(
+      170deg,
+      rgba(255, 255, 255, 0.55) 0%,
+      rgba(255, 255, 255, 0.12) 42%,
+      rgba(255, 255, 255, 0) 68%
+    ),
+    color-mix(in srgb, var(--lc-paper-2) 96%, transparent);
+  /* THE RIM IS THE MEMBER'S, not the house mustard. Every plate used to wear the same
+     `--lc-accent` edge, so on a floor of twelve the only thing saying WHO was the 5px dot — and the
+     dot is spent on posture (working / idle / away / offline), which is a different question. The
+     hue is already the body under the plate and the row in the reel; the plate was skipping it.
+     Mixed at 55% into the paper rim rather than used neat: at full strength a twelve-seat floor is
+     twelve competing outlines, which is the "nothing recedes" failure the stock ranking above
+     exists to fix — but the first cut at 34% was the opposite failure, a hue you had to be told was
+     there (checked at 2x on /office-preview: Ada's rose and Hana's blue were separable, Bo's and
+     Cy's were not). 55% is where the plates read as different people at 1x without any of them
+     shouting. Falls back to the mustard for the receptionist and anything else with no seat. */
+  border: 1px solid
+    color-mix(in srgb, var(--lc-plate-hue, var(--lc-accent)) 55%, var(--lc-paper-rim));
   font-family: var(--font-mono, monospace);
   font-size: var(--lc-type-name);
   letter-spacing: -0.01em;
@@ -1477,6 +1521,8 @@
      ever able to answer. Rim, sheen and seat stay: the plate is still a lit object sitting on the
      floor, it has just stopped radiating. */
   box-shadow:
+    /* the glass edge — a hairline of light all the way round, as on the bubble */
+    inset 0 0 0 1px rgba(255, 253, 247, 0.45),
     inset 0 1px 0 var(--lc-paper-sheen),
     0 1px 4px -1px var(--lc-paper-drop),
     0 1px 1px -0.5px var(--lc-paper-seat);
@@ -1851,7 +1897,29 @@
 .lc-gl-label__dot--off {
   background: var(--lc-dot-off);
 }
-/* ─── ephemeral speech bubble (act body typed over the sender's head, then fades) ─────────────── */
+/* ─── ephemeral speech bubble (act body typed over the sender's head, then fades) ───────────────
+ *
+ * ── COLOUR IS IDENTITY. FORM IS THE ACT. (nick, 2026-09-02) ────────────────────────────────────
+ *
+ * `--lc-speech-tone` keeps its name and has changed its meaning: it is the SENDER'S hue now
+ * (`memberColor`), set inline by the scene, and it owns the ring, the tail, the top blush and the
+ * glow. Every bubble a member speaks therefore looks like that member and like nobody else.
+ *
+ * It used to be the act's tone, out of `toneColor()` — nine hues, on a surface with no legend
+ * anywhere. Decoding one meant clicking through to the stream, at which point the colour had done
+ * no work; and they were not nine separable things in the first place (`info`/`challenge`/`lane`/
+ * `handoff` all blue-violet, `success`/`status` both green-teal, with `lane`/`handoff` deliberately
+ * one family per their own comment in format.ts). Meanwhile the member's hue was already on the
+ * body on the floor, the nameplate dot, the reel row and the caption dot — four reinforcements —
+ * and the bubble was the one surface not using it.
+ *
+ * `--lc-speech-ink` is the readable twin, also set inline: same hue, held at a luminance that
+ * clears AA on this paper for every seat. The fill cannot carry text — see `.lc-st-lead`.
+ *
+ * The act now rides ONE RANKED AXIS of form (`.is-mark--*` below), not a palette, so a viewer can
+ * tell which of two marked bubbles matters more without having learned anything. Most bubbles carry
+ * no mark at all, and that is the half that makes the rest legible.
+ */
 .lc-speech {
   position: absolute;
   top: 0;
@@ -1883,20 +1951,56 @@
      legibility is decided by who walks under it — the same rule the caption and the asks rail now
      follow. If the ghosting is wanted back, it belongs in a form that cannot reach the ink: tone the
      RING or the shadow, not the stock. */
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--lc-paper) 88%, var(--lc-speech-tone)) 0%,
-    var(--lc-paper) 34%,
-    var(--lc-paper-2) 100%
-  );
-  /* No backdrop-filter. It was here to buy contrast for a translucent dark bubble; near-opaque paper
-     needs none — and this element renders on the /broadcast 1920x1080 30fps capture, where a blur
-     is a per-frame GPU readback forever (the same rule the reel card block states). */
-  /* The act's tone owns the ring, and it is now a FULL-strength ring rather than a half-alpha
-     suggestion: a bubble has to carry both "someone spoke" and "this is what kind of act it was"
-     across a busy warm room, and at 52% the tone was a rumour. The tighter contact shadow underneath
-     is what actually separates the stock from the floor — see the lift tokens. */
+  background:
+    /* The specular: a bright band raking across the top third, slightly off-horizontal so it reads
+       as light falling on a pane rather than as a second stripe of paper. This layer is the glass —
+       it is what a backdrop-filter would have been bought for, at none of its cost. */
+    linear-gradient(
+      172deg,
+      rgba(255, 255, 255, 0.6) 0%,
+      rgba(255, 255, 255, 0.16) 24%,
+      rgba(255, 255, 255, 0) 48%
+    ),
+    /* The stock beneath it, at 93% — see the glass note above for why not less. */
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, color-mix(in srgb, var(--lc-paper) 88%, var(--lc-speech-tone)) 93%, transparent) 0%,
+      color-mix(in srgb, var(--lc-paper) 93%, transparent) 34%,
+      color-mix(in srgb, var(--lc-paper-2) 93%, transparent) 100%
+    );
+  /* ── the glass, and exactly how much of it there is ───────────────────────────────────────────
+     (nick, 2026-09-02: "a tiny bit of glassmorphism")
+
+     Glassmorphism is normally two ingredients — you see THROUGH the pane, and what you see is
+     BLURRED. This bubble may have the first in a small dose and may not have the second at all, and
+     both limits are load-bearing rather than timidity:
+
+     · NO backdrop-filter, ever. This element renders on the /broadcast 1920x1080 30fps capture,
+       where a blur is a per-frame GPU readback forever — the office-block house rule, stated in
+       four places in this file. A dozen nameplates and several bubbles would each pay it, every
+       frame, for the life of the stream. The blur is the expensive half of glass; the cheap half is
+       the one that actually reads at this size.
+     · The stock stays essentially opaque. The 88%-transparent version this replaced measured 1.38:1
+       over a dark actor (see above). 7% is a different order of magnitude: what bleeds through is a
+       tint, not the room, and `--lc-paper-ink` still measures far above AA on it. Past ~10% the
+       bubble's legibility goes back to being decided by whoever walks under it, which is the exact
+       failure this block exists to prevent.
+
+     What does the work instead is the EDGE: a bright specular band across the top third
+     (`::before`), a one-pixel inner rim light, and the tone ring outside it. That is what the eye
+     reads as a lit pane rather than a lighter patch of floor — the `--lc-paper-sheen` argument from
+     the paper-set block, spent harder here because a bubble is the surface that has to interrupt
+     you. */
+  /* The SPEAKER owns the ring, at full strength rather than as a half-alpha suggestion: it has to
+     carry "who is talking" across a busy warm room, and at 52% the hue was a rumour. (It carried
+     "what kind of act" until 2026-09-02 — see the block header for where that went and why.) The
+     tighter contact shadow underneath is what actually separates the stock from the floor — see the
+     lift tokens. */
   box-shadow:
+    /* The rim light: a full hairline of light INSIDE the edge, not just along the top. On a flat
+       card one lit edge is enough; on something meant to read as a pane the light has to go all the
+       way round, because that is what tells the eye the edge has thickness. */
+    inset 0 0 0 1px rgba(255, 253, 247, 0.5),
     inset 0 1px 0 var(--lc-paper-sheen),
     inset 0 0 16px -6px color-mix(in srgb, var(--lc-speech-tone) 30%, transparent),
     0 0 0 1.5px color-mix(in srgb, var(--lc-speech-tone) 80%, var(--lc-paper-rim)),
@@ -1948,6 +2052,171 @@
     opacity var(--lc-dur-5) ease,
     transform var(--lc-dur-5) var(--lc-ease-in-out);
 }
+/* ─── the act's mark: ONE RANKED AXIS, not a palette ─────────────────────────────────────────────
+ *
+ * Four marks, in weight order (speech.ts `SPEECH_MARK_WEIGHT`), and the CSS spends escalating
+ * weight on them so the ORDER is readable before the vocabulary is:
+ *
+ *   done       ✓   badge only                     work landed
+ *   review     ◎   badge only, warmer             somebody has to go and read something
+ *   interrupt  ↪   heavy ring + badge             this changes what its recipient is doing now
+ *   needs-human !  heavy ring + badge + pulse     a person must answer; `.is-holding` = a seat is
+ *                                                 actually stopped until they do (ADR 147 §2)
+ *
+ * Everything else — message, status_update, handoff, the lane transitions, goal, defer, insight,
+ * decline — gets NOTHING, and that is the half of the design that makes the rest work. Nine act
+ * hues failed partly because every bubble wore one, so none of them meant "look here".
+ *
+ * The marks are NEUTRAL, never coloured. Colour on this surface means identity now, and a mark that
+ * picked up a hue of its own would start the same guessing game one layer up. They are drawn in the
+ * paper ink at varying weight and opacity, sitting on the ring the member already owns.
+ *
+ * The badge is a real element (see `showSpeech`), not a pseudo: `__inner`'s ::before/::after are
+ * the bubble's tail, and the obvious second choice — `__text::after` — anchors it to the TEXT, so
+ * on a bubble carrying a recipient chip it landed halfway down the body instead of at the corner. */
+.lc-speech__mark {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--lc-paper-2);
+  color: var(--lc-paper-ink);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-tag);
+  font-weight: 700;
+  line-height: 1;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 70%, var(--lc-paper-rim)),
+    0 1px 3px -1px var(--lc-paper-drop);
+}
+/* The two loud marks thicken the member's ring rather than recolouring it — weight is the axis, and
+   the hue stays the answer to "who". */
+.lc-speech__inner.is-mark--interrupt,
+.lc-speech__inner.is-mark--needs-human {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+    inset 0 1px 0 var(--lc-paper-sheen),
+    inset 0 0 16px -6px color-mix(in srgb, var(--lc-speech-tone) 34%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+    0 2px 3px -1px var(--lc-paper-seat),
+    0 9px 22px -8px var(--lc-paper-drop),
+    0 3px 20px -5px color-mix(in srgb, var(--lc-speech-tone) 52%, transparent);
+}
+/* The top of the axis, and the ONLY thing on the floor that pulses: a `blocking` ask whose silence
+   holds its sender (ADR 147 §2 — `askTierHolds`). Not "an ask happened", which is common; "a seat
+   has stopped and will not move until a person answers", which is not. A standard or advisory ask
+   proceeds on its own and gets the heavy ring without the pulse — the difference has been on the
+   wire the whole time and this is the first surface to spend it. */
+/* Scoped to the top mark on purpose, not just to `.is-holding`: the pulse is the room's single
+   loudest device and it must not be reachable from any other rung, however a future caller sets
+   `holds`. Belt and braces with `speechMark`, which already only sets it for a holding ask. */
+.lc-speech__inner.is-mark--needs-human.is-holding {
+  animation: lc-speech-holding 2.4s var(--lc-ease-in-out) infinite;
+}
+@keyframes lc-speech-holding {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+      0 2px 3px -1px var(--lc-paper-seat),
+      0 9px 22px -8px var(--lc-paper-drop),
+      0 3px 20px -5px color-mix(in srgb, var(--lc-speech-tone) 52%, transparent);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+      0 0 0 7px color-mix(in srgb, var(--lc-speech-tone) 26%, transparent),
+      0 2px 3px -1px var(--lc-paper-seat),
+      0 9px 22px -8px var(--lc-paper-drop),
+      0 3px 26px -4px color-mix(in srgb, var(--lc-speech-tone) 62%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The mark still has to READ without the animation — a reduced-motion viewer must not lose the
+     one distinction the room makes about urgency. It holds the pulse's wide halo, static. */
+  .lc-speech__inner.is-mark--needs-human.is-holding {
+    animation: none;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 253, 247, 0.5),
+      inset 0 1px 0 var(--lc-paper-sheen),
+      0 0 0 3px color-mix(in srgb, var(--lc-speech-tone) 88%, var(--lc-paper-rim)),
+      0 0 0 7px color-mix(in srgb, var(--lc-speech-tone) 26%, transparent),
+      0 2px 3px -1px var(--lc-paper-seat),
+      0 9px 22px -8px var(--lc-paper-drop),
+      0 3px 26px -4px color-mix(in srgb, var(--lc-speech-tone) 62%, transparent);
+  }
+}
+
+/* ─── the receptionist's bubble: the HOUSE voice ─────────────────────────────────────────────────
+ *
+ * She is the only speaker on the floor who is not an attested seat (receptionist.ts: staff, not
+ * roster — no nameplate, no headcount, no roster row), and everything the room says about ITSELF
+ * comes out of her mouth: where you have landed, what these people are, what the bubbles mean.
+ * That arrived in the same paper and the same tail as an agent's status update, which made the one
+ * bubble that is NOT a member speaking the hardest one to tell apart from a member speaking.
+ *
+ * So: her own stock — cooler, flatter, no member blush, because she has no identity hue to carry —
+ * and the musterd chip in place of one. The mark IS her identity: she speaks for the product, not
+ * for a seat. Squared-off corners on the tail side finish the separation at a glance, before any of
+ * the detail is legible. */
+.lc-speech.is-reception .lc-speech__inner {
+  --lc-speech-tone: var(--lc-accent-bright);
+  border-radius: 13px 13px 4px 13px;
+  background:
+    linear-gradient(
+      172deg,
+      rgba(255, 255, 255, 0.66) 0%,
+      rgba(255, 255, 255, 0.18) 26%,
+      rgba(255, 255, 255, 0) 50%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--lc-paper) 94%, transparent) 0%,
+      color-mix(in srgb, var(--lc-paper-2) 94%, transparent) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 253, 247, 0.55),
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 0 0 1.5px color-mix(in srgb, var(--lc-accent) 46%, var(--lc-paper-rim)),
+    0 2px 3px -1px var(--lc-paper-seat),
+    0 9px 22px -8px var(--lc-paper-drop);
+}
+/* The chip sits in the TOP-LEFT corner, out of the flow — the mirror of the mark badge, which only
+   ever occupies the right. Absolute rather than inline at the head of the sentence, and for the
+   same reason as the mark: a bubble may not grow a row (nick, 2026-09-02). An inline chip is ~18px
+   of first-line width, which is a word — and the word it pushes down is the one the greeting was
+   written to open with. Out of the flow it costs the copy nothing and reads as a speaker's badge
+   rather than as punctuation. */
+.lc-speech__brand {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  display: inline-flex;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1.5px var(--lc-paper),
+    0 1px 3px -1px var(--lc-paper-drop);
+}
+.lc-speech__brand svg {
+  display: block;
+}
+/* Her copy is the room introducing itself, so it gets a touch more air than an act body — this is
+   the one bubble a stranger is meant to actually stop and read (first-five-seconds §4). */
+.lc-speech.is-reception .lc-speech__text {
+  line-height: 1.45;
+}
+
 /* a bubble that carries an act id is a click-through to the stream row — quiet until hovered */
 .lc-speech.is-clickable {
   pointer-events: auto;
@@ -2032,9 +2301,9 @@
 }
 
 /* the soft acknowledge pulse the moment a bubble is clicked (focus hands off to the stream flash) */
-/* The recipient chip: who a directed act is aimed at, so the body can safely say "you". The TONE
-   tints the chip's rim and wash only — never its text. `--lc-speech-tone` defaults to
-   `--lc-accent-bright`, which is a FILL token (~1.2:1 as text); the ink stays `--lc-muted`
+/* The recipient chip: who a directed act is aimed at, so the body can safely say "you". The
+   SPEAKER'S HUE tints the chip's rim and wash only — never its text. `--lc-speech-tone` is
+   `memberColor`, a FILL (~1.2:1 as text at the amber end of the band); the ink stays `--lc-muted`
    (5.71:1 on the darkest paper), the same fill/ink split the badge palette already enforces. */
 .lc-speech__to {
   display: inline-block;
@@ -2189,14 +2458,20 @@
     transform: scale(1) translateY(0);
   }
 }
-/* the lane/goal verb lead — a small spoken-aloud tag in the act's tone, before the title */
+/* The lane/goal verb lead — a small spoken-aloud tag before the title, tinted toward the SPEAKER.
+   `--lc-speech-ink` and not `--lc-speech-tone`, and the difference is load-bearing rather than
+   tidy: the tone is now `memberColor`, a FILL held at hsl 68%/62% whose relative luminance runs
+   0.154 (indigo) to 0.699 (amber) across the two hue bands. Mixed 52% into the paper ink that is
+   readable for a member on the cool end and washed out for one on the warm end — the same seat-
+   dependent failure the avatar components had before `memberInk` existed (format.ts). The ink is
+   the same hue held at a luminance that clears AA on this paper for every member. */
 .lc-st-lead {
   font-family: var(--font-mono, monospace);
   font-size: 0.84em;
   font-weight: 700;
   letter-spacing: 0.03em;
   margin-right: 4px;
-  color: color-mix(in srgb, var(--lc-speech-tone) 52%, var(--lc-paper-ink));
+  color: color-mix(in srgb, var(--lc-speech-ink) 52%, var(--lc-paper-ink));
 }
 .lc-st-lead::after {
   content: ' ·';
@@ -2216,7 +2491,7 @@
   white-space: nowrap;
 }
 .lc-speech .lc-st-id {
-  color: color-mix(in srgb, var(--lc-paper-dim) 82%, var(--lc-speech-tone));
+  color: color-mix(in srgb, var(--lc-paper-dim) 82%, var(--lc-speech-ink));
   cursor: default;
 }
 /* a PR/issue ref — a bright tone accent, no box; the liveliest word in the line */
@@ -2224,7 +2499,7 @@
   font-family: var(--font-mono, monospace);
   font-size: 0.9em;
   font-weight: 650;
-  color: color-mix(in srgb, var(--lc-speech-tone) 46%, var(--lc-paper-ink));
+  color: color-mix(in srgb, var(--lc-speech-ink) 46%, var(--lc-paper-ink));
   /* No glow: a bloom that reads as light on a dark bubble reads as a smudge on paper. */
 }
 /* **strong** prose — carries the sentence's weight without shouting */
@@ -2238,7 +2513,7 @@
   }
 }
 
-/* a quiet "there's more" chip, bottom-right, tinted with the act tone — fades as the bubble expands */
+/* a quiet "there's more" chip, bottom-right, tinted toward the speaker — fades as the bubble expands */
 .lc-speech__more {
   position: absolute;
   right: 7px;
@@ -2247,7 +2522,7 @@
   line-height: 1;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: color-mix(in srgb, var(--lc-speech-tone) 78%, #f4ead9);
+  color: color-mix(in srgb, var(--lc-speech-ink) 78%, var(--lc-paper-2));
   opacity: 0.85;
   transition: opacity var(--lc-dur-1) ease;
   pointer-events: none;
@@ -2274,6 +2549,20 @@
 }
 .lc-speech.is-expanded .lc-speech__more {
   opacity: 0;
+}
+/* Hovering makes `__inner` a scroll container (`overflow-y: auto` above), which CLIPS anything
+   hanging outside its box — and the badge hangs at -7px by design. Tuck it inside on expand rather
+   than letting the mark vanish exactly when the viewer has leaned in to read the act.
+
+   Still `position: absolute`, and that is the point rather than an implementation detail: A BUBBLE
+   MAY NOT GROW A ROW (nick, 2026-09-02). Every device this file adds to a bubble — the mark, the
+   "there's more" chip — is taken OUT of the flow, so the number of lines a bubble occupies is set
+   by what the member actually said and by nothing else. The first cut of this rule floated the
+   badge into the text on expand, which reflowed the opening line around it; a float is a row's
+   worth of disruption wearing different clothes. */
+.lc-speech.is-expanded .lc-speech__mark {
+  top: 5px;
+  right: 5px;
 }
 .lc-speech.is-expanded .lc-speech__inner::-webkit-scrollbar {
   width: 6px;

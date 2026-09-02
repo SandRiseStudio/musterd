@@ -1,7 +1,7 @@
 import type { LaneState, Posture, WorkingHours } from '@musterd/protocol';
 import type { Caption } from '../captions';
 import type { ActTone } from '../format';
-import type { Addressee } from './speech';
+import type { Addressee, SpeechMarking } from './speech';
 import type { WallBoard } from './wallboard';
 
 /** Facing on the isometric floor. S = toward the viewer (front), N = away, E/W = profiles. */
@@ -177,6 +177,10 @@ export type OfficeEvent =
       id?: string;
       act?: string;
       addressee?: Addressee | null;
+      /** What KIND of act this is, as one of four ranked marks — see speech.ts `speechMark`. The
+       *  bubble's colour is the sender's identity, so this is the whole of what it says about the
+       *  act. `null`/absent is the common answer: most acts are the room working. */
+      marking?: SpeechMarking | null;
     };
 
 /** The imperative handle the `OfficeScene` component drives the mounted scene through. */

@@ -62,6 +62,25 @@ describe('the life event roll', () => {
   it('keeps the bark rare — a bark on a timer is an alarm clock', () => {
     expect(LIFE_EVENTS.find((e) => e.name === 'bark')!.weight).toBeLessThan(0.02);
   });
+
+  /* The room tone may never make a noise a viewer could mistake for a musterd cue (nick,
+     2026-09-02). `chime` was a two-soft-sine-notes chat-app ping — the same instrument playing the
+     same figure as `CUES`; `creak` was a narrow noise band gliding down over 0.42 s, which is the
+     `whoosh` moment's gesture at the loudest gain in the table. Pinned by name because the failure
+     mode is somebody re-adding a "nice little ping" without knowing what it collides with. */
+  it('carries no ambient event that impersonates an act cue', () => {
+    const names = LIFE_EVENTS.map((e) => e.name);
+    expect(names).not.toContain('chime');
+    expect(names).not.toContain('creak');
+  });
+
+  it('never rolls one either, at any point in the distribution', () => {
+    const ctx = { ...EMPTY_LIFE, working: [{ x: 0, seed: 1 }], pairs: [{ x: 0 }], dog: { x: 0, walking: true } };
+    for (let i = 0; i < 1000; i++) {
+      const name = pickLifeEvent(i / 1000, ctx, i * 37);
+      expect(name === 'chime' || name === 'creak').toBe(false);
+    }
+  });
 });
 
 describe('chatter', () => {
@@ -107,7 +126,7 @@ describe('dog sounds', () => {
 describe('work sounds track evidenced work (E2 spec §3)', () => {
   it('keeps every work-family sound out of a room where nobody is working', () => {
     const heard = sweep(EMPTY_LIFE);
-    for (const n of ['keys', 'tap', 'softTap', 'creak', 'drawer', 'stapler']) {
+    for (const n of ['keys', 'tap', 'softTap', 'drawer', 'stapler']) {
       expect(heard.has(n), n).toBe(false);
     }
   });

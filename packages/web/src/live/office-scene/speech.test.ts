@@ -10,6 +10,9 @@ import {
   stripNoise,
   truncateSpeech,
   typeCadence,
+  speechMark,
+  SPEECH_MARK_GLYPH,
+  SPEECH_MARK_WEIGHT,
 } from './speech';
 
 describe('truncateSpeech', () => {
@@ -251,5 +254,135 @@ describe('speechAddressee — the eligible set', () => {
     expect(speechAddressee({ kind: 'member', name: 'ryder' }, 'miley', ['dolly', 'sloane'])).toEqual(
       { names: ['ryder'], label: 'ryder', tether: true },
     );
+  });
+});
+
+
+/* ─── the act's mark ────────────────────────────────────────────────────────────────────────────
+ * The bubble's COLOUR is the sender now; this is the whole of what it says about the act. These
+ * pin the two things that are easy to get wrong by accident: that most acts get NOTHING (the half
+ * that makes the marked ones legible), and that `holds` — the pulse, the room's single loudest
+ * device — is reachable only from a genuinely-held ask.
+ */
+describe('speechMark — which acts earn a mark', () => {
+  it('marks nothing for the acts that are just the room working', () => {
+    for (const act of ['message', 'status_update', 'handoff', 'insight', 'defer', 'goal', 'wait']) {
+      expect(speechMark(act, null, null), act).toBeNull();
+    }
+  });
+
+  /* Considered and deliberately left plain: a refusal is not an emergency, and a declining bubble's
+     first line always says so out loud ("not taking this one — …"). Pinned so it is a decision on
+     the record rather than an omission somebody later "fixes". */
+  it('leaves a decline plain — the words already carry it', () => {
+    expect(speechMark('decline', null, null)).toBeNull();
+  });
+
+  it('marks the two terminals of work as done', () => {
+    expect(speechMark('accept', null, null)).toEqual({ mark: 'done', holds: false });
+    expect(speechMark('resolve', null, null)).toEqual({ mark: 'done', holds: false });
+    expect(speechMark('message', { lane_resolve: {} }, 'lane_resolve')).toEqual({
+      mark: 'done',
+      holds: false,
+    });
+  });
+
+  it('marks the steering pair as an interrupt, and NEITHER of them holds', () => {
+    expect(speechMark('steer', null, null)).toEqual({ mark: 'interrupt', holds: false });
+    expect(speechMark('challenge', null, null)).toEqual({ mark: 'interrupt', holds: false });
+  });
+
+  /* A lane going blocked is the one lane transition that is not routine — work has STOPPED, and
+     nobody is necessarily watching the board. Every other lane state stays plain. */
+  it('marks a lane going blocked, and no other lane transition', () => {
+    const blocked = { lane_state: { state: 'blocked', title: 'x' } };
+    expect(speechMark('message', blocked, 'lane_state')).toEqual({ mark: 'interrupt', holds: false });
+    expect(speechMark('message', { lane_state: { state: 'active' } }, 'lane_state')).toBeNull();
+    expect(speechMark('message', { lane_open: {} }, 'lane_open')).toBeNull();
+    expect(speechMark('message', { lane_claim: {} }, 'lane_claim')).toBeNull();
+  });
+
+  it('reads the lane kind, not the act — a lane transition arrives as a plain `message`', () => {
+    // Same meta, no recovered kind: the act alone cannot see a lane event, so it must not guess.
+    expect(speechMark('message', { lane_state: { state: 'blocked' } }, null)).toBeNull();
+  });
+});
+
+describe('speechMark — an ask, and where its volume comes from', () => {
+  /* ADR 147 §1: `approve` is an acceptance request — somebody has to go and READ a landed outcome.
+     `consult`/`escalate` are a seat that cannot proceed without a person. Both need a human; only
+     one of them has stopped a seat, and the room must not shout them at the same volume. */
+  it('splits an ask by species: approve is a review, the rest need a human', () => {
+    expect(speechMark('ask', { species: 'approve', tier: 'standard' }, null)).toEqual({
+      mark: 'review',
+      holds: false,
+    });
+    expect(speechMark('ask', { species: 'consult', tier: 'standard' }, null)?.mark).toBe(
+      'needs-human',
+    );
+    expect(speechMark('ask', { species: 'escalate', tier: 'standard' }, null)?.mark).toBe(
+      'needs-human',
+    );
+  });
+
+  /* The find this whole path exists to spend: `meta.tier` has been on the wire since ADR 147 and
+     the asks rail already ranks by it, but the bubble painted a blocking ask and an advisory one
+     the same. A blocking ask HOLDS its sender — nothing that seat was doing moves again until a
+     person answers — and that, not "an ask happened", is what earns the pulse. */
+  it('takes the loud variant from the tier that actually holds, not from the act', () => {
+    expect(speechMark('ask', { species: 'consult', tier: 'blocking' }, null)).toEqual({
+      mark: 'needs-human',
+      holds: true,
+    });
+    for (const tier of ['standard', 'advisory']) {
+      expect(speechMark('ask', { species: 'consult', tier }, null), tier).toEqual({
+        mark: 'needs-human',
+        holds: false,
+      });
+    }
+  });
+
+  /* An approve-species ask never pulses even at the top tier: the loud treatment is a claim about
+     the SENDER being stopped, and a seat awaiting acceptance is not stopped — it has submitted and
+     moved on. Getting this wrong would put every routine review request at maximum volume, which
+     is the exact inflation the mark axis exists to prevent. */
+  it('never pulses an acceptance request, whatever tier it claims', () => {
+    expect(speechMark('ask', { species: 'approve', tier: 'blocking' }, null)).toEqual({
+      mark: 'review',
+      holds: false,
+    });
+  });
+
+  /* A malformed ask is still an ask — it just cannot claim a tier it did not send. Quiet is the
+     honest default: `holds` is a factual claim about the sender's state, not decoration. */
+  it('degrades a malformed ask to quiet rather than to loud', () => {
+    expect(speechMark('ask', {}, null)).toEqual({ mark: 'needs-human', holds: false });
+    expect(speechMark('ask', { species: 'nope', tier: 'nope' }, null)).toEqual({
+      mark: 'needs-human',
+      holds: false,
+    });
+    expect(speechMark('ask', null, null)).toEqual({ mark: 'needs-human', holds: false });
+  });
+
+  it('marks the informal review routing too — request_help, never loud', () => {
+    expect(speechMark('request_help', null, null)).toEqual({ mark: 'review', holds: false });
+  });
+});
+
+describe('the mark axis is RANKED, and every mark is drawable', () => {
+  /* The point of the axis: a viewer who has learned nothing still reads "that one first". A set of
+     unranked symbols would have rebuilt the nine-hue problem in a new medium. */
+  it('orders needs-human > interrupt > review > done', () => {
+    const order = (Object.keys(SPEECH_MARK_WEIGHT) as (keyof typeof SPEECH_MARK_WEIGHT)[]).sort(
+      (a, b) => SPEECH_MARK_WEIGHT[b] - SPEECH_MARK_WEIGHT[a],
+    );
+    expect(order).toEqual(['needs-human', 'interrupt', 'review', 'done']);
+  });
+
+  it('gives every mark a distinct glyph — a badge nothing can render is a mark that vanishes', () => {
+    const glyphs = Object.values(SPEECH_MARK_GLYPH);
+    expect(glyphs).toHaveLength(Object.keys(SPEECH_MARK_WEIGHT).length);
+    expect(new Set(glyphs).size).toBe(glyphs.length);
+    for (const g of glyphs) expect(g.trim()).not.toBe('');
   });
 });
