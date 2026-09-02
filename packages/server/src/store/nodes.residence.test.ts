@@ -5,7 +5,9 @@ import {
   bindSeatToNode,
   listNodeLiveness,
   seatBinding,
+  seatBindings,
   touchNode,
+  trustNodeForSeat,
   unbindSeat,
   upsertForeignNode,
 } from './nodes.js';
@@ -22,13 +24,17 @@ function seed() {
   const db = openDb(':memory:');
   const team = createTeam(db, { slug: 'revive' });
   const ada = addMember(db, team, { name: 'ada', kind: 'agent' }).row;
+  const nick = addMember(db, team, { name: 'nick', kind: 'human' }).row;
   db.prepare(
     "INSERT INTO nodes (id, team_id, label, next_seq) VALUES ('nA', ?, 'laptop-a', 1)",
   ).run(team.id);
   db.prepare(
     "INSERT INTO nodes (id, team_id, label, next_seq) VALUES ('nB', ?, 'laptop-b', 1)",
   ).run(team.id);
-  return { db, team, ada };
+  db.prepare(
+    "INSERT INTO nodes (id, team_id, label, next_seq, revoked_at) VALUES ('nX', ?, 'retired', 1, 5)",
+  ).run(team.id);
+  return { db, team, ada, nick };
 }
 
 describe('seat→node residence binding (ADR 328 §4)', () => {
@@ -57,6 +63,66 @@ describe('seat→node residence binding (ADR 328 §4)', () => {
     expect(unbindSeat(db, ada.id)).toBeNull();
     expect(bindSeatToNode(db, team.id, ada.id, 'nB', 12)).toEqual({ bound: true });
     expect(seatBinding(db, ada.id)?.node_id).toBe('nB');
+  });
+});
+
+describe('a human seat trusts a SET of machines (ADR 358)', () => {
+  it('a fresh machine cannot self-trust: the speaker must already be in the set, and an empty set has no voucher', () => {
+    const { db, team, nick } = seed();
+    expect(trustNodeForSeat(db, team.id, nick, 'nB', 'nB', 10)).toEqual({
+      trusted: false,
+      reason: 'not_resident',
+    });
+    bindSeatToNode(db, team.id, nick.id, 'nA', 10);
+    expect(trustNodeForSeat(db, team.id, nick, 'nB', 'nB', 11)).toEqual({
+      trusted: false,
+      reason: 'not_resident',
+    });
+    expect(seatBindings(db, nick.id).map((b) => b.node_id)).toEqual(['nA']);
+  });
+
+  it('from a bound node the act adds another; both then speak for the seat; a repeat is idempotent', () => {
+    const { db, team, nick } = seed();
+    bindSeatToNode(db, team.id, nick.id, 'nA', 10);
+    expect(trustNodeForSeat(db, team.id, nick, 'nA', 'nB', 11)).toEqual({
+      trusted: true,
+      already: false,
+    });
+    expect(seatBindings(db, nick.id).map((b) => b.node_id)).toEqual(['nA', 'nB']);
+    expect(bindSeatToNode(db, team.id, nick.id, 'nB', 12)).toEqual({ bound: true });
+    expect(bindSeatToNode(db, team.id, nick.id, 'nA', 12)).toEqual({ bound: true });
+    // The first-bound node stays the one a refusal names.
+    expect(seatBinding(db, nick.id)?.node_id).toBe('nA');
+    expect(trustNodeForSeat(db, team.id, nick, 'nB', 'nA', 13)).toEqual({
+      trusted: true,
+      already: true,
+    });
+  });
+
+  it('agents stay one-node, and a target must be an enrolled unrevoked node', () => {
+    const { db, team, ada, nick } = seed();
+    bindSeatToNode(db, team.id, ada.id, 'nA', 10);
+    expect(trustNodeForSeat(db, team.id, ada, 'nA', 'nB', 11)).toEqual({
+      trusted: false,
+      reason: 'not_human',
+    });
+    bindSeatToNode(db, team.id, nick.id, 'nA', 10);
+    expect(trustNodeForSeat(db, team.id, nick, 'nA', 'nX', 11)).toEqual({
+      trusted: false,
+      reason: 'unknown_node',
+    });
+    expect(trustNodeForSeat(db, team.id, nick, 'nA', 'nope', 11)).toEqual({
+      trusted: false,
+      reason: 'unknown_node',
+    });
+  });
+
+  it('the admin unbind clears the whole set', () => {
+    const { db, team, nick } = seed();
+    bindSeatToNode(db, team.id, nick.id, 'nA', 10);
+    trustNodeForSeat(db, team.id, nick, 'nA', 'nB', 11);
+    expect(unbindSeat(db, nick.id)).toEqual({ node_id: 'nA' });
+    expect(seatBindings(db, nick.id)).toEqual([]);
   });
 });
 

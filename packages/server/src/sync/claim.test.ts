@@ -10,7 +10,7 @@ import { createServer, type RunningServer } from '../index.js';
 import { readNodeState } from '../node/state.js';
 import { getLane, updateLane } from '../store/lanes.js';
 import { addMember, getMemberByName } from '../store/members.js';
-import { insertMessage } from '../store/messages.js';
+import { insertMessage, localNodeForTeam } from '../store/messages.js';
 import { unbindSeat } from '../store/nodes.js';
 import { touchAmbientPresence } from '../store/presence.js';
 import { getTeamBySlug } from '../store/teams.js';
@@ -344,5 +344,120 @@ describe('federation 3c — the hub arbitrates a claim', () => {
     );
     expect(res.status).toBe(409);
     expect(res.json.error.message).toMatch(/not yet replicated|sync/);
+  });
+});
+
+describe('ADR 358 — a human seat trusts a set of machines by an explicit act from a bound session', () => {
+  const bindingsOf = (name: string) =>
+    hub.db
+      .prepare<[string, string], { node_id: string }>(
+        `SELECT s.node_id FROM seat_nodes s JOIN members m ON m.id = s.member_id
+          WHERE m.team_id = ? AND m.name = ? ORDER BY s.bound_at, s.node_id`,
+      )
+      .all(hubTeam().id, name)
+      .map((r) => r.node_id);
+
+  it('a fresh machine cannot self-trust: the joiner asking for itself is refused with the bound node named, and nothing changes', async () => {
+    const laneA = await laneOnBoth('a');
+    await patch(hubBase, `/teams/bravo/lanes/${laneA}`, { owner_seat: 'nick' }, nickOnHub);
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id).id;
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    expect(bindingsOf('nick')).toEqual([hubNode]);
+
+    const res = await post(
+      joinerBase,
+      '/teams/bravo/nodes/trust',
+      { node_id: joinerNode },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(403);
+    expect(res.json.error.code).toBe('bound_elsewhere');
+    expect(res.json.node_id).toBe(hubNode);
+    expect(bindingsOf('nick')).toEqual([hubNode]);
+    const denied = hub.db
+      .prepare<
+        [],
+        { detail: string }
+      >("SELECT detail FROM audit WHERE action = 'seat.bound_elsewhere' AND result = 'deny' ORDER BY rowid DESC LIMIT 1")
+      .get()!;
+    expect(JSON.parse(denied.detail)).toMatchObject({
+      act: 'trust',
+      node: joinerNode,
+      bound_to: hubNode,
+    });
+  });
+
+  it('from the bound machine the seat trusts the joiner; both then claim as it, and the act forwarded from the joiner is idempotent', async () => {
+    const laneA = await laneOnBoth('a');
+    await patch(hubBase, `/teams/bravo/lanes/${laneA}`, { owner_seat: 'nick' }, nickOnHub);
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id).id;
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+
+    const trusted = await post(
+      hubBase,
+      '/teams/bravo/nodes/trust',
+      { node_id: joinerNode },
+      nickOnHub,
+    );
+    expect(trusted.status).toBe(200);
+    expect(trusted.json).toEqual({ seat: 'nick', node_id: joinerNode, already: false });
+    expect(bindingsOf('nick')).toEqual([hubNode, joinerNode]);
+    expect(
+      hub.db
+        .prepare<
+          [],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM audit WHERE action = 'seat.node_trusted'")
+        .get(),
+    ).toEqual({ n: 1 });
+
+    // The joiner now speaks for nick — and so does the hub still.
+    const laneB = await laneOnBoth('b');
+    const fromJoiner = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneB}`,
+      { owner_seat: 'nick' },
+      nickOnJoiner,
+    );
+    expect(fromJoiner.status).toBe(200);
+    const laneC = await laneOnBoth('c');
+    const fromHub = await patch(
+      hubBase,
+      `/teams/bravo/lanes/${laneC}`,
+      { owner_seat: 'nick' },
+      nickOnHub,
+    );
+    expect(fromHub.status).toBe(200);
+
+    // Forwarded: a session on the joiner (now in the set) vouches for the hub's node — already there.
+    const again = await post(
+      joinerBase,
+      '/teams/bravo/nodes/trust',
+      { node_id: hubNode },
+      nickOnJoiner,
+    );
+    expect(again.status).toBe(200);
+    expect(again.json).toEqual({ seat: 'nick', node_id: hubNode, already: true });
+    expect(bindingsOf('nick')).toEqual([hubNode, joinerNode]);
+  });
+
+  it('a node the hub does not know is refused 404, and the admin unbind clears the whole set', async () => {
+    const laneA = await laneOnBoth('a');
+    await patch(hubBase, `/teams/bravo/lanes/${laneA}`, { owner_seat: 'nick' }, nickOnHub);
+    const unknown = await post(hubBase, '/teams/bravo/nodes/trust', { node_id: 'nope' }, nickOnHub);
+    expect(unknown.status).toBe(404);
+    expect(unknown.json.error.code).toBe('not_found');
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    await post(hubBase, '/teams/bravo/nodes/trust', { node_id: joinerNode }, nickOnHub);
+    expect(bindingsOf('nick')).toHaveLength(2);
+    const unbound = await call(
+      hubBase,
+      'DELETE',
+      '/teams/bravo/nodes/bindings/nick',
+      undefined,
+      nickOnHub,
+    );
+    expect(unbound.status).toBe(200);
+    expect(bindingsOf('nick')).toEqual([]);
   });
 });
