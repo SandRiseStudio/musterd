@@ -234,6 +234,29 @@ describe('walk choreography', () => {
     expect(back.ly).toBeCloseTo(home.ly, 5);
   });
 
+  /**
+   * The boundary the eligible-set walk sits exactly on, measured rather than assumed.
+   *
+   * `walk` holds one trip in flight plus three pending, so a four-name set — MAX_ELIGIBLE — fits
+   * only when the sender is idle. One walk already running and the last leg is refused, silently:
+   * the caller gets `false` and the room simply never shows that desk. Observed in the browser on
+   * /office-preview, whose looping script re-fires faster than an ~8.5s round trip drains; from its
+   * second loop the guard refuses legs, including a single-recipient walk that predates eligible
+   * sets. Recorded here so the next reader knows the fit is exact and not comfortable.
+   */
+  it('has no headroom at the eligible cap — a busy sender loses the last leg of a four-name set', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo'), node('Cy'), node('Dee'), node('Eve')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+
+    // One trip already running, then a full four-name set behind it.
+    expect(actors.walk('Ada', { kind: 'help', to: 'Bo', urgent: false })).toBe(true);
+    const accepted = ['Bo', 'Cy', 'Dee', 'Eve'].map((to) =>
+      actors.walk('Ada', { kind: 'help', to, urgent: false }),
+    );
+    expect(accepted).toEqual([true, true, true, false]);
+  });
+
   it("won't walk to a dnd member — do-not-interrupt is honoured by the choreography (\u00a74 lane 4)", () => {
     const focused = { ...node('Bo'), dnd: true };
     const { placements, byName } = world([node('Ada'), focused]);

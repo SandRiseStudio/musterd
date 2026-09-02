@@ -1591,10 +1591,16 @@ export function mountOffice(
         }
         break;
       case 'walk-help': {
-        // The sender walks to EVERY name, one desk after another: `actors.walk` queues per call
-        // (one trip in flight, up to three pending), so a set at the MAX_ELIGIBLE cap of four fits
-        // without the backlog guard dropping a leg. The fallback cue fires only if NO leg could
-        // play — one unreachable desk among several is not a failed act, it is a shorter trip.
+        // The sender walks to EVERY name, one desk after another: `actors.walk` queues per call —
+        // one trip in flight plus three pending, so a set at the MAX_ELIGIBLE cap of four fits
+        // exactly, WITH NO HEADROOM. A sender who already has a walk running loses the tail of a
+        // four-name set to the backlog guard, silently. Measured in the browser 2026-09-02: the
+        // /office-preview script re-fires faster than an ~8.5s round trip drains, so from its
+        // second loop on the guard refuses legs — including the single-recipient `Ada -> Bo` walk
+        // that predates eligible sets entirely. That makes it a property of the queue depth and the
+        // act rate, not of this fan-out; on /live, acts arrive far enough apart that it has room.
+        // The fallback cue fires only if NO leg could play — one unreachable desk among several is
+        // not a failed act, it is a shorter trip.
         let walked = false;
         for (const req of helpWalks(ev)) {
           pushThread(ev.from, req.to);
