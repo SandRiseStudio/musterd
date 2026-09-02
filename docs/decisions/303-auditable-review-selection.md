@@ -57,6 +57,11 @@ Presence from unrelated acts.
 The new snapshot creates a stable seam for later questions about model source, quiescence, roster
 order, and harness reachability. It does not claim that any one of them currently causes the skew.
 
+*Amended 2026-09-02 ([ADR 351](351-unattested-worker-routes-ungraded.md)).* `worker_unattested`
+is historical from this date: a gradeable candidate under an unattested worker is now routable at
+the `ungraded` rung and, when not selected, files `tie_break`. The snapshot's `selected.grade` can
+read `ungraded`; `worker_family = 'unknown'` beside it is how a reader tells the rung apart.
+
 *Amended 2026-09-01 (lane `01M1FJYETP6809EW45WY0S71V8`).* The vocabulary gains `worker_unattested`,
 and the snapshot gains `worker_family`. A null grade has two owners and the row must say which:
 when the **worker's** live occupancy attests nothing, every gradeable candidate was being filed as

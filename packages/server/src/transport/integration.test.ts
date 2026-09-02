@@ -5292,6 +5292,68 @@ describe('two-stage close (ADR 169)', () => {
     expect(closedRows[0].detail.review_grade).toBe('cross_model');
   });
 
+  it('an unattested worker is routed at the `ungraded` rung and the close abstains (ADR 351)', async () => {
+    const t = await post('/teams', { slug: 'ungraded', creator: { name: 'nick4', kind: 'human' } });
+    const nick4 = t.json.human_credential as string;
+    const mk = async (name: string, model?: string): Promise<Auth> => {
+      await post(`/teams/ungraded/members`, { name, kind: 'agent' }, nick4);
+      const auth = (await resolveAuth('/teams/ungraded/inbox', {
+        key: t.json.agent_key as string,
+        seat: name,
+      }))!;
+      if (model !== undefined) await reattestAgentModel('ungraded', auth, model);
+      return auth;
+    };
+    // The worker is live on a bare claim that attests nothing — the shape a CLI-driven seat has
+    // when no harness binding is present (12 of 129 no_candidate rows to 2026-09-02).
+    const worker = await mk('worker');
+    const twin = await mk('twin', 'claude-opus-4-8');
+
+    const lane = await post('/teams/ungraded/lanes', { title: 'ungraded', claim: true }, worker);
+    const laneId = lane.json.lane.id as string;
+    const ready = await fetch(base + `/teams/ungraded/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(worker) },
+      body: JSON.stringify({ state: 'ready_for_review' }),
+    }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    expect(ready.status).toBe(200);
+    // Before ADR 351 this was a no_candidate. Now it routes — and the record claims no diversity.
+    expect(ready.json.review).toMatchObject({
+      reviewer: 'twin',
+      route: 'ungraded',
+      grade: 'ungraded',
+    });
+    const rows = await auditRowsFor(nick4, 'ungraded', 'lane.ready_for_review');
+    expect(rows[0].detail.no_candidate).toBeUndefined();
+    expect(rows[0].detail.route).toBe('ungraded');
+    expect(rows[0].detail.review_grade).toBe('ungraded');
+    expect(rows[0].detail.review_selection).toMatchObject({
+      outcome: 'peer_selected',
+      worker_family: 'unknown',
+      selected: { reviewer: 'twin', grade: 'ungraded' },
+    });
+    // The ask the reviewer sees carries the same word, so nobody reads a cross_family it is not.
+    const inbox = await get('/teams/ungraded/inbox?unread=1', twin);
+    const ask = inbox.json.messages.find(
+      (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+        m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+    );
+    expect(ask.meta.lane_review.grade).toBe('ungraded');
+
+    // The close edge grades from live attestations (ADR 188 §3): the worker still attests nothing,
+    // so the grade abstains and the abstention is COUNTED (ADR 173) — verified, ungraded, honest.
+    const closed = await fetch(base + `/teams/ungraded/lanes/${laneId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...authHeaders(twin) },
+      body: JSON.stringify({ state: 'done' }),
+    }).then(async (r) => ({ status: r.status, json: (await r.json()) as Record<string, any> }));
+    expect(closed.status).toBe(200);
+    const closedRows = await auditRowsFor(nick4, 'ungraded', 'lane.closed');
+    expect(closedRows[0].detail.verified).toBe(true);
+    expect(closedRows[0].detail.review_grade).toBeUndefined();
+    expect(closedRows[0].detail.review_grade_unknown).toBe(true);
+  });
+
   it('a same-model voluntary confirm stays verified but is graded same_model (ADR 188)', async () => {
     const t = await post('/teams', { slug: 'twins', creator: { name: 'n3', kind: 'human' } });
     const n3 = t.json.human_credential as string;

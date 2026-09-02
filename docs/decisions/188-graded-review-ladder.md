@@ -115,6 +115,13 @@ human_ask_fired }`. The 17-row baseline table stays queryable and is the before-
   pick for `risk.length === 0` is now the agents-only ladder. Risky peer-then-human (§4) is
   untouched.
 
+- **2026-09-02 — a rung below the ladder.** [ADR 351](351-unattested-worker-routes-ungraded.md)
+  routes an **unattested worker** to a live attested peer at `ungraded`, below `cross_model`. §1's
+  "either side unknown → null, ineligible to route" stays frozen as the *grade*; the picker adds
+  the rung outside `REVIEW_GRADES`, with its own `route` value, and §3's close-edge abstention
+  (`review_grade_unknown`) is what such a close records. An unattested *candidate* is still never
+  routed.
+
 - **Honesty limit (ADR 200):** the ladder grades what was **recorded**, and no rung can detect a seat
   presenting a human credential ([ADR 200](200-credential-custody-and-the-real-use-gate.md)).
   Accepted for dogfood; forbidden in any build promoted for real use.

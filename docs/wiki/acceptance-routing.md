@@ -92,4 +92,10 @@ dolly's [#1152](https://github.com/SandRiseStudio/musterd/pull/1152) added exact
 
 The generalisation worth carrying: **an experimenter's hand in the population is not data**, and a filter written as exclusions cannot enforce that on its own. Two habits follow. Prefer stating the population positively where the values are known and small (`route is a pick route`) so a new value must be admitted deliberately rather than by default. And when a new route value is unavoidable, put it on the exclusion list *before its first row lands* — after that, no amendment can distinguish "excluded because it is not ladder data" from "excluded because it moved the number the wrong way", and the window is contaminated in a way no later correction reaches. That timing is why this one was written against a verified count of zero; the amendment beside `CONCENTRATION_PREDICTION` carries the same falsifier.
 
+The rule was followed once, on purpose, the next day: [ADR 351](../decisions/351-unattested-worker-routes-ungraded.md)
+added `route: 'ungraded'` and excluded it from `liveRouted` in the same PR, written at count 0 of
+its own rows (2026-09-02; falsify: `sqlite3 ~/.musterd/musterd.db "select count(*) from audit where
+action='lane.ready_for_review' and detail like '%\"route\":\"ungraded\"%'"` returns more than 0 on
+a daemon built before the ADR 351 PR — the rows would predate the exclusion).
+
 The near miss is the point: the value was proposed, reviewed, and approved without anyone noticing it changed a pre-registered denominator, and it surfaced only because the PR was routed to the seat that owns the instrument. It would not have survived a review by anyone else on the team — see [measuring a moving page](measuring-a-moving-page.md).
