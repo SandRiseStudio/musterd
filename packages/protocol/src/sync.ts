@@ -71,18 +71,31 @@ export const SyncLaneEventSchema = z.object({
 });
 export type SyncLaneEvent = z.infer<typeof SyncLaneEventSchema>;
 
-/** Either replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
-export const SyncEventSchema = z.union([SyncLaneEventSchema, SyncMessageEventSchema]);
+/**
+ * One replicated PRESENCE event (presence-replication spec 2026-09-02): a `presence.*` audit row —
+ * attached, detached, reattested — the session transition, written where the presence row changed.
+ * The lane event's shape under its own tag: same allocator, same composed `AuditEntrySchema`, and
+ * the fold decides what it can project. Heartbeats never ride this wire.
+ */
+export const SyncPresenceEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('presence') });
+export type SyncPresenceEvent = z.infer<typeof SyncPresenceEventSchema>;
+
+/** Any replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
+export const SyncEventSchema = z.union([
+  SyncLaneEventSchema,
+  SyncPresenceEventSchema,
+  SyncMessageEventSchema,
+]);
 export type SyncEvent = z.infer<typeof SyncEventSchema>;
 
-/** The id the hub keys `sync_log` on: the envelope's for a message, the audit row's for a lane. */
+/** The id the hub keys `sync_log` on: the envelope's for a message, the audit row's for a lane or presence. */
 export function syncEventId(event: SyncEvent): string {
-  return event.kind === 'lane' ? event.event.id : event.envelope.id;
+  return event.kind === 'lane' || event.kind === 'presence' ? event.event.id : event.envelope.id;
 }
 
 /** The team slug the event claims, for the hub's "pushed into the team it names" check. */
 export function syncEventTeam(event: SyncEvent): string {
-  return event.kind === 'lane' ? event.team : event.envelope.team;
+  return event.kind === 'lane' || event.kind === 'presence' ? event.team : event.envelope.team;
 }
 
 /**
@@ -131,7 +144,16 @@ export const SyncPullLaneEventSchema = SyncLaneEventSchema.extend({
 });
 export type SyncPullLaneEvent = z.infer<typeof SyncPullLaneEventSchema>;
 
-export const SyncPullEventSchema = z.union([SyncPullLaneEventSchema, SyncPullMessageEventSchema]);
+export const SyncPullPresenceEventSchema = SyncPresenceEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullPresenceEvent = z.infer<typeof SyncPullPresenceEventSchema>;
+
+export const SyncPullEventSchema = z.union([
+  SyncPullLaneEventSchema,
+  SyncPullPresenceEventSchema,
+  SyncPullMessageEventSchema,
+]);
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;
 
 /** Same bound as push, for the same reason: a legitimate catch-up must not allocate unboundedly. */
@@ -187,5 +209,20 @@ export const SyncPullResponseSchema = z.object({
   events: z.array(SyncPullEventSchema).max(SYNC_PULL_MAX_BATCH),
   /** The hub's head, so a puller can compute lag (`hub_head − cursor`) without a second call. */
   hub_seq_high: z.number().int().nonnegative(),
+  /**
+   * Every node of the team with the hub's liveness stamp (presence replication §3). A remote
+   * presence row is live while its node is; this is how a joiner learns that. Defaults to empty
+   * so an older hub's page still parses — every remote row then reads not-live, the conservative
+   * answer.
+   */
+  nodes: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        label: z.string(),
+        last_seen_at: z.number().int().nullable(),
+      }),
+    )
+    .default([]),
 });
 export type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;
