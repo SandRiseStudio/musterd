@@ -1081,3 +1081,54 @@ describe('POST /teams/:slug/residency/wake-progress (ADR 262)', () => {
     expect(report.status).toBe(200);
   });
 });
+
+describe('roster wakeability (ADR 357) — the wake-leases poll is the host heartbeat', () => {
+  const adaRow = async () => {
+    const roster = await get('/teams/dawn/members', nickCred);
+    return roster.json.members.find((m: { name: string }) => m.name === 'Ada');
+  };
+
+  it('an enrolled seat on a host this daemon has never heard from is wakeable — unknown never demotes', async () => {
+    await enrollAda();
+    const ada = await adaRow();
+    expect(ada.wakeable).toBe(true);
+    expect(ada.wakeability).toBe('wakeable');
+  });
+
+  it('the poll records the host; silence past HOST_STALE_MS reads enrolled_host_stale while `wakeable` stays true', async () => {
+    await enrollAda();
+    const polled = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    expect(polled.status).toBe(200);
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    const seen = server.db
+      .prepare<
+        [string, string],
+        { seen_at: number }
+      >('SELECT seen_at FROM host_liveness WHERE team_id = ? AND host = ?')
+      .get(team.id, 'laptop.local');
+    expect(seen?.seen_at).toEqual(expect.any(Number));
+    expect((await adaRow()).wakeability).toBe('wakeable');
+
+    // The actuator goes quiet: age the sighting past the line instead of waiting a minute.
+    server.db
+      .prepare('UPDATE host_liveness SET seen_at = ? WHERE team_id = ? AND host = ?')
+      .run(Date.now() - 61_000, team.id, 'laptop.local');
+    const stale = await adaRow();
+    expect(stale.wakeability).toBe('enrolled_host_stale');
+    expect(stale.wakeable).toBe(true); // enrolment is a different fact, and it did not change
+
+    // One more poll and it is reachable again.
+    await post('/teams/dawn/residency/wake-leases', { host: 'laptop.local' }, agentKey);
+    expect((await adaRow()).wakeability).toBe('wakeable');
+  });
+
+  it('a seat that is not enrolled reads not_enrolled and wakeable=false', async () => {
+    const ada = await adaRow();
+    expect(ada.wakeable).toBe(false);
+    expect(ada.wakeability).toBe('not_enrolled');
+  });
+});

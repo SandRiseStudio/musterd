@@ -138,7 +138,13 @@ function SeatRow({
   // Residency (ADR 131): an enrolled offline seat is not unreachable — a directed act wakes it;
   // `resumable` only while the capture sits inside the harness's ~30d GC horizon (inc 5), which is
   // exactly why the wire carries a timestamp and not a boolean.
-  const wakeable = !online && !reconnecting && m.wakeable === true;
+  const enrolled = !online && !reconnecting && m.wakeable === true;
+  // ADR 357: the five-state read, when the daemon sends it. An older daemon omits `wakeability`
+  // and the chip reads exactly as before (enrolled ⇒ "wakeable"). A newer one lets the chip say
+  // WHY an enrolled seat cannot be reached — a dead actuator or a vanished workspace used to read
+  // "wakeable" until a wake failed in host.log where nobody was looking.
+  const wakeability = enrolled ? (m.wakeability ?? 'wakeable') : null;
+  const wakeable = wakeability === 'wakeable';
   const resumable =
     wakeable && m.resumable_at != null && Date.now() - m.resumable_at < 30 * 24 * 60 * 60 * 1000;
   const chip = rosterPrimaryChip(m);
@@ -207,6 +213,30 @@ function SeatRow({
               title="Enrolled in harness residency (ADR 131) — a directed act wakes this seat"
             >
               wakeable
+            </span>
+          )}
+          {wakeability === 'enrolled_host_stale' && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="Enrolled, but the host actuator that would spawn this seat has stopped polling — a directed act will wait until it is back (ADR 357)"
+            >
+              enrolled · host quiet
+            </span>
+          )}
+          {wakeability === 'enrolled_dead_workspace' && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="Enrolled, but the last wake reported the workspace gone — re-provision before a directed act can reach it (ADR 357)"
+            >
+              enrolled · workspace gone
+            </span>
+          )}
+          {wakeability === 'enrolled_seat_busy' && (
+            <span
+              className="lc-stat lc-stat--quiet"
+              title="Enrolled and acting on the ledger just now with a lapsed heartbeat — waking it would spawn a duplicate (ADR 219)"
+            >
+              enrolled · busy
             </span>
           )}
           {resumable && (

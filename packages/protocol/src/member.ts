@@ -8,6 +8,7 @@ import {
   SurfaceSchema,
 } from './acts.js';
 import { AccountStatusSchema, CapabilitiesSchema } from './capabilities.js';
+import { WAKEABILITIES } from './model.js';
 import { OfflineReasonSchema } from './offline.js';
 import { PostureSchema } from './posture.js';
 import { WorkingHoursSchema, type WorkingHours } from './working-hours.js';
@@ -164,6 +165,16 @@ export const MemberSummarySchema = MemberSchema.extend({
    * Optional for back-compat; the server always sets it.
    */
   wakeable: z.boolean().optional(),
+  /**
+   * The ADR 189 five-state read beside the boolean (ADR 357): `wakeable` says "enrolled", this says
+   * whether a directed act can actually reach the seat right now — `enrolled_host_stale` when the
+   * actuator that would spawn it has stopped polling, `enrolled_dead_workspace` when its last wake
+   * report said the workspace is gone and nothing newer contradicts it, `enrolled_seat_busy` when
+   * the audit trail shows it acting with a lapsed heartbeat. The same derivation the ADR 191
+   * offline-acceptor pick uses, so the roster and the picker cannot disagree. Optional and
+   * additive: an older daemon omits it and every consumer reads `wakeable` exactly as before.
+   */
+  wakeability: z.enum(WAKEABILITIES).optional(),
   /**
    * When the seat last attested a capturable harness session (ADR 131 §5) — the resumable badge's
    * input (inc 5, finding b). A TIMESTAMP, not a boolean, deliberately: captures age past the

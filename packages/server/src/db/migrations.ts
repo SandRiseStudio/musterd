@@ -1484,6 +1484,22 @@ export const MIGRATIONS: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_presence_node ON presence(node)');
     },
   },
+  {
+    // ADR 357: the host actuator's `POST /residency/wake-leases` poll is its heartbeat. One row per
+    // (team, host), newest sighting wins — the fact `enrolled_host_stale` was always waiting for.
+    // Not replicated (ADR 331): a host's liveness is a fact about THIS daemon's reachability.
+    version: 62,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS host_liveness (
+          team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          host    TEXT NOT NULL,
+          seen_at INTEGER NOT NULL,
+          PRIMARY KEY (team_id, host)
+        );
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

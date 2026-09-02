@@ -68,7 +68,7 @@ describe('sync containment', () => {
     // Rewind past v50 and replay the migration tail. v51–v53 add independent tables and an index;
     // v54 adds the origin index and the pull cursor, and touches no row; v55 adds guarded columns; v56 re-issues v54.
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(61);
+    expect(runMigrations(db)).toBe(62);
 
     expect(snapshot(db)).toEqual(before);
     // …and the replay did not drop what was already staged-adjacent: the tables survive it.
