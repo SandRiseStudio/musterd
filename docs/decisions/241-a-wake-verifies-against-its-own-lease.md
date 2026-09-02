@@ -109,16 +109,24 @@ and the token is plumbed now so that increment needs no second rollout.
 - `wake_lease` travels with `provenance` on ambient touches rather than sticking like
   `model`/`build`/`epoch`. The two answer one question together; a sticky token under a fresh
   provenance would keep asserting a lease the session no longer belongs to.
+- **2026-09-02 (increment 3, lane 01M1HQC9JJ):** the claude-code backend now holds the same bar.
+  `occupied && !lease_matched` defers, kills the child, and a deferred resume does not fall through
+  to a fresh spawn. It was the last of five backends gating on occupancy alone, and the only one
+  whose seats are routinely contended by a human in the worktree. The rollout coupling above now
+  applies to claude-code workspaces too: a dist that attests no token deferred-loops until rebuilt.
+  Wiki: `docs/wiki/wake-leases.md` §"The mirror defect".
 
 ### Limitations, and what is left open
 
 - **ADR 238's own limitation is now recorded in its Context.** It narrowed the false-success window;
   it did not close it. What remains true in 238 is that all three 2026-08-05 failures showed a
   `session` row at verify time, so waiting past it was right for those.
-- **Increment 3 (open): the claude-code backend's success bar.** It accepts any fresh occupancy as
-  its own, so it has this defect wider open than codex ever did, with no symptom yet only because
-  its wakes have not been contended. It needs the strict check plus a rollout check that every
-  enrolled workspace's dist attests the token.
+- **Increment 3 — closed 2026-09-02 (lane 01M1HQC9JJ).** _As written 2026-08-07:_ the claude-code
+  backend's success bar accepts any fresh occupancy as its own, so it has this defect wider open
+  than codex ever did, with no symptom yet only because its wakes have not been contended. It needs
+  the strict check plus a rollout check that every enrolled workspace's dist attests the token.
+  _2026-09-02:_ the strict check landed (see Consequences). The rollout check is unchanged from
+  codex's: a workspace whose adapter dist predates the token defers, which is the honest direction.
 - **Not verified live.** This increment is proven by unit tests and by mutation, not by a live wake.
   The live probe that produced the ~8s figure cost real OpenAI budget and was not repeated.
 
