@@ -501,3 +501,26 @@ cannot move total), and no deletable twin was found: the voices reuse the existi
 
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit; total
   should read ≈243.5 KiB against 246.1 KiB (252,000 B).
+
+## 2026-09-01 — initialJsGzipBytes 156000 → 158000 (lapsed asks, PR #1158)
+
+#1158 added `applyTierClock`, the `lapsed` state and the elapsed-note card to `asks.ts`,
+`AsksStrip.tsx` and `AsksReel.tsx`. Those modules are the /live strip and the /broadcast reel —
+the eager graph itself — so ADR 183's initial-budget remedy (a dynamic import) has nothing to move:
+the code is the surface. The PR's own gates passed with bytes to spare; the merge commit did not.
+
+| tree | initial JS gzip, worst route /live (gate style) |
+| --- | --- |
+| #1158 branch @ ca4e48dc, CI (its own gates, green) | 152.3 KB against 152.3 KB |
+| main @ db1099de, local | 152.3 KB against 152.3 KB (passes) |
+| main @ db1099de, CI | 152.4 KB against 152.3 KB (**red**) |
+| #1155 @ 0540ee3f rebased on that main, CI | 152.4 KB — same failure, no web change in the PR |
+
+The ~0.1 KB is the 2026-08-24 CI gzip toolchain delta landing on a ceiling that had bytes free
+locally and none on CI — the same shape as the 2026-08-25 and 2026-08-31 raises. Raise to
+CI-measured + ~1.2% (156,058 → 158,000), matching those precedents. Reviewed on the PR by dolly
+(mutation-verified, 768/768); the budget was not checked at review time, which is the process gap
+this note records: **a PR that reads "N KB / N KB" on its own gates will read over on main.**
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit; initial
+  should read ≈152.3 KB against 154.3 KB (158,000 B), and main's CI gates go green.
