@@ -419,6 +419,22 @@ if (!process.argv.includes('--static-only')) {
       '/live (connected, asks sheet open)',
       12,
     );
+    /* The nameplates, OPEN (`?plates-open`). Same gap as the asks sheet one line up, and wider: the
+       harness segment carries its own ink per harness (--lc-hz-{codex,cursor,grok,opencode}-ink) and
+       lives inside a `0fr` track whose segments are `opacity: 0` until a viewer clicks the plate.
+       The sweep skips clipped and zero-opacity rows, so those four inks had shipped since ADR 352
+       with this gate never once measuring them — and /broadcast, whose plates ARE permanently open,
+       filters the detail down to the model crumb, so no route rendered the segment at all.
+
+       The fixture seats one seat per glyphed harness (fixture-team.sh SEATS), so all four inks paint
+       in one pass. One lighting value: the plate is opaque paper over the canvas, so its inks do not
+       track the room's light the way the canvas-adjacent rows do — the bracket would measure the
+       same pairs twice for ~15s of fixture time. */
+    report(
+      await sweep(`${base}/live?team=${team}&light=${SCENE_LIGHTS[0]}${SCENE_STILL}&plates-open`),
+      '/live (connected, nameplates open)',
+      12,
+    );
   } finally {
     await sh(['down']);
   }

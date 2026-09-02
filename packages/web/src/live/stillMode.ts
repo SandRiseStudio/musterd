@@ -102,3 +102,29 @@ export const stillMode = (): boolean => flagHere('still');
 export const isAsksOpen = (search: string): boolean => hasFlag(search, 'asks-open');
 
 export const asksOpenMode = (): boolean => flagHere('asks-open');
+
+/**
+ * `?plates-open` — MEASUREMENT MODE for ink that only exists inside a control nobody clicked.
+ *
+ * Third of the same bargain as `?still` and `?asks-open` above, and the gap it closes is the widest
+ * of the three. The nameplate's harness segment carries its own per-harness ink
+ * (`--lc-hz-{codex,cursor,grok,opencode}-ink`, Live.css) and lives in the plate's expanded DETAIL —
+ * a `0fr` grid track whose segments are `opacity: 0` until a viewer clicks the plate open. The sweep
+ * skips both zero-opacity and clipped rows, so all four inks have shipped since ADR 352 **without
+ * the contrast gate ever once measuring them**. On /broadcast the detail is permanently open but
+ * `plateDetailParts` is filtered to the model crumb there, so that route never renders the segment
+ * either. There was no state, on any route, in which a harness ink could be measured.
+ *
+ * The alternative was to have the sweep click every plate. Rejected on the ADR 285 argument
+ * unchanged, and more sharply here: the expand is a 300ms grid-template-columns transition with a
+ * per-segment stagger of `90ms + i * 50ms`, so driving it from outside means inferring when twenty
+ * plates have all finished unpacking — the exact inference the sweep already carries six guards'
+ * worth of. The page knows. It can simply mount them open, with no transition to race.
+ *
+ * Scope: it sets each plate's INITIAL expanded state only. The viewer can still collapse any plate,
+ * the toggle behaves normally, and nothing else about the plate changes — same segments, same copy,
+ * same inks. It is inert on /broadcast, whose plates are not interactive and never carry the seg.
+ */
+export const isPlatesOpen = (search: string): boolean => hasFlag(search, 'plates-open');
+
+export const platesOpenMode = (): boolean => flagHere('plates-open');

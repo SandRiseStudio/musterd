@@ -1393,11 +1393,20 @@
 
   /* Harness inks — one per glyph in surfaceGlyph.ts (the harnesses a provider pin cannot
      distinguish). -ink because they colour text and glyph; there is no fill twin until something
-     actually fills with them. Measured on --lc-paper (#f3e2c3), the lightest stock they land on. */
-  --lc-hz-codex-ink: #0f6b52; /* 5.08:1 */
-  --lc-hz-cursor-ink: #4f46b8; /* 5.68:1 */
-  --lc-hz-grok-ink: #8e2a7d; /* 5.93:1 — magenta, the one hue the other three leave free */
-  --lc-hz-opencode-ink: #a03d00; /* 5.21:1 */
+     actually fills with them.
+     Re-measured against the NAMEPLATE (#e9d3ab), which is the stock they actually land on. The
+     original set was measured on --lc-paper (#f3e2c3) as "the lightest stock they land on" — and
+     `lightest` was the error, twice over: the plate is DARKER than --lc-paper, so a dark ink scores
+     LOWER there, and lightest is the wrong extreme to calibrate a dark ink against in any case. The
+     harness segment renders nowhere but the plate, so the plate is the only paper that was ever
+     load-bearing. Measured 2026-09-02 by the sweep, first time these four have been measured at all:
+     codex came out 4.43 against a 4.5 requirement — a shipped AA failure — and opencode 4.54, which
+     passes by 0.04 and would not survive any paper tweak. Both moved; cursor and grok already cleared
+     it on the real paper and are untouched. The gate now measures all four (`?plates-open`). */
+  --lc-hz-codex-ink: #0e6249; /* 5.02:1 on the plate — was #0f6b52, 4.43:1, below AA */
+  --lc-hz-cursor-ink: #4f46b8; /* 4.95:1 */
+  --lc-hz-grok-ink: #8e2a7d; /* 5.17:1 — magenta, the one hue the other three leave free */
+  --lc-hz-opencode-ink: #963900; /* 4.99:1 on the plate — was #a03d00, 4.54:1, passing by 0.04 */
 }
 
 .lc-gl-labels {
