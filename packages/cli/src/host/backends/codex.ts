@@ -18,14 +18,24 @@ const KILL_GRACE_MS = 10_000;
 const RESUME_VERIFY_WINDOW_MS = 30_000;
 
 /** Codex's documented fresh form. The workspace flag is intentionally absent from resume: that
- * subcommand does not accept it, so the child `cwd` is the workspace boundary. */
+ * subcommand does not accept it, so the child `cwd` is the workspace boundary.
+ *
+ * Carries `--dangerously-bypass-hook-trust` (ADR 359): codex gates `.codex/hooks.json` execution
+ * behind "persisted hook trust," normally granted by an interactive first-run prompt a headless
+ * wake spawn can never show. musterd authors the hooks.json being trusted — onboarding writes it
+ * into every provisioned workspace — so bypassing the confirmation is skipping a step guaranteed
+ * to answer yes, not opening a new attack surface. Without it, SessionStart/PostToolUse/SessionEnd
+ * never fire and a codex seat's resumable attestation, session capture, and ADR 246 model
+ * observation are silently absent. */
 export function buildCodexFreshArgs(line: string, workspace: string): string[] {
-  return ['exec', '--json', '-C', workspace, line];
+  return ['exec', '--json', '--dangerously-bypass-hook-trust', '-C', workspace, line];
 }
 
-/** Exact captured thread only; production wake never carries a trust, sandbox, or approval bypass. */
+/** Exact captured thread only. Carries the same `--dangerously-bypass-hook-trust` as the fresh
+ * form, for the same reason (ADR 359) — resume is a wake path too, and hooks must fire on it
+ * identically or every resumed session goes right back to being unattested. */
 export function buildCodexResumeArgs(line: string, threadId: string): string[] {
-  return ['exec', 'resume', '--json', threadId, line];
+  return ['exec', 'resume', '--json', '--dangerously-bypass-hook-trust', threadId, line];
 }
 
 const ThreadStartedSchema = z.object({
