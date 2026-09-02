@@ -67,7 +67,7 @@ Presence rows are liveness, not work: the quiescence readers (`lastActionByActor
 
 ### 2. The fold projects into `presence`, plus a `node` column
 
-Migration v60 adds `presence.node` (null = local). The fold writes `presence` as the third thing it
+Migration v61 adds `presence.node` (null = local). The fold writes `presence` as the third thing it
 writes, in the audit row's transaction, with the lane discipline — block, never skip:
 
 - `attached` inserts with `id = detail.presence`, the seat resolved by name (`unresolved_seat`
@@ -154,7 +154,7 @@ joiner stops on the unknown kind. Hub before joiners.
 - A joiner that cannot reach the hub sees every remote seat age out together after the TTL — it
   cannot know, and not-live is the conservative reading.
 - Protocol: `SyncPresenceEventSchema`, `SyncPullResponseSchema.nodes`, `PresenceSchema.node` /
-  `node_label`, epoch 18. Migration v60. Three new log lines: `sync_push_refused_residence`,
+  `node_label`, epoch 18. Migration v61 (v60 is dolly's #1197, ADR 357; both open 2026-09-02, high-water-mark rule #1174). Three new log lines: `sync_push_refused_residence`,
   `sync_fold_unknown_event` (also now covers `unknown_lane_event`, which was never reported),
   `sync_fold_presence_unborn` (and `sync_fold_lane_unborn`, likewise).
 

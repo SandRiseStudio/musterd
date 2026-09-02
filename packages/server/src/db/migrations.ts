@@ -1474,7 +1474,7 @@ export const MIGRATIONS: Migration[] = [
     // carries the `nodes.id` it lives on; NULL is a local row (a socket or an ambient touch animates
     // it). Every reader's liveness predicate branches on this column (store/presence.ts
     // LIVE_PRESENCE_SQL), and the reaper's heartbeat cutoff applies to local rows only.
-    version: 60,
+    version: 61,
     up: (db) => {
       const cols = db
         .prepare<[], { name: string }>('PRAGMA table_info(presence)')
