@@ -126,7 +126,7 @@ describe('speechEventFor', () => {
       tone: 'neutral',
       id: 'e1',
       act: 'message',
-      addressee: { name: 'ben', tether: true },
+      addressee: { names: ['ben'], label: 'ben', tether: true },
     });
   });
 
@@ -139,7 +139,24 @@ describe('speechEventFor', () => {
     expect(
       speechEventFor(env('message', { to: { kind: 'member', name: 'ada' }, body: 'note to self' }))
         .addressee,
-    ).toEqual({ name: 'ada', tether: false });
+    ).toEqual({ names: ['ada'], label: 'ada', tether: false });
+  });
+
+  /**
+   * The eligible-set half of the same wiring. `speechEventFor` must hand `meta.eligible` to
+   * `speechAddressee`; dropping that argument leaves the rule's own tests green and puts the
+   * megaphone back on every review-routing act — which is the state this lane found.
+   */
+  it('carries an eligible set onto the bubble — 2-4 named seats, none of them picked', () => {
+    expect(
+      speechEventFor(
+        env('request_help', {
+          to: { kind: 'team' },
+          body: 'Review please',
+          meta: { eligible: ['ben', 'cy'] },
+        }),
+      ).addressee,
+    ).toEqual({ names: ['ben', 'cy'], label: 'ben or cy', tether: true });
   });
 
   it('a body-less act speaks its act label so nothing passes invisibly', () => {

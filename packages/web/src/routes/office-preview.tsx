@@ -84,7 +84,10 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       // An addressed bubble early in the loop, so the chip is visible when someone is WATCHING the
       // room. It is not the one the gate measures: Cy speaks again at 6700, and one bubble per member
       // means this one is superseded long before the sweep's shutter — Bo's at 7500 is the survivor.
-      addressee: { name: 'Fen', tether: true },
+      // An ADR 254 eligible set, deliberately: this is the shape /live carries most (28 of the 35
+      // in the live corpus are review routing), and the design tool must be able to draw the state
+      // the room actually receives — a chip naming the set, and a trace to each desk.
+      addressee: { names: ['Fen', 'Hana'], label: 'Fen or Hana', tether: true },
     },
   },
   { at: 500, ev: { kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' } },
@@ -132,7 +135,7 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       // `rgb(90,78,63)` over its own 9% tone wash, and /office-preview stays 0 below AA. A declined
       // handoff is also the honest place for a recipient chip: "not taking this one" needs a "from
       // whom" or it is unreadable.
-      addressee: { name: 'Eli', tether: true },
+      addressee: { names: ['Eli'], label: 'Eli', tether: true },
     },
   },
   { at: 8000, ev: { kind: 'wait', who: 'Ivy' } },

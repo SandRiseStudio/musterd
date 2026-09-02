@@ -1,4 +1,4 @@
-import type { Envelope } from '@musterd/protocol';
+import { eligibleOf, type Envelope } from '@musterd/protocol';
 import { actLabel, actTone, laneEvent } from '../format';
 import { speechAddressee } from './speech';
 import type { OfficeEvent } from './types';
@@ -83,6 +83,8 @@ export function speechEventFor(env: Envelope): Extract<OfficeEvent, { kind: 'spe
     tone: actTone(env.act),
     id: env.id,
     act: env.act,
-    addressee: speechAddressee(env.to, env.from),
+    // `eligibleOf` is the protocol's single reader of the shape, deliberately shared so no package
+    // can interpret an eligible set differently from the schema that validated it.
+    addressee: speechAddressee(env.to, env.from, eligibleOf(env.meta)),
   };
 }
