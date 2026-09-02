@@ -386,3 +386,77 @@ describe('codexBackend', () => {
     await result.settled;
   });
 });
+
+/**
+ * The completion record (lane 01M1G310Y7). Until 2026-09-02 this backend's `settled` was typed
+ * `Promise<undefined>` — it resolved with nothing, on every run, so the loop's supplementary
+ * wake-cost report had nothing to post and the daemon never wrote a `residency.wake_cost` row for a
+ * codex seat. Measured on the live host log: gptbot 130 spawns, 0 cost rows, against four
+ * claude-code seats that priced. A wake loop on that seat (six leases in 40 minutes, 2026-09-01)
+ * was invisible to the exact rail ADR 252 built to show it.
+ *
+ * Codex prints no cost summary the host can attest, so `cost_usd` stays absent. But wall-clock is
+ * the HOST's measurement, not the child's report — the same principle the native backend states —
+ * and it is what makes every wake, including the ones that fail, land on the rail.
+ */
+describe('the completion record — every settled run reports what the host measured', () => {
+  const fresh = (child: Child) =>
+    codexBackend({
+      resolveBin: async () => '/codex',
+      spawn: (() => child) as never,
+      recordFreshThread: () => undefined,
+    });
+
+  it('a woke run that exits cleanly carries duration_ms', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(true);
+    child.exit(0);
+    const completion = await result.settled;
+    expect(completion).toBeDefined();
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.duration_ms).toBeGreaterThanOrEqual(0);
+    expect(completion?.cost_usd).toBeUndefined();
+  });
+
+  it('a run that FAILS still consumed a spawn and a clock — it prices too', async () => {
+    // gptbot's shape on 2026-09-01: 11 of its wakes died `run exited with code 1`. Each one was a
+    // real process on this machine for real seconds, and none of them reached the rail.
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    child.exit(1);
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(false);
+    const completion = await result.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+  });
+
+  it('a watchdog-killed run prices — it is the most expensive shape there is', async () => {
+    const child = new Child();
+    child.kill = () => {
+      setTimeout(() => child.exit(143), 1);
+      return true;
+    };
+    const slowVerify = () =>
+      new Promise<{ occupied: boolean }>((r) => setTimeout(() => r({ occupied: false }), 150));
+    const backend = codexBackend({
+      resolveBin: async () => '/codex',
+      spawn: (() => child) as never,
+      recordFreshThread: () => undefined,
+      killGraceMs: 5,
+    });
+    const result = await backend.wake(
+      { ...spec, bounds: { timeout_ms: 30 } },
+      { ...ctx, verifyOccupied: slowVerify },
+    );
+    expect(result.outcome.occupied).toBe(false);
+    const completion = await result.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.duration_ms).toBeGreaterThanOrEqual(30);
+  });
+});
