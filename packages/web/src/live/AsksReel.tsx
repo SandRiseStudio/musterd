@@ -13,7 +13,7 @@ import {
   type ReviewView,
 } from './asks';
 import { acceptanceCapacity, initial, kindOf, memberAvatar } from './format';
-import { reelIndex } from './reel';
+import { reelIndex, reelTicks } from './reel';
 
 /**
  * The asks rail as stream chrome (ADR 228) — what `AsksStrip` is to `/live`, minus every part that
@@ -69,18 +69,19 @@ export function AsksReel({
 
   // The tick. Idle cost is paid by every viewer, forever (packages/web/AGENTS.md), and a stream runs
   // for hours — so it runs only when something on screen actually changes with time: a countdown
-  // (`loud`), or a rotation with more than one card to turn.
+  // (`loud`), or a rotation with more than one card to turn. Both halves matter, and why the second
+  // one is not implied by the first is written out on `reelTicks`.
   //
-  // The second half of that condition is not decoration. Before `applyTierClock`, every stale ask
-  // was loud, so a board with anything on it ticked. Now a stage can hold nothing but lanes in
-  // review — nothing loud at all — and gating on `loud` alone would freeze the reel on whichever
-  // card it first drew, for the length of the broadcast.
-  const rotates = cards.length > 1;
+  // Computed HERE, in render, rather than inside the effect: it makes the condition a pure function
+  // this suite can hold (effects never run under `react-dom/server`), and it makes the dependency
+  // exactly the thing the effect branches on — the interval is now torn down and rebuilt only when
+  // the answer actually flips, not on every change of loud count.
+  const ticks = reelTicks(loud.length, cards.length);
   useEffect(() => {
-    if (loud.length === 0 && !rotates) return;
+    if (!ticks) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [loud.length, rotates]);
+  }, [ticks]);
 
   // Null only when the timeline holds no asks at all — same rule as /live's strip. With everything
   // settled, /live shows a quiet "nothing waiting" row rather than vanishing, and the stream keeps

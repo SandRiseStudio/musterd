@@ -43,6 +43,26 @@ const ask = (id: string, tier: string, agoMs: number): Envelope =>
     ts: Date.now() - agoMs,
   }) as Envelope;
 
+/**
+ * An ask a human parked: the ask itself plus the `wait` that carries `ask_ref` back to it, which is
+ * the only thing that produces `state: 'deferred'`. Two envelopes, so it returns a pair to spread.
+ */
+const deferredAsk = (id: string, agoMs: number): Envelope[] => [
+  ask(id, 'standard', agoMs),
+  {
+    id: `${id}-wait`,
+    v: PROTOCOL_VERSION,
+    team: 'revive',
+    from: 'nick',
+    to: { kind: 'member', name: 'izzo' },
+    act: 'wait',
+    body: 'deciding — check back tomorrow',
+    thread: null,
+    meta: { ask_ref: id, until: 'tomorrow' },
+    ts: Date.now() - agoMs + 1,
+  } as Envelope,
+];
+
 const render = (envelopes: Envelope[]) =>
   renderToStaticMarkup(createElement(AsksStrip, { envelopes, roster, cfg }));
 
@@ -86,5 +106,32 @@ describe('the rail, rendered — a lapsed ask must not read as one waiting on yo
     const rail = html.slice(0, html.indexOf('lc-asks__sheet'));
     expect(rail).toContain('body of live');
     expect(rail).not.toContain('body of lapsed');
+  });
+
+  /**
+   * The order of the sheet itself: `loud → deferred → lapsed`.
+   *
+   * The test above proves a lapsed ask is not FIRST, which is not the same claim and was the whole
+   * of the coverage until 2026-09-02 — with only a lapsed and a live ask in play, swapping the last
+   * two buckets is invisible. Confirmed by mutation before this test was written: reordering
+   * `AsksStrip.tsx`'s `cards` to `[...loud, ...lapsed, ...deferred]` left all 867 web tests green.
+   * That ordering is the difference between "someone is deciding this" and "the clock decided it",
+   * and it is what a reader scans top-down to find what still needs them.
+   */
+  it('orders the sheet loud, then deferred, then lapsed — a deferred ask outranks a dead one', () => {
+    const html = render([
+      ask('lapsed', 'standard', DAYS_3),
+      ...deferredAsk('deciding', DAYS_3),
+      ask('live', 'blocking', 1000),
+    ]);
+    const at = (id: string) => html.indexOf(`body of ${id}`);
+    // All three are on the page — an ordering assertion over a missing card proves nothing.
+    expect(at('live')).toBeGreaterThan(-1);
+    expect(at('deciding')).toBeGreaterThan(-1);
+    expect(at('lapsed')).toBeGreaterThan(-1);
+    expect(at('live')).toBeLessThan(at('deciding'));
+    expect(at('deciding')).toBeLessThan(at('lapsed'));
+    // And the counts agree with the buckets the order was built from.
+    expect(html).toContain('1 elapsed');
   });
 });
