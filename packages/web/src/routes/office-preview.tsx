@@ -73,7 +73,7 @@ const FIXTURE_IDENTITY: Record<string, { surface: string; model: string | null; 
 
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
 const SCRIPT: { at: number; ev: OfficeEvent }[] = [
-  { at: 200, ev: { kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' } },
+  { at: 200, ev: { kind: 'walk-help', from: 'Ada', to: ['Bo'], tier: 'needs-attn' } },
   {
     at: 300,
     ev: {
@@ -87,11 +87,15 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       // An ADR 254 eligible set, deliberately: this is the shape /live carries most (28 of the 35
       // in the live corpus are review routing), and the design tool must be able to draw the state
       // the room actually receives — a chip naming the set, and a trace to each desk.
-      addressee: { names: ['Fen', 'Hana'], label: 'Fen or Hana', tether: true },
+      addressee: { names: ['Hana', 'Bo'], label: 'Hana or Bo', tether: true },
     },
   },
   { at: 500, ev: { kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' } },
-  { at: 1100, ev: { kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' } },
+  // Cy's bubble at 200ms names an eligible set ("Hana or Bo"), and the walk it describes visits
+  // BOTH desks in turn — the design tool draws the multi-stop trip /live actually receives. Both
+  // names are members who are ON the floor by default: `Fen` is in the default `offline` set above,
+  // so a leg to Fen never plays and the tool would show a one-stop trip while claiming two.
+  { at: 1100, ev: { kind: 'walk-help', from: 'Cy', to: ['Hana', 'Bo'], tier: 'urgent' } },
   { at: 1800, ev: { kind: 'megaphone', from: 'Ivy' } },
   {
     at: 2000,
@@ -148,10 +152,10 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       tone: 'info',
     },
   },
-  { at: 4200, ev: { kind: 'note', from: 'Ada', to: 'Cy', tone: 'info' } },
+  { at: 4200, ev: { kind: 'note', from: 'Ada', to: ['Cy'], tone: 'info' } },
   // Steering trio (ADR 103): a challenge questions a direction, an interrupt-class steer redirects it,
   // and a defer pushes a Goal later — a board-wide pulse.
-  { at: 4700, ev: { kind: 'challenge', from: 'Dev', to: 'Bo', urgent: false } },
+  { at: 4700, ev: { kind: 'challenge', from: 'Dev', to: ['Bo'], urgent: false } },
   {
     at: 4800,
     ev: {
@@ -543,14 +547,14 @@ function OfficePreviewPage() {
         <button
           className="lc__pbtn"
           title="request help (walk-over)"
-          onClick={() => fire({ kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' })}
+          onClick={() => fire({ kind: 'walk-help', from: 'Ada', to: ['Bo'], tier: 'needs-attn' })}
         >
           ?
         </button>
         <button
           className="lc__pbtn"
           title="urgent help (run)"
-          onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' })}
+          onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: ['Fen'], tier: 'urgent' })}
         >
           !
         </button>
@@ -579,7 +583,7 @@ function OfficePreviewPage() {
         <button
           className="lc__pbtn"
           title="challenge (justify?)"
-          onClick={() => fire({ kind: 'challenge', from: 'Cy', to: 'Bo', urgent: false })}
+          onClick={() => fire({ kind: 'challenge', from: 'Cy', to: ['Bo'], urgent: false })}
         >
           🤔
         </button>

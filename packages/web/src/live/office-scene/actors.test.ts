@@ -181,6 +181,59 @@ describe('walk choreography', () => {
     expect(back.bubble).toBeNull();
   });
 
+  /**
+   * ADR 254 eligible sets: an act addressed to 2-4 seats makes the sender walk to EACH desk, one
+   * trip after another, because any of them can discharge it and the room must not rank them
+   * (nick, 2026-09-02). `walk` already queued per call; this pins that a set-sized burst actually
+   * drains, since the backlog guard caps `pending` at three and MAX_ELIGIBLE is four.
+   */
+  it('walks the sender to every seat of an eligible set, one desk after another', () => {
+    const { placements, byName } = world([node('Ada'), node('Bo'), node('Cy'), node('Dee'), node('Eve')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    const home = actors.poses().get('Ada')!;
+    const desks = new Map(
+      ['Bo', 'Cy', 'Dee', 'Eve'].map((n) => [n, actors.poses().get(n)!] as const),
+    );
+
+    // The MAX_ELIGIBLE cap: four names, so three queue behind the one that starts immediately.
+    for (const to of ['Bo', 'Cy', 'Dee', 'Eve']) {
+      expect(actors.walk('Ada', { kind: 'help', to, urgent: false })).toBe(true);
+    }
+
+    // Nearest approach to each desk over the whole burst — a leg that never ran stays far away.
+    const nearest = new Map([...desks.keys()].map((n) => [n, Infinity]));
+    let guard = 0;
+    while (actors.active() && guard++ < 20000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada')!;
+      for (const [n, d] of desks) {
+        const gap = Math.hypot(p.lx - d.lx, p.ly - d.ly);
+        if (gap < nearest.get(n)!) nearest.set(n, gap);
+      }
+    }
+    expect(actors.active()).toBe(false);
+
+    // Every one of the four was actually visited, not just the first.
+    /**
+     * A visit is "came far closer to that desk than sitting at home ever would". Measured rather
+     * than guessed: a walker stops BESIDE a desk, not on it (~72 units of stand-off here), while the
+     * four baselines from Ada's own seat are 190, 318, 460 and 673. An absolute "did it touch the
+     * desk" threshold reads every leg as a miss, which is exactly the wrong conclusion — so compare
+     * each approach with its own baseline instead of with a magic number.
+     */
+    for (const [n, gap] of nearest) {
+      const d = desks.get(n)!;
+      const baseline = Math.hypot(home.lx - d.lx, home.ly - d.ly);
+      expect({ seat: n, visited: gap < baseline * 0.5 }).toEqual({ seat: n, visited: true });
+    }
+
+    // And the sender is back at its own desk when the whole trip is done.
+    const back = actors.poses().get('Ada')!;
+    expect(back.lx).toBeCloseTo(home.lx, 5);
+    expect(back.ly).toBeCloseTo(home.ly, 5);
+  });
+
   it("won't walk to a dnd member — do-not-interrupt is honoured by the choreography (\u00a74 lane 4)", () => {
     const focused = { ...node('Bo'), dnd: true };
     const { placements, byName } = world([node('Ada'), focused]);

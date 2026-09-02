@@ -12,6 +12,7 @@ import {
 import { stillMode } from '../stillMode';
 import { surfaceGlyph } from '../surfaceGlyph';
 import { createActors, deskNeighbourPairs, type Actors } from './actors';
+import { helpWalks } from './mapping';
 import {
   ambientFrameBudgetMs,
   DEFAULT_CAPTURE_FPS,
@@ -1579,18 +1580,31 @@ export function mountOffice(
       case 'screen-pulse':
         pushCue(ev.who, toneColor(ev.tone), '');
         break;
+      // `to` is a list on the three ELIGIBLE_ACTS: one name normally, 2-4 for an ADR 254 set. Each
+      // name gets the identical treatment a single recipient gets — the room must not rank them,
+      // because the ledger does not (nick, 2026-09-02).
       case 'note':
-        pushCue(ev.to, toneColor(ev.tone), '');
         pushCue(ev.from, toneColor(ev.tone), '');
-        pushThread(ev.from, ev.to, toneColor(ev.tone));
+        for (const to of ev.to) {
+          pushCue(to, toneColor(ev.tone), '');
+          pushThread(ev.from, to, toneColor(ev.tone));
+        }
         break;
-      case 'walk-help':
-        pushThread(ev.from, ev.to);
-        // A real walk-over; fall back to an in-place cue only if the walk can't play (target gone).
-        if (!actors.walk(ev.from, { kind: 'help', to: ev.to, urgent: ev.tier === 'urgent' })) {
+      case 'walk-help': {
+        // The sender walks to EVERY name, one desk after another: `actors.walk` queues per call
+        // (one trip in flight, up to three pending), so a set at the MAX_ELIGIBLE cap of four fits
+        // without the backlog guard dropping a leg. The fallback cue fires only if NO leg could
+        // play — one unreachable desk among several is not a failed act, it is a shorter trip.
+        let walked = false;
+        for (const req of helpWalks(ev)) {
+          pushThread(ev.from, req.to);
+          if (actors.walk(ev.from, req)) walked = true;
+        }
+        if (!walked) {
           pushCue(ev.from, '#f4cf52', ev.tier === 'urgent' ? '!' : '', ev.tier === 'urgent');
         }
         break;
+      }
       case 'walk-handoff':
         pushThread(ev.from, ev.to, toneColor('handoff'));
         if (!actors.walk(ev.from, { kind: 'handoff', to: ev.to, urgent: false })) {
@@ -1644,7 +1658,7 @@ export function mountOffice(
         // party when it's directed. Urgent only when flagged (bolder ring + glyph then).
         const col = toneColor('challenge');
         pushCue(ev.from, col, '?', ev.urgent);
-        if (ev.to) pushCue(ev.to, col, '?', ev.urgent);
+        for (const to of ev.to) pushCue(to, col, '?', ev.urgent);
         break;
       }
       case 'defer':

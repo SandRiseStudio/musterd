@@ -1,6 +1,6 @@
 import type { Act, Envelope, Recipient } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import { actToEvent, speechEventFor } from './mapping';
+import { actToEvent, helpWalks, speechEventFor } from './mapping';
 
 function env(act: Act, over: Partial<Envelope> = {}): Envelope {
   return {
@@ -28,7 +28,7 @@ describe('actToEvent', () => {
   });
 
   it('maps a direct message to a note, a team message to a megaphone', () => {
-    expect(actToEvent(env('message'))).toMatchObject({ kind: 'note', from: 'ada', to: 'ben' });
+    expect(actToEvent(env('message'))).toMatchObject({ kind: 'note', from: 'ada', to: ['ben'] });
     expect(actToEvent(env('message', { to: { kind: 'team' } }))).toEqual({
       kind: 'megaphone',
       from: 'ada',
@@ -91,14 +91,58 @@ describe('actToEvent', () => {
     expect(actToEvent(env('challenge'))).toEqual({
       kind: 'challenge',
       from: 'ada',
-      to: 'ben',
+      to: ['ben'],
       urgent: false,
     });
     expect(actToEvent(env('challenge', { to: { kind: 'team' }, meta: { urgent: true } }))).toEqual({
       kind: 'challenge',
       from: 'ada',
-      to: null,
+      to: [],
       urgent: true,
+    });
+  });
+
+  /**
+   * ADR 254 eligible sets, on the three acts that may carry one. Every name is treated as a full
+   * recipient — the sender walks to each desk in turn, exactly the trip a single recipient gets
+   * (nick, 2026-09-02). Before this these fell through to `megaphone`: 28 request_help and 7
+   * message acts in the live corpus drew nobody at all.
+   */
+  describe('an eligible set is a list of real recipients, not a team broadcast', () => {
+    const set = (act: Act, eligible: string[], extra: Record<string, unknown> = {}) =>
+      actToEvent(env(act, { to: { kind: 'team' }, meta: { eligible, ...extra } }));
+
+    it('walks request_help to every seat in the set', () => {
+      expect(set('request_help', ['ben', 'cy'])).toMatchObject({
+        kind: 'walk-help',
+        from: 'ada',
+        to: ['ben', 'cy'],
+        tier: 'needs-attn',
+      });
+    });
+
+    it('carries the urgent tier across the whole set, not just the first leg', () => {
+      expect(set('request_help', ['ben', 'cy', 'dee'], { urgent: true })).toMatchObject({
+        tier: 'urgent',
+        to: ['ben', 'cy', 'dee'],
+      });
+    });
+
+    it('notes a message to every seat, and questions a challenge at every seat', () => {
+      expect(set('message', ['ben', 'cy'])).toMatchObject({ kind: 'note', to: ['ben', 'cy'] });
+      expect(set('challenge', ['ben', 'cy'])).toMatchObject({ kind: 'challenge', to: ['ben', 'cy'] });
+    });
+
+    it('drops the sender out of their own set — nobody walks to their own desk', () => {
+      expect(set('request_help', ['ada', 'ben'])).toMatchObject({ to: ['ben'] });
+    });
+
+    it('falls back to the megaphone when the set names nobody else', () => {
+      expect(set('request_help', ['ada'])).toEqual({ kind: 'megaphone', from: 'ada' });
+      expect(actToEvent(env('request_help', { to: { kind: 'team' } }))).toEqual({
+        kind: 'megaphone',
+        from: 'ada',
+      });
     });
   });
 
@@ -167,5 +211,39 @@ describe('speechEventFor', () => {
 
   it('whitespace-only bodies count as body-less', () => {
     expect(speechEventFor(env('status_update', { body: '   ' })).text).toBe('status');
+  });
+});
+
+/**
+ * The fan-out the scene performs for a `walk-help`. Pinned here because the loop that consumes it
+ * lives in the imperative scene module: mutating that loop to `ev.to.slice(0, 1)` — walk only the
+ * first seat of an eligible set — left all 890 web tests green before this function existed.
+ *
+ * What this does NOT hold, stated rather than implied: that the scene calls `actors.walk` once per
+ * returned request. That is one line inside `index.ts`, which has no DOM here to mount; the fan-out
+ * decision itself is now covered, instead of nothing being covered.
+ */
+describe('helpWalks — one trip per seat, in the order the sender named them', () => {
+  const ev = (to: string[], tier: 'needs-attn' | 'urgent' = 'needs-attn') =>
+    ({ kind: 'walk-help', from: 'ada', to, tier }) as const;
+
+  it('makes a trip for every seat of an eligible set, not just the first', () => {
+    expect(helpWalks(ev(['ben', 'cy', 'dee']))).toEqual([
+      { kind: 'help', to: 'ben', urgent: false },
+      { kind: 'help', to: 'cy', urgent: false },
+      { kind: 'help', to: 'dee', urgent: false },
+    ]);
+  });
+
+  it('carries the urgent tier onto every leg — the last desk is not a calmer errand', () => {
+    expect(helpWalks(ev(['ben', 'cy'], 'urgent')).every((w) => w.urgent)).toBe(true);
+  });
+
+  it('is a single trip for a single recipient, unchanged', () => {
+    expect(helpWalks(ev(['ben']))).toEqual([{ kind: 'help', to: 'ben', urgent: false }]);
+  });
+
+  it('asks for no trip at all when the act named nobody', () => {
+    expect(helpWalks(ev([]))).toEqual([]);
   });
 });
