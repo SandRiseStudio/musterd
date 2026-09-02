@@ -125,3 +125,11 @@ deterministic guards are what actually carry the load.
 PRs with `REVIEW_MODEL=claude-sonnet-5` and compare findings against the Haiku run on the same diff,
 which isolates model capability from rule quality. Worth running only if the Haiku acceptance rate
 is genuinely borderline — not as routine tuning.
+
+## Amendment (2026-09-02): the Eval was read, and the reviewer is dropped
+
+The finding-acceptance rate above was never computed until [ADR 180 reviewer eval](../wiki/adr-180-reviewer-eval.md) (dolly, 2026-09-02): **0 of 55 findings** posted on the 22 commented PRs among the last 80 led to a code change before merge, zero received a reply, and the Bugbot baseline the Eval named was itself **0–1 of 94** — Bugbot's median gap from first finding to merge was 0 minutes. The rule this section wrote fires on both arms: the cheap model lost nothing that mattered, and near-zero over 176 in-scope PRs (not ~30) means drop, not upgrade.
+
+Decision 3 is therefore retired: `.github/workflows/review.yml` and `scripts/review/pr-review.ts` are removed in the same PR as the eval page. Decisions 1, 2 and 4 stand — `gates` is still the only required check, the deterministic guards are what carried the load, and `.github/REVIEW-RULES.md` remains the one home for review rules as the human/seat checklist [ADR 338](338-a-finding-is-not-a-fix-request.md) builds on. The shadow experiment reserved for a borderline rate is not run; a reviewer nobody reads is not improved by a better model.
+
+The Consequences line "the advisory reviewer must not be treated as coverage" turned out to be the whole story: it was not treated as anything.
