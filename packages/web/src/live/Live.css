@@ -1396,6 +1396,7 @@
      actually fills with them. Measured on --lc-paper (#f3e2c3), the lightest stock they land on. */
   --lc-hz-codex-ink: #0f6b52; /* 5.08:1 */
   --lc-hz-cursor-ink: #4f46b8; /* 5.68:1 */
+  --lc-hz-grok-ink: #8e2a7d; /* 5.93:1 — magenta, the one hue the other three leave free */
   --lc-hz-opencode-ink: #a03d00; /* 5.21:1 */
 }
 
@@ -1710,6 +1711,9 @@
 }
 .lc-gl-label__seg--hz-cursor {
   color: var(--lc-hz-cursor-ink);
+}
+.lc-gl-label__seg--hz-grok {
+  color: var(--lc-hz-grok-ink);
 }
 .lc-gl-label__seg--hz-opencode {
   color: var(--lc-hz-opencode-ink);

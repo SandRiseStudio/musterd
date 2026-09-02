@@ -24,10 +24,13 @@ const CURSOR_SVG = `${SVG_OPEN}<path fill="currentColor" d="M5 2.5l14.5 10.1-7.4
 /** codex — a shell prompt: chevron and underscore. */
 const CODEX_SVG = `${SVG_OPEN}<path fill="currentColor" d="M4.5 5.6L12.9 12l-8.4 6.4 1.9 2.4L17.5 12 6.4 3.2zM13.5 19.4h8v2.6h-8z"/></svg>`;
 
+/** grok — a crossed slash: two bars, the shape xAI's mark reduces to at this size. */
+const GROK_SVG = `${SVG_OPEN}<path fill="currentColor" d="M4 3.2h3.6L20 20.8h-3.6zM20 3.2h-3.6L4 20.8h3.6z"/></svg>`;
+
 /** opencode — a terminal block cursor mid-line. */
 const OPENCODE_SVG = `${SVG_OPEN}<path fill="currentColor" d="M3 16.8h5.2v3.4H3zM9.8 13.4h8.4v6.8H9.8zM3 3.8h15.2v3.4H3zM3 8.6h10.4V12H3z"/></svg>`;
 
-export type SurfaceGlyphId = 'codex' | 'cursor' | 'opencode';
+export type SurfaceGlyphId = 'codex' | 'cursor' | 'grok' | 'opencode';
 
 export interface SurfaceGlyph {
   id: SurfaceGlyphId;
@@ -37,12 +40,13 @@ export interface SurfaceGlyph {
 const GLYPHS: Record<SurfaceGlyphId, string> = {
   codex: CODEX_SVG,
   cursor: CURSOR_SVG,
+  grok: GROK_SVG,
   opencode: OPENCODE_SVG,
 };
 
 export function surfaceGlyph(surface: string | null | undefined): SurfaceGlyph | null {
   if (!surface) return null;
-  if (surface === 'codex' || surface === 'cursor' || surface === 'opencode') {
+  if (surface === 'codex' || surface === 'cursor' || surface === 'grok' || surface === 'opencode') {
     return { id: surface, svg: GLYPHS[surface] };
   }
   return null;
