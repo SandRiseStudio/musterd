@@ -18,6 +18,7 @@ import {
   resolveBindingDir,
   warnForeignAdapterWorkspace,
 } from './binding.js';
+import { processAncestry } from './processAncestry.js';
 import { readWakeLeaseFile } from './wakeLeaseFile.js';
 import {
   resolveDriver,
@@ -248,7 +249,8 @@ export function resolveLaunchSurface(env: NodeJS.ProcessEnv): {
 /** Test seams for the wake-lease file fallback (ADR 354); production reads the real clock and pid. */
 export interface LoadMcpConfigDeps {
   now?: () => number;
-  ppid?: () => number;
+  /** This process's ancestors, nearest first; defaults to a bounded `ps` walk (`processAncestry`). */
+  ancestors?: () => readonly number[];
 }
 
 export function loadMcpConfig(
@@ -303,14 +305,16 @@ export function loadMcpConfig(
   // Codex launches MCP servers with a sanitized env (measured 2026-09-02: twelve variables, no
   // `MUSTERD_*`), so on that harness this is the only way the adapter can learn it was woken, and
   // without it the actuator read its own session as "held by another" and killed it. The reader
-  // honours the file only from the process the actuator spawned (spawner_pid === our ppid) and only
-  // while unexpired — an attestation with a source, never a default (ADR 236).
+  // honours the file only from a process descended from the one the actuator spawned (spawner_pid
+  // in our bounded ancestry — the `codex` launcher is a Node wrapper one generation above the
+  // native binary that launches us) and only while unexpired — an attestation with a source, never
+  // a default (ADR 236).
   const envSilent =
     resolveAttestedProvenance(env) === undefined && resolveWakeLease(env) === undefined;
   const fromFile = envSilent
     ? readWakeLeaseFile(bindingDir, {
         now: deps.now?.() ?? Date.now(),
-        ppid: deps.ppid?.() ?? process.ppid,
+        ancestors: deps.ancestors ?? (() => processAncestry()),
       })
     : undefined;
   return {

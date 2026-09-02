@@ -18,12 +18,16 @@ export interface WakeLeaseFromFile {
  * environment carried neither `MUSTERD_PROVENANCE` nor `MUSTERD_WAKE_LEASE`.
  */
 export function readWakeLeaseFile(
-  workspace: string,
-  deps: { now: number; ppid: number },
+  // The workspace ROOT (what `resolveBindingDir` returns), never the `.musterd` dir itself — this
+  // joins `BINDING_DIR` on. Named so the call site reads right without checking (ryder, #1187).
+  workspaceRoot: string,
+  // `ancestors` is a thunk: the walk costs one `ps` per hop and must run only once a file has
+  // been found and parsed — the common case (no file) pays nothing.
+  deps: { now: number; ancestors: () => readonly number[] },
 ): WakeLeaseFromFile | undefined {
   let raw: string;
   try {
-    raw = readFileSync(join(workspace, BINDING_DIR, WAKE_LEASE_FILE), 'utf8');
+    raw = readFileSync(join(workspaceRoot, BINDING_DIR, WAKE_LEASE_FILE), 'utf8');
   } catch {
     return undefined;
   }
@@ -37,8 +41,12 @@ export function readWakeLeaseFile(
   if (!result.success) return undefined;
   const lease = result.data;
   // The two conditions that make this an attestation and not a default (ADR 236): the file must
-  // name the process that spawned us, and it must still be inside the wake it was written for.
-  if (lease.spawner_pid !== deps.ppid) return undefined;
+  // name a process in OUR ancestry — the one the actuator spawned — and it must still be inside the
+  // wake it was written for. Ancestry rather than the parent alone because the harness the actuator
+  // spawns is not always the one that launches us: `codex` is a Node wrapper that spawns the native
+  // binary, so the actuator's child is our grandparent (the live falsifier for #1187 refused on
+  // exactly that hop). Expiry is checked first — it is free, and a dead file must not cost a `ps`.
   if (deps.now >= lease.expires_at) return undefined;
+  if (!deps.ancestors().includes(lease.spawner_pid)) return undefined;
   return { lease_id: lease.lease_id, harness: lease.harness };
 }

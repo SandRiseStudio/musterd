@@ -66,14 +66,14 @@ afterEach(() => {
 describe('loadMcpConfig — the wake-lease file fills a silent env, never overrides a spoken one', () => {
   it('silent env + file naming our parent ⇒ provenance wake and the lease (the codex wake)', () => {
     writeLease(4242);
-    const cfg = loadMcpConfig(baseEnv(), { now: () => NOW, ppid: () => 4242 });
+    const cfg = loadMcpConfig(baseEnv(), { now: () => NOW, ancestors: () => [4242] });
     expect(cfg.provenance).toBe('wake');
     expect(cfg.wakeLease).toBe('01M1HKKABRN1N967MXZY1EAG19');
   });
 
   it('silent env + file naming SOMEONE ELSE ⇒ session, no lease (a human in the same workspace)', () => {
     writeLease(4242);
-    const cfg = loadMcpConfig(baseEnv(), { now: () => NOW, ppid: () => 7 });
+    const cfg = loadMcpConfig(baseEnv(), { now: () => NOW, ancestors: () => [7, 6] });
     expect(cfg.provenance).toBe('session');
     expect(cfg.wakeLease).toBeUndefined();
   });
@@ -82,7 +82,7 @@ describe('loadMcpConfig — the wake-lease file fills a silent env, never overri
     writeLease(4242, { lease_id: 'FROM_FILE' });
     const cfg = loadMcpConfig(
       { ...baseEnv(), MUSTERD_PROVENANCE: 'wake', MUSTERD_WAKE_LEASE: 'FROM_ENV' },
-      { now: () => NOW, ppid: () => 4242 },
+      { now: () => NOW, ancestors: () => [4242] },
     );
     expect(cfg.provenance).toBe('wake');
     expect(cfg.wakeLease).toBe('FROM_ENV');
@@ -93,7 +93,7 @@ describe('loadMcpConfig — the wake-lease file fills a silent env, never overri
     writeLease(4242);
     const cfg = loadMcpConfig(
       { ...baseEnv(), MUSTERD_PROVENANCE: 'session' },
-      { now: () => NOW, ppid: () => 4242 },
+      { now: () => NOW, ancestors: () => [4242] },
     );
     expect(cfg.provenance).toBe('session');
     expect(cfg.wakeLease).toBeUndefined();
@@ -111,7 +111,7 @@ describe('loadMcpConfig — the wake-lease file fills a silent env, never overri
         agent_key: 'msak_test',
       }),
     );
-    const cfg = loadMcpConfig(baseEnv(), { now: () => NOW, ppid: () => 4242 });
+    const cfg = loadMcpConfig(baseEnv(), { now: () => NOW, ancestors: () => [4242] });
     expect(cfg.provenance).toBe('session');
     expect(cfg.wakeLease).toBeUndefined();
   });
