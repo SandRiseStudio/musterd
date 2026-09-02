@@ -17,7 +17,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('55');
+    expect(ver?.value).toBe('56');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -262,7 +262,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(55); // runs v18…v55 (including the pull cursor and bootstrap cutover evidence)
+    expect(runMigrations(db)).toBe(56); // runs v18…v56 (including the pull cursor and bootstrap cutover evidence)
 
     const scope = (id: string) =>
       db
@@ -326,7 +326,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(55);
+    expect(runMigrations(db)).toBe(56);
 
     const policy = (id: string) =>
       db
@@ -658,9 +658,29 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(55);
+    expect(runMigrations(db)).toBe(56);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
+    db.close();
+  });
+
+  // ryder, acceptance of 3b-ii (01M1FAD24JM5), 2026-09-02: v54 never ran on the dogfood daemon.
+  // #1164 landed v55 first; runMigrations is a high-water mark, so a DB already at 55 skips a 54
+  // that arrives later. Live musterd.db sat at schema 55 with no idx_messages_origin and no
+  // sync_pull_cursor. v56 re-issues v54's IF NOT EXISTS body so that DB catches up.
+  it('v56 re-issues v54 for a DB that reached 55 without it', () => {
+    const db = withRemoteNode();
+    db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
+    db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
+
+    expect(runMigrations(db)).toBe(56);
+
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
+    ).toEqual({ name: 'sync_pull_cursor' });
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'idx_messages_origin'").get(),
+    ).toEqual({ name: 'idx_messages_origin' });
     db.close();
   });
 

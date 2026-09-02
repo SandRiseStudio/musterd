@@ -1362,6 +1362,24 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // v54 never ran on any DB that had already reached v55. #1164 (ADR 350) landed v55 on main
+    // first; #1155 (3b-ii) then landed v54 behind it, and runMigrations is a high-water mark, so a
+    // lower number arriving later is skipped. The dogfood daemon sat at schema 55 with no
+    // idx_messages_origin and no sync_pull_cursor (ryder, 3b-ii acceptance, 2026-09-02). Re-issue
+    // v54's body verbatim; every statement is IF NOT EXISTS, so a DB that ran v54 is untouched.
+    version: 56,
+    up: (db) => {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_origin ON messages(origin_node, origin_seq);
+        CREATE TABLE IF NOT EXISTS sync_pull_cursor (
+          team_id       TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          last_hub_seq  INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {
