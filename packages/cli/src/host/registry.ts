@@ -57,17 +57,51 @@ export function saveHostRegistry(registry: HostRegistry, path = hostRegistryPath
   writeFileSync(path, JSON.stringify(registry, null, 2) + '\n', 'utf8');
 }
 
+/** Every spelling of the local loopback that a binding has been seen to carry. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]', '0:0:0:0:0:0:0:1']);
+
+/**
+ * The registry's identity for a daemon (lane 01M1J2V4EJ, 2026-09-02). `server` is copied from a
+ * workspace's `binding.json`, which a human typed — `localhost` in one, `127.0.0.1` in the next —
+ * and the same socket under two spellings became two registry identities and two poll groups. The
+ * first group to claim a lease for the other's seat then reported it "not in this machine's host
+ * registry" while the seat WAS registered. Fold what cannot distinguish two daemons: case, the
+ * trailing slash, and the loopback aliases. A remote host keeps its name; a value that is not a
+ * URL is returned as given, so the loop still groups on it rather than dropping the entry.
+ */
+export function canonicalServer(server: string): string {
+  let url: URL;
+  try {
+    url = new URL(server);
+  } catch {
+    return server;
+  }
+  const host = url.hostname.toLowerCase();
+  const canonicalHost =
+    LOOPBACK_HOSTS.has(host) || /^127\.\d+\.\d+\.\d+$/.test(host) ? '127.0.0.1' : host;
+  const port = url.port ? `:${url.port}` : '';
+  const pathname = url.pathname.replace(/\/+$/, '');
+  return `${url.protocol.toLowerCase()}//${canonicalHost}${port}${pathname}`;
+}
+
 const sameSeat = (a: { server?: string; team: string; seat: string }, b: HostRegistryEntry) =>
-  (a.server === undefined || a.server === b.server) && a.team === b.team && a.seat === b.seat;
+  (a.server === undefined || canonicalServer(a.server) === canonicalServer(b.server)) &&
+  a.team === b.team &&
+  a.seat === b.seat;
 
 /** Upsert keyed on (server, team, seat) — one workspace per seat per machine, last-write-wins
- *  (mirroring the server's last-enrolled-wins). Returns the saved entry. */
+ *  (mirroring the server's last-enrolled-wins). The server is stored canonical. Returns the saved
+ *  entry. */
 export function upsertHostEntry(
   entry: Omit<HostRegistryEntry, 'updated_at'>,
   path = hostRegistryPath(),
 ): HostRegistryEntry {
   const registry = loadHostRegistry(path);
-  const full: HostRegistryEntry = { ...entry, updated_at: Date.now() };
+  const full: HostRegistryEntry = {
+    ...entry,
+    server: canonicalServer(entry.server),
+    updated_at: Date.now(),
+  };
   const rest = registry.entries.filter((e) => !sameSeat(entry, e));
   saveHostRegistry({ entries: [...rest, full] }, path);
   return full;
