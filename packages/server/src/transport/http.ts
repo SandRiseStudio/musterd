@@ -4046,11 +4046,10 @@ export async function handleHttp(
             `"${member.name}" is a service seat — ledger seats never open or hold lanes (ADR 232)`,
           );
         const body = parseOrBadRequest(OpenLaneSchema, await readJson(req));
-        // The `lane.claimed at_open` row (ADR 203's third acquisition edge) is written by the store
-        // inside the insert's transaction (lane-replication spec §Hole 3).
-        const lane = openLane(ctx.db, team.id, team.slug, member.name, body, Date.now(), {
-          actor: member.name,
-        });
+        // The `lane.opened` birth row and the `lane.claimed at_open` row (ADR 203's third
+        // acquisition edge) are written by the store inside the insert's transaction, as the
+        // creator (lane-replication spec §Hole 3, Finding 4).
+        const lane = openLane(ctx.db, team.id, team.slug, member.name, body, Date.now());
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
         // goals-front-door design: an unclaimed open isn't contending, so laneWarnings stays quiet —

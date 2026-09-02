@@ -536,7 +536,6 @@ describe('lane.* rows are written by the store, inside the write', () => {
         claim: true,
       },
       7,
-      { actor: 'June' },
     );
     expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened', 'lane.claimed']);
     expect(rows(db, lane.id)[0]).toEqual({
@@ -564,15 +563,13 @@ describe('lane.* rows are written by the store, inside the write', () => {
 
   it('an unclaimed open still writes lane.opened, and nothing else', () => {
     const { db, team } = seed();
-    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'unowned' }, 7, { actor: 'June' });
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'unowned' }, 7);
     expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened']);
   });
 
   it('openLane with claim writes lane.claimed at_open', () => {
     const { db, team } = seed();
-    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'born owned', claim: true }, 1, {
-      actor: 'June',
-    });
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'born owned', claim: true }, 1);
     expect(rows(db, lane.id).slice(1)).toEqual([
       {
         actor: 'June',
@@ -599,7 +596,8 @@ describe('lane.* rows are written by the store, inside the write', () => {
     updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'Cleo' }, 5, undefined, audit);
     updateLane(db, team.id, lane.id, 'bravo', { state: 'open' }, 6, undefined, { actor: 'Cleo' });
 
-    expect(rows(db, lane.id)).toEqual([
+    expect(rows(db, lane.id)[0].action).toBe('lane.opened');
+    expect(rows(db, lane.id).slice(1)).toEqual([
       {
         actor: 'June',
         action: 'lane.claimed',
@@ -647,11 +645,12 @@ describe('lane.* rows are written by the store, inside the write', () => {
     expect(getLane(db, team.id, lane.id, 'bravo')?.branch).toBe('before');
   });
 
-  it('without an audit option nothing is written (callers that own their own verb)', () => {
+  it('updateLane without an audit option writes nothing (callers that own their own verb)', () => {
     const { db, team } = seed();
     const lane = openLane(db, team.id, 'bravo', 'June', { title: 't' });
     updateLane(db, team.id, lane.id, 'bravo', { state: 'active' });
-    expect(rows(db, lane.id)).toEqual([]);
+    // The birth is the store's own row and is always there; the patch added nothing after it.
+    expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened']);
   });
 });
 

@@ -188,9 +188,12 @@ export function openLane(
   createdBy: string,
   input: OpenLane,
   now: number = Date.now(),
-  audit?: LaneAudit,
 ): Lane {
   const claim = input.claim === true;
+  // The birth's actor IS the creator — every caller passed the same name twice, and two of three
+  // (incidents, seeds) passed nothing and were born with no first event (dolly, #1179 decline). So
+  // openLane takes no audit argument at all: the store writes the birth, and no caller can omit it.
+  const audit: LaneAudit = { actor: createdBy };
   // ADR 244: an admin's default-stakes rule fires HERE, at open, and never again. Resolving it late
   // — at submit, or at close — would make a policy able to rewrite what a lane already was, which is
   // the exact trap ADR 234 increment 2 named for the close edge: only a RECORDED fact earns a label.
@@ -244,29 +247,27 @@ export function openLane(
     // Finding 4 (lane-replication spec): the birth is the first event, and it carries the whole
     // declaration — the fields `lane.updated` will later diff against. Without it the log describes
     // what happened to a lane and never what the lane is.
-    if (audit) {
-      laneAuditRow(db, teamId, audit, 'lane.opened', row.id, {
-        lane: row.id,
-        title: row.title,
-        project: row.project,
-        detail: row.detail,
-        kind: row.kind,
-        role: row.role,
-        scope: input.scope ?? [],
-        depends_on: input.depends_on ?? [],
-        branch: row.branch,
-        goal_id: row.goal_id,
-        risk: input.risk ?? [],
-        stakes,
-        stakes_provenance: row.stakes_provenance ?? 'declared',
-        created_by: createdBy,
-        created_at: now,
-      });
-    }
+    laneAuditRow(db, teamId, audit, 'lane.opened', row.id, {
+      lane: row.id,
+      title: row.title,
+      project: row.project,
+      detail: row.detail,
+      kind: row.kind,
+      role: row.role,
+      scope: input.scope ?? [],
+      depends_on: input.depends_on ?? [],
+      branch: row.branch,
+      goal_id: row.goal_id,
+      risk: input.risk ?? [],
+      stakes,
+      stakes_provenance: row.stakes_provenance ?? 'declared',
+      created_by: createdBy,
+      created_at: now,
+    });
     // A lane born owned is the most common acquisition of all (ADR 203). No collision is possible —
     // the lane did not exist — so no guard: just the row, `at_open` so a reader can tell a birth
     // from a takeover.
-    if (audit && row.owner_seat) {
+    if (row.owner_seat) {
       laneAuditRow(db, teamId, audit, 'lane.claimed', row.id, {
         lane: row.id,
         owner: row.owner_seat,
