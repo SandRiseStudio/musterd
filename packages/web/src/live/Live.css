@@ -1396,6 +1396,7 @@
      actually fills with them. Measured on --lc-paper (#f3e2c3), the lightest stock they land on. */
   --lc-hz-codex-ink: #0f6b52; /* 5.08:1 */
   --lc-hz-cursor-ink: #4f46b8; /* 5.68:1 */
+  --lc-hz-grok-ink: #8e2a7d; /* 5.93:1 — magenta, the one hue the other three leave free */
   --lc-hz-opencode-ink: #a03d00; /* 5.21:1 */
 }
 
@@ -1710,6 +1711,9 @@
 }
 .lc-gl-label__seg--hz-cursor {
   color: var(--lc-hz-cursor-ink);
+}
+.lc-gl-label__seg--hz-grok {
+  color: var(--lc-hz-grok-ink);
 }
 .lc-gl-label__seg--hz-opencode {
   color: var(--lc-hz-opencode-ink);
@@ -3170,6 +3174,22 @@
 .lc-to__name {
   color: var(--lc-text);
   font-weight: 550;
+}
+/* An ADR 254 eligible set: 2-4 seats, ANY one of whom discharges the act. It wears the `direct`
+   pill because that is what it is — a list of real recipients, not a weaker team act — and each
+   seat keeps its own avatar dot so the row answers "which people?" at a glance. `or` is the whole
+   meaning of the shape, so it is set quieter than the names but never dimmer than the pill's own
+   muted ink (both resolve to tokens the contrast gate already measures on this pill). */
+.lc-to__seat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.lc-to__or {
+  color: var(--lc-muted);
+  font-weight: 400;
+  /* the pill's flex gap already separates the seats; this only needs to breathe inside one */
+  margin-right: 1px;
 }
 .lc-to--all {
   color: var(--lc-accent-ink);
