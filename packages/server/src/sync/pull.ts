@@ -1,9 +1,13 @@
-import { SYNC_PULL_MAX_BATCH, SyncPullResponseSchema, type SyncPullEvent } from '@musterd/protocol';
+import {
+  SYNC_PULL_MAX_BATCH,
+  SyncPullResponseSchema,
+  type SyncPullResponse,
+} from '@musterd/protocol';
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
 import { listActiveTeams } from '../store/teams.js';
-import { foldBatch, readPullCursor, type FoldStop } from './fold.js';
+import { foldBatch, foldNodeLiveness, readPullCursor, type FoldStop } from './fold.js';
 import { hasEnrolledJoiners, readStaged } from './log.js';
 
 /**
@@ -94,6 +98,37 @@ function reportStop(ctx: Ctx, team: string, stop: FoldStop): void {
           "the canonical order skipped an origin's sequence; the hub's invariant broke — terminal",
       });
       return;
+    case 'unknown_lane_event':
+    case 'unknown_presence_event':
+      log.error({
+        msg: 'sync_fold_unknown_event',
+        team,
+        action: stop.action,
+        hub_seq: stop.hub_seq,
+        detail: 'a peer runs a newer build; upgrade this daemon — retrying each tick',
+      });
+      return;
+    case 'lane_unborn':
+      log.error({
+        msg: 'sync_fold_lane_unborn',
+        team,
+        lane: stop.lane,
+        action: stop.action,
+        hub_seq: stop.hub_seq,
+        detail:
+          'a transition for a lane this daemon never saw born (pre-2026-09-02 lane, or a hole); retrying each tick',
+      });
+      return;
+    case 'presence_unborn':
+      log.error({
+        msg: 'sync_fold_presence_unborn',
+        team,
+        presence: stop.presence,
+        action: stop.action,
+        hub_seq: stop.hub_seq,
+        detail: 'a re-attestation for a session this daemon never saw attach; retrying each tick',
+      });
+      return;
   }
 }
 
@@ -102,7 +137,7 @@ async function fetchPage(
   credential: string,
   slug: string,
   after: number,
-): Promise<SyncPullEvent[]> {
+): Promise<SyncPullResponse> {
   const url = new URL(`/teams/${slug}/sync/pull`, hubUrl);
   url.searchParams.set('after', String(after));
   url.searchParams.set('limit', String(SYNC_PULL_MAX_BATCH));
@@ -125,7 +160,7 @@ async function fetchPage(
     throw new Error(`hub head is below this daemon's pull cursor ${after} — impossible, refusing`);
   }
   if (!res.ok) throw new Error(`hub responded ${res.status}`);
-  return SyncPullResponseSchema.parse(await res.json()).events;
+  return SyncPullResponseSchema.parse(await res.json());
 }
 
 /** One team's pull pass. Returns how many events were applied. Exported for through-DB tests. */
@@ -145,12 +180,15 @@ export async function pullTeam(
   if (!enrollment && !isHub) return 0;
 
   const cursor = readPullCursor(ctx.db, team.id);
-  const page = enrollment
+  const page: Pick<SyncPullResponse, 'events' | 'nodes'> = enrollment
     ? await fetchPage(enrollment.hub_url, enrollment.credential, team.slug, cursor)
-    : readStaged(ctx.db, team.id, cursor, SYNC_PULL_MAX_BATCH);
-  if (page.length === 0) return 0;
+    : { events: readStaged(ctx.db, team.id, cursor, SYNC_PULL_MAX_BATCH), nodes: [] };
+  // Node liveness lands even when the page is empty: a quiet team still needs to know its
+  // machines are alive (presence replication §3). The hub reads its own table and folds none.
+  if (page.nodes.length > 0) foldNodeLiveness(ctx.db, team.id, page.nodes);
+  if (page.events.length === 0) return 0;
 
-  const result = foldBatch(ctx.db, team.id, page, now);
+  const result = foldBatch(ctx.db, team.id, page.events, now);
   if (result.stop) {
     reportStop(ctx, team.slug, result.stop);
   } else {

@@ -3389,7 +3389,12 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     const adminView = await get('/teams/dawn/audit', nickTok);
     expect(adminView.status).toBe(200);
     expect(adminView.json.audit.length).toBeGreaterThan(0);
-    expect(adminView.json.audit[0]).toMatchObject({ action: 'member.reclaim', result: 'allow' });
+    // nick's own touches write replicated `presence.*` rows beside the reclaim; the reclaim is the
+    // entry this case is about.
+    const nonPresence = (adminView.json.audit as { action: string }[]).filter(
+      (r) => !r.action.startsWith('presence.'),
+    );
+    expect(nonPresence[0]).toMatchObject({ action: 'member.reclaim', result: 'allow' });
 
     const nonAdmin = await get('/teams/dawn/audit', { key: team.json.agent_key, seat: 'Ada' });
     expect(nonAdmin.status).toBe(403);

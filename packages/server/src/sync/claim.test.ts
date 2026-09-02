@@ -9,7 +9,9 @@ import { openDb } from '../db/open.js';
 import { createServer, type RunningServer } from '../index.js';
 import { readNodeState } from '../node/state.js';
 import { getLane, updateLane } from '../store/lanes.js';
-import { addMember } from '../store/members.js';
+import { addMember, getMemberByName } from '../store/members.js';
+import { unbindSeat } from '../store/nodes.js';
+import { touchAmbientPresence } from '../store/presence.js';
 import { insertMessage } from '../store/messages.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { Hub } from '../transport/hub.js';
@@ -138,6 +140,16 @@ beforeEach(async () => {
     }),
   );
   await enrollJoiner();
+  // nick's first authenticated touch on the hub attaches an ambient presence there, and the hub's
+  // own staging binds nick to the hub's node the moment that `presence.attached` is ingested
+  // (presence replication §2). These cases are about the CLAIM edge with nick living on the
+  // joiner, so take that first touch now, stage it, and release the fixture's binding — the same
+  // admin unbind a human on two machines uses. Later touches refresh the row and emit nothing, so
+  // nothing re-binds behind the tests' backs.
+  const nickOnHubRow = getMemberByName(hub.db, hubTeam().id, 'nick')!;
+  touchAmbientPresence(hub.db, nickOnHubRow.id, 'cli', 45_000);
+  await pushTeam(hubCtx(), hubTeam());
+  unbindSeat(hub.db, nickOnHubRow.id);
 });
 
 afterEach(async () => {

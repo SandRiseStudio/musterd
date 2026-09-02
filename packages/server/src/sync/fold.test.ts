@@ -4,7 +4,7 @@ import { openDb, type Database } from '../db/open.js';
 import { addMember } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
 import { createTeam } from '../store/teams.js';
-import { foldBatch, readPullCursor } from './fold.js';
+import { foldBatch, foldNodeLiveness, readPullCursor } from './fold.js';
 
 /**
  * The fold (3b-ii) — the second insert path ADR 331 §Consequences warned about, built once and
@@ -378,6 +378,155 @@ describe('foldBatch — the lane kind', () => {
       foreign('f-3', 3, 3),
     ]);
     expect(res).toEqual({ applied: 3, skipped: 0, last_hub_seq: 3, stop: null });
+    db.close();
+  });
+});
+
+/** A replicated `presence.*` row from the foreign origin (presence replication, 2026-09-02). */
+function foreignPresence(
+  id: string,
+  seq: number,
+  hubSeq: number,
+  action: string,
+  detail: Record<string, unknown>,
+  actor = 'ada',
+): SyncPullEvent {
+  return {
+    kind: 'presence',
+    team: 'revive',
+    event: { id, ts: 4000 + seq, actor, action, target: actor, result: 'allow', detail },
+    origin_node: FOREIGN,
+    origin_seq: seq,
+    hub_seq: hubSeq,
+  };
+}
+
+describe('foldBatch — the presence kind', () => {
+  it('presence.attached inserts a remote row keyed on the origin node; reattested updates it; detached deletes it', () => {
+    const { db, team } = seed();
+    const att = foreignPresence('p-1', 1, 1, 'presence.attached', {
+      presence: 'pB',
+      surface: 'codex',
+      model: 'gpt-5',
+      model_source: 'observed',
+      workspace: '~/b',
+      driver: 'nick',
+      provenance: 'session',
+      build: null,
+      epoch: 17,
+    });
+    expect(foldBatch(db, team.id, [att]).stop).toBeNull();
+    expect(
+      db
+        .prepare(
+          "SELECT node, surface, model, workspace, driver, conn_id, held_until, wake_lease FROM presence WHERE id = 'pB'",
+        )
+        .get(),
+    ).toEqual({
+      node: FOREIGN,
+      surface: 'codex',
+      model: 'gpt-5',
+      workspace: '~/b',
+      driver: 'nick',
+      conn_id: null,
+      held_until: null,
+      wake_lease: null,
+    });
+    const re = foreignPresence('p-2', 2, 2, 'presence.reattested', {
+      presence: 'pB',
+      model: 'gpt-5-mini',
+      model_source: 'observed',
+      surface: 'codex',
+    });
+    expect(foldBatch(db, team.id, [re]).stop).toBeNull();
+    expect(db.prepare("SELECT model FROM presence WHERE id = 'pB'").get()).toEqual({
+      model: 'gpt-5-mini',
+    });
+    const det = foreignPresence('p-3', 3, 3, 'presence.detached', {
+      presence: 'pB',
+      reason: 'goodbye',
+    });
+    expect(foldBatch(db, team.id, [det]).stop).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM presence WHERE id = 'pB'").get()).toEqual({
+      n: 0,
+    });
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS n FROM audit WHERE action LIKE 'presence.%' AND origin_node = ?")
+        .get(FOREIGN),
+    ).toEqual({ n: 3 });
+    // The allocator never moved for any of it.
+    expect(localNextSeq(db, team.id)).toBe(2);
+    db.close();
+  });
+
+  it('a reattested for a session never seen attach stops as presence_unborn; a detached for one is a no-op that advances', () => {
+    const { db, team } = seed();
+    const det = foreignPresence('p-1', 1, 1, 'presence.detached', {
+      presence: 'ghost',
+      reason: 'reaped',
+    });
+    expect(foldBatch(db, team.id, [det])).toMatchObject({ stop: null, applied: 1, last_hub_seq: 1 });
+    const re = foreignPresence('p-2', 2, 2, 'presence.reattested', {
+      presence: 'ghost',
+      model: 'x',
+      model_source: null,
+      surface: 'codex',
+    });
+    expect(foldBatch(db, team.id, [re]).stop).toMatchObject({
+      kind: 'presence_unborn',
+      presence: 'ghost',
+    });
+    expect(readPullCursor(db, team.id)).toBe(1);
+    db.close();
+  });
+
+  it('an unknown presence verb or a surface this build cannot store stops as unknown_presence_event', () => {
+    const { db, team } = seed();
+    const weird = foreignPresence('p-1', 1, 1, 'presence.attached', {
+      presence: 'p',
+      surface: 'holodeck',
+    });
+    expect(foldBatch(db, team.id, [weird]).stop).toMatchObject({ kind: 'unknown_presence_event' });
+    const verb = foreignPresence('p-1', 1, 1, 'presence.teleported', { presence: 'p' });
+    expect(foldBatch(db, team.id, [verb]).stop).toMatchObject({ kind: 'unknown_presence_event' });
+    db.close();
+  });
+
+  it('a presence for a seat this roster lacks stops as unresolved_seat, like a message', () => {
+    const { db, team } = seed();
+    const ev = foreignPresence(
+      'p-1',
+      1,
+      1,
+      'presence.attached',
+      { presence: 'p', surface: 'codex' },
+      'stranger',
+    );
+    expect(foldBatch(db, team.id, [ev]).stop).toMatchObject({
+      kind: 'unresolved_seat',
+      seat: 'stranger',
+    });
+    db.close();
+  });
+
+  it('foldNodeLiveness upserts foreign nodes without touching the local allocator', () => {
+    const { db, team } = seed();
+    const localNode = db
+      .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
+      .get(team.id)!.node_id;
+    db.prepare('UPDATE nodes SET next_seq = 7 WHERE id = ?').run(localNode);
+    foldNodeLiveness(db, team.id, [
+      { id: localNode, label: 'me', last_seen_at: 1 },
+      { id: 'nB', label: 'b', last_seen_at: 2 },
+    ]);
+    expect(db.prepare('SELECT next_seq FROM nodes WHERE id = ?').get(localNode)).toEqual({
+      next_seq: 7,
+    });
+    expect(db.prepare("SELECT label, last_seen_at FROM nodes WHERE id = 'nB'").get()).toEqual({
+      label: 'b',
+      last_seen_at: 2,
+    });
     db.close();
   });
 });

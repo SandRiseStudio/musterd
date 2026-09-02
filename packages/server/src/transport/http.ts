@@ -162,6 +162,7 @@ import {
   latestStatusUpdate,
   listInbox,
   listTeamMessages,
+  localNodeForTeam,
   pendingInterrupts,
   rowToEnvelope,
 } from '../store/messages.js';
@@ -169,10 +170,12 @@ import {
   authenticateNode,
   bindNode,
   consumeInvite,
+  listNodeLiveness,
   listNodes,
   mintInvite,
   revokeNode,
   rotateNode,
+  touchNode,
   unbindSeat,
 } from '../store/nodes.js';
 import { deriveNext } from '../store/orientation.js';
@@ -287,6 +290,7 @@ import {
   SyncDuplicateIdError,
   SyncGapError,
   SyncOriginError,
+  SyncResidenceError,
 } from '../sync/log.js';
 import { pullTeam } from '../sync/pull.js';
 import { pushTeam } from '../sync/push.js';
@@ -3655,6 +3659,9 @@ export async function handleHttp(
             'the sync surface authenticates with a machine credential (msnode_) for this team',
           );
         }
+        // Every authenticated sync contact stamps the node alive (presence replication §3): this
+        // is the clock a remote presence row's liveness reads.
+        touchNode(ctx.db, node.id, Date.now());
         const body = parseOrBadRequest(SyncClaimRequestSchema, await readJson(req));
         try {
           const lane = arbitrateClaim(ctx, team, node, body);
@@ -3721,11 +3728,22 @@ export async function handleHttp(
             'the sync surface authenticates with a machine credential (msnode_) for this team',
           );
         }
+        touchNode(ctx.db, node.id, Date.now());
         const body = parseOrBadRequest(SyncPushRequestSchema, await readJson(req));
         try {
           const result = ingestBatch(ctx.db, team.id, node.id, body.events);
           return sendJson(res, 200, SyncPushResponseSchema.parse(result));
         } catch (err) {
+          if (err instanceof SyncResidenceError) {
+            // ADR 328 §4 at ingest: the same 403 shape the claim route hands back, plus the seat,
+            // so the pusher can name what to unbind.
+            return sendJson(res, 403, {
+              error: { code: 'bound_elsewhere', message: err.message },
+              seat: err.seat,
+              node_id: err.boundTo,
+              node_label: err.boundLabel,
+            });
+          }
           // Both refusals are things the caller can act on, not faults. A 500 here would read as
           // "the hub is broken" for what is actually "resend from seq N".
           if (err instanceof SyncGapError) {
@@ -3766,6 +3784,7 @@ export async function handleHttp(
             'the sync surface authenticates with a machine credential (msnode_) for this team',
           );
         }
+        touchNode(ctx.db, node.id, Date.now());
         const after = Number(url.searchParams.get('after') ?? '0');
         const limit = Math.min(
           Number(url.searchParams.get('limit') ?? SYNC_PULL_MAX_BATCH),
@@ -3789,12 +3808,20 @@ export async function handleHttp(
             hub_seq_high: head,
           });
         }
+        // Node liveness rides the page (presence replication §3). The hub's own row reads "now":
+        // a hub answering a pull is alive by definition, and nothing else stamps it.
+        const now = Date.now();
+        const self = localNodeForTeam(ctx.db, team.id).id;
+        const nodes = listNodeLiveness(ctx.db, team.id).map((n) =>
+          n.id === self ? { ...n, last_seen_at: now } : n,
+        );
         return sendJson(
           res,
           200,
           SyncPullResponseSchema.parse({
             events: readStaged(ctx.db, team.id, after, limit),
             hub_seq_high: head,
+            nodes,
           }),
         );
       }

@@ -1,5 +1,7 @@
 import { syncEventId, syncEventTeam, type SyncEvent, type SyncPullEvent } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { getMemberByName } from '../store/members.js';
+import { bindSeatToNode } from '../store/nodes.js';
 
 /**
  * The hub's staging log for pushed events (ADR 325 increment 3b-i).
@@ -36,6 +38,23 @@ export class SyncDuplicateIdError extends Error {
   constructor(readonly eventId: string) {
     super(`envelope id ${eventId} is already staged for this origin under a different origin_seq`);
     this.name = 'SyncDuplicateIdError';
+  }
+}
+
+/**
+ * A presence event names a seat bound to ANOTHER node (ADR 328 §4, enforced at ingest — presence
+ * replication spec §2). The batch is refused whole and the pusher's cursor stays: a node may speak
+ * for the seats that live on it and for no other, and a session attached elsewhere is exactly the
+ * hole the residence binding closes. The way out is an admin unbind, or attaching where it lives.
+ */
+export class SyncResidenceError extends Error {
+  constructor(
+    readonly seat: string,
+    readonly boundTo: string,
+    readonly boundLabel: string,
+  ) {
+    super(`seat "${seat}" is bound to node "${boundLabel}"; this node may not speak for it`);
+    this.name = 'SyncResidenceError';
   }
 }
 
@@ -109,6 +128,21 @@ export function ingestBatch(
       // layer already had the information to refuse (dolly, 2026-08-28).
       if (syncEventTeam(event) !== node.slug) {
         throw new SyncOriginError('event names a team other than the one it is pushed into');
+      }
+
+      // Residence at ingest (presence replication §2): the first `presence.*` a node pushes for a
+      // seat binds the seat to it, first-writer-wins under the same guarded CAS a claim uses; a
+      // seat already bound elsewhere refuses the batch. Runs on every presence event, replay or
+      // not, and before the replay check on purpose: the binding is a fact about who may speak,
+      // not about which seq was stored. An unknown seat is the fold's problem (`unresolved_seat`);
+      // residence needs a member id. This transaction rolls the whole batch back on the throw, so
+      // a refused batch binds nothing.
+      if (event.kind === 'presence') {
+        const seat = getMemberByName(db, teamId, event.event.actor ?? '');
+        if (seat) {
+          const bound = bindSeatToNode(db, teamId, seat.id, nodeId, now);
+          if (!bound.bound) throw new SyncResidenceError(seat.name, bound.node_id, bound.label);
+        }
       }
 
       // A replay of something already held is a no-op, not a gap: the pusher resending after a lost
