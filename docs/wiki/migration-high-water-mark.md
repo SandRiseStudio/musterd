@@ -36,6 +36,14 @@ name in ('sync_pull_cursor','idx_messages_origin')"` prints 55 and nothing else 
 where the fix has landed prints both names). The two-real-daemons acceptance on the PR passed
 11/11 and could not have seen this: both daemons started from empty databases.
 
+~~The dogfood daemon is at 55 with neither object (2026-09-02)~~ **FIXED 2026-09-02 by
+[#1174](https://github.com/SandRiseStudio/musterd/pull/1174) / `da54c03f`**: v56 re-issues v54's
+body verbatim, and `db.test.ts` pins it by rewinding `schema_version` to 55 with the index and
+table dropped, then asserting the runner reaches 56 with both present. Re-run of the query above
+on the same laptop after the daemon picked up the fix prints `56`, `idx_messages_origin`,
+`sync_pull_cursor`. The mechanism in the section above is unchanged — the runner is still a mark —
+so the habit below still applies to the next reserved number.
+
 The comment on v55 is the interesting part. It named the failure it was avoiding — two migrations
 sharing one number, of which the runner applies only the first — and chose the exact arrangement
 that produces the same outcome by another route. Both are the same fact: the runner's cursor holds
@@ -62,6 +70,11 @@ fresh database is unaffected), plus a test that a database at 55 without the tab
 - **Whether the runner should track a set instead of a mark** is a separate decision. It would make
   this shape impossible and would change what `schema_version` means to every reader of it. Not
   made here; named so it is not folded into a fix by accident.
+
+The same cursor bit once before, from the other side: [sync-push](sync-push.md) records dolly's
+2026-08-28 note that editing an *unlanded* v50 in place leaves every scratch database already
+stamped at 50 on the old body, because `IF NOT EXISTS` plus a mark below the edit means nothing
+re-runs. Editing below the mark and landing below the mark are the same skip.
 
 This is a [cannot-separate-two-causes](cannot-separate-two-causes.md) instance: `schema_version =
 55` reads the same whether v54 ran or was skipped, and every test that would exercise the skipped
