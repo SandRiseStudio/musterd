@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import type { WakeLeaseFile } from '@musterd/protocol';
 import { z } from 'zod';
 import { resolveCodexBin } from '../../codexBin.js';
 import { findBinding, saveBinding } from '../../config.js';
@@ -11,6 +12,7 @@ import type {
   WakeSpec,
 } from '../backend.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
+import { clearWakeLeaseFile, writeWakeLeaseFile } from '../wakeLeaseFile.js';
 
 const KILL_GRACE_MS = 10_000;
 const RESUME_VERIFY_WINDOW_MS = 30_000;
@@ -84,6 +86,10 @@ export interface CodexDeps {
   spawn?: typeof nodeSpawn;
   readSession?: (workspace: string) => LocalSessionLiveness;
   recordFreshThread?: (workspace: string, id: string, startedAt: number) => void;
+  /** The wake-lease file channel (ADR 354): written at spawn, cleared at settle. Injectable so the
+   *  tests assert the contract without touching a filesystem. */
+  writeWakeLease?: (workspace: string, lease: WakeLeaseFile) => void;
+  clearWakeLease?: (workspace: string, leaseId: string) => void;
   killGraceMs?: number;
   resumeVerifyWindowMs?: number;
   /** Injectable pinned-shim write; wake PATH must resolve this actuator's CLI before Homebrew. */
@@ -144,6 +150,20 @@ async function attempt(
       settled: Promise.resolve(undefined),
     };
   }
+  // ADR 354: Codex does not forward this process's env to the MCP servers it launches, so the lease
+  // `codexWakeEnv` put in the child's environment stops at the child. Hand it over on disk as well,
+  // naming the child's pid so only a process THAT codex spawned can honour it. Written now, before
+  // verification, because the adapter autojoins ~15s in; cleared when the run settles (below).
+  if (child.pid !== undefined) {
+    (deps.writeWakeLease ?? writeWakeLeaseFile)(spec.workspace, {
+      lease_id: spec.order.lease_id,
+      provenance: 'wake',
+      harness: 'codex',
+      spawner_pid: child.pid,
+      started_at: startedAt,
+      expires_at: startedAt + timeoutMs,
+    });
+  }
   let threadId: string | undefined;
   let buffer = '';
   child.stdout?.on('data', (chunk: Buffer) => {
@@ -168,6 +188,10 @@ async function attempt(
   });
   const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
     clearTimeout(watchdog);
+    // The lease file dies with the run, success or failure — a killed wake must not leave a lease
+    // for the next occupant of this workspace to find (ADR 354).
+    if (child.pid !== undefined)
+      (deps.clearWakeLease ?? clearWakeLeaseFile)(spec.workspace, spec.order.lease_id);
     const duration_ms = Date.now() - startedAt;
     // The same settle line the claude backend writes, so host.log can be measured the same way
     // across harnesses — the absence of one is how this backend's hole stayed invisible.

@@ -378,6 +378,7 @@ src/
   binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193); ADR 143 env leak guard + ADR 213/218 foreign-binary warn (real checkouts only); saveBinding preserves omitted capture fields and same-seat claimed seat_credential, capture writers pass { drop: { model_observed: true } } (ADR 270/340)
   brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 154)
   workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
+  wakeLeaseFile.ts // reads the actuator-written wake lease (ADR 354) — consulted only when env is silent on BOTH provenance and lease, honoured only when spawner_pid is our ppid and unexpired: an attestation with a source, never a default (ADR 236)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
   telemetry.ts    // boots the shared SDK as musterd-mcp + wraps every tool in a musterd.tool.call span (ADR 089)
   toolTelemetry.ts // first-party tool-call telemetry: times/classifies every tools/call (bounces included) + attests the rendered-surface weight, batched to the daemon (ADR 144 inc 1)
