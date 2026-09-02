@@ -4143,7 +4143,12 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
         .filter((r) => r.action === action)
         .map((r) => ({
           target: r.target,
-          detail: JSON.parse(r.detail!) as { fields?: string[]; from?: string; to?: string },
+          detail: JSON.parse(r.detail!) as {
+            fields?: string[];
+            changes?: Record<string, { from: unknown; to: unknown }>;
+            from?: string;
+            to?: string;
+          },
         }));
     const patch = (laneId: string, body: unknown) =>
       fetch(base + `/teams/ledgr2/lanes/${laneId}`, {
@@ -4160,6 +4165,12 @@ describe('coordination lanes, Phase 1 (ADR 083)', () => {
     const edit = rows('lane.updated').find((r) => r.target === id);
     expect(edit).toBeDefined();
     expect(edit!.detail.fields?.sort()).toEqual(['branch', 'detail']);
+    // …and the values, so a replicating peer can fold the edit rather than only know it happened
+    // (lane-replication spec §Finding 3, hole 2).
+    expect(edit!.detail.changes).toEqual({
+      branch: { from: null, to: 'nick/branch' },
+      detail: { from: null, to: 'now with detail' },
+    });
 
     // A no-change patch writes nothing.
     await patch(id, { branch: 'nick/branch' });

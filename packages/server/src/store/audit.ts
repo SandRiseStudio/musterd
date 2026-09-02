@@ -116,7 +116,9 @@ export type AuditAction =
   // nothing in the audit log but the release that undid it.
   | 'lane.claimed'
   // ADR 325 prereq: the transitions the four rows above do NOT cover, so a lane's whole history
-  // folds back out of the log. `lane.updated` is any field edit (detail: { lane, fields }) —
+  // folds back out of the log. `lane.updated` is any field edit (detail: { lane, fields,
+  // changes: { field: { from, to } } } — values since the lane-replication slice, names alone
+  // left a folding peer nothing to apply) —
   // branch/scope/title/… changes previously wrote nothing at all. `lane.state_changed` is a state
   // move not already recorded as claimed/released/ready_for_review/closed (detail: { lane, from,
   // to }) — e.g. active↔blocked, or acceptance sent back by its owner.

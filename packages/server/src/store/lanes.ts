@@ -351,6 +351,24 @@ export function laneFieldChanges(before: Lane, after: Lane): string[] {
   );
 }
 
+/**
+ * The values behind `laneFieldChanges`: `{ field: { from, to } }` for every audited field that
+ * moved. `lane.updated` carried names only, so history could prove a scope changed and never say
+ * to what — a replicating peer folding the row had nothing to apply (lane-replication spec
+ * §Finding 3, hole 2). Absent reads as `null` on both sides, matching the equality above.
+ */
+export function laneFieldDiff(
+  before: Lane,
+  after: Lane,
+): Record<string, { from: unknown; to: unknown }> {
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  for (const f of laneFieldChanges(before, after)) {
+    const key = f as (typeof AUDITED_LANE_FIELDS)[number];
+    out[f] = { from: before[key] ?? null, to: after[key] ?? null };
+  }
+  return out;
+}
+
 export interface LaneFilter {
   project?: string;
   owner?: string;

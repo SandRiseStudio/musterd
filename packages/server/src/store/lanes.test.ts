@@ -9,6 +9,7 @@ import {
   getLane,
   globsOverlap,
   LaneConflictError,
+  laneFieldDiff,
   laneWarnings,
   lanesForGoal,
   listLanes,
@@ -475,6 +476,29 @@ describe('departed-seat claim release (ADR 196)', () => {
         },
       },
     ]);
+  });
+});
+
+// Lane-replication slice (spec §Finding 3, hole 2): `lane.updated` recorded field NAMES only, so
+// history could prove a lane's scope changed and never say to what. A folding peer needs values.
+describe('laneFieldDiff — the values behind a lane.updated row', () => {
+  it('reports from/to per changed audited field, arrays by value, and nothing for unchanged ones', () => {
+    const { db, team } = seed();
+    const before = openLane(db, team.id, 'bravo', 'June', {
+      title: 'old',
+      scope: ['a/**'],
+      claim: true,
+    });
+    const after = updateLane(db, team.id, before.id, 'bravo', {
+      title: 'new',
+      scope: ['a/**', 'b/**'],
+      state: 'active', // state is not an audited field — it has its own verb
+    })!;
+
+    expect(laneFieldDiff(before, after)).toEqual({
+      title: { from: 'old', to: 'new' },
+      scope: { from: ['a/**'], to: ['a/**', 'b/**'] },
+    });
   });
 });
 
