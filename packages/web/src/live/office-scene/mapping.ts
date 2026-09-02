@@ -1,6 +1,6 @@
 import { eligibleOf, type Envelope } from '@musterd/protocol';
 import { actLabel, actTone, laneEvent } from '../format';
-import { speechAddressee } from './speech';
+import { speechAddressee, speechMark } from './speech';
 import type { OfficeEvent } from './types';
 
 /**
@@ -97,6 +97,11 @@ export function speechEventFor(env: Envelope): Extract<OfficeEvent, { kind: 'spe
     // `eligibleOf` is the protocol's single reader of the shape, deliberately shared so no package
     // can interpret an eligible set differently from the schema that validated it.
     addressee: speechAddressee(env.to, env.from, eligibleOf(env.meta)),
+    /* The act's mark (speech.ts `speechMark`) — computed HERE, at the one place a bubble event is
+       built from an envelope, for the reason this function exists at all: assembled inline in the
+       scene it would be a projection no test holds. A lane transition arrives as a plain `message`
+       + meta, so the recovered lane kind has to be passed in — the act alone cannot see it. */
+    marking: speechMark(env.act, env.meta, laneEvent(env)),
   };
 }
 

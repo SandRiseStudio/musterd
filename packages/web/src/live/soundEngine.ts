@@ -625,8 +625,6 @@ export class RoomTone {
       case 'whisper': return this.murmur(ctx, out, true);
       case 'tap': return this.tap(ctx, out, 0.9);
       case 'softTap': return this.tap(ctx, out, 0.35);
-      case 'creak': return this.creak(ctx, out);
-      case 'chime': return this.chime(ctx, out);
       case 'stapler': return this.stapler(ctx, out);
       case 'drawer': return this.drawer(ctx, out);
       case 'footsteps': return this.footsteps(ctx, out);
@@ -665,26 +663,11 @@ export class RoomTone {
     }
   }
 
-  /** A chat app pinging at somebody else's desk: two quick soft notes. Drawn from a few different
-   *  apps' worth of intervals — rising, wider, falling — so no two pings in a row are the same one. */
-  private chime(ctx: AudioContext, out: AudioNode): void {
-    const sets: [number, number][] = [
-      [523.25, 783.99], // C5 → G5
-      [587.33, 880.0], // D5 → A5
-      [659.25, 987.77], // E5 → B5
-      [783.99, 659.25], // G5 → E5 — the falling one
-    ];
-    const [f1, f2] = sets[Math.floor(Math.random() * sets.length)]!;
-    // A pure sine loses far less through its (nonexistent) filtering than the noise-based events do,
-    // so on the shared LIFE bus it needs the *smallest* number here to sit level with them. Kept a
-    // touch under the keystroke: this is always a ping at somebody else's desk, never yours.
-    const g = 0.009 + Math.random() * 0.006;
-    const t0 = ctx.currentTime + 0.02;
-    this.ping(ctx, out, t0, f1, g);
-    this.ping(ctx, out, t0 + 0.09 + Math.random() * 0.05, f2, g * 1.15);
-  }
-
-  /** One soft sine strike with a fast attack and a long ring — the body of a notification note. */
+  /** One soft sine strike with a fast attack and a long ring — the body of a notification note.
+   *  The room tone's ONLY remaining user is the dog's collar (`jingle`), which fires 6–11 of these
+   *  45 ms apart up at 2400–4000 Hz: a rattle, not a note. The two-note figure that used to share
+   *  this primitive (`chime`) was removed for colliding with the act cues — see the note on
+   *  LIFE_EVENTS in soundLife.ts. Anything new built on `ping` has to clear that same bar. */
   private ping(ctx: AudioContext, out: AudioNode, at: number, freq: number, gain: number): void {
     const osc = ctx.createOscillator();
     osc.type = 'sine';
@@ -756,26 +739,6 @@ export class RoomTone {
     this.click(ctx, out, ctx.currentTime + 0.02, 260 + Math.random() * 420, 0.12 * body, 0.13);
   }
 
-  /** A chair taking somebody's weight — a short downward glide, which is the whole gesture. */
-  private creak(ctx: AudioContext, out: AudioNode): void {
-    const t0 = ctx.currentTime + 0.02;
-    const src = ctx.createBufferSource();
-    src.buffer = this.noiseBuffer(ctx);
-    src.loop = true;
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.Q.value = 7;
-    bp.frequency.setValueAtTime(520, t0);
-    bp.frequency.exponentialRampToValueAtTime(300, t0 + 0.42);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t0);
-    // Q 7 is the narrowest band of any life event, so it loses the most and needs the most back.
-    g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.09);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
-    src.connect(bp).connect(g).connect(out);
-    src.start(t0);
-    src.stop(t0 + 0.5);
-  }
 
   /** A stapler: the soft press of the arm, then the sharp ka-CHUNK of the staple setting. Two
    *  transients with the weight on the second, which is the opposite of a keypress — that reversal

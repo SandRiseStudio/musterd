@@ -171,7 +171,35 @@ describe('speechEventFor', () => {
       id: 'e1',
       act: 'message',
       addressee: { names: ['ben'], label: 'ben', tether: true },
+      // A plain message is the room working: no mark. Held by the exact-match above, not asserted
+      // loosely — the whole point of this describe is that the CONSTRUCTION is pinned, and a field
+      // that only appears when it is non-null is a field that can silently stop appearing.
+      marking: null,
     });
+  });
+
+  /* The mark's half of the same wiring, and the same lesson ryder's 01M0GVNBHA acceptance taught:
+     `speechMark` has its own suite, and reverting THIS call site to `marking: null` would leave all
+     of it green while every bubble on the floor lost its badge. */
+  it('carries the act mark onto the bubble — the wiring, not just the rule', () => {
+    expect(speechEventFor(env('steer', { body: 'change of plan' })).marking).toEqual({
+      mark: 'interrupt',
+      holds: false,
+    });
+    expect(
+      speechEventFor(env('ask', { body: 'ok to drop the index?', meta: { species: 'consult', tier: 'blocking' } }))
+        .marking,
+    ).toEqual({ mark: 'needs-human', holds: true });
+  });
+
+  /* A lane transition rides as a plain `message` + meta, so the mark can only be right if this call
+     site recovers the lane kind and hands it over. Reverting the third argument to `null` is a
+     one-token change that `speechMark`'s own suite cannot see. */
+  it('recovers the lane kind for the mark — a blocked lane arrives as a `message`', () => {
+    expect(
+      speechEventFor(env('message', { meta: { lane_state: { state: 'blocked', title: 'x' } }, body: '[lane] "x" → blocked' }))
+        .marking,
+    ).toEqual({ mark: 'interrupt', holds: false });
   });
 
   it('team and broadcast acts name nobody (the team is the default audience)', () => {

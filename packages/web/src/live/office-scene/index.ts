@@ -9,6 +9,8 @@ import {
   shortLaneState,
   shortWorkTitle,
 } from '../presenceLabel';
+import { musterdChipSvg } from '../../brand/chipMark';
+import { memberInk } from '../format';
 import { platesOpenMode, stillMode } from '../stillMode';
 import { surfaceGlyph } from '../surfaceGlyph';
 import { createActors, deskNeighbourPairs, type Actors } from './actors';
@@ -52,8 +54,10 @@ import {
   shapeSpeech,
   speechLength,
   speechTokens,
+  SPEECH_MARK_GLYPH,
   typeCadence,
   type Addressee,
+  type SpeechMarking,
   type SpeechToken,
 } from './speech';
 import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode, Pose } from './types';
@@ -61,6 +65,18 @@ import type { AmbientLogEntry, OfficeData, OfficeEvent, OfficeHandle, OfficeNode
 export type { OfficeData, OfficeEvent, OfficeHandle, OfficeNode, OfficeStats } from './types';
 
 const DPR_CAP = 2;
+
+/**
+ * The synthetic head the receptionist's bubble hangs from, and the key `showSpeech` recognises as
+ * "this is the house voice, not a seat".
+ *
+ * A bare string literal in three places was one typo away from a bubble that renders as an ordinary
+ * member — and the failure would be silent, because `heads.get(who)` simply returns undefined and
+ * `showSpeech` drops the line. She is deliberately NOT in the node map (staff, not roster —
+ * receptionist.ts), so no name collision with a real seat is possible: a member called
+ * `receptionist` could not be seated, since the room's own front desk is not a desk in `DESK_SLOTS`.
+ */
+const RECEPTIONIST_SPEAKER = 'receptionist';
 const CUE_SECS = 1.5;
 
 /** Posture → the name label's dot modifier. One green: only `working` earns it. */
@@ -309,8 +325,10 @@ export function mountOffice(
   const welcomeTimer = setInterval(() => {
     if (STILL) return; // deterministic measurement mode: nothing transient may start
     if (!broadcast && (suspended || !VISIBLE())) return;
-    const line = stepWelcome(welcome, Date.now(), actors.active());
-    if (line) showSpeech('receptionist', line, 'info');
+    // The team name is hers to say: she is the one character on the floor whose job is to tell a
+    // stranger where they have landed (welcome.ts).
+    const line = stepWelcome(welcome, Date.now(), actors.active(), teamName);
+    if (line) showSpeech(RECEPTIONIST_SPEAKER, line, 'info');
   }, 5_000);
   function renderRail() {
     // The line is chrome now, not scene DOM — hand it out and let WorkStack's header carry it.
@@ -509,7 +527,7 @@ export function mountOffice(
     // The receptionist's bubble anchor — synthetic head above her desk. syncLabels skips names
     // without a node, so she gains a voice without gaining a nameplate or a roster row.
     const rp = project(RECEPTIONIST.lx, RECEPTIONIST.ly, fit);
-    heads.set('receptionist', { x: rp.x, y: rp.y - 58 * fit.scale });
+    heads.set(RECEPTIONIST_SPEAKER, { x: rp.x, y: rp.y - 58 * fit.scale });
     syncLabels(anchors.heads, nodes, poses);
     repositionSpeeches(anchors.heads);
     positionBoardSpot();
@@ -591,6 +609,10 @@ export function mountOffice(
       el.textContent = '';
       el.style.pointerEvents = interactiveLabels ? 'auto' : 'none';
       el.classList.toggle('is-broadcast', !interactiveLabels);
+      /* The plate's rim wears the seat's own hue rather than the house mustard — the same identity
+         the body under it is painted in. `memberColor`, a FILL: the CSS mixes it into the paper rim
+         at 34% and it never carries text, so the fill/ink split is respected. */
+      el.style.setProperty('--lc-plate-hue', node.color);
 
       const present = node.presence !== 'offline';
       // Absent state means the viewer has not touched this plate yet, which is where `?plates-open`
@@ -851,6 +873,7 @@ export function mountOffice(
     id?: string,
     act?: string,
     addressee?: Addressee | null,
+    marking?: SpeechMarking | null,
   ) {
     const { glance, full, clamped } = shapeSpeech(raw, act);
     const head = heads.get(who);
@@ -874,7 +897,69 @@ export function mountOffice(
         options.onActClick!(id);
       });
     }
-    inner.style.setProperty('--lc-speech-tone', toneColor(tone));
+    /* ── the bubble's colour is WHO, not WHAT ──────────────────────────────────────────────────
+       `--lc-speech-tone` names an act tone for historical reasons and now carries the sender's
+       identity hue: ring, tail, blush and glow all come off it, so every bubble a member speaks
+       looks like that member and no other. See speech.ts `speechMark` for the full argument and
+       for where the act went instead.
+
+       Two values, because a colour that is both SEEN and READ needs two (format.ts, and the
+       --lc-*-ink block in Live.css). `node.color` is `memberColor` — a FILL, and it spans luminance
+       0.154–0.699 across the hue bands, so mixing it into the rich-token text colours would be
+       readable for indigo and not for amber. `memberInk` is the same hue held at a luminance that
+       clears AA on the paper, and it is what the text usages mix with.
+
+       The receptionist is not in the node map (she is staff, not roster — receptionist.ts), so she
+       falls through to the act tone and to her own stock in the CSS. That is the intended path, not
+       a gap: she is the one speaker on the floor with no identity to paint. */
+    const speaker = actors.nodes().get(who);
+    inner.style.setProperty('--lc-speech-tone', speaker ? speaker.color : toneColor(tone));
+    // Both are set on every bubble, never one of them: `--lc-speech-ink` has no `:root` definition
+    // (it is runtime-parametric, which is what exempts it from `tokens:check`), so a bubble that set
+    // only the tone would leave every text usage with an unresolved var() — and an unresolved
+    // `color:` is not an error, CSS just drops the declaration and the span silently inherits. That
+    // is the exact failure mode the --lc-type-* note in packages/web/AGENTS.md records costing three
+    // of six tokens in #1104. The receptionist gets the act tone for both, which is what she had.
+    inner.style.setProperty(
+      '--lc-speech-ink',
+      speaker ? memberInk(who, speaker.kind) : 'var(--lc-paper-ink)',
+    );
+    if (marking) {
+      inner.classList.add(`is-mark--${marking.mark}`);
+      // The loud variant of `needs-human`: the tier actually holds its sender (ADR 147 §2), so
+      // nothing that seat was doing moves again until a person answers.
+      if (marking.holds) inner.classList.add('is-holding');
+      /* A real element rather than a pseudo, for two reasons that both bit: `__inner`'s ::before
+         and ::after are the bubble's tail, and hanging the badge off `__text::after` instead
+         anchored it to the TEXT — so on a bubble with a recipient chip it landed halfway down the
+         body instead of at the corner. As a child of `__inner` it sits against the bubble's own box
+         and inherits the enter/fade transition, which a pseudo on the outer wrapper would not. */
+      const badge = document.createElement('span');
+      badge.className = 'lc-speech__mark';
+      badge.textContent = SPEECH_MARK_GLYPH[marking.mark];
+      badge.setAttribute('aria-hidden', 'true');
+      inner.appendChild(badge);
+    }
+
+    /* ── the receptionist's bubble is HOUSE, not a member's ────────────────────────────────────
+       Everything the room says about itself comes out of her mouth — where you are, what these
+       people are, what the bubbles mean (welcome.ts). Until now that arrived wearing the same paper
+       and the same tail as an agent's status update, which quietly made the house voice look like a
+       eleventh seat: the one bubble on the floor that is NOT an attested member speaking was the one
+       hardest to tell apart from one.
+       Same argument as receptionist.ts's "staff, not roster" — no nameplate, no headcount, no roster
+       row — carried into the one place she does appear as a speaker. She gets the brand mark rather
+       than an identity hue, because the mark IS her identity: she speaks for musterd, not for a
+       seat. */
+    if (who === RECEPTIONIST_SPEAKER) {
+      outer.classList.add('is-reception');
+      const mark = document.createElement('span');
+      mark.className = 'lc-speech__brand';
+      // Static markup from a constant path (brand/chipMark.ts) — no interpolated content ever
+      // reaches it. Same shape as the provider pin and the harness glyph above.
+      mark.innerHTML = musterdChipSvg(13);
+      inner.appendChild(mark);
+    }
     // ── the recipient chip ────────────────────────────────────────────────────────────────────
     // A directed act names who it is aimed at, so the body can safely say "you". Team and broadcast
     // acts pass no addressee: the team is already the default audience, and a chip on every bubble
@@ -1569,7 +1654,7 @@ export function mountOffice(
     }
     // Speech is legible content, not motion — it plays even under reduced-motion (typewriter off there).
     if (ev.kind === 'speech') {
-      showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act, ev.addressee);
+      showSpeech(ev.who, ev.text, ev.tone, ev.id, ev.act, ev.addressee, ev.marking);
       // An ask lands with acoustic weight in the room (E3 spec §2): one soft held tone, panned to
       // the asked member's desk when directed, soft-centre for a team ask. Stateless by design.
       if (ev.act === 'ask') {

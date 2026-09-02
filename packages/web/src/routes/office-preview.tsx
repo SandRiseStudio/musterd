@@ -118,7 +118,13 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
   { at: 3600, ev: { kind: 'resolve', who: 'Fen' } },
   {
     at: 3700,
-    ev: { kind: 'speech', who: 'Fen', text: 'fixed — resolving the thread', tone: 'success' },
+    ev: {
+      kind: 'speech',
+      who: 'Fen',
+      text: 'fixed — resolving the thread',
+      tone: 'success',
+      marking: { mark: 'done', holds: false }, // DONE — badge only (✓)
+    },
   },
   // `decline` and `wait` complete the set: every other kind `actToEvent` can produce from a real
   // envelope was already scripted here, but these two were not — so two states a viewer of /live can
@@ -142,6 +148,40 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       addressee: { names: ['Eli'], label: 'Eli', tether: true },
     },
   },
+  /* THE TOP OF THE MARK AXIS, and it had no fixture at all until now: a `blocking` to-human ask
+     (ADR 147). Every other act family in this script was reachable here and this one — the single
+     loudest thing the room can show, and the only bubble that pulses — could only be seen by
+     waiting for a real seat to raise one on /live. Same argument that put `decline` and `wait` in
+     this script on 2026-08-20: a state the design tool cannot reach is a state nobody has looked at.
+     `holds: true` is what `askTierHolds('blocking')` returns — the seat has stopped until a person
+     answers, which is what earns the pulse over the heavy ring an ordinary ask gets. */
+  { at: 8400, ev: { kind: 'walk-help', from: 'Hana', to: ['Ada'], tier: 'urgent' } },
+  {
+    at: 8500,
+    ev: {
+      kind: 'speech',
+      who: 'Hana',
+      text: 'this drops the production index — I am holding until a human says go',
+      tone: 'accent',
+      marking: { mark: 'needs-human', holds: true },
+      addressee: { names: ['Ada'], label: 'Ada', tether: true },
+    },
+  },
+  /* And its quiet sibling, so the two are comparable side by side rather than one at a time: an
+     acceptance request is also an ask, also needs a person, and does NOT hold anyone — `approve`
+     species, so it reads as REVIEW (a badge, no heavy ring). Getting these two the same volume is
+     the mistake the tier split exists to prevent. */
+  {
+    at: 8900,
+    ev: {
+      kind: 'speech',
+      who: 'Eli',
+      text: 'lane 01M1J4XV6D is ready — judge the landed outcome when you get a minute',
+      tone: 'accent',
+      marking: { mark: 'review', holds: false },
+      addressee: { names: ['Cy', 'Dev'], label: 'Cy or Dev', tether: true },
+    },
+  },
   { at: 8000, ev: { kind: 'wait', who: 'Ivy' } },
   {
     at: 8100,
@@ -163,6 +203,7 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       who: 'Dev',
       text: 'why render.ts before the seating fix? can you justify the order?',
       tone: 'challenge',
+      marking: { mark: 'interrupt', holds: false }, // INTERRUPT — heavy ring + ↪
     },
   },
   { at: 5600, ev: { kind: 'steer', from: 'Ada', to: 'Hana', urgent: true } },
@@ -173,6 +214,12 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       who: 'Ada',
       text: 'change of plan — drop the profiling, the deploy is what matters now',
       tone: 'steer',
+      // INTERRUPT — heavy ring + ↪. The fixture has to carry the marks or nobody ever looks at
+      // them: this route is the design loop AND the surface the contrast sweep measures, and a
+      // state it cannot reach is a state that gets reviewed for the first time in production. The
+      // markings here are what `speechMark` really returns for these acts — a fixture that invents
+      // its own teaches the wrong room, the same rule the `tone` values above already follow.
+      marking: { mark: 'interrupt', holds: false },
     },
   },
   { at: 6600, ev: { kind: 'defer', who: 'Cy' } },

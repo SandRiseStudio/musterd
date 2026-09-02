@@ -2,7 +2,7 @@
  * Pure helpers for the ephemeral office speech bubbles — an act's body types out over the sender's head,
  * then fades. Kept separate from the DOM wiring in `index.ts` so the text-shaping logic is unit-testable.
  */
-import type { Recipient } from '@musterd/protocol';
+import { AskSpeciesSchema, AskTierSchema, askTierHolds, type Recipient } from '@musterd/protocol';
 import { richTokens, type RichToken } from '../format';
 
 /** Glance budget: what a bubble shows unhovered. Wide enough to carry the actual point of a message
@@ -205,4 +205,125 @@ export function speechAddressee(
  * full glance (~180 chars) types out in ~3s. */
 export function typeCadence(len: number): number {
   return Math.min(55, Math.max(16, Math.round(2600 / Math.max(len, 1))));
+}
+
+/* ─── what kind of act a bubble is carrying ──────────────────────────────────────────────────────
+ *
+ * COLOUR IS IDENTITY; FORM IS THE ACT. The bubble used to paint the act with `toneColor()` — nine
+ * hues — and the member's own colour appeared nowhere on it. That was backwards in both halves:
+ *
+ * · Nine unlabelled hues is past what anyone learns without a legend, and /live has no legend. The
+ *   only way to decode one was to click through to the stream, at which point the colour did no
+ *   work. Worse, they are not nine distinguishable things: `info`/`challenge`/`lane`/`handoff` are
+ *   all blue-violet and `success`/`status` are both green-teal, so six of the nine collapse into
+ *   two families at a glance — and `lane`/`handoff` are the same family *on purpose*, per their own
+ *   comment in format.ts.
+ * · The member hue, meanwhile, was already reinforced four ways — the body on the floor, the dot on
+ *   the nameplate, the row in the reel, the caption's dot — and the bubble was the one surface not
+ *   using it. Five repetitions of one fact is how a colour becomes learnable.
+ *
+ * So the hue moved to identity and the act became this: a SHORT, RANKED list of marks.
+ *
+ * ── Why ranked, and why short ───────────────────────────────────────────────────────────────────
+ *
+ * Replacing nine hues with nine glyphs would have rebuilt the same problem in a new medium — a
+ * viewer still could not tell which of two marked bubbles mattered more. Hues have no order; weight
+ * does. So the marks below are ONE AXIS, and the renderer spends escalating weight on them (badge →
+ * heavy ring + badge → heavy ring + badge + pulse). A viewer who has learned nothing at all still
+ * reads "that one first", which is the only question a glance can ask.
+ *
+ * And most acts get NO mark. That half is load-bearing: nine hues failed partly *because* every
+ * bubble carried one, so none of them meant "look here". `message`, `status_update`, `handoff`,
+ * `lane_open`/`claim`/`state`, `goal`, `defer`, `insight` and `decline` are the room working — the
+ * words in the bubble already say what happened, and the caption rail narrates it in plain language.
+ * (`decline` was considered and deliberately left plain: a refusal is not an emergency, and its
+ * first line always says so out loud.)
+ *
+ * Decided with nick, 2026-09-02.
+ */
+export type SpeechMark = 'needs-human' | 'interrupt' | 'review' | 'done';
+
+/** Rendering weight, high wins. Exported so a caller comparing two marks cannot invent its own order. */
+export const SPEECH_MARK_WEIGHT: Record<SpeechMark, number> = {
+  'needs-human': 4,
+  interrupt: 3,
+  review: 2,
+  done: 1,
+};
+
+/**
+ * The badge each mark wears. Deliberately a glyph and not a word: the badge sits at 7.5px in the
+ * bubble's corner, where three characters of English would be unreadable and would also have to be
+ * translated. The WORD for the act is already in the bubble — `stripNoise` and `PLAIN_VERBS` put it
+ * there in plain language — so this only has to be a distinguishable shape at a glance.
+ *
+ * Drawn in the paper ink, never in a hue: colour on this surface means identity now (see
+ * `speechMark`), and a mark with a colour of its own would restart the guessing game one layer up.
+ */
+export const SPEECH_MARK_GLYPH: Record<SpeechMark, string> = {
+  'needs-human': '!',
+  interrupt: '↪',
+  review: '◎',
+  done: '✓',
+};
+
+/**
+ * The mark a bubble carries, and whether it is the loud variant of it.
+ *
+ * `holds` is not a second severity knob invented here — it is `askTierHolds(meta.tier)`, the
+ * protocol's own answer to "does silence stop the agent?" (ADR 147 §2). A `blocking` ask holds:
+ * nothing that seat was doing moves again until a person answers, which is the loudest true thing
+ * on the floor. An `advisory` ask proceeds on its own after three minutes and should not outshout a
+ * status update. The wire has carried both fields all along and `asks.ts` already ranks the rail by
+ * them; the bubble was ignoring them and painting every ask the same mustard.
+ */
+export interface SpeechMarking {
+  mark: SpeechMark;
+  /** Escalate to the loudest treatment — the ask's tier actually holds its sender. */
+  holds: boolean;
+}
+
+/**
+ * Which mark an act earns, from the act and its meta. Pure; `null` is the common answer.
+ *
+ * The ask SPECIES (ADR 147 §1) is what splits "a human must decide something" from "please come and
+ * judge this": `approve` is an acceptance request — someone has to go and read a landed outcome —
+ * while `consult` and `escalate` are a seat that cannot proceed without a person. Both need a human;
+ * only one of them is holding a seat still, and the room should not shout them at the same volume.
+ *
+ * `laneKind` is the recovered lane-event kind (format.ts `laneEvent`), because a lane transition
+ * arrives as a plain `message` + meta and the act alone cannot see it.
+ */
+export function speechMark(
+  act: string,
+  meta?: Record<string, unknown> | null,
+  laneKind?: string | null,
+): SpeechMarking | null {
+  if (act === 'ask') {
+    const species = AskSpeciesSchema.safeParse(meta?.['species']);
+    const tier = AskTierSchema.safeParse(meta?.['tier']);
+    // A malformed ask is still an ask — it just cannot claim a tier it did not send. `holds` false
+    // is the honest default: the loud treatment is a claim about the sender's state, not decoration.
+    const holds = tier.success && askTierHolds(tier.data);
+    if (species.success && species.data === 'approve') return { mark: 'review', holds: false };
+    return { mark: 'needs-human', holds };
+  }
+  // The informal "come and look at this" — the review routing 28 of the 35 directed acts in the
+  // live corpus actually are. No tier on the wire, so never the loud variant.
+  if (act === 'request_help') return { mark: 'review', holds: false };
+  /* The steering pair (ADR 103): both change what their recipient is doing right now, and NEITHER
+     holds. `holds` is not "loud" — it is the specific claim that a seat has stopped and will not
+     move until a person answers, and only an ask's tier can make it (ADR 147 §2). A steer is
+     urgent and its recipient keeps working; spending the room's one pulse on it would leave the
+     genuinely-stuck case with nothing louder to escalate to. */
+  if (act === 'steer' || act === 'challenge') return { mark: 'interrupt', holds: false };
+  if (act === 'accept' || act === 'resolve') return { mark: 'done', holds: false };
+  if (laneKind === 'lane_resolve') return { mark: 'done', holds: false };
+  // A lane going blocked is work that has STOPPED — the one lane transition that is not routine.
+  if (laneKind === 'lane_state') {
+    const bag = meta?.['lane_state'];
+    const state = bag && typeof bag === 'object' ? (bag as Record<string, unknown>)['state'] : null;
+    if (state === 'blocked') return { mark: 'interrupt', holds: false };
+  }
+  return null;
 }
