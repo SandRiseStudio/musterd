@@ -1319,20 +1319,6 @@ try {
     if (rc.opacity < 0.99) faded.push(rc.key.split('|')[0] || '?');
     // Centre of the line box. With glyphs transparent the whole box is background, so the centre is
     // as good as any point and is the least likely to catch a border or a rounded corner.
-    console.log(
-      'DBG',
-      JSON.stringify({
-        key: rc.key,
-        x: rc.x,
-        y: rc.y,
-        w: rc.w,
-        h: rc.h,
-        docW: geom.docW,
-        docH: geom.docH,
-        scale,
-        tall,
-      }),
-    );
     const p = at(rc.x + rc.w / 2, rc.y + rc.h / 2);
     // Carry the settled opacity: the glyphs are faded by it too, so the INK has to be composited at
     // that alpha over what was sampled. Fading text is one of the commonest ways contrast dies, and

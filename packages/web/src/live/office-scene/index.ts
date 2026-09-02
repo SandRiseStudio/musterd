@@ -9,7 +9,7 @@ import {
   shortLaneState,
   shortWorkTitle,
 } from '../presenceLabel';
-import { stillMode } from '../stillMode';
+import { platesOpenMode, stillMode } from '../stillMode';
 import { surfaceGlyph } from '../surfaceGlyph';
 import { createActors, deskNeighbourPairs, type Actors } from './actors';
 import { helpWalks } from './mapping';
@@ -230,6 +230,11 @@ export function mountOffice(
       ? options.captureFps
       : DEFAULT_CAPTURE_FPS;
   const interactiveLabels = options.interactiveLabels === true;
+  /* `?plates-open` (stillMode.ts) — measurement mode: every plate mounts with its detail already
+     open, so the harness segment's four inks are visible to the contrast sweep. Read once here
+     rather than per plate per sync: the flag cannot change without a navigation, and this runs
+     inside syncLabels. Interactive routes only — a broadcast plate has no detail to open. */
+  const platesOpen = interactiveLabels && platesOpenMode();
   const showWorkCues = options.showWorkCues !== false;
   const dpr = officeDpr(broadcast, DPR_CAP);
 
@@ -373,7 +378,9 @@ export function mountOffice(
     if (!interactiveLabels) return;
     let st = plateExpand.get(name);
     if (!st) {
-      st = { expanded: false, timer: null };
+      // Seeded from the flag for the same reason: without this, the first click on a plate that
+      // MOUNTED open would set expanded=true — a no-op the viewer reads as a dead control.
+      st = { expanded: platesOpen, timer: null };
       plateExpand.set(name, st);
     }
     clearExpandTimer(name);
@@ -586,7 +593,10 @@ export function mountOffice(
       el.classList.toggle('is-broadcast', !interactiveLabels);
 
       const present = node.presence !== 'offline';
-      const expanded = plateExpand.get(name)?.expanded === true;
+      // Absent state means the viewer has not touched this plate yet, which is where `?plates-open`
+      // lands: the DEFAULT is open under the flag, so plates mount unpacked with no transition to
+      // race. An explicit state always wins, so a viewer collapsing one still collapses it.
+      const expanded = plateExpand.get(name)?.expanded ?? platesOpen;
       el.classList.toggle('is-expanded', expanded);
 
       const meta = identityMeta({
