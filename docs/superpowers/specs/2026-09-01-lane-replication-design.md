@@ -114,6 +114,39 @@ construction, with `lane.state_changed` explicitly excluding the four edges that
 `stakes_provenance` and `kind` are in no audit diff set at all, and incident-driven lane writes are
 audited under `incident.*` rather than `lane.*` — two smaller instances of the same shape.
 
+## Finding 4 — a lane's birth writes no row, so its declared content exists only in the table
+
+*Found 2026-09-02 while sizing the corpus for the projection measurement.*
+
+Seven verbs cover the edges, and none covers the first one. `openLane` writes a `lane.claimed
+at_open` row only when the lane is born owned; an unclaimed open writes **nothing**, and even the
+claimed birth records `{lane, owner, previous_owner, kind, at_open}` — no title, project, scope,
+depends_on, detail, stakes, goal. Live corpus 2026-09-02 (falsify: rerun the two counts):
+
+| | count |
+| --- | --- |
+| rows in `lanes` | 792 |
+| lanes with any `lane.*` audit row | see measurement below |
+| `lane.claimed` rows | 537 |
+
+So the transition log, even with holes 1–3 closed, describes *what happened to* a lane and never
+*what the lane is*. A peer folding it can learn that lane X moved to `active` under owner Y and
+still not know X's title or the paths it touches — which is what surface-overlap warnings and 3c's
+CAS both read. The `[lane] opened` message carries `{lane, title, project}` (Finding 1), three of
+the ten declared fields.
+
+**This settles more of the A/B question than the timing does.** Candidate A as written — project
+state from the log — cannot start, because the log has no first event. The fix is one verb:
+`lane.opened`, written by `openLane` inside its insert transaction (the same shape hole 3 gave the
+other four), carrying the full declaration. With it, the log is complete from that moment forward
+and A becomes possible; without it, A is a projection of a series that begins mid-sentence.
+
+Historical rows cannot be back-filled into events — `lane.updated` before #1173 carried names only
+(164 rows), and 172 of 792 lanes have no `lane.*` row at all. The projection is exact from the point the
+record became complete, and the deployment topology's "second machine" precondition should say so:
+a joiner enrolling today folds a log whose lanes older than 2026-09-02 have no birth. That is the
+cost of deriving from a log that was built as observability first, and it is a one-time cost.
+
 ## The design question this slice exists to settle
 
 Two candidates, and the increment's real work is choosing with evidence rather than taste.
@@ -197,6 +230,45 @@ is that second writer. 3c does not add a guard to an unguarded path; it makes an
 guard start mattering. And exactly one of the five `updateLane` callers arms it: the PATCH handler,
 and only for ownership or state patches. The acceptance path, the sweep and both incident writes all
 call the unguarded form.
+
+## The measurement — projection cost and agreement on the live corpus (2026-09-02)
+
+Read-only against `~/.musterd/musterd.db` at schema 55: 792 lanes, 47,763 audit rows of which
+1,912 are `lane.*`. Script in the session scratchpad (`project-lanes.mjs`); falsify by rerunning
+against a later corpus.
+
+| read | ms per run (20 runs, warm) |
+| --- | --- |
+| `SELECT * FROM lanes` (the board's cost today) | 4.18 |
+| fold every `lane.*` row in write order into a state map | 5.10 |
+
+**Cost is not the deciding factor.** The projection costs about one millisecond more than the
+table read it would replace, over a log a year of dogfood produced. The unmeasured risk in §A is
+measured and small; a materialised row would be an optimisation for a corpus we do not have.
+
+Agreement is where the corpus speaks:
+
+| | count |
+| --- | --- |
+| lanes with any `lane.*` row | 620 of 792 |
+| of those, projected `state` equals the table | 620 of 620 |
+| of those, projected `owner_seat` equals the table | 508 of 620 |
+| lanes with no row, created before the first `lane.claimed` (2026-08-01) | 168 |
+| lanes with no row, created after | 4 |
+
+Every one of the 112 owner disagreements has the same shape: a `done` lane whose table row keeps
+its owner and whose log never saw a claim — claimed before the claim verb existed, closed after.
+The fold is right about every transition it was shown. The four post-2026-08-01 lanes with no row
+are unclaimed opens: Finding 4, in the data.
+
+**What this decides.** A, with one addition. State projects correctly from the log wherever the
+log is complete, at a cost the board will not notice. What the log lacks is a beginning — so the
+slice ships `lane.opened` (Finding 4), and from that moment a lane's whole life is in the log:
+born, edited with values, moved, handed, released, closed, each row written in the transaction
+that made it true. B's stamped row is not needed to reach a state the log expresses, and adding it
+would reintroduce the second insert path for no measured gain. The 168 pre-verb lanes and the 112
+pre-claim owners are history the log cannot recover, and the topology doc's second-machine
+precondition should say so plainly rather than let a joiner discover it.
 
 ## Hole 3, decided: the `lane.*` rows move inside the lane write's transaction
 
