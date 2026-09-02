@@ -336,7 +336,11 @@ export function identityFromEnv(
  *   concurrent reader never sees a torn file (and the 0600 mode exists from the first byte).
  */
 /** Capture-writer intent, distinct from omit. Claim/agent never pass this (ADR 268). */
-export type SaveBindingOptions = { drop?: { model_observed?: boolean } };
+export type SaveBindingOptions = {
+  drop?: { model_observed?: boolean };
+  /** Injectable only for focused atomic-publication failure tests. */
+  rename?: typeof renameSync;
+};
 
 export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOptions): string {
   const bindingDir = join(dir, BINDING_DIR);
@@ -375,7 +379,7 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
   } catch {
     // best-effort on platforms without chmod semantics
   }
-  renameSync(tmp, p);
+  (opts?.rename ?? renameSync)(tmp, p);
   recordBinding(dir, merged);
   return p;
 }

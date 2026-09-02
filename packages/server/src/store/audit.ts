@@ -60,6 +60,10 @@ export type AuditAction =
   | 'bootstrap_credential.refused'
   | 'bootstrap_credential.expired'
   | 'bootstrap_credential.revoked'
+  // ADR 350: per-Workspace successor exchange, safe retry cleanup, and per-Team legacy cutover.
+  | 'bootstrap_credential.migrated'
+  | 'bootstrap_credential.migration_replaced'
+  | 'bootstrap_credential.cutover'
   | 'agent_session_lease.revoked'
   | 'agent_session_lease.minted'
   | 'agent_session_lease.renewed'
@@ -362,28 +366,33 @@ export interface AuditRow {
   created_at: number;
 }
 
+/** Insert an audit row and surface failure when the caller's transaction requires the evidence. */
+export function appendAuditRequired(db: Database, teamId: string, entry: AuditEntry): void {
+  const now = Date.now();
+  const row: AuditRow = {
+    id: ulid(),
+    team_id: teamId,
+    ts: now,
+    actor: entry.actor,
+    action: entry.action,
+    target: entry.target,
+    result: entry.result,
+    detail: entry.detail ? JSON.stringify(entry.detail) : null,
+    created_at: now,
+  };
+  db.prepare(
+    `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+     VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at)`,
+  ).run(row);
+}
+
 /**
  * Append an audit entry. **Best-effort observability, never a gate**: a failure here is logged and
  * swallowed so it can never break the request path it is recording.
  */
 export function appendAudit(db: Database, teamId: string, entry: AuditEntry): void {
   try {
-    const now = Date.now();
-    const row: AuditRow = {
-      id: ulid(),
-      team_id: teamId,
-      ts: now,
-      actor: entry.actor,
-      action: entry.action,
-      target: entry.target,
-      result: entry.result,
-      detail: entry.detail ? JSON.stringify(entry.detail) : null,
-      created_at: now,
-    };
-    db.prepare(
-      `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
-       VALUES (@id, @team_id, @ts, @actor, @action, @target, @result, @detail, @created_at)`,
-    ).run(row);
+    appendAuditRequired(db, teamId, entry);
   } catch (err) {
     log.warn({ msg: 'audit_append_failed', action: entry.action, err: String(err) });
   }

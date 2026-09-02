@@ -15,6 +15,7 @@ import { captureSession } from './commands/session.js';
 import { statusCommand } from './commands/status.js';
 import { teamCommand } from './commands/team.js';
 import { whoamiCommand } from './commands/whoami.js';
+import { wireCommand } from './commands/wire.js';
 import { loadConfig, saveBinding } from './config.js';
 import { cachedTeamLive } from './onboard/init.js';
 import { sessionDigest } from './session/digest.js';
@@ -92,6 +93,142 @@ async function run(fn: (p: ReturnType<typeof parseArgs>) => Promise<number>, arg
     spy.mockRestore();
   }
 }
+
+describe('CLI end-to-end (ADR 350 legacy bootstrap cutover)', () => {
+  it('migrates two Workspaces and one host without interrupting an occupied Presence', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+    await run(teamCommand, ['add', 'Grace', '--kind', 'agent']);
+    const config = loadConfig();
+    const legacyKey = config.agentKeys['dawn']!;
+    const adminCredential = config.identities['dawn']!.key;
+    const adaAuth = await claimAgentHttp(
+      process.env['MUSTERD_SERVER']!,
+      'dawn',
+      legacyKey,
+      adminCredential,
+      'Ada',
+    );
+    const graceAuth = await claimAgentHttp(
+      process.env['MUSTERD_SERVER']!,
+      'dawn',
+      legacyKey,
+      adminCredential,
+      'Grace',
+    );
+    const adaPresence = server.db
+      .prepare<[string], { id: string }>(
+        `SELECT p.id FROM presence p JOIN members m ON m.id = p.member_id
+         WHERE m.name = ? AND p.status = 'online'`,
+      )
+      .get('Ada')!.id;
+
+    const adaDir = mkdtempSync(join(tmpdir(), 'musterd-ada-'));
+    const graceDir = mkdtempSync(join(tmpdir(), 'musterd-grace-'));
+    try {
+      for (const [workspace, seat, credential] of [
+        [adaDir, 'Ada', adaAuth.key],
+        [graceDir, 'Grace', graceAuth.key],
+      ] as const) {
+        saveBinding(workspace, {
+          version: 2,
+          server: process.env['MUSTERD_SERVER']!,
+          team: 'dawn',
+          claim: { mode: 'seat', name: seat },
+          agent_key: legacyKey,
+          seat_credential: credential,
+        });
+        cwdSpy.mockReturnValue(workspace);
+        expect((await run(wireCommand, ['wire', '--migrate-bootstrap'])).code).toBe(0);
+      }
+      expect(
+        server.db
+          .prepare<[string], { id: string }>('SELECT id FROM presence WHERE id = ?')
+          .get(adaPresence)?.id,
+      ).toBe(adaPresence);
+
+      cwdSpy.mockReturnValue(cwdDir);
+      const enrolled = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/residency/enroll`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${adminCredential}`,
+        },
+        body: JSON.stringify({ seat: 'Ada', harness: 'cursor', host: 'mac-studio' }),
+      });
+      expect(enrolled.status).toBe(201);
+      const hostMint = JSON.parse(
+        (await run(teamCommand, ['bootstrap', 'mint', '--host', 'mac-studio', '--json'])).out,
+      );
+      const hostUse = await fetch(
+        `${process.env['MUSTERD_SERVER']}/teams/dawn/residency/wake-leases`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${hostMint.agent_key}`,
+          },
+          body: JSON.stringify({ host: 'mac-studio' }),
+        },
+      );
+      expect(hostUse.status).toBe(200);
+
+      const reseatPolicy = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/policy`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${adminCredential}`,
+        },
+        body: JSON.stringify({ standing_reseat_known_agents: true }),
+      });
+      expect(reseatPolicy.status).toBe(200);
+      for (const workspace of [adaDir, graceDir]) {
+        const binding = JSON.parse(
+          readFileSync(join(workspace, '.musterd', 'binding.json'), 'utf8'),
+        );
+        const claimed = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/claim`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            key: binding.agent_key,
+            target: { seat: binding.claim.name },
+            surface: 'cli',
+          }),
+        });
+        expect(claimed.status).toBe(200);
+      }
+
+      const cutover = await run(teamCommand, ['bootstrap', 'cutover', '--yes', '--json']);
+      expect(JSON.parse(cutover.out)).toMatchObject({ ok: true, already_cut_over: false });
+
+      const legacyClaim = await fetch(`${process.env['MUSTERD_SERVER']}/teams/dawn/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          key: legacyKey,
+          target: { seat: 'Ada' },
+          surface: 'cli',
+        }),
+      });
+      expect(legacyClaim.status).toBe(403);
+      const legacyHost = await fetch(
+        `${process.env['MUSTERD_SERVER']}/teams/dawn/residency/wake-leases`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: `Bearer ${legacyKey}`,
+          },
+          body: JSON.stringify({ host: 'mac-studio' }),
+        },
+      );
+      expect(legacyHost.status).toBe(401);
+    } finally {
+      rmSync(adaDir, { recursive: true, force: true });
+      rmSync(graceDir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('CLI end-to-end (Scenario A: two humans on one team)', () => {
   it('creates a team, adds a second human, exchanges a message', async () => {

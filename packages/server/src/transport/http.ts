@@ -65,6 +65,8 @@ import {
   SubmitSeedBriefSchema,
   TeamMemorySearchResponseSchema,
   TOKEN_PREFIXES,
+  BootstrapCutoverRequestSchema,
+  BootstrapMigrationRequestSchema,
   NodeEnrollRequestSchema,
   NodeInviteMintSchema,
   NodeJoinRequestSchema,
@@ -244,7 +246,9 @@ import { staleLaneWarnings } from '../store/staleness.js';
 import { searchInsights } from '../store/teamMemory.js';
 import {
   archiveTeam,
+  bootstrapCutoverReadiness,
   createTeam,
+  cutoverLegacyBootstrap,
   findBootstrapCredential,
   findBootstrapCredentialRecord,
   getTeamBySlug,
@@ -252,7 +256,9 @@ import {
   getPolicy,
   getStoredPolicy,
   listBootstrapCredentials,
+  migrateLegacyBootstrapCredential,
   mintBootstrapCredential,
+  recordBootstrapCredentialUse,
   requireTeam,
   revokeBootstrapCredential,
   rotateAgentKey,
@@ -1165,6 +1171,7 @@ function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage, host?: s
     });
   }
   if (credential?.use_kind === 'host' && host !== undefined && credential.target === host) {
+    recordBootstrapCredentialUse(ctx.db, credential.id);
     appendAudit(ctx.db, team.id, {
       actor: null,
       action: 'bootstrap_credential.used',
@@ -1187,7 +1194,15 @@ function authAgentKeyOnly(ctx: Ctx, slug: string, req: IncomingMessage, host?: s
   if (!keyHash || hashToken(bearer(req)) !== keyHash) {
     throw new MusterdError(
       'unauthorized',
-      `the residency wake endpoints authenticate with the team agent key (mskey_) for "${slug}"`,
+      team.bootstrap_cutover_at !== null
+        ? [
+            `Team "${slug}" has retired its legacy bootstrap credential.`,
+            'Use an administrator-minted scoped credential:',
+            'musterd team bootstrap mint --seat <name>',
+            'musterd team bootstrap mint --role <role>',
+            'musterd team bootstrap mint --host <label>',
+          ].join('\n')
+        : `the residency wake endpoints authenticate with the team agent key (mskey_) for "${slug}"`,
     );
   }
   return team;
@@ -1522,6 +1537,53 @@ export async function handleHttp(
         human_credential: credential,
         agent_key,
         policy: getPolicy(ctx.db, team.id),
+      });
+    }
+
+    if (method === 'POST' && path === '/agent-bootstrap-migrations') {
+      const body = parseOrBadRequest(BootstrapMigrationRequestSchema, await readJson(req));
+      const migrated = migrateLegacyBootstrapCredential(ctx.db, {
+        legacyKey: body.legacy_key,
+        seatCredential: body.seat_credential,
+      });
+      const credential = migrated.credential;
+      if (migrated.replaced_credential_id) {
+        appendAudit(ctx.db, credential.team_id, {
+          actor: credential.created_by,
+          action: 'bootstrap_credential.migration_replaced',
+          target: migrated.replaced_credential_id,
+          result: 'allow',
+          detail: {
+            successor_credential_id: credential.id,
+            target_member_id: credential.migration_target_member_id,
+          },
+        });
+      }
+      appendAudit(ctx.db, credential.team_id, {
+        actor: credential.created_by,
+        action: 'bootstrap_credential.migrated',
+        target: credential.id,
+        result: 'allow',
+        detail: {
+          predecessor_credential_id: migrated.predecessor_credential_id,
+          successor_credential_id: credential.id,
+          target_member_id: credential.migration_target_member_id,
+        },
+      });
+      return sendJson(res, 201, {
+        credential: {
+          id: credential.id,
+          use: credential.use_kind,
+          target: credential.target,
+          label: credential.label,
+          state: credential.state,
+          expires_at: credential.expires_at,
+          created_by: credential.created_by,
+          created_at: credential.created_at,
+          rotated_at: credential.rotated_at,
+          revoked_at: credential.revoked_at,
+        },
+        agent_key: migrated.agent_key,
       });
     }
 
@@ -2317,6 +2379,27 @@ export async function handleHttp(
         });
       }
 
+      if (method === 'GET' && rest === '/agent-bootstrap-cutover') {
+        const { team } = authAdmin(ctx, slug, req);
+        return sendJson(res, 200, bootstrapCutoverReadiness(ctx.db, team.id));
+      }
+
+      if (method === 'POST' && rest === '/agent-bootstrap-cutover') {
+        const { team, member } = authAdmin(ctx, slug, req);
+        const body = parseOrBadRequest(BootstrapCutoverRequestSchema, await readJson(req));
+        const readiness = cutoverLegacyBootstrap(ctx.db, {
+          teamId: team.id,
+          actor: member.name,
+          force: body.force,
+        });
+        return sendJson(res, 200, {
+          ok: true,
+          already_cut_over: readiness.already_cut_over,
+          forced: body.force,
+          readiness,
+        });
+      }
+
       const bootstrapCredentialMatch = rest.match(/^\/agent-bootstrap-credentials\/([^/]+)$/);
       if (method === 'DELETE' && bootstrapCredentialMatch) {
         const credentialId = decodeURIComponent(bootstrapCredentialMatch[1]!);
@@ -2789,6 +2872,8 @@ export async function handleHttp(
         if (bootstrapRecord && !bootstrapCredential) {
           const expired =
             bootstrapRecord.expires_at !== null && bootstrapRecord.expires_at <= Date.now();
+          const retiredLegacy =
+            bootstrapRecord.use_kind === 'legacy' && team.bootstrap_cutover_at !== null;
           appendAudit(ctx.db, team.id, {
             actor: null,
             action: expired ? 'bootstrap_credential.expired' : 'bootstrap_credential.refused',
@@ -2802,9 +2887,17 @@ export async function handleHttp(
           return sendJson(res, 403, {
             type: 'refused',
             code: 'forbidden',
-            message: `this bootstrap credential is ${expired ? 'expired' : bootstrapRecord.state}`,
+            message: retiredLegacy
+              ? 'this Team has retired its legacy bootstrap credential'
+              : `this bootstrap credential is ${expired ? 'expired' : bootstrapRecord.state}`,
             claimable: [],
-            hint: 'ask a team admin to mint a replacement credential',
+            hint: retiredLegacy
+              ? [
+                  'musterd team bootstrap mint --seat <name>',
+                  'musterd team bootstrap mint --role <role>',
+                  'musterd team bootstrap mint --host <label>',
+                ].join('\n')
+              : 'ask a team admin to mint a replacement credential',
           });
         }
         const keyHash = getAgentKeyHash(ctx.db, team.id);
@@ -2951,6 +3044,7 @@ export async function handleHttp(
           });
         }
         if (bootstrapCredential) {
+          recordBootstrapCredentialUse(ctx.db, bootstrapCredential.id);
           appendAudit(ctx.db, team.id, {
             actor: null,
             action: 'bootstrap_credential.used',

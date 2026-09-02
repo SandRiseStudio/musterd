@@ -156,6 +156,19 @@ export interface BootstrapCredentialSummary {
   revoked_at: number | null;
 }
 
+export interface BootstrapCutoverReadiness {
+  already_cut_over: boolean;
+  unmet_seats: Array<{ member_id: string; name: string }>;
+  unmet_hosts: string[];
+}
+
+export interface BootstrapCutoverResponse {
+  ok: true;
+  already_cut_over: boolean;
+  forced: boolean;
+  readiness: BootstrapCutoverReadiness;
+}
+
 export class HttpClient {
   constructor(private opts: HttpClientOpts) {}
 
@@ -406,6 +419,12 @@ export class HttpClient {
   rotateAgentKey(slug: string): Promise<AgentKeyMint> {
     return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-key/rotate`, {});
   }
+  migrateBootstrapCredential(body: {
+    legacy_key: string;
+    seat_credential: string;
+  }): Promise<{ credential: BootstrapCredentialSummary; agent_key: string }> {
+    return this.request('POST', '/agent-bootstrap-migrations', body);
+  }
   mintBootstrapCredential(
     slug: string,
     body: {
@@ -432,6 +451,14 @@ export class HttpClient {
       'DELETE',
       `/teams/${encodeURIComponent(slug)}/agent-bootstrap-credentials/${encodeURIComponent(id)}`,
     );
+  }
+  bootstrapCutoverReadiness(slug: string): Promise<BootstrapCutoverReadiness> {
+    return this.request('GET', `/teams/${encodeURIComponent(slug)}/agent-bootstrap-cutover`);
+  }
+  cutoverLegacyBootstrap(slug: string, force: boolean): Promise<BootstrapCutoverResponse> {
+    return this.request('POST', `/teams/${encodeURIComponent(slug)}/agent-bootstrap-cutover`, {
+      force,
+    });
   }
   roster(slug: string): Promise<{
     members: MemberSummary[];

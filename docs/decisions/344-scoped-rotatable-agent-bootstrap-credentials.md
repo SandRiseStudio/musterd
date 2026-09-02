@@ -88,6 +88,10 @@ claim authentication or making key distribution unauditable.
 - Scheduled rotation, compromise detection, and automatic revocation are not
   implied by credential records. They remain dependent on the next
   claim-abuse-controls decision.
+- 2026-09-01: [ADR 350](./350-retire-legacy-team-bootstrap-key.md) defines the compatibility-window
+  exit: authenticated agent Workspace migration, administrator-distributed host successors,
+  observed-use readiness, and transactional per-Team cutover. Legacy lookup code remains until
+  every extant Team has recorded cutover.
 
 ## Observability & Evaluation
 

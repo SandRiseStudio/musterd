@@ -29,8 +29,10 @@ Presence-bound leases for routine agent HTTP access; admin-gated governance; and
 records. Secrets are shown once, stored as hashes by the daemon, and excluded from logs and
 telemetry.
 
-The Team-wide key minted by `team create` remains accepted as a marked legacy compatibility
-credential. New credential minting uses a seat, role, or residency-host scope.
+Teams created before scoped bootstrap credentials may still accept a marked legacy Team-wide key
+until an administrator completes the documented cutover. `musterd team bootstrap cutover` refuses
+unless every held agent seat and residency host has demonstrated scoped authentication, unless the
+administrator explicitly forces the cutover.
 
 musterd does not yet provide sandbox enforcement, database encryption at rest, mTLS, OS-keychain
 secret storage, automatic credential rotation, signed audit records, or claim rate limiting. Harness

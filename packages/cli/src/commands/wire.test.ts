@@ -1,9 +1,18 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BINDING_DIR, BINDING_FILE, WORKSPACE_SPEC_FILE } from '@musterd/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
+import { saveBinding } from '../config.js';
 import { nodeFs, type HarnessContext } from '../onboard/reconcile/context.js';
 import {
   canonicalFingerprint,
@@ -139,16 +148,157 @@ async function run(argv: string[], deps?: Parameters<typeof wireCommand>[1]) {
   vi.spyOn(process.stdout, 'write').mockImplementation((c: never) => (out.push(String(c)), true));
   vi.spyOn(process.stderr, 'write').mockImplementation((c: never) => (errs.push(String(c)), true));
   try {
-    const code = await wireCommand(
-      parseArgs(argv),
-      deps ?? { ctx: ctxOf(), registry: [fakeAdapter('fake-a')] },
-    );
+    const code = await wireCommand(parseArgs(argv), {
+      ctx: ctxOf(),
+      registry: [fakeAdapter('fake-a')],
+      ...deps,
+    });
     return { code, out: out.join(''), err: errs.join('') };
   } finally {
     (process.stdout.write as unknown as { mockRestore: () => void }).mockRestore();
     (process.stderr.write as unknown as { mockRestore: () => void }).mockRestore();
   }
 }
+
+describe('musterd wire --migrate-bootstrap (ADR 350)', () => {
+  it('atomically replaces only the legacy key in the current binding', async () => {
+    saveBinding(cwd, {
+      version: 2,
+      server: 'http://localhost:4849',
+      team: 'bravo',
+      claim: { mode: 'seat', name: 'Sonnet' },
+      agent_key: 'mskey_legacy',
+      seat_credential: 'msac_sonnet',
+      grant: 'msgr_keep',
+      model: 'gpt-test',
+      driver: 'nick',
+    });
+    const migrateBootstrapCredential = vi.fn(async () => ({
+      credential: {
+        id: 'cred-1',
+        use: 'claim_seat' as const,
+        target: 'Sonnet',
+        label: 'legacy-migration',
+        state: 'active' as const,
+        expires_at: null,
+        created_by: 'Sonnet',
+        created_at: 1,
+        rotated_at: null,
+        revoked_at: null,
+      },
+      agent_key: 'mskey_scoped',
+    }));
+
+    const result = await run(['wire', '--migrate-bootstrap'], {
+      http: { migrateBootstrapCredential },
+    });
+
+    expect(result.code).toBe(0);
+    expect(migrateBootstrapCredential).toHaveBeenCalledWith({
+      legacy_key: 'mskey_legacy',
+      seat_credential: 'msac_sonnet',
+    });
+    expect(readBinding()).toMatchObject({
+      agent_key: 'mskey_scoped',
+      seat_credential: 'msac_sonnet',
+      grant: 'msgr_keep',
+      model: 'gpt-test',
+      driver: 'nick',
+    });
+    expect(statSync(join(cwd, BINDING_DIR, BINDING_FILE)).mode & 0o777).toBe(0o600);
+    expect(result.out).not.toContain('mskey_scoped');
+  });
+
+  it('keeps the legacy binding intact when atomic publication fails', async () => {
+    saveBinding(cwd, {
+      version: 2,
+      server: 'http://localhost:4849',
+      team: 'bravo',
+      claim: { mode: 'seat', name: 'Sonnet' },
+      agent_key: 'mskey_legacy',
+      seat_credential: 'msac_sonnet',
+    });
+    const original = readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8');
+
+    await expect(
+      run(['wire', '--migrate-bootstrap'], {
+        http: {
+          migrateBootstrapCredential: async () => ({
+            credential: {
+              id: 'cred-1',
+              use: 'claim_seat',
+              target: 'Sonnet',
+              label: null,
+              state: 'active',
+              expires_at: null,
+              created_by: 'Sonnet',
+              created_at: 1,
+              rotated_at: null,
+              revoked_at: null,
+            },
+            agent_key: 'mskey_scoped',
+          }),
+        },
+        saveBinding: (dir, binding) =>
+          saveBinding(dir, binding, {
+            rename: () => {
+              throw new Error('injected rename failure');
+            },
+          }),
+      }),
+    ).rejects.toThrow(
+      'could not publish the scoped credential; the legacy key remains in this binding',
+    );
+    expect(readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8')).toBe(original);
+    expect(readBinding().agent_key).toBe('mskey_legacy');
+    expect(statSync(join(cwd, BINDING_DIR, BINDING_FILE)).mode & 0o777).toBe(0o600);
+  });
+
+  it.each([
+    ['missing binding', null],
+    [
+      'non-seat claim',
+      {
+        version: 2,
+        server: 'http://localhost:4849',
+        team: 'bravo',
+        claim: { mode: 'role', role: 'backend' },
+        agent_key: 'mskey_legacy',
+        seat_credential: 'msac_sonnet',
+      },
+    ],
+    [
+      'missing legacy key',
+      {
+        version: 2,
+        server: 'http://localhost:4849',
+        team: 'bravo',
+        claim: { mode: 'seat', name: 'Sonnet' },
+        seat_credential: 'msac_sonnet',
+      },
+    ],
+    [
+      'missing seat credential',
+      {
+        version: 2,
+        server: 'http://localhost:4849',
+        team: 'bravo',
+        claim: { mode: 'seat', name: 'Sonnet' },
+        agent_key: 'mskey_legacy',
+      },
+    ],
+  ] as const)('refuses %s without contacting the server', async (_label, binding) => {
+    if (binding) saveBinding(cwd, binding);
+    const migrateBootstrapCredential = vi.fn();
+
+    await expect(
+      run(['wire', '--migrate-bootstrap'], {
+        http: { migrateBootstrapCredential },
+      }),
+    ).rejects.toThrow();
+    expect(migrateBootstrapCredential).not.toHaveBeenCalled();
+  });
+});
 
 describe('musterd wire (noninteractive, desire-preserving — ADR 282)', () => {
   it('reconciles the SAVED selection and materializes the binding with the resolved key', async () => {
