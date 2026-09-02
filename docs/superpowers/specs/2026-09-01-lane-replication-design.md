@@ -198,6 +198,47 @@ guard start mattering. And exactly one of the five `updateLane` callers arms it:
 and only for ownership or state patches. The acceptance path, the sweep and both incident writes all
 call the unguarded form.
 
+## Hole 3, decided: the `lane.*` rows move inside the lane write's transaction
+
+*Added 2026-09-02 after holes 1 and 2 landed on #1173.*
+
+Hole 1 was closed by writing the release and its row in one transaction with
+`appendAuditRequired`. That is the shape every `lane.*` row needs and none of the others has:
+the seven verbs the PATCH handler and `route.ts` emit are written **after** `updateLane` has
+committed, through `appendAudit`, which swallows failure. Two consequences, both fatal to a fold:
+
+- A lane can change with no row (the append failed, silently), so history has a gap the reader
+  cannot see — the same shape as hole 1, one layer up.
+- The write commits first and the append follows, so an append that fails leaves the log
+  *behind* the table. A peer folding the log converges on the wrong state, with no signal that
+  it has.
+
+**The decision:** a `lane.*` row is not observability, it is the transition. It is written by the
+store, inside the same transaction as the row it describes, with `appendAuditRequired`. If the
+record cannot be written, the transition does not happen. This is the property `insertMessage`
+already has for `messages` (the log *is* the write) and it is what makes the audit spine a
+substrate rather than a best-effort shadow.
+
+**The shape:** `updateLane` grows an `actor` argument and emits the verb itself, inside
+`updateLaneInTx`, using the same exclusive-edge rules the handler applies now
+(`http.ts:4243-4264`) — moved, not duplicated, so the two cannot drift. The handler stops
+emitting `lane.*` rows and keeps only the team-visible notes. `recordLaneClose` already owns
+terminal edges from three doors and stays where it is; it moves to the required form. The four
+unguarded `updateLane` callers (acceptance path, sweep, both incident writes) pass their actor
+and get their rows for free, which closes the incident-under-`incident.*` gap named above.
+
+**What it costs:** an audit failure can now fail a lane write with a 500. That is the point. The
+alternative — a lane that moved with no record — is the failure this whole slice exists to
+prevent, and `messages` has paid the same price since v1 without incident.
+
+**Why it is its own PR:** it changes `updateLane`'s signature at five call sites and moves ~60
+lines of edge logic from transport to store. It is mechanical, but it is the kind of mechanical
+that deserves a reviewer reading the before and after side by side rather than riding behind two
+small fixes.
+
+Falsifier: make `appendAuditRequired` throw inside a lane PATCH and assert the lane row is
+unchanged and the response is a 500, not a 200 with a silent gap.
+
 ## Falsifier to write first
 
 Per the 3b-ii pattern, the test precedes the design's implementation: **a lane opened and claimed on
