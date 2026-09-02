@@ -16,7 +16,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { appendAuditRequired, type AuditRow } from './audit.js';
+import { appendAuditRequired, type AuditAction, type AuditRow } from './audit.js';
 import { listGoals } from './goals.js';
 import { getPolicy } from './teams.js';
 
@@ -95,6 +95,92 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
 /** States that participate in contention (ADR 169: shared constant — includes ready_for_review). */
 const CONTENDING: ReadonlySet<string> = LANE_CONTENDING_STATES;
 
+/**
+ * Who is making a lane transition, for the `lane.*` row the store writes beside it. Lane-replication
+ * spec §Hole 3: a `lane.*` row is not observability, it IS the transition — so it is written inside
+ * the same transaction as the lane row, with the required append, and if the record cannot be
+ * written the transition does not happen. `messages` has had this property since v1 (the log is
+ * the write); it is what makes the audit spine a substrate a peer can fold rather than a
+ * best-effort shadow. Callers that own their own verb (`recordLaneClose`, `lane.ready_for_review`)
+ * pass nothing and write theirs as before.
+ */
+export interface LaneAudit {
+  actor: string | null;
+}
+
+function laneAuditRow(
+  db: Database,
+  teamId: string,
+  audit: LaneAudit,
+  action: AuditAction,
+  laneId: string,
+  detail: Record<string, unknown>,
+): void {
+  appendAuditRequired(db, teamId, {
+    actor: audit.actor,
+    action,
+    target: laneId,
+    result: 'allow',
+    detail,
+  });
+}
+
+/**
+ * The four edges the store records, with the same exclusivity the PATCH handler used to apply —
+ * moved here, not duplicated, so the predicates cannot drift (ryder, #1071 acceptance). Terminal
+ * edges belong to `recordLaneClose`; entering awaiting_acceptance belongs to `lane.ready_for_review`.
+ */
+function recordLaneEdges(
+  db: Database,
+  teamId: string,
+  before: Lane,
+  after: Lane,
+  ownerPatched: boolean,
+  audit: LaneAudit,
+): void {
+  const claimed =
+    ownerPatched && after.owner_seat !== null && after.owner_seat !== before.owner_seat;
+  if (claimed) {
+    laneAuditRow(db, teamId, audit, 'lane.claimed', after.id, {
+      lane: after.id,
+      owner: after.owner_seat,
+      previous_owner: before.owner_seat,
+      // A handoff and a self-claim are the same patch; only the record can tell them apart later.
+      kind: after.owner_seat === audit.actor ? 'claim' : 'handoff',
+      ...(before.owner_seat ? { takeover_of_offline_owner: true } : {}),
+    });
+  }
+  const changed = laneFieldChanges(before, after);
+  if (changed.length > 0) {
+    laneAuditRow(db, teamId, audit, 'lane.updated', after.id, {
+      lane: after.id,
+      fields: changed,
+      changes: laneFieldDiff(before, after),
+    });
+  }
+  const released = before.owner_seat !== null && after.state === 'open' && before.state !== 'open';
+  if (released) {
+    laneAuditRow(db, teamId, audit, 'lane.released', after.id, {
+      lane: after.id,
+      released_by: audit.actor,
+      owner_before: before.owner_seat,
+    });
+  }
+  if (
+    after.state !== before.state &&
+    !LANE_TERMINAL_STATES.has(after.state) &&
+    !released &&
+    !(isAwaitingAcceptance(after.state) && !isAwaitingAcceptance(before.state)) &&
+    !claimed
+  ) {
+    laneAuditRow(db, teamId, audit, 'lane.state_changed', after.id, {
+      lane: after.id,
+      from: before.state,
+      to: after.state,
+    });
+  }
+}
+
 export function openLane(
   db: Database,
   teamId: string,
@@ -102,6 +188,7 @@ export function openLane(
   createdBy: string,
   input: OpenLane,
   now: number = Date.now(),
+  audit?: LaneAudit,
 ): Lane {
   const claim = input.claim === true;
   // ADR 244: an admin's default-stakes rule fires HERE, at open, and never again. Resolving it late
@@ -146,12 +233,27 @@ export function openLane(
     resolved_at: null,
     updated_at: now,
   };
-  db.prepare(
+  const insert = db.prepare(
     `INSERT INTO lanes (id, team_id, project, title, detail, kind, owner_seat, role, surface_globs,
                         depends_on, branch, goal_id, risk, stakes, stakes_provenance, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
      VALUES (@id, @team_id, @project, @title, @detail, @kind, @owner_seat, @role, @surface_globs,
              @depends_on, @branch, @goal_id, @risk, @stakes, @stakes_provenance, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
-  ).run(row);
+  );
+  db.transaction(() => {
+    insert.run(row);
+    // A lane born owned is the most common acquisition of all (ADR 203). No collision is possible —
+    // the lane did not exist — so no guard: just the row, `at_open` so a reader can tell a birth
+    // from a takeover.
+    if (audit && row.owner_seat) {
+      laneAuditRow(db, teamId, audit, 'lane.claimed', row.id, {
+        lane: row.id,
+        owner: row.owner_seat,
+        previous_owner: null,
+        kind: 'claim',
+        at_open: true,
+      });
+    }
+  })();
   return rowToLane(row, teamSlug);
 }
 
@@ -207,8 +309,11 @@ export function updateLane(
   patch: UpdateLane,
   now: number = Date.now(),
   expect?: LaneExpectation,
+  audit?: LaneAudit,
 ): Lane | null {
-  return db.transaction(() => updateLaneInTx(db, teamId, id, teamSlug, patch, now, expect))();
+  return db.transaction(() =>
+    updateLaneInTx(db, teamId, id, teamSlug, patch, now, expect, audit),
+  )();
 }
 
 function updateLaneInTx(
@@ -219,6 +324,7 @@ function updateLaneInTx(
   patch: UpdateLane,
   now: number,
   expect?: LaneExpectation,
+  audit?: LaneAudit,
 ): Lane | null {
   const existing = getLane(db, teamId, id, teamSlug);
   if (!existing) return null;
@@ -326,7 +432,9 @@ function updateLaneInTx(
     `UPDATE lanes SET ${[...changed.map((c) => `${c}=@${c}`), 'updated_at=@updated_at'].join(', ')}
      WHERE team_id=@team_id AND id=@id`,
   ).run(bind);
-  return getLane(db, teamId, id, teamSlug);
+  const after = getLane(db, teamId, id, teamSlug)!;
+  if (audit) recordLaneEdges(db, teamId, existing, after, patch.owner_seat !== undefined, audit);
+  return after;
 }
 
 /** Fields a `lane.updated` audit row reports (ADR 325 prereq). Ownership and state are excluded —
