@@ -222,7 +222,9 @@ guard goes.
 - **`packages/protocol/src/sync.ts` is a contract.** `SyncEventSchema`, `SyncPushRequestSchema`,
   `SyncPushResponseSchema` and `SYNC_PUSH_MAX_BATCH` (500 — an unbounded batch is an
   unauthenticated-adjacent memory primitive) are what another implementation compiles against.
-  Changing them needs an ADR, which is the rule that produced this one.
+  Since 3b-ii, so are `SyncPullEventSchema`, `SyncPullResponseSchema` and `SYNC_PULL_MAX_BATCH`
+  (the amendment below). Changing them needs an ADR, which is the rule that produced this one —
+  and this amendment.
 - **The receiver validates as strictly as the sender.** Composing `EnvelopeSchema` means a hub
   rejects anything the origin's own daemon would have rejected. It also means a protocol version
   skew between machines surfaces as a validation refusal rather than as a half-understood event.
@@ -236,6 +238,43 @@ guard goes.
   stable and git-replicated. A team that renames seats freely, or that lets two machines disagree
   about the roster, degrades this to an ambiguous reference. That is a real cost of ADR 058's split,
   accepted here rather than discovered later.
+
+### Amendment 2026-09-01 — the pull wire is the push event plus `hub_seq`, and it carries the act **as a string**
+
+> **Amended 2026-09-01** by stanley on lane `01M1FAD24JM5ADVH7G774K2DQP` (increment 3b-ii, #1155),
+> prompted by dolly's review finding F1 on that PR. A dated note, not a Decision edit: it adds a
+> schema the Decision did not cover and loosens no rule above.
+
+3b-ii adds the read side: `GET /sync/pull` pages the canonical order, and the page is
+`SyncPullEventSchema` — `SyncEvent`'s shape with `hub_seq` beside it, because the puller's cursor
+*is* a `hub_seq`. Composition again, for §Decision 1's reason. `SYNC_PULL_MAX_BATCH` equals the push
+bound, for the push bound's reason.
+
+One field is deliberately looser than on the push side: **`envelope.act` is `z.string().min(1)` on
+the pull wire, not the `Act` enum.** The push side validates the act on ingest against the *hub's*
+build, and that is right — the hub refuses what its own daemon would refuse (§Consequences). But the
+log outlives builds. A hub rolled back after ingesting a newer act, or a puller behind the hub, meets
+a stored act it cannot name. With the enum on the pull schema, the hub's own response re-parse
+refused the whole page and answered `500` to every puller; the puller logged `sync_pull_failed` —
+the same line as being offline (§Decision 7's failure, again) — and applied *nothing*, not even the
+valid prefix before the one event it could not classify. One unknown act stalled every daemon on the
+team, silently.
+
+So the rule: **the wire carries what the log holds; the reader decides what it can apply.**
+Classifying an act is the fold's job, and the fold already has the right answer — its `unknown_act`
+stop applies the valid prefix, holds the cursor there, and says "upgrade this daemon" at error,
+retried each tick. That is loud, per-daemon, and bounded to the one event, which is what a schema
+refusal at the transport layer cannot be.
+
+This does not weaken §Decision 1's guarantee. An act reached the log only by passing the enum at
+ingest on some build; the string type on the pull side admits nothing that was not once a valid
+act somewhere. It moves *where a build-skew is discovered* from the transport (where the only
+answer is 500) to the fold (where the answer is the stop).
+
+Falsifier: `sync/pull.test.ts`, "an act this build cannot name reaches the fold over the wire —
+prefix applied, stop classified, no 500" — stage an act the puller's build does not know, and assert
+the events before it are applied and the page is not refused. Reverting the schema to the enum turns
+that test red (dolly reproduced it in a clean checkout, 2026-09-01).
 
 ## Observability & Evaluation
 
