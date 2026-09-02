@@ -123,6 +123,7 @@ import {
   getLane,
   LaneConflictError,
   laneFieldChanges,
+  laneFieldDiff,
   laneWarnings,
   lanesForGoal,
   noGoalWarning,
@@ -4233,7 +4234,7 @@ export async function handleHttp(
             action: 'lane.updated',
             target: lane.id,
             result: 'allow',
-            detail: { lane: lane.id, fields: changedFields },
+            detail: { lane: lane.id, fields: changedFields, changes: laneFieldDiff(before, lane) },
           });
         }
         if (
