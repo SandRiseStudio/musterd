@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AuditEntrySchema } from './audit.js';
 import { EnvelopeSchema } from './envelope.js';
 
 /**
@@ -16,8 +17,13 @@ import { EnvelopeSchema } from './envelope.js';
  * drift would look exactly like "this act is replicable but unvalidated".
  */
 
-/** One replicated event: an envelope, and the origin that minted it. */
-export const SyncEventSchema = z.object({
+/**
+ * One replicated MESSAGE event: an envelope, and the origin that minted it. `kind` is optional and
+ * defaults to the message so that every event a 3b-ii build ever staged parses unchanged — the
+ * lane kind below is the second, and it is the tagged one.
+ */
+export const SyncMessageEventSchema = z.object({
+  kind: z.literal('message').optional(),
   envelope: EnvelopeSchema,
   /** The `nodes` row id that minted this event — a principal the hub authenticated (ADR 328 §1). */
   origin_node: z.string().min(1),
@@ -39,7 +45,45 @@ export const SyncEventSchema = z.object({
    */
   from_provenance: z.string().nullable(),
 });
+export type SyncMessageEvent = z.infer<typeof SyncMessageEventSchema>;
+
+/**
+ * One replicated LANE event (lane-replication spec §"The wire, decided"): a `lane.*` audit row —
+ * the transition itself, written by the store inside the lane write's transaction — and the origin
+ * that minted it. It draws `origin_seq` from the SAME allocator as messages (ADR 335 §8), so one
+ * node's sequence is dense across both kinds and the hub's gap check holds unchanged.
+ *
+ * `AuditEntrySchema` is composed, not restated, for the reason ADR 335 §1 gives the envelope: the
+ * receiver runs exactly the validation the sender's own daemon ran. `event.action` stays the open
+ * string it has always been (ADR 074); the FOLD decides which verbs it can apply, and blocks on one
+ * it cannot name rather than storing a transition it cannot project.
+ *
+ * `team` is the slug, checked by the hub against the authenticated node's team exactly as the
+ * message envelope's `team` is. `event.ts` travels: it is the origin's clock, and the projected
+ * lane's timestamps are the origin's facts about when it moved.
+ */
+export const SyncLaneEventSchema = z.object({
+  kind: z.literal('lane'),
+  team: z.string().min(1),
+  event: AuditEntrySchema,
+  origin_node: z.string().min(1),
+  origin_seq: z.number().int().positive(),
+});
+export type SyncLaneEvent = z.infer<typeof SyncLaneEventSchema>;
+
+/** Either replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
+export const SyncEventSchema = z.union([SyncLaneEventSchema, SyncMessageEventSchema]);
 export type SyncEvent = z.infer<typeof SyncEventSchema>;
+
+/** The id the hub keys `sync_log` on: the envelope's for a message, the audit row's for a lane. */
+export function syncEventId(event: SyncEvent): string {
+  return event.kind === 'lane' ? event.event.id : event.envelope.id;
+}
+
+/** The team slug the event claims, for the hub's "pushed into the team it names" check. */
+export function syncEventTeam(event: SyncEvent): string {
+  return event.kind === 'lane' ? event.team : event.envelope.team;
+}
 
 /**
  * One push is bounded. The route is authenticated by `msnode_`, but a credential-holding machine
@@ -76,10 +120,18 @@ export type SyncPushResponse = z.infer<typeof SyncPushResponseSchema>;
  * nothing, not even the prefix before the poisoned event (dolly, #1155 review F1). The wire carries
  * what the log holds; the reader decides what it can apply.
  */
-export const SyncPullEventSchema = SyncEventSchema.extend({
+export const SyncPullMessageEventSchema = SyncMessageEventSchema.extend({
   envelope: EnvelopeSchema.innerType().extend({ act: z.string().min(1) }),
   hub_seq: z.number().int().positive(),
 });
+export type SyncPullMessageEvent = z.infer<typeof SyncPullMessageEventSchema>;
+
+export const SyncPullLaneEventSchema = SyncLaneEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullLaneEvent = z.infer<typeof SyncPullLaneEventSchema>;
+
+export const SyncPullEventSchema = z.union([SyncPullLaneEventSchema, SyncPullMessageEventSchema]);
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;
 
 /** Same bound as push, for the same reason: a legitimate catch-up must not allocate unboundedly. */

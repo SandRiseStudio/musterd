@@ -1,6 +1,6 @@
 import { type Lane, isAwaitingAcceptance, reviewGrade } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { appendAudit, peerReviewGradeOf, reviewRouting } from './audit.js';
+import { appendAudit, appendLaneEventRequired, peerReviewGradeOf, reviewRouting } from './audit.js';
 import { memberIsHuman, memberModelByName, workerFamily } from './review.js';
 
 /**
@@ -191,7 +191,9 @@ export function recordLaneClose(
                   // opposite failures this was, and abstains when the promise is unknowable.
                   waitVerdict
             : 'self_close';
-  appendAudit(db, teamId, {
+  // The close is a lane transition, so it is the replicated, required form (lane-replication spec
+  // §Hole 3): if the record cannot be written, the close does not happen.
+  appendLaneEventRequired(db, teamId, {
     actor: closer.name,
     action: 'lane.closed',
     target: lane.id,

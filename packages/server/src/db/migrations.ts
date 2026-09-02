@@ -1421,6 +1421,31 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Lane-replication slice (spec 2026-09-01 §"The wire, decided"): a `lane.*` audit row is the
+    // second replicated kind. It draws `(origin_node, origin_seq)` from the same `nodes.next_seq`
+    // allocator as messages (ADR 335 §8) at the moment the store writes it. Every other audit row,
+    // and every row older than this migration, keeps the DEFAULTs and reads as "not replicated";
+    // the unique index is partial on `origin_seq > 0` so those rows never collide with each other.
+    // This is the fold's idempotence key, the shape v54 gave `idx_messages_origin`.
+    //
+    // v58 lands after v57 (#1181, presence CHECK): runMigrations is a high-water mark, so a lower
+    // number arriving later never runs (the v54/v55 lesson, #1174).
+    version: 58,
+    up: (db) => {
+      const cols = db
+        .prepare<[], { name: string }>('PRAGMA table_info(audit)')
+        .all()
+        .map((c) => c.name);
+      if (!cols.includes('origin_node'))
+        db.exec("ALTER TABLE audit ADD COLUMN origin_node TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes('origin_seq'))
+        db.exec('ALTER TABLE audit ADD COLUMN origin_seq INTEGER NOT NULL DEFAULT 0');
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_origin ON audit(origin_node, origin_seq) WHERE origin_seq > 0',
+      );
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

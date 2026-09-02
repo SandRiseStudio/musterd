@@ -95,6 +95,7 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import {
   appendAudit,
+  appendLaneEventRequired,
   hasInterruptRaised,
   laneOwnerHistory,
   listAudit,
@@ -4360,7 +4361,8 @@ export async function handleHttp(
             : humanRequired && pick?.grade === 'human'
               ? 'blocking'
               : 'standard';
-          appendAudit(ctx.db, team.id, {
+          // A lane transition: the replicated, required form (lane-replication spec §Hole 3).
+          appendLaneEventRequired(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.ready_for_review',
             target: lane.id,

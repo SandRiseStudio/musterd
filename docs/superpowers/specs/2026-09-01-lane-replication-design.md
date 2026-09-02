@@ -313,6 +313,71 @@ small fixes.
 Falsifier: make `appendAuditRequired` throw inside a lane PATCH and assert the lane row is
 unchanged and the response is a 500, not a 200 with a silent gap.
 
+## The wire, decided: the `lane.*` row is the second replicated kind (2026-09-02)
+
+*Added after #1179 and #1182 landed `lane.opened` on every birth. With those, the audit log holds a
+lane's whole life from 2026-09-02 forward, written in the transaction that made it true. What it
+still cannot do is leave the machine.*
+
+Finding 1 showed the `[lane]` notes already cross, and why they are not the transition. Finding 3
+showed the transition is the `lane.*` audit row. So the unit that remains is exactly one sentence:
+**the `lane.*` audit row rides the push/pull wire beside the message, and the fold applies it.**
+
+**The stamp.** A `lane.*` row draws `(origin_node, origin_seq)` from the same `nodes.next_seq`
+allocator `insertMessage` uses, at the moment it is written, inside the lane write's transaction.
+ADR 335 §8 already reserves this: "one allocator serves every replicated kind, so the moment a
+second kind draws from it — 3c's lane claims — a messages-derived head under-reports". The
+allocator is shared; the sequence is therefore dense across both kinds, and the hub's gap check
+holds unchanged. Migration v58 adds the two columns to `audit` (`DEFAULT ''`/`0`, so every
+non-lane row and every historical row reads as "not replicated") and a unique index on the pair,
+partial on `origin_seq > 0`, which is what makes the fold idempotent — the same shape as
+`idx_messages_origin` in v54. **v58 lands after wanderer's v57 (#1181)** or the high-water-mark
+runner skips v57 forever (ryder, #1175).
+
+Only `lane.*` rows are stamped. The rest of `audit` stays local observability, unstamped, exactly
+as before: this slice replicates lane transitions, not the governance log. The open question "does
+`audit` ride this slice" is answered *no, only its lane verbs do*, and the answer is visible in the
+partial index.
+
+**The wire.** `SyncEvent` becomes a tagged pair. The message event is unchanged and its tag is
+optional — every event a 3b-ii build ever staged parses as a message, so no re-staging and no epoch
+bump for the existing kind. The lane event is `{ kind: 'lane', team, event: AuditEntry, origin_node,
+origin_seq }`, composing `AuditEntrySchema` from the protocol package rather than restating it
+(ADR 335 §1's rule, applied to the second kind). `event.action` stays the open string it has always
+been; the fold, not the wire, decides what it can apply. The hub's ingest checks `team` against the
+authenticated node's team for both kinds, keys `sync_log.id` on the audit row's ULID, and stores the
+event verbatim, as it does today.
+
+**The push.** `unpushed` reads both tables — messages and stamped audit rows — for the node, merged
+and ordered by `origin_seq`. Nothing else in the push changes: the cursor is a seq, and a seq is a
+seq whichever table holds it.
+
+**The fold.** Two disciplines carry over unchanged: never touch `nodes.next_seq`, and block rather
+than skip. A lane event whose pair is already held is a replay. A lane event that passes the gap
+check is inserted into local `audit` with its stamp verbatim, and then **projected into `lanes`**
+in the same transaction: `lane.opened` inserts the row from its declaration; `lane.claimed` sets
+the owner and `claimed_at`; `lane.released` clears the owner and moves the lane to `open`;
+`lane.state_changed` moves the state; `lane.updated` applies each `changes[field].to`;
+`lane.ready_for_review` moves to `awaiting_acceptance`; `lane.closed` sets the terminal state and
+`resolved_at`. A verb the fold does not know is `unknown_lane_event`, the `unknown_act` shape: block,
+log "upgrade this daemon", retry each tick. A transition for a lane the fold has never seen born is
+`lane_unborn` — a lane older than 2026-09-02 on the origin, or a log with a hole — and it blocks
+for the same reason: applying it would produce a row with no title, and the topology doc's
+precondition names this case.
+
+**What this does to the A/B question, finally.** `lanes` on a peer is a materialised projection of
+the replicated log, written by exactly one fold, reviewed in one file, run by hub and joiner alike —
+the same posture 3b-ii gave `messages`. `openLane` remains the sole *local* insert path; the fold is
+the sole *foreign* one. The measurement showed the read-time projection is cheap, and this design
+does not need it: the fold applies each event once, on arrival, and every existing reader of `lanes`
+keeps working with no change. This is not B: no row is stamped, no row is synced, and a peer that
+folds the same log reaches the same table by the same transitions the origin took.
+
+**Who folds.** Both, symmetrically, for now. 3c makes the hub authoritative over ownership; until
+then a joiner projecting a claim from a stale log is exactly as wrong as it is today, when it sees
+nothing at all. The topology doc's "lanes do not replicate" line moves to "lane transitions
+replicate; ownership is not yet arbitrated".
+
 ## Falsifier to write first
 
 Per the 3b-ii pattern, the test precedes the design's implementation: **a lane opened and claimed on

@@ -16,7 +16,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { appendAuditRequired, type AuditAction, type AuditRow } from './audit.js';
+import { appendLaneEventRequired, type AuditAction, type AuditRow } from './audit.js';
 import { listGoals } from './goals.js';
 import { getPolicy } from './teams.js';
 
@@ -116,7 +116,7 @@ function laneAuditRow(
   laneId: string,
   detail: Record<string, unknown>,
 ): void {
-  appendAuditRequired(db, teamId, {
+  appendLaneEventRequired(db, teamId, {
     actor: audit.actor,
     action,
     target: laneId,
@@ -916,7 +916,7 @@ function releaseLaneWithRecord(
     `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
      WHERE team_id = ? AND id = ?`,
   ).run(now, teamId, laneId);
-  appendAuditRequired(db, teamId, {
+  appendLaneEventRequired(db, teamId, {
     actor: SYSTEM_RELEASER,
     action: 'lane.released',
     target: laneId,
