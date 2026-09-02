@@ -9,6 +9,14 @@ import {
   shortWorkTitle,
 } from './presenceLabel';
 
+describe('shortSurface — first-class harnesses keep their own name', () => {
+  it('names grok as grok, not grok-cli and not the model family crumb', () => {
+    expect(shortSurface('grok')).toBe('grok');
+    expect(shortSurface('claude-code')).toBe('claude code');
+    expect(shortSurface('opencode')).toBe('opencode');
+  });
+});
+
 describe('shortModel — the Claude families', () => {
   it('names every Claude family with its version, Fable included', () => {
     expect(shortModel('claude-opus-5')).toBe('opus 5');

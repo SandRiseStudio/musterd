@@ -38,7 +38,7 @@ function senderProvenance(db: Database, memberId: string): string | null {
  * that name events it never sent. Two sequences corrupted at once, which is the ambiguity between
  * loss and silence that ADR 331 exists to prevent.
  */
-function localNodeForTeam(db: Database, teamId: string): { id: string } {
+export function localNodeForTeam(db: Database, teamId: string): { id: string } {
   const marked = db
     .prepare<[string], { node_id: string }>('SELECT node_id FROM local_node WHERE team_id = ?')
     .get(teamId);

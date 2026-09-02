@@ -1,5 +1,11 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { pageMeta } from '../brand/siteMeta';
+import {
+  GRAPH_ID,
+  absoluteUrl,
+  breadcrumbNode,
+  markdownAlternate,
+  pageHead,
+} from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -13,13 +19,29 @@ export const Route = createFileRoute('/docs/$slug')({
     if (!page) throw notFound();
     return page;
   },
-  head: ({ loaderData, params }) => ({
-    meta: pageMeta({
+  head: ({ loaderData, params }) =>
+    pageHead({
       title: loaderData?.title ?? 'Docs',
       description: loaderData?.excerpt ?? 'musterd documentation.',
       path: `/docs/${params.slug}`,
+      links: [markdownAlternate(`/docs/${params.slug}`)],
+      graph: [
+        {
+          '@type': 'TechArticle',
+          headline: loaderData?.title ?? 'Docs',
+          description: loaderData?.excerpt ?? 'musterd documentation.',
+          url: absoluteUrl(`/docs/${params.slug}`),
+          inLanguage: 'en',
+          isPartOf: { '@id': GRAPH_ID.website },
+          publisher: { '@id': GRAPH_ID.organization },
+          about: { '@id': GRAPH_ID.software },
+        },
+        breadcrumbNode([
+          { name: 'Docs', path: '/docs' },
+          { name: loaderData?.title ?? 'Docs', path: `/docs/${params.slug}` },
+        ]),
+      ],
     }),
-  }),
   component: Doc,
 });
 

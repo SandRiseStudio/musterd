@@ -338,7 +338,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'agent',
     signature:
       // The live flag is still `--profile` (rename is ADR 296 tier 3) — the signature must match it. <!-- vocab:ok -->
-      '<name> [--role <label>] [--profile <profile>] [--harness <claude-code|cursor|codex>] [--here | --path <dir>]', // <!-- vocab:ok -->
+      '<name> [--role <label>] [--profile <profile>] [--harness <claude-code|cursor|codex|opencode|grok>] [--here | --path <dir>]', // <!-- vocab:ok -->
     summary: 'add an agent AND give it its own isolated workspace',
     group: 'team',
     primary: true,

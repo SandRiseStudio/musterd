@@ -265,3 +265,119 @@ describe('foldBatch', () => {
     db.close();
   });
 });
+
+/** A replicated `lane.*` row from the foreign origin (lane-replication spec §"The wire, decided"). */
+function foreignLane(
+  id: string,
+  seq: number,
+  hubSeq: number,
+  action: string,
+  detail: Record<string, unknown>,
+): SyncPullEvent {
+  return {
+    kind: 'lane',
+    team: 'revive',
+    event: {
+      id,
+      ts: 3000 + seq,
+      actor: 'nick',
+      action,
+      target: (detail['lane'] as string) ?? null,
+      result: 'allow',
+      detail,
+    },
+    origin_node: FOREIGN,
+    origin_seq: seq,
+    hub_seq: hubSeq,
+  };
+}
+
+describe('foldBatch — the lane kind', () => {
+  it('projects a birth into lanes, holds the row in audit with its stamp, and leaves the allocator alone', () => {
+    const { db, team } = seed();
+    const before = localNextSeq(db, team.id);
+    const res = foldBatch(db, team.id, [
+      foreignLane('e-1', 1, 1, 'lane.opened', {
+        lane: 'L1',
+        title: 'from afar',
+        project: 'musterd',
+        scope: ['a/**'],
+        stakes: 'high',
+        created_by: 'nick',
+        created_at: 5,
+      }),
+      foreignLane('e-2', 2, 2, 'lane.claimed', { lane: 'L1', owner: 'nick', kind: 'claim' }),
+    ]);
+    expect(res).toEqual({ applied: 2, skipped: 0, last_hub_seq: 2, stop: null });
+    expect(localNextSeq(db, team.id)).toBe(before);
+    expect(
+      db
+        .prepare(
+          'SELECT title, project, surface_globs, stakes, owner_seat, state, created_at FROM lanes WHERE id = ?',
+        )
+        .get('L1'),
+    ).toEqual({
+      title: 'from afar',
+      project: 'musterd',
+      surface_globs: '["a/**"]',
+      stakes: 'high',
+      owner_seat: 'nick',
+      state: 'claimed',
+      created_at: 5,
+    });
+    expect(
+      db
+        .prepare(
+          'SELECT id, origin_node, origin_seq FROM audit WHERE origin_node = ? ORDER BY origin_seq',
+        )
+        .all(FOREIGN),
+    ).toEqual([
+      { id: 'e-1', origin_node: FOREIGN, origin_seq: 1 },
+      { id: 'e-2', origin_node: FOREIGN, origin_seq: 2 },
+    ]);
+    db.close();
+  });
+
+  it('blocks on a verb it cannot project — the wire outran the reader', () => {
+    const { db, team } = seed();
+    const res = foldBatch(db, team.id, [
+      foreignLane('e-1', 1, 1, 'lane.opened', { lane: 'L1', title: 't' }),
+      foreignLane('e-2', 2, 2, 'lane.teleported', { lane: 'L1' }),
+    ]);
+    expect(res.applied).toBe(1);
+    expect(res.stop).toEqual({ kind: 'unknown_lane_event', action: 'lane.teleported', hub_seq: 2 });
+    expect(readPullCursor(db, team.id)).toBe(1);
+    db.close();
+  });
+
+  it('blocks on a transition for a lane it never saw born, before the row lands in audit', () => {
+    const { db, team } = seed();
+    const res = foldBatch(db, team.id, [
+      foreignLane('e-1', 1, 1, 'lane.claimed', { lane: 'GHOST', owner: 'nick', kind: 'claim' }),
+    ]);
+    expect(res.stop).toEqual({
+      kind: 'lane_unborn',
+      lane: 'GHOST',
+      action: 'lane.claimed',
+      hub_seq: 1,
+    });
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM audit WHERE origin_node = ?').get(FOREIGN),
+    ).toEqual({ n: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM lanes WHERE id = ?').get('GHOST')).toEqual({
+      n: 0,
+    });
+    db.close();
+  });
+
+  it('a message and a lane row from one origin share one dense sequence — no gap between kinds', () => {
+    const { db, team } = seed();
+    const res = foldBatch(db, team.id, [
+      foreign('f-1', 1, 1),
+      foreignLane('e-2', 2, 2, 'lane.opened', { lane: 'L1', title: 't' }),
+      foreign('f-3', 3, 3),
+    ]);
+    expect(res).toEqual({ applied: 3, skipped: 0, last_hub_seq: 3, stop: null });
+    db.close();
+  });
+});

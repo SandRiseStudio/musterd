@@ -1,4 +1,4 @@
-import type { Envelope } from '@musterd/protocol';
+import { eligibleOf, type Envelope } from '@musterd/protocol';
 import { actLabel, actTone, laneEvent } from '../format';
 import { speechAddressee } from './speech';
 import type { OfficeEvent } from './types';
@@ -14,6 +14,17 @@ export function actToEvent(env: Envelope): OfficeEvent | null {
   const lane = laneEvent(env);
   const tone = actTone(lane ?? env.act);
   const urgent = env.meta?.['urgent'] === true;
+  /**
+   * Who the act is for, as a list. A `member` act is a one-name list; an ADR 254 eligible set
+   * (message / request_help / challenge) is 2-4 names carried in `meta.eligible` while `to` stays
+   * `{kind:'team'}`, because routing still fans out to the team.
+   *
+   * Every name is treated identically — the sender walks to each desk in turn, the same trip it
+   * makes for a single recipient (nick, 2026-09-02). Anything less would make "either of you" a
+   * second-class act in the room while the ledger treats all of them as equally on the hook.
+   */
+  const recipients: string[] =
+    to.kind === 'member' ? [to.name] : (eligibleOf(env.meta)?.filter((n) => n !== from) ?? []);
 
   // Lane open/resolve/handoff (ADR 083 §4: an ordinary `message` + meta, no new act) get their own
   // choreography instead of collapsing into the generic team megaphone or 1:1 note.
@@ -29,12 +40,12 @@ export function actToEvent(env: Envelope): OfficeEvent | null {
     case 'status_update':
       return { kind: 'screen-pulse', who: from, tone };
     case 'message':
-      return to.kind === 'member'
-        ? { kind: 'note', from, to: to.name, tone }
+      return recipients.length > 0
+        ? { kind: 'note', from, to: recipients, tone }
         : { kind: 'megaphone', from };
     case 'request_help':
-      return to.kind === 'member'
-        ? { kind: 'walk-help', from, to: to.name, tier: urgent ? 'urgent' : 'needs-attn' }
+      return recipients.length > 0
+        ? { kind: 'walk-help', from, to: recipients, tier: urgent ? 'urgent' : 'needs-attn' }
         : { kind: 'megaphone', from };
     case 'handoff':
       return to.kind === 'member'
@@ -55,7 +66,7 @@ export function actToEvent(env: Envelope): OfficeEvent | null {
     case 'steer':
       return { kind: 'steer', from, to: to.kind === 'member' ? to.name : null, urgent };
     case 'challenge':
-      return { kind: 'challenge', from, to: to.kind === 'member' ? to.name : null, urgent };
+      return { kind: 'challenge', from, to: recipients, urgent };
     case 'defer':
       return { kind: 'defer', who: from };
     default:
@@ -83,6 +94,31 @@ export function speechEventFor(env: Envelope): Extract<OfficeEvent, { kind: 'spe
     tone: actTone(env.act),
     id: env.id,
     act: env.act,
-    addressee: speechAddressee(env.to, env.from),
+    // `eligibleOf` is the protocol's single reader of the shape, deliberately shared so no package
+    // can interpret an eligible set differently from the schema that validated it.
+    addressee: speechAddressee(env.to, env.from, eligibleOf(env.meta)),
   };
+}
+
+
+/**
+ * The walk requests a `walk-help` turns into — one per seat, in the order the sender named them.
+ *
+ * Pure and here rather than inline in the scene's event switch, for the reason ryder's 01M0GVNBHA
+ * acceptance established and dolly's #1158 review repeated: a fan-out written inline is a fan-out
+ * no test holds. Mutating the scene's loop to `ev.to.slice(0, 1)` — walk only the first of an
+ * eligible set — left all 890 web tests green before this existed.
+ *
+ * `actors.walk` queues per call (one trip in flight, up to three pending), so a set at the
+ * `MAX_ELIGIBLE` cap of four drains without the backlog guard dropping a leg.
+ */
+export function helpWalks(ev: Extract<OfficeEvent, { kind: 'walk-help' }>): WalkReq[] {
+  return ev.to.map((to) => ({ kind: 'help' as const, to, urgent: ev.tier === 'urgent' }));
+}
+
+/** One trip the scene hands to `actors.walk`. */
+export interface WalkReq {
+  kind: 'help';
+  to: string;
+  urgent: boolean;
 }

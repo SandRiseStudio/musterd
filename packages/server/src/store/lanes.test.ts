@@ -9,6 +9,7 @@ import {
   getLane,
   globsOverlap,
   LaneConflictError,
+  laneFieldDiff,
   laneWarnings,
   lanesForGoal,
   listLanes,
@@ -422,6 +423,234 @@ describe('departed-seat claim release (ADR 196)', () => {
       state: 'open',
       owner_seat: null,
     });
+  });
+
+  // Lane-replication slice (spec 2026-09-01-lane-replication-design.md §Finding 3, hole 1): these
+  // two paths were the only places a lane changed hands with no record of who or why. Increment 1
+  // made every transition leave a `lane.*` audit row precisely so a replicating daemon can fold
+  // history back out — a release that leaves no trace cannot replicate under any design, and a
+  // peer would keep showing a holder this machine already released.
+  const releasedRows = (db: ReturnType<typeof openDb>, laneId: string) =>
+    db
+      .prepare<[string], { actor: string | null; detail: string }>(
+        "SELECT actor, detail FROM audit WHERE action = 'lane.released' AND target = ?",
+      )
+      .all(laneId)
+      .map((r) => ({ actor: r.actor, detail: JSON.parse(r.detail) as Record<string, unknown> }));
+
+  it('releaseInFlightClaimsForSeat leaves a lane.released row per lane, naming the departed holder', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'wip', claim: true });
+
+    releaseInFlightClaimsForSeat(db, team.id, 'June');
+
+    expect(releasedRows(db, lane.id)).toEqual([
+      {
+        actor: 'musterd',
+        detail: {
+          lane: lane.id,
+          released_by: 'musterd',
+          owner_before: 'June',
+          reason: 'seat_left',
+        },
+      },
+    ]);
+  });
+
+  it('releaseDepartedSeatClaims leaves a lane.released row per swept lane', () => {
+    const { db, team } = seed();
+    const june = addMember(db, team, { name: 'June', kind: 'agent' });
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'ghost wip', claim: true });
+    db.prepare('UPDATE members SET left_at = ? WHERE id = ?').run(Date.now(), june.row.id);
+
+    releaseDepartedSeatClaims(db);
+
+    expect(releasedRows(db, lane.id)).toEqual([
+      {
+        actor: 'musterd',
+        detail: {
+          lane: lane.id,
+          released_by: 'musterd',
+          owner_before: 'June',
+          reason: 'seat_departed_sweep',
+        },
+      },
+    ]);
+  });
+});
+
+// Lane-replication slice (spec §Finding 3, hole 2): `lane.updated` recorded field NAMES only, so
+// history could prove a lane's scope changed and never say to what. A folding peer needs values.
+describe('laneFieldDiff — the values behind a lane.updated row', () => {
+  it('reports from/to per changed audited field, arrays by value, and nothing for unchanged ones', () => {
+    const { db, team } = seed();
+    const before = openLane(db, team.id, 'bravo', 'June', {
+      title: 'old',
+      scope: ['a/**'],
+      claim: true,
+    });
+    const after = updateLane(db, team.id, before.id, 'bravo', {
+      title: 'new',
+      scope: ['a/**', 'b/**'],
+      state: 'active', // state is not an audited field — it has its own verb
+    })!;
+
+    expect(laneFieldDiff(before, after)).toEqual({
+      title: { from: 'old', to: 'new' },
+      scope: { from: ['a/**'], to: ['a/**', 'b/**'] },
+    });
+  });
+});
+
+// Lane-replication slice (spec §Hole 3): a lane.* row IS the transition, so the store writes it
+// inside the same transaction as the lane row, with the required append. If the record cannot be
+// written, the transition does not happen.
+describe('lane.* rows are written by the store, inside the write', () => {
+  const rows = (db: ReturnType<typeof openDb>, laneId: string) =>
+    db
+      .prepare<[string], { actor: string | null; action: string; detail: string }>(
+        'SELECT actor, action, detail FROM audit WHERE target = ? ORDER BY rowid',
+      )
+      .all(laneId)
+      .map((r) => ({ actor: r.actor, action: r.action, detail: JSON.parse(r.detail) }));
+
+  // Finding 4: the log had no first event. `lane.opened` carries the whole declaration so a peer
+  // folding the log knows what a lane IS, not only what happened to it.
+  it('openLane writes lane.opened carrying the full declaration, before any claim row', () => {
+    const { db, team } = seed();
+    const lane = openLane(
+      db,
+      team.id,
+      'bravo',
+      'June',
+      {
+        title: 'declared',
+        project: 'musterd',
+        detail: 'why',
+        scope: ['packages/server/**'],
+        depends_on: ['01DEP'],
+        branch: 'june/x',
+        goal_id: 'launch',
+        risk: ['schema'],
+        stakes: 'high',
+        claim: true,
+      },
+      7,
+    );
+    expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened', 'lane.claimed']);
+    expect(rows(db, lane.id)[0]).toEqual({
+      actor: 'June',
+      action: 'lane.opened',
+      detail: {
+        lane: lane.id,
+        title: 'declared',
+        project: 'musterd',
+        detail: 'why',
+        kind: null,
+        role: null,
+        scope: ['packages/server/**'],
+        depends_on: ['01DEP'],
+        branch: 'june/x',
+        goal_id: 'launch',
+        risk: ['schema'],
+        stakes: 'high',
+        stakes_provenance: 'declared',
+        created_by: 'June',
+        created_at: 7,
+      },
+    });
+  });
+
+  it('an unclaimed open still writes lane.opened, and nothing else', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'unowned' }, 7);
+    expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened']);
+  });
+
+  it('openLane with claim writes lane.claimed at_open', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 'born owned', claim: true }, 1);
+    expect(rows(db, lane.id).slice(1)).toEqual([
+      {
+        actor: 'June',
+        action: 'lane.claimed',
+        detail: {
+          lane: lane.id,
+          owner: 'June',
+          previous_owner: null,
+          kind: 'claim',
+          at_open: true,
+        },
+      },
+    ]);
+  });
+
+  it('updateLane writes claimed / updated / state_changed / released for their edges', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 't' });
+    const audit = { actor: 'June' };
+
+    updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'June' }, 2, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { branch: 'b' }, 3, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'active' }, 4, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { owner_seat: 'Cleo' }, 5, undefined, audit);
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'open' }, 6, undefined, { actor: 'Cleo' });
+
+    expect(rows(db, lane.id)[0].action).toBe('lane.opened');
+    expect(rows(db, lane.id).slice(1)).toEqual([
+      {
+        actor: 'June',
+        action: 'lane.claimed',
+        detail: { lane: lane.id, owner: 'June', previous_owner: null, kind: 'claim' },
+      },
+      {
+        actor: 'June',
+        action: 'lane.updated',
+        detail: { lane: lane.id, fields: ['branch'], changes: { branch: { from: null, to: 'b' } } },
+      },
+      {
+        actor: 'June',
+        action: 'lane.state_changed',
+        detail: { lane: lane.id, from: 'claimed', to: 'active' },
+      },
+      {
+        actor: 'June',
+        action: 'lane.claimed',
+        detail: {
+          lane: lane.id,
+          owner: 'Cleo',
+          previous_owner: 'June',
+          kind: 'handoff',
+          takeover_of_offline_owner: true,
+        },
+      },
+      {
+        actor: 'Cleo',
+        action: 'lane.released',
+        detail: { lane: lane.id, released_by: 'Cleo', owner_before: 'Cleo' },
+      },
+    ]);
+  });
+
+  it('a transition whose record cannot be written does not happen', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 't', branch: 'before' });
+    db.exec('DROP TABLE audit');
+
+    expect(() =>
+      updateLane(db, team.id, lane.id, 'bravo', { branch: 'after' }, 2, undefined, {
+        actor: 'June',
+      }),
+    ).toThrow();
+    expect(getLane(db, team.id, lane.id, 'bravo')?.branch).toBe('before');
+  });
+
+  it('updateLane without an audit option writes nothing (callers that own their own verb)', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'bravo', 'June', { title: 't' });
+    updateLane(db, team.id, lane.id, 'bravo', { state: 'active' });
+    // The birth is the store's own row and is always there; the patch added nothing after it.
+    expect(rows(db, lane.id).map((r) => r.action)).toEqual(['lane.opened']);
   });
 });
 

@@ -2,6 +2,7 @@ import { SYNC_PUSH_MAX_BATCH, SyncPushResponseSchema, type SyncEvent } from '@mu
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
+import type { AuditRow } from '../store/audit.js';
 import { rowToEnvelope } from '../store/messages.js';
 import type { MessageRow } from '../store/rows.js';
 import { listActiveTeams } from '../store/teams.js';
@@ -93,13 +94,18 @@ function advanceCursor(ctx: Ctx, teamId: string, nodeId: string, seq: number, no
  * anchor (ADR 325): shipping it would dangle on the receiver, or resolve to a DIFFERENT seat that
  * happens to hold that id there.
  */
-function unpushed(
-  ctx: Ctx,
-  teamId: string,
-  nodeId: string,
-  after: number,
-): { row: MessageRow; from: string; to: string | null }[] {
-  return ctx.db
+type Pending =
+  | { kind: 'message'; seq: number; row: MessageRow; from: string; to: string | null }
+  | { kind: 'lane'; seq: number; row: AuditRow };
+
+/**
+ * Everything this node minted after `after`, across BOTH replicated kinds, in origin order. One
+ * allocator serves messages and `lane.*` audit rows alike (ADR 335 §8), so the merge is a plain
+ * sort on `origin_seq` and the sequence the hub sees is dense. Bounded after the merge, not per
+ * table — bounding each side first could ship seq 501 of one kind ahead of seq 3 of the other.
+ */
+function unpushed(ctx: Ctx, teamId: string, nodeId: string, after: number): Pending[] {
+  const messages: Pending[] = ctx.db
     .prepare<
       [string, string, number, number],
       MessageRow & { from_name: string; to_name: string | null }
@@ -113,7 +119,52 @@ function unpushed(
         LIMIT ?`,
     )
     .all(teamId, nodeId, after, SYNC_PUSH_MAX_BATCH)
-    .map((r) => ({ row: r, from: r.from_name, to: r.to_name }));
+    .map((r) => ({ kind: 'message', seq: r.origin_seq, row: r, from: r.from_name, to: r.to_name }));
+  const lanes: Pending[] = ctx.db
+    .prepare<[string, string, number, number], AuditRow>(
+      `SELECT * FROM audit
+        WHERE team_id = ? AND origin_node = ? AND origin_seq > ?
+        ORDER BY origin_seq
+        LIMIT ?`,
+    )
+    .all(teamId, nodeId, after, SYNC_PUSH_MAX_BATCH)
+    .map((r) => ({ kind: 'lane', seq: r.origin_seq, row: r }));
+  return [...messages, ...lanes].sort((a, b) => a.seq - b.seq).slice(0, SYNC_PUSH_MAX_BATCH);
+}
+
+function toSyncEvent(pending: Pending, slug: string): SyncEvent {
+  if (pending.kind === 'lane') {
+    const { row } = pending;
+    return {
+      kind: 'lane',
+      team: slug,
+      event: {
+        id: row.id,
+        ts: row.ts,
+        actor: row.actor,
+        action: row.action,
+        target: row.target,
+        result: row.result,
+        detail: row.detail ? (JSON.parse(row.detail) as Record<string, unknown>) : null,
+      },
+      origin_node: row.origin_node,
+      origin_seq: row.origin_seq,
+    };
+  }
+  const { row, from, to } = pending;
+  // `received_at` is `created_at` in envelope clothing — the read side's receipt position — and
+  // it is stripped here for the same reason `created_at` itself does not travel (below): the hub
+  // stamps its own on fold, and shipping ours would assert a falsehood about when it learned.
+  const { received_at: _local, ...envelope } = rowToEnvelope(row, slug, from, to);
+  return {
+    envelope,
+    origin_node: row.origin_node,
+    origin_seq: row.origin_seq,
+    // Travels because it is an attested fact about the event (ADR 131 §4). `created_at`
+    // deliberately does not: it is local receipt time, and shipping ours would assert a falsehood
+    // about when the hub learned of the event.
+    from_provenance: row.from_provenance,
+  };
 }
 
 /**
@@ -147,21 +198,7 @@ export async function pushTeam(
   const pending = unpushed(ctx, team.id, nodeId, cursor);
   if (pending.length === 0) return 0;
 
-  const events: SyncEvent[] = pending.map(({ row, from, to }) => {
-    // `received_at` is `created_at` in envelope clothing — the read side's receipt position — and
-    // it is stripped here for the same reason `created_at` itself does not travel (below): the hub
-    // stamps its own on fold, and shipping ours would assert a falsehood about when it learned.
-    const { received_at: _local, ...envelope } = rowToEnvelope(row, team.slug, from, to);
-    return {
-      envelope,
-      origin_node: row.origin_node,
-      origin_seq: row.origin_seq,
-      // Travels because it is an attested fact about the event (ADR 131 §4). `created_at`
-      // deliberately does not: it is local receipt time, and shipping ours would assert a falsehood
-      // about when the hub learned of the event.
-      from_provenance: row.from_provenance,
-    };
-  });
+  const events: SyncEvent[] = pending.map((p) => toSyncEvent(p, team.slug));
 
   if (loopback) {
     try {

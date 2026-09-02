@@ -1,5 +1,11 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { pageMeta } from '../brand/siteMeta';
+import {
+  GRAPH_ID,
+  absoluteUrl,
+  breadcrumbNode,
+  itemListNode,
+  pageHead,
+} from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -13,14 +19,27 @@ export const Route = createFileRoute('/roadmap')({
     const { roadmapSections } = await import('../content/generated/site-content');
     return roadmapSections;
   },
-  head: () => ({
-    meta: pageMeta({
+  head: ({ loaderData }) =>
+    pageHead({
       title: 'Roadmap',
       description:
         'What musterd has shipped, what is next, and what it has ruled out on principle — with the reasoning kept in the open.',
       path: '/roadmap',
+      graph: [
+        {
+          '@type': 'CollectionPage',
+          name: 'Roadmap',
+          url: absoluteUrl('/roadmap'),
+          isPartOf: { '@id': GRAPH_ID.website },
+          about: { '@id': GRAPH_ID.software },
+        },
+        // The sections, not the ~82 items: the list states what the page groups work into, and a
+        // crawler that wants the items has the page. Naming every item here would double the
+        // route's bytes to restate what the HTML already says.
+        itemListNode((loaderData ?? []).map((s) => ({ name: s.label }))),
+        breadcrumbNode([{ name: 'Roadmap', path: '/roadmap' }]),
+      ],
     }),
-  }),
   component: Roadmap,
 });
 

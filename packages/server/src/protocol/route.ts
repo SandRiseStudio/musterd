@@ -812,9 +812,16 @@ function applyAcceptanceVerdict(
   const before = getLane(ctx.db, team.id, laneId, team.slug);
   if (!before || !isAwaitingAcceptance(before.state)) return;
 
-  const lane = updateLane(ctx.db, team.id, laneId, team.slug, {
-    state: act === 'accept' ? 'done' : 'active',
-  });
+  const lane = updateLane(
+    ctx.db,
+    team.id,
+    laneId,
+    team.slug,
+    { state: act === 'accept' ? 'done' : 'active' },
+    Date.now(),
+    undefined,
+    { actor: decider.name },
+  );
   if (!lane) return;
 
   if (act === 'accept') {

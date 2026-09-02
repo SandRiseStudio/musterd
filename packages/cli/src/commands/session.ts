@@ -101,6 +101,8 @@ export interface HookPayload {
   model_id?: string;
   /** Cursor Agent hooks (ADR 198): legacy composer model slug. */
   model?: string;
+  /** Which harness produced this payload — inferred from field names (ADR 352). */
+  harness?: 'claude-code' | 'cursor' | 'grok';
 }
 
 function parseHookPayload(raw: string): HookPayload {
@@ -112,13 +114,28 @@ function parseHookPayload(raw: string): HookPayload {
     const sessionId =
       typeof o['session_id'] === 'string'
         ? o['session_id']
-        : typeof o['conversation_id'] === 'string'
-          ? o['conversation_id']
-          : undefined;
+        : typeof o['sessionId'] === 'string'
+          ? o['sessionId']
+          : typeof o['conversation_id'] === 'string'
+            ? o['conversation_id']
+            : undefined;
     const roots = Array.isArray(o['workspace_roots'])
       ? o['workspace_roots'].filter((r): r is string => typeof r === 'string')
       : [];
-    const cwd = typeof o['cwd'] === 'string' ? o['cwd'] : roots.length > 0 ? roots[0] : undefined;
+    const cwd =
+      typeof o['cwd'] === 'string'
+        ? o['cwd']
+        : typeof o['workspaceRoot'] === 'string'
+          ? o['workspaceRoot']
+          : roots.length > 0
+            ? roots[0]
+            : undefined;
+    const harness: HookPayload['harness'] =
+      typeof o['sessionId'] === 'string' || typeof o['hookEventName'] === 'string'
+        ? 'grok'
+        : typeof o['conversation_id'] === 'string'
+          ? 'cursor'
+          : 'claude-code';
     return {
       ...(sessionId ? { session_id: sessionId } : {}),
       ...(typeof o['transcript_path'] === 'string' && o['transcript_path']
@@ -126,7 +143,12 @@ function parseHookPayload(raw: string): HookPayload {
         : {}),
       ...(cwd ? { cwd } : {}),
       ...(typeof o['model_id'] === 'string' ? { model_id: o['model_id'] } : {}),
-      ...(typeof o['model'] === 'string' ? { model: o['model'] } : {}),
+      ...(typeof o['model'] === 'string'
+        ? { model: o['model'] }
+        : typeof o['current_model_id'] === 'string'
+          ? { model: o['current_model_id'] }
+          : {}),
+      harness,
     };
   } catch {
     return {};
@@ -472,6 +494,7 @@ function observeModelFor(harnessId: string, payload: HookPayload): string | unde
       ...(payload.session_id ? { session_id: payload.session_id } : {}),
       ...(payload.model_id ? { model_id: payload.model_id } : {}),
       ...(payload.model ? { model: payload.model } : {}),
+      ...(payload.cwd ? { cwd: payload.cwd } : {}),
     });
   } catch {
     return undefined;
@@ -496,7 +519,7 @@ async function pushAttestation(
   session: SessionCapture,
   event: 'start' | 'end',
   dir: string,
-  harness: 'claude-code' | 'cursor' = CAPTURE_HARNESS,
+  harness: 'claude-code' | 'cursor' | 'grok' = CAPTURE_HARNESS,
   // Whether a refused lease may be answered with a claim. A session event (start/end) may; the
   // tool boundary may only while this slot has never spent its claim — see `claim_attempted_at`.
   mayClaim = true,
@@ -715,7 +738,7 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
       return;
     }
     session = {
-      harness: CAPTURE_HARNESS,
+      harness: payload.harness ?? CAPTURE_HARNESS,
       id: payload.session_id,
       ...(payload.transcript_path ? { transcript_path: payload.transcript_path } : {}),
       started_at: Date.now(),
@@ -736,9 +759,10 @@ export async function captureSession(event: 'start' | 'end', payload: HookPayloa
   // Expect this to observe NOTHING on a fresh session: the transcript named here is the new one, and
   // it carries no assistant turn yet. `refreshModelObservation` below is what actually lands the
   // observation, at the first tool boundary — this call only catches a resumed transcript.
-  const observed = event === 'start' ? observeModelFor(CAPTURE_HARNESS, payload) : undefined;
+  const captureHarness = payload.harness ?? CAPTURE_HARNESS;
+  const observed = event === 'start' ? observeModelFor(captureHarness, payload) : undefined;
   const model_observed = observed
-    ? { model: observed, harness: CAPTURE_HARNESS, observed_at: Date.now() }
+    ? { model: observed, harness: captureHarness, observed_at: Date.now() }
     : binding.model_observed;
 
   saveBinding(dir, { ...binding, session, ...(model_observed ? { model_observed } : {}) });

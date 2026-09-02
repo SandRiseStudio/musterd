@@ -95,6 +95,7 @@ import { parseEnvelope, parseOrBadRequest } from '../protocol/validate.js';
 import { resolveActivity } from '../store/activity.js';
 import {
   appendAudit,
+  appendLaneEventRequired,
   hasInterruptRaised,
   laneOwnerHistory,
   listAudit,
@@ -122,7 +123,6 @@ import {
   deriveGoalStatus,
   getLane,
   LaneConflictError,
-  laneFieldChanges,
   laneWarnings,
   lanesForGoal,
   noGoalWarning,
@@ -4047,28 +4047,10 @@ export async function handleHttp(
             `"${member.name}" is a service seat — ledger seats never open or hold lanes (ADR 232)`,
           );
         const body = parseOrBadRequest(OpenLaneSchema, await readJson(req));
-        const lane = openLane(ctx.db, team.id, team.slug, member.name, body);
-        // The acquisition ledger (ADR 203) must cover every edge that decides who owns work. The
-        // PATCH handler records claims and handoffs; this is the third edge — a lane born owned via
-        // `{claim:true}` — which is the most common acquisition of all and was the one left
-        // unwritten, so a ledger reconstruction would have missed the ordinary case. No collision is
-        // possible here (the lane did not exist), hence no guard: just the row, marked `at_open` so
-        // a reader can tell a birth from a takeover.
-        if (lane.owner_seat) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.claimed',
-            target: lane.id,
-            result: 'allow',
-            detail: {
-              lane: lane.id,
-              owner: lane.owner_seat,
-              previous_owner: null,
-              kind: 'claim',
-              at_open: true,
-            },
-          });
-        }
+        // The `lane.opened` birth row and the `lane.claimed at_open` row (ADR 203's third
+        // acquisition edge) are written by the store inside the insert's transaction, as the
+        // creator (lane-replication spec §Hole 3, Finding 4).
+        const lane = openLane(ctx.db, team.id, team.slug, member.name, body, Date.now());
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         deliverLaneWarnings(ctx, team, member, warnings); // all warnings are fresh at open
         // goals-front-door design: an unclaimed open isn't contending, so laneWarnings stays quiet —
@@ -4185,7 +4167,9 @@ export async function handleHttp(
             : undefined;
         let lane: Lane;
         try {
-          lane = updateLane(ctx.db, team.id, laneId, team.slug, patch, Date.now(), guard)!;
+          lane = updateLane(ctx.db, team.id, laneId, team.slug, patch, Date.now(), guard, {
+            actor: member.name,
+          })!;
         } catch (err) {
           if (err instanceof LaneConflictError) {
             throw new MusterdError(
@@ -4197,69 +4181,10 @@ export async function handleHttp(
           }
           throw err;
         }
-        // The claim edge is the one that decides who owns work, and it was the only lane edge
-        // writing no audit row at all — which is why reconstructing the collision above from the
-        // audit log turned up nothing but the release. Record every ownership acquisition.
-        if (
-          body.owner_seat !== undefined &&
-          lane.owner_seat &&
-          lane.owner_seat !== before.owner_seat
-        ) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.claimed',
-            target: lane.id,
-            result: 'allow',
-            detail: {
-              lane: lane.id,
-              owner: lane.owner_seat,
-              previous_owner: before.owner_seat,
-              // A handoff and a self-claim are the same PATCH; only the audit can tell them apart
-              // after the fact, so say which this was rather than leaving it to be inferred.
-              kind: lane.owner_seat === member.name ? 'claim' : 'handoff',
-              ...(before.owner_seat ? { takeover_of_offline_owner: true } : {}),
-            },
-          });
-        }
-        // ADR 325 prereq: the transitions with no verb of their own. A field edit writes
-        // `lane.updated` naming exactly what changed; a state move not covered by
-        // claimed/released/ready_for_review/closed writes `lane.state_changed`. Together with
-        // those four, every lane transition now leaves a durable row — the property a replicating
-        // daemon folds history back out of.
-        const changedFields = laneFieldChanges(before, lane);
-        if (changedFields.length > 0) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.updated',
-            target: lane.id,
-            result: 'allow',
-            detail: { lane: lane.id, fields: changedFields },
-          });
-        }
-        if (
-          lane.state !== before.state &&
-          !LANE_TERMINAL_STATES.has(lane.state) && // lane.closed owns terminal edges
-          !(lane.state === 'open' && before.owner_seat !== null) && // lane.released owns this edge
-          !(isAwaitingAcceptance(lane.state) && !isAwaitingAcceptance(before.state)) && // lane.ready_for_review
-          // Mirror the lane.claimed emit above EXACTLY (owner must be non-null): an ownership
-          // change that produced no acquisition row must not also be swallowed here, or the
-          // transition writes nothing at all (ryder, #1071 acceptance). Unreachable via this
-          // handler today — UpdateLaneSchema's owner_seat rejects null — but the two predicates
-          // must not be able to drift apart.
-          !(
-            body.owner_seat !== undefined &&
-            lane.owner_seat !== null &&
-            lane.owner_seat !== before.owner_seat
-          ) // lane.claimed
-        ) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.state_changed',
-            target: lane.id,
-            result: 'allow',
-            detail: { lane: lane.id, from: before.state, to: lane.state },
-          });
-        }
+        // `lane.claimed` / `lane.updated` / `lane.state_changed` / `lane.released` are written by
+        // the store inside the write's transaction (lane-replication spec §Hole 3): a row that
+        // cannot be written fails the transition rather than leaving the log behind the table.
+        // This handler keeps only the team-visible notes.
         const warnings = laneWarnings(ctx.db, team.id, team.slug, lane);
         // Directed-wake dedup (ADR 083 §4): only warnings the mutation *introduced* wake the other
         // owner — re-surfacing unchanged conditions is the board's job, not the inbox's.
@@ -4312,13 +4237,6 @@ export async function handleHttp(
         // same pair: a team-visible note and an audit row naming who held it. The `lane_state`
         // broadcast below is suppressed for this edge — one event, not two.
         if (before.owner_seat !== null && lane.state === 'open' && before.state !== 'open') {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'lane.released',
-            target: lane.id,
-            result: 'allow',
-            detail: { lane: lane.id, released_by: member.name, owner_before: before.owner_seat },
-          });
           deliverLaneTeamAct(ctx, team, member, `[lane] released "${lane.title}" — open again`, {
             lane_release: { lane: lane.id, title: lane.title, owner_before: before.owner_seat },
           });
@@ -4443,7 +4361,8 @@ export async function handleHttp(
             : humanRequired && pick?.grade === 'human'
               ? 'blocking'
               : 'standard';
-          appendAudit(ctx.db, team.id, {
+          // A lane transition: the replicated, required form (lane-replication spec §Hole 3).
+          appendLaneEventRequired(ctx.db, team.id, {
             actor: member.name,
             action: 'lane.ready_for_review',
             target: lane.id,

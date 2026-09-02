@@ -189,7 +189,7 @@ The governed successor to `hello` — **additive schemas, not yet wired into `WS
 ```ts
 export const PROTOCOL_VERSION = 'musterd/0.3';
 export const ACTS = ['message','status_update','request_help','handoff','accept','decline','wait','resolve','steer','challenge','defer'] as const; // steer/challenge/defer: the steering trio, ADR 103
-export const SURFACES = ['cli','claude-code','codex','opencode','cursor','web','ios','slack','other','musterd'] as const; // opencode: ADR 321; musterd (the native harness): ADR 251
+export const SURFACES = ['cli','claude-code','codex','opencode','grok','cursor','web','ios','slack','other','musterd'] as const; // grok: ADR 352; opencode: ADR 321; musterd (the native harness): ADR 251
 
 export const Act = z.enum(ACTS);
 export const Surface = z.enum(SURFACES);

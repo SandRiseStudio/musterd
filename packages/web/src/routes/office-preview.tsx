@@ -73,7 +73,7 @@ const FIXTURE_IDENTITY: Record<string, { surface: string; model: string | null; 
 
 // A looping choreography script (ms offset → event), so the room is always alive on the preview.
 const SCRIPT: { at: number; ev: OfficeEvent }[] = [
-  { at: 200, ev: { kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' } },
+  { at: 200, ev: { kind: 'walk-help', from: 'Ada', to: ['Bo'], tier: 'needs-attn' } },
   {
     at: 300,
     ev: {
@@ -84,11 +84,18 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       // An addressed bubble early in the loop, so the chip is visible when someone is WATCHING the
       // room. It is not the one the gate measures: Cy speaks again at 6700, and one bubble per member
       // means this one is superseded long before the sweep's shutter — Bo's at 7500 is the survivor.
-      addressee: { name: 'Fen', tether: true },
+      // An ADR 254 eligible set, deliberately: this is the shape /live carries most (28 of the 35
+      // in the live corpus are review routing), and the design tool must be able to draw the state
+      // the room actually receives — a chip naming the set, and a trace to each desk.
+      addressee: { names: ['Hana', 'Bo'], label: 'Hana or Bo', tether: true },
     },
   },
   { at: 500, ev: { kind: 'walk-handoff', from: 'Eli', to: 'Hana', label: 'floor.ts' } },
-  { at: 1100, ev: { kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' } },
+  // Cy's bubble at 200ms names an eligible set ("Hana or Bo"), and the walk it describes visits
+  // BOTH desks in turn — the design tool draws the multi-stop trip /live actually receives. Both
+  // names are members who are ON the floor by default: `Fen` is in the default `offline` set above,
+  // so a leg to Fen never plays and the tool would show a one-stop trip while claiming two.
+  { at: 1100, ev: { kind: 'walk-help', from: 'Cy', to: ['Hana', 'Bo'], tier: 'urgent' } },
   { at: 1800, ev: { kind: 'megaphone', from: 'Ivy' } },
   {
     at: 2000,
@@ -132,7 +139,7 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       // `rgb(90,78,63)` over its own 9% tone wash, and /office-preview stays 0 below AA. A declined
       // handoff is also the honest place for a recipient chip: "not taking this one" needs a "from
       // whom" or it is unreadable.
-      addressee: { name: 'Eli', tether: true },
+      addressee: { names: ['Eli'], label: 'Eli', tether: true },
     },
   },
   { at: 8000, ev: { kind: 'wait', who: 'Ivy' } },
@@ -145,10 +152,10 @@ const SCRIPT: { at: number; ev: OfficeEvent }[] = [
       tone: 'info',
     },
   },
-  { at: 4200, ev: { kind: 'note', from: 'Ada', to: 'Cy', tone: 'info' } },
+  { at: 4200, ev: { kind: 'note', from: 'Ada', to: ['Cy'], tone: 'info' } },
   // Steering trio (ADR 103): a challenge questions a direction, an interrupt-class steer redirects it,
   // and a defer pushes a Goal later — a board-wide pulse.
-  { at: 4700, ev: { kind: 'challenge', from: 'Dev', to: 'Bo', urgent: false } },
+  { at: 4700, ev: { kind: 'challenge', from: 'Dev', to: ['Bo'], urgent: false } },
   {
     at: 4800,
     ev: {
@@ -540,14 +547,14 @@ function OfficePreviewPage() {
         <button
           className="lc__pbtn"
           title="request help (walk-over)"
-          onClick={() => fire({ kind: 'walk-help', from: 'Ada', to: 'Bo', tier: 'needs-attn' })}
+          onClick={() => fire({ kind: 'walk-help', from: 'Ada', to: ['Bo'], tier: 'needs-attn' })}
         >
           ?
         </button>
         <button
           className="lc__pbtn"
           title="urgent help (run)"
-          onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: 'Fen', tier: 'urgent' })}
+          onClick={() => fire({ kind: 'walk-help', from: 'Cy', to: ['Fen'], tier: 'urgent' })}
         >
           !
         </button>
@@ -576,7 +583,7 @@ function OfficePreviewPage() {
         <button
           className="lc__pbtn"
           title="challenge (justify?)"
-          onClick={() => fire({ kind: 'challenge', from: 'Cy', to: 'Bo', urgent: false })}
+          onClick={() => fire({ kind: 'challenge', from: 'Cy', to: ['Bo'], urgent: false })}
         >
           🤔
         </button>

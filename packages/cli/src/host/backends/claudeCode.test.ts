@@ -347,7 +347,31 @@ describe('claudeCodeBackend.wake', () => {
     expect(actuation.outcome.occupied).toBe(false);
     expect(child.signals).toContain('SIGTERM');
     expect(actuation.outcome.reason).toMatch(/watchdog timeout \(50ms\)|exited/);
-    await actuation.settled;
+    // Lane 01M1G310Y7: a killed run prints no JSON summary, and until 2026-09-02 that meant NO
+    // completion at all — the most expensive wake shape there is (a full timeout_ms of a live
+    // agent) priced at nothing. 26 of the 55 unpriced claude-code settles on the live host log
+    // were exactly this. Wall-clock is the host's own measurement and does not need the child's
+    // cooperation to exist.
+    const completion = await actuation.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.duration_ms).toBeGreaterThanOrEqual(50);
+    expect(completion?.cost_usd).toBeUndefined();
+  });
+
+  it('a run that exits with no parseable summary still carries the host-measured wall clock', async () => {
+    // The `exit=error` / `exit=0 with no JSON` shapes — 25 more of the 55 unpriced settles.
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => ({ occupied: false }));
+    const wake = backend.wake(spec({ bounds: { timeout_ms: 1_000 } }), c);
+    await Promise.resolve();
+    child.stdout.emit('data', Buffer.from('not json at all\n'));
+    child.exit(1);
+    const actuation = await wake;
+    expect(actuation.outcome.occupied).toBe(false);
+    const completion = await actuation.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.cost_usd).toBeUndefined();
   });
 
   // A host that cannot spawn is DEFERRED, never FAILED (ADR 221). A failure consumes an attempt

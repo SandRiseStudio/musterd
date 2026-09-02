@@ -63,7 +63,7 @@ export interface ReviewPick {
    * picker funnelling — a false positive on the exact hypothesis. Filter on this field, not on
    * grade.
    */
-  route: 'human_admin' | 'cross_family' | 'named';
+  route: 'human_admin' | 'cross_family' | 'named' | 'ungraded';
   /**
    * The achieved rung of the diversity ladder (ADR 188). 'human' for a human counterpart —
    * cross-family by construction, and named honestly rather than folded into cross_family.
@@ -71,11 +71,26 @@ export interface ReviewPick {
    * On a `named` route this is OBSERVED, never promised: nothing was filtered on it, so it reports
    * the pairing as it stood and abstains to `same_model` when it cannot prove better. It is not a
    * routing decision and must never be read as one.
+   *
+   * `ungraded` (ADR 351) is the rung below the ladder: the WORKER's live occupancy attests nothing,
+   * so no pairing can be graded, and the picker routes to a live attested peer anyway rather than
+   * to nobody. It is not one of ADR 188's three grades on purpose — it claims no decorrelation, the
+   * close edge abstains on it (`review_grade_unknown`), and its own `route` value keeps it out of
+   * the ADR 260 eval's `liveRouted` population.
    */
-  grade: ReviewGrade | 'human';
+  grade: PickGrade;
   /** The reviewer's family ('human' for human seats) — the audit's reviewer_family. */
   reviewer_family: string;
 }
+
+/**
+ * The rung below ADR 188's ladder (ADR 351): routed, and proven nothing about. Kept off
+ * `REVIEW_GRADES` so nothing that reasons about decorrelation can mistake it for a grade.
+ */
+export const UNGRADED = 'ungraded' as const;
+export type PickGrade = ReviewGrade | 'human' | typeof UNGRADED;
+/** What a selection snapshot can record for a chosen peer — never 'human' (the peer ladder is agents-only). */
+export type SnapshotGrade = ReviewGrade | typeof UNGRADED;
 
 /** Why a seat was not the reviewer in a particular, recorded selection. ADR 303 keeps this
  * vocabulary deliberately bounded so an audit row remains evidence, not an unstructured diary. */
@@ -89,7 +104,9 @@ export type ReviewSelectionExclusion =
    *  a fact about the asker, filed once per candidate so the set stays complete; it is NOT the
    *  candidate's own `unknown_grade`. Before 2026-09-01 the two were conflated and an unattested
    *  worker read as "the team had nobody" (10 of 129 no_candidate rows, every candidate a known
-   *  family). */
+   *  family). Written on rows from 2026-09-01 to ADR 351 only: since then a gradeable candidate
+   *  under an unattested worker is routable at the `ungraded` rung, and loses (if it loses) on
+   *  `tie_break`. Kept so historical rows still type. */
   | 'worker_unattested'
   | 'unknown_grade'
   | 'same_model'
@@ -105,14 +122,14 @@ export interface ReviewSelectionCandidate {
   /** Whether this seat won the picker after all routing constraints and ladder precedence. */
   eligible: boolean;
   /** Present only for the selected candidate. */
-  grade?: ReviewGrade;
+  grade?: SnapshotGrade;
   /** Present when this candidate was not selected. */
   exclusion?: ReviewSelectionExclusion;
 }
 
 /** Decision-time evidence persisted with `lane.ready_for_review` (ADR 303). */
 export interface ReviewSelectionSnapshot {
-  selected: { reviewer: string; grade: ReviewGrade } | null;
+  selected: { reviewer: string; grade: SnapshotGrade } | null;
   /** The asker's live family at decision time (`unknown` when its occupancy attests nothing). The
    *  close row carries the same value later; here so the ready row is readable on its own. */
   worker_family: string;
@@ -461,7 +478,7 @@ export function selectReviewCounterpart(
   // one fact about the asker, not a fact about each candidate — see `worker_unattested`.
   const workerUnattested = normalizeModelId(workerModel) === MODEL_UNKNOWN;
   const candidates: ReviewSelectionCandidate[] = [];
-  const selectable: Array<{ index: number; member: MemberRow; grade: ReviewGrade }> = [];
+  const selectable: Array<{ index: number; member: MemberRow; grade: SnapshotGrade }> = [];
 
   for (const member of listMembers(db, teamId)) {
     const candidate: ReviewSelectionCandidate = {
@@ -499,13 +516,15 @@ export function selectReviewCounterpart(
     const grade = reviewGrade(workerModel, candidateModel);
     if (grade === null) {
       // Attribute the null to the side that owns it. A candidate that attests nothing is its own
-      // `unknown_grade` whatever the worker did; only a gradeable candidate can be blinded by the
-      // worker. The behaviour is unchanged either way — nothing routes (ADR 188 grades nothing from
-      // an unknown model) — but the row now says WHY nobody was asked.
-      candidate.exclusion =
-        workerUnattested && normalizeModelId(candidateModel) !== MODEL_UNKNOWN
-          ? 'worker_unattested'
-          : 'unknown_grade';
+      // `unknown_grade` whatever the worker did — never routed, at any rung: two unknowns prove
+      // even less than one. A gradeable candidate blinded by an unattested WORKER is a different
+      // fact (ADR 303's `worker_unattested`), and since ADR 351 it is routable at the rung below
+      // the ladder: an ungraded review beats no review, and the record says exactly that much.
+      if (workerUnattested && normalizeModelId(candidateModel) !== MODEL_UNKNOWN) {
+        selectable.push({ index: candidates.length - 1, member, grade: UNGRADED });
+      } else {
+        candidate.exclusion = 'unknown_grade';
+      }
       continue;
     }
     if (grade === 'same_model') {
@@ -515,7 +534,10 @@ export function selectReviewCounterpart(
     selectable.push({ index: candidates.length - 1, member, grade });
   }
 
-  const LADDER: ReviewGrade[] = ['cross_family', 'cross_model'];
+  // `ungraded` sits below both rungs (ADR 351). In practice a selection is all-graded or
+  // all-ungraded — the worker is attested or it is not — but the order is stated so the ladder
+  // reads as one list, not as a rule plus an exception.
+  const LADDER: SnapshotGrade[] = ['cross_family', 'cross_model', UNGRADED];
   // Stable sort preserves roster order for an equal-grade tie, which is the pre-ADR-303 policy.
   selectable.sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
   const best = selectable[0];
@@ -532,8 +554,11 @@ export function selectReviewCounterpart(
   }
   const pick: ReviewPick = {
     reviewer: best.member.name,
-    // Wire-compat: `route` keeps its historical value on this path; `grade` carries the finer truth.
-    route: 'cross_family',
+    // Wire-compat: `route` keeps its historical value on the graded path; `grade` carries the finer
+    // truth. An ungraded pick gets its OWN route value, on purpose: `route` is the field the ADR 260
+    // eval filters its population on (see `route` above), and a rung that proves nothing must not
+    // enter the denominator of a diversity claim by silence.
+    route: best.grade === UNGRADED ? UNGRADED : 'cross_family',
     grade: best.grade,
     reviewer_family: memberFamily(db, best.member),
   };

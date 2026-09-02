@@ -3,7 +3,13 @@ import { z } from 'zod';
 import { resolveCodexBin } from '../../codexBin.js';
 import { findBinding, saveBinding } from '../../config.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
-import type { ActuatorBackend, BackendContext, WakeActuation, WakeSpec } from '../backend.js';
+import type {
+  ActuatorBackend,
+  BackendContext,
+  WakeActuation,
+  WakeCompletion,
+  WakeSpec,
+} from '../backend.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
 
 const KILL_GRACE_MS = 10_000;
@@ -100,7 +106,12 @@ interface Attempt {
   occupied: boolean;
   exactCleanWithoutPresence: boolean;
   reason: string;
-  settled: Promise<undefined>;
+  /** Resolves when the child finishes (exit, or watchdog kill), carrying the HOST-measured wall
+   *  clock for the supplementary wake-cost report. Codex prints no cost the host can attest, so
+   *  `cost_usd` is absent — but duration needs no cooperation from the child to exist, and it is
+   *  what puts every codex wake on the `residency.wake_cost` rail at all (lane 01M1G310Y7: this was
+   *  `Promise<undefined>`, and 130 gptbot spawns had produced 0 cost rows). */
+  settled: Promise<WakeCompletion | undefined>;
   /** ADR 238: the seat is held by a session this wake did not create — defer, never charge. */
   deferred?: boolean;
 }
@@ -155,9 +166,16 @@ async function attempt(
       resolve(null);
     });
   });
-  const settled = exited.then(() => {
+  const settled: Promise<WakeCompletion | undefined> = exited.then((code) => {
     clearTimeout(watchdog);
-    return undefined;
+    const duration_ms = Date.now() - startedAt;
+    // The same settle line the claude backend writes, so host.log can be measured the same way
+    // across harnesses — the absence of one is how this backend's hole stayed invisible.
+    ctx.log(
+      `run for ${spec.order.seat} (${label}) settled: exit=${code ?? 'error'}` +
+        `${timedOut ? ' (watchdog)' : ''} wall=${(duration_ms / 1000).toFixed(1)}s`,
+    );
+    return { duration_ms };
   });
   const verified = await Promise.race([
     ctx.verifyOccupied(

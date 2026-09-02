@@ -62,6 +62,30 @@ describe('incident clustering (spec 2026-08-14 inc 1)', () => {
     );
   });
 
+  // Finding 4 (lane-replication spec), dolly's #1179 decline: the incident path opened a lane with no
+  // first event. The birth is written by openLane itself, so no caller can leave it out.
+  it('an incident lane is born with a lane.opened row, as the reporter who tripped the threshold', () => {
+    const { db, team } = seed();
+    recordBlockedReport(db, team.id, 'revive', 'izzo', report(), 'm1');
+    const out = recordBlockedReport(db, team.id, 'revive', 'dolly', report(), 'm2') as {
+      lane: Lane;
+    };
+    const rows = db
+      .prepare<
+        [string],
+        { actor: string | null; detail: string }
+      >("SELECT actor, detail FROM audit WHERE action = 'lane.opened' AND target = ? ORDER BY id")
+      .all(out.lane.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor).toBe('dolly');
+    expect(JSON.parse(rows[0].detail)).toMatchObject({
+      lane: out.lane.id,
+      kind: 'incident',
+      stakes: 'high',
+      created_by: 'dolly',
+    });
+  });
+
   it('same seat twice does not open', () => {
     const { db, team } = seed();
     recordBlockedReport(db, team.id, 'revive', 'izzo', report(), 'm1');

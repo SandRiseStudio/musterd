@@ -1,4 +1,4 @@
-import { ActSchema, type SyncPullEvent } from '@musterd/protocol';
+import { ActSchema, type SyncPullEvent, type SyncPullLaneEvent } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { getMemberByName } from '../store/members.js';
 import type { MessageRow } from '../store/rows.js';
@@ -27,7 +27,162 @@ export type FoldStop =
   | { kind: 'unresolved_seat'; seat: string; hub_seq: number }
   | { kind: 'unknown_act'; act: string; hub_seq: number }
   | { kind: 'id_collision'; id: string; hub_seq: number; held_origin: string }
-  | { kind: 'origin_gap'; origin: string; expected: number; got: number; hub_seq: number };
+  | { kind: 'origin_gap'; origin: string; expected: number; got: number; hub_seq: number }
+  // Lane events (spec §"The wire, decided"). `unknown_lane_event` is `unknown_act`'s shape for the
+  // second kind: a verb this build cannot project — upgrade this daemon, retried each tick.
+  // `lane_unborn` is a transition for a lane this daemon never saw born: the origin's lane predates
+  // `lane.opened` (2026-09-02) or the log has a hole. Applying it would mint a row with no title.
+  | { kind: 'unknown_lane_event'; action: string; hub_seq: number }
+  | { kind: 'lane_unborn'; lane: string; action: string; hub_seq: number };
+
+/** The `lane.*` verbs the fold can project. Anything else stops as `unknown_lane_event`. */
+const LANE_VERBS = new Set([
+  'lane.opened',
+  'lane.claimed',
+  'lane.released',
+  'lane.updated',
+  'lane.state_changed',
+  'lane.ready_for_review',
+  'lane.closed',
+  // Review verbs carry no state; they are held in `audit` for the readers that want them.
+  'lane.review_sent_back',
+  'lane.review_peer_confirmed',
+]);
+
+/**
+ * Project one replicated lane transition into this daemon's `lanes` — the materialised fold the
+ * spec chose over a read-time projection. Every case mirrors the origin's own write: what the
+ * store did to its row when it wrote this verb, this does to ours. `null` when the lane has no row
+ * here and the verb is not its birth.
+ */
+function projectLaneEvent(
+  db: Database,
+  teamId: string,
+  event: SyncPullLaneEvent['event'],
+): 'applied' | 'unborn' {
+  const d = (event.detail ?? {}) as Record<string, unknown>;
+  const laneId = (typeof d['lane'] === 'string' ? d['lane'] : event.target) ?? '';
+  const ts = event.ts;
+  const held = db
+    .prepare<[string, string], { id: string }>('SELECT id FROM lanes WHERE team_id = ? AND id = ?')
+    .get(teamId, laneId);
+
+  if (event.action === 'lane.opened') {
+    // The birth carries the whole declaration (Finding 4). A replay past the idempotence check
+    // cannot reach here, so a held row means two origins minted one lane id: keep ours, the way
+    // `id_collision` keeps the message we hold — and say nothing, since the audit row is kept.
+    if (held) return 'applied';
+    const scope = Array.isArray(d['scope']) ? d['scope'] : [];
+    const dependsOn = Array.isArray(d['depends_on']) ? d['depends_on'] : [];
+    const risk = Array.isArray(d['risk']) ? d['risk'] : [];
+    const stakes = typeof d['stakes'] === 'string' ? d['stakes'] : 'normal';
+    const provenance = typeof d['stakes_provenance'] === 'string' ? d['stakes_provenance'] : null;
+    db.prepare(
+      `INSERT INTO lanes (id, team_id, project, title, detail, kind, owner_seat, role, surface_globs,
+                          depends_on, branch, goal_id, risk, stakes, stakes_provenance, merged_json, state,
+                          created_by, created_at, claimed_at, resolved_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'open', ?, ?, NULL, NULL, ?)`,
+    ).run(
+      laneId,
+      teamId,
+      typeof d['project'] === 'string' ? d['project'] : 'default',
+      typeof d['title'] === 'string' ? d['title'] : '',
+      typeof d['detail'] === 'string' ? d['detail'] : null,
+      typeof d['kind'] === 'string' ? d['kind'] : null,
+      typeof d['role'] === 'string' ? d['role'] : null,
+      JSON.stringify(scope),
+      JSON.stringify(dependsOn),
+      typeof d['branch'] === 'string' ? d['branch'] : null,
+      typeof d['goal_id'] === 'string' ? d['goal_id'] : null,
+      risk.length > 0 ? JSON.stringify(risk) : null,
+      stakes !== 'normal' ? stakes : null,
+      provenance === 'defaulted' ? 'defaulted' : null,
+      typeof d['created_by'] === 'string' ? d['created_by'] : (event.actor ?? ''),
+      typeof d['created_at'] === 'number' ? d['created_at'] : ts,
+      typeof d['created_at'] === 'number' ? d['created_at'] : ts,
+    );
+    return 'applied';
+  }
+  if (!held) return 'unborn';
+
+  switch (event.action) {
+    case 'lane.claimed': {
+      const owner = typeof d['owner'] === 'string' ? d['owner'] : event.actor;
+      db.prepare(
+        `UPDATE lanes SET owner_seat = ?, state = CASE WHEN state = 'open' THEN 'claimed' ELSE state END,
+                          claimed_at = ?, updated_at = ? WHERE team_id = ? AND id = ?`,
+      ).run(owner, ts, ts, teamId, laneId);
+      return 'applied';
+    }
+    case 'lane.released':
+      db.prepare(
+        `UPDATE lanes SET owner_seat = NULL, state = 'open', claimed_at = NULL, updated_at = ?
+          WHERE team_id = ? AND id = ?`,
+      ).run(ts, teamId, laneId);
+      return 'applied';
+    case 'lane.state_changed': {
+      const to = typeof d['to'] === 'string' ? d['to'] : null;
+      if (to === null) return 'applied';
+      db.prepare('UPDATE lanes SET state = ?, updated_at = ? WHERE team_id = ? AND id = ?').run(
+        to,
+        ts,
+        teamId,
+        laneId,
+      );
+      return 'applied';
+    }
+    case 'lane.ready_for_review':
+      db.prepare(
+        "UPDATE lanes SET state = 'awaiting_acceptance', updated_at = ? WHERE team_id = ? AND id = ?",
+      ).run(ts, teamId, laneId);
+      return 'applied';
+    case 'lane.closed': {
+      const state = typeof d['state'] === 'string' ? d['state'] : 'done';
+      db.prepare(
+        'UPDATE lanes SET state = ?, resolved_at = ?, updated_at = ? WHERE team_id = ? AND id = ?',
+      ).run(state, ts, ts, teamId, laneId);
+      return 'applied';
+    }
+    case 'lane.updated': {
+      // `changes: { field: { from, to } }` — values since hole 2. Each audited field maps to its
+      // column; `scope` keeps its historical `surface_globs` column name.
+      const changes = (d['changes'] ?? {}) as Record<string, { to?: unknown }>;
+      const column: Record<string, string> = {
+        title: 'title',
+        detail: 'detail',
+        project: 'project',
+        role: 'role',
+        scope: 'surface_globs',
+        depends_on: 'depends_on',
+        branch: 'branch',
+        goal_id: 'goal_id',
+        risk: 'risk',
+        stakes: 'stakes',
+        kind: 'kind',
+        merged: 'merged_json',
+      };
+      for (const [field, change] of Object.entries(changes)) {
+        const col = column[field];
+        if (!col) continue;
+        let value: unknown = change.to ?? null;
+        if (field === 'scope' || field === 'depends_on') value = JSON.stringify(value ?? []);
+        else if (field === 'risk')
+          value = Array.isArray(value) && value.length > 0 ? JSON.stringify(value) : null;
+        else if (field === 'stakes') value = value === 'normal' ? null : value;
+        else if (field === 'merged') value = value === null ? null : JSON.stringify(value);
+        db.prepare(`UPDATE lanes SET ${col} = ?, updated_at = ? WHERE team_id = ? AND id = ?`).run(
+          value,
+          ts,
+          teamId,
+          laneId,
+        );
+      }
+      return 'applied';
+    }
+    default:
+      return 'applied';
+  }
+}
 
 export interface FoldResult {
   applied: number;
@@ -63,15 +218,44 @@ function localNodeId(db: Database, teamId: string): string | null {
   );
 }
 
-/** The highest origin_seq this daemon holds for an origin — the read-side gap check's baseline. */
+/**
+ * The highest origin_seq this daemon holds for an origin — the read-side gap check's baseline.
+ * Across BOTH replicated kinds: one allocator serves messages and lane rows (ADR 335 §8), so a head
+ * read from one table alone under-reports and trips the gap check on a legitimate sequence.
+ */
 function heldHead(db: Database, originNode: string): number {
-  return (
+  const m =
     db
       .prepare<
         [string],
         { high: number | null }
       >('SELECT MAX(origin_seq) AS high FROM messages WHERE origin_node = ?')
-      .get(originNode)?.high ?? 0
+      .get(originNode)?.high ?? 0;
+  const a =
+    db
+      .prepare<
+        [string],
+        { high: number | null }
+      >('SELECT MAX(origin_seq) AS high FROM audit WHERE origin_node = ?')
+      .get(originNode)?.high ?? 0;
+  return Math.max(m, a);
+}
+
+/** Rule 2 for both kinds: is the pair already held here? */
+function heldPair(db: Database, originNode: string, originSeq: number): boolean {
+  return (
+    db
+      .prepare<
+        [string, number],
+        { id: string }
+      >('SELECT id FROM messages WHERE origin_node = ? AND origin_seq = ?')
+      .get(originNode, originSeq) !== undefined ||
+    db
+      .prepare<
+        [string, number],
+        { id: string }
+      >('SELECT id FROM audit WHERE origin_node = ? AND origin_seq = ?')
+      .get(originNode, originSeq) !== undefined
   );
 }
 
@@ -97,23 +281,15 @@ export function foldBatch(
     };
 
     for (const event of events) {
-      const env = event.envelope;
-
-      // Rule 1 — own origin: already in messages via insertMessage. Not an error.
+      // Rule 1 — own origin: already here via insertMessage / the store's lane write. Not an error.
       if (local !== null && event.origin_node === local) {
         skipped += 1;
         cursor = event.hub_seq;
         continue;
       }
 
-      // Rule 2 — replay: the pair is the idempotence key.
-      const held = db
-        .prepare<
-          [string, number],
-          { id: string }
-        >('SELECT id FROM messages WHERE origin_node = ? AND origin_seq = ?')
-        .get(event.origin_node, event.origin_seq);
-      if (held) {
+      // Rule 2 — replay: the pair is the idempotence key, whichever kind holds it.
+      if (heldPair(db, event.origin_node, event.origin_seq)) {
         skipped += 1;
         cursor = event.hub_seq;
         continue;
@@ -132,6 +308,46 @@ export function foldBatch(
         };
         return finish();
       }
+
+      // The second kind: a lane transition. Held in `audit` with its stamp verbatim, then projected
+      // into `lanes` in this same transaction — the fold is the one foreign writer of both.
+      if (event.kind === 'lane') {
+        const e = event.event;
+        if (!LANE_VERBS.has(e.action)) {
+          stop = { kind: 'unknown_lane_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        const laneId =
+          (typeof e.detail?.['lane'] === 'string' ? (e.detail['lane'] as string) : e.target) ?? '';
+        // Project first: an unborn lane must stop BEFORE the audit row lands, or the row's presence
+        // would advance heldHead past an event this daemon never applied.
+        const outcome = projectLaneEvent(db, teamId, e);
+        if (outcome === 'unborn') {
+          stop = { kind: 'lane_unborn', lane: laneId, action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        db.prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          e.id,
+          teamId,
+          e.ts,
+          e.actor,
+          e.action,
+          e.target,
+          e.result,
+          e.detail ? JSON.stringify(e.detail) : null,
+          now,
+          event.origin_node,
+          event.origin_seq,
+        );
+        applied += 1;
+        cursor = event.hub_seq;
+        continue;
+      }
+
+      const env = event.envelope;
 
       // Rule 3 — resolve every seat the envelope names, or stop here. `to` blocks too: NULL would
       // silently turn a directed act into a broadcast.

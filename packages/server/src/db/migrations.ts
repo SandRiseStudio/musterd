@@ -1362,6 +1362,90 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // v54 never ran on any DB that had already reached v55. #1164 (ADR 350) landed v55 on main
+    // first; #1155 (3b-ii) then landed v54 behind it, and runMigrations is a high-water mark, so a
+    // lower number arriving later is skipped. The dogfood daemon sat at schema 55 with no
+    // idx_messages_origin and no sync_pull_cursor (ryder, 3b-ii acceptance, 2026-09-02). Re-issue
+    // v54's body verbatim; every statement is IF NOT EXISTS, so a DB that ran v54 is untouched.
+    version: 56,
+    up: (db) => {
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_origin ON messages(origin_node, origin_seq);
+        CREATE TABLE IF NOT EXISTS sync_pull_cursor (
+          team_id       TEXT PRIMARY KEY REFERENCES teams(id) ON DELETE CASCADE,
+          last_hub_seq  INTEGER NOT NULL,
+          updated_at    INTEGER NOT NULL
+        );
+      `);
+    },
+  },
+  {
+    // ADR 352: `grok` joins the Surface enum. SQLite cannot ALTER a CHECK, so rebuild presence
+    // the way v39 (`musterd`) and v44 (`opencode`) did. Column list matches the live table
+    // (v44 + model_source from v42); v1 DDL in schema.ts is deliberately left stale.
+    version: 57,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE presence_new (
+          id            TEXT PRIMARY KEY,
+          member_id     TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+          surface       TEXT NOT NULL CHECK (surface IN
+                          ('cli','claude-code','codex','opencode','grok','cursor','web','ios','slack',
+                           'other','musterd')),
+          status        TEXT NOT NULL DEFAULT 'online' CHECK (status IN ('online','away','offline')),
+          conn_id       TEXT,
+          last_seen_at  INTEGER NOT NULL,
+          created_at    INTEGER NOT NULL,
+          held_until    INTEGER,
+          provenance    TEXT,
+          workspace     TEXT,
+          driver        TEXT,
+          model         TEXT,
+          build         TEXT,
+          epoch         INTEGER,
+          wake_lease    TEXT,
+          model_source  TEXT
+        );
+        INSERT INTO presence_new (id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                                  held_until, provenance, workspace, driver, model, build, epoch,
+                                  wake_lease, model_source)
+          SELECT id, member_id, surface, status, conn_id, last_seen_at, created_at,
+                 held_until, provenance, workspace, driver, model, build, epoch,
+                 wake_lease, model_source
+          FROM presence;
+        DROP TABLE presence;
+        ALTER TABLE presence_new RENAME TO presence;
+        CREATE INDEX idx_presence_member ON presence(member_id);
+        CREATE INDEX idx_presence_last_seen ON presence(last_seen_at);
+      `);
+    },
+  },
+  {
+    // Lane-replication slice (spec 2026-09-01 §"The wire, decided"): a `lane.*` audit row is the
+    // second replicated kind. It draws `(origin_node, origin_seq)` from the same `nodes.next_seq`
+    // allocator as messages (ADR 335 §8) at the moment the store writes it. Every other audit row,
+    // and every row older than this migration, keeps the DEFAULTs and reads as "not replicated";
+    // the unique index is partial on `origin_seq > 0` so those rows never collide with each other.
+    // This is the fold's idempotence key, the shape v54 gave `idx_messages_origin`.
+    //
+    // v58 lands after v57 (#1181, presence CHECK): runMigrations is a high-water mark, so a lower
+    // number arriving later never runs (the v54/v55 lesson, #1174).
+    version: 58,
+    up: (db) => {
+      const cols = db
+        .prepare<[], { name: string }>('PRAGMA table_info(audit)')
+        .all()
+        .map((c) => c.name);
+      if (!cols.includes('origin_node'))
+        db.exec("ALTER TABLE audit ADD COLUMN origin_node TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes('origin_seq'))
+        db.exec('ALTER TABLE audit ADD COLUMN origin_seq INTEGER NOT NULL DEFAULT 0');
+      db.exec(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_origin ON audit(origin_node, origin_seq) WHERE origin_seq > 0',
+      );
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

@@ -1,5 +1,11 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { pageMeta } from '../brand/siteMeta';
+import {
+  absoluteUrl,
+  breadcrumbNode,
+  feedAlternate,
+  itemListNode,
+  pageHead,
+} from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -11,13 +17,22 @@ export const Route = createFileRoute('/blog/')({
     const { blogPosts } = await import('../content/generated/site-content');
     return blogPosts.map(({ slug, title, date }) => ({ slug, title, date }));
   },
-  head: () => ({
-    meta: pageMeta({
+  head: ({ loaderData }) =>
+    pageHead({
       title: 'Blog',
       description: 'Launch notes and what the team learns building musterd — with musterd.',
       path: '/blog',
+      links: [feedAlternate()],
+      graph: [
+        {
+          '@type': 'CollectionPage',
+          name: 'Blog',
+          url: absoluteUrl('/blog'),
+        },
+        itemListNode((loaderData ?? []).map((p) => ({ name: p.title, path: `/blog/${p.slug}` }))),
+        breadcrumbNode([{ name: 'Blog', path: '/blog' }]),
+      ],
     }),
-  }),
   component: BlogIndex,
 });
 

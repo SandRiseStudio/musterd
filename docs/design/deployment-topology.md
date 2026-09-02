@@ -210,5 +210,12 @@ promoted daemon on SQLite satisfies the CAS — one process, one writer.
 live WebSocket delivery of a remote event is a follow-up. **The inbox and wake cursors still key on
 `ts`** — the origin's clock — so a folded event older than a seat's last read is invisible to that
 seat; the readers move to `created_at` in their own lane, a hard precondition before a second
-machine enrolls (spec §"The ts-cursor defect"). **Lanes, goals and audit do not replicate**
-(ADR 331 §Decision 5), so lane claims stay local until 3c — which now has what it was missing.
+machine enrolls (spec §"The ts-cursor defect"). **Lane transitions replicate; ownership is not yet
+arbitrated.** Since 2026-09-02 every `lane.*` audit row is stamped from the node's allocator and
+rides the push/pull wire beside messages; the fold projects it into the peer's `lanes`
+(lane-replication spec §"The wire, decided"). A joiner therefore sees a hub-side claim and the hub
+sees a joiner's, but nothing refuses the second of two claims for one lane — that is 3c, which now
+has what it was missing. **Precondition for a second machine:** a joiner folds a log whose lanes
+older than 2026-09-02 have no `lane.opened`; a transition for such a lane blocks the fold as
+`lane_unborn` until the origin's history is reconciled by hand. Goals stay a projection of
+messages and need nothing; the rest of `audit` does not replicate (ADR 331 §Decision 5).

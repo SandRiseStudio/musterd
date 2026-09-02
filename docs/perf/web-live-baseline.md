@@ -582,3 +582,47 @@ CI. A re-baseline may only tighten (ADR 183); this one does.
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` — initial should read ≈149.0 KiB
   against 150.9 KiB (154,500 B). If a future change puts `BoardOverlay` back into the eager graph,
   this budget is now tight enough to say so instead of absorbing it silently.
+
+## 2026-09-02 — totalJsGzipBytes 252000 → 255000 (musterd.io agent surfaces, PR #1177)
+
+**The 28 bytes are not the story; the ceiling is.** Tier 3 of the musterd.io discoverability
+arc is almost entirely build-time work — the markdown mirrors, `llms-full.txt` and
+`blog/rss.xml` are emitted by `scripts/site-files.ts` through the vite config and never enter
+the bundle. Its whole client-side cost is `markdownAlternate()` and `feedAlternate()` in
+`siteMeta.ts` plus the three route `links` arrays that call them: the `<link rel="alternate">`
+tags that announce a mirror from the page it mirrors.
+
+| tree | total JS gzip (gate style) | free against 252,000 |
+| --- | --- | --- |
+| main @ 0c4315fa, local | 251,125 B | 875 B |
+| branch @ 8e4f5fe8, local | 251,153 B | 847 B |
+| main @ 0c4315fa, CI (green) | 246.0 KiB against 246.1 KiB | **under 100 B** |
+| branch @ 8e4f5fe8, CI | 246.1 KiB against 246.1 KiB (**red**) | none |
+
+Feature cost, measured both ways: **+28 B**. Main was already consuming 99.96% of the ceiling
+on CI, and 28 bytes was more than it had left.
+
+No remedy exists on this budget by construction: ADR 183 is explicit that lazy-loading cannot
+move total (it adds per-chunk overhead), and the remedies that can — delete code, drop a
+dependency — have nothing to take here. The two helpers are five lines and they *are* the
+feature: without the head link, an agent that lands on the HTML has no way to find the mirror
+except by guessing at a URL convention. An `import.meta.env.SSR` guard was considered and
+**rejected**: it would drop the tags from the client build and React would then remove them
+from the head at hydration, so a JS-rendering crawler — Googlebot included — would see the
+announcement disappear. A tag that exists only until the page hydrates is worse than no tag.
+
+A re-baseline was checked first per ADR 183 and is not available: measured + 15% would be
+~289,000, which loosens, and a re-baseline may only tighten. So this is a raise, recorded as
+one, to CI-measured (~252,02x) + ~1.2%, matching the 2026-08-24 / 08-25 / 08-31 precedents. It
+leaves ~3.8 KB of true headroom where under 100 B had made any web change a coin flip against
+CI — the same failure shape the 2026-09-01 entry above records for the *initial* budget, now
+observed on total.
+
+**The thing to watch**: this is the fourth raise of `totalJsGzipBytes` since 2026-08-24
+(241,000 → 246,000 → 249,000 → 252,000 → 255,000) with no re-baseline between them. Every one
+was justified on its own measurement, and the trend is still a trend. The 2026-09-02 initial-JS
+entry above is the counter-example worth copying: its remedy was found in code that had
+described itself as lazy for months and was not.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit; total
+  should read ≈245.3 KiB against 249.0 KiB (255,000 B), and main's CI gates stay green.

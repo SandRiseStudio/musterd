@@ -318,3 +318,43 @@ describe('opencodeBackend', () => {
     await result.settled;
   });
 });
+
+/**
+ * The completion record (lane 01M1G310Y7) — same defect and same fix as the codex backend, whose
+ * `attempt` this one was written from: `settled` resolved with nothing, so no wake on this
+ * harness ever reached the `residency.wake_cost` rail. Wall-clock is host-measured, so every
+ * settled run carries it; opencode prints no attested cost, so `cost_usd` stays absent.
+ */
+describe('the completion record — every settled run reports what the host measured', () => {
+  const fresh = (child: Child) =>
+    opencodeBackend({
+      resolveBin: async () => '/opencode',
+      spawn: (() => child) as never,
+      recordFreshSession: () => undefined,
+    });
+
+  it('a woke run that exits cleanly carries duration_ms', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"step_start","timestamp":1,"sessionID":"ses_new"}');
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(true);
+    child.exit(0);
+    const completion = await result.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+    expect(completion?.cost_usd).toBeUndefined();
+  });
+
+  it('a run that FAILS still prices', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"step_start","timestamp":1,"sessionID":"ses_new"}');
+    child.exit(1);
+    const result = await wake;
+    expect(result.outcome.occupied).toBe(false);
+    const completion = await result.settled;
+    expect(completion?.duration_ms).toBeTypeOf('number');
+  });
+});

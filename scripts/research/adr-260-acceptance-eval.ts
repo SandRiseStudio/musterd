@@ -117,6 +117,10 @@ const liveRouted = (rs: Submit[]) =>
       !r.d.no_candidate &&
       !r.d.wake_queued &&
       r.d.route !== 'named' &&
+      // ADR 351: an unattested worker is routed at the `ungraded` rung. The ladder DID choose, but
+      // it chose among pairings it could not grade, so the row is no evidence about decorrelation
+      // in either direction — out of the population on arrival, before its first row landed.
+      r.d.route !== 'ungraded' &&
       r.d.reviewer,
   );
 
@@ -132,6 +136,9 @@ export interface WindowResult {
    *  reader then attributes the gap to whichever bucket they already suspect. dolly's catch on
    *  #1156, and the same ADR 234 shape this PR flagged in her report.ts. */
   named: number;
+  /** Submits routed at the `ungraded` rung (ADR 351): out of `liveRouted`, counted for the same
+   *  reason `named` is — a bucket that leaves the mix silently makes the mix stop summing. */
+  ungraded: number;
   good: number;
   confirms: number;
   jumped: number;
@@ -188,6 +195,7 @@ export function evaluate(name: string, rs: Submit[]): WindowResult {
     noCandidate: rs.filter((r) => r.d.no_candidate).length,
     exempt: rs.filter((r) => r.d.acceptance_exempt).length,
     named: rs.filter((r) => r.d.route === 'named' && !r.d.acceptance_exempt).length,
+    ungraded: rs.filter((r) => r.d.route === 'ungraded').length,
     good,
     confirms,
     jumped,
@@ -595,7 +603,7 @@ function main() {
   for (const r of results) {
     console.log(`\n=== ${r.name} — ${r.submits} submits ===`);
     console.log(
-      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt} | hand-routed ${r.named}`,
+      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt} | hand-routed ${r.named} | ungraded ${r.ungraded}`,
     );
     console.log(
       `  [1] good <=10m ${r.good}/${r.liveRouted} = ${pct(r.goodRate)}   (any confirm ${r.confirms}/${r.liveRouted})`,

@@ -134,8 +134,16 @@ export type Tier = 'ambient' | 'needs-attn' | 'urgent';
  */
 export type OfficeEvent =
   | { kind: 'screen-pulse'; who: string; tone: ActTone }
-  | { kind: 'note'; from: string; to: string; tone: ActTone }
-  | { kind: 'walk-help'; from: string; to: string; tier: Tier }
+  /**
+   * `to` is a LIST on the three acts that may carry an ADR 254 eligible set (message, request_help,
+   * challenge — `ELIGIBLE_ACTS`): one name normally, 2-4 when any of them can discharge the act.
+   * Plural in the type rather than "a name plus some others", because the scene must treat every
+   * name the same way — the sender walks the whole set, one desk after another, exactly as it walks
+   * to a single recipient. `walk-handoff` and `steer` stay singular: two owners is zero owners, and
+   * both are structurally single-target.
+   */
+  | { kind: 'note'; from: string; to: string[]; tone: ActTone }
+  | { kind: 'walk-help'; from: string; to: string[]; tier: Tier }
   | { kind: 'walk-handoff'; from: string; to: string; label: string }
   | { kind: 'megaphone'; from: string }
   /** `of`: whose work was accepted (the act's recipient) — the celebration lands on THEM, not the
@@ -149,7 +157,7 @@ export type OfficeEvent =
   // the target. `challenge` is an epistemic "justify?" question over the head(s). `defer` mutates the
   // plan (a Goal, `meta.goal_id`) so it pulses across the board in the lane family.
   | { kind: 'steer'; from: string; to: string | null; urgent: boolean }
-  | { kind: 'challenge'; from: string; to: string | null; urgent: boolean }
+  | { kind: 'challenge'; from: string; to: string[]; urgent: boolean }
   | { kind: 'defer'; who: string }
   /** A plain-language narrated moment for the caption rail (first-five-seconds §2). Structured
    * rather than a bare string: the chrome colours the line by tone and dots it in the actor's own

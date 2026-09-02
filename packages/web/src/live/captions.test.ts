@@ -22,6 +22,29 @@ const env = (over: Partial<Envelope>): Envelope =>
   }) as Envelope;
 
 describe('captionFor — plain-language narration of notable moments (first-five-seconds §2)', () => {
+  /**
+   * ADR 254 eligible sets. These arrive as `to: {kind:'team'}` with the names in `meta.eligible`,
+   * so the `if (!to) return null` guard swallowed them entirely — 28 review-routing `request_help`s
+   * in the live corpus produced NO caption at all while the CLI printed the names.
+   */
+  it('narrates a request_help addressed to an eligible set, which used to caption nothing', () => {
+    expect(
+      captionFor(env({ act: 'request_help', to: { kind: 'team' }, meta: { eligible: ['dolly', 'sloane'] } })),
+    ).toEqual({
+      text: 'ryder is asking dolly or sloane for help',
+      who: 'ryder',
+      tone: 'ask',
+    });
+  });
+
+  it('still says nothing for a plain team request_help — the team is the default audience', () => {
+    expect(captionFor(env({ act: 'request_help', to: { kind: 'team' } }))).toBeNull();
+    // A one-name "set" is a member act that took the wrong road, not an eligible set.
+    expect(
+      captionFor(env({ act: 'request_help', to: { kind: 'team' }, meta: { eligible: ['dolly'] } })),
+    ).toBeNull();
+  });
+
   it('narrates a directed handoff with names first', () => {
     expect(captionFor(env({ act: 'handoff', to: { kind: 'member', name: 'dolly' } }))).toEqual({
       text: 'ryder is handing work to dolly',

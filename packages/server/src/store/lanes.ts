@@ -16,7 +16,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import type { AuditRow } from './audit.js';
+import { appendLaneEventRequired, type AuditAction, type AuditRow } from './audit.js';
 import { listGoals } from './goals.js';
 import { getPolicy } from './teams.js';
 
@@ -95,6 +95,92 @@ function rowToLane(row: LaneRow, teamSlug: string): Lane {
 /** States that participate in contention (ADR 169: shared constant — includes ready_for_review). */
 const CONTENDING: ReadonlySet<string> = LANE_CONTENDING_STATES;
 
+/**
+ * Who is making a lane transition, for the `lane.*` row the store writes beside it. Lane-replication
+ * spec §Hole 3: a `lane.*` row is not observability, it IS the transition — so it is written inside
+ * the same transaction as the lane row, with the required append, and if the record cannot be
+ * written the transition does not happen. `messages` has had this property since v1 (the log is
+ * the write); it is what makes the audit spine a substrate a peer can fold rather than a
+ * best-effort shadow. Callers that own their own verb (`recordLaneClose`, `lane.ready_for_review`)
+ * pass nothing and write theirs as before.
+ */
+export interface LaneAudit {
+  actor: string | null;
+}
+
+function laneAuditRow(
+  db: Database,
+  teamId: string,
+  audit: LaneAudit,
+  action: AuditAction,
+  laneId: string,
+  detail: Record<string, unknown>,
+): void {
+  appendLaneEventRequired(db, teamId, {
+    actor: audit.actor,
+    action,
+    target: laneId,
+    result: 'allow',
+    detail,
+  });
+}
+
+/**
+ * The four edges the store records, with the same exclusivity the PATCH handler used to apply —
+ * moved here, not duplicated, so the predicates cannot drift (ryder, #1071 acceptance). Terminal
+ * edges belong to `recordLaneClose`; entering awaiting_acceptance belongs to `lane.ready_for_review`.
+ */
+function recordLaneEdges(
+  db: Database,
+  teamId: string,
+  before: Lane,
+  after: Lane,
+  ownerPatched: boolean,
+  audit: LaneAudit,
+): void {
+  const claimed =
+    ownerPatched && after.owner_seat !== null && after.owner_seat !== before.owner_seat;
+  if (claimed) {
+    laneAuditRow(db, teamId, audit, 'lane.claimed', after.id, {
+      lane: after.id,
+      owner: after.owner_seat,
+      previous_owner: before.owner_seat,
+      // A handoff and a self-claim are the same patch; only the record can tell them apart later.
+      kind: after.owner_seat === audit.actor ? 'claim' : 'handoff',
+      ...(before.owner_seat ? { takeover_of_offline_owner: true } : {}),
+    });
+  }
+  const changed = laneFieldChanges(before, after);
+  if (changed.length > 0) {
+    laneAuditRow(db, teamId, audit, 'lane.updated', after.id, {
+      lane: after.id,
+      fields: changed,
+      changes: laneFieldDiff(before, after),
+    });
+  }
+  const released = before.owner_seat !== null && after.state === 'open' && before.state !== 'open';
+  if (released) {
+    laneAuditRow(db, teamId, audit, 'lane.released', after.id, {
+      lane: after.id,
+      released_by: audit.actor,
+      owner_before: before.owner_seat,
+    });
+  }
+  if (
+    after.state !== before.state &&
+    !LANE_TERMINAL_STATES.has(after.state) &&
+    !released &&
+    !(isAwaitingAcceptance(after.state) && !isAwaitingAcceptance(before.state)) &&
+    !claimed
+  ) {
+    laneAuditRow(db, teamId, audit, 'lane.state_changed', after.id, {
+      lane: after.id,
+      from: before.state,
+      to: after.state,
+    });
+  }
+}
+
 export function openLane(
   db: Database,
   teamId: string,
@@ -104,6 +190,10 @@ export function openLane(
   now: number = Date.now(),
 ): Lane {
   const claim = input.claim === true;
+  // The birth's actor IS the creator — every caller passed the same name twice, and two of three
+  // (incidents, seeds) passed nothing and were born with no first event (dolly, #1179 decline). So
+  // openLane takes no audit argument at all: the store writes the birth, and no caller can omit it.
+  const audit: LaneAudit = { actor: createdBy };
   // ADR 244: an admin's default-stakes rule fires HERE, at open, and never again. Resolving it late
   // — at submit, or at close — would make a policy able to rewrite what a lane already was, which is
   // the exact trap ADR 234 increment 2 named for the close edge: only a RECORDED fact earns a label.
@@ -146,12 +236,47 @@ export function openLane(
     resolved_at: null,
     updated_at: now,
   };
-  db.prepare(
+  const insert = db.prepare(
     `INSERT INTO lanes (id, team_id, project, title, detail, kind, owner_seat, role, surface_globs,
                         depends_on, branch, goal_id, risk, stakes, stakes_provenance, merged_json, state, created_by, created_at, claimed_at, resolved_at, updated_at)
      VALUES (@id, @team_id, @project, @title, @detail, @kind, @owner_seat, @role, @surface_globs,
              @depends_on, @branch, @goal_id, @risk, @stakes, @stakes_provenance, @merged_json, @state, @created_by, @created_at, @claimed_at, @resolved_at, @updated_at)`,
-  ).run(row);
+  );
+  db.transaction(() => {
+    insert.run(row);
+    // Finding 4 (lane-replication spec): the birth is the first event, and it carries the whole
+    // declaration — the fields `lane.updated` will later diff against. Without it the log describes
+    // what happened to a lane and never what the lane is.
+    laneAuditRow(db, teamId, audit, 'lane.opened', row.id, {
+      lane: row.id,
+      title: row.title,
+      project: row.project,
+      detail: row.detail,
+      kind: row.kind,
+      role: row.role,
+      scope: input.scope ?? [],
+      depends_on: input.depends_on ?? [],
+      branch: row.branch,
+      goal_id: row.goal_id,
+      risk: input.risk ?? [],
+      stakes,
+      stakes_provenance: row.stakes_provenance ?? 'declared',
+      created_by: createdBy,
+      created_at: now,
+    });
+    // A lane born owned is the most common acquisition of all (ADR 203). No collision is possible —
+    // the lane did not exist — so no guard: just the row, `at_open` so a reader can tell a birth
+    // from a takeover.
+    if (row.owner_seat) {
+      laneAuditRow(db, teamId, audit, 'lane.claimed', row.id, {
+        lane: row.id,
+        owner: row.owner_seat,
+        previous_owner: null,
+        kind: 'claim',
+        at_open: true,
+      });
+    }
+  })();
   return rowToLane(row, teamSlug);
 }
 
@@ -207,8 +332,11 @@ export function updateLane(
   patch: UpdateLane,
   now: number = Date.now(),
   expect?: LaneExpectation,
+  audit?: LaneAudit,
 ): Lane | null {
-  return db.transaction(() => updateLaneInTx(db, teamId, id, teamSlug, patch, now, expect))();
+  return db.transaction(() =>
+    updateLaneInTx(db, teamId, id, teamSlug, patch, now, expect, audit),
+  )();
 }
 
 function updateLaneInTx(
@@ -219,6 +347,7 @@ function updateLaneInTx(
   patch: UpdateLane,
   now: number,
   expect?: LaneExpectation,
+  audit?: LaneAudit,
 ): Lane | null {
   const existing = getLane(db, teamId, id, teamSlug);
   if (!existing) return null;
@@ -326,7 +455,9 @@ function updateLaneInTx(
     `UPDATE lanes SET ${[...changed.map((c) => `${c}=@${c}`), 'updated_at=@updated_at'].join(', ')}
      WHERE team_id=@team_id AND id=@id`,
   ).run(bind);
-  return getLane(db, teamId, id, teamSlug);
+  const after = getLane(db, teamId, id, teamSlug)!;
+  if (audit) recordLaneEdges(db, teamId, existing, after, patch.owner_seat !== undefined, audit);
+  return after;
 }
 
 /** Fields a `lane.updated` audit row reports (ADR 325 prereq). Ownership and state are excluded —
@@ -349,6 +480,24 @@ export function laneFieldChanges(before: Lane, after: Lane): string[] {
   return AUDITED_LANE_FIELDS.filter(
     (f) => JSON.stringify(before[f] ?? null) !== JSON.stringify(after[f] ?? null),
   );
+}
+
+/**
+ * The values behind `laneFieldChanges`: `{ field: { from, to } }` for every audited field that
+ * moved. `lane.updated` carried names only, so history could prove a scope changed and never say
+ * to what — a replicating peer folding the row had nothing to apply (lane-replication spec
+ * §Finding 3, hole 2). Absent reads as `null` on both sides, matching the equality above.
+ */
+export function laneFieldDiff(
+  before: Lane,
+  after: Lane,
+): Record<string, { from: unknown; to: unknown }> {
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  for (const f of laneFieldChanges(before, after)) {
+    const key = f as (typeof AUDITED_LANE_FIELDS)[number];
+    out[f] = { from: before[key] ?? null, to: after[key] ?? null };
+  }
+  return out;
 }
 
 export interface LaneFilter {
@@ -742,6 +891,41 @@ export function boardWarnings(
 const RELEASE_ON_DEPART = "('claimed','active','blocked')" as const;
 
 /**
+ * The system as a releaser, named the way `SYSTEM_CLOSER` names the sweep. A departure release has
+ * no seat behind it, and `null` would read as "actor unknown" — which is the defect this fixes.
+ */
+const SYSTEM_RELEASER = 'musterd';
+
+/**
+ * Release one lane back to `open` AND leave the `lane.released` row the PATCH path leaves
+ * (`transport/http.ts`, same `detail` shape plus a `reason`). Increment 1 of ADR 325 made every
+ * lane transition leave a durable row so a replicating daemon can fold history back out; these two
+ * departure paths were the exceptions — the only places a lane changed hands with no record of who
+ * or why (lane-replication spec §Finding 3). `appendAuditRequired`, not `appendAudit`: the release
+ * and its record are one transaction, so a peer can never see the first without the second.
+ */
+function releaseLaneWithRecord(
+  db: Database,
+  teamId: string,
+  laneId: string,
+  ownerBefore: string,
+  reason: 'seat_left' | 'seat_departed_sweep',
+  now: number,
+): void {
+  db.prepare(
+    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
+     WHERE team_id = ? AND id = ?`,
+  ).run(now, teamId, laneId);
+  appendLaneEventRequired(db, teamId, {
+    actor: SYSTEM_RELEASER,
+    action: 'lane.released',
+    target: laneId,
+    result: 'allow',
+    detail: { lane: laneId, released_by: SYSTEM_RELEASER, owner_before: ownerBefore, reason },
+  });
+}
+
+/**
  * Release a seat's in-flight lanes back to `open` (ADR 196 / open ⟺ unowned). Used when the seat
  * soft-leaves the roster so the board cannot assert ownership for a name every list filter drops.
  * Returns the released lane ids + prior state for logging/audit.
@@ -759,12 +943,8 @@ export function releaseInFlightClaimsForSeat(
     )
     .all(teamId, seatName);
   if (rows.length === 0) return [];
-  const upd = db.prepare(
-    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
-     WHERE team_id = ? AND id = ?`,
-  );
   db.transaction(() => {
-    for (const r of rows) upd.run(now, teamId, r.id);
+    for (const r of rows) releaseLaneWithRecord(db, teamId, r.id, seatName, 'seat_left', now);
   })();
   return rows.map((r) => ({ id: r.id, state_before: r.state }));
 }
@@ -787,12 +967,9 @@ export function releaseDepartedSeatClaims(
     )
     .all();
   if (rows.length === 0) return [];
-  const upd = db.prepare(
-    `UPDATE lanes SET state = 'open', owner_seat = NULL, claimed_at = NULL, updated_at = ?
-     WHERE team_id = ? AND id = ?`,
-  );
   db.transaction(() => {
-    for (const r of rows) upd.run(now, r.team_id, r.lane);
+    for (const r of rows)
+      releaseLaneWithRecord(db, r.team_id, r.lane, r.seat, 'seat_departed_sweep', now);
   })();
   return rows;
 }

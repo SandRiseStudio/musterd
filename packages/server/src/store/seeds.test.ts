@@ -158,6 +158,39 @@ describe('shared Seed store (ADR 291)', () => {
     ]);
   });
 
+  // Finding 4 (lane-replication spec), dolly's #1179 decline: the Seed promotion opened a lane with
+  // no first event. The birth is written by openLane itself, so no caller can leave it out.
+  it('a promoted Seed lane is born with a lane.opened row, as the promoting Member', () => {
+    const team = createTeam(db, { slug: 'bravo' });
+    addMember(db, team, { name: 'nick', kind: 'human', slackUserId: 'U123' });
+    const ada = addMember(db, team, { name: 'ada', kind: 'agent' }).row;
+    const seed = createSeedFromRelay(db, team.id, {
+      id: 'relay-opened',
+      source: 'slack',
+      body: 'Explore this',
+      ts: 1,
+      meta: { user: 'U123' },
+    });
+    claimSeed(db, team.id, seed.id, ada);
+    const promoted = submitSeedBrief(db, team.id, team.slug, seed.id, ada, {
+      result: 'promote',
+      brief,
+    });
+    const rows = db
+      .prepare<
+        [string],
+        { actor: string | null; detail: string }
+      >("SELECT actor, detail FROM audit WHERE action = 'lane.opened' AND target = ? ORDER BY id")
+      .all(promoted.linked_lane_id as string);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actor).toBe('ada');
+    expect(JSON.parse(rows[0].detail)).toMatchObject({
+      lane: promoted.linked_lane_id,
+      title: 'Test the idea',
+      created_by: 'ada',
+    });
+  });
+
   it('lets any Member manually promote an unexplored Seed and records skipped research', () => {
     const team = createTeam(db, { slug: 'bravo' });
     const nick = addMember(db, team, {

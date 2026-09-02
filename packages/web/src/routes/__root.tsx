@@ -28,8 +28,14 @@ export const Route = createRootRoute({
       { property: 'og:description', content: SITE_SHARE_DESCRIPTION },
       { property: 'og:type', content: 'website' },
       { property: 'og:url', content: SITE_ORIGIN },
+      { property: 'og:site_name', content: SITE_TITLE },
+      { property: 'og:locale', content: 'en_US' },
       { property: 'og:image', content: ogImage },
       { property: 'og:image:alt', content: SITE_CARD_ALT },
+      // Stated so a client can reserve the card's box before the image arrives; Slack and
+      // LinkedIn both render a narrow placeholder without them.
+      { property: 'og:image:width', content: '1200' },
+      { property: 'og:image:height', content: '630' },
       { name: 'twitter:card', content: 'summary_large_image' },
       { name: 'twitter:image', content: ogImage },
     ],
