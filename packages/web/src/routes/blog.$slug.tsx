@@ -1,5 +1,12 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { GRAPH_ID, absoluteUrl, breadcrumbNode, pageHead } from '../brand/siteMeta';
+import {
+  GRAPH_ID,
+  absoluteUrl,
+  breadcrumbNode,
+  feedAlternate,
+  markdownAlternate,
+  pageHead,
+} from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -21,6 +28,7 @@ export const Route = createFileRoute('/blog/$slug')({
       description: loaderData?.excerpt ?? 'Notes from the team building musterd.',
       path: `/blog/${params.slug}`,
       ogType: 'article',
+      links: [markdownAlternate(`/blog/${params.slug}`), feedAlternate()],
       graph: [
         {
           '@type': 'BlogPosting',

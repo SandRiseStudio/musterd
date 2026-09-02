@@ -17,6 +17,10 @@ export const PUBLIC_ALLOW = [
   'robots.txt',
   'sitemap.xml',
   'llms.txt',
+  // The whole docs corpus in one fetch, for an agent reader. The per-page markdown mirrors and
+  // /blog/rss.xml need no entry of their own: they are emitted INSIDE the already-allowed `docs`
+  // and `blog` directories, which this list copies whole.
+  'llms-full.txt',
   '_headers',
 ];
 

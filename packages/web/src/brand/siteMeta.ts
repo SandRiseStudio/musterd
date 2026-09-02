@@ -97,6 +97,28 @@ export function pageHead(meta: PageMeta) {
   };
 }
 
+/**
+ * The markdown mirror of a page, announced from the page itself.
+ *
+ * /docs/** and /blog/** are rendered from markdown at build time, so the clean form already exists
+ * and ships beside the HTML (scripts/site-files.ts). This is how an agent that landed on the HTML
+ * finds it without guessing at a URL convention. It is an ALTERNATE representation, not another
+ * page: the canonical stays on the HTML, so the mirror competes with nothing.
+ */
+export function markdownAlternate(path: string) {
+  return { rel: 'alternate', type: 'text/markdown', href: absoluteUrl(`${path}.md`) };
+}
+
+/** Feed autodiscovery, the link a reader's "subscribe" button looks for. */
+export function feedAlternate() {
+  return {
+    rel: 'alternate',
+    type: 'application/rss+xml',
+    title: `${SITE_TITLE} — blog`,
+    href: absoluteUrl('/blog/rss.xml'),
+  };
+}
+
 /** Crawlers refuse relative og:image. Vite `?url` imports are path-only. */
 export function absoluteUrl(path: string): string {
   if (/^https?:\/\//.test(path)) return path;
