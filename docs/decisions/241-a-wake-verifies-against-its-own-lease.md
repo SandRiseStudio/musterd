@@ -2,6 +2,9 @@
 
 - Status: accepted
 - Date: 2026-08-05
+- Snapshot-debt: none — the one frequency word in §Decision ("a woken session's first
+  authenticated call is usually a hook") describes the harness wiring order (SessionStart hook
+  before any tool call), not a measured rate; nothing in this ADR asserts a number over a window.
 - Deciders: ryder, gptbot (rejected the ADR 238 outcome that made this necessary), stanley (named
   the hypothesis increment 1 failed to close)
 - Relates to: ADR 238 (increment 1 — this ADR corrects its remaining hole), ADR 236 (absence is not
