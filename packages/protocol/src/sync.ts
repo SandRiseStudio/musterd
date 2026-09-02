@@ -137,6 +137,39 @@ export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;
 /** Same bound as push, for the same reason: a legitimate catch-up must not allocate unboundedly. */
 export const SYNC_PULL_MAX_BATCH = SYNC_PUSH_MAX_BATCH;
 
+/**
+ * Federation 3c: the hub-authoritative claim (ADR 325 §Authority split, residence 1). An enrolled
+ * joiner does not decide a self-claim locally; it asks the hub, which runs the guarded CAS against
+ * ITS row and writes the `lane.claimed` event from its own allocator — so the decision reaches
+ * every machine, the joiner included, through the ordinary fold. `expect` is the joiner's read at
+ * decision time, the same expectation the local PATCH carries (`LaneExpectation`): the hub refuses
+ * if the lane has moved, naming the holder, instead of overwriting.
+ *
+ * Authenticated by the machine credential (`msnode_`); `seat` names the claimant on the shared
+ * roster (ADR 058), never a daemon-private member id.
+ */
+export const SyncClaimRequestSchema = z.object({
+  lane: z.string().min(1),
+  seat: z.string().min(1),
+  expect: z.object({
+    owner_seat: z.string().nullable(),
+    state: z.string().min(1),
+  }),
+});
+export type SyncClaimRequest = z.infer<typeof SyncClaimRequestSchema>;
+
+/**
+ * A refused claim carries WHO holds the lane beside the error envelope, the way a sync gap carries
+ * `expected_seq`: the caller can act on a name (ask for a handoff) where it cannot act on a
+ * sentence. `holder` is null when the refusal is about state, not ownership.
+ */
+export const SyncClaimRefusalSchema = z.object({
+  error: z.object({ code: z.literal('conflict'), message: z.string() }),
+  holder: z.string().nullable(),
+  state: z.string(),
+});
+export type SyncClaimRefusal = z.infer<typeof SyncClaimRefusalSchema>;
+
 export const SyncPullResponseSchema = z.object({
   events: z.array(SyncPullEventSchema).max(SYNC_PULL_MAX_BATCH),
   /** The hub's head, so a puller can compute lag (`hub_head − cursor`) without a second call. */

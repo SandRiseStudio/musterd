@@ -74,6 +74,7 @@ import {
   NodeListSchema,
   SYNC_PULL_MAX_BATCH,
   SyncPullResponseSchema,
+  SyncClaimRequestSchema,
   SyncPushRequestSchema,
   SyncPushResponseSchema,
 } from '@musterd/protocol';
@@ -269,6 +270,13 @@ import {
 } from '../store/teams.js';
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
 import {
+  arbitrateClaim,
+  claimAtHub,
+  ClaimRefusedError,
+  HubUnreachableError,
+  joinerEnrollment,
+} from '../sync/claim.js';
+import {
   hubHead,
   ingestBatch,
   readStaged,
@@ -276,6 +284,8 @@ import {
   SyncGapError,
   SyncOriginError,
 } from '../sync/log.js';
+import { pullTeam } from '../sync/pull.js';
+import { pushTeam } from '../sync/push.js';
 import {
   recordCcdNudge,
   recordNudgeDecision,
@@ -3629,6 +3639,45 @@ export async function handleHttp(
       // else: ADR 328 §3 admits a node here and to no other route, so this is the first and only
       // consumer of `authenticateNode`. Pushed events land in `sync_log`; nothing here writes to
       // `messages` — that fold is 3b-ii.
+      // Federation 3c: the hub arbitrates a joiner's self-claim (ADR 325 residence 1). Same machine
+      // credential as the sync surface; the guarded CAS and the live-incumbent rule run against the
+      // hub's row, and the hub's own `lane.claimed` event carries the decision back out.
+      if (method === 'POST' && rest === '/sync/claim') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        const body = parseOrBadRequest(SyncClaimRequestSchema, await readJson(req));
+        try {
+          const lane = arbitrateClaim(ctx, team, node, body);
+          // Stage the decision now rather than on the push timer, so the joiner's pull — which it
+          // runs the moment it has our answer — finds the row it was just told about. Best effort:
+          // the timer stages it anyway if this fails.
+          await pushTeam(ctx, team).catch(() => undefined);
+          // arbitrateClaim resolved the seat on this roster before deciding, so the row exists.
+          const claimant = getMemberByName(ctx.db, team.id, body.seat)!;
+          deliverLaneTeamAct(ctx, team, claimant, `[lane] claimed "${lane.title}"`, {
+            lane_claim: { lane: lane.id, title: lane.title },
+          });
+          return sendJson(res, 200, { lane });
+        } catch (err) {
+          if (err instanceof ClaimRefusedError) {
+            // Hand-built for the same reason the sync gap is: the refusal carries fields the error
+            // envelope has no room for, and `error: { code, message }` stays byte-compatible.
+            return sendJson(res, 409, {
+              error: { code: 'conflict', message: err.message },
+              holder: err.holder,
+              state: err.state,
+            });
+          }
+          throw err;
+        }
+      }
+
       if (method === 'POST' && rest === '/sync/push') {
         const team = requireTeam(ctx.db, slug);
         const node = authenticateNode(ctx.db, team.id, bearer(req));
@@ -4099,7 +4148,42 @@ export async function handleHttp(
         // deliberate give-away that must keep working. So this refuses only self-directed takeovers,
         // and only while the incumbent is LIVE — an offline or departed owner stays claimable, which
         // is the same posture ADR 196 took when it released departed seats' in-flight lanes.
+        // Federation 3c (ADR 325 §Authority split): on an enrolled JOINER a self-claim is not this
+        // daemon's to decide. It goes to the hub, which runs the CAS against its row and answers
+        // with the lane or a refusal naming the holder; this daemon writes nothing and converges
+        // from the hub's log. Unreachable hub ⇒ refuse with its own code, never a provisional
+        // claim. Handoffs (naming someone else) and every other patch stay local for now.
+        const claimingForSelf =
+          body.owner_seat !== undefined &&
+          body.owner_seat === member.name &&
+          before.owner_seat !== member.name;
+        const enrollment = claimingForSelf ? joinerEnrollment(ctx.db, team.id, team.slug) : null;
+        let arbitrated: Lane | undefined;
+        if (enrollment) {
+          try {
+            arbitrated = await claimAtHub(enrollment, team.slug, {
+              lane: laneId,
+              seat: member.name,
+              expect: { owner_seat: before.owner_seat, state: before.state },
+            });
+          } catch (err) {
+            if (err instanceof ClaimRefusedError) {
+              return sendJson(res, 409, {
+                error: { code: 'conflict', message: err.message },
+                holder: err.holder,
+                state: err.state,
+              });
+            }
+            if (err instanceof HubUnreachableError)
+              throw new MusterdError('hub_unreachable', err.message);
+            throw err;
+          }
+          // Best effort: pull the hub's decision now so the caller's next read agrees with the
+          // answer they were just given. A failed pull changes nothing — the claim already holds.
+          await pullTeam(ctx, team).catch(() => undefined);
+        }
         const takingForSelf =
+          !enrollment &&
           body.owner_seat !== undefined &&
           body.owner_seat === member.name &&
           before.owner_seat !== null &&
@@ -4167,9 +4251,15 @@ export async function handleHttp(
             : undefined;
         let lane: Lane;
         try {
-          lane = updateLane(ctx.db, team.id, laneId, team.slug, patch, Date.now(), guard, {
-            actor: member.name,
-          })!;
+          lane = arbitrated
+            ? // The hub decided; this daemon's row is whatever the fold has applied so far, and the
+              // hub's answer stands in until it has.
+              getLane(ctx.db, team.id, laneId, team.slug)?.owner_seat === member.name
+              ? getLane(ctx.db, team.id, laneId, team.slug)!
+              : arbitrated
+            : updateLane(ctx.db, team.id, laneId, team.slug, patch, Date.now(), guard, {
+                actor: member.name,
+              })!;
         } catch (err) {
           if (err instanceof LaneConflictError) {
             throw new MusterdError(

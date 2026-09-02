@@ -29,6 +29,9 @@ const CODE_EXIT: Record<ErrorCode, number> = {
   // grant is an auth refusal (5). The claim command that emits these lands in the P3.3 cutover.
   claim_conflict: 9,
   expired_grant: 5,
+  // Federation 3c (ADR 355): the hub could not be asked to arbitrate a claim. Its own exit so a
+  // script can tell "refused" (9) from "could not be decided" — retry later, never claim anyway.
+  hub_unreachable: 12,
 };
 
 export function exitForCode(code: ErrorCode): number {

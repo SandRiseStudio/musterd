@@ -140,7 +140,7 @@ footprint, schema meta — and `local_node`, below). Roster identity stays on gi
 | 3a | The machine credential — `msnode_`, `msinv_` enrollment, rotation, revocation | landed 2026-08-28 (#1100, `3b8415cf`, [ADR 328](../decisions/328-machine-credential.md)) |
 | 3b-i | Sync wire format and push — `sync_log` staging under a canonical `hub_seq` | landed 2026-08-31 (`46707cb5`, [ADR 335](../decisions/335-sync-wire-format.md)) |
 | **3b-ii** | **Pull by cursor, the fold into `messages`, read-side gap detection; the hub stages its own history** | **this build** (migration v54, spec `docs/superpowers/specs/2026-09-01-sync-fold-design.md`) |
-| 3c | Hub-authoritative claim CAS, seat→node residence binding | not started — needs this increment plus a lane-replication slice (its lane's declared dep on 3a alone is wrong) |
+| 3c | Hub-authoritative claim CAS, seat→node residence binding | landed 2026-09-02 (ADR 355): a joiner's self-claim is decided by the hub's guarded CAS; refusals name the holder; an unreachable hub refuses with `hub_unreachable`. Residence is the `node` on the hub's `lane.claimed` row. Presence summaries (the displacement rule's input for remote seats) are the next slice |
 
 The hub storage engine needs no decision: ADR 325 defines a hub by the surface it speaks, and a
 promoted daemon on SQLite satisfies the CAS — one process, one writer.
@@ -210,12 +210,15 @@ promoted daemon on SQLite satisfies the CAS — one process, one writer.
 live WebSocket delivery of a remote event is a follow-up. **The inbox and wake cursors still key on
 `ts`** — the origin's clock — so a folded event older than a seat's last read is invisible to that
 seat; the readers move to `created_at` in their own lane, a hard precondition before a second
-machine enrolls (spec §"The ts-cursor defect"). **Lane transitions replicate; ownership is not yet
-arbitrated.** Since 2026-09-02 every `lane.*` audit row is stamped from the node's allocator and
+machine enrolls (spec §"The ts-cursor defect"). **Lane transitions replicate; a joiner's claim is
+arbitrated by the hub.** Since 2026-09-02 every `lane.*` audit row is stamped from the node's allocator and
 rides the push/pull wire beside messages; the fold projects it into the peer's `lanes`
 (lane-replication spec §"The wire, decided"). A joiner therefore sees a hub-side claim and the hub
-sees a joiner's, but nothing refuses the second of two claims for one lane — that is 3c, which now
-has what it was missing. **Precondition for a second machine:** a joiner folds a log whose lanes
+sees a joiner's, and since 3c (ADR 355) a self-claim on a joiner is decided by the hub's guarded CAS:
+the second of two claims for one lane is refused naming the holder, and a claim the hub cannot be
+asked about refuses with `hub_unreachable` rather than landing provisionally. Handoffs, releases
+and closes still apply locally and replicate; the displacement rule consults the hub's own
+presence, so a seat resident on another machine reads as not live until presence summaries land. **Precondition for a second machine:** a joiner folds a log whose lanes
 older than 2026-09-02 have no `lane.opened`; a transition for such a lane blocks the fold as
 `lane_unborn` until the origin's history is reconciled by hand. Goals stay a projection of
 messages and need nothing; the rest of `audit` does not replicate (ADR 331 §Decision 5).

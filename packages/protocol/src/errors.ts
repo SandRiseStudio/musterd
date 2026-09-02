@@ -15,6 +15,10 @@ export const ERROR_CODES = [
   'server_error',
   'claim_conflict',
   'expired_grant',
+  // Federation 3c (ADR 325 §Offline semantics): a hub-authoritative act — a lane claim on an
+  // enrolled joiner — refuses while the hub is unreachable, with its OWN code so a caller can tell
+  // "the hub said no" from "the hub could not be asked". Never a provisional claim.
+  'hub_unreachable',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 export const ErrorCodeSchema = z.enum(ERROR_CODES);
@@ -36,6 +40,7 @@ export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
   // 410/403; 403 wins to keep the two protocol edits converging without conflict.
   claim_conflict: 409,
   expired_grant: 403,
+  hub_unreachable: 503,
 };
 
 export const ErrorBodySchema = z.object({
