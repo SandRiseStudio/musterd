@@ -524,3 +524,61 @@ this note records: **a PR that reads "N KB / N KB" on its own gates will read ov
 
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit; initial
   should read ≈152.3 KB against 154.3 KB (158,000 B), and main's CI gates go green.
+
+## 2026-09-02 — initialJsGzipBytes 158000 → 154500 (the raise above, repaid; PR #1168)
+
+The first entry in this log that gives bytes back. The raise directly above was correct triage —
+main was red and taking every rebased PR with it — but its premise, *"the code is the surface"*,
+holds only for #1158's own bytes. It is not true of the route they landed on.
+
+| tree | initial JS gzip (/live eager) | |
+| --- | --- | --- |
+| `d7cb401c` (#1158's parent), local | 155,721 B | CI green |
+| `db1099de` / `5cc8aa68` (main), local | 155,964 B | **CI red** |
+| this branch, local | **152,540 B** | |
+
+#1158 cost **243 B** against a ceiling with **279 B** free, and all 243 are feature:
+`applyTierClock`, the loudness guard in `answerableCount`, and the lapsed note's copy. Nothing
+there is shaveable without taking the honesty out of the surface it was built for. So the bytes
+came from somewhere else, and the somewhere else had been hiding in plain sight.
+
+`BoardOverlay`'s header has said since it was written that the board is *"kept out of /live's
+eager graph (ADR 151: heavy, occasional code gets a lazy chunk, never the entry)"*. Only the inner
+`Board` ever was. The 219-line modal shell — plus `useBoardData`, `goalGrid` and
+`boardOverlayMath` through its static imports — rode the entry chunk on a route that renders none
+of it until a reader reaches for the wall, behind an already-conditional
+`{boardOpen && <BoardOverlay/>}`. Making the shell lazy too costs one `Suspense` boundary:
+
+| step | initial JS gzip | Δ |
+| --- | --- | --- |
+| main | 155,964 B | — |
+| dedupe the `?still` / `?asks-open` flag readers | 155,960 B | −4 B |
+| **lazy `BoardOverlay` shell** | **152,540 B** | **−3,439 B** |
+
+About 14× what #1158 borrowed. The flag-reader dedupe is kept for being better code, not for its
+bytes: gzip had already collapsed the duplicated `try`/`catch`, which is worth remembering the
+next time a shave looks obvious on the page.
+
+Per ADR 183 the total moved the other way, exactly as that ADR predicts a lazy split will:
+249,509 → 250,547 B (+~1 KB of per-chunk overhead, 36 → 38 chunks), still inside the 252,000
+ceiling.
+
+`preloadBoardOverlay` keeps the promise the old `preloadBoard` made — the wall hotspot's first
+hover/focus now warms *both* halves (shell, then board), so a click still lands on a loaded chunk
+and the "comes off the wall" flight is not waiting on a network round trip.
+
+### Two measurement traps, both of which cost time here
+
+- **`perf:check` does not build.** It only reads `packages/web/dist/client`. A reading taken
+  without `pnpm --filter @musterd/web build` first is the *previous* tree's dist — which is how
+  two commits 243 B apart both measured 155,964 B and looked identical.
+- **A PR reading "N KB / N KB" on its own gates will read over on main** — the process finding
+  from the note above, kept, because it is what this ceiling's headroom was hiding.
+
+New budget is measured 152,540 + the CI toolchain delta + ~1.2% slack (the 2026-08-12 precedent),
+leaving ~1.9 KiB of genuine headroom where 279 B had made *any* web change a coin flip against
+CI. A re-baseline may only tighten (ADR 183); this one does.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` — initial should read ≈149.0 KiB
+  against 150.9 KiB (154,500 B). If a future change puts `BoardOverlay` back into the eager graph,
+  this budget is now tight enough to say so instead of absorbing it silently.
