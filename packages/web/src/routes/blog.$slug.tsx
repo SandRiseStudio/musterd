@@ -1,5 +1,5 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { pageMeta } from '../brand/siteMeta';
+import { GRAPH_ID, absoluteUrl, breadcrumbNode, pageHead } from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -15,13 +15,33 @@ export const Route = createFileRoute('/blog/$slug')({
     if (!post) throw notFound();
     return post;
   },
-  head: ({ loaderData, params }) => ({
-    meta: pageMeta({
+  head: ({ loaderData, params }) =>
+    pageHead({
       title: loaderData?.title ?? 'Blog',
       description: loaderData?.excerpt ?? 'Notes from the team building musterd.',
       path: `/blog/${params.slug}`,
+      ogType: 'article',
+      graph: [
+        {
+          '@type': 'BlogPosting',
+          headline: loaderData?.title ?? 'Blog',
+          description: loaderData?.excerpt ?? 'Notes from the team building musterd.',
+          url: absoluteUrl(`/blog/${params.slug}`),
+          inLanguage: 'en',
+          // The filename date is the one freshness fact the site can state truthfully, the same
+          // reason sitemap.xml carries lastmod on posts and nothing else (scripts/site-files.ts).
+          ...(loaderData?.date ? { datePublished: loaderData.date } : {}),
+          mainEntityOfPage: absoluteUrl(`/blog/${params.slug}`),
+          isPartOf: { '@id': GRAPH_ID.website },
+          author: { '@id': GRAPH_ID.organization },
+          publisher: { '@id': GRAPH_ID.organization },
+        },
+        breadcrumbNode([
+          { name: 'Blog', path: '/blog' },
+          { name: loaderData?.title ?? 'Blog', path: `/blog/${params.slug}` },
+        ]),
+      ],
     }),
-  }),
   component: Post,
 });
 

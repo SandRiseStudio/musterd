@@ -1,5 +1,5 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { pageMeta } from '../brand/siteMeta';
+import { absoluteUrl, breadcrumbNode, itemListNode, pageHead } from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -11,13 +11,21 @@ export const Route = createFileRoute('/docs/')({
     const { docsPages } = await import('../content/generated/site-content');
     return docsPages.map(({ slug, title }) => ({ slug, title }));
   },
-  head: () => ({
-    meta: pageMeta({
+  head: ({ loaderData }) =>
+    pageHead({
       title: 'Docs',
       description: 'Install musterd, learn the concepts a team runs on, and read the protocol spec.',
       path: '/docs',
+      graph: [
+        {
+          '@type': 'CollectionPage',
+          name: 'Docs',
+          url: absoluteUrl('/docs'),
+        },
+        itemListNode((loaderData ?? []).map((p) => ({ name: p.title, path: `/docs/${p.slug}` }))),
+        breadcrumbNode([{ name: 'Docs', path: '/docs' }]),
+      ],
     }),
-  }),
   component: DocsIndex,
 });
 
