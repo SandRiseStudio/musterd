@@ -25,6 +25,8 @@ import {
   rosterPrimaryChip,
   type RichToken,
   acceptanceCapacity,
+  recipientNames,
+  recipientScope,
 } from './format';
 
 describe('actTone — steering acts (ADR 103)', () => {
@@ -669,3 +671,43 @@ describe('initial — the one-letter avatar glyph', () => {
   });
 });
 
+
+
+/**
+ * ADR 254 eligible sets in the stream row. These travel as `to: {kind:'team'}` with the names in
+ * `meta.eligible`, so a reader of `to` alone renders "team" over an act addressed to named people —
+ * which is what /live's stream panel did until 2026-09-02, while the CLI printed the names and the
+ * office scene walked to every desk.
+ */
+describe('recipientScope / recipientNames — an eligible set is named, not a team broadcast', () => {
+  const TEAM = { kind: 'team' } as const;
+  const MEMBER = { kind: 'member', name: 'ryder' } as const;
+
+  it('reads a 2-4 name set as its own scope, and lists every name', () => {
+    expect(recipientScope(TEAM, ['ryder', 'sloane'])).toBe('eligible');
+    expect(recipientNames(TEAM, ['ryder', 'sloane'])).toEqual(['ryder', 'sloane']);
+    expect(recipientNames(TEAM, ['a', 'b', 'c', 'd'])).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('keeps a plain team act a team act', () => {
+    expect(recipientScope(TEAM, null)).toBe('team');
+    expect(recipientScope(TEAM)).toBe('team');
+    expect(recipientNames(TEAM, null)).toEqual([]);
+  });
+
+  it('treats a one-name set as a team act — that is a member act that took the wrong road', () => {
+    expect(recipientScope(TEAM, ['ryder'])).toBe('team');
+    expect(recipientNames(TEAM, ['ryder'])).toEqual([]);
+  });
+
+  it('lets a member recipient win over any eligible set on the same envelope', () => {
+    // Both shapes present is a protocol contradiction; `to` is the routed truth, so it decides.
+    expect(recipientScope(MEMBER, ['dolly', 'sloane'])).toBe('direct');
+    expect(recipientNames(MEMBER, ['dolly', 'sloane'])).toEqual(['ryder']);
+  });
+
+  it('leaves broadcast alone', () => {
+    expect(recipientScope({ kind: 'broadcast' }, ['a', 'b'])).toBe('all');
+    expect(recipientNames({ kind: 'broadcast' }, ['a', 'b'])).toEqual([]);
+  });
+});

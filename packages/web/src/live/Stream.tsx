@@ -1,4 +1,4 @@
-import type { Envelope, MemberSummary } from '@musterd/protocol';
+import { eligibleOf, type Envelope, type MemberSummary } from '@musterd/protocol';
 import {
   Fragment,
   type ReactElement,
@@ -21,7 +21,7 @@ import {
   type LaneEventDetail,
   memberColor, memberAvatar,
   proseSegments,
-  recipientName,
+  recipientNames,
   recipientScope,
   richLength,
   rosterIndex,
@@ -300,8 +300,11 @@ function Row({
   const effAct = lane ?? (goal ? 'goal' : env.act);
   const tone = actTone(effAct);
   const kind = kindOf(env.from, idx);
-  const scope = recipientScope(env.to);
-  const toName = recipientName(env.to);
+  // ADR 254: the names of an eligible set live in `meta.eligible` while `to` stays `{kind:'team'}`,
+  // so the row has to read both or it renders "team" over an act addressed to named people.
+  const eligible = eligibleOf(env.meta);
+  const scope = recipientScope(env.to, eligible);
+  const toNames = recipientNames(env.to, eligible);
   const threaded = env.thread != null;
   // The exact message this one replies to (ADR 025 reply_to / --reply-to → meta.in_reply_to).
   const replyToId = typeof env.meta?.['in_reply_to'] === 'string' ? env.meta['in_reply_to'] : null;
@@ -325,7 +328,7 @@ function Row({
           <ActIcon act={effAct} />
           {actLabel(effAct)}
         </span>
-        <Recipient scope={scope} name={toName} idx={idx} />
+        <Recipient scope={scope} names={toNames} idx={idx} />
       </div>
       {parent && (
         <button
@@ -366,22 +369,31 @@ function Row({
  */
 function Recipient({
   scope,
-  name,
+  names,
   idx,
 }: {
   scope: ReturnType<typeof recipientScope>;
-  name: string | null;
+  names: string[];
   idx: Map<string, MemberSummary>;
 }) {
-  if (scope === 'direct' && name) {
+  // `direct` and `eligible` render the same way, deliberately: an eligible set is a list of real
+  // recipients, not a weaker kind of team act, and the reader's question — "is this waiting on a
+  // person, and which?" — has the same answer for both. Only the joiner differs, because "or" is
+  // the whole meaning: any ONE of them discharges it.
+  if ((scope === 'direct' || scope === 'eligible') && names.length > 0) {
     return (
-      <span className="lc-to lc-to--direct">
+      <span className={`lc-to lc-to--direct${scope === 'eligible' ? ' lc-to--eligible' : ''}`}>
         <ToArrow />
-        <span
-          className="lc-to__dot"
-          style={{ background: memberColor(name, kindOf(name, idx)) }}
-        />
-        <span className="lc-to__name">{name}</span>
+        {names.map((name, i) => (
+          <span className="lc-to__seat" key={name}>
+            {i > 0 && <span className="lc-to__or">or</span>}
+            <span
+              className="lc-to__dot"
+              style={{ background: memberColor(name, kindOf(name, idx)) }}
+            />
+            <span className="lc-to__name">{name}</span>
+          </span>
+        ))}
       </span>
     );
   }

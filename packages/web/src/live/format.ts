@@ -253,16 +253,29 @@ export function proseSegments(input: string): RichToken[][] {
   return (pieces.length > 1 ? pieces : [text]).map((p) => richTokens(p));
 }
 
-/** Where a message went, distilled to the three audiences a reader cares about (ADR 061 firehose). */
-export type ActScope = 'direct' | 'team' | 'all';
-export function recipientScope(to: Envelope['to']): ActScope {
+/**
+ * Where a message went, distilled to the audiences a reader cares about (ADR 061 firehose).
+ *
+ * `eligible` is the ADR 254 shape: 2-4 named seats, any one of whom discharges the act. It travels
+ * as `to: {kind:'team'}` with the names in `meta.eligible`, because routing still fans out to the
+ * team — so a reader of `to` alone sees a team broadcast, which is what the stream row showed until
+ * 2026-09-02 while the CLI printed the names and the office scene walked to each desk.
+ */
+export type ActScope = 'direct' | 'eligible' | 'team' | 'all';
+export function recipientScope(to: Envelope['to'], eligible?: string[] | null): ActScope {
   if (to.kind === 'member') return 'direct';
-  if (to.kind === 'team') return 'team';
+  if (to.kind === 'team') return eligible && eligible.length > 1 ? 'eligible' : 'team';
   return 'all';
 }
-/** The named recipient of a direct (1:1) message; null for team/broadcast. */
-export function recipientName(to: Envelope['to']): string | null {
-  return to.kind === 'member' ? to.name : null;
+/**
+ * Who the act names, as a list: one seat for a direct message, 2-4 for an eligible set, empty for a
+ * team or broadcast act. Plural so a caller cannot render one name and drop the rest — the failure
+ * this pair exists to end.
+ */
+export function recipientNames(to: Envelope['to'], eligible?: string[] | null): string[] {
+  if (to.kind === 'member') return [to.name];
+  if (to.kind === 'team' && eligible && eligible.length > 1) return eligible;
+  return [];
 }
 
 export function initial(name: string): string {
