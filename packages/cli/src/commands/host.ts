@@ -5,6 +5,7 @@ import type { ActuatorBackend } from '../host/backend.js';
 import { claudeCodeBackend } from '../host/backends/claudeCode.js';
 import { codexBackend } from '../host/backends/codex.js';
 import { nativeBackend } from '../host/backends/native.js';
+import { grokBackend } from '../host/backends/grok.js';
 import { opencodeBackend } from '../host/backends/opencode.js';
 import { pollHostOnce, type HostPollDeps } from '../host/loop.js';
 import { hostRegistryPath, loadHostRegistry } from '../host/registry.js';
@@ -54,6 +55,8 @@ export async function hostCommand(
   backends.set(codex.harness, codex);
   const opencode = opencodeBackend();
   backends.set(opencode.harness, opencode);
+  const grok = grokBackend();
+  backends.set(grok.harness, grok);
   // The native row (ADR 251): selected only by an enrollment that explicitly says
   // `harness: musterd` — registered here, never a default (a native wake spends real dollars
   // against the configured model; phase-1 rollout is opt-in per enrollment).

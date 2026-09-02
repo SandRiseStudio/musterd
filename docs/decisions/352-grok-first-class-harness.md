@@ -2,7 +2,7 @@
 
 - Status: proposed — 2026-09-02
 - Date: 2026-09-02
-- Builds on: [ADR 321](321-opencode-first-class-harness.md) (the SURFACES + CHECK + adapter + enumerator + wake playbook this follows for the third time), [ADR 281](281-multi-harness-worktree-selection.md) (a novel harness uses surface `other` until a protocol ADR adds it), [ADR 251](251-native-backend-musterd-as-its-own-harness.md), [ADR 006](006-cursor-surface.md), [ADR 031](031-codex-adapter-scope.md) (project-local config, never the global file), [ADR 165](165-no-secrets-in-shared-mcp-entry.md) / [ADR 286](286-launch-surface-marker.md) (entry carries only `MUSTERD_LAUNCH_SURFACE`), [ADR 166](166-session-liveness-by-enumeration.md), [ADR 150](150-structural-inducement-pretooluse-gates.md), [ADR 326](326-session-orientation.md), [ADR 027](027-non-invasive-harness-coexistence.md), [ADR 135](135-build-provenance-every-runtime.md)
+- Builds on: [ADR 321](321-opencode-first-class-harness.md) (the SURFACES + CHECK + adapter + enumerator + wake playbook this follows for the third time), [ADR 281](281-multi-harness-worktree-selection.md) (a novel harness uses surface `other` until a protocol ADR adds it), [ADR 251](251-native-backend-musterd-as-its-own-harness.md), [ADR 006](006-cursor-surface.md), [ADR 031](031-codex-adapter-scope.md) (project-local config, never the global file), [ADR 165](165-no-secrets-in-shared-mcp-entry.md) / [ADR 286](286-launch-surface-marker.md) (entry carries only `MUSTERD_LAUNCH_SURFACE`), [ADR 166](166-session-liveness-by-enumeration.md), [ADR 150](150-structural-inducement-pretooluse-gates.md), [ADR 326](326-session-orientation.md), [ADR 027](027-non-invasive-harness-coexistence.md), [ADR 135](135-build-provenance-every-runtime.md) <!-- vocab:ok -->
 - Lane: `01M1HHH60ETQF5QPTV3PA2KDA8`
 - Authored by wanderer, 2026-09-02. The lane was claimed from inside Grok CLI itself, which is both the subject and the evidence.
 
@@ -106,12 +106,12 @@ If project `.grok/config.toml` has no `[ui.status_line]`, write `type = "command
 - **Every resumable seat rebuilds.** Epoch 17. Announce; do not `service refresh` to see a UI change.
 - Presence rows may attest `grok`. The web viewer renders the friendly label without a fan-out release.
 - Migration v57 rebuilds `presence` O(rows). Dogfood scale is trivial, as v44 was.
-- A Grok session in a folder that still has Cursor MCP **and** a native Grok entry attests `grok` because config.toml wins on the `musterd` name. Cursor sessions in the same worktree still attest `cursor` (their own entry). Multi-harness worktrees stay legal (ADR 281).
+- A Grok session in a folder that still has Cursor MCP **and** a native Grok entry attests `grok` because config.toml wins on the `musterd` name. Cursor sessions in the same workspace still attest `cursor` (their own entry). Multi-harness workspaces stay legal (ADR 281).
 - Stdio MCP does not respawn on a list refresh (measured 2026-09-02: PID started before the rebuild kept attesting the old stamp). Activation copy names disable+enable or a session restart.
 - Architecture trees, SPEC, wiki matrix, and harness-residency table update in the same commits that land the files (`arch-trees:check`, hard rule 3).
 
 ## Observability & Evaluation
 
 - **Traces:** occupancy `surface=grok` on claim/heartbeat; `MUSTERD_LAUNCH_SURFACE` is the launcher marker (already spanned). Wake reports `fresh | resumed` as today. Gate decisions stay shapes-only (ADR 150).
-- **Eval:** a Grok CLI session in a provisioned worktree attests `grok` on the roster (not `cursor` / `other`); `team_inbox_check` and `team_send {act:'status_update'}` succeed. Falsify: `team_status` still prints `cursor` after `musterd harness configure` + MCP respawn.
-- **Experiment:** dogfood on wanderer's worktree (this lane) before submit.
+- **Eval:** a Grok CLI session in a provisioned workspace attests `grok` on the roster (not `cursor` / `other`); `team_inbox_check` and `team_send {act:'status_update'}` succeed. Falsify: `team_status` still prints `cursor` after `musterd harness configure` + MCP respawn.
+- **Experiment:** dogfood on wanderer's workspace (this lane) before submit.

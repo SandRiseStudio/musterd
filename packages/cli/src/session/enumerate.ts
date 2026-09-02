@@ -129,6 +129,7 @@ let memo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | 
 let codexMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 let cursorMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 let opencodeMemo: { at: number; rows: ScannedTranscript[] | undefined } | null = null;
+let grokMemo: { root: string; at: number; rows: ScannedTranscript[] | undefined } | null = null;
 
 /** Drop the scan memo — tests and long-lived processes that need a guaranteed-fresh read. */
 export function resetSessionScan(): void {
@@ -136,6 +137,7 @@ export function resetSessionScan(): void {
   codexMemo = null;
   cursorMemo = null;
   opencodeMemo = null;
+  grokMemo = null;
 }
 
 /**
@@ -420,6 +422,76 @@ export function enumerateOpencodeSessions(
   if (opencodeMemo.rows === undefined) return undefined;
   const target = resolve(workspace);
   return opencodeMemo.rows
+    .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
+    .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+/** The only Grok summary.json fields that establish resume identity, liveness, and workspace
+ *  ownership (ADR 352 §6). Display fields are never parsed. */
+const GrokSummarySchema = z
+  .object({
+    info: z.object({ id: z.string().min(1), cwd: z.string().min(1) }),
+    last_active_at: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * Read-only Grok CLI session enumeration (ADR 352 §6): documented files under
+ * `$GROK_HOME/sessions/<encoded-cwd>/<id>/summary.json`. `grok sessions list` has no --json.
+ * I/O failure is "cannot tell" (`undefined`), never "no sessions".
+ */
+export function enumerateGrokSessions(
+  workspace: string,
+  home = process.env['GROK_HOME'] ?? join(homedir(), '.grok'),
+  now = Date.now(),
+): SessionFile[] | undefined {
+  const root = join(home, 'sessions');
+  if (!grokMemo || grokMemo.root !== root || now - grokMemo.at > MEMO_MS) {
+    let rows: ScannedTranscript[] | undefined;
+    try {
+      const groups = readdirSync(root, { withFileTypes: true });
+      rows = [];
+      for (const group of groups) {
+        if (!group.isDirectory()) continue;
+        const groupDir = join(root, group.name);
+        let sessions: string[];
+        try {
+          sessions = readdirSync(groupDir);
+        } catch {
+          continue;
+        }
+        for (const id of sessions) {
+          const summaryPath = join(groupDir, id, 'summary.json');
+          try {
+            const parsed = GrokSummarySchema.safeParse(
+              JSON.parse(readFileSync(summaryPath, 'utf8')),
+            );
+            if (!parsed.success) continue;
+            const stamp = parsed.data.last_active_at ?? parsed.data.updated_at;
+            const mtime = stamp ? Date.parse(stamp) : 0;
+            if (!Number.isFinite(mtime)) continue;
+            rows.push({
+              id: parsed.data.info.id,
+              path: summaryPath,
+              mtime,
+              bytes: 0,
+              workspace: findWorkspaceDir(parsed.data.info.cwd),
+            });
+          } catch {
+            continue;
+          }
+        }
+      }
+    } catch {
+      rows = undefined;
+    }
+    grokMemo = { root, at: now, rows };
+  }
+  if (grokMemo.rows === undefined) return undefined;
+  const target = resolve(workspace);
+  return grokMemo.rows
     .filter((row) => row.workspace !== null && resolve(row.workspace) === target)
     .map(({ id, path, mtime, bytes }) => ({ id, path, mtime, bytes }))
     .sort((a, b) => b.mtime - a.mtime);

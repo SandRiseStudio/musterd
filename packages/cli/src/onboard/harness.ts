@@ -217,6 +217,8 @@ export interface ModelObservationInput {
   model_id?: string | undefined;
   /** Legacy composer model slug from a Cursor Agent hook (ADR 198). */
   model?: string | undefined;
+  /** Workspace cwd from the hook payload (Grok `cwd` / `workspaceRoot`, ADR 352). */
+  cwd?: string | undefined;
 }
 
 /** A pluggable onboarding adapter for one agent harness. */

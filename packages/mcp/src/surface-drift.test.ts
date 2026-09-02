@@ -55,7 +55,7 @@ const writeRichLocalState = (): void => {
 
 describe('launch-marker Surface resolution (ADR 286)', () => {
   it('every valid launch marker resolves its matching Surface', () => {
-    for (const surface of ['claude-code', 'cursor', 'codex', 'other'] as const) {
+    for (const surface of ['claude-code', 'cursor', 'codex', 'grok', 'other'] as const) {
       const got = resolveLaunchSurface({ MUSTERD_LAUNCH_SURFACE: surface });
       expect(got).toEqual({ surface, markerGeneration: 'launch' });
     }

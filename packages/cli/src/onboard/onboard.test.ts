@@ -6,6 +6,7 @@ import { inspectInitTarget, nameBoundElsewhere } from './guard.js';
 import { claudeCode } from './harnesses/claudeCode.js';
 import { cursor } from './harnesses/cursor.js';
 import { HARNESSES } from './harnesses/index.js';
+import { grok } from './harnesses/grok.js';
 import { opencode } from './harnesses/opencode.js';
 import { buildEntry, buildMcpEnv } from './mcpEntry.js';
 import {
@@ -364,11 +365,13 @@ describe('harness registry', () => {
       'claude-code',
       'codex',
       'cursor',
+      'grok',
       'opencode',
     ]);
     expect(claudeCode.surface).toBe('claude-code');
     expect(cursor.surface).toBe('cursor');
     expect(opencode.surface).toBe('opencode');
+    expect(grok.surface).toBe('grok');
   });
 
   // Non-hermetic: shells out to the real `claude` CLI (can take ~4–8s), so give it a generous
