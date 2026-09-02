@@ -15,6 +15,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * about this component rather than about an unused function: together they hold "the reel ticks
  * exactly when it should", which was the untested claim.
  *
+ * **The division of labour, since the spy hides it** (dolly, reviewing #1180). The mock below
+ * reimplements `reelTicks` rather than delegating to it, so this file holds the WIRING and none of
+ * the logic: weaken the real predicate and every test here still passes. That is deliberate — a
+ * wiring pin that also asserted the answer would fail for two unrelated reasons and tell you
+ * neither. `reel.test.ts` owns the logic half, and the two are only a pair if both exist.
+ *
  * What this pair still does not hold, stated plainly rather than implied: that `setInterval` is
  * actually called on the true branch. That needs a renderer which runs effects, and adding one is a
  * dependency decision for the package (`packages/web/AGENTS.md`), not a thing to smuggle in with a
