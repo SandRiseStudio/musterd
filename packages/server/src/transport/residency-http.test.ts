@@ -1116,7 +1116,7 @@ describe('roster wakeability (ADR 357) — the wake-leases poll is the host hear
     // The actuator goes quiet: age the sighting past the line instead of waiting a minute.
     server.db
       .prepare('UPDATE host_liveness SET seen_at = ? WHERE team_id = ? AND host = ?')
-      .run(Date.now() - 61_000, team.id, 'laptop.local');
+      .run(Date.now() - 301_000, team.id, 'laptop.local');
     const stale = await adaRow();
     expect(stale.wakeability).toBe('enrolled_host_stale');
     expect(stale.wakeable).toBe(true); // enrolment is a different fact, and it did not change
@@ -1130,5 +1130,61 @@ describe('roster wakeability (ADR 357) — the wake-leases poll is the host hear
     const ada = await adaRow();
     expect(ada.wakeable).toBe(false);
     expect(ada.wakeability).toBe('not_enrolled');
+  });
+});
+
+describe('roster wakeability (ADR 357 correction) — a busy host is not a quiet one', () => {
+  it('a wake-report refreshes the host sighting, so a serial actuation never reads enrolled_host_stale', async () => {
+    await enrollAda();
+    const send = await post(
+      '/teams/dawn/messages',
+      {
+        envelope: makeEnvelope({
+          id: 'u2',
+          team: 'dawn',
+          from: 'nick',
+          to: { kind: 'member', name: 'Ada' },
+          act: 'message',
+          body: 'need you',
+          meta: { urgent: true, urgent_reason: 'wake me' },
+        }),
+      },
+      nickCred,
+    );
+    expect(send.status).toBe(201);
+    const leases = await post(
+      '/teams/dawn/residency/wake-leases',
+      { host: 'laptop.local' },
+      agentKey,
+    );
+    expect(leases.json.orders).toHaveLength(1);
+    const leaseId = leases.json.orders[0].lease_id as string;
+    const team = getTeamBySlug(server.db, 'dawn')!;
+    // The actuator goes quiet for longer than the line while it works the lease — no polls.
+    server.db
+      .prepare('UPDATE host_liveness SET seen_at = ? WHERE team_id = ? AND host = ?')
+      .run(Date.now() - 301_000, team.id, 'laptop.local');
+    const before = await get('/teams/dawn/members', nickCred);
+    expect(before.json.members.find((m: { name: string }) => m.name === 'Ada').wakeability).toBe(
+      'enrolled_host_stale',
+    );
+    // Its report is the next thing it says, and that alone is a sighting.
+    const report = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: false, reason: 'watchdog timeout (5ms)' },
+      agentKey,
+    );
+    expect(report.status).toBe(200);
+    const seen = server.db
+      .prepare<
+        [string, string],
+        { seen_at: number }
+      >('SELECT seen_at FROM host_liveness WHERE team_id = ? AND host = ?')
+      .get(team.id, 'laptop.local');
+    expect(Date.now() - (seen?.seen_at ?? 0)).toBeLessThan(10_000);
+    const after = await get('/teams/dawn/members', nickCred);
+    expect(after.json.members.find((m: { name: string }) => m.name === 'Ada').wakeability).toBe(
+      'wakeable',
+    );
   });
 });

@@ -2727,7 +2727,11 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/residency/wake-turn') {
         const body = parseOrBadRequest(WakeTurnBodySchema, await readJson(req));
         const team = requireTeam(ctx.db, slug);
-        authAgentKeyOnly(ctx, slug, req, hostForWakeLease(ctx, team.id, body.lease_id));
+        const turnHost = hostForWakeLease(ctx, team.id, body.lease_id);
+        authAgentKeyOnly(ctx, slug, req, turnHost);
+        // ADR 357 correction: a host mid-actuation is not polling, but it is talking — every
+        // host-authenticated residency request is a sighting.
+        if (turnHost) recordHostSeen(ctx.db, team.id, turnHost, Date.now());
         const appended = appendWakeTurn(ctx.db, team.id, body);
         if (!appended)
           throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -2737,7 +2741,9 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/residency/wake-progress') {
         const body = parseOrBadRequest(WakeProgressBodySchema, await readJson(req));
         const team = requireTeam(ctx.db, slug);
-        authAgentKeyOnly(ctx, slug, req, hostForWakeLease(ctx, team.id, body.lease_id));
+        const progressHost = hostForWakeLease(ctx, team.id, body.lease_id);
+        authAgentKeyOnly(ctx, slug, req, progressHost);
+        if (progressHost) recordHostSeen(ctx.db, team.id, progressHost, Date.now()); // ADR 357 correction
         const row = markWakeSpawned(ctx.db, team.id, body.lease_id);
         if (!row)
           throw new MusterdError('not_found', `no wake lease "${body.lease_id}" on ${slug}`);
@@ -2752,12 +2758,13 @@ export async function handleHttp(
         const rawBody = await readJson(req);
         const team = requireTeam(ctx.db, slug);
         const authBody = WakeReportBodySchema.safeParse(rawBody);
-        authAgentKeyOnly(
-          ctx,
-          slug,
-          req,
-          authBody.success ? hostForWakeLease(ctx, team.id, authBody.data.lease_id) : undefined,
-        );
+        const reportHost = authBody.success
+          ? hostForWakeLease(ctx, team.id, authBody.data.lease_id)
+          : undefined;
+        authAgentKeyOnly(ctx, slug, req, reportHost);
+        // ADR 357 correction: the report is the LAST thing a serial actuation says before it polls
+        // again — stamping it here is what keeps a busy host from reading `enrolled_host_stale`.
+        if (reportHost) recordHostSeen(ctx.db, team.id, reportHost, Date.now());
         const body = parseWakeReportOrAudit(ctx.db, team.id, rawBody);
         const lease = settleWakeLease(ctx.db, team.id, body.lease_id);
         if (!lease) {

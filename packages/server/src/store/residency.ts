@@ -431,12 +431,19 @@ export function listResidency(db: Database, teamId: string): ResidencyRow[] {
 }
 
 /**
- * How long a host may go without polling `POST /residency/wake-leases` before its seats read
- * `enrolled_host_stale` (ADR 357). The actuator polls every 10 s (`musterd host`), so six missed
- * polls; a daemon bounce (~1 s) or a slow tick never trips it, a dead LaunchAgent does within a
- * minute.
+ * How long a host may go silent before its seats read `enrolled_host_stale` (ADR 357).
+ *
+ * ~~60 s — six missed 10 s polls~~ CORRECTED 2026-09-02 by the first live falsifier: the actuator
+ * polls every 10 s only while IDLE. `pollHostOnce` is serial — an actuation suspends polling for
+ * its whole verify window, and the first codex wake after #1197 went 94 s between requests
+ * (15:50:02 → 15:51:36) while doing exactly what it should. At 60 s every enrolled seat read
+ * `enrolled_host_stale` during a healthy wake. Five minutes is above the longest silence a serial
+ * actuation can produce (a 30 s resume window plus a lease-TTL fresh window) and still shows a
+ * dead LaunchAgent inside the time an ADR 191 ask would otherwise wait on it. Every
+ * host-authenticated residency request (poll, progress, turn, report) now stamps the sighting, so a
+ * busy host refreshes at report time even mid-actuation.
  */
-export const HOST_STALE_MS = 60_000;
+export const HOST_STALE_MS = 300_000;
 
 /**
  * The host's poll IS its heartbeat (ADR 357). Every `POST /residency/wake-leases` names the host;

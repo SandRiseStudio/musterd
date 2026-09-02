@@ -43,9 +43,16 @@ falsified from the roster: every enrolled seat read the same word.
 
 2. **The two missing facts are derived server-side, once, for roster and picker alike.**
    `seatWakeabilityFacts` (store/residency.ts) yields per enrolled member:
-   - `host_reachable`: `true` if the seat's host polled within `HOST_STALE_MS` (60 s — six missed
-     polls; a daemon bounce never trips it, a dead LaunchAgent does inside a minute); `false` if it
-     polled and stopped; **`undefined` if this daemon has never heard from it.** Unknown never
+   - `host_reachable`: `true` if the seat's host was heard from within `HOST_STALE_MS`; `false` if
+     it was heard from and then went silent; **`undefined` if this daemon has never heard from it.**
+     ~~60 s — six missed 10 s polls~~ CORRECTED 2026-09-02 by the first live falsifier, run 20
+     minutes after this landed: the actuator polls every 10 s only while *idle*. `pollHostOnce` is
+     serial, so an actuation suspends polling for its whole verify window — the first codex wake
+     after #1197 went 94 s between requests (15:50:02 → 15:51:36) while behaving correctly, and at
+     60 s every enrolled seat read `enrolled_host_stale` during a healthy wake. Now **five minutes**,
+     above the longest silence a serial actuation can produce, and every host-authenticated
+     residency request (poll, progress, turn, report) stamps the sighting, not only the poll.
+     Unknown never
      demotes (ADR 236): a fresh install, an older host build, or a registry entry nobody has polled
      yet reads exactly as it did before this table existed. The first draft made never-seen read
      stale; it turned five existing wake-pool tests red, which is what those tests were for.
@@ -71,8 +78,9 @@ its `enrolled_dead_workspace` in the first place).
 
 ## Consequences
 
-- A dead actuator shows on the roster within a minute as `host quiet` on every seat it serves, and
-  ADR 191 stops routing to those seats until it is back.
+- A dead actuator shows on the roster within five minutes as `host quiet` on every seat it serves,
+  and ADR 191 stops routing to those seats until it is back. A busy one never reads quiet: its
+  progress and report requests are sightings too.
 - `host_liveness` is one row per (team, host), rewritten every 10 s per host. Not replicated (ADR
   331): a host's liveness is a fact about THIS daemon's reachability.
 - `resumable_at` is untouched by this ADR. For the codex seat it is 19 days stale on the wrong
@@ -92,11 +100,16 @@ its `enrolled_dead_workspace` in the first place).
   not; the wake pool reads `enrolled_host_stale` / `enrolled_dead_workspace` / `wakeable` from the
   same facts, and a never-seen host stays `wakeable`. Integration: a wake-leases poll flips a seat's
   roster `wakeability` from `enrolled_host_stale`-after-silence to `wakeable`.
-- **Experiment.** Pre-registered: `launchctl unload` the host LaunchAgent; within 70 s every seat
-  in `host-registry.json` reads `enrolled_host_stale` on `/live` and no acceptance is routed to
-  them; `launchctl load` it; within one poll they read `wakeable`. Falsify: a seat reads `wakeable`
-  more than 70 s after its host's last poll, or an acceptance lands on a seat reading anything but
-  `wakeable`.
+- **Experiment.** Pre-registered: `launchctl unload` the host LaunchAgent; within `HOST_STALE_MS`
+  + one poll every seat in `host-registry.json` reads `enrolled_host_stale` on `/live` and no
+  acceptance is routed to them; `launchctl load` it; within one poll they read `wakeable`. Falsify:
+  a seat reads `wakeable` past that line after its host's last request, or an acceptance lands on a
+  seat reading anything but `wakeable`. **Run once, 2026-09-02 15:51 on `68ddf6ad`** — the reload
+  half held (first poll 15:53:18 → `wakeable`/`enrolled_seat_busy` within 10 s), the unload half was
+  pre-empted: every seat already read stale at the baseline because a healthy 94 s actuation had
+  exceeded the 60 s line. That is the correction above. Re-run owed on the corrected line.
+- **What it must also not do.** Read a busy host as quiet. Falsify: `enrolled_host_stale` on any
+  seat while `wake_leases` holds an unsettled lease for its host younger than `HOST_STALE_MS`.
 - **What it must not move.** `wakeable` (the boolean) for any seat, and the wake pool's membership
   (mark, never filter — ADR 189). Falsify: any existing `review.test.ts` assertion on pool
   membership changes.
