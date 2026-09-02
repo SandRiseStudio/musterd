@@ -104,6 +104,8 @@ export interface PresenceRow {
    *  actuator handed the child, attested back on claim. Null for every occupancy no wake caused,
    *  which is nearly all of them. The only column here that identifies rather than describes. */
   wake_lease: string | null;
+  /** The `nodes.id` this row was folded from (presence replication, 2026-09-02); NULL = local. */
+  node: string | null;
   created_at: number;
 }
 
