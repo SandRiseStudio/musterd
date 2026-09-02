@@ -19,6 +19,11 @@ export const ERROR_CODES = [
   // enrolled joiner — refuses while the hub is unreachable, with its OWN code so a caller can tell
   // "the hub said no" from "the hub could not be asked". Never a provisional claim.
   'hub_unreachable',
+  // ADR 328 §4, enforced (ADR 355 amendment): a claim for a seat the hub has bound to ANOTHER node.
+  // Authorization, not contention — the lane may be free; the node is not entitled to speak for
+  // that seat. Its own code because the next move is neither "retry" nor "ask for a handoff": it
+  // is an admin unbind, or claiming from the machine the seat lives on.
+  'bound_elsewhere',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 export const ErrorCodeSchema = z.enum(ERROR_CODES);
@@ -41,6 +46,7 @@ export const ERROR_HTTP_STATUS: Record<ErrorCode, number> = {
   claim_conflict: 409,
   expired_grant: 403,
   hub_unreachable: 503,
+  bound_elsewhere: 403,
 };
 
 export const ErrorBodySchema = z.object({

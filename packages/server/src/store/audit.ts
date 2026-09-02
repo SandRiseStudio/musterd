@@ -348,7 +348,15 @@ export type AuditAction =
   | 'node.enrolled'
   | 'node.enrollment_refused'
   | 'node.rotated'
-  | 'node.revoked';
+  | 'node.revoked'
+  // ADR 328 §4, enforced (ADR 355 amendment, 2026-09-02): the seat→node residence binding's trace.
+  // `seat.bound` — first speak, the node now holds the seat (detail: { node }). `seat.bound_elsewhere`
+  // — a node asked to act as a seat another node holds; result `deny`, detail { node, bound_to }.
+  // `seat.unbound` — the explicit re-bind act, under admin authority (detail: { node, by }). A run
+  // of bound_elsewhere→unbound pairs is the signal ADR 328 §Experiment pre-registered.
+  | 'seat.bound'
+  | 'seat.bound_elsewhere'
+  | 'seat.unbound';
 
 export interface AuditEntry {
   /** Seat name that initiated the op; null for system/reaper writes. */

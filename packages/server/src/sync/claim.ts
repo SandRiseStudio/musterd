@@ -1,6 +1,7 @@
 import {
   type Lane,
   LaneSchema,
+  SeatBoundElsewhereRefusalSchema,
   type SyncClaimRequest,
   SyncClaimRefusalSchema,
 } from '@musterd/protocol';
@@ -8,8 +9,11 @@ import type { Database } from 'better-sqlite3';
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
+import { appendAudit } from '../store/audit.js';
 import { getLane, LaneConflictError, updateLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
+import { localNodeForTeam } from '../store/messages.js';
+import { bindSeatToNode, seatBinding } from '../store/nodes.js';
 import { hasLivePresence } from '../store/presence.js';
 
 /**
@@ -41,12 +45,81 @@ export class ClaimRefusedError extends Error {
   }
 }
 
+/**
+ * The seat lives on another node (ADR 328 §4). Authorization, not contention: the lane may be
+ * free, and the answer is an admin unbind or a claim from the machine the seat is bound to.
+ */
+export class SeatBoundElsewhereError extends Error {
+  constructor(
+    seat: string,
+    readonly nodeId: string,
+    readonly nodeLabel: string,
+  ) {
+    super(
+      `seat "${seat}" is bound to node "${nodeLabel}" — a node speaks only for the seats resident ` +
+        `on it (ADR 328 §4). Claim from that machine, or have an admin unbind the seat ` +
+        `(DELETE /teams/<slug>/nodes/bindings/${seat}) to move it.`,
+    );
+    this.name = 'SeatBoundElsewhereError';
+  }
+}
+
+/**
+ * ADR 328 §4, the enforced half: bind the seat to the node speaking for it, first-writer-wins, and
+ * refuse when another node already holds it. Runs on the hub for a forwarded claim and on every
+ * daemon for a local self-claim (where `node` is the local row) — so by the time a second machine
+ * enrolls, the seats that have been building on the first are already bound to it, and the ledger
+ * records each refusal as the `seat.bound_elsewhere` row ADR 328 §Experiment watches for.
+ *
+ * Throws `SeatBoundElsewhereError`; every other outcome is a `seat.bound` row on first bind and
+ * silence after.
+ */
+export function assertSeatResident(
+  db: Database,
+  teamId: string,
+  seat: { id: string; name: string },
+  node: { id: string; label: string },
+  now: number = Date.now(),
+): void {
+  const had = seatBinding(db, seat.id);
+  const result = bindSeatToNode(db, teamId, seat.id, node.id, now);
+  if (result.bound) {
+    if (!had) {
+      appendAudit(db, teamId, {
+        actor: seat.name,
+        action: 'seat.bound',
+        target: seat.name,
+        result: 'allow',
+        detail: { node: node.id, label: node.label },
+      });
+    }
+    return;
+  }
+  appendAudit(db, teamId, {
+    actor: seat.name,
+    action: 'seat.bound_elsewhere',
+    target: seat.name,
+    result: 'deny',
+    detail: { node: node.id, bound_to: result.node_id, bound_label: result.label },
+  });
+  throw new SeatBoundElsewhereError(seat.name, result.node_id, result.label);
+}
+
 /** The hub could not be asked. Distinct from a refusal by construction, never folded into one. */
 export class HubUnreachableError extends Error {
   constructor(hubUrl: string, cause: string) {
     super(`the hub at ${hubUrl} could not be reached to arbitrate this claim (${cause})`);
     this.name = 'HubUnreachableError';
   }
+}
+
+/** This daemon's own node row with its label — minted on first use, the `insertMessage` rule. */
+export function localNodeWithLabel(db: Database, teamId: string): { id: string; label: string } {
+  const { id } = localNodeForTeam(db, teamId);
+  const row = db
+    .prepare<[string], { label: string }>('SELECT label FROM nodes WHERE id = ?')
+    .get(id);
+  return { id, label: row?.label ?? '' };
 }
 
 /** This daemon's enrollment for the team, if it is a joiner (the push/pull rule: node.json names OUR node row). */
@@ -67,13 +140,15 @@ export function joinerEnrollment(
  * Hub side. Throws `ClaimRefusedError` for every "no" the caller can act on; anything else is a
  * fault. The three refusals, in the order they are checked:
  *  - the seat is not on this roster yet (git lag) — retry after the roster reconciles;
+ *  - the seat is bound to another node (ADR 328 §4) — `SeatBoundElsewhereError`, not a refusal a
+ *    retry clears: the node is not entitled to speak for that seat;
  *  - the lane is not here yet (the origin's `lane.opened` has not folded) — retry after sync;
  *  - the CAS: the lane moved since the joiner read it, or a live incumbent holds it (ADR 203).
  */
 export function arbitrateClaim(
   ctx: Ctx,
   team: { id: string; slug: string },
-  node: { id: string },
+  node: { id: string; label: string },
   req: SyncClaimRequest,
   now: number = Date.now(),
 ): Lane {
@@ -92,6 +167,8 @@ export function arbitrateClaim(
       'unknown',
     );
   }
+  // Residence before anything about the lane: an unentitled node learns nothing about the board.
+  assertSeatResident(ctx.db, team.id, seat, node, now);
   const before = getLane(ctx.db, team.id, req.lane, team.slug);
   if (!before) {
     throw new ClaimRefusedError(
@@ -169,6 +246,13 @@ export async function claimAtHub(
     throw new HubUnreachableError(enrollment.hub_url, String(err));
   }
   const body: unknown = await res.json().catch(() => null);
+  if (res.status === 403) {
+    const refusal = SeatBoundElsewhereRefusalSchema.safeParse(body);
+    if (refusal.success) {
+      // Relayed as-is: the hub's binding is the fact, and this daemon has nothing to add to it.
+      throw new SeatBoundElsewhereError(req.seat, refusal.data.node_id, refusal.data.node_label);
+    }
+  }
   if (res.status === 409) {
     const refusal = SyncClaimRefusalSchema.safeParse(body);
     if (refusal.success) {
