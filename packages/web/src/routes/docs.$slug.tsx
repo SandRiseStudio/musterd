@@ -1,5 +1,11 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { GRAPH_ID, absoluteUrl, breadcrumbNode, pageHead } from '../brand/siteMeta';
+import {
+  GRAPH_ID,
+  absoluteUrl,
+  breadcrumbNode,
+  markdownAlternate,
+  pageHead,
+} from '../brand/siteMeta';
 import { SiteFooter } from '../components/site/SiteFooter';
 import { SiteNav } from '../components/site/SiteNav';
 import '../components/site/Prose.css';
@@ -18,6 +24,7 @@ export const Route = createFileRoute('/docs/$slug')({
       title: loaderData?.title ?? 'Docs',
       description: loaderData?.excerpt ?? 'musterd documentation.',
       path: `/docs/${params.slug}`,
+      links: [markdownAlternate(`/docs/${params.slug}`)],
       graph: [
         {
           '@type': 'TechArticle',
