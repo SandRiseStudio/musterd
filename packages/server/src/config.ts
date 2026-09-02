@@ -56,6 +56,15 @@ export interface ResolvedConfig {
 export const HEARTBEAT_INTERVAL_MS = 15_000;
 export const PRESENCE_TIMEOUT_MS = 45_000;
 /**
+ * How long a presence row folded from another machine stays live after its node's last sync
+ * contact (presence replication, 2026-09-02): the origin's own reap window plus two chances to
+ * push (`SYNC_PUSH_INTERVAL_MS` in sync/push.ts, 60 s — if that changes, change this). This is the
+ * staleness ADR 325 §Consequences said the build must tolerate explicitly, not rediscover — a seat
+ * on a machine that lost power is displaceable in under three minutes; a seat on a machine between
+ * pushes is not. Named once; every reader of remote liveness uses it.
+ */
+export const REMOTE_PRESENCE_TTL_MS = PRESENCE_TIMEOUT_MS + 2 * 60_000;
+/**
  * Agent working→active decay (presence-honesty §2.1): `working` requires a status_update fresher
  * than this. 15 min is deliberately generous — hooks nudge status at task boundaries, and an
  * accepted consequence is a heads-down agent reading `active` with its stale claim shown aged.

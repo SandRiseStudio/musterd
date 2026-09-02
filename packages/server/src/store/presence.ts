@@ -1,7 +1,8 @@
 import type { Provenance, PresenceStatus, Surface } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { appendAudit } from './audit.js';
+import { REMOTE_PRESENCE_TTL_MS } from '../config.js';
+import { appendAudit, appendReplicatedEvent } from './audit.js';
 import type { MemberRow, PresenceRow } from './rows.js';
 
 export interface PresenceSummary {
@@ -40,10 +41,58 @@ export interface AttachContext {
   wake_lease?: string | null;
 }
 
+/** The seat and team behind a member id — every transition names the seat, never the private id. */
+function seatOf(db: Database, memberId: string): { team_id: string; name: string } | undefined {
+  return db
+    .prepare<
+      [string],
+      { team_id: string; name: string }
+    >('SELECT team_id, name FROM members WHERE id = ?')
+    .get(memberId);
+}
+
+type DetachReason = 'goodbye' | 'reaped' | 'displaced' | 'cleared';
+
+/**
+ * Emit `presence.detached` for LOCAL rows only (`node IS NULL`), then delete them. `where` selects
+ * the rows. A remote row is never the subject of a locally emitted transition: this machine did
+ * not end that session and must not say it did (presence replication spec §1).
+ */
+function detachLocalRows(
+  db: Database,
+  where: string,
+  params: unknown[],
+  reason: DetachReason,
+): void {
+  const rows = db
+    .prepare<
+      unknown[],
+      { id: string; member_id: string }
+    >(`SELECT id, member_id FROM presence WHERE node IS NULL AND ${where}`)
+    .all(...params);
+  for (const r of rows) {
+    const seat = seatOf(db, r.member_id);
+    if (seat) {
+      appendReplicatedEvent(db, seat.team_id, {
+        actor: seat.name,
+        action: 'presence.detached',
+        target: seat.name,
+        result: 'allow',
+        detail: { presence: r.id, reason },
+      });
+    }
+    db.prepare('DELETE FROM presence WHERE id = ?').run(r.id);
+  }
+}
+
 /**
  * Create a presence row (a new attachment) for a member on a surface. A member may hold multiple
  * rows at once: agents are kept single-active by the ws hello path (clear-then-attach), while human
  * seats fan out and accumulate live rows (kind-scoped single-active, ADR 042).
+ *
+ * The row and its `presence.attached` event are one transaction (presence replication, 2026-09-02):
+ * the event carries what the roster shows — never `wake_lease`, which identifies rather than
+ * describes and does not travel.
  */
 export function attach(
   db: Database,
@@ -52,33 +101,55 @@ export function attach(
   connId: string | null,
   ctx: AttachContext = {},
 ): PresenceRow {
-  const now = Date.now();
-  // Back online — clear any sticky offline reason (ADR 141).
-  db.prepare('UPDATE members SET last_offline_reason = NULL WHERE id = ?').run(memberId);
-  const row: PresenceRow = {
-    id: ulid(),
-    member_id: memberId,
-    surface,
-    status: 'online',
-    conn_id: connId,
-    last_seen_at: now,
-    held_until: null,
-    provenance: ctx.provenance ?? null,
-    workspace: ctx.workspace ?? null,
-    driver: ctx.driver ?? null,
-    model: ctx.model ?? null,
-    model_source: ctx.model ? (ctx.model_source ?? null) : null,
-    build: ctx.build ?? null,
-    epoch: ctx.epoch ?? null,
-    wake_lease: ctx.wake_lease ?? null,
-    node: null,
-    created_at: now,
-  };
-  db.prepare(
-    `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, wake_lease, node, created_at)
-     VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @model_source, @build, @epoch, @wake_lease, @node, @created_at)`,
-  ).run(row);
-  return row;
+  return db.transaction(() => {
+    const now = Date.now();
+    // Back online — clear any sticky offline reason (ADR 141).
+    db.prepare('UPDATE members SET last_offline_reason = NULL WHERE id = ?').run(memberId);
+    const row: PresenceRow = {
+      id: ulid(),
+      member_id: memberId,
+      surface,
+      status: 'online',
+      conn_id: connId,
+      last_seen_at: now,
+      held_until: null,
+      provenance: ctx.provenance ?? null,
+      workspace: ctx.workspace ?? null,
+      driver: ctx.driver ?? null,
+      model: ctx.model ?? null,
+      model_source: ctx.model ? (ctx.model_source ?? null) : null,
+      build: ctx.build ?? null,
+      epoch: ctx.epoch ?? null,
+      wake_lease: ctx.wake_lease ?? null,
+      node: null,
+      created_at: now,
+    };
+    db.prepare(
+      `INSERT INTO presence (id, member_id, surface, status, conn_id, last_seen_at, held_until, provenance, workspace, driver, model, model_source, build, epoch, wake_lease, node, created_at)
+       VALUES (@id, @member_id, @surface, @status, @conn_id, @last_seen_at, @held_until, @provenance, @workspace, @driver, @model, @model_source, @build, @epoch, @wake_lease, @node, @created_at)`,
+    ).run(row);
+    const seat = seatOf(db, memberId);
+    if (seat) {
+      appendReplicatedEvent(db, seat.team_id, {
+        actor: seat.name,
+        action: 'presence.attached',
+        target: seat.name,
+        result: 'allow',
+        detail: {
+          presence: row.id,
+          surface,
+          provenance: row.provenance,
+          workspace: row.workspace,
+          driver: row.driver,
+          model: row.model,
+          model_source: row.model_source,
+          build: row.build,
+          epoch: row.epoch,
+        },
+      });
+    }
+    return row;
+  })();
 }
 
 /**
@@ -111,12 +182,12 @@ export function release(db: Database, presenceId: string, graceMs: number): void
  * seat on operator reclaim/remove (any kind).
  */
 export function clearMemberPresence(db: Database, memberId: string): void {
-  db.prepare('DELETE FROM presence WHERE member_id = ?').run(memberId);
+  detachLocalRows(db, 'member_id = ?', [memberId], 'cleared');
 }
 
 /** Drop a single presence row by id — used to evict exactly a displaced connection (ADR 068). */
 export function clearPresenceById(db: Database, presenceId: string): void {
-  db.prepare('DELETE FROM presence WHERE id = ?').run(presenceId);
+  detachLocalRows(db, 'id = ?', [presenceId], 'displaced');
 }
 
 /**
@@ -125,7 +196,7 @@ export function clearPresenceById(db: Database, presenceId: string): void {
  * without touching a live same-workspace session it deliberately keeps (ADR 068).
  */
 export function clearOrphanPresence(db: Database, memberId: string): void {
-  db.prepare('DELETE FROM presence WHERE member_id = ? AND conn_id IS NULL').run(memberId);
+  detachLocalRows(db, 'member_id = ? AND conn_id IS NULL', [memberId], 'cleared');
 }
 
 /**
@@ -232,7 +303,7 @@ export function heartbeat(db: Database, presenceId: string, status?: PresenceSta
 }
 
 export function detach(db: Database, presenceId: string): void {
-  db.prepare('DELETE FROM presence WHERE id = ?').run(presenceId);
+  detachLocalRows(db, 'id = ?', [presenceId], 'goodbye');
 }
 
 /**
@@ -424,18 +495,32 @@ export function listReclaimableMemberIds(db: Database, teamId: string, now: numb
 export function reapStale(db: Database, timeoutMs: number): PresenceRow[] {
   const now = Date.now();
   const cutoff = now - timeoutMs;
-  const stale = db
-    .prepare<
-      [number, number],
-      PresenceRow
-    >('SELECT * FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)')
-    .all(cutoff, now);
-  if (stale.length > 0) {
+  return db.transaction(() => {
+    // The heartbeat cutoff is a LOCAL rule: only this machine's sockets and ambient touches animate
+    // a local row, so only a local row can go quiet by it.
+    const stale = db
+      .prepare<
+        [number, number],
+        PresenceRow
+      >('SELECT * FROM presence WHERE node IS NULL AND (last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?))')
+      .all(cutoff, now);
+    detachLocalRows(
+      db,
+      'last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)',
+      [cutoff, now],
+      'reaped',
+    );
+    // Remote rows whose node has gone quiet: removed silently — this machine did not end that
+    // session and must not say it did (spec §1). The origin's own `detached`, if it ever arrives,
+    // deletes nothing and advances the cursor.
+    const remoteCutoff = now - REMOTE_PRESENCE_TTL_MS;
     db.prepare(
-      'DELETE FROM presence WHERE last_seen_at <= ? OR (held_until IS NOT NULL AND held_until <= ?)',
-    ).run(cutoff, now);
-  }
-  return stale;
+      `DELETE FROM presence WHERE node IS NOT NULL AND id IN (
+         SELECT p.id FROM presence p LEFT JOIN nodes n ON n.id = p.node
+          WHERE p.node IS NOT NULL AND (n.last_seen_at IS NULL OR n.last_seen_at <= ?))`,
+    ).run(remoteCutoff);
+    return stale;
+  })();
 }
 
 export function presenceById(db: Database, id: string): PresenceRow | undefined {
@@ -466,7 +551,32 @@ export function reattestModel(
     nextSource,
     presenceId,
   );
+  emitReattested(db, presenceId);
   return { previous: row.model ?? null };
+}
+
+/**
+ * `presence.reattested` for a LOCAL row after its model or surface changed (presence replication,
+ * 2026-09-02). Carries the whole attestation triple so a peer's fold needs no prior state beyond
+ * the row itself. Callers return early when nothing changed, so no duplicate rows.
+ */
+function emitReattested(db: Database, presenceId: string): void {
+  const after = presenceById(db, presenceId);
+  if (!after || after.node !== null) return;
+  const seat = seatOf(db, after.member_id);
+  if (!seat) return;
+  appendReplicatedEvent(db, seat.team_id, {
+    actor: seat.name,
+    action: 'presence.reattested',
+    target: seat.name,
+    result: 'allow',
+    detail: {
+      presence: presenceId,
+      model: after.model,
+      model_source: after.model_source,
+      surface: after.surface,
+    },
+  });
 }
 
 /**
@@ -484,6 +594,7 @@ export function reattestSurface(
   if (!row) return undefined;
   if (row.surface === surface) return undefined;
   db.prepare('UPDATE presence SET surface = ? WHERE id = ?').run(surface, presenceId);
+  emitReattested(db, presenceId);
   return { previous: row.surface as Surface };
 }
 
