@@ -110,7 +110,7 @@ rows do not write it: under an unattested worker a gradeable candidate is either
   stays `unknown_grade`; an attested worker's `same_model` twin stays excluded (no fall-through);
   the HTTP ready → ask → close round trip records `ungraded` at ready and `review_grade_unknown` at
   close (`review.test.ts`, `integration.test.ts`).
-- **Pre-registered prediction.** The unattested-worker `no_candidate` shape (12 rows to 2026-09-02,
+- **Experiment.** Pre-registered prediction: The unattested-worker `no_candidate` shape (12 rows to 2026-09-02,
   see [the wiki page](../wiki/unattested-worker-blinds-the-picker.md)) stops growing; the same seats
   and moments produce `route: 'ungraded'` rows instead. Falsify: a `no_candidate` row after this
   ADR lands whose `worker_family` is `unknown` and whose candidates include a live attested agent.
