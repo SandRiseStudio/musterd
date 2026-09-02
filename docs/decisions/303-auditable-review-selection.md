@@ -57,6 +57,15 @@ Presence from unrelated acts.
 The new snapshot creates a stable seam for later questions about model source, quiescence, roster
 order, and harness reachability. It does not claim that any one of them currently causes the skew.
 
+*Amended 2026-09-01 (lane `01M1FJYETP6809EW45WY0S71V8`).* The vocabulary gains `worker_unattested`,
+and the snapshot gains `worker_family`. A null grade has two owners and the row must say which:
+when the **worker's** live occupancy attests nothing, every gradeable candidate was being filed as
+its own `unknown_grade`, so one unattested asker read as "the team had nobody" — 10 of 129
+`no_candidate` rows at the time of the amendment, the worker unattested in all 10 and every excluded
+candidate a known family (see [the wiki page](../wiki/unattested-worker-blinds-the-picker.md)). The
+routing outcome is unchanged: ADR 188 grades nothing from an unknown model and never routes
+`same_model`, so an unattested worker still routes nowhere. Only the attribution changed.
+
 ## Observability & Evaluation
 
 **Traces.** Every live review selection continues to emit `lane.ready_for_review`; its detail gains

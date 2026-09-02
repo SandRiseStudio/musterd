@@ -218,6 +218,7 @@ import {
   REVIEW_LOOP_BREAKER_N,
   reviewLoopBounceCount,
   selectReviewCounterpart,
+  workerFamily,
   teamFamilyPosture,
   annotateClose,
   closeVerdicts,
@@ -4305,7 +4306,14 @@ export async function handleHttp(
             namedAcceptorPick && !('refused' in namedAcceptorPick) ? namedAcceptorPick : undefined;
           const peerSelection =
             named || exemption.exempt
-              ? { pick: null, snapshot: { selected: null, candidates: [] } }
+              ? {
+                  pick: null,
+                  snapshot: {
+                    selected: null,
+                    worker_family: workerFamily(ctx.db, team.id, worker),
+                    candidates: [],
+                  },
+                }
               : selectReviewCounterpart(
                   ctx.db,
                   team.id,
@@ -4418,6 +4426,10 @@ export async function handleHttp(
                         ? 'peer_selected'
                         : 'no_candidate',
                 selected: pick ? { reviewer: pick.reviewer, grade: pick.grade } : null,
+                // The asker's family at decision time. `unknown` here plus `worker_unattested` on
+                // the candidates is "we could not grade the asker", which is not "the team had
+                // nobody" — the two read identically before 2026-09-01.
+                worker_family: peerSelection.snapshot.worker_family,
                 candidates: peerSelection.snapshot.candidates,
               },
               // ADR 188: the achieved rung of the diversity ladder rides beside the historical

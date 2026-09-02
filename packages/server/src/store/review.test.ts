@@ -479,6 +479,42 @@ describe('selectReviewCounterpart — decision-time audit snapshot (ADR 303)', (
       },
     });
   });
+
+  // An ungradeable WORKER is not an absent candidate set. Before this, `reviewGrade` returned null
+  // for every candidate when the worker's live occupancy attested nothing, and the picker filed each
+  // of those nulls as the CANDIDATE's `unknown_grade` — so one unattested asker knocked out every
+  // eligible reviewer, and the row read as "the team had nobody" (10 of 129 no_candidate rows,
+  // measured 2026-09-01: worker unattested in all 10, every excluded candidate a known family).
+  it('an unattested worker is recorded as such — not as every candidate being ungradeable', async () => {
+    const { openLane } = await import('./lanes.js');
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team } = seed();
+    const { row: worker } = addMember(db, team, { kind: 'agent', name: 'worker', role: '' });
+    attach(db, worker.id, 'cli', 'conn-worker'); // live, attests nothing (the claim-storm shape)
+    agent(db, team, 'gptbot', 'gpt-5.6-sol'); // live, attested, would be cross_family
+    agent(db, team, 'dolly', 'claude-opus-4-8'); // live, attested, would be cross_model or same
+    const { row: unknown } = addMember(db, team, { kind: 'agent', name: 'unknown', role: '' });
+    attach(db, unknown.id, 'cli', 'conn-unknown'); // a candidate that is itself unattested
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'a change', claim: true });
+
+    const selection = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    // Still no route: ADR 188 grades nothing from an unknown worker, and never routes same_model.
+    expect(selection.pick).toBeNull();
+    expect(selection.snapshot).toMatchObject({
+      selected: null,
+      worker_family: 'unknown',
+      candidates: expect.arrayContaining([
+        { member: 'worker', family: 'unknown', eligible: false, exclusion: 'self' },
+        { member: 'gptbot', family: 'gpt', eligible: false, exclusion: 'worker_unattested' },
+        { member: 'dolly', family: 'claude', eligible: false, exclusion: 'worker_unattested' },
+        // A candidate that attests nothing is still its own `unknown_grade` — the two are separable.
+        { member: 'unknown', family: 'unknown', eligible: false, exclusion: 'unknown_grade' },
+      ]),
+    });
+    // The attested snapshot names the worker's family too, so a reader need not join the close row.
+    const attested = selectReviewCounterpart(db, team.id, lane, 'gptbot', TIMEOUT);
+    expect(attested.snapshot.worker_family).toBe('gpt');
+  });
 });
 
 describe('pickReviewCounterpart — drops busy live agents (quiet-set inc 1)', () => {

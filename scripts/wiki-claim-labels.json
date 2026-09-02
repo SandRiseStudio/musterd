@@ -159,5 +159,6 @@
   "row (2026-09-01, seat `ryder`; falsify: on a build before #1150, POST the route with the binding's": "defect",
   "One gap #1150 keeps, on purpose (2026-09-01; falsify: read `heldElsewhere` in": "other",
   "## A new route value silently joins the population it is not evidence about (2026-09-01; falsify: `sqlite3 ~/.musterd/musterd.db \"select count(*) from audit where action='lane.ready_for_review' and detail like '%\\\"route\\\":\\\"named\\\"%'\"` — the exclusion was written at count 0 of 494 ready rows)": "defect",
-  "- A named route abstains to `same_model` whenever the observed pairing falls short of a better grade (2026-09-01; falsify: read `namedAcceptor` in `packages/server/src/store/review.ts` — the `?? 'same_model'` on the grade is the abstention). That is the honest record, since nothing was promised about a seat the ladder did not choose. But each such row drags `crossFamilyShare`, a figure that claims to describe the *picker's* achieved diversity.": "other"
+  "- A named route abstains to `same_model` whenever the observed pairing falls short of a better grade (2026-09-01; falsify: read `namedAcceptor` in `packages/server/src/store/review.ts` — the `?? 'same_model'` on the grade is the abstention). That is the honest record, since nothing was promised about a seat the ladder did not choose. But each such row drags `crossFamilyShare`, a figure that claims to describe the *picker's* achieved diversity.": "other",
+  "(2026-09-01; falsify: find a `lane.ready_for_review` row with `review_selection.outcome =": "defect"
 }
