@@ -19,7 +19,7 @@ ride the existing push/pull wire under a `kind: 'presence'` tag and the fold pro
 
 ## Global Constraints
 
-- Migration number is **v59**; re-check `git log origin/main -- packages/server/src/db/migrations.ts`
+- Migration number is **v60**; re-check `git log origin/main -- packages/server/src/db/migrations.ts`
   and open PRs before merge and renumber upward if anything landed (high-water-mark rule, #1174).
 - Feature epoch becomes **18** (`packages/protocol/src/feature-epoch.ts`).
 - ADR number **356**; `pnpm adr-numbers:check` must pass.
@@ -41,7 +41,7 @@ ride the existing push/pull wire under a `kind: 'presence'` tag and the fold pro
 
 | File | Responsibility after this plan |
 | --- | --- |
-| `packages/server/src/db/migrations.ts` | v59: `presence.node` + index |
+| `packages/server/src/db/migrations.ts` | v60: `presence.node` + index |
 | `packages/server/src/store/audit.ts` | `appendReplicatedEvent` (generalised from `appendLaneEventRequired`), `presence.*` in `AuditAction` |
 | `packages/server/src/store/presence.ts` | emits the three verbs; `node` on rows; one liveness predicate (`LIVE_PRESENCE_SQL`) used by every reader; reaper scoped to local rows plus stale-remote sweep |
 | `packages/server/src/store/nodes.ts` | `touchNode`, `upsertForeignNode`, `listNodeLiveness` |
@@ -61,7 +61,7 @@ ride the existing push/pull wire under a `kind: 'presence'` tag and the fold pro
 
 ---
 
-### Task 1: Migration v59 and the `node` column
+### Task 1: Migration v60 and the `node` column
 
 **Files:**
 - Modify: `packages/server/src/db/migrations.ts` (append after v58, ~line 1448)
@@ -76,7 +76,7 @@ ride the existing push/pull wire under a `kind: 'presence'` tag and the fold pro
 Append to the migrations test file's top-level `describe`:
 
 ```ts
-it('v59 adds presence.node (null = local) with an index', () => {
+it('v60 adds presence.node (null = local) with an index', () => {
   const db = openDb(':memory:');
   const cols = db.prepare<[], { name: string }>('PRAGMA table_info(presence)').all().map((c) => c.name);
   expect(cols).toContain('node');
@@ -90,7 +90,7 @@ it('v59 adds presence.node (null = local) with an index', () => {
 
 - [ ] **Step 2: Run it**
 
-Run: `/Users/nick/Library/pnpm/pnpm vitest run packages/server/src/db/migrations.test.ts -t v59`
+Run: `/Users/nick/Library/pnpm/pnpm vitest run packages/server/src/db/migrations.test.ts -t v60`
 Expected: FAIL, `node` not in columns.
 
 - [ ] **Step 3: Add the migration**
@@ -103,7 +103,7 @@ After the v58 entry:
     // the `nodes.id` it lives on; NULL is a local row (a socket or an ambient touch animates it).
     // Every reader's liveness predicate branches on this column (store/presence.ts LIVE_PRESENCE_SQL),
     // and the reaper's heartbeat cutoff applies to local rows only.
-    version: 59,
+    version: 60,
     up: (db) => {
       const cols = db
         .prepare<[], { name: string }>('PRAGMA table_info(presence)')
@@ -143,7 +143,7 @@ Expected: PASS. Also run `pnpm migrations:check`.
 
 ```bash
 git add packages/server/src/db/migrations.ts packages/server/src/db/migrations.test.ts packages/server/src/store/rows.ts packages/server/src/store/presence.ts
-git commit -m "feat(server): migration v59 — presence.node, the machine a folded presence row lives on"
+git commit -m "feat(server): migration v60 — presence.node, the machine a folded presence row lives on"
 ```
 
 ---
@@ -696,15 +696,64 @@ Check for a feature-epoch test that pins the number and update it.
 
 ---
 
-### Task 6: Push tags `presence.*` rows; hub stamps node contact; pull response carries `nodes`
+### Task 6: Push tags `presence.*` rows; hub stamps node contact and enforces residence at ingest; pull response carries `nodes`
 
 **Files:**
-- Modify: `packages/server/src/sync/push.ts:135-153` (`toSyncEvent`)
+- Modify: `packages/server/src/sync/push.ts:135-153` (`toSyncEvent`) and the `!res.ok` branch (~line 314)
+- Modify: `packages/server/src/sync/log.ts` (`ingestBatch`, inside the per-event loop after the team check)
 - Modify: `packages/server/src/transport/http.ts:3645-3770` (the three `/sync/*` routes)
 - Test: `packages/server/src/sync/push.test.ts`
 
 **Interfaces:**
-- Consumes: `touchNode`, `listNodeLiveness` (Task 4).
+- Consumes: `touchNode`, `listNodeLiveness` (Task 4); `bindSeatToNode` from `store/nodes.ts` (#1195, ADR 355 §5); `getMemberByName`.
+- Produces: `SyncResidenceError extends Error { seat: string; boundTo: string; boundLabel: string }` in `log.ts`, mapped to `403 { error: { code: 'bound_elsewhere', message }, seat, node_id, node_label }` by the push route.
+
+- [ ] **Step 0: Failing residence test** (push.test.ts):
+
+```ts
+it('the hub refuses a presence event for a seat bound to another node, and binds an unbound seat to the pusher (spec §2)', async () => {
+  // nick claims locally on the hub: nick is bound to the hub's node (#1195).
+  const laneId = (await post(hubBase, '/teams/bravo/lanes', { title: 'x' }, nickOnHub)).json.lane.id;
+  await patch(hubBase, `/teams/bravo/lanes/${laneId}`, { owner_seat: 'nick' }, nickOnHub);
+  // The joiner attaches nick anyway and pushes.
+  const nickJ = joiner.db.prepare<[string], { id: string }>("SELECT id FROM members WHERE name = 'nick' AND team_id = ?").get(joinerTeam().id)!;
+  attach(joiner.db, nickJ.id, 'codex', 'c1');
+  const cursorBefore = joiner.db.prepare('SELECT last_seq FROM sync_push_cursor').get();
+  await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/bound_elsewhere|403/);
+  expect(joiner.db.prepare('SELECT last_seq FROM sync_push_cursor').get()).toEqual(cursorBefore);
+  // An unbound seat binds to the joiner on its first attached.
+  const adaJ = joiner.db.prepare<[string], { id: string }>("SELECT id FROM members WHERE name = 'ada' AND team_id = ?").get(joinerTeam().id)!;
+  // (detach nick first so the batch is clean, or run this half in its own test)
+});
+```
+
+Split into two tests if the batch ordering makes the second half awkward — the refused batch blocks the cursor by design.
+
+In `ingestBatch`, after the team check and before the replay check, for `event.kind === 'presence'`:
+
+```ts
+      if (event.kind === 'presence') {
+        const seat = getMemberByName(db, teamId, event.event.actor ?? '');
+        // An unknown seat is the fold's problem (unresolved_seat); residence needs a member id.
+        if (seat) {
+          const bound = bindSeatToNode(db, teamId, seat.id, nodeId, now);
+          if (!bound.bound) throw new SyncResidenceError(seat.name, bound.node_id, bound.label);
+        }
+      }
+```
+
+`ingestBatch` runs in one transaction, so a throw rolls back any binding minted earlier in the same batch — correct: a refused batch binds nothing.
+
+In `push.ts`, before `if (!res.ok)`:
+
+```ts
+  if (res.status === 403) {
+    const body = (await res.json().catch(() => null)) as { seat?: unknown; node_label?: unknown } | null;
+    // ADR 335 §7: a refusal must be distinguishable from offline. The way out is an admin unbind.
+    log.error({ msg: 'sync_push_refused_residence', team: team.slug, seat: body?.seat ?? null, bound_to: body?.node_label ?? null, detail: 'a presence event names a seat bound to another node; unbind it or attach from where it lives' });
+    throw new Error(`hub refused the batch (403 bound_elsewhere)`);
+  }
+```
 
 - [ ] **Step 1: Failing test** (push.test.ts, using its existing hub/joiner harness):
 

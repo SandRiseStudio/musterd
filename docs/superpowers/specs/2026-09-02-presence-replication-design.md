@@ -88,7 +88,7 @@ own machine (ADR 354); off-host it is a string with no verifier.
 
 ### 2. The fold projects into `presence`, plus a `node` column
 
-Migration v59 adds `node TEXT` to `presence` (null: local, the row a socket or an ambient touch
+Migration v60 adds `node TEXT` to `presence` (null: local, the row a socket or an ambient touch
 animates). Foreign presence rows are the third thing the fold writes, in the same transaction as the
 audit row, with the same discipline as lanes: block, never skip.
 
@@ -111,13 +111,25 @@ The `presence` CHECK on `surface` is the migration-57 list. A `surface` the loca
 refuses is an `unknown_presence_event` for the same reason an unknown act is: the origin runs a
 newer build.
 
-**Single-active does not cross machines through the fold.** Today a fresh agent hello on machine A
-for seat X clears X's presence rows on A (ADR 042). After this slice it clears X's *local* rows on A
-and emits `detached (cleared)` for each; it does not touch X's remote rows, and B's row for X's
-session on B is B's to end. Two live agent sessions for one seat on two machines is therefore
-possible after this slice, visible on every roster, and **deliberately not resolved here**: it is an
-ownership fact, the claim's shape, and it is decided at the hub in its own increment the way ADR 355
-decided the claim. This spec makes the conflict visible; the next one makes it impossible.
+**Single-active does not cross machines through the fold; residence does, at ingest.** Today a
+fresh agent hello on machine A for seat X clears X's presence rows on A (ADR 042). After this slice
+it clears X's *local* rows on A and emits `detached (cleared)` for each; it does not touch X's remote
+rows, and B's row for X's session on B is B's to end.
+
+What stops two machines from both attaching seat X is the seat→node binding #1195 / ADR 355 §5
+enforced at the claim edge (`seat_nodes`, ADR 328 §4). This slice extends it to the presence kind
+at the hub's ingest: a `presence.attached` whose `actor` is a seat **bound to another node** is
+refused with `SyncOriginError` — the node is not entitled to speak for that seat — and one whose
+seat is **unbound binds it** to the pushing node, "the first time N speaks for X" taken literally.
+Refusal is a `403` on the push, so the pusher logs `sync_push_refused_residence` at ERROR with the
+seat and the bound node (distinguishable from offline, ADR 335 §7) and retries each tick; the way
+out is the admin unbind, the same as at the claim edge. Detached and reattested rows for a seat are
+checked the same way — a node may not end or re-attest a session on a seat it does not hold.
+
+This is push-level residence for ONE kind, the kind this slice creates. Messages and `lane.*` rows
+still name any seat at ingest; that is the general increment ADR 355 §5 named, and it lands after
+this one rather than inside it. A human seat that attaches on two machines meets the same
+`bound_elsewhere` a human claiming on two machines meets, and the same release valve.
 
 ### 3. A remote row is live while its node is
 
@@ -215,12 +227,17 @@ harness:
    advances nothing past it. A `detached` for one is applied as a no-op and the cursor advances.
 7. A fresh agent hello for seat X on A clears X's local rows on A, emits `detached (cleared)` for
    each, and leaves X's row-from-B untouched on A. Both rows show on every roster.
+9. Residence at ingest: after nick claims on the hub (bound to the hub's node), an `attached` for
+   nick pushed by the joiner is refused `403` and the joiner's push cursor does not move; an
+   `attached` for an unbound seat binds it to the joiner in `seat_nodes`; after an admin unbind the
+   refused batch is accepted on the next push.
 8. `store.test.ts` presence cases unchanged: a single daemon with no enrollment emits stamped
    `presence.*` rows that nobody pushes, exactly as `lane.*` rows are today.
 
 ## Out of scope, named
 
-- Cross-machine agent single-active (§2). Next increment, at the hub.
+- Push-level residence for messages and `lane.*` (§2). The presence kind gets it here; the rest is
+  the general increment ADR 355 §5 named.
 - Hub arbitration of handoff, release and close (ADR 355 §1). Still their own increments.
 - Any reader of the history (§6). `musterd report`, the diversity view, the wake rails: each reads
   it when it needs it.
@@ -228,5 +245,5 @@ harness:
 
 ## Migration numbers
 
-v59 is this slice (`presence.node`). Open PRs at the time of writing carry no migration; re-check
+v60 is this slice (`presence.node`); v59 is `seat_nodes` (#1195, ADR 355 §5). Open PRs at the time of writing carry no migration; re-check
 before merge, and land after any that appear (the high-water-mark rule, #1174).
