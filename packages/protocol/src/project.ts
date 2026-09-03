@@ -65,6 +65,38 @@ export function resolveProject(opts: ResolveProjectOpts = {}): string {
 }
 
 /**
+ * The **identity** of the workspace a session runs in — stable for the life of the folder, and the
+ * value single-active displacement compares (ADR 068/092).
+ *
+ * Deliberately NOT the workspace *label* (`resolveWorkspace`, `resolveClaimWorkspace`). That label
+ * is a where-on-attach seed rendered dim on the roster, "approximately right by design", and it is
+ * qualified with the git branch — so it CHANGES under the session that owns it: a branch switch
+ * renames it, and a detached HEAD (every review, every rebase, every `switch --detach origin/main`)
+ * drops the qualifier entirely. Compared by string equality it made a seat's own next attach look
+ * like a foreign workspace, and the same-workspace grace that exists to protect the live session
+ * never engaged — measured 2026-09-02, lane 01M1JQYYAC.
+ *
+ * The work tree root is the right granularity: one seat gets one worktree (`provisionWorkspace`,
+ * ADR 065), it is what a session cannot change without becoming a different session, and unlike the
+ * basename it cannot collide between two checkouts of the same repo. Note this is `--show-toplevel`
+ * and NOT `repoProject`'s `--git-common-dir`: the project name must be worktree-INvariant so N seats
+ * share one surface space; this must be worktree-SPECIFIC so two seats on one repo are two
+ * workspaces. Same repo, opposite invariants, on purpose.
+ *
+ * A declared `MUSTERD_WORKSPACE` wins here as it does for the label — an override names the
+ * workspace on both axes, so a human who says "these two are one workspace" is believed.
+ * Degrades to `cwd` outside a work tree (or with no git at all); never throws.
+ */
+export function resolveWorkspaceKey(
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const declared = env['MUSTERD_WORKSPACE']?.trim();
+  if (declared) return declared.slice(0, 200);
+  return (gitToplevel(cwd) ?? cwd).slice(0, 200);
+}
+
+/**
  * The git toplevel for `cwd`, or null when `cwd` isn't inside a work tree — the shared copy of a
  * `rev-parse` that the CLI's provisioner and the MCP adapter's workspace label each grew privately.
  */

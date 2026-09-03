@@ -11,6 +11,7 @@ import {
   type Surface,
 } from '@musterd/protocol';
 import { readBuildStamp } from '@musterd/protocol/build-stamp';
+import { resolveWorkspaceKey } from '@musterd/protocol/project';
 import { ulid } from 'ulid';
 import {
   findBinding,
@@ -66,6 +67,9 @@ export interface McpConfig {
   wakeLease?: string | undefined;
   /** The gracefully-degrading "where" label, resolved once at load. */
   workspace: string;
+  /** The workspace's stable identity (the work tree root) — what displacement compares, because the
+   *  label above is branch-qualified and changes under this very session (lane 01M1JQYYAC). */
+  workspaceKey: string;
   /** The human driving this session, if one is (driver co-presence, ADR 021). Env > binding.json
    *  (ADR 165 inc 2) — per-worktree state, never the repo-root-shared harness entry. */
   driver?: string | undefined;
@@ -329,6 +333,7 @@ export function loadMcpConfig(
     provenance: fromFile ? 'wake' : resolveProvenance(env),
     wakeLease: resolveWakeLease(env) ?? fromFile?.lease_id,
     workspace,
+    workspaceKey: resolveWorkspaceKey(env),
     // Per-worktree fields moved out of the shared harness entry (ADR 165 inc 2): env stays the
     // manual override (headless/CI), the binding is what provisioning writes.
     driver: resolveDriver(env) ?? binding?.driver,

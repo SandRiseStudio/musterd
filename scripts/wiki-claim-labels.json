@@ -181,5 +181,8 @@
   "- ~~**Lane claim is a TOCTOU, not a CAS**~~ **Landed:** guarded `updateLane` CAS (ADR 325 prereq), hub-arbitrated for every ownership/state edge (ADR 355/361). (2026-08-25; falsify: read the lane PATCH handler,": "other",
   "- ~~**The claim's arbitration input is host-local**~~ **Closed by ADR 356** (presence transitions replicate; the hub's incumbent rule sees every machine). (2026-08-25; falsify: read ADR 203's guard —": "other",
   "- ~~**`updateLane` is a blind full-row overwrite**~~ **Landed:** per-field UPDATE + `lane.updated` diff rows (ADR 325 prereq). (2026-08-25; falsify: read the UPDATE at": "other",
-  "## What codex and opencode actually print at turn end — tokens, no attestable price (2026-09-02, lane 01M1HJY3JF, ADR 364; falsify: `codex exec --json --skip-git-repo-check \"Reply ok\" | tail -1` and `opencode run --format json \"Reply ok\" | tail -1`)": "other"
+  "## What codex and opencode actually print at turn end — tokens, no attestable price (2026-09-02, lane 01M1HJY3JF, ADR 364; falsify: `codex exec --json --skip-git-repo-check \"Reply ok\" | tail -1` and `opencode run --format json \"Reply ok\" | tail -1`)": "other",
+  "## The label is branch-qualified, so it changes under the session holding it (2026-09-02, lane 01M1JQYYAC; falsify: `resolveWorkspace` in `packages/mcp/src/workspace.ts` — check whether its qualifier can change without the process restarting)": "defect",
+  "## Comparing that label with `===` made a seat's own re-attach look foreign (2026-09-02; falsify: the audit query below across a HEAD detach)": "defect",
+  "## The two git invariants point opposite ways, on purpose (2026-09-03; falsify: read `repoProject` and `resolveWorkspaceKey` in `packages/protocol/src/project.ts` — one resolves `--git-common-dir`, the other `--show-toplevel`)": "other"
 }

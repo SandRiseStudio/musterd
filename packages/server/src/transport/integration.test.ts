@@ -1985,6 +1985,135 @@ describe('WebSocket', () => {
     live.close();
   });
 
+  it('a re-attach whose LABEL changed but whose workspace_key did not is the same workspace (a branch switch must not evict the live session — lane 01M1JQYYAC)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+    const live = new TestWs();
+    await live.open();
+    live.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+      workspace_key: '/Users/x/repo',
+    });
+    expect((await live.waitFor('occupied')).type).toBe('occupied');
+
+    // The seat detaches HEAD to review a merge SHA. Same folder, same session's worktree — but the
+    // label loses its branch qualifier, which is exactly what used to read as a foreign workspace.
+    const afterDetach = new TestWs();
+    await afterDetach.open();
+    afterDetach.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo',
+      workspace_key: '/Users/x/repo',
+    });
+    expect((await afterDetach.waitFor('occupied')).type).toBe('occupied');
+
+    await expect(live.waitFor('error', 300)).rejects.toThrow(/timeout/);
+    const teamId = getTeamBySlug(server.db, 'dawn')!.id;
+    expect(
+      listAudit(server.db, teamId).some(
+        (r) => r.action === 'claim.superseded' && JSON.parse(r.detail ?? '{}').via === 'ws',
+      ),
+    ).toBe(false);
+
+    afterDetach.close();
+    live.close();
+  });
+
+  it('two different work trees whose folders share a name are still different workspaces (the key sees the collision the label could not)', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+    const first = new TestWs();
+    await first.open();
+    first.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+      workspace_key: '/Users/x/one/repo',
+    });
+    expect((await first.waitFor('occupied')).type).toBe('occupied');
+
+    const second = new TestWs();
+    await second.open();
+    second.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main', // identical label, genuinely different checkout
+      workspace_key: '/Users/x/two/repo',
+    });
+    expect((await second.waitFor('occupied')).type).toBe('occupied');
+
+    const superseded = await first.waitFor('error');
+    expect((superseded as any).code).toBe('superseded');
+
+    first.close();
+    second.close();
+  });
+
+  it("falls back to label equality when a client sends no workspace_key (an old dist keeps exactly today's behaviour)", async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
+    const grant = await standingGrant(team.json.human_credential, 'Ada');
+
+    const live = new TestWs();
+    await live.open();
+    live.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+    });
+    expect((await live.waitFor('occupied')).type).toBe('occupied');
+
+    const probe = new TestWs();
+    await probe.open();
+    probe.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant,
+      surface: 'claude-code',
+      workspace: 'repo@main',
+    });
+    expect((await probe.waitFor('occupied')).type).toBe('occupied');
+    await expect(live.waitFor('error', 300)).rejects.toThrow(/timeout/);
+
+    probe.close();
+    live.close();
+  });
+
   it('a different-workspace claim still supersedes (newest-wins across real sessions, ADR 017/068)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);

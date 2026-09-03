@@ -576,6 +576,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               awaitingClaim: req.id,
               isAdmin: false,
               workspace: frame.workspace ?? null,
+              workspaceKey: frame.workspace_key ?? null,
               isOpen: () => ws.readyState === ws.OPEN,
               send: (f) => send(ws, f),
               close: () => ws.close(),
@@ -592,6 +593,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
                   // stream and `GET /messages` can never disagree about what this seat may see.
                   fullVisibility: targetMember ? hasFullMessageVisibility(targetMember) : false,
                   workspace: frame.workspace ?? null,
+                  workspaceKey: frame.workspace_key ?? null,
                   send: (f) => send(ws, f),
                   close: () => ws.close(),
                 };
@@ -647,8 +649,22 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             targetMember.kind === 'agent' &&
             targetMember.observer === 0
           ) {
-            const sameWorkspace = (w?: string | null): boolean =>
-              w != null && frame.workspace != null && w === frame.workspace;
+            // Identity first, label only as a fallback (lane 01M1JQYYAC): `frame.workspace` is a
+            // display label qualified with the git branch, so it changes under the very session it
+            // identifies — a branch switch or a detached HEAD renamed it, this comparison read the
+            // seat's own re-attach as a foreign workspace, and the grace below never engaged. When
+            // both sides carry a `workspace_key` (the work tree root) that is the whole test; when
+            // either does not (an older dist), fall back to exactly the previous behaviour.
+            const sameWorkspace = (old: Connection): boolean => {
+              if (frame.workspace_key != null && old.workspaceKey != null) {
+                return old.workspaceKey === frame.workspace_key;
+              }
+              return (
+                old.workspace != null &&
+                frame.workspace != null &&
+                old.workspace === frame.workspace
+              );
+            };
             displacedModel =
               ctx.db
                 .prepare<
@@ -664,7 +680,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               .get(targetMember.id)?.count;
             let displaced = 0;
             for (const old of ctx.hub.connsForMember(targetMember.id)) {
-              if (sameWorkspace(old.workspace)) {
+              if (sameWorkspace(old)) {
                 sameWorkspacePredecessors.push(old.connId);
                 continue;
               }
@@ -762,6 +778,7 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             // and `GET /messages` can never disagree about what this seat may see.
             fullVisibility: hasFullMessageVisibility(targetMember),
             workspace: frame.workspace ?? null,
+            workspaceKey: frame.workspace_key ?? null,
             send: (f) => send(ws, f),
             close: () => ws.close(),
           };

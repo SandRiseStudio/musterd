@@ -9,7 +9,7 @@ import {
   type MemberKind,
   type MemberSummary,
 } from '@musterd/protocol';
-import { gitOutput, gitToplevel } from '@musterd/protocol/project';
+import { gitOutput, gitToplevel, resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
@@ -154,6 +154,7 @@ function gather(flags: Record<string, string | boolean>) {
     sources,
     team,
     workspace: resolveClaimWorkspace(),
+    workspaceKey: resolveWorkspaceKey(),
     asName: flagStr(flags, 'as'),
     model: attestedModel(binding, env),
   };

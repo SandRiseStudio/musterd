@@ -5,6 +5,7 @@ import {
   type Binding,
   type WakeTurnBody,
 } from '@musterd/protocol';
+import { resolveWorkspaceKey } from '@musterd/protocol/project';
 import { HttpClient } from '../../client.js';
 import { findBinding } from '../../config.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../../session/liveness.js';
@@ -122,6 +123,7 @@ export function nativeBackend(deps: NativeDeps = {}): ActuatorBackend {
         team: spec.team,
         seat,
         workspace: spec.workspace,
+        workspaceKey: resolveWorkspaceKey(process.env, spec.workspace),
         leaseId: spec.order.lease_id,
         model,
         modelSource,

@@ -27,6 +27,14 @@ export interface Connection {
    * — only a *different* workspace is a genuinely new session that takes the seat (ADR 068).
    */
   workspace?: string | null;
+  /**
+   * The workspace's stable identity (the work tree root), when the client sent one. This — not
+   * {@link workspace} — is what displacement compares: the label carries a git branch qualifier and
+   * therefore changes under a session that switches branches or detaches HEAD, which made a seat's
+   * own re-attach look foreign and evict its live session (lane 01M1JQYYAC, 2026-09-03).
+   * Undefined from an older client; the comparison then falls back to the label.
+   */
+  workspaceKey?: string | null;
   send: (frame: WSServerFrame) => void;
   /** Force-close the underlying socket (used to displace a superseded same-identity session). */
   close?: () => void;

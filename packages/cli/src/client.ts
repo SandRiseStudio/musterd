@@ -110,6 +110,9 @@ export interface HttpClientOpts {
   team?: string;
   /** Workspace label passed to the command-scoped re-claim (ADR 068/092). */
   workspace?: string;
+  /** Stable workspace identity (work tree root) — what displacement compares (lane 01M1JQYYAC);
+   *  the label above is branch-qualified and is renamed by a switch or a detached HEAD. */
+  workspaceKey?: string;
   /** The self-identifying Bearer secret: agent-seat (`msac_`) or human (`mscr_`) credential. */
   key?: string;
   /**
@@ -231,7 +234,7 @@ export class HttpClient {
    * (ADR 340, #1131); callers that have one must pass it.
    */
   async claimSessionLease(): Promise<{ lease: string; close: () => void }> {
-    const { key, seat, surface, team, workspace } = this.opts;
+    const { key, seat, surface, team, workspace, workspaceKey } = this.opts;
     if (!key?.startsWith(TOKEN_PREFIXES.agent_seat) || !team || !seat || !surface) {
       throw new CliError(
         'cannot claim a session lease without an agent-seat credential, team, seat and surface',
@@ -263,6 +266,7 @@ export class HttpClient {
         target: { seat },
         surface,
         ...(workspace !== undefined ? { workspace } : {}),
+        ...(workspaceKey !== undefined ? { workspaceKey } : {}),
         ...(this.opts.model !== undefined ? { model: this.opts.model } : {}),
         ...(this.opts.createClaimSocket ? { createSocket: this.opts.createClaimSocket } : {}),
         onDeliver: () => {},
@@ -1288,6 +1292,8 @@ export interface WatchClaimOpts {
   /** Attach-time context (ADR 014), sticky for the session — same as `watch`. */
   provenance?: string;
   workspace?: string;
+  /** Stable workspace identity (work tree root) — compared for displacement (lane 01M1JQYYAC). */
+  workspaceKey?: string;
   /** Harness-attested model id (ADR 101). Defaults to the env resolution (`MUSTERD_MODEL` /
    *  `ANTHROPIC_MODEL`); absent reads as `unknown` server-side, never blocks. */
   model?: string;
@@ -1363,6 +1369,7 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           surface: opts.surface as Surface,
           ...(opts.grant !== undefined ? { grant: opts.grant } : {}),
           ...(opts.workspace !== undefined ? { workspace: opts.workspace } : {}),
+          ...(opts.workspaceKey !== undefined ? { workspaceKey: opts.workspaceKey } : {}),
           // Model attestation (ADR 101): explicit opt wins, else the shared env resolution.
           ...(attestedModel !== undefined ? { model: attestedModel } : {}),
           // Build attestation (ADR 135): this CLI dist's own stamp.

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_PROJECT, repoProject, resolveProject } from './project.js';
+import { DEFAULT_PROJECT, repoProject, resolveProject, resolveWorkspaceKey } from './project.js';
 
 function git(args: string[], cwd: string): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
@@ -82,5 +82,59 @@ describe('resolveProject', () => {
   it('sanitizes whitespace and caps length', () => {
     expect(resolveProject({ explicit: ' two words ', env: {} })).toBe('two-words');
     expect(resolveProject({ explicit: 'x'.repeat(200), env: {} })).toHaveLength(80);
+  });
+});
+
+describe('resolveWorkspaceKey (branch-invariant workspace identity, lane 01M1JQYYAC)', () => {
+  let repo: string;
+
+  beforeAll(() => {
+    repo = mkdtempSync(join(tmpdir(), 'musterd-wskey-'));
+    git(['init'], repo);
+    git(
+      ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-m', 'seed'],
+      repo,
+    );
+  });
+
+  afterAll(() => rmSync(repo, { recursive: true, force: true }));
+
+  it('is the same before and after a branch switch — the bug this exists to fix', () => {
+    const onDefault = resolveWorkspaceKey({}, repo);
+    git(['checkout', '-b', 'feature'], repo);
+    expect(resolveWorkspaceKey({}, repo)).toBe(onDefault);
+  });
+
+  it('is the same on a detached HEAD, where the display label loses its qualifier', () => {
+    const named = resolveWorkspaceKey({}, repo);
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo }).toString().trim();
+    git(['checkout', '--detach', head], repo);
+    expect(resolveWorkspaceKey({}, repo)).toBe(named);
+  });
+
+  it('is the same from a subdirectory of the work tree', () => {
+    const sub = join(repo, 'packages', 'deep');
+    mkdirSync(sub, { recursive: true });
+    expect(resolveWorkspaceKey({}, sub)).toBe(resolveWorkspaceKey({}, repo));
+  });
+
+  it('distinguishes two different work trees, which is the collision the label could not see', () => {
+    const other = mkdtempSync(join(tmpdir(), 'musterd-wskey-'));
+    try {
+      git(['init'], other);
+      expect(resolveWorkspaceKey({}, other)).not.toBe(resolveWorkspaceKey({}, repo));
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('honours a declared MUSTERD_WORKSPACE — an override names the workspace on both axes', () => {
+    expect(resolveWorkspaceKey({ MUSTERD_WORKSPACE: '  auth rewrite ' }, repo)).toBe(
+      'auth rewrite',
+    );
+  });
+
+  it('degrades to the cwd outside a work tree, and never throws', () => {
+    expect(resolveWorkspaceKey({}, '/')).toBe('/');
   });
 });
