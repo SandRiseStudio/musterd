@@ -8,7 +8,7 @@ import {
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
-import type { AuditRow } from '../store/audit.js';
+import { REPLICATED_LEDGER_VERBS, type AuditRow } from '../store/audit.js';
 import { rowToEnvelope } from '../store/messages.js';
 import type { MessageRow } from '../store/rows.js';
 import { listActiveTeams } from '../store/teams.js';
@@ -183,9 +183,14 @@ function unpushed(ctx: Ctx, teamId: string, nodeId: string, after: number): Pend
 function toSyncEvent(pending: Pending, slug: string): SyncEvent {
   if (pending.kind === 'lane') {
     const { row } = pending;
-    // The action prefix decides the tag: one allocator, one query, three kinds (presence
-    // replication, 2026-09-02). The hub and the fold branch on the tag, never on the prefix.
-    const kind: 'lane' | 'presence' = row.action.startsWith('presence.') ? 'presence' : 'lane';
+    // The action decides the tag: one allocator, one query, four kinds (ADR 365). The hub and the
+    // fold branch on the TAG, never on the prefix — a reader that re-derived the kind from the
+    // action would be a second copy of this rule, free to disagree with the one that shipped it.
+    const kind: 'lane' | 'presence' | 'ledger' = REPLICATED_LEDGER_VERBS.has(row.action)
+      ? 'ledger'
+      : row.action.startsWith('presence.')
+        ? 'presence'
+        : 'lane';
     return {
       kind,
       team: slug,
