@@ -47,6 +47,12 @@ export { loadMcpConfig, type McpConfig } from './config.js';
 export { bind } from './bind.js';
 export { resolveWorkspace, resolveProvenance } from './workspace.js';
 export { withTraceContext } from './otel.js';
+// Exported for the CLI-side registry pin (see modelProbe.ts) as well as the adapter's own use.
+export {
+  isProbeCapableSurface,
+  PROBE_CAPABLE_SURFACES,
+  shouldWarnUnobservedModel,
+} from './modelProbe.js';
 
 /**
  * Drop presence and exit on every way the host can go away. The WS socket keeps Node's event loop
