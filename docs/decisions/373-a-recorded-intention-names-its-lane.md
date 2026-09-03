@@ -123,31 +123,57 @@ ADR adopts it wholesale: **print measured coverage on every run**, the way
 number rather than a hope. A green `intents:check` means "no forward reference in a *named* shape is
 undisposed", never "every intention is tracked."
 
-### Increment 2 — a lane carries the document that asked for it
+### Increment 2 — a document-recorded intention is a Seed, and the edge already exists
 
-Add one optional field to the lane record: **`sourced_from`**, a short reference to the artifact that
-called for the work. It is deliberately the same edge `seeds.linked_lane_id` already draws, pointed
-at a document instead of a text message — **not a second, unrelated way for a lane to say where it
-came from**. Whether the two should converge on one representation, and which direction the edge
-should point, is a question for the surface survey on lane `01M1MKSMBP` (dolly), whose deliverable is
-exactly the collision list a new field name has to clear.
+**No new field, and no new word.** This increment was drafted as `sourced_from` on the lane record;
+dolly rejected that on lane `01M1MKSMBP` (the surface survey), and the rejection is right and is
+adopted here in full.
 
-```
-sourced_from: "adr:354"            // an ADR, optionally #section
-sourced_from: "roadmap:ledger-seats"
-sourced_from: "wiki:research-corpus.md"
-sourced_from: "design:2026-09-01-human-surface.md"
-```
+The thing that asked for the work already has a noun on both surfaces — a **Seed**
+([ADR 291](291-shared-seeds-before-lanes.md), [ADR 319](319-shared-seed-surfaces.md): a Team idea
+captured before it becomes a Lane, an immutable source plus an exploration thread) — and the edge
+already has a name: **`seeds.linked_lane_id`** ([ADR 248](248-a-seed-is-captured-in-the-open-and-lands-as-a-lane.md)).
+`sourced_from` would have been a third word for an edge that already has one.
 
-Optional, never inferred, absent by default — absence means "nobody said", not "nothing asked"
-(ADR 236). It is set at `lane_open` / `lane_update` and travels with the lane, so it folds under
-[ADR 353](353-lane-transitions-replicate-as-audit-rows.md) with the rest of the lane payload rather
-than becoming a fourth kind on the wire.
+So the increment is:
 
-This is what turns the sweep from archaeology into a query. With increment 1 answering "does this
-sentence name a lane?", increment 2 answers the reciprocal and harder question — **"which ADRs,
-roadmap items and wiki pages have never had a lane at all?"** — which is how ADR 095 went unnoticed
-for two months while being perfectly legible to any human who opened the file.
+> **A document-recorded intention is a Seed whose source is a repo path and anchor instead of an
+> SMS or Slack capture.** `intents:check` ingests a `Follows-up:` marker the same way the relay
+> ingests a Slack message — capture, never interpret — and promotion to a lane sets `linked_lane_id`
+> exactly as it does today.
+
+What that buys, measured against the draft it replaces: zero new lane fields, zero new MCP tool
+parameters, no ADR 296 vocabulary entry to defend, and no `context:check` bytes charged to every
+seat on every turn. The promotion path, the tray (`team_seed_list`), and the `seed → lane` edge are
+all already built and already exercised.
+
+**Edge direction: `seed → lane`, unchanged.** A Seed promotes to exactly one lane — that is what
+promotion means — while one lane may answer several documents, so the many-side belongs on the Seed.
+A lane's provenance is therefore *"the seeds whose `linked_lane_id` is me"*: a query, not a column.
+If a lane-side back-pointer is ever genuinely needed, the existing noun is `seed_id`.
+
+**The one real cost, stated plainly.** `SeedSourceSchema` is `z.literal('slack')`
+(`packages/protocol/src/seeds.ts:14`) — a single literal, not an enum, even though the relay already
+carries `sms` in its buffer. Admitting a repo-path source widens it, which is a protocol change under
+AGENTS.md hard rule 1, with this ADR as its authority. That is the whole schema delta, and it is
+smaller than the one this increment was originally going to make.
+
+This is what turns the sweep from archaeology into a query: increment 1 asks "does this sentence
+name a disposition?", and the Seed tray answers the reciprocal — **what has been captured and never
+promoted** — which is how ADR 095 went unnoticed for two months while being perfectly legible to any
+human who opened the file.
+
+### Increment 4 — the up-next brief lists open Seeds above open lanes
+
+Placed by dolly, whose surface it is, and recorded here so the arc is legible rather than because
+this ADR decides it. `next` already answers "what should I do next" and already has an up-next
+section of open unowned lanes (`packages/server/src/store/orientation.ts:119`, currently `Lane[]`).
+Seeds awaiting exploration are the same question one step earlier, so the brief's up-next lists open
+Seeds — source-tagged, e.g. *"from ADR 373 §4"* — above open lanes. Nothing else changes.
+
+**Not `inbox`, and not `--waiting`.** Those carry things addressed to a seat. An intention is
+addressed to nobody, which is precisely the problem this ADR exists to solve, and filing it where a
+reader expects their own name would hide it a second time.
 
 ### Explicitly not decided here
 
@@ -157,11 +183,11 @@ for two months while being perfectly legible to any human who opened the file.
   12 blocking asks ever answered, every one resolved by the clock running out
   (`docs/design/2026-09-01-human-surface.md`). Flag it; never flip it. Whether to add that flag as a
   gate is increment 3.
-- **No new "what is waiting for me" surface.** Lane `01M1MB7WCW` measured on 2026-09-03 that `inbox`,
-  `nudge`, `next` and `status` are two questions wearing four commands, and its recommendation was
-  two surfaces, not four. Reporting unstarted intentions belongs inside `next` — and **where exactly
-  is dolly's call, not this ADR's**: she holds the live surface work (`01M1MKSMBP` survey,
-  `01M1MMFSS0` folding `nudge` into `inbox --waiting`). That is increment 4, and it is hers to place.
+- **No new "what is waiting for me" surface, and no new noun.** Lane `01M1MB7WCW` measured on
+  2026-09-03 that `inbox`, `nudge`, `next` and `status` are two questions wearing four commands.
+  Increment 4 above is dolly's placement, not this ADR's; increment 2's shape is likewise hers. Both
+  were drafted worse here and corrected there, which is the argument for asking the seat that holds
+  the surface before minting anything on it.
 
 ## Consequences
 
@@ -178,16 +204,16 @@ for two months while being perfectly legible to any human who opened the file.
   and `census.ts` is a code comment, deliberately excluded. Increment 2 is what reaches ADR 095 and
   the three undisposed multi-admin ADRs. **Neither increment reaches all nine, and this ADR does not
   claim otherwise** — the pair is a large improvement on zero, not a solution.
-- **`sourced_from` is a new word on both surfaces**, and this ADR does not get to mint it alone.
-  It appears in `lane_open` and `lane_update` on the MCP tool surface and in the CLI's lane verbs, so
-  it is subject to ADR 296's one-meaning-per-word gate, to `context:check`'s standing-byte budget
-  (every byte in the tools/list render is paid by every seat on every turn, and that gate is NOT in
-  the usual local list), and to dolly's rule on lane `01M1MKSMBP`: anything that changes a name
-  others depend on becomes its own lane with its own approval. **Increment 2 does not proceed until
-  the surface survey has judged the name** — including whether `seeds.linked_lane_id` and this should
-  be one thing.
-- **`sourced_from` is a protocol change** and lands under AGENTS.md hard rule 1 with this ADR as its
-  authority. It needs a migration; per
+- **The only schema delta is widening `SeedSourceSchema` past `z.literal('slack')`**, which is a
+  protocol change under AGENTS.md hard rule 1 with this ADR as its authority. No new lane field, no
+  new MCP tool parameter, no ADR 296 vocabulary entry, and no `context:check` bytes charged to every
+  seat on every turn — all of which the rejected `sourced_from` draft would have cost.
+- **This ADR was wrong twice and got corrected twice before landing, both times by looking rather
+  than asking after the fact.** Checking the board before messaging dolly turned up `seeds` and
+  falsified the Problem section's first sentence; dolly's answer then replaced increment 2's whole
+  mechanism and placed increment 4. Recorded because the ADR's own subject is intentions that go
+  unreconciled: the reconciliation that worked here was a seat reading another seat's lanes before
+  writing, which is cheaper than any gate this ADR proposes. It needs a migration; per
   [migration-high-water-mark](../wiki/migration-high-water-mark.md), the number must not be reserved
   ahead of a branch that will not merge before the next number is taken.
 - **A new gate is a new thing that can rot.** `intents:check` joins fourteen registered controls, and
@@ -203,7 +229,9 @@ for two months while being perfectly legible to any human who opened the file.
 **Traces.** `intents:check` prints, on every run, the same two-part shape the wiki gate prints: the
 pass/fail verdict, and its **measured coverage** — matched intentions over hand-labelled intentions
 in the corpus, with shape misses and out-of-scope-surface misses counted separately. Increment 2 adds
-no trace of its own; `sourced_from` is a lane field, visible wherever a lane is.
+no trace of its own beyond the rows it creates: an ingested `Follows-up:` marker is a Seed like any
+other, visible in `team_seed_list` and carrying `linked_lane_id` once promoted, so the existing seed
+surfaces are the observability.
 
 **Eval.** Dataset: the nine lanes opened 2026-09-03 (`01M1MMHJP3`, `01M1MMJ1AC`, `01M1MMJKBY`,
 `01M1MMK333`, `01M1MMKHX8`, `01M1MMKYMN`, `01M1MMMDCR`, `01M1MMND6E`, `01M1MMNRW7`), each carrying
