@@ -1,6 +1,6 @@
 # 361 — Every ownership edge is the hub's: release, handoff and close follow the claim behind the CAS, and the origin speaks
 
-- Status: proposed — 2026-09-02. Authored by stanley on lane `01M1J93RJKGWA34Y7YF66PKB34`, the
+- Status: accepted — 2026-09-03 (merged `13bf165f`, #1212; proposed 2026-09-02). Authored by stanley on lane `01M1J93RJKGWA34Y7YF66PKB34`, the
   increment ADR 355 §Alternatives promised: "One edge, done properly and falsified, is the
   increment; the others follow it."
 - Date: 2026-09-02

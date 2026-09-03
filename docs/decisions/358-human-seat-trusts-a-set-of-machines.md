@@ -1,6 +1,6 @@
 # 358 — A human seat trusts a set of machines; a second node joins by an explicit act from a bound session
 
-- Status: proposed — 2026-09-02. Authored by stanley on lane `01M1J17QHK66WA79KZVKS8PGT2`, the
+- Status: accepted — 2026-09-03 (merged `14003d89`, #1205; proposed 2026-09-02). Authored by stanley on lane `01M1J17QHK66WA79KZVKS8PGT2`, the
   follow-on ADR 355 §5 named when it applied residence to human seats "as ADR 328 wrote it" and
   left fan-out across machines as the open evidence question.
 - Date: 2026-09-02

@@ -1,6 +1,6 @@
 # 365 — The ledger kind: a best-effort verb crosses the wire, and decides nothing when it lands
 
-- Status: proposed — 2026-09-03. Authored by ryder on lane `01M1JNY95CWSEWR3DP5XMHYSME`, gap 3 of
+- Status: accepted — 2026-09-03 (merged `18d250ff`, #1227; proposed 2026-09-03). Authored by ryder on lane `01M1JNY95CWSEWR3DP5XMHYSME`, gap 3 of
   stanley's residence-2 census (`01M1JNNF42NR3P2JPN8ZJEACN8`).
 - Date: 2026-09-03
 - Builds on: [ADR 325](325-multi-machine-federation.md) (residence 2: facts that cross without
