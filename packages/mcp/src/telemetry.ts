@@ -1,5 +1,5 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { normalizeSeatName } from '@musterd/protocol';
+import { normalizeSeatName, shouldWarnUnobservedModel } from '@musterd/protocol';
 import { startTelemetry, type TelemetryHandle } from '@musterd/telemetry';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { MusterdClient } from './client.js';
@@ -41,8 +41,15 @@ export function startMcpTelemetry(config: McpConfig): Promise<TelemetryHandle> {
 }
 
 /**
- * Record MCP's initialized host identity and declaration state (ADR 120). Harness context is
- * diagnostic only: it is never copied into the model attribute or sent to the team server.
+ * Record MCP's initialized host identity and declaration state (ADR 120), and say out loud
+ * whatever is wrong with this session's attestation. Harness context is diagnostic only: it is
+ * never copied into the model attribute or sent to the team server, and — the point of ADR 120 —
+ * never used to decide probe-capability either. That comes from `config.surface`, which the
+ * launcher marker resolved (ADR 286); `clientInfo` is a string the client chose.
+ *
+ * Three warnings, at most two of which can fire together (unknown and unobserved are exclusive):
+ * nothing declared, a declaration where an observation was reachable, and an observation that
+ * contradicts a declaration. All warn-only — attestation never blocks (ADR 101).
  */
 export function recordAdapterInitialization(
   config: McpConfig,
@@ -61,13 +68,42 @@ export function recordAdapterInitialization(
     span.end();
   });
 
+  const source = harness
+    ? ` (harness: ${harness.name}${harness.version ? ` ${harness.version}` : ''})`
+    : '';
+
   if (config.modelSource === 'unknown') {
-    const source = harness
-      ? ` (harness: ${harness.name}${harness.version ? ` ${harness.version}` : ''})`
-      : '';
     warn(
       `musterd MCP has no declared model; this session will attest unknown${source}. ` +
         'Set MUSTERD_MODEL, expose ANTHROPIC_MODEL, or provision a binding model.',
+    );
+  } else if (shouldWarnUnobservedModel(config.surface, config.modelSource)) {
+    // The second silence (ADR 101/158 follow-up). `unknown` is loud, `observed` is right, and the
+    // case in between said nothing at all: a harness that HAS a model probe, attesting a snapshot.
+    // That is the exact shape of the defect ADR 158 was written for — one seat attested `grok-4.5`
+    // for weeks while running `claude-opus-4-8` — and it is invisible from the tiers alone, because
+    // `binding` looks identical whether or not an observation was ever reachable.
+    //
+    // Warn, never block (ADR 101): the declaration is still attested, and a stale one is honest
+    // about being a declaration. The reader is told what would replace it.
+    warn(
+      `musterd MCP is attesting a declared model (${config.model ?? 'unset'}, tier ` +
+        `${config.modelSource}) on ${config.surface}, which can observe the model it is actually ` +
+        `running${source}. No observation reached this session, so the roster shows a snapshot. ` +
+        'Run `musterd wire` to (re)install this harness\'s hooks, then start a new session.',
+    );
+  }
+
+  // The tripwire ADR 101 names, which until now was computed and never printed: an observation
+  // contradicted a declaration. Independent of the tier warning above — drift means the probe DID
+  // run, so this fires on the healthy `observed` path and is the one case where the stale
+  // declaration is provably wrong rather than merely unverified.
+  if (config.modelDrift) {
+    warn(
+      `musterd MCP model drift: this session declares ${config.modelDrift.declared} but is ` +
+        `observed running ${config.modelDrift.observed}${source}. The observation wins (it is a ` +
+        'measurement, not an assumption); the declaration is stale — clear MUSTERD_MODEL or ' +
+        'update `binding.model`.',
     );
   }
 }
