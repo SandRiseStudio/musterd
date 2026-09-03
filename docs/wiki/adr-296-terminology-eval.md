@@ -25,8 +25,11 @@ is usage voting against a chosen word — revise the term, not the gate.
 
 Trajectory of the user-facing half: 49 → 13 → 5, with **0 pending** — burn-down C (the five root
 docs) is complete on branch `stanley/vocab-burndown-c`, handed to sloane with lane 01M0K5XTX9
-(2026-08-24; falsify: `git log origin/stanley/vocab-burndown-c`). The design half (28
-`DESIGN_BASELINE` docs, burn-down D, lane 01M0K5Y0F4) is open and unstarted. The registry bound
+(2026-08-24; falsify: `git log origin/stanley/vocab-burndown-c`). ~~The design half (28
+`DESIGN_BASELINE` docs, burn-down D, lane 01M0K5Y0F4) is open and unstarted.~~ **BOTH LANES CLOSED —
+re-read 2026-09-03:** `01M0K5XTX9` (burn-down C) and `01M0K5Y0F4` (burn-down D) are `done`, owned by
+sloane. This paragraph is a snapshot of the day it was written; a lane id in a wiki page is a
+pointer to moving state, so it dates faster than the measurement beside it. The registry bound
 is ~2026-10-05; as of this measurement the bound has not passed, so "reaches zero by its bound"
 is **on track, not yet discharged** — this page is the baseline record, not the closing report.
 
