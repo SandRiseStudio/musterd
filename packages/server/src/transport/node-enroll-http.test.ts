@@ -23,6 +23,7 @@ let joiner: RunningServer;
 let hubBase: string;
 let joinerBase: string;
 let nickCredential: string;
+let joinerCredential: string;
 let dir: string;
 
 async function post(base: string, path: string, body?: unknown, auth?: string) {
@@ -81,7 +82,9 @@ beforeEach(async () => {
     creator: { name: 'nick', kind: 'human' },
   });
   nickCredential = created.json.human_credential;
-  await post(joinerBase, '/teams', { slug: 'bravo', creator: { name: 'nick', kind: 'human' } });
+  joinerCredential = (
+    await post(joinerBase, '/teams', { slug: 'bravo', creator: { name: 'nick', kind: 'human' } })
+  ).json.human_credential;
 });
 
 afterEach(async () => {
@@ -212,5 +215,57 @@ describe('POST /node/enroll — the joiner daemon enrolls itself at a hub', () =
     // 400 rather than 422: the daemon's own `parseOrBadRequest` maps a schema failure to
     // bad_request, and this route follows the convention every other body-parsing route uses.
     expect(res.status).toBe(400);
+  });
+});
+
+describe('the hub is the machine the team was created on (ADR 375)', () => {
+  async function enrolled() {
+    mintLocalRow(joiner, 'bravo', 'm-joiner');
+    const { json: minted } = await post(
+      hubBase,
+      '/teams/bravo/nodes/invite',
+      { label: 'joiner laptop' },
+      nickCredential,
+    );
+    const res = await post(joinerBase, '/node/enroll', {
+      hub_url: hubBase,
+      code: minted.invite,
+      team: 'bravo',
+    });
+    expect(res.status).toBe(200);
+  }
+
+  it('an enrolled joiner cannot mint an invite — the refusal names the hub to mint from (§2)', async () => {
+    await enrolled();
+    // The joiner's own admin credential, minted when its copy of the team was created.
+    const before = joiner.db.prepare('SELECT COUNT(*) AS n FROM node_invites').get() as {
+      n: number;
+    };
+    const res = await post(
+      joinerBase,
+      '/teams/bravo/nodes/invite',
+      { label: 'a third machine' },
+      joinerCredential,
+    );
+    expect(res.status).toBe(409);
+    expect(res.json.error.code).toBe('conflict');
+    expect(res.json.error.message).toContain(hubBase);
+    expect(joiner.db.prepare('SELECT COUNT(*) AS n FROM node_invites').get()).toEqual(before);
+  });
+
+  it('a hub cannot enroll — refused before any request leaves the machine (§3)', async () => {
+    await enrolled();
+    mintLocalRow(hub, 'bravo', 'm-hub');
+    // Point the hub at a URL nothing listens on: if the refusal came AFTER the outbound call, this
+    // would be a connection error, not a 409.
+    const res = await post(hubBase, '/node/enroll', {
+      hub_url: 'http://127.0.0.1:9',
+      code: 'msinv_irrelevant',
+      team: 'bravo',
+    });
+    expect(res.status).toBe(409);
+    expect(res.json.error.code).toBe('conflict');
+    expect(res.json.error.message).toMatch(/is the hub/);
+    expect(readNodeState().nodes['bravo']?.hub_url).toBe(hubBase); // the joiner's record, untouched
   });
 });
