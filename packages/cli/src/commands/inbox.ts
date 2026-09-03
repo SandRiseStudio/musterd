@@ -14,6 +14,7 @@ import { CliError } from '../errors.js';
 import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { kindLookup, resolve, resolveRead } from './helpers.js';
+import { waitingCommand } from './nudge.js';
 import { attestSlotIfUnattested, refreshModelObservation } from './session.js';
 
 /** Block-until-message exit code on timeout — mirrors coreutils `timeout(1)` so shell loops can tell
@@ -32,6 +33,10 @@ export async function inboxCommand(parsed: Parsed): Promise<number> {
   // tool boundary, so it must be resolved *before* the acting `resolve()` below (which throws on an
   // ambient/unbound folder) and must be silent-or-one-line, best-effort, and never fail a tool call.
   if (parsed.flags['interrupt-check']) return interruptCheck(parsed);
+  // --waiting (ADR 053): the read-only banner + the directed acts behind it, the approval-prompt
+  // Notification hook target. Read-only, never moves the cursor, silent when nothing waits, exit 0
+  // always — so it too must run before the acting `resolve()` below.
+  if (parsed.flags['waiting']) return waitingCommand(parsed);
 
   // `musterd inbox defer <act_id> --until-lane <id> | --until-reply` (ADR 211 §6): the recipient's
   // "not now, raise it when ⟨cond⟩". The CLI takes the surface investment because ADR 145 §4 spends

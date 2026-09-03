@@ -7,7 +7,7 @@
 | Command | Question it answers | What it prints | Reads the cursor? |
 | --- | --- | --- | --- |
 | `musterd inbox` | what is waiting for me — **the answer** | the acts, day-grouped, bounded recent window + every unread | advances it (unless `--peek`, or any lens) |
-| `musterd nudge` | the same, at the approval prompt — **a pointer** | the banner, then the waiting acts one line each (bounded) | never |
+| `musterd inbox --waiting` (~~`musterd nudge`~~ until 2026-09-03, now a hidden alias — lane 01M1MMFSS0) | the same, at the approval prompt — **a pointer** | the banner, then the waiting acts one line each (bounded) | never |
 | `musterd status` | who is on the team — the **roster**; leads with the same pointer | `⚑ N requests waiting for you since …` then the roster | never |
 | `musterd next` | what should I do next — **the brief** | lanes you carry, owed reviews, what shipped, up-next | never |
 | every other command | (ADR 046 side-car) — **the same pointer** on stderr | `⚑ N acts waiting for <me> — musterd inbox (since …)` | never |
@@ -26,7 +26,7 @@ And one drift restored: ADR 053 §1 decided the approval-prompt hook "prints any
 
 ## Still open (2026-09-03)
 
-- **`nudge` is silent on a stale session lease.** It resolves with `reclaimAgentLease: false` by design (a hook one-shot must never reclaim the seat), so when the seat's lease has lapsed the inbox read fails and the catch swallows it: zero output while acts wait. Observed on dolly's seat 2026-09-03 after a daemon bounce; `inbox --peek` on the same binding worked. Falsifier: run `musterd nudge` and `musterd inbox --peek --unread` back to back on a seat whose lease is stale — nudge prints nothing, inbox prints the acts. Not fixed here; the fix is a read that survives a lapsed lease without reclaiming it, and belongs with the lease design (ADR 337).
+- **`inbox --waiting` (was `nudge`) is silent on a stale session lease.** It resolves with `reclaimAgentLease: false` by design (a hook one-shot must never reclaim the seat), so when the seat's lease has lapsed the inbox read fails and the catch swallows it: zero output while acts wait. Observed on dolly's seat 2026-09-03 after a daemon bounce; `inbox --peek` on the same binding worked. Falsifier: run `musterd nudge` and `musterd inbox --peek --unread` back to back on a seat whose lease is stale — nudge prints nothing, inbox prints the acts. Not fixed here; the fix is a read that survives a lapsed lease without reclaiming it, and belongs with the lease design (ADR 337).
 - **`ask` counts for everyone.** `isActionNeeded` flags every `ask`, including guardian's `daemon_down` broadcast to the team, so a human's count includes asks nobody routed to them (26 of nick's 120 were guardian). Whether a team-addressed ask should count for every human is an ADR 147 question, not a rendering one.
 
 ## Recommendation (half A of lane 01M1MB7WCW)

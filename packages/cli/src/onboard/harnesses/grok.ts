@@ -147,7 +147,7 @@ const LOCAL_HOOKS: readonly {
   {
     event: 'Notification',
     marker: NOTIFY_MARKER,
-    command: cmd('nudge', NOTIFY_MARKER, true),
+    command: cmd('inbox --waiting', NOTIFY_MARKER, true),
   },
   {
     event: 'PostToolUse',

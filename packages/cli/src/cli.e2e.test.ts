@@ -893,7 +893,7 @@ describe('CLI ergonomics papercuts (ADR 067)', () => {
   });
 });
 
-describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () => {
+describe('inbox --waiting — surface waiting acts at the approval prompt (ADR 053)', () => {
   it('prints the directed acts waiting for the bound seat, read-only (cursor stays put)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick', '--role', 'lead']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent', '--json']);
@@ -901,14 +901,20 @@ describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () =
     await run(sendCommand, ['--to', 'Ada', '--act', 'request_help', 'review the auth PR']);
 
     actAs('dawn', 'Ada', authority.key, authority.sessionLease);
-    const nudge = await run(nudgeCommand, []);
-    expect(nudge.code).toBe(0);
-    expect(nudge.out).toContain('Ada');
-    expect(nudge.out).toContain('waiting');
+    const waiting = await run(inboxCommand, ['--waiting']);
+    expect(waiting.code).toBe(0);
+    expect(waiting.out).toContain('Ada');
+    expect(waiting.out).toContain('waiting');
+    expect(waiting.out).toContain('review the auth PR');
 
-    // Read-only: it never advanced the cursor, so a second nudge still surfaces the same act.
-    const again = await run(nudgeCommand, []);
+    // Read-only: it never advanced the cursor, so a second read still surfaces the same act.
+    const again = await run(inboxCommand, ['--waiting']);
     expect(again.out).toContain('waiting');
+
+    // The pre-2026-09-03 name still answers, byte-for-byte — installed hooks keep working until
+    // `init --refresh-hooks` re-points them.
+    const alias = await run(nudgeCommand, []);
+    expect(alias.out).toBe(again.out);
   });
 
   it('prints nothing (exit 0) when no directed act is waiting', async () => {
@@ -919,9 +925,9 @@ describe('nudge — surface waiting acts at the approval prompt (ADR 053)', () =
     await run(sendCommand, ['--to', '@team', '--act', 'status_update', 'refactoring']);
 
     actAs('dawn', 'Ada', authority.key, authority.sessionLease);
-    const nudge = await run(nudgeCommand, []);
-    expect(nudge.code).toBe(0);
-    expect(nudge.out).toBe('');
+    const waiting = await run(inboxCommand, ['--waiting']);
+    expect(waiting.code).toBe(0);
+    expect(waiting.out).toBe('');
   });
 });
 

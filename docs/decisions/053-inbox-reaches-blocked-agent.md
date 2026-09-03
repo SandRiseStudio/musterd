@@ -94,6 +94,8 @@ working. The state clears on the next acting command (the loop resumed).
 
 **Move #1 (receiver-side push) — shipped.**
 
+> **Amendment 2026-09-03 (lane 01M1MMFSS0, surface survey #1245):** the command is now `musterd inbox --waiting`; `musterd nudge` remains a hidden alias for one release and the provisioned Notification hook runs the new form. Same code, same contract. Reason: "nudge" had come to name six things in two directions — this one is a pull (the seat reads its own inbox), ADR 167's delivery nudge is a push into a teammate's session — and readers expected `musterd nudge` to poke someone else. The Decision below is unchanged; read `musterd nudge` as `musterd inbox --waiting`.
+
 - **`musterd nudge`** — a read-only command that prints the directed acts waiting for this folder's
   bound seat (reusing `pendingActionSummary`/`openActionNeeded`, the same predicate as ADR 024/046, so
   live/nudge/hook paths classify identically). It never advances the read cursor (self-clearing only
