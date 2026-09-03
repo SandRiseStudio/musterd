@@ -37,9 +37,7 @@ beforeEach(async () => {
   miley = (
     await post('/teams/dawn/members', { name: 'miley', kind: 'human', hue: 212 }, bearer(nickCred))
   ).json.human_credential;
-  dolly = (
-    await post('/teams/dawn/members', { name: 'dolly', kind: 'human', hue: 40 }, bearer(nickCred))
-  ).json.human_credential;
+  await post('/teams/dawn/members', { name: 'dolly', kind: 'human', hue: 40 }, bearer(nickCred));
 });
 afterEach(async () => {
   await server.close();
