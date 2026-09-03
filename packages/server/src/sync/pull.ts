@@ -129,6 +129,16 @@ function reportStop(ctx: Ctx, team: string, stop: FoldStop): void {
         detail: 'a re-attestation for a session this daemon never saw attach; retrying each tick',
       });
       return;
+    case 'mistagged_ledger_event':
+      log.error({
+        msg: 'sync_fold_mistagged_ledger',
+        team,
+        action: stop.action,
+        hub_seq: stop.hub_seq,
+        detail:
+          'a projected verb arrived under the non-projecting ledger tag; the origin runs a build that mis-tags — terminal, needs operator attention',
+      });
+      return;
   }
 }
 

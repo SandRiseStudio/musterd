@@ -217,6 +217,34 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     expect(leased[0]!.target).toBe('Ada');
   });
 
+  it("ignores a peer machine's wake rows: the hourly cap counts what this daemon minted", () => {
+    // ADR 365 §3. The six wake verbs replicate now, so a peer's rows land in THIS `audit`. They
+    // must not decide here: folding them into the rate cap would make wake caps team-wide, which
+    // is a decision crossing the wire (residence 3) and not ADR 365's to make.
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    const now = Date.now();
+    for (let i = 0; i < WAKE_HOURLY_CAP + 3; i += 1) {
+      db.prepare(
+        `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+         VALUES (?, ?, ?, NULL, 'residency.woke', ?, 'allow', ?, ?, 'peer-node', ?)`,
+      ).run(
+        `peer-${i}`,
+        team.id,
+        now - 60_000,
+        'Ada',
+        JSON.stringify({ act: `p${i}` }),
+        now,
+        i + 1,
+      );
+    }
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+  });
+
   it('holds mutual exclusion: a live lease blocks a second order for the same seat', () => {
     const { db, team, nick, ada } = seed();
     enroll(db, team, ada);

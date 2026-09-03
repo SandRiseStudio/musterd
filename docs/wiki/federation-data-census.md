@@ -119,6 +119,15 @@ ADR 325's prereq-fix lane addresses the first four; strike-and-date here as they
   `store/lanes.ts:242` — it sets every column from a merged object). Concurrent patches to
   unrelated fields clobber; non-ownership field changes (branch, scope, title, stakes…) emit no
   audit or event at all.
+- **The insight substrate was a one-machine view** (2026-09-03, gap 3 of the residence-2 census;
+  measured at `8b327be3` on the dogfood daemon: 4,953 `residency.*` audit rows, none stamped, while
+  `deriveWakeMetrics` reads six of those verbs — so `musterd report`'s wake cost counted one
+  machine). **Struck 2026-09-03** for the wake economy by [ADR 365](../decisions/365-the-ledger-kind.md):
+  the six wake verbs cross as `ledger` events, appended to `audit` and projected into nothing, while
+  every deciding reader of them stays pinned to rows the local node minted. Still standing for
+  `tool_call_stats`, `incident_reports`, `seed_thread_entries`, and the `residency.*` verbs outside
+  the wake economy — falsify by pushing a `residency.host_suspended` row between two daemons and
+  looking for it on the receiver.
 - **`audit` cannot be a correctness log** (2026-08-25; falsify: read `appendAudit`,
   `store/audit.ts:335` — it try/catches its own INSERT and logs a warning on failure). Contract
   is explicit ("best-effort observability, never a gate"); ADR 131 already ruled on it. This one

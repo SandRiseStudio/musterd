@@ -479,6 +479,26 @@ export function listHostSeen(db: Database, teamId: string): Map<string, number> 
  * landed since. The daemon cannot stat a path on the host's filesystem; it can read what the host
  * last reported and whether anything newer contradicts it.
  */
+/**
+ * ADR 365 §3 — the deciding readers of the wake ledger stay on rows THIS machine minted.
+ *
+ * The six wake verbs now cross the wire as `ledger` events so `musterd report` can count a team's
+ * whole wake economy (ADR 365 §1). But those same rows are the rate policy's state (ADR 131 §4):
+ * the hourly cap, the attempt cap, ADR 262's re-spend breaker and ADR 357's `workspace_readable`
+ * all COUNT them. Folding a peer's rows into those counts would make wake caps team-wide — a
+ * decision crossing the wire, which is residence 3, and not this ADR's to make. So every deciding
+ * read carries this predicate and behaves exactly as it did before replication existed.
+ *
+ * `''` is a row minted here before the stamp existed (every pre-v58 row, and any row whose stamp
+ * failed); the subquery is this daemon's node id for the team, absent on a machine that has never
+ * enrolled — which is then simply the `''` case. A folded row matches neither.
+ *
+ * Falsifier: fold a peer's `residency.woke` rows past the hourly cap and poll for a wake here — it
+ * must still be ordered. `residency.test.ts` "ignores a peer machine's wake rows" pins it; drop the
+ * predicate from `wakesSince` and that case fails.
+ */
+const MINTED_HERE = `AND origin_node IN ('', COALESCE((SELECT node_id FROM local_node l WHERE l.team_id = audit.team_id), ''))`;
+
 export interface SeatWakeabilityFacts {
   enrolled: true;
   host: string;
@@ -513,11 +533,13 @@ export function seatWakeabilityFacts(
   const lastFailure = db.prepare<[string, string], { detail: string; ts: number }>(
     `SELECT detail, ts FROM audit
       WHERE team_id = ? AND action = 'residency.wake_failed' AND target = ?
+        ${MINTED_HERE}
       ORDER BY ts DESC, id DESC LIMIT 1`,
   );
   const lastWoke = db.prepare<[string, string], { ts: number }>(
     `SELECT ts FROM audit
       WHERE team_id = ? AND action = 'residency.woke' AND target = ?
+        ${MINTED_HERE}
       ORDER BY ts DESC, id DESC LIMIT 1`,
   );
   const out = new Map<string, SeatWakeabilityFacts>();
@@ -583,7 +605,7 @@ function wakesSince(db: Database, teamId: string, seatName: string, sinceTs: num
     .prepare<[string, string, number], { n: number }>(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action IN ('residency.woke','residency.wake_failed')
-          AND target = ? AND ts > ?`,
+          AND target = ? AND ts > ? ${MINTED_HERE}`,
     )
     .get(teamId, seatName, sinceTs);
   return row?.n ?? 0;
@@ -597,7 +619,7 @@ function deferredSince(db: Database, teamId: string, seatName: string, sinceTs: 
     .prepare<[string, string, number], { one: number }>(
       `SELECT 1 AS one FROM audit
         WHERE team_id = ? AND action = 'residency.wake_deferred'
-          AND target = ? AND ts > ? LIMIT 1`,
+          AND target = ? AND ts > ? ${MINTED_HERE} LIMIT 1`,
     )
     .get(teamId, seatName, sinceTs);
   return row != null;
@@ -609,7 +631,7 @@ function attemptsForAct(db: Database, teamId: string, actId: string): number {
     .prepare<[string, string], { n: number }>(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action IN ('residency.woke','residency.wake_failed')
-          AND json_extract(detail, '$.act') = ?`,
+          AND json_extract(detail, '$.act') = ? ${MINTED_HERE}`,
     )
     .get(teamId, actId);
   return row?.n ?? 0;
@@ -621,7 +643,7 @@ function isExhausted(db: Database, teamId: string, actId: string): boolean {
     .prepare<[string, string], { one: number }>(
       `SELECT 1 AS one FROM audit
         WHERE team_id = ? AND action = 'residency.wake_exhausted'
-          AND json_extract(detail, '$.act') = ? LIMIT 1`,
+          AND json_extract(detail, '$.act') = ? ${MINTED_HERE} LIMIT 1`,
     )
     .get(teamId, actId);
   return row != null;
@@ -679,7 +701,7 @@ function workOrderEdgeFailureCount(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action = 'residency.wake_failed'
           AND json_extract(detail, '$.lane_id') = ?
-          AND json_extract(detail, '$.edge') = ?`,
+          AND json_extract(detail, '$.edge') = ? ${MINTED_HERE}`,
     )
     .get(teamId, laneId, edge);
   return row?.n ?? 0;
@@ -697,7 +719,7 @@ function workOrderEdgeWokeCount(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action = 'residency.woke'
           AND json_extract(detail, '$.lane_id') = ?
-          AND json_extract(detail, '$.edge') = ?`,
+          AND json_extract(detail, '$.edge') = ? ${MINTED_HERE}`,
     )
     .get(teamId, laneId, edge);
   return row?.n ?? 0;
@@ -719,7 +741,7 @@ function laneMovedSinceLastWoke(
     .prepare<[string, string, string], { ts: number }>(
       `SELECT ts FROM audit
         WHERE team_id = ? AND action = 'residency.woke'
-          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.lane_id') = ? ${MINTED_HERE}
           AND json_extract(detail, '$.edge') = ?
         ORDER BY ts DESC, id DESC LIMIT 1`,
     )
@@ -745,7 +767,7 @@ function workOrderEdgeStillTrue(
     .prepare<[string, string, string], { detail: string }>(
       `SELECT detail FROM audit
         WHERE team_id = ? AND action = 'residency.wake_failed'
-          AND json_extract(detail, '$.lane_id') = ?
+          AND json_extract(detail, '$.lane_id') = ? ${MINTED_HERE}
           AND json_extract(detail, '$.edge') = ?
         ORDER BY ts DESC, id DESC LIMIT 1`,
     )

@@ -41,7 +41,14 @@ export type FoldStop =
   // attach: a hole, not a fact to invent a row from. (A detach for one is a no-op that advances —
   // the same fact arriving after our stale-node sweep.)
   | { kind: 'unknown_presence_event'; action: string; hub_seq: number }
-  | { kind: 'presence_unborn'; presence: string; action: string; hub_seq: number };
+  | { kind: 'presence_unborn'; presence: string; action: string; hub_seq: number }
+  // Ledger events (ADR 365). There is no `unknown_ledger_event` for an unrecognised VERB — a
+  // ledger row projects into nothing, so a verb this build has never heard of is a row it can
+  // still hold honestly, and blocking would wedge the fold on a fact that decides nothing. The one
+  // refusal is a PROJECTED verb wearing the non-projecting tag: a `lane.*`/`presence.*` action
+  // under `kind: 'ledger'` would land in `audit` with its stamp and never reach its projector,
+  // leaving this daemon's `lanes` silently behind the origin's with no gap to find it by.
+  | { kind: 'mistagged_ledger_event'; action: string; hub_seq: number };
 
 /** The `lane.*` verbs the fold can project. Anything else stops as `unknown_lane_event`. */
 const LANE_VERBS = new Set([
@@ -408,6 +415,37 @@ export function foldBatch(
           hub_seq: event.hub_seq,
         };
         return finish();
+      }
+
+      // The fourth kind: a ledger row (ADR 365). Held in `audit` with its stamp, projected into
+      // nothing — the ledger IS the projection, and `deriveWakeMetrics` reads it there. No seat
+      // resolution: an audit row's `actor` is text, not a foreign key, so a seat this roster lacks
+      // costs nothing and blocking on it would stall the ledger behind git lag.
+      if (event.kind === 'ledger') {
+        const e = event.event;
+        if (e.action.startsWith('lane.') || e.action.startsWith('presence.')) {
+          stop = { kind: 'mistagged_ledger_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        db.prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          e.id,
+          teamId,
+          e.ts,
+          e.actor,
+          e.action,
+          e.target,
+          e.result,
+          e.detail ? JSON.stringify(e.detail) : null,
+          now,
+          event.origin_node,
+          event.origin_seq,
+        );
+        applied += 1;
+        cursor = event.hub_seq;
+        continue;
       }
 
       // The third kind: a presence transition. Same discipline as the lane kind — project first,

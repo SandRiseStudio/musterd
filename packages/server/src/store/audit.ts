@@ -440,6 +440,28 @@ export function appendReplicatedEvent(db: Database, teamId: string, entry: Audit
 /** `lane.*` writers keep their name; the allocator and the SAVEPOINT are the same. */
 export const appendLaneEventRequired = appendReplicatedEvent;
 
+/**
+ * The best-effort verbs that cross the wire as ADR 365 `ledger` events: the wake economy, whose
+ * rows ARE the wake-cost ledger `musterd report` reads (`deriveWakeMetrics`, insights.ts). A wake
+ * paid for on one machine was invisible to every other before this set existed.
+ *
+ * Consulted inside {@link appendAudit} rather than at the ~14 call sites that write these verbs,
+ * because the failure mode of a per-site opt-in is a new call site that silently does not
+ * replicate — the exact defect this closes, one verb later. Adding a verb here is the whole change.
+ *
+ * A verb belongs here only if NOTHING decides on it across machines. These six are read by
+ * deciders locally (rate cap, ADR 262 breaker, wakeability), and those readers are pinned to rows
+ * this machine minted — ADR 365 §3. Widening this set means checking that pinning again.
+ */
+export const REPLICATED_LEDGER_VERBS = new Set([
+  'residency.woke',
+  'residency.wake_failed',
+  'residency.wake_deferred',
+  'residency.wake_exhausted',
+  'residency.wake_cost',
+  'residency.wake_report_rejected',
+]);
+
 /** Insert an audit row and surface failure when the caller's transaction requires the evidence. */
 export function appendAuditRequired(db: Database, teamId: string, entry: AuditEntry): void {
   const now = Date.now();
@@ -467,6 +489,18 @@ export function appendAuditRequired(db: Database, teamId: string, entry: AuditEn
  * swallowed so it can never break the request path it is recording.
  */
 export function appendAudit(db: Database, teamId: string, entry: AuditEntry): void {
+  if (REPLICATED_LEDGER_VERBS.has(entry.action)) {
+    try {
+      appendReplicatedEvent(db, teamId, entry);
+      return;
+    } catch (err) {
+      // The stamp is a nice-to-have; the ROW is the observability contract. A daemon with no
+      // `local_node` row for the team (never enrolled, never messaged) cannot allocate a seq, and
+      // must still keep its own ledger — it falls through to the unstamped append, which reads
+      // exactly as every pre-ADR-364 row does: local, and not replicated.
+      log.warn({ msg: 'ledger_stamp_failed', action: entry.action, err: String(err) });
+    }
+  }
   try {
     appendAuditRequired(db, teamId, entry);
   } catch (err) {

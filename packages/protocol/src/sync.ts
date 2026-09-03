@@ -81,22 +81,45 @@ export type SyncLaneEvent = z.infer<typeof SyncLaneEventSchema>;
 export const SyncPresenceEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('presence') });
 export type SyncPresenceEvent = z.infer<typeof SyncPresenceEventSchema>;
 
+/**
+ * One replicated LEDGER event (ADR 365): a best-effort audit verb that crosses the wire verbatim
+ * and is projected into nothing — the ledger IS the projection. The lane event's shape under its
+ * own tag, drawn from the same allocator, so a node's sequence stays dense across four kinds.
+ *
+ * Why a fourth tag rather than widening the lane filter: a stamped row whose action the fold has
+ * never learned to project stops the fold at `unknown_lane_event`, and these verbs are exactly the
+ * ones no projector exists for. The tag is the reader's licence to append without projecting.
+ *
+ * A ledger event carries no decision. The fold appends it to `audit` and nothing else; every
+ * deciding reader of these verbs stays scoped to rows this machine minted (ADR 365 §3).
+ */
+export const SyncLedgerEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('ledger') });
+export type SyncLedgerEvent = z.infer<typeof SyncLedgerEventSchema>;
+
 /** Any replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
 export const SyncEventSchema = z.union([
   SyncLaneEventSchema,
   SyncPresenceEventSchema,
+  SyncLedgerEventSchema,
   SyncMessageEventSchema,
 ]);
 export type SyncEvent = z.infer<typeof SyncEventSchema>;
 
 /** The id the hub keys `sync_log` on: the envelope's for a message, the audit row's for a lane or presence. */
 export function syncEventId(event: SyncEvent): string {
-  return event.kind === 'lane' || event.kind === 'presence' ? event.event.id : event.envelope.id;
+  return isAuditKind(event) ? event.event.id : event.envelope.id;
+}
+
+/** The three kinds whose payload is an audit row, as opposed to the message's envelope. */
+export function isAuditKind<T extends { kind?: string | undefined }>(
+  event: T,
+): event is T & { kind: 'lane' | 'presence' | 'ledger' } {
+  return event.kind === 'lane' || event.kind === 'presence' || event.kind === 'ledger';
 }
 
 /** The team slug the event claims, for the hub's "pushed into the team it names" check. */
 export function syncEventTeam(event: SyncEvent): string {
-  return event.kind === 'lane' || event.kind === 'presence' ? event.team : event.envelope.team;
+  return isAuditKind(event) ? event.team : event.envelope.team;
 }
 
 /**
@@ -106,7 +129,7 @@ export function syncEventTeam(event: SyncEvent): string {
  * nothing to bind and nothing to refuse.
  */
 export function syncEventActor(event: SyncEvent): string | null {
-  if (event.kind === 'lane' || event.kind === 'presence') return event.event.actor ?? null;
+  if (isAuditKind(event)) return event.event.actor ?? null;
   return event.envelope.from;
 }
 
@@ -161,9 +184,15 @@ export const SyncPullPresenceEventSchema = SyncPresenceEventSchema.extend({
 });
 export type SyncPullPresenceEvent = z.infer<typeof SyncPullPresenceEventSchema>;
 
+export const SyncPullLedgerEventSchema = SyncLedgerEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullLedgerEvent = z.infer<typeof SyncPullLedgerEventSchema>;
+
 export const SyncPullEventSchema = z.union([
   SyncPullLaneEventSchema,
   SyncPullPresenceEventSchema,
+  SyncPullLedgerEventSchema,
   SyncPullMessageEventSchema,
 ]);
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;
