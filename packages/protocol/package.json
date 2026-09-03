@@ -35,6 +35,14 @@
     "./project": {
       "types": "./dist/project.d.ts",
       "default": "./dist/project.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "default": "./dist/model.js"
+    },
+    "./posture": {
+      "types": "./dist/posture.d.ts",
+      "default": "./dist/posture.js"
     }
   },
   "files": [
