@@ -222,6 +222,40 @@ describe('seat memory replication (ADR 366)', () => {
     expect(getMemory(joiner.db, nickOn(joiner.db, joinerTeam()).id)).toBeNull();
   });
 
+  it('a clear survives an OLDER save that arrives after it — the clear keeps its clock once the row is gone', async () => {
+    // gptbot's decline of lane 01M1JNY14F (2026-09-03), reproduced: the joiner saves a note and
+    // does NOT push yet; the hub clears (a newer fact); the hub folds nothing of the joiner's;
+    // then the joiner's older save crosses. Before the fix the hub had no row to compare against
+    // and applied it — a note the seat deliberately dropped walked back in. ADR 366 decision 4.
+    await roundTrip(); // bind nick to the joiner first (its j-0 crosses), as in the repro
+    await call(
+      'PUT',
+      joinerBase,
+      '/teams/bravo/memory',
+      { headline: 'stale', body: 'minted before the clear' },
+      nickOnJoiner,
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    const cleared = await call('DELETE', hubBase, '/teams/bravo/memory', undefined, nickOnHub);
+    expect(cleared.status).toBe(204);
+    // The hub's own clear is folded from its loopback (a skip) before the joiner's save arrives.
+    await pushTeam(hubCtx(), hubTeam());
+    await pullTeam(hubCtx(), hubTeam());
+    expect(getMemory(hub.db, nickOn(hub.db, hubTeam()).id)).toBeNull();
+
+    // Now the older save crosses to the hub.
+    await pushTeam(joinerCtx, joinerTeam());
+    await pullTeam(hubCtx(), hubTeam());
+    expect(getMemory(hub.db, nickOn(hub.db, hubTeam()).id)).toBeNull();
+
+    // And the clear reaches the joiner, where the stale note still sits, and removes it.
+    await roundTrip();
+    expect(getMemory(joiner.db, nickOn(joiner.db, joinerTeam()).id)).toBeNull();
+    await roundTrip();
+    expect(getMemory(hub.db, nickOn(hub.db, hubTeam()).id)).toBeNull();
+    expect(getMemory(joiner.db, nickOn(joiner.db, joinerTeam()).id)).toBeNull();
+  });
+
   it('a save made AFTER a clear survives the clear arriving late', async () => {
     // Clear on the hub, then a newer save on the joiner, then both cross. The clear is a fact with
     // a clock; it is about the note that the new note replaced, and must lose to the newer save.

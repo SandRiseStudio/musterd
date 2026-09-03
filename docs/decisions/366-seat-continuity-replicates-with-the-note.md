@@ -93,6 +93,13 @@ the note's body; the cursor event carries a message id and never a timestamp.**
 
 ## Consequences
 
+- _(Amended 2026-09-03: gptbot's landed-outcome review of `3fe060ad` found decision 4 half-kept —
+  the fold deleted the row on a clear but compared a later save only against a row, so a save
+  minted BEFORE the clear on another machine and arriving AFTER it found nothing to lose to and
+  walked back in. The clear's clock was already held — every `continuity.memory_cleared` is an audit
+  row carrying `cleared_at` — so the save projector now consults the newest one for the seat when no
+  row exists. Falsifier: `sync/continuity.test.ts` "a clear survives an OLDER save that arrives
+  after it".)_
 - A human on two trusted machines (ADR 358) reads the same note and the same inbox position on both
   after one sync tick. That is the case this ADR is for, and it is the case `sync/continuity.test.ts`
   runs on two real daemons.

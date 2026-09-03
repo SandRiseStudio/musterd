@@ -270,7 +270,8 @@ const CONTINUITY_VERBS = new Set([
  */
 function projectContinuityEvent(
   db: Database,
-  seat: { id: string },
+  teamId: string,
+  seat: { id: string; name: string },
   event: SyncPullLaneEvent['event'],
   now: number,
 ): 'applied' | 'unknown' | 'cursor_unborn' {
@@ -284,6 +285,20 @@ function projectContinuityEvent(
       >('SELECT saved_at FROM seat_memory WHERE member_id = ?')
       .get(seat.id);
     if (local && local.saved_at >= savedAt) return 'applied';
+    // No local note is NOT "nothing to compare against" (gptbot's decline of lane 01M1JNY14F,
+    // 2026-09-03): a clear deleted the row, and a save minted BEFORE that clear on another machine
+    // can still arrive after it. The clear's clock is held — every `continuity.memory_cleared` is an
+    // audit row with `cleared_at`, this daemon's own included — so the delayed older save loses to
+    // it here exactly as it would have lost to the row the clear removed. ADR 366 decision 4.
+    if (!local) {
+      const cleared = db
+        .prepare<[string, string], { t: number | null }>(
+          `SELECT MAX(json_extract(detail, '$.cleared_at')) AS t FROM audit
+            WHERE team_id = ? AND action = 'continuity.memory_cleared' AND actor = ?`,
+        )
+        .get(teamId, seat.name);
+      if (cleared?.t != null && cleared.t >= savedAt) return 'applied';
+    }
     db.prepare(
       `INSERT INTO seat_memory (member_id, headline, body, saved_at)
        VALUES (?, ?, ?, ?)
@@ -650,7 +665,7 @@ export function foldBatch(
         }
         // Project first, so a stop lands BEFORE the audit row does — a row present for an event
         // this daemon never applied would advance heldHead past it.
-        const outcome = projectContinuityEvent(db, seat, e, now);
+        const outcome = projectContinuityEvent(db, teamId, seat, e, now);
         if (outcome === 'unknown') {
           stop = { kind: 'unknown_continuity_event', action: e.action, hub_seq: event.hub_seq };
           return finish();
