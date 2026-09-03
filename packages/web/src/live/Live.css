@@ -880,6 +880,24 @@
 .lc-office__mark svg {
   border-radius: 4px;
 }
+
+/* ─── the corner the route speaks from ────────────────────────────────────
+   Stacked above the watermark, same right edge, and unlike the watermark NOT hidden from
+   assistive tech and NOT washed out: what sits here is a fact the page asserts about itself
+   (where to find us; that this feed may blink while the team ships the thing being watched).
+   `/broadcast` fills it; `/live` leaves it empty. Content-sized so the room keeps every pixel. */
+.lc-office__corner {
+  position: absolute;
+  right: var(--lc-5);
+  bottom: calc(var(--lc-4) + 26px);
+  z-index: var(--lc-z-overlay);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--lc-2);
+  pointer-events: none;
+  max-width: 44%;
+}
 .lc-office__collapse .lc-collapse {
   background: rgba(20, 15, 12, 0.55);
   border-color: rgba(255, 233, 208, 0.22);
@@ -2097,24 +2115,29 @@
  * on a bubble carrying a recipient chip it landed halfway down the body instead of at the corner. */
 .lc-speech__mark {
   position: absolute;
-  top: -7px;
-  right: -7px;
+  top: -10px;
+  right: -10px;
   display: grid;
   place-items: center;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
   box-sizing: border-box;
   border-radius: 999px;
   background: var(--lc-paper-2);
   color: var(--lc-paper-ink);
   font-family: var(--font-mono, monospace);
-  font-size: var(--lc-type-tag);
+  /* One size up from the nameplate's own line, on a 22px coin: the first cut was a 15px tag-sized
+     badge and nick could not read the act off the stream (2026-09-03) — the mark is the one thing
+     on the bubble that says WHAT happened, so it earns the size, and the sender's ring it sits on
+     still says WHO. */
+  font-size: var(--lc-type-aside);
   font-weight: 700;
   line-height: 1;
   box-shadow:
-    inset 0 0 0 1px color-mix(in srgb, var(--lc-speech-tone) 70%, var(--lc-paper-rim)),
-    0 1px 3px -1px var(--lc-paper-drop);
+    inset 0 0 0 1.5px color-mix(in srgb, var(--lc-speech-tone) 78%, var(--lc-paper-rim)),
+    0 1px 0 var(--lc-paper-sheen),
+    0 2px 5px -1px var(--lc-paper-drop);
 }
 /* The two loud marks thicken the member's ring rather than recolouring it — weight is the axis, and
    the hue stays the answer to "who". */

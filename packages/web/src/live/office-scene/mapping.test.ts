@@ -162,6 +162,20 @@ describe('actToEvent', () => {
  * `addressee: null` at the emit site left every suite green, because only the pure rule
  * (speechAddressee) had tests — not the construction that calls it. */
 describe('speechEventFor', () => {
+  /* The sender is the person under the bubble, so a body that opens with their own name says it
+     twice. Pinned at the construction site (this is where `text` is built), and pinned narrowly:
+     only the SENDER's name, only at the start, never the recipient chip. */
+  it('drops the leading "name: " when the name is the speaker\'s own', () => {
+    expect(speechEventFor(env('status_update', { body: 'ada: #12 merged' })).text).toBe('#12 merged');
+    expect(speechEventFor(env('status_update', { body: 'Ada:  #12 merged' })).text).toBe('#12 merged');
+  });
+  it('leaves another name, a mid-line name, and a body that is nothing but the name alone', () => {
+    expect(speechEventFor(env('message', { body: 'ben: you were right' })).text).toBe('ben: you were right');
+    expect(speechEventFor(env('message', { body: 'so ada: no' })).text).toBe('so ada: no');
+    expect(speechEventFor(env('message', { body: 'ada:' })).text).toBe('ada:');
+    expect(speechEventFor(env('message', { body: 'adam: hi' })).text).toBe('adam: hi');
+  });
+
   it('a directed act carries its recipient onto the bubble — the wiring, not just the rule', () => {
     expect(speechEventFor(env('message', { body: 'you were right' }))).toEqual({
       kind: 'speech',

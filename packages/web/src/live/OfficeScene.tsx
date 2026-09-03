@@ -93,6 +93,7 @@ export function OfficeScene({
   onReady,
   topSlot,
   bandSlot,
+  cornerSlot,
   /** Hybrid nameplate work cues vs in-panel WorkStack (`stack`) vs neither. Default none on the
    *  plate — work lives in WorkStack on `/live` (nick, 2026-07-30). */
   workCues = 'none',
@@ -126,6 +127,9 @@ export function OfficeScene({
    * remaining pixel. `/broadcast` passes nothing and stays full-bleed.
    */
   bandSlot?: ReactNode;
+  /** Chrome stacked in the bottom-right corner above the product watermark — the route's own
+   * assertions about the page (a notice, a contact line). `/broadcast` fills it; `/live` does not. */
+  cornerSlot?: ReactNode;
   workCues?: 'hybrid' | 'stack' | 'none';
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -289,6 +293,7 @@ export function OfficeScene({
         {/* The product's mark on the room itself — for every frame that leaves this app (a clip, a
             screenshot, the stream), quiet enough to live under everything. The overlay card carries
             the TEAM's name; this corner carries the product's. */}
+        {!collapsed && cornerSlot && <div className="lc-office__corner">{cornerSlot}</div>}
         {!collapsed && (
           <div className="lc-office__mark" aria-hidden="true">
             <MusterdWord className="lc-office__mark-lockup" chipSize={15} />
