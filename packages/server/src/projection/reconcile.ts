@@ -115,6 +115,9 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       lifecycleUntil,
       workingHours: seat.working_hours ?? null,
       slackUserId: seat.slack_user_id ?? null,
+      // ADR 374: the file owns the hue. Absent in the file is a statement — null — not a gap for
+      // the daemon to fill; otherwise two machines reconciling the same roster would disagree.
+      hue: seat.hue ?? null,
     };
     const existing = getMemberByName(db, team.id, name); // includes tombstoned rows
     if (!existing) {
@@ -127,6 +130,7 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
         lifecycleUntil: fields.lifecycleUntil,
         workingHours: fields.workingHours ?? null,
         slackUserId: fields.slackUserId ?? null,
+        hue: fields.hue ?? null,
       });
       result.added.push(name);
       result.minted[name] = token;
@@ -142,7 +146,8 @@ export function reconcileTeam(db: Database, spec: TeamSpec): ReconcileResult {
       existing.lifecycle_until !== fields.lifecycleUntil ||
       existing.working_hours !==
         (fields.workingHours ? JSON.stringify(fields.workingHours) : null) ||
-      existing.slack_user_id !== fields.slackUserId
+      existing.slack_user_id !== fields.slackUserId ||
+      existing.hue !== (fields.hue ?? null)
     ) {
       // UPDATE in place — id, token_hash, bound_at preserved (live session unaffected).
       updateMemberIdentity(db, existing.id, fields);

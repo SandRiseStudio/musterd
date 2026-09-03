@@ -381,3 +381,34 @@ describe('the agent workspace receives its own scoped bootstrap credential', () 
     );
   });
 });
+
+describe('musterd agent <name> --hue (ADR 374)', () => {
+  const cwd0 = process.cwd();
+  beforeEach(() => {
+    vi.clearAllMocks();
+    h.rosterHome = {};
+    h.agentKeys = { ritual: 'mskey_team' };
+    h.workspace.dir = mkdtempSync(join(tmpdir(), 'magent-hue-'));
+  });
+  afterEach(() => {
+    process.chdir(cwd0);
+    rmSync(h.workspace.dir, { recursive: true, force: true });
+  });
+
+  it('writes the hue into the seat file on a file-backed team and sends it to the daemon', async () => {
+    h.rosterHome = { ritual: h.workspace.dir };
+    await agentCommand(parseArgs(['June', '--hue', '212']));
+    expect(h.writeSeatFile).toHaveBeenCalledWith(
+      h.workspace.dir,
+      'June',
+      expect.objectContaining({ kind: 'agent', hue: 212 }),
+    );
+    expect(h.addMember).toHaveBeenCalledWith('ritual', expect.objectContaining({ hue: 212 }));
+  });
+
+  it('refuses a hue off the wheel before touching anything', async () => {
+    await expect(agentCommand(parseArgs(['June', '--hue', '360']))).rejects.toThrow(/0.*359/);
+    expect(h.writeSeatFile).not.toHaveBeenCalled();
+    expect(h.addMember).not.toHaveBeenCalled();
+  });
+});

@@ -45,7 +45,8 @@ function computeData(
         activity: m.activity ?? (m.presence === 'offline' ? 'offline' : 'active'),
         posture: memberPosture(m),
         state: m.state ?? null,
-        color: memberColor(m.name, kind),
+        color: memberColor(m.name, kind, m.hue),
+        hue: m.hue ?? null,
         role: m.role,
         surface: live?.surface ?? null,
         model: live?.model ?? null,
@@ -167,7 +168,7 @@ export function OfficeScene({
   // in the working list (an arrival, above all), so this reads the roster rather than the entries.
   const narrator = caption ? roster.find((m) => m.name === caption.who) : undefined;
   const captionColor = narrator
-    ? memberColor(narrator.name, narrator.kind === 'human' ? 'human' : 'agent')
+    ? memberColor(narrator.name, narrator.kind === 'human' ? 'human' : 'agent', narrator.hue)
     : undefined;
 
   useEffect(() => {

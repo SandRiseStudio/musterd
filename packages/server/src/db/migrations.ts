@@ -637,7 +637,8 @@ export const MIGRATIONS: Migration[] = [
           last_offline_reason TEXT,
           working_hours TEXT,
           roles TEXT,
-          slack_user_id TEXT
+          slack_user_id TEXT,
+          hue INTEGER
         );
         INSERT INTO members_new (${colList}) SELECT ${colList} FROM members;
         DROP TABLE members;
@@ -1535,6 +1536,17 @@ export const MIGRATIONS: Migration[] = [
         .map((c) => c.name);
       if (!cols.includes('refused_json'))
         db.exec('ALTER TABLE sync_push_cursor ADD COLUMN refused_json TEXT');
+    },
+  },
+  {
+    // ADR 374 — a member's colour is a hue the seat file owns. One nullable INTEGER, 0–359. No
+    // backfill on purpose: on a file-backed team the file is the source and reconcile projects it;
+    // a backfill here would recolour every seat on upgrade and be overwritten by the next reconcile
+    // anyway. `musterd team hue --assign-missing` assigns, as a reviewable diff.
+    version: 65,
+    up: (db) => {
+      const cols = db.prepare("SELECT name FROM pragma_table_info('members')").pluck().all();
+      if (!cols.includes('hue')) db.exec('ALTER TABLE members ADD COLUMN hue INTEGER');
     },
   },
 ];

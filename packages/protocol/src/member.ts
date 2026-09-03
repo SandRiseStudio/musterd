@@ -46,6 +46,11 @@ export const MemberSchema = z.object({
   working_hours: WorkingHoursSchema.nullish(),
   /** ADR 311: optional Slack identity used to attribute captured Seeds to this human Member. */
   slack_user_id: z.string().min(1).nullish(),
+  /** The member's colour, as an HSL hue 0–359 (ADR 374). One number, never a hex: every surface
+   *  derives lightness from it so the colour clears AA wherever it is painted. On a file-backed
+   *  team the seat file owns it and this is reconcile's projection; null/absent means "not
+   *  assigned" and a renderer falls back to its name hash — deterministic, so machines agree. */
+  hue: z.number().int().min(0).max(359).nullish(),
   /** Account status — Axis 1 (ADR 070). Optional for back-compat; the server always resolves it. */
   account_status: AccountStatusSchema.optional(),
   /** Effective capabilities (ADR 070). Optional for back-compat; the server always resolves it. */

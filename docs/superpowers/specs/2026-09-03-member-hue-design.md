@@ -45,12 +45,14 @@ visor) and from the roster chip, which were always the load-bearing tell.
 - `Member.hue: z.number().int().min(0).max(359).nullish()`. `MemberSummary` extends `Member`, so
   the roster carries it with no further change. Nullish for back-compat: an older daemon omits it
   and every consumer falls back exactly as today.
-- `HUE_MIN_SEPARATION = 15` (degrees). 24 fully separated slots on the wheel; the dogfood team has
-  18 seats. **HSL hue is not perceptually uniform** (finding 2): 15° across yellow→green reads
-  closer than 15° across blue. Before settling on the metric, a falsifier test renders the 24 HSL
-  slots through `memberAvatar`, converts to OKLab and asserts a pairwise ΔE floor. If the floor
-  fails, `assignHue`/`hueConflict` measure separation in OKLCH hue (the stored number stays an HSL
-  degree — only the distance changes). The measured numbers go in the ADR either way.
+- `HUE_MIN_SEPARATION = 12`, **in OKLCH degrees** — the stored number stays an HSL degree (it is
+  what CSS and the canvas consume); `hueSeparation(a, b)` converts both to OKLCH hue at the web's
+  fill (`hsl(h, 68%, 62%)`) before it measures. **HSL hue is not perceptually uniform** (finding
+  2), and it was measured before the metric was chosen: fifteen HSL degrees between 105° and 120°
+  is ~5° of OKLCH (ΔE 0.026, two greens); between 180° and 195° it is ~27° (ΔE 0.09, cyan against
+  blue) — a 5× spread across the wheel. Twelve rather than fifteen because `assignHue` is greedy
+  from hashed seeds and a greedy walk fits fewer seats than 360/separation: at fifteen it seated
+  17–20 over fifty trials (median 18; the team has 18), at twelve 22–26 (median 24).
 - `defaultHue(name): number` — the existing golden-ratio hash, over the full wheel.
 - `assignHue(seed, taken: readonly number[]): number` — the nearest hue to `seed` (walking outward
   alternately ±1°) that is ≥ `HUE_MIN_SEPARATION` from every value in `taken`, on the circle. When

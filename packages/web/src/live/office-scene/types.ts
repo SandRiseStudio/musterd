@@ -30,8 +30,11 @@ export interface OfficeNode {
    */
   posture: Posture;
   state: string | null;
-  /** The member's signature colour — `memberColor(name, kind)`, an `hsl()` string. */
+  /** The member's signature colour — `memberColor(name, kind, hue)`, an `hsl()` string. */
   color: string;
+  /** The stored hue behind `color` (ADR 374), or null when the name hash painted it — carried so the
+   *  speech ink (`memberInk`) can be derived from the same number the fill was. */
+  hue?: number | null;
   role: string;
   /** Live presence surface (harness) — for the floating nameplate identity line. */
   surface: string | null;

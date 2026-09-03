@@ -1,5 +1,5 @@
 import { type Binding, resolveAttestedModel } from '@musterd/protocol';
-import { flagStr, type Parsed } from '../args.js';
+import { flagStr, type Parsed, flagHue } from '../args.js';
 import { loadConfig, saveBinding, saveWorkspaceSpec } from '../config.js';
 import { CliError } from '../errors.js';
 import { infraTouchWarning } from '../infra-gate.js';
@@ -44,6 +44,9 @@ export async function agentCommand(
   // local setup (workspace provisioning); neither implies the other. Pre-rename, one flag did both.
   const role = flagStr(parsed.flags, 'role');
   const profileName = flagStr(parsed.flags, 'profile');
+  // ADR 374: the seat's colour, if the creator chose one; otherwise assigned at write (file-backed)
+  // or by the daemon (db-only). Validated first so a typo touches nothing.
+  const hue = flagHue(parsed.flags);
   // Model attestation (ADR 101): persist a *declared* model into the seat's binding.json so the adapter
   // attests by default instead of rotting to `unknown`. `--model` wins, else the ambient env the CLI
   // runs in (MUSTERD_MODEL / ANTHROPIC_MODEL, via the shared resolver). Never a guess — undefined stays
@@ -93,14 +96,24 @@ export async function agentCommand(
   // ADR 058 §5: write the seat file first for a file-backed team so the file stays the single writer;
   // db-only teams skip this and the daemon originates. addMember revives a soft-removed name (ADR 065).
   const home = loadConfig().rosterHome[team];
-  if (home) writeSeatFile(home, name, { kind: 'agent', ...(role ? { role } : {}) });
+  if (home)
+    writeSeatFile(home, name, {
+      kind: 'agent',
+      ...(role ? { role } : {}),
+      ...(hue !== undefined ? { hue } : {}),
+    });
   // Declare the seat (v0.3: no per-seat token — the agent claims it with the team agent key on launch).
   // Idempotent: if the seat is already declared (e.g. you ran `team add <name>` first, or re-ran this
   // command), reuse it and just (re)build the workspace instead of dead-ending on a conflict — a
   // ready-to-run workspace is the whole point of this command. Guard against reusing a *human* seat.
   let reused = false;
   try {
-    await http.addMember(team, { name, kind: 'agent', ...(role ? { role } : {}) });
+    await http.addMember(team, {
+      name,
+      kind: 'agent',
+      ...(role ? { role } : {}),
+      ...(hue !== undefined ? { hue } : {}),
+    });
   } catch (err) {
     if (!(err instanceof CliError) || err.code !== 'conflict') throw err;
     const { members } = await http.roster(team);
