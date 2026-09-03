@@ -4,8 +4,10 @@ import {
   BINDING_DIR,
   BINDING_FILE,
   bindingSeat,
+  envelopePosition,
   resolveAttestation,
   resolveAttestedModel,
+  type Envelope,
   type MemberKind,
   type MemberSummary,
 } from '@musterd/protocol';
@@ -331,12 +333,30 @@ export async function pendingActionSummary(
   http: HttpClient,
   team: string,
   me: string,
-): Promise<{ count: number; since: number } | undefined> {
-  const res = await http.inbox(team, { unread: true });
-  const waiting = openActionNeeded(res.messages, me, res.answered ?? [], dischargedIds(res));
+): Promise<{ count: number; since: number; waiting: Envelope[] } | undefined> {
+  // Walk EVERY unread page. A pageless read is a bounded PREFIX (the daemon caps it at 200 and says
+  // `truncated`, ADR 287); one page counted "acts in the oldest 200 unread" and called it the total —
+  // measured 2026-09-03 as "⚑ 8 acts waiting" on an inbox holding 120, with `since` the oldest of
+  // that page. Same walk as `inbox`: repeat the first request narrowed by `since` = the last
+  // envelope's receipt position, and union the server-computed answered/discharged sets across pages.
+  const messages: Envelope[] = [];
+  const answered = new Set<string>();
+  const discharged = new Set<string>();
+  let page = await http.inbox(team, { unread: true });
+  for (;;) {
+    messages.push(...page.messages);
+    for (const id of page.answered ?? []) answered.add(id);
+    for (const id of dischargedIds(page)) discharged.add(id);
+    if (!page.truncated || page.messages.length === 0) break;
+    page = await http.inbox(team, {
+      unread: true,
+      since: envelopePosition(page.messages[page.messages.length - 1]!),
+    });
+  }
+  const waiting = openActionNeeded(messages, me, answered, discharged);
   if (waiting.length === 0) return undefined;
   const since = waiting.reduce((min, m) => Math.min(min, m.ts), Infinity);
-  return { count: waiting.length, since };
+  return { count: waiting.length, since, waiting };
 }
 
 /**

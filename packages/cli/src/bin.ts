@@ -53,6 +53,7 @@ import { wakeContextCommand } from './commands/wake-context.js';
 import { whoamiCommand } from './commands/whoami.js';
 import { wireCommand } from './commands/wire.js';
 import { CliError } from './errors.js';
+import { exitAfterFlush } from './exit.js';
 import {
   nearestCommand,
   renderCommandHelp,
@@ -305,12 +306,13 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
 }
 
 main(process.argv.slice(2))
-  .then((code) => process.exit(code))
+  .then((code) => exitAfterFlush(code))
   .catch((err) => {
     if (err instanceof CliError) {
       process.stderr.write(`${theme.err('✗')} ${err.message}\n`);
-      process.exit(err.exitCode);
+      exitAfterFlush(err.exitCode);
+      return;
     }
     process.stderr.write(`${theme.err(sym.err)} ${(err as Error).message}\n`);
-    process.exit(1);
+    exitAfterFlush(1);
   });

@@ -1,5 +1,5 @@
 import type { Parsed } from '../args.js';
-import { renderReachabilityNudge } from '../render/rows.js';
+import { renderReachabilityNudge, renderWaitingActs } from '../render/rows.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 
 /**
@@ -31,7 +31,10 @@ export async function nudgeCommand(parsed: Parsed): Promise<number> {
     // line would be noise on every parked prompt. Absence of output IS the empty state here.
     if (!pending) return 0;
     const line = renderReachabilityNudge(pending.count, pending.since, identity.name);
-    if (line) process.stdout.write(line + '\n');
+    if (!line) return 0;
+    // The acts themselves, not only the count: the human at the prompt can act on a line that
+    // names who asked for what; a bare count pointed at an inbox it then had to go and read.
+    process.stdout.write([line, ...renderWaitingActs(pending.waiting)].join('\n') + '\n');
   } catch {
     // Best-effort: a blocked approval prompt must never be disturbed by a failing nudge.
   }
