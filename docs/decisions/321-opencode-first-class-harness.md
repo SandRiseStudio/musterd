@@ -157,6 +157,8 @@ the fallback itself for every future harness is its own decision, not smuggled i
 Registered as `'opencode'` in `commands/host.ts`. Watchdog, roster verification, and lease-bound
 verification are the shared mechanics — ADR 241's invariant needs no opencode-specific thought.
 
+_(Amended 2026-09-03: the "no hook table" premise below is corrected by ADR 362; the heartbeat-primary conclusion stands. See the amendment below.)_
+
 ### 8. Capture: heartbeat-side reconciliation only — no plugins
 
 Opencode has no hook table, so SessionCapture-on-start/end does not exist for it in v1. Capture
@@ -221,3 +223,5 @@ The one measured claim worth keeping once live: an opencode seat's enumerated-li
 should disagree with slot-based verdicts at the same rate other CLI harnesses do; if opencode
 seats show systematically stale or absent enumeration against a working binary, that falsifies
 the CLI-as-evidence-boundary choice in §6 and reopens reading the storage directly.
+
+_(Amended 2026-09-03: §8's "no hook table" premise is superseded by ADR 362 — upstream now ships a plugin event channel (`session.created`/`session.idle`/`message.updated` via an `event` dispatcher, project-local `.opencode/plugins/` or npm `plugin:` entries). The §8 conclusion is reaffirmed on new grounds, not inherited: resume via `--continue`/`--session` fires no bus event (upstream #5409, open), and resume is wake's primary path, so a capture plugin would be blind where residency looks most; plugin-as-executable-code also crosses ADR 027's guest posture further than §8 weighed. No plugin ships; revisit is falsifier-gated per ADR 362 Decision 3. The `step_finish` `part.cost` USD field is recorded there as available wake-cost evidence for lane 01M1HJY3JF.)_
