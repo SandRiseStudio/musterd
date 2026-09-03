@@ -47,7 +47,6 @@ export const WRITE_TOOLS: ReadonlySet<string> = new Set<string>([
   'lane_handoff',
   'lane_update',
   'lane_submit',
-  'lane_ready',
   'lane_resolve',
 ]);
 

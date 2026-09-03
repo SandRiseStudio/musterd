@@ -131,3 +131,7 @@ human asks get the same framing plus peer findings.
   co-author overlap above is surfaced rather than excluded.
 - **Experiment.** First week after deploy: fraction of closes that used `lane_submit` /
   `awaiting_acceptance` vs direct `lane_resolve`; spot-check ask bodies contain the checklist.
+
+---
+
+_Amendment (dated 2026-09-03, surface survey #1245 item 2, lane 01M1MMRHY6): the deprecated aliases `lane_ready` / `musterd lane ready` kept for compatibility by this ADR are removed — their one-epoch retention elapsed long ago (FEATURE_EPOCH has moved several times since July). `lane_submit` / `musterd lane submit` is the only spelling. The Decision above is unchanged._

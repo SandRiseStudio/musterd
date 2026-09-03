@@ -412,25 +412,6 @@ export function registerLanes(
     laneSubmitHandler,
   );
 
-  // Deprecated alias for lane_submit (ADR 192) — keep registered so older sessions/harness memory work.
-  server.registerTool(
-    'lane_ready',
-    {
-      description: 'Deprecated alias for lane_submit (ADR 192) — prefer lane_submit.',
-      inputSchema: {
-        id: z.string().describe('lane id'),
-        pr: z.number().int().optional().describe('landed PR number; omit for a local merge'),
-        sha: z.string().optional().describe('squash-merge SHA on main'),
-        authorized_by: z
-          .string()
-          .optional()
-          .describe('the human whose authority the merge ran under'),
-        branch: z.string().optional().describe('branch carrying the work'),
-      },
-    },
-    laneSubmitHandler,
-  );
-
   server.registerTool(
     'lane_resolve',
     {

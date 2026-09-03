@@ -347,7 +347,7 @@ function describeWakePool(p: FamilyPosture, now: number = Date.now()): string {
 
 /**
  * One bounded human/agent-readable line for a posture — used where the posture rides an act or a
- * response and must not balloon (e.g. the `lane_ready` no-candidate sanction). Never one entry per
+ * response and must not balloon (e.g. the `lane_submit` no-candidate sanction). Never one entry per
  * seat: the wake pool truncates at three names.
  */
 export function describeFamilyPosture(p: FamilyPosture): string {

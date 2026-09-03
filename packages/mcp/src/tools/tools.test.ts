@@ -1787,17 +1787,6 @@ describe('lane_submit merge verification (merge-verified submit)', () => {
       merged: { verification: 'unattested' },
     });
   });
-
-  it('the deprecated lane_ready alias gets the same refusal', async () => {
-    const updateLane = vi.fn(async () => ({ lane: submittedLane, warnings: [] }));
-    const handlers = captureAll(
-      (s: any, c: any) => registerLanes(s, c, async () => 'not_ancestor' as any),
-      { updateLane } as Partial<MusterdClient>,
-    );
-    const out = text(await handlers['lane_ready']!({ id: 'L1', sha: 'abc123f' }));
-    expect(out).toContain('not on origin/main');
-    expect(updateLane).not.toHaveBeenCalled();
-  });
 });
 
 describe('lane_resolve merge verification (done means landed — the #997/#998 aliasing)', () => {

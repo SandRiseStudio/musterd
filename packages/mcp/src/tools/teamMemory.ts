@@ -10,8 +10,8 @@ import { errorResult, notReadyMessage, textResult } from './format.js';
  * Team memory (ADR 327): findings saved so the whole team can find them. `team_insight_save`
  * writes an `insight` act — team-visible by intent, the opposite of seat memory's privacy (ADR
  * 093); `team_insight_search` is the pull-only read over a derived FTS fold of the log (a rebuildable
- * cache, never a source of truth — ADR 259). `team_memory_search` remains as a deprecated alias for
- * one epoch (ryder finding on #1073 — one-meaning-per-word, ADR 296). Durable findings still belong
+ * cache, never a source of truth — ADR 259). (The `team_memory_search` alias from the 2026-08-27 rename was
+ * removed 2026-09-03 after its one-epoch retention — ADR 296 one-meaning-per-word.) Durable findings still belong
  * in docs/wiki/ eventually: saving an insight is the fast tier, promoting one into the wiki is
  * the governed act.
  */
@@ -100,16 +100,6 @@ export function registerTeamMemory(
     'team_insight_search',
     {
       description: SEARCH_DESCRIPTION,
-      inputSchema: searchInputSchema,
-    },
-    searchHandler,
-  );
-
-  // Deprecated alias — keep for one epoch so existing callers don't bounce (ADR 296 one-meaning-per-word).
-  server.registerTool(
-    'team_memory_search',
-    {
-      description: `[deprecated: use team_insight_search] ${SEARCH_DESCRIPTION}`,
       inputSchema: searchInputSchema,
     },
     searchHandler,
