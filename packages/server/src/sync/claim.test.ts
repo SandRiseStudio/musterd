@@ -13,6 +13,7 @@ import { addMember, getMemberByName, mintCredential } from '../store/members.js'
 import { insertMessage, localNodeForTeam } from '../store/messages.js';
 import { unbindSeat } from '../store/nodes.js';
 import { touchAmbientPresence } from '../store/presence.js';
+import { claimWakeLeases, enrollResidency } from '../store/residency.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { Hub } from '../transport/hub.js';
 import { pullTeam } from './pull.js';
@@ -620,5 +621,112 @@ describe('ADR 361 — release, handoff and close on a joiner are decided by the 
     await hubToJoiner();
     expect(actsOn(hub.db, hubTeam().id, 'lane_claim', laneId)).toBe(1);
     expect(actsOn(joiner.db, joinerTeam().id, 'lane_claim', laneId)).toBe(1);
+  });
+});
+
+describe('a directed act folded from another machine wakes the recipient where they live (residence 3 stays local)', () => {
+  const HOST = 'joiner-laptop.local';
+  const enrollOn = (server: RunningServer, name: string) => {
+    const team = getTeamBySlug(server.db, 'bravo')!;
+    const member = getMemberByName(server.db, team.id, name)!;
+    enrollResidency(server.db, team.id, {
+      member_id: member.id,
+      harness: 'claude-code',
+      host: HOST,
+      grant_id: 'g1',
+      authorized_by: 'nick',
+    });
+  };
+
+  it("a handoff minted on the hub for a seat resident on the joiner folds there and the joiner's host poll leases a wake for it; the hub, where the seat is not resident, leases nothing", async () => {
+    enrollOn(joiner, 'ada'); // ada lives on the joiner and is offline there
+    const laneId = await laneOnBoth('w');
+    // nick, resident on the hub, claims and hands the lane to ada — the act is minted on the hub.
+    const claimed = await patch(
+      hubBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { owner_seat: 'nick' },
+      nickOnHub,
+    );
+    expect(claimed.status).toBe(200);
+    const handed = await patch(
+      hubBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { owner_seat: 'ada', handoff_note: 'yours, from the other machine' },
+      nickOnHub,
+    );
+    expect(handed.status).toBe(200);
+    const handoffId = hub.db
+      .prepare<
+        [string],
+        { id: string }
+      >("SELECT id FROM messages WHERE team_id = ? AND act = 'handoff' ORDER BY ts DESC LIMIT 1")
+      .get(hubTeam().id)!.id;
+
+    // The hub cannot wake ada: no residency row here.
+    expect(claimWakeLeases(hub.db, hubTeam().id, 'bravo', HOST, 45_000)).toEqual([]);
+
+    await hubToJoiner();
+    expect(
+      joiner.db
+        .prepare<[string], { n: number }>('SELECT COUNT(*) AS n FROM messages WHERE id = ?')
+        .get(handoffId),
+    ).toEqual({ n: 1 });
+    const orders = claimWakeLeases(joiner.db, joinerTeam().id, 'bravo', HOST, 45_000);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({ seat: 'ada', act_id: handoffId, sender: 'nick' });
+    expect(
+      joiner.db
+        .prepare<
+          [string],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM audit WHERE action = 'residency.wake_leased' AND target = ?")
+        .get('ada'),
+    ).toEqual({ n: 1 });
+  });
+
+  it('a folded reply discharges the sender-side ledger: after ada accepts on the joiner and it folds back, the hub no longer lists the handoff as open', async () => {
+    enrollOn(joiner, 'ada');
+    const laneId = await laneOnBoth('d');
+    await patch(hubBase, `/teams/bravo/lanes/${laneId}`, { owner_seat: 'nick' }, nickOnHub);
+    await patch(hubBase, `/teams/bravo/lanes/${laneId}`, { owner_seat: 'ada' }, nickOnHub);
+    const handoffId = hub.db
+      .prepare<
+        [string],
+        { id: string }
+      >("SELECT id FROM messages WHERE team_id = ? AND act = 'handoff' ORDER BY ts DESC LIMIT 1")
+      .get(hubTeam().id)!.id;
+    await hubToJoiner();
+    const { openDirectedLedger } = await import('../store/delivery.js');
+    expect(openDirectedLedger(hub.db, hubTeam().id).map((d) => d.id)).toContain(handoffId);
+    // ada answers on the joiner (a store-level accept, as her session would send it).
+    const jt = joinerTeam();
+    const ada = getMemberByName(joiner.db, jt.id, 'ada')!;
+    const nickOnJoinerRow = getMemberByName(joiner.db, jt.id, 'nick')!;
+    insertMessage(
+      joiner.db,
+      jt.id,
+      ada.id,
+      nickOnJoinerRow.id,
+      makeEnvelope({
+        id: 'ada-accept-1',
+        team: 'bravo',
+        from: 'ada',
+        to: { kind: 'member', name: 'nick' },
+        act: 'accept',
+        body: 'on it',
+        meta: { in_reply_to: handoffId },
+        ts: Date.now(),
+      }),
+    );
+    // nick's own fixture message (`j-0`) rides the same batch and nick is bound to the hub, so
+    // nick trusts the joiner first — ADR 358's remedy, exercised end to end.
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    expect(
+      (await post(hubBase, '/teams/bravo/nodes/trust', { node_id: joinerNode }, nickOnHub)).status,
+    ).toBe(200);
+    await pushTeam(joinerCtx, jt);
+    await pullTeam(hubCtx(), hubTeam());
+    expect(openDirectedLedger(hub.db, hubTeam().id).map((d) => d.id)).not.toContain(handoffId);
   });
 });

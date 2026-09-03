@@ -108,10 +108,16 @@ its birth folded on the hub; the joiner retries after sync.
   availability sacrifice, now on all four edges it named. Messages, opens and field edits still
   work offline.
 - The `[lane] claimed` duplicate is gone: one act per claim, minted where the seat acted.
-- Known and unchanged: a handoff from a joiner to a seat resident on another machine mints the
+- ~~Known and unchanged: a handoff from a joiner to a seat resident on another machine mints the
   `handoff` act on the joiner; it reaches the recipient's inbox through the fold, but no wake
   lease is spent anywhere, because the wake ledger is residence 3 and the fold does not consult
-  it. That is the next residence gap, not this increment's.
+  it. That is the next residence gap, not this increment's.~~ **Wrong, corrected 2026-09-02 (lane
+  `01M1JBQRA3`):** the wake ledger is *derived* — `claimWakeLeases` runs on the host's poll over
+  `messages` (`listInterruptCandidates`, `openDirectedLedger`), never at route time — so a folded
+  directed act is a wake candidate on the machine the recipient is enrolled on, and a folded reply
+  discharges the sender's ledger. Falsifiers in `sync/claim.test.ts`: a handoff minted on the hub
+  for a seat enrolled on the joiner leases exactly one wake on the joiner's poll and none on the
+  hub; ada's folded `accept` removes the handoff from the hub's open ledger. Nothing to build.
 
 ## Observability & Evaluation
 
