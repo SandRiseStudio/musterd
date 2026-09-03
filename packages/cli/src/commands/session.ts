@@ -513,13 +513,17 @@ function observeModelFor(harnessId: string, payload: HookPayload): string | unde
  * The digest travels; the id does not. It is what lets the ledger distinguish one session flapping
  * from two short-lived sessions of the same seat — the question that made 48 same-seat
  * captured→ended pairs unreadable on 2026-08-05.
+ *
+ * Exported so `codexHook.ts` can share it (lane 01M1JBH9CR): codex's own `attest()` never sent
+ * `seat`/`sessionLease` and 401'd unconditionally, silently, on every call since it was written —
+ * this is the implementation that already gets the credential shape right.
  */
-async function pushAttestation(
+export async function pushAttestation(
   binding: Binding,
   session: SessionCapture,
   event: 'start' | 'end',
   dir: string,
-  harness: 'claude-code' | 'cursor' | 'grok' = CAPTURE_HARNESS,
+  harness: 'claude-code' | 'cursor' | 'grok' | 'codex' = CAPTURE_HARNESS,
   // Whether a refused lease may be answered with a claim. A session event (start/end) may; the
   // tool boundary may only while this slot has never spent its claim — see `claim_attempted_at`.
   mayClaim = true,

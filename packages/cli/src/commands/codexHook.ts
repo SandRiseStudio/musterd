@@ -1,17 +1,9 @@
-import {
-  bindingSeat,
-  parseCodexHookEvent,
-  resolveAttestedWakeLease,
-  type Binding,
-  type CodexHookEvent,
-} from '@musterd/protocol';
+import { parseCodexHookEvent, type Binding, type CodexHookEvent } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
-import { HttpClient } from '../client.js';
 import { findBinding, saveBinding } from '../config.js';
 import { CliError } from '../errors.js';
-import { sessionDigest } from '../session/digest.js';
 import { findWorkspaceDir } from './helpers.js';
-import { emitSessionOrientation } from './session.js';
+import { emitSessionOrientation, pushAttestation } from './session.js';
 
 export type CodexHookDeps = {
   start?: (event: Extract<CodexHookEvent, { event: 'start' }>) => Promise<void> | void;
@@ -75,38 +67,20 @@ function localBinding(cwd: string): { dir: string; binding: Binding } | undefine
   return binding ? { dir, binding } : undefined;
 }
 
-async function attest(binding: Binding, sessionId: string, event: 'start' | 'end'): Promise<void> {
-  const seat = bindingSeat(binding);
-  if (!binding.agent_key || !seat) return;
-  try {
-    const wakeLease = resolveAttestedWakeLease(process.env);
-    await new HttpClient({ server: binding.server, key: binding.agent_key })
-      .presenceNeutral()
-      .attestSession(binding.team, {
-        seat,
-        harness: 'codex',
-        event,
-        session_digest: sessionDigest(binding.agent_key, sessionId),
-        ...(wakeLease ? { wake_lease: wakeLease } : {}),
-      });
-  } catch {
-    // A hook's local evidence remains valid when the daemon is unavailable.
-  }
-}
-
 async function captureStart(event: Extract<CodexHookEvent, { event: 'start' }>): Promise<void> {
   const local = localBinding(event.cwd);
   if (!local) return;
-  saveBinding(local.dir, {
-    ...local.binding,
-    session: {
-      harness: 'codex',
-      id: event.session_id,
-      ...(event.transcript_path ? { transcript_path: event.transcript_path } : {}),
-      started_at: Date.now(),
-    },
-  });
-  await attest(local.binding, event.session_id, 'start');
+  const session = {
+    harness: 'codex' as const,
+    id: event.session_id,
+    ...(event.transcript_path ? { transcript_path: event.transcript_path } : {}),
+    started_at: Date.now(),
+  };
+  saveBinding(local.dir, { ...local.binding, session });
+  // pushAttestation (session.ts, ADR 359 lane 01M1JBH9CR) — the previous inline attest() here sent
+  // no seat and no session lease, so every call 401'd silently since this file was written; the
+  // codex hooks never having fired before ADR 359 is the only reason that stayed invisible.
+  await pushAttestation(local.binding, session, 'start', local.dir, 'codex');
   // ADR 333: Codex SessionStart stdout is developer context. Same block Claude emits; silent on fail.
   const orientation = await emitSessionOrientation(local.dir);
   if (orientation) process.stdout.write(orientation + '\n');
@@ -116,8 +90,9 @@ async function captureEnd(event: Extract<CodexHookEvent, { event: 'end' }>): Pro
   const local = localBinding(event.cwd);
   const session = local?.binding.session;
   if (!local || !session || session.harness !== 'codex' || session.id !== event.session_id) return;
-  saveBinding(local.dir, { ...local.binding, session: { ...session, ended_at: Date.now() } });
-  await attest(local.binding, session.id, 'end');
+  const ended = { ...session, ended_at: Date.now() };
+  saveBinding(local.dir, { ...local.binding, session: ended });
+  await pushAttestation(local.binding, ended, 'end', local.dir, 'codex');
 }
 
 async function observeModel(
