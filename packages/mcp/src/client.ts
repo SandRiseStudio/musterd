@@ -803,6 +803,7 @@ export class MusterdClient {
           surface: this.config.surface,
           provenance: this.config.provenance,
           workspace: this.config.workspace,
+          ...(this.config.workspaceKey ? { workspace_key: this.config.workspaceKey } : {}),
           ...(this.config.driver ? { driver: this.config.driver } : {}),
           ...(this.config.model
             ? {

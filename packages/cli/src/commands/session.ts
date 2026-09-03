@@ -11,6 +11,7 @@ import {
   type Binding,
   type SessionCapture,
 } from '@musterd/protocol';
+import { resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import { findBinding, findWorkspaceSpec, requireUsableBinding, saveBinding } from '../config.js';
@@ -560,6 +561,7 @@ export async function pushAttestation(
       server: binding.server,
       team: binding.team,
       workspace: resolveClaimWorkspace(process.env, dir),
+      workspaceKey: resolveWorkspaceKey(process.env, dir),
       key,
       seat,
       surface: 'cli',

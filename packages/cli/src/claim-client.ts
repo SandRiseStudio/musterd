@@ -50,6 +50,9 @@ export function buildClaimFrame(input: {
   surface: Surface;
   grant?: string;
   workspace?: string;
+  /** The workspace's stable identity (work tree root) — what displacement compares (lane
+   *  01M1JQYYAC). The label above is branch-qualified and changes under its own session. */
+  workspaceKey?: string;
   model?: string;
   build?: string;
 }): ClaimFrame {
@@ -64,6 +67,9 @@ export function buildClaimFrame(input: {
     // CLI-claimed seat reads with a real workspace instead of null (also lets a bare re-claim tell
     // "already live *here*" from "live elsewhere", ADR 087).
     ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
+    // The IDENTITY behind that label (lane 01M1JQYYAC): the label carries a git branch, so it is
+    // renamed by a branch switch or a detached HEAD and cannot be compared for sameness.
+    ...(input.workspaceKey !== undefined ? { workspace_key: input.workspaceKey } : {}),
     // Model attestation (ADR 101) — harness-attested per-occupancy; absent reads as `unknown`.
     ...(input.model !== undefined ? { model: input.model } : {}),
     // Build attestation (ADR 135) — the client dist's own stamp; absent for unstamped builds.

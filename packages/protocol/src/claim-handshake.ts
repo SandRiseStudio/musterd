@@ -68,6 +68,17 @@ export const ClaimFrame = z.object({
    * newest-wins (ADR 017). Optional for back-compat; the MCP/CLI clients already send it on the wire.
    */
   workspace: z.string().optional(),
+  /**
+   * The workspace's stable IDENTITY (`resolveWorkspaceKey` — the work tree root), as opposed to
+   * `workspace` above, which is a display label. Displacement compares this when both sides have it.
+   *
+   * They were one field until 2026-09-03 (lane 01M1JQYYAC), and that was the bug: the label is
+   * branch-qualified, so a branch switch or a detached HEAD renamed the workspace under the session
+   * holding it, its own next attach compared unequal, and ADR 092's same-workspace grace never
+   * engaged — the seat evicted itself. Optional for back-compat: absent on either side, the server
+   * falls back to comparing labels exactly as before, so an un-rebuilt dist is no worse off.
+   */
+  workspace_key: z.string().max(200).optional(),
   /** How this session was provisioned (ADR 014) + the human driving it (ADR 021) — presence metadata
    *  the live `hello` carried; surfaced on the roster. The client already sends both; recorded at OCCUPY. */
   provenance: ProvenanceSchema.optional(),
