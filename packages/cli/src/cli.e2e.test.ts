@@ -5,6 +5,7 @@ import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
 import { HttpClient, watchClaim } from './client.js';
+import { claimCommand } from './commands/claim.js';
 import { reachabilityNudge, resolve, resolveRead } from './commands/helpers.js';
 import { inboxCommand } from './commands/inbox.js';
 import { joinCommand } from './commands/join.js';
@@ -685,6 +686,16 @@ describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
     const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
     expect(ok.code).toBe(0);
     expect(ok.out).toContain('joined');
+  });
+
+  it('`claim <name> --team <slug>` is the same handshake — the vault key is found without --key (ADR 374)', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    const ok = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
+    expect(ok.code).toBe(0);
+    expect(JSON.parse(ok.out.trim().split('\n').pop()!)).toMatchObject({
+      team: 'dawn',
+      member: 'nick',
+    });
   });
 });
 

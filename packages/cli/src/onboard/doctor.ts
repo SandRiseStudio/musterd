@@ -388,7 +388,7 @@ async function inspectSeatIdentity(
       i.key !== config.agentKeys[binding.team],
   );
   const repair = held
-    ? `\`musterd join ${binding.team} --as ${seat}\` here — this machine already holds their ` +
+    ? `\`musterd claim ${seat} --team ${binding.team}\` here — this machine already holds their ` +
       `credential, so this rebinds the folder with nothing to paste`
     : `\`musterd team credential ${seat}\` here — this machine holds no credential for them, so it ` +
       `must be re-issued (their previous one stops working), and running it in this folder repairs ` +

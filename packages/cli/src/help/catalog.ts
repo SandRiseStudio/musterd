@@ -404,14 +404,6 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd human nick --team acme', 'musterd human lin --home ~/work/acme'],
   },
   {
-    name: 'join',
-    signature: '<slug> --as <name> [--token <tok>] [--surface cli]',
-    summary: 'join a team as a named member from this surface',
-    group: 'team',
-    primary: true,
-    examples: ['musterd join acme --as nick'],
-  },
-  {
     name: 'role',
     signature:
       // `--from <template>` is the command's own usage string (role.ts) — the signature must match it. <!-- vocab:ok -->
@@ -744,16 +736,24 @@ export const CATALOG: readonly CommandEntry[] = [
   // ── Seats & admin ──────────────────────────────────────────────────────────────────────────
   {
     name: 'claim',
-    signature: '[<name>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]',
-    summary: 'get onto the team from this folder — occupy or adopt a seat',
+    signature:
+      '[<name>] [--team <slug>] [--key <mskey_|mscr_>] [--grant <msgr_>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]',
+    summary: 'get onto the team from this folder — occupy or adopt a seat (MCP: team_join)',
     group: 'team',
     primary: true,
     detail:
       'Get onto the team from this folder: bare `claim` occupies your bound seat (or confirms it if ' +
       'already live here); a name/role claims that seat; `--token` adopts a teammate’s seat; `--force` ' +
       'repoints a folder bound to a live member. A held seat opens a request and blocks until an admin ' +
-      'approves, then occupies (ADR 087).',
-    examples: ['musterd claim', 'musterd claim scout', 'musterd claim --role reviewer'],
+      'approves, then occupies (ADR 087). In a fresh folder name the team and present the key: ' +
+      '`claim <name> --team <slug> --key <mskey_|mscr_>` (the former `musterd join`, folded in by ADR 374; ' +
+      'a key this machine has held before is found in the vault). The MCP spelling is `team_join`.',
+    examples: [
+      'musterd claim',
+      'musterd claim scout',
+      'musterd claim --role reviewer',
+      'musterd claim nick --team acme --key mscr_…',
+    ],
   },
   {
     name: 'requests',

@@ -58,7 +58,16 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
 
   // Bootstrap claims present the team agent key. A reoccupy of this binding's exact seat may present
   // its claimed agent credential; never use that credential to target a different member.
-  const agentKey = flagStr(flags, 'key') ?? process.env['MUSTERD_AGENT_KEY'] ?? binding?.agent_key;
+  const agentKey =
+    flagStr(flags, 'key') ??
+    process.env['MUSTERD_AGENT_KEY'] ??
+    binding?.agent_key ??
+    // The ADR 059 vault: a fresh folder claiming a seat this machine has held before needs no key
+    // pasted — the same fallback `musterd join` always had, so folding join into claim (ADR 374)
+    // loses nothing.
+    (parsed.positionals[0]
+      ? config.knownIdentities.find((i) => i.team === team && i.name === parsed.positionals[0])?.key
+      : undefined);
   const grant = flagStr(flags, 'grant') ?? process.env['MUSTERD_GRANT'] ?? binding?.grant;
   const target = resolveTarget(parsed, binding);
   const boundSeat = binding ? bindingSeat(binding) : undefined;

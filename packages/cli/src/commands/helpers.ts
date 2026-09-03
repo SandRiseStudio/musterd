@@ -205,7 +205,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
   if (!match) {
     const who = asName ? ` as ${asName}` : '';
     throw new CliError(
-      `no identity for team "${team}"${who} — run: musterd join ${team} --as <name>`,
+      `no identity for team "${team}"${who} — run: musterd claim <name> --team ${team}`,
       4,
     );
   }
