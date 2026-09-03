@@ -126,6 +126,15 @@ function SeatRow({
   // The build ref stays only as operator detail in the tooltip; it is never itself the trigger.
   const memberBuild = m.presences?.[0]?.build ?? undefined;
   const memberEpoch = m.presences?.[0]?.epoch ?? undefined;
+  // The machine this seat lives on (presence replication, ADR 356) — `presences` comes back ordered
+  // `last_seen_at DESC` (presence.ts:461), so index 0 is where the seat was seen MOST RECENTLY, and
+  // the CLI reads the same index for the same reason (render/rows.ts:352). A local row carries
+  // `node: null` and says nothing: the machine you are already looking at is not news, and a suffix
+  // on every row would cost the rare remote one all its salience.
+  // Falls back to silence rather than the raw id when the label has not synced — `node_label` is a
+  // LEFT JOIN onto `nodes`, so a node this daemon has not replicated yet joins to null, and a ULID
+  // in the roster would be worse than not naming the machine at all.
+  const nodeLabel = m.presences?.[0]?.node_label?.trim() || undefined;
   const epochBehind = isFeatureBehind(m, daemonEpoch);
   const skewTitle = epochBehind
     ? `Behind on features — this seat is on epoch ${memberEpoch}, the team is on ${daemonEpoch}. ` +
@@ -190,9 +199,14 @@ function SeatRow({
         <div className="lc-seat__gov">
           <span
             className={`lc-stat lc-stat--${chip.quiet ? 'quiet' : chip.tone}`}
-            title={m.offline_reason ? `Offline reason: ${m.offline_reason}` : `Posture: ${chip.label}`}
+            title={
+              (m.offline_reason
+                ? `Offline reason: ${m.offline_reason}`
+                : `Posture: ${chip.label}`) + (nodeLabel ? ` · on ${nodeLabel}` : '')
+            }
           >
             {chip.label}
+            {nodeLabel && <span className="lc-stat__node"> @ {nodeLabel}</span>}
           </span>
           {accountEx && (
             <span

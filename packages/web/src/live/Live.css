@@ -3047,6 +3047,16 @@
   border-radius: 5px;
   border: 1px solid transparent;
 }
+/* The machine a remote seat lives on (presence replication, ADR 356) — ` @ laptop-b` riding the
+   posture chip. Subordinate to the posture, which is what the chip is FOR, so it drops the mono
+   tracking and sits a step back. Deliberately NOT `opacity`: this text sits on the chip's own
+   tinted paper and `--lc-stat--quiet` already paints the faintest ink in the system, so an alpha
+   pass over it lands below AA on the very rows most likely to carry a node. Weight and tracking
+   buy the same recession for free, and the gate measures what a reader actually gets. */
+.lc-stat__node {
+  font-weight: 400;
+  letter-spacing: 0;
+}
 .lc-stat--quiet {
   color: var(--lc-faint);
   background: transparent;
