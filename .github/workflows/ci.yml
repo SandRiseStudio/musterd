@@ -1,6 +1,12 @@
 # CI — the authoritative merge gate (ADR 106). Runs the same gates agents run locally, on every PR.
 # Local runs are an optional fast smoke-test; THIS is the source of truth that branch protection
 # requires green before a squash-merge. Keep the job name `gates` stable — it's the required check.
+#
+# Shape (ADR 106 amendment 2026-09-03): the gates run as PARALLEL leaves and `gates` is the fan-in.
+# Measured before the change, one serial job took 8m10s per PR, and 78% of it was two steps that do
+# not depend on each other — the Chrome contrast sweep (227s) and tests+coverage (157s). Every
+# gate still runs on every PR; only the wall clock changed. Each leaf does its own checkout+build
+# (.github/actions/setup) so nothing is shared through an artifact.
 name: CI
 
 on:
@@ -17,44 +23,24 @@ permissions:
   contents: read
 
 jobs:
-  gates:
-    name: gates
+  # Typecheck + lint + the two byte budgets. All read the built dist; none takes more than ~30s.
+  static:
+    name: static
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        # Full history so roadmap-truth:check can verify shipped items against merged-PR commits
-        # (`git log --grep "(#N)"`); the default shallow depth-1 checkout would hide them.
-        with:
-          fetch-depth: 0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.28.2
-
-      - name: Install Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      # dist/ is gitignored and workspace packages resolve to ./dist, so build before typecheck/test.
-      - name: Build
-        run: pnpm build
+      - uses: ./.github/actions/setup
 
       - name: Typecheck
         run: pnpm typecheck
 
       # Byte budgets for the built web client (ADR 151) — guards the /live perf arc (#326–#331)
-      # against silent regression. Needs Build first (reads packages/web/dist/client).
+      # against silent regression. Reads packages/web/dist/client.
       - name: Perf budgets
         run: pnpm perf:check
 
       # Standing-context byte budgets (spec 2026-08-03) — every byte musterd injects into a seat's
-      # context (tools/list, primer, hook nudges) can only grow deliberately. Needs Build first.
+      # context (tools/list, primer, hook nudges) can only grow deliberately.
       - name: Context budgets
         run: pnpm context:check
 
@@ -64,28 +50,70 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      # The other half of web a11y. `pnpm lint` gates the STRUCTURAL half (jsx-a11y as errors, #493);
-      # that eslint block names colour contrast as the first thing it cannot see, and until now
-      # nothing checked it — `a11y:contrast` ran only when someone remembered. Nine live AA failures
-      # had accumulated by the time anyone measured. Sweeps the built client's prerendered routes in
-      # real Chrome (contrast cannot be computed from hex — alpha tints and color-mix()), so it needs
-      # Build first. ubuntu-latest ships Chrome; CHROME_BIN is named rather than discovered so a
-      # runner-image change fails loudly instead of silently skipping. The second phase stands up a
-      # throwaway daemon over a synthetic team so `/board` and `/live` are measured CONNECTED —
-      # without it the sweep only ever reaches their sign-in screen, which is where eleven failures
-      # were hiding when the connected phase was first pointed at them.
-      - name: A11y contrast
-        run: pnpm a11y:check
-        env:
-          CHROME_BIN: /usr/bin/google-chrome
+  # `pnpm coverage` runs the full suite AND enforces the per-package line floors (vitest.config.ts),
+  # so a drop below the floor fails the gate — closes the silent coverage-drift gap (ADR 106).
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
 
-      # `pnpm coverage` runs the full suite AND enforces the per-package line floors (vitest.config.ts),
-      # so a drop below the floor fails the gate — closes the silent coverage-drift gap (ADR 106).
       - name: Tests + coverage
         run: pnpm coverage
 
-      # prettier + roadmap:check + arch-trees:check + obs-evals:check + guidance:check + vocab:check
-      # + tokens:check (CSS colour tokens that lie: phantom, or a fallback disagreeing with the token)
+  # The other half of web a11y. `pnpm lint` gates the STRUCTURAL half (jsx-a11y as errors, #493);
+  # that eslint block names colour contrast as the first thing it cannot see, and until now
+  # nothing checked it — `a11y:contrast` ran only when someone remembered. Nine live AA failures
+  # had accumulated by the time anyone measured. Sweeps the built client's prerendered routes in
+  # real Chrome (contrast cannot be computed from hex — alpha tints and color-mix()), so it needs
+  # Build first. ubuntu-latest ships Chrome; CHROME_BIN is named rather than discovered so a
+  # runner-image change fails loudly instead of silently skipping.
+  #
+  # Two leaves, because the gate has two phases that share nothing but the dist: the prerendered
+  # sweep (14 routes + the office at two lights, ~150s) and the CONNECTED sweep, which stands up a
+  # throwaway daemon over a synthetic team so `/board` and `/live` are measured past their sign-in
+  # screen (~80s) — eleven failures were hiding there when the connected phase was first pointed
+  # at them. Serial they were the longest step in CI; split, neither is the critical path.
+  a11y-prerender:
+    name: a11y-prerender
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: A11y contrast (prerendered routes)
+        run: pnpm a11y:check --static-only
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+
+  a11y-connected:
+    name: a11y-connected
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+
+      - name: A11y contrast (connected board + live)
+        run: pnpm a11y:check --connected-only
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+
+  # prettier + roadmap:check + roadmap-truth:check + arch-trees:check + obs-evals:check +
+  # adr-numbers:check + guidance:check + vocab:check + tokens:check + migrations:check +
+  # source-nul:check + wiki:check + controls:check + watch:check — then the diff-based ADR gate.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # Full history so roadmap-truth:check can verify shipped items against merged-PR commits
+        # (`git log --grep "(#N)"`) and change-adr:check can diff against the base branch; the
+        # default shallow depth-1 checkout would hide both. Only this leaf needs it.
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+
       - name: Gates (format + docs)
         run: pnpm format:check
 
@@ -97,3 +125,26 @@ jobs:
         env:
           CHANGE_ADR_BASE: origin/${{ github.base_ref }}
         run: pnpm change-adr:check
+
+  # The fan-in, and the ONLY required check (ADR 106 §2). `if: always()` so it runs even when a
+  # leaf fails — a skipped required check blocks merge with no verdict, which reads as an outage.
+  # It then asserts every leaf SUCCEEDED by name: a bare `always()` with no result check is the
+  # classic mistake that turns a red leaf into a green gate. `cancelled` and `skipped` are red here
+  # too — a leaf that never ran did not pass.
+  gates:
+    name: gates
+    runs-on: ubuntu-latest
+    needs: [static, coverage, a11y-prerender, a11y-connected, docs]
+    if: always()
+    steps:
+      - name: Every leaf must have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq .
+          failed="$(echo "$RESULTS" | jq -r 'to_entries[] | select(.value.result != "success") | .key')"
+          if [ -n "$failed" ]; then
+            echo "::error::gates — leaf(s) did not succeed: $(echo "$failed" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "gates — all $(echo "$RESULTS" | jq 'length') leaves succeeded"

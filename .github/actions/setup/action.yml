@@ -1,0 +1,29 @@
+# Shared preamble for every CI leaf (ADR 106 amendment 2026-09-03). Each leaf checks out, installs
+# and BUILDS on its own runner rather than pulling a dist artifact: a rebuild is ~22s, an artifact
+# round-trip is ~10–20s plus a retention/size failure mode, and the cost is paid in parallel so it
+# never lands on the critical path. Revisit if Build grows past the longest leaf.
+name: musterd setup
+description: checkout is the caller's; this installs pnpm + Node, restores the store, installs and builds.
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10.28.2
+
+    - name: Install Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: pnpm
+
+    - name: Install deps
+      shell: bash
+      run: pnpm install --frozen-lockfile
+
+    # dist/ is gitignored and workspace packages resolve to ./dist, so build before anything
+    # that typechecks, lints, tests, or measures the built client.
+    - name: Build
+      shell: bash
+      run: pnpm build

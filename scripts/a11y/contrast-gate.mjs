@@ -4,7 +4,7 @@
  * something, as a CI check rather than a habit.
  *
  * Usage:
- *   node scripts/a11y/contrast-gate.mjs [--dir <built client>] [--port <n>] [--routes a,b,c]
+ *   node scripts/a11y/contrast-gate.mjs [--dir <built client>] [--port <n>] [--routes a,b,c] [--static-only | --connected-only]
  *
  * Exit code is 1 if any route reports a live failure. Two phases, both self-contained — it needs
  * `pnpm build` first and nothing else:
@@ -60,6 +60,16 @@ const DIR = arg('dir', join(HERE, '../../packages/web/dist/client'));
 // the number, so there is no reason to fight over a fixed one. An EXPLICIT --port keeps
 // first-come-first-served semantics: the caller asked for that port specifically, and silently
 // substituting another would make "--port 4331" mean "4331, probably".
+/* The two phases share nothing but the built dist, so CI runs them as two parallel leaves (ADR 106
+   amendment 2026-09-03): `--static-only` is phase 1 alone (it predates this and also serves "no CLI
+   build"), `--connected-only` is phase 2 alone. Both are a NARROWING of one run's coverage and say
+   so in their summary; only the two together — or a flagless run — are the whole gate. */
+const STATIC_ONLY = process.argv.includes('--static-only');
+const CONNECTED_ONLY = process.argv.includes('--connected-only');
+if (STATIC_ONLY && CONNECTED_ONLY) {
+  console.error('contrast-gate — --static-only and --connected-only together measure nothing.');
+  process.exit(1);
+}
 const EXPLICIT_PORT = arg('port', '');
 const PORT = EXPLICIT_PORT ? Number(EXPLICIT_PORT) : 0;
 
@@ -198,7 +208,11 @@ const sweep = (url) =>
     child.on('close', (code) => resolve({ code, out }));
   });
 
-console.log(`contrast-gate — ${ROUTES.length} routes over ${DIR}\n`);
+console.log(
+  CONNECTED_ONLY
+    ? `contrast-gate — connected phase only over ${DIR}\n`
+    : `contrast-gate — ${ROUTES.length} routes over ${DIR}\n`,
+);
 const failed = [];
 /** Routes that went UNMEASURED (sweep exit 2) — a subset of `failed`, reported apart from it. */
 const unmeasured = [];
@@ -210,7 +224,9 @@ const unmeasured = [];
  *   can afford. Prerendered routes legitimately measure zero (a page can be all gradient), so the
  *   floor is opt-in per route rather than global.
  */
+let measured = 0;
 const report = ({ code, out }, label, floor = 0) => {
+  measured += 1;
   const live = /live: (\d+) measured, (\d+) below AA/.exec(out);
   const skipped = /SKIPPED (\d+) —/.exec(out);
   const tail = skipped ? `, ${skipped[1]} unmeasurable` : '';
@@ -319,7 +335,7 @@ const sceneRoutes = new Set(['/office-preview']);
  */
 const SCENE_STILL = '&still';
 
-for (const route of ROUTES) {
+for (const route of CONNECTED_ONLY ? [] : ROUTES) {
   if (sceneRoutes.has(route)) {
     for (const light of SCENE_LIGHTS) {
       report(
@@ -333,6 +349,9 @@ for (const route of ROUTES) {
 }
 
 server.close();
+if (CONNECTED_ONLY) {
+  console.log('  ! --connected-only: the prerendered routes went unmeasured in this run');
+}
 
 /* ── phase 2: the CONNECTED board ──────────────────────────────────────────────────────────────
  *
@@ -343,7 +362,7 @@ server.close();
  *
  * `--static-only` skips it (no CLI build, or you only want the fast pass). It is a narrowing of
  * coverage, so it says so rather than passing quietly. */
-if (!process.argv.includes('--static-only')) {
+if (!STATIC_ONLY) {
   // The fixture script is already isolation-capable — A11Y_FIXTURE_{ROOT,PORT,TEAM} exist exactly
   // so two stacks cannot collide — but this gate never used them, so two concurrent runs raced to
   // the same daemon port, DB, and team ("paper" already exists), and the loser exited 1 in the
@@ -461,4 +480,7 @@ if (failed.length) {
   );
   process.exit(1);
 }
-console.log(`\ncontrast-gate — ${ROUTES.length} routes, 0 below AA`);
+console.log(
+  `\ncontrast-gate — ${measured} sweep(s), 0 below AA` +
+    (STATIC_ONLY ? ' (prerendered phase only)' : CONNECTED_ONLY ? ' (connected phase only)' : ''),
+);
