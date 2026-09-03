@@ -562,6 +562,11 @@ export class MusterdClient {
     return this.request('POST', `/teams/${this.config.team}/goals/retract`, body);
   }
 
+  /** Set the caller's own availability (ADR 044 — SPEC A.6 axis 2). `until` is epoch ms, `away` only. */
+  setAvailability(body: { status: string; until?: number }): Promise<{ member: MemberSummary }> {
+    return this.request('POST', `/teams/${this.config.team}/availability`, body);
+  }
+
   /** The insight report (ADR 050/084) — one server-side projection. */
   report(): Promise<Report> {
     return this.request('GET', `/teams/${this.config.team}/report`);

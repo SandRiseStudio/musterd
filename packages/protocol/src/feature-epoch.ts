@@ -91,5 +91,8 @@
 // kind and `presence.node` exists (migration 61). An older hub refuses a `kind: 'presence'` push
 // (422); an older joiner stops on the unknown kind. Hub before joiners, as every federation
 // increment.
-export const FEATURE_EPOCH = 18 as const;
+// Epoch 19 — `team_availability` (surface survey #1245, item 6): the MCP twin of `musterd
+// availability`. A seat at this epoch can set its own availability from an MCP session; an older
+// seat's tool list does not carry it and it keeps shelling out.
+export const FEATURE_EPOCH = 19 as const;
 export type FeatureEpoch = typeof FEATURE_EPOCH;
