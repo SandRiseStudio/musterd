@@ -1,4 +1,4 @@
-import { PROVENANCES, type Provenance, type Surface } from './acts.js';
+import { PROVENANCES, type Provenance } from './acts.js';
 import type { ModelObservation } from './binding.js';
 
 /**
@@ -190,47 +190,6 @@ export function resolveAttestation(input: AttestationInput): AttestationResult {
     return { model: input.binding, source: 'binding', drift: false, declared: undefined };
   }
   return { model: undefined, source: 'unknown', drift: false, declared: undefined };
-}
-
-/**
- * The surfaces whose harness adapter declares an `observeModel` probe (packages/cli/src/onboard/
- * harnesses/*.ts). On one of these, an `observed` attestation was *available* — so resolving to a
- * declared tier instead means the probe did not run or its write never landed, and the seat will
- * attest a snapshot for the whole session.
- *
- * This is the list `resolveAttestation` cannot infer: it sees tiers, not which harness it is on.
- * It lives here, beside the ladder, so the adapter and the CLI cannot hold different ideas of who
- * can be probed. Adding an `observeModel` slot to a harness means adding its surface here.
- *
- * `cli`, `web`, `ios`, `slack`, `other` and `musterd` are deliberately absent — none has a probe to
- * miss, so a declaration is the honest best they can do and warning at them would be noise.
- */
-export const PROBE_CAPABLE_SURFACES = [
-  'claude-code',
-  'codex',
-  'cursor',
-  'grok',
-  'opencode',
-] as const satisfies readonly Surface[];
-
-/** Does this surface's harness have a model probe that *could* have produced an observation? */
-export function isProbeCapableSurface(surface: string | null | undefined): boolean {
-  return (PROBE_CAPABLE_SURFACES as readonly string[]).includes(surface ?? '');
-}
-
-/**
- * Should this session warn that it is attesting a **declaration** where an observation was
- * reachable? True only on a probe-capable surface that resolved `binding` or `environment`.
- *
- * `observed` is the goal state and `unknown` has its own, louder warning (nothing to correct — the
- * seat declares nothing at all), so both stay silent here. Warn, never block (ADR 101).
- */
-export function shouldWarnUnobservedModel(
-  surface: string | null | undefined,
-  source: AttestationSource,
-): boolean {
-  if (source !== 'binding' && source !== 'environment') return false;
-  return isProbeCapableSurface(surface);
 }
 
 /**

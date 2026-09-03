@@ -1,10 +1,11 @@
 import type { McpServer } from '@modelcontextprotocol/server';
-import { normalizeSeatName, shouldWarnUnobservedModel } from '@musterd/protocol';
+import { normalizeSeatName } from '@musterd/protocol';
 import { startTelemetry, type TelemetryHandle } from '@musterd/telemetry';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import type { MusterdClient } from './client.js';
 import type { McpConfig } from './config.js';
 import type { HarnessContext } from './harness.js';
+import { shouldWarnUnobservedModel } from './modelProbe.js';
 
 /**
  * Adapter-side telemetry (ADR 089 increment 1). Boots the shared SDK as `musterd-mcp` and wraps
