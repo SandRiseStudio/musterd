@@ -133,3 +133,69 @@ describe('.lc-stat__node stays inside what the contrast gate can measure', () =>
     expect(rule).not.toMatch(/(^|[;\s])opacity\s*:/);
   });
 });
+
+/**
+ * A woken seat says so on the roster (ADR 131 residency + ADR 356 provenance).
+ *
+ * The chip rides ALONGSIDE the posture rather than replacing it — posture is what the seat is
+ * doing, provenance is why it is in the room at all, and a wake can be `working` or `active` like
+ * anything else. `wokenSeat.test.ts` holds the derivation; these two pin that the roster actually
+ * paints it, and that a seat nobody woke stays quiet.
+ */
+describe('RosterPanel — a woken seat says so', () => {
+  const wokenSeatRow = (provenance: string | null) =>
+    seat({
+      presences: [
+        { status: 'online', surface: 'codex', provenance, last_seen_at: Date.now() } as never,
+      ],
+    });
+
+  it('marks a seat a wake put in the room, without dropping its posture', () => {
+    const html = render([wokenSeatRow('wake')]);
+    expect(html).toContain('woken');
+    expect(html).toContain('working');
+  });
+
+  it('stays quiet for a seat someone opened themselves', () => {
+    expect(render([wokenSeatRow('session')])).not.toContain('woken');
+  });
+
+  it('stays quiet when the row never said — absence is not an assertion', () => {
+    expect(render([wokenSeatRow(null)])).not.toContain('woken');
+  });
+});
+
+/**
+ * Both `woken` marks stay fill-free, for a margin that is measured even though the chip is not.
+ *
+ * `--lc-accent-ink` is 4.60:1 worst case (Live.css:113) — a tenth of a point over AA. The `dnd`
+ * tag's comment records what a tint does to that kind of margin: a 14% amber under `--lc-warn-ink`
+ * lightened the ground and took 5.11 to 4.35. At 4.60 there is no tint that survives.
+ *
+ * And the gate cannot check this for us on the roster. Its fixture joins every seat with a TEAM
+ * BOOTSTRAP key (`mskey_`), while provenance rides an agent-seat credential gate (`msac_`,
+ * cli/src/client.ts:321) because it is a harness fact a human must not stamp (ADR 121). Seeding a
+ * woken row into the fixture was tried and the gate correctly refused it — so no `a11y:check` run
+ * will ever render `.lc-stat--woken`, and the guard has to live here.
+ *
+ * The office nameplate's `woken` tag IS swept, through /office-preview, and uses the same ink and
+ * the same recipe. Keeping the two identical is what makes that sweep evidence for this chip.
+ */
+describe('the woken marks stay fill-free — 4.60:1 leaves no room for a tint', () => {
+  for (const selector of ['.lc-stat--woken', '.lc-gl-label__woken']) {
+    const rule = new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`).exec(css)?.[1];
+
+    it(`${selector} exists`, () => {
+      expect(rule).toBeDefined();
+    });
+
+    it(`${selector} paints no background tint`, () => {
+      expect(rule).not.toMatch(/background\s*:\s*color-mix/);
+      expect(rule).not.toMatch(/background\s*:\s*(?!transparent)[a-z#]/i);
+    });
+
+    it(`${selector} carries the accent INK, never the accent fill`, () => {
+      expect(rule).toMatch(/color:\s*var\(--lc-accent-ink\)/);
+    });
+  }
+});

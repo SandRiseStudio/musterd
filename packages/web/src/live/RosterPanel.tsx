@@ -10,6 +10,7 @@ import {
   rosterPrimaryChip,
 } from './format';
 import { CollapseButton, PanelRail } from './PanelChrome';
+import { wokenBadge, wokenSeat } from './wokenSeat';
 
 /**
  * The roster rail — presence posture (ADR 138) plus governance exceptions/capabilities (ADR 073/070).
@@ -135,6 +136,10 @@ function SeatRow({
   // LEFT JOIN onto `nodes`, so a node this daemon has not replicated yet joins to null, and a ULID
   // in the roster would be worse than not naming the machine at all.
   const nodeLabel = m.presences?.[0]?.node_label?.trim() || undefined;
+  // Why this seat is in the room at all (ADR 131) — a wake, or a person opening a session. Rides
+  // ALONGSIDE the posture chip rather than replacing it: posture is what the seat is doing,
+  // provenance is why it is here, and a woken seat is `working` or `active` like any other.
+  const woken = wokenSeat(m);
   const epochBehind = isFeatureBehind(m, daemonEpoch);
   const skewTitle = epochBehind
     ? `Behind on features — this seat is on epoch ${memberEpoch}, the team is on ${daemonEpoch}. ` +
@@ -208,6 +213,11 @@ function SeatRow({
             {chip.label}
             {nodeLabel && <span className="lc-stat__node"> @ {nodeLabel}</span>}
           </span>
+          {woken && (
+            <span className="lc-stat lc-stat--woken" title={wokenBadge().title}>
+              {wokenBadge().label}
+            </span>
+          )}
           {accountEx && (
             <span
               className={`lc-stat lc-stat--${accountEx.tone}`}

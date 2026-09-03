@@ -48,6 +48,16 @@ export interface OfficeNode {
   offline_reason: string | null;
   /** Last seen (wire fact) — the warm-desk fade and the desk-capacity tiebreak read it. */
   last_seen_at: number | null;
+  /**
+   * This seat is in the room because a wake put it there (ADR 131), not because a person opened a
+   * session — read from the live presence's stamped `provenance` (see `wokenSeat.ts`).
+   *
+   * NOT a posture, and deliberately kept off `posture` rather than folded into it: posture decides
+   * where the body is placed and what colour its dot is, and a woken seat sits, works and idles
+   * like any other. This answers the different question the office could not answer at all — an
+   * eleven-second codex wake and a human at a terminal drew identically until now.
+   */
+  woken: boolean;
 }
 
 /** The office has no arcs — relationships show as choreography, not edges. */

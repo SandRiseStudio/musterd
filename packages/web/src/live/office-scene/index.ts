@@ -655,6 +655,19 @@ export function mountOffice(
           dndTag.textContent = 'dnd';
           plate.appendChild(dndTag);
         }
+        if (node.woken) {
+          // Why this seat is in the room (ADR 131) — a wake put it there, rather than a person
+          // opening a session. On the COLLAPSED plate, same slot grammar as `dnd` and `service`,
+          // because the window it has to be read in is the whole problem: a clean codex wake held
+          // presence for ELEVEN SECONDS (claim 14:19:04 → ws_close 14:19:15). A fact that only
+          // appears on expand is a fact nobody will ever expand in time to see.
+          // Quieter than `dnd` on purpose. dnd is an instruction to the room — do not walk to me —
+          // and it outranks this; `woken` is context you check once something has caught your eye.
+          const wokenTag = document.createElement('span');
+          wokenTag.className = 'lc-gl-label__woken';
+          wokenTag.textContent = 'woken';
+          plate.appendChild(wokenTag);
+        }
         if (node.service) {
           // A service seat has no model to attest (ADR 232 — it is pure code), so the provider
           // slot would render the unknown-"?" mark and read as a broken attestation. Say what it
