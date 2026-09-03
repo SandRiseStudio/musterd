@@ -1,6 +1,6 @@
 # Research corpus — what we have measured, and where it lives
 
-Every number in findings 001–008 comes from two directories on one laptop, none of it committed; this page is the map of what exists, what produces it, and what is designed but not built.
+Every number in findings 001–009 comes from two directories on one laptop, none of it committed; this page is the map of what exists, what produces it, and what is designed but not built.
 
 The split this page assumes is ADR 056's: **produce** (our own dogfood data — this page) versus
 **ingest** (outside literature — the research radar, `docs/design/research-foundation.md`). A fact
@@ -61,6 +61,7 @@ the repo, which is what makes the preservation rail load-bearing rather than tid
 | 006 | **Enforcement induces coordination** | 8/8 lanes claimed vs 0/8; **1.9% vs 72.2% waste at equal correctness (~38×)** |
 | 007 | Compliance under deny                | Gate A n=4, 13 lane-block denies, zero forced; Gate B confounded              |
 | 008 | Subagent-write detector recall       | 67.7% recall, 0 false positives on 15 reads                                   |
+| 009 | Repeat wakes, unchanged reason       | half of every non-landing wake repeats one the rail already made             |
 
 Finding 006 is the one the pitch rests on, and it comes with a standing rule recorded in
 [cookoff.md](cookoff.md): **compare D to uncoordinated N, never to solo** — solo wins on both cost
@@ -87,8 +88,10 @@ first.
   Each public dir now includes a filled `README.md` card (falsify: `ls scripts/dataset/card.md`).
   A HuggingFace upload of a live release has not been cut (2026-08-19; falsify: a dataset card
   under the Sandrise org on HF). Roadmap item `coordination-dataset`.
-- **ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR
-  184 all build on has never been accepted.
+- ~~**ADR 056 is still `proposed`** — the charter that eight findings, the obs-eval CI gate, and ADR
+  184 all build on has never been accepted.~~ **ACCEPTED 2026-08-24** (nick; amended on acceptance).
+  The two roadmap items it freezes (`research-intake`, `coordination-dataset`) are unshipped-with-
+  `building`, which is the only shape `roadmap-truth:check` rule 3 permits once the ADR flips.
 - **Per-model leaderboard** — still not built, but **not for the reason recorded here until
   2026-08-21** (corrected; falsify: run `packages/server/src/telemetry.test.ts` and read the
   `#207` case, or drop the `model.family` spread in `recordLoopClosure` and watch it fail). This
@@ -117,8 +120,15 @@ first.
   006 flagship); the wiki line that listed them as unauthorised was stale as of 2026-07-20.
 - **ADR 250's weekly reads** (asks-to-founder per merged PR; repeat wakes with unchanged reason;
   capability-miss count) — prose instructions, no instrument, no schedule.
-- **Radar M4/M5** — sweep and triage built, but `seen.json` is empty and no digest has ever been
-  emitted. That is the ingest side; see the goal `research-radar`.
+- **Radar M4/M5** — ~~sweep and triage built, but `seen.json` is empty and no digest has ever been
+  emitted~~ (2026-08-18). **Corrected 2026-09-03:** M4 IS built — `emitDigest` in
+  `scripts/radar/digest.ts` writes the weekly digest and appends `seen.json`, landed with
+  [#1049](https://github.com/SandRiseStudio/musterd/pull/1049). What is still true is the half that
+  matters, and it is the half nobody can see from the code:
+  **the instrument has never been run** (2026-09-03; falsify: a non-empty `seen.json`, or any digest
+  file committed under `docs/research/radar/`). `seen.json` is verbatim `{"arxiv": [], "hf": []}`,
+  there is no `radar:sweep` LaunchAgent, and `package.json` wires no `--emit` script. What remains is
+  M5 plus a first real run. That is the ingest side; see the goal `research-radar`, marked shipped.
 
 ## The sibling corpus: Exploring Next
 
