@@ -30,7 +30,7 @@ export async function nudgeCommand(parsed: Parsed): Promise<number> {
   try {
     // Hook one-shot (Notification hook): never reclaim the seat — see ResolveReadOptions.
     const { http, team, identity, explicit } = resolveRead(parsed.flags, {
-      reclaimAgentLease: false,
+      claimSeatPerRequest: false,
     });
     // Only an explicit actor (a bound seat / env / `--as`) — never an ambient global-config read
     // (ADR 036) — has an inbox to surface.

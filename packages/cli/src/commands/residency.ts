@@ -460,7 +460,7 @@ async function policyCommand(parsed: Parsed): Promise<number> {
 }
 
 async function statusCommand(parsed: Parsed): Promise<number> {
-  const { team, http } = resolveRead(parsed.flags, { reclaimAgentLease: true });
+  const { team, http } = resolveRead(parsed.flags, { claimSeatPerRequest: true });
   const { residency, policy_defaults } = await http.residency(team);
 
   if (parsed.flags['json']) {

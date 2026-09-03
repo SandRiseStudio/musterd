@@ -74,7 +74,7 @@ export async function boardCommand(parsed: Parsed): Promise<number> {
  */
 export async function signinCommand(parsed: Parsed, surface: SigninSurface): Promise<number> {
   const { team, server, http, identity } = resolveRead(parsed.flags, {
-    reclaimAgentLease: true,
+    claimSeatPerRequest: true,
   });
   const place = surface === 'live' ? 'the office' : 'the board';
 

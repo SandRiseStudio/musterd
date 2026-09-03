@@ -12,7 +12,7 @@ import { resolveRead } from './helpers.js';
  */
 export async function whoamiCommand(parsed: Parsed): Promise<number> {
   const { team, identity, identitySource, explicit } = resolveRead(parsed.flags, {
-    reclaimAgentLease: true,
+    claimSeatPerRequest: true,
   });
 
   if (parsed.flags['json']) {

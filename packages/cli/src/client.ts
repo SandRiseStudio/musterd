@@ -124,8 +124,8 @@ export interface HttpClientOpts {
   seat?: string;
   /** Required alongside an `msac_` credential; proves its current Presence (ADR 337). */
   sessionLease?: string;
-  /** Re-claim an agent seat and hold its Presence through this HTTP request (ADR 339). */
-  reclaimAgentLease?: boolean;
+  /** Claim the agent seat afresh and hold its Presence for THIS request (ADR 339) — the per-request claim, not the admin `musterd reclaim` (drop someone else's stale session) and not `claimSessionLease` (one claim after a refusal). Renamed from `claimSeatPerRequest` 2026-09-03: three "reclaim"s named three different things. */
+  claimSeatPerRequest?: boolean;
   /** This client's surface, sent as `x-musterd-surface` so ambient presence labels it (ADR 057). */
   surface?: string;
   /**
@@ -206,7 +206,7 @@ export class HttpClient {
   private async claimAgentLease(): Promise<{ lease: string; close: () => void } | undefined> {
     const { key, seat, surface, team } = this.opts;
     if (
-      !this.opts.reclaimAgentLease ||
+      !this.opts.claimSeatPerRequest ||
       !key?.startsWith(TOKEN_PREFIXES.agent_seat) ||
       !team ||
       !seat ||
@@ -228,7 +228,7 @@ export class HttpClient {
    * Claim the seat over WS and hand back the session lease it minted, holding the Presence until
    * `close`. This is ADR 337 §4 made explicit — "reconnection uses the seat credential to make a
    * fresh claim and receive a fresh lease" — for a caller that has just had its stored lease
-   * REFUSED and wants exactly one claim in reply, rather than `reclaimAgentLease`, which claims
+   * REFUSED and wants exactly one claim in reply, rather than `claimSeatPerRequest`, which claims
    * before every request whether or not the stored lease still works (the 2026-09-01 claim storm,
    * #1138/#1143). The `workspace` label is what lets a live same-workspace adapter survive the claim
    * (ADR 340, #1131); callers that have one must pass it.
