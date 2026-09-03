@@ -935,7 +935,7 @@ export function mountOffice(
     // of six tokens in #1104. The receptionist gets the act tone for both, which is what she had.
     inner.style.setProperty(
       '--lc-speech-ink',
-      speaker ? memberInk(who, speaker.kind) : 'var(--lc-paper-ink)',
+      speaker ? memberInk(who, speaker.kind, speaker.hue) : 'var(--lc-paper-ink)',
     );
     if (marking) {
       inner.classList.add(`is-mark--${marking.mark}`);

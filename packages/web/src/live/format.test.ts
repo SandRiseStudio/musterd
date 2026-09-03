@@ -711,3 +711,34 @@ describe('recipientScope / recipientNames — an eligible set is named, not a te
     expect(recipientNames({ kind: 'broadcast' }, ['a', 'b'])).toEqual([]);
   });
 });
+
+describe('memberHue — a stored hue wins, and the fallback is the old hash to the degree (ADR 374)', () => {
+  it('paints the stored hue when the roster carries one', () => {
+    expect(memberHue('miley', 'agent', 212)).toBe(212);
+    expect(memberColor('miley', 'agent', 212)).toBe('hsl(212, 68%, 62%)');
+    expect(memberAvatar('miley', 'agent', 212)).toMatch(/^hsl\(212, 68%, /);
+    expect(memberInk('miley', 'agent', 212)).toMatch(/^hsl\(212, 68%, /);
+  });
+
+  it('falls back to the name hash when the hue is null or absent — a pre-374 daemon looks the same', () => {
+    expect(memberHue('miley', 'agent', null)).toBe(memberHue('miley', 'agent'));
+    expect(memberHue('miley', 'agent', undefined)).toBe(memberHue('miley', 'agent'));
+  });
+
+  it('the fallback and the protocol’s legacyHue are one number — `team hue --assign-missing` seeds from it', async () => {
+    const { legacyHue } = await import('@musterd/protocol/hue');
+    for (const name of ['miley', 'dolly', 'ryder', 'nick', 'gptbot', 'a', 'zz-top']) {
+      expect(memberHue(name, 'agent')).toBe(legacyHue(name, 'agent'));
+      expect(memberHue(name, 'human')).toBe(legacyHue(name, 'human'));
+    }
+  });
+});
+
+describe('hueOf — the roster index answers the hue the way kindOf answers the kind (ADR 374)', () => {
+  it('returns the stored hue for a rostered name and null for anyone else', async () => {
+    const { hueOf, rosterIndex } = await import('./format');
+    const idx = rosterIndex([{ name: 'miley', kind: 'agent', hue: 212 } as never]);
+    expect(hueOf('miley', idx)).toBe(212);
+    expect(hueOf('stranger', idx)).toBeNull();
+  });
+});

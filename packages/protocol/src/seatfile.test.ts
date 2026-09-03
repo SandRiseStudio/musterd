@@ -346,3 +346,27 @@ describe('normalizeSeatName — the stable identity key (issue #107)', () => {
     expect(normalizeSeatName(normalizeSeatName('June'))).toBe('june');
   });
 });
+
+describe('seat file — hue (ADR 374)', () => {
+  it('round-trips `hue` as a top-level key, after the identity keys and before any table', () => {
+    const text = 'kind = "agent"\nrole = "designer"\nhue = 212\n';
+    const seat = parseSeatFile(text, 'miley');
+    expect(seat.hue).toBe(212);
+    expect(serializeSeat(seat)).toBe(text);
+    const withTable =
+      'kind = "agent"\nrole = "reviewer"\nhue = 45\n\n[capabilities]\ncan_flag_urgent = false\n';
+    expect(serializeSeat(parseSeatFile(withTable, 'olive'))).toBe(withTable);
+  });
+
+  it('is optional — a seat without one is the pre-374 file, byte for byte', () => {
+    const text = 'kind = "human"\nrole = "lead"\n';
+    expect(parseSeatFile(text, 'david').hue).toBeUndefined();
+    expect(serializeSeat(parseSeatFile(text, 'david'))).toBe(text);
+  });
+
+  it('refuses a hue off the wheel or not an integer', () => {
+    for (const bad of ['360', '-1', '12.5', '"212"']) {
+      expect(() => parseSeatFile(`kind = "agent"\nrole = ""\nhue = ${bad}\n`, 'x')).toThrow();
+    }
+  });
+});

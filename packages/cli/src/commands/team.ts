@@ -22,7 +22,8 @@ import {
   GuardianTierSchema,
   type TeamFile,
 } from '@musterd/protocol';
-import { flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
+import { HUE_MIN_SEPARATION, assignHue, hueConflict, legacyHue } from '@musterd/protocol/hue';
+import { flagHue, flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
   excludeCredentialFromGit,
@@ -37,8 +38,8 @@ import {
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
 import { hint, success, sym } from '../render/ui.js';
-import { writeSeatFile } from '../roster.js';
-import { findWorkspaceDir, inherited, resolve } from './helpers.js';
+import { readSeatFiles, readSeatHues, seatFilePath, setSeatHue, writeSeatFile } from '../roster.js';
+import { findWorkspaceDir, inherited, resolve, resolveRead } from './helpers.js';
 
 export async function teamCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
@@ -52,8 +53,9 @@ export async function teamCommand(parsed: Parsed): Promise<number> {
   if (sub === 'archive') return teamArchive(parsed);
   if (sub === 'export') return teamExport(parsed);
   if (sub === 'policy') return teamPolicy(parsed);
+  if (sub === 'hue') return teamHue(parsed);
   throw new CliError(
-    'usage: musterd team <create|add|observe|credential|agent-key|bootstrap|remove|archive|export|policy> ...',
+    'usage: musterd team <create|add|observe|credential|agent-key|bootstrap|remove|archive|export|policy|hue> ...',
     2,
   );
 }
@@ -758,12 +760,15 @@ async function teamAdd(parsed: Parsed): Promise<number> {
   const role = flagStr(parsed.flags, 'role');
   const lifecycle = flagStr(parsed.flags, 'lifecycle') as Lifecycle | undefined;
   const until = flagStr(parsed.flags, 'until');
+  // ADR 374: the seat's colour, if chosen. Absent, the seat file assigns one at write (file-backed)
+  // or the daemon does (db-only). Validated before anything is written.
+  const hue = flagHue(parsed.flags);
   // ADR 058 §5: for a file-backed team the file is the single writer — write `seats/<name>.toml`
   // first, then `addMember` becomes project-and-return (the daemon reconciles the file, mints, hands
   // back the token). A db-only team has no roster home, so this is skipped and the daemon originates.
   const home = loadConfig().rosterHome[team];
   if (home) {
-    writeSeatFile(home, name, { kind, role, lifecycle, until });
+    writeSeatFile(home, name, { kind, role, lifecycle, until, hue });
   }
   const res = await http.addMember(team, {
     name,
@@ -771,6 +776,7 @@ async function teamAdd(parsed: Parsed): Promise<number> {
     role,
     ...(lifecycle ? { lifecycle } : {}),
     ...(until ? { lifecycle_until: Date.parse(until) } : {}),
+    ...(hue !== undefined ? { hue } : {}),
   });
   const bootstrap =
     kind === 'agent'
@@ -875,6 +881,160 @@ async function teamObserve(parsed: Parsed): Promise<number> {
  * *someone else's* credential touches none of that: it is a secret for another person, not a
  * sign-in for this machine.
  */
+/**
+ * `musterd team hue <name> [<deg>] | --assign-missing` — a member's colour (ADR 374).
+ *
+ * Two homes for the same fact, the split `team add` already makes: on a file-backed team the seat
+ * file owns the hue and this command edits the file (the daemon reconciles it; two machines that
+ * share the repo agree); on a db-only team the daemon owns it and this command asks the daemon.
+ *
+ * `--assign-missing` is the one-time pass for a roster that predates hues: every seat without one
+ * is seeded from the hue the web painted it with before (`legacyHue` — the name hash, banded by
+ * kind) and walked clear only if it collides, so the colours people already know survive and only
+ * the near-duplicates move. Seats that already have a hue are not touched. On a file-backed team
+ * the result is a diff to read before it is pushed.
+ */
+async function teamHue(parsed: Parsed): Promise<number> {
+  // The file-backed path never talks to the daemon, so it must not demand an identity — a person
+  // editing the roster checkout may hold none here. Resolve the team auth-free first; the db-only
+  // branch resolves an authenticated client only when it is about to use one.
+  const { team } = resolveRead(parsed.flags);
+  const home = loadConfig().rosterHome[team];
+  const http = () => resolve(parsed.flags).http;
+  const assignMissing = Boolean(parsed.flags['assign-missing']);
+  const name = parsed.positionals[1];
+  const degRaw = parsed.positionals[2];
+
+  if (assignMissing) {
+    const assigned: Array<{
+      name: string;
+      kind: MemberKind;
+      hue: number;
+      sharedWith: string | null;
+    }> = [];
+    if (home) {
+      const seats = readSeatFiles(home);
+      const taken = readSeatHues(home);
+      for (const [seatName, seat] of Object.entries(seats)) {
+        if (seat.hue !== undefined) continue;
+        const kind = seat.kind === 'human' ? 'human' : 'agent';
+        const hue = assignHue(legacyHue(seatName, kind), Object.values(taken));
+        setSeatHue(home, seatName, hue);
+        assigned.push({
+          name: seatName,
+          kind: seat.kind,
+          hue,
+          sharedWith: sharedWithName(hue, taken),
+        });
+        taken[seatName] = hue;
+      }
+    } else {
+      const { members } = await http().roster(team);
+      const taken: Record<string, number> = {};
+      for (const m of members) if (typeof m.hue === 'number') taken[m.name] = m.hue;
+      for (const m of members) {
+        if (typeof m.hue === 'number') continue;
+        const kind = m.kind === 'human' ? 'human' : 'agent';
+        const hue = assignHue(legacyHue(m.name, kind), Object.values(taken));
+        await http().setHue(team, m.name, hue);
+        assigned.push({ name: m.name, kind: m.kind, hue, sharedWith: sharedWithName(hue, taken) });
+        taken[m.name] = hue;
+      }
+    }
+    if (assigned.length === 0) {
+      process.stdout.write(theme.meta(`every seat in ${team} already has a hue`) + '\n');
+      return 0;
+    }
+    for (const a of assigned) {
+      process.stdout.write(
+        success(`${theme.memberName(a.name, a.kind)} ${theme.meta('→')} hue ${a.hue}`) +
+          (a.sharedWith
+            ? `  ${theme.warn(`colour shared with ${a.sharedWith} — the wheel is full`)}`
+            : '') +
+          '\n',
+      );
+    }
+    if (home)
+      process.stdout.write(
+        hint(`written to ${seatFilePath(home, '<name>')} — review the diff, then commit and push`) +
+          '\n',
+      );
+    return 0;
+  }
+
+  if (!name) {
+    throw new CliError(
+      'usage: musterd team hue <name> [<0-359>] | musterd team hue --assign-missing',
+      2,
+    );
+  }
+
+  // Set.
+  if (degRaw !== undefined) {
+    const hue = Number(degRaw);
+    if (!Number.isInteger(hue) || hue < 0 || hue > 359)
+      throw new CliError(
+        `hue must be an integer from 0 to 359 (an HSL degree), got "${degRaw}"`,
+        2,
+      );
+    if (home) {
+      if (!existsSync(seatFilePath(home, name)))
+        throw new CliError(`no seat "${name}" — no ${seatFilePath(home, name)}`, 4);
+      const seatKind = readSeatFiles(home)[name]?.kind ?? 'agent';
+      const taken = readSeatHues(home, name);
+      const near = hueConflict(hue, Object.values(taken));
+      if (near !== null) {
+        const who = Object.entries(taken).find(([, h]) => h === near)?.[0] ?? '?';
+        throw new CliError(
+          `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who}" (${near}) — pick another`,
+          4,
+        );
+      }
+      const p = setSeatHue(home, name, hue);
+      process.stdout.write(
+        success(`${theme.memberName(name, seatKind)} ${theme.meta('→')} hue ${hue}`) +
+          `  ${theme.meta(`(${p} — the file owns it; commit and push)`)}\n`,
+      );
+      return 0;
+    }
+    const { member } = await http().setHue(team, name, hue);
+    process.stdout.write(
+      success(
+        `${theme.memberName(name, member.kind)} ${theme.meta('→')} hue ${member.hue ?? hue}`,
+      ) + '\n',
+    );
+    return 0;
+  }
+
+  // Show.
+  if (home) {
+    const seat = readSeatFiles(home)[name];
+    if (!seat) throw new CliError(`no seat "${name}" — no ${seatFilePath(home, name)}`, 4);
+    process.stdout.write(
+      seat.hue === undefined
+        ? `${theme.memberName(name, seat.kind)}: ${theme.meta('no hue — painted from the name hash; `musterd team hue ' + name + ' <0-359>` or `--assign-missing` sets one')}\n`
+        : `${theme.memberName(name, seat.kind)}: hue ${seat.hue}  ${theme.meta(`(seats/${name}.toml owns it)`)}\n`,
+    );
+    return 0;
+  }
+  const { members } = await http().roster(team);
+  const m = members.find((x) => x.name === name);
+  if (!m) throw new CliError(`no member "${name}" in "${team}"`, 4);
+  process.stdout.write(
+    typeof m.hue === 'number'
+      ? `${theme.memberName(name, m.kind)}: hue ${m.hue}\n`
+      : `${theme.memberName(name, m.kind)}: ${theme.meta('no hue — painted from the name hash; `musterd team hue ' + name + ' <0-359>` sets one')}\n`,
+  );
+  return 0;
+}
+
+/** Who a freshly assigned hue still sits too close to, when the wheel could not seat it clear. */
+function sharedWithName(hue: number, taken: Record<string, number>): string | null {
+  const near = hueConflict(hue, Object.values(taken));
+  if (near === null) return null;
+  return Object.entries(taken).find(([, h]) => h === near)?.[0] ?? null;
+}
+
 async function teamCredential(parsed: Parsed): Promise<number> {
   const name = parsed.positionals[1];
   if (!name)

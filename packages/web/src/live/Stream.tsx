@@ -25,7 +25,7 @@ import {
   recipientScope,
   richLength,
   rosterIndex,
-  type RichToken,
+  type RichToken, hueOf
 } from './format';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import {
@@ -300,6 +300,7 @@ function Row({
   const effAct = lane ?? (goal ? 'goal' : env.act);
   const tone = actTone(effAct);
   const kind = kindOf(env.from, idx);
+  const hue = hueOf(env.from, idx);
   // ADR 254: the names of an eligible set live in `meta.eligible` while `to` stays `{kind:'team'}`,
   // so the row has to read both or it renders "team" over an act addressed to named people.
   const eligible = eligibleOf(env.meta);
@@ -319,7 +320,7 @@ function Row({
       <div className="lc-row__head">
         <time className="lc-row__ts">{clock(env.ts)}</time>
         <span className={`lc-chip lc-chip--${kind}`}>
-          <span className="lc-chip__avatar" style={{ background: memberAvatar(env.from, kind) }}>
+          <span className="lc-chip__avatar" style={{ background: memberAvatar(env.from, kind, hue) }}>
             {initial(env.from)}
           </span>
           <span className="lc-chip__name">{env.from}</span>
@@ -339,7 +340,7 @@ function Row({
         >
           <span
             className="lc-quote__bar"
-            style={{ background: memberColor(parent.from, kindOf(parent.from, idx)) }}
+            style={{ background: memberColor(parent.from, kindOf(parent.from, idx), hueOf(parent.from, idx)) }}
           />
           <span className="lc-quote__who">{parent.from}</span>
           <span className="lc-quote__text">{summaryLine(parent)}</span>
@@ -389,7 +390,7 @@ function Recipient({
             {i > 0 && <span className="lc-to__or">or</span>}
             <span
               className="lc-to__dot"
-              style={{ background: memberColor(name, kindOf(name, idx)) }}
+              style={{ background: memberColor(name, kindOf(name, idx), hueOf(name, idx)) }}
             />
             <span className="lc-to__name">{name}</span>
           </span>

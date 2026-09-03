@@ -36,13 +36,25 @@ describe('roster seat-file writer (ADR 058 §5)', () => {
       rmSync(home, { recursive: true, force: true });
     });
 
-    it('writes canonical TOML under <home>/.musterd/seats, token-free', () => {
+    it('writes canonical TOML under <home>/.musterd/seats, token-free, coloured from birth (ADR 374)', () => {
       const p = writeSeatFile(home, 'olive', { kind: 'agent', role: 'reviewer' });
       expect(p).toBe(seatFilePath(home, 'olive'));
       expect(seatFileExists(home, 'olive')).toBe(true);
       const body = readFileSync(p, 'utf8');
-      expect(body).toBe('kind = "agent"\nrole = "reviewer"\n');
+      // The hue is assigned at write when the caller names none — the file is where a colour is born
+      // on a file-backed team — and it lands as the last top-level key.
+      expect(body).toMatch(/^kind = "agent"\nrole = "reviewer"\nhue = \d+\n$/);
       expect(body).not.toMatch(/token|mskd_/);
+    });
+
+    it('keeps an explicit hue, and a second seat is placed clear of the first', () => {
+      writeSeatFile(home, 'olive', { kind: 'agent', role: 'reviewer', hue: 200 });
+      expect(readFileSync(seatFilePath(home, 'olive'), 'utf8')).toBe(
+        'kind = "agent"\nrole = "reviewer"\nhue = 200\n',
+      );
+      const p = writeSeatFile(home, 'olive-2', { kind: 'agent', role: 'reviewer' });
+      const hue = Number(/hue = (\d+)/.exec(readFileSync(p, 'utf8'))![1]);
+      expect(hue).not.toBe(200);
     });
   });
 });

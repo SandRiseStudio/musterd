@@ -320,14 +320,19 @@ export function kindOf(name: string, idx: Map<string, MemberSummary>): Kind {
   return idx.get(name)?.kind === 'human' ? 'human' : 'agent';
 }
 
+/** The stored hue for a rostered name (ADR 374), or null — the colour functions then hash the name. */
+export function hueOf(name: string, idx: Map<string, MemberSummary>): number | null {
+  return idx.get(name)?.hue ?? null;
+}
+
 /**
  * A deterministic, per-member colour so every agent (and human) is individually distinguishable —
  * stable across sessions (hashed from the name, not assigned by index). Agents sit in a cool jewel
  * band, humans in a warm band, so kind still reads at a glance while individuals stay unique. The
  * golden-ratio hash spreads similar names apart. Returns an `hsl()` string usable in CSS and three.js.
  */
-export function memberColor(name: string, kind: Kind): string {
-  return `hsl(${memberHue(name, kind)}, 68%, 62%)`;
+export function memberColor(name: string, kind: Kind, hue?: number | null): string {
+  return `hsl(${memberHue(name, kind, hue)}, 68%, 62%)`;
 }
 
 /**
@@ -335,7 +340,13 @@ export function memberColor(name: string, kind: Kind): string {
  * the fill on the floor, the avatar they get in the roster and their name in the rail are all
  * unmistakably the same person.
  */
-export function memberHue(name: string, kind: Kind): number {
+export function memberHue(name: string, kind: Kind, hue?: number | null): number {
+  // ADR 374: the roster carries the member's hue — the seat file's on a file-backed team, the
+  // daemon's on a DB-only one — and it wins. Null/absent is a pre-374 daemon or a seat nobody has
+  // coloured yet; the hash below is what every surface painted before hues were stored, kept to
+  // the degree so that day looks identical (`legacyHue` in @musterd/protocol/hue is the same
+  // formula, pinned equal by test; it is not imported here to keep these bytes off /live's graph).
+  if (hue !== null && hue !== undefined) return hue;
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   const t = (h * 0.618033988749895) % 1;
@@ -410,8 +421,8 @@ function lightnessForLuminance(hue: number, target: number): number {
  * lighter `memberColor` and the room is untouched. The hue — which is what actually says *who* —
  * is identical, so the roster avatar and the person on the floor still read as one identity.
  */
-export function memberAvatar(name: string, kind: Kind): string {
-  const hue = memberHue(name, kind);
+export function memberAvatar(name: string, kind: Kind, stored?: number | null): string {
+  const hue = memberHue(name, kind, stored);
   return `hsl(${hue}, 68%, ${lightnessForLuminance(hue, 0.165)}%)`;
 }
 
@@ -420,8 +431,8 @@ export function memberAvatar(name: string, kind: Kind): string {
  * the darkest paper in the family (--lc-surface-3). Amber is the binding constraint: it is the
  * lightest hue in either band and drags the target well below where the cool hues would need it.
  */
-export function memberInk(name: string, kind: Kind): string {
-  const hue = memberHue(name, kind);
+export function memberInk(name: string, kind: Kind, stored?: number | null): string {
+  const hue = memberHue(name, kind, stored);
   return `hsl(${hue}, 68%, ${lightnessForLuminance(hue, 0.095)}%)`;
 }
 

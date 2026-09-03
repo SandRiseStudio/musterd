@@ -202,7 +202,7 @@ function SeatRow({
           disc. `aria-hidden` stays: the name is on the next line. */}
       <span
         className="lc-seat__avatar"
-        style={{ background: memberAvatar(m.name, kind) }}
+        style={{ background: memberAvatar(m.name, kind, m.hue) }}
         aria-hidden="true"
       >
         {initial(m.name)}

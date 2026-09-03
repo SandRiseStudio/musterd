@@ -276,3 +276,14 @@ describe('.lc-roster__dwell', () => {
     expect(rule).not.toMatch(/(^|[;\s])opacity\s*:/);
   });
 });
+
+describe('the stored hue reaches the roster avatar (ADR 374)', () => {
+  it('fills the monogram from the roster hue, not the name hash', () => {
+    const html = renderToStaticMarkup(
+      createElement(RosterPanel, {
+        roster: [seat({ name: 'gptbot', presence: 'online', posture: 'working', hue: 212 })],
+      }),
+    );
+    expect(html).toMatch(/background:hsl\(212, 68%/);
+  });
+});

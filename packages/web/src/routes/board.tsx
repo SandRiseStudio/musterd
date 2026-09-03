@@ -21,7 +21,7 @@ import {
 import { filterLanes, UNOWNED } from '../live/boardWrite';
 import { goalFilter, resolveBoardView } from '../live/goalGrid';
 import { useBoardData } from '../live/useBoardData';
-import { initial, kindOf, memberColor, memberAvatar } from '../live/format';
+import { initial, kindOf, memberColor, memberAvatar, hueOf} from '../live/format';
 import { InsightRail } from '../live/InsightRail';
 import { useLiveStream } from '../live/useLiveStream';
 import { useReport } from '../live/useReport';
@@ -301,7 +301,11 @@ function BoardPage() {
               <span
                 className="lc-card__avatar"
                 style={{
-                  background: memberAvatar(me, kindOf(me, new Map(roster.map((m) => [m.name, m])))),
+                  background: memberAvatar(
+                    me,
+                    kindOf(me, new Map(roster.map((m) => [m.name, m]))),
+                    hueOf(me, new Map(roster.map((m) => [m.name, m]))),
+                  ),
                 }}
                 aria-hidden="true"
               >
@@ -461,7 +465,7 @@ function FilterStrip({
     <div className="lc-board__filters" role="group" aria-label="Filter lanes by owner">
       {roster.map((m) => {
         const on = selected.has(m.name);
-        const color = memberColor(m.name, kindOf(m.name, rosterIdx));
+        const color = memberColor(m.name, kindOf(m.name, rosterIdx), m.hue);
         const n = live(m.name);
         return (
           <button

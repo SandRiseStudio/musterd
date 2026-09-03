@@ -82,7 +82,7 @@ export function roomEntries(roster: MemberSummary[], board: LaneBoard | null): R
       return {
         name: m.name,
         kind,
-        color: memberColor(m.name, kind),
+        color: memberColor(m.name, kind, m.hue),
         posture: memberPosture(m),
         title: lane ? lane.title : status,
         source: lane ? 'lane' : status ? 'status' : null,

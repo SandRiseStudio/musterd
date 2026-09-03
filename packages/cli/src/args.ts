@@ -71,6 +71,19 @@ export function parseArgs(argv: string[]): Parsed {
   return { positionals, flags, metaPairs };
 }
 
+/**
+ * `--hue <0-359>` (ADR 374): an integer degree on the wheel, or undefined when the flag is absent.
+ * Refused here, before any file or request is touched — a bad hue is a typo, not a state.
+ */
+export function flagHue(flags: Record<string, string | boolean>): number | undefined {
+  const raw = flagStr(flags, 'hue');
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 359)
+    throw new CliError(`--hue must be an integer from 0 to 359 (an HSL degree), got "${raw}"`, 2);
+  return n;
+}
+
 export function flagStr(flags: Record<string, string | boolean>, name: string): string | undefined {
   const v = flags[name];
   return typeof v === 'string' ? v : undefined;

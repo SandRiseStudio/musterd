@@ -644,3 +644,61 @@ describe('reconcile — governance projection (ADR 070, v0.3 P1)', () => {
     expect(memberView('olive').capabilities!.can_flag_urgent).toBe(true); // generalist again
   });
 });
+
+describe('reconcile — the seat file owns the hue (ADR 374)', () => {
+  const team = 'slug = "acme"\n';
+
+  it('projects a file hue on ADD and again on UPDATE, and NULLs it when the file drops it', () => {
+    writeRoster(team, { miley: 'kind = "agent"\nrole = "designer"\nhue = 212\n' });
+    reconcile();
+    const t = getTeamBySlug(db, 'acme')!;
+    expect(getMemberByName(db, t.id, 'miley')!.hue).toBe(212);
+
+    writeRoster(team, { miley: 'kind = "agent"\nrole = "designer"\nhue = 40\n' });
+    expect(reconcile().updated).toEqual(['miley']);
+    expect(getMemberByName(db, t.id, 'miley')!.hue).toBe(40);
+
+    writeRoster(team, { miley: 'kind = "agent"\nrole = "designer"\n' });
+    expect(reconcile().updated).toEqual(['miley']);
+    expect(getMemberByName(db, t.id, 'miley')!.hue).toBeNull();
+  });
+
+  it('never invents a hue for a file-backed seat — a file without one projects null on ADD', () => {
+    writeRoster(team, { dolly: 'kind = "agent"\nrole = ""\n' });
+    reconcile();
+    const t = getTeamBySlug(db, 'acme')!;
+    expect(getMemberByName(db, t.id, 'dolly')!.hue).toBeNull();
+    expect(toMember(getMemberByName(db, t.id, 'dolly')!, 'acme').hue).toBeNull();
+  });
+
+  it('REVIVE takes the hue from the file, like every other identity field', () => {
+    writeRoster(team, { ryder: 'kind = "agent"\nrole = ""\nhue = 100\n' });
+    reconcile();
+    rmSync(join(dir, '.musterd', 'seats', 'ryder.toml'));
+    reconcile();
+    writeRoster(team, { ryder: 'kind = "agent"\nrole = ""\nhue = 130\n' });
+    expect(reconcile().revived).toEqual(['ryder']);
+    const t = getTeamBySlug(db, 'acme')!;
+    expect(getMemberByName(db, t.id, 'ryder')!.hue).toBe(130);
+  });
+
+  it('two daemons reconciling the same seat files report the same hue per name', () => {
+    writeRoster(team, {
+      miley: 'kind = "agent"\nrole = ""\nhue = 212\n',
+      nick: 'kind = "human"\nrole = "admin"\n',
+    });
+    reconcile();
+    const other = openDb(':memory:');
+    try {
+      const spec = loadTeamSpec(dir)!;
+      reconcileTeam(other, spec);
+      for (const name of ['miley', 'nick']) {
+        const a = getMemberByName(db, getTeamBySlug(db, 'acme')!.id, name)!.hue;
+        const b = getMemberByName(other, getTeamBySlug(other, 'acme')!.id, name)!.hue;
+        expect(b).toBe(a);
+      }
+    } finally {
+      other.close();
+    }
+  });
+});

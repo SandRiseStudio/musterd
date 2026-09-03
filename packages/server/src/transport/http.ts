@@ -159,6 +159,7 @@ import {
   rotateToken,
   setAvailability,
   setMemberGovernance,
+  setMemberHue,
   teamHasAdmin,
 } from '../store/members.js';
 import { applyMemoryClear, applyMemorySave, getMemory, memoryEnvelope } from '../store/memory.js';
@@ -757,7 +758,12 @@ const AddMemberBody = z.object({
    *  gets. Omitted ⇒ `'full'`, the trusted local dashboard; safe as a default only because ADR 134
    *  restricts minting to a local peer or an admin. */
   observer_scope: z.enum(['full', 'public']).optional(),
+  /** ADR 374: the seat's hue. Honoured on a DB-only team; on a file-backed team the seat file the
+   *  CLI wrote first carries it and reconcile projects it. */
+  hue: z.number().int().min(0).max(359).nullish(),
 });
+
+const HueBody = z.object({ hue: z.number().int().min(0).max(359) });
 
 /**
  * Body for `POST /teams/:slug/signin-handoff` (ADR 170). The credential is checked, not stored —
@@ -1741,6 +1747,7 @@ export async function handleHttp(
           role: body.role ?? '',
           ...(body.lifecycle ? { lifecycle: body.lifecycle } : {}),
           lifecycleUntil: body.lifecycle_until ?? null,
+          ...(body.hue !== undefined ? { hue: body.hue } : {}),
           ...(body.observer
             ? { observer: true, observerScope: body.observer_scope ?? 'full' }
             : {}),
@@ -5427,6 +5434,33 @@ export async function handleHttp(
       // Operator escape hatch (ADR 017 follow-up): forcibly drop a member's live session so it can
       // rejoin — for a stuck/orphaned presence newest-wins can't displace (no new session is coming).
       // Admin-gated (ADR 071, P2) with the empty-admin fallback so an un-migrated team keeps the hatch.
+      // ADR 374 — a member's hue, on a DB-only team. The member themself or a team admin; a
+      // collision is refused by name. On a file-backed team the seat file owns the hue, so the
+      // route points at the file rather than writing a value reconcile would overwrite.
+      const hueMatch = rest.match(/^\/members\/([^/]+)\/hue$/);
+      if (method === 'POST' && hueMatch) {
+        const { team, member } = authTouch(ctx, slug, req);
+        const body = parseOrBadRequest(HueBody, await readJson(req));
+        const targetName = decodeURIComponent(hueMatch[1]!);
+        const target = getMemberByName(ctx.db, team.id, targetName);
+        if (!target || target.left_at !== null)
+          throw new MusterdError('not_found', `no member "${targetName}" in "${slug}"`);
+        if (target.id !== member.id && !resolveCapabilities(member).is_admin)
+          throw new MusterdError(
+            'forbidden',
+            'only the member themself or a team admin may set a hue',
+          );
+        const roots = [...new Set([...ctx.rosterRoots, ...resolveRosterRoots()])];
+        if (teamSpecForSlug(roots, slug))
+          throw new MusterdError(
+            'conflict',
+            `"${slug}" is file-backed — set \`hue = ${body.hue}\` in seats/${targetName}.toml (the file owns it; \`musterd team hue\` does this)`,
+          );
+        setMemberHue(ctx.db, target, body.hue);
+        const me = summarize(ctx, team.slug, team.id, member).find((m) => m.name === targetName);
+        return sendJson(res, 200, { member: me });
+      }
+
       const reclaimMatch = rest.match(/^\/members\/([^/]+)\/reclaim$/);
       if (method === 'POST' && reclaimMatch) {
         const { team, member: caller, viaFallback } = authGovernance(ctx, slug, req);

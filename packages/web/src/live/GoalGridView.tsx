@@ -1,7 +1,7 @@
 import type { FlowMetrics, Goal, GoalFlow, Lane, LaneWarning, MemberSummary } from '@musterd/protocol';
 import { useMemo } from 'react';
 import { buildGoalGrid, type GoalCardModel, type RunwayDot, type ShippedGoal } from './goalGrid';
-import { initial, kindOf, memberAvatar } from './format';
+import { initial, kindOf, memberAvatar, hueOf} from './format';
 import './GoalGrid.css';
 
 /**
@@ -295,7 +295,9 @@ function Runway({
           <span key={d.lane} className="gg-rider" style={{ left: `${d.x}%` }}>
             <span
               className="gg-rider__av"
-              style={{ background: memberAvatar(d.owner, kindOf(d.owner, rosterIdx)) }}
+              style={{
+                background: memberAvatar(d.owner, kindOf(d.owner, rosterIdx), hueOf(d.owner, rosterIdx)),
+              }}
             >
               {initial(d.owner)}
             </span>

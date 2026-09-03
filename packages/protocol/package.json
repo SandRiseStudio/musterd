@@ -43,6 +43,10 @@
     "./posture": {
       "types": "./dist/posture.d.ts",
       "default": "./dist/posture.js"
+    },
+    "./hue": {
+      "types": "./dist/hue.d.ts",
+      "default": "./dist/hue.js"
     }
   },
   "files": [

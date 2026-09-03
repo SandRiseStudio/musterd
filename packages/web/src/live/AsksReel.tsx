@@ -12,7 +12,7 @@ import {
   type AskView,
   type ReviewView,
 } from './asks';
-import { acceptanceCapacity, initial, kindOf, memberAvatar } from './format';
+import { acceptanceCapacity, initial, kindOf, memberAvatar, hueOf} from './format';
 import { reelIndex, reelTicks } from './reel';
 
 /**
@@ -160,7 +160,9 @@ function ShownAsk({
     <div className="bc-reel__row" key={shown.env.id}>
       <span
         className="bc-reel__who"
-        style={{ background: memberAvatar(shown.env.from, kindOf(shown.env.from, idx)) }}
+        style={{
+          background: memberAvatar(shown.env.from, kindOf(shown.env.from, idx), hueOf(shown.env.from, idx)),
+        }}
         aria-hidden="true"
       >
         {initial(shown.env.from)}
@@ -188,7 +190,7 @@ function ShownReview({ shown, idx }: { shown: ReviewView; idx: Map<string, Membe
     <div className="bc-reel__row" key={shown.lane.id}>
       <span
         className="bc-reel__who"
-        style={{ background: memberAvatar(owner, kindOf(owner, idx)) }}
+        style={{ background: memberAvatar(owner, kindOf(owner, idx), hueOf(owner, idx)) }}
         aria-hidden="true"
       >
         {initial(owner)}

@@ -406,6 +406,10 @@ export class HttpClient {
   addMember(slug: string, body: Record<string, unknown>) {
     return this.request('POST', `/teams/${slug}/members`, body);
   }
+  /** ADR 374: set a member's hue on a DB-only team (a file-backed team edits the seat file). */
+  setHue(slug: string, name: string, hue: number): Promise<{ member: MemberSummary }> {
+    return this.request('POST', `/teams/${slug}/members/${encodeURIComponent(name)}/hue`, { hue });
+  }
   /**
    * Re-mint a human member's `mscr_` credential in place — the recovery path for a lost one. Sits at
    * the provisioning bar (localhost unauthenticated, admin off-host), so this deliberately does NOT

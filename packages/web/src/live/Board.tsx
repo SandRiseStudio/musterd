@@ -20,7 +20,7 @@ import {
   type LaneAction,
   type MovedLanes,
 } from './boardWrite';
-import { initial, kindOf, memberAvatar } from './format';
+import { initial, kindOf, memberAvatar, hueOf} from './format';
 import { GoalGrid } from './GoalGridView';
 
 /**
@@ -402,7 +402,9 @@ function LaneCard({
                 immediately to its right, so the letter is decoration, not information. */}
             <span
               className="lc-card__avatar"
-              style={{ background: memberAvatar(lane.owner_seat, ownerKind) }}
+              style={{
+                background: memberAvatar(lane.owner_seat, ownerKind, hueOf(lane.owner_seat, rosterIdx)),
+              }}
               aria-hidden="true"
             >
               {initial(lane.owner_seat)}
@@ -525,7 +527,9 @@ function SeatPicker({
         >
           <span
             className="lc-card__avatar"
-            style={{ background: memberAvatar(m.name, m.kind === 'human' ? 'human' : 'agent') }}
+            style={{
+              background: memberAvatar(m.name, m.kind === 'human' ? 'human' : 'agent', m.hue),
+            }}
             aria-hidden="true"
           >
             {initial(m.name)}
