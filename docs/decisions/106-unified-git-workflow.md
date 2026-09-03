@@ -184,10 +184,16 @@ then assert every leaf's `result == success` by name — `cancelled` and `skippe
 Adding a gate means adding it to a leaf **and** to the `needs:` list; a leaf missing from `needs:`
 is a gate nobody requires.
 
-**Eval, amended.** _Baseline:_ 8m10s median over the three runs above. _Target:_ under 4m30s on the
-first three post-merge runs, with the critical path expected to be `coverage` at ~15s setup + 22s
-build + 157s ≈ 3m15s. _Falsifier:_ branch protection still lists exactly one required check named
-`gates`, and a deliberately red leaf produces a red `gates`. If a leaf proves flaky on a cold
-runner (the sweep's 30s Chrome start timeout exists because cold start flaked once), that is a
-regression this amendment introduced, and the fix is the leaf, not the fan-in.
+**Eval, amended.** _Baseline:_ 8m10s median over the three runs above. _First run on the new shape_
+(`33793376033`, this PR): **4m31s** created→completed; leaves `a11y-prerender` 261s,
+`a11y-connected` 150s, `coverage` 127s, `static` 95s, `docs` 50s, `gates` 3s. The critical path is
+the prerendered sweep, not `coverage` as predicted — on its own cold runner the 15-sweep phase took
+~215s after setup, against ~125s on a warm laptop, so the per-launch Chrome floor is the next lever
+(the "faster sweep" rejected above becomes the right next lane once this lands). The run before it
+(`33792845354`) had two red leaves for reasons unrelated to any gate and `gates` went red in 3s —
+the fan-in falsifier, exercised for real. _Target:_ under 4m30s median on the first three
+post-merge runs. _Falsifier:_ branch protection still lists exactly one required check named
+`gates`. If a leaf proves flaky on a cold runner (the sweep's 30s Chrome start timeout exists
+because cold start flaked once), that is a regression this amendment introduced, and the fix is the
+leaf, not the fan-in.
 
