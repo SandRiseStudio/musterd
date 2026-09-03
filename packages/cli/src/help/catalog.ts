@@ -433,11 +433,11 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'nudge',
     signature: '',
-    summary: 'print directed acts waiting for this seat (read-only)',
+    summary: 'the waiting-acts banner and the acts behind it (read-only)',
     group: 'messaging',
     primary: true,
     detail:
-      'Print the directed acts waiting for this seat. Read-only — the approval-prompt hook target.',
+      'The one-line banner and, under it, the directed acts waiting for this seat, oldest first. Read-only — never moves the cursor; the approval-prompt hook target. `musterd inbox` is the full answer.',
   },
   {
     name: 'reap',
@@ -612,7 +612,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'status',
     signature: '',
-    summary: 'the roster — who’s on the team, present, and working',
+    summary: 'the roster — who’s on the team, present, and working; leads with what waits for you',
     group: 'insight',
     primary: true,
     detail:

@@ -37,6 +37,7 @@ src/
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
   errors.ts           // CliError(code) -> message + exit code
+  exit.ts             // exitAfterFlush: exit only once stdout+stderr have drained — a piped render was cut at 64 KB by a bare process.exit()
   help/               // the structured command catalog behind `musterd help` (ADR 113)
     catalog.ts        // pure, import-free command catalog (groups + entries) — the single source guidance:check reads
     plain.ts          // renderPlainHelp(): the uncolored HELP string derived from the catalog (guidance-safe)

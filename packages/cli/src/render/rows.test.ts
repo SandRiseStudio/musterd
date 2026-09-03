@@ -17,7 +17,7 @@ import {
   renderStatusHeader,
   renderRoster,
 } from './rows.js';
-import { dayLabel } from './theme.js';
+import { dayLabel, sinceLabel } from './theme.js';
 
 // picocolors auto-disables color when stdout is not a TTY (vitest), so output is plain & deterministic.
 
@@ -730,9 +730,15 @@ describe('renderPendingSummary (ADR 024 — comeback summary)', () => {
   });
 
   it('pluralizes and shows the since-time for several', () => {
-    const out = renderPendingSummary(3, since);
+    const out = renderPendingSummary(3, since, since + 60_000);
     expect(out).toContain('3 requests waiting for you');
     expect(out).toMatch(/since \d\d:\d\d/); // local HH:MM — timezone-robust
+  });
+
+  it('dates the since-time once it is older than today (a bare clock read as "today" for 15 days)', () => {
+    const fifteenDaysLater = since + 15 * 86_400_000;
+    const out = renderPendingSummary(3, since, fifteenDaysLater);
+    expect(out).toMatch(/since Jun \d+ \d\d:\d\d/);
   });
 });
 
@@ -751,9 +757,28 @@ describe('renderReachabilityNudge (ADR 046 — agent-side reachability)', () => 
   });
 
   it('pluralizes and shows the since-time for several', () => {
-    const out = renderReachabilityNudge(3, since, 'David');
+    const out = renderReachabilityNudge(3, since, 'David', since + 60_000);
     expect(out).toContain('3 acts waiting for David');
     expect(out).toMatch(/since \d\d:\d\d/); // local HH:MM — timezone-robust
+  });
+
+  it('dates the since-time once it is older than today', () => {
+    const out = renderReachabilityNudge(3, since, 'David', since + 2 * 86_400_000);
+    expect(out).toMatch(
+      /since (Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) · Jun \d+ \d\d:\d\d/,
+    );
+  });
+});
+
+describe('sinceLabel (a clock with a date once it is not today)', () => {
+  const at = (y: number, mo: number, d: number, h = 9, mi = 5) =>
+    new Date(y, mo - 1, d, h, mi).getTime();
+  it('is the bare clock on the same local day', () => {
+    expect(sinceLabel(at(2026, 8, 19, 15, 18), at(2026, 8, 19, 23))).toBe('15:18');
+  });
+  it('carries the day label once it is not today', () => {
+    expect(sinceLabel(at(2026, 8, 19, 15, 18), at(2026, 8, 20, 9))).toBe('Yesterday 15:18');
+    expect(sinceLabel(at(2026, 8, 19, 15, 18), at(2026, 9, 3, 9))).toBe('Aug 19 15:18');
   });
 });
 

@@ -8,7 +8,7 @@ import {
   type MemberSummary,
   type PresenceStatus,
 } from '@musterd/protocol';
-import { clock, dayLabel, theme } from './theme.js';
+import { clock, dayLabel, sinceLabel, theme } from './theme.js';
 import { heading, hint, padEndVisible, sym, termWidth, visibleLen, wrapText } from './ui.js';
 
 export type KindOf = (name: string) => MemberKind;
@@ -517,12 +517,12 @@ export function dischargedIds(res: { discharged?: { id: string }[] }): string[] 
  * the durable inbox cursor (unread, action-needed messages). Returns '' when nothing waits, so a
  * caller can prepend it unconditionally without adding a blank line of noise on the common path.
  */
-export function renderPendingSummary(count: number, sinceTs: number): string {
+export function renderPendingSummary(count: number, sinceTs: number, now = Date.now()): string {
   if (count <= 0) return '';
   const noun = count === 1 ? 'request' : 'requests';
   return (
     theme.actionNeeded(`⚑ ${count} ${noun} waiting for you`) +
-    theme.meta(` since ${clock(sinceTs)} — musterd inbox to read`)
+    theme.meta(` since ${sinceLabel(sinceTs, now)} — musterd inbox to read`)
   );
 }
 
@@ -569,13 +569,41 @@ export function renderMachineLine(
  * surfaced away from `status`, where "you" has no anchor) and points at the fix. Returns '' when
  * nothing waits, so a caller can append it unconditionally. Pure — same predicate as the live path.
  */
-export function renderReachabilityNudge(count: number, sinceTs: number, me: string): string {
+export function renderReachabilityNudge(
+  count: number,
+  sinceTs: number,
+  me: string,
+  now = Date.now(),
+): string {
   if (count <= 0) return '';
   const noun = count === 1 ? 'act' : 'acts';
   return (
     theme.actionNeeded(`⚑ ${count} ${noun} waiting for ${me}`) +
-    theme.meta(` — musterd inbox  (since ${clock(sinceTs)})`)
+    theme.meta(` — musterd inbox  (since ${sinceLabel(sinceTs, now)})`)
   );
+}
+
+/** How many waiting acts `renderWaitingActs` lists before it folds the rest into a `+N more`. */
+export const WAITING_ACTS_SHOWN = 5;
+
+/**
+ * The acts behind the banner, one line each, oldest first — what `musterd nudge` prints under its
+ * banner so the human at the approval prompt sees WHAT waits, not only how many (ADR 053 §1 said
+ * "prints any unread directed acts"; the banner alone had drifted to a count that pointed at an
+ * inbox which could not show it). Bounded: past {@link WAITING_ACTS_SHOWN} it says how many more.
+ */
+export function renderWaitingActs(waiting: Envelope[], now = Date.now()): string[] {
+  const rows = [...waiting].sort((a, b) => a.ts - b.ts);
+  const lines = rows.slice(0, WAITING_ACTS_SHOWN).map((m) => {
+    const head = m.body.split('\n').find((l) => l.trim() !== '') ?? '';
+    const brief = head.length > 96 ? `${head.slice(0, 95)}…` : head;
+    return `  ${theme.meta(sinceLabel(m.ts, now))} ${m.from} ${theme.actBadge(m.act)} ${brief}`;
+  });
+  if (rows.length > WAITING_ACTS_SHOWN)
+    lines.push(
+      theme.meta(`  +${rows.length - WAITING_ACTS_SHOWN} more — musterd inbox --peek --unread`),
+    );
+  return lines;
 }
 
 export function renderPresence(status: PresenceStatus, surface?: string): string {
