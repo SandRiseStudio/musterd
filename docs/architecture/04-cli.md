@@ -122,7 +122,7 @@ src/
       cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks: preToolUse gate (ADR 150/369), postToolUse interrupt (ADR 088/369), sessionStart orient (ADR 333), model_id observe (ADR 198), afterShellExecution + afterMCPExecution (ADR 265)
       codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249); toolkit-declared plugin fragments write [plugins."id"] enable tables in the same file (ADR 323)
       opencode.ts     // detect/configure via project-local .opencode/opencode.json (`mcp.musterd`, McpLocalConfig shape); plain JSON only — an opencode.jsonc sibling is refused, never raced (ADR 321 §3/§4); no hooks, guidance rides the AGENTS.md primer opencode reads natively; orient skill is canonical `.musterd/skill/orient.md` (ADR 333)
-      grok.ts         // detect/configure via project-local .grok/config.toml + Claude-parity hooks in .grok/hooks/musterd.json (nudge, interrupt, gate, capture, end), statusline, permission floor; Cursor hook compat off (ADR 352)
+      grok.ts         // detect/configure via project-local .grok/config.toml + hooks in .grok/hooks/musterd.json (inbox --waiting, PreToolUse interrupt additionalContext + Stop continuation (ADR 370), gate, capture, end), statusline, permission floor; Cursor hook compat off (ADR 352)
       codexHooks.ts   // reversible .codex/hooks.json renderer: marker-owned SessionStart/SessionEnd/PostToolUse + UserPromptSubmit orient-nudge (ADR 249 / ADR 333)
       codexToml.ts    // TOML read/merge helper for the Codex adapter — [mcp_servers.*] and [plugins.*] tables only (ADR 031/323)
   archaeology/        // cookoff wasted-work reference collector — git-only, no daemon (ADR 122/123)
