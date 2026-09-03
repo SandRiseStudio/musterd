@@ -1,6 +1,6 @@
 # 371 — The record kind, and the rest of the ledger: the insight substrate crosses the wire
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-09-03
 - Lane: `01M1MJ61JYM0CZ7VQJXC2DA2FK` (residence-2 census gap 3, the last of three)
 - Closes: residence-2 census gap 3 (`docs/wiki/federation-data-census.md` §Gaps, ranked)
@@ -102,10 +102,14 @@ holds a read-only mirror of the pool. That is what keeps `incidentReporters` —
 that runs at route time on whichever daemon the `resolve` is posted to — correct on a joiner: it
 reads a local mirror of a hub-decided fact, which is how every `lanes` read already works.
 
-**A `record.incident_report` the hub did not mint stops the fold** (`record_not_hub_minted`): a
-joiner-stamped pool row is a second counter in the making, and the only thing worse than a count
-taken on one machine is one taken on two. The check is on `origin_node` against the hub's node for
-the team, which every joiner already holds (ADR 355 §5).
+**A `record.incident_report` the hub did not mint is refused at ingest**, the ADR 367 rule for a
+policy event: admissible only on the hub's own loopback push, a `SyncOriginError` (403) otherwise,
+and the batch binds nothing. A joiner-stamped pool row is a second counter in the making, and the
+only thing worse than a count taken on one machine is one taken on two. Refusing at the hub rather
+than at every joiner's fold means no joiner needs to know which node is the hub — the hub never
+stages the row, so it never reaches one. The reporter it names is exempt from residence binding for
+the same reason the policy actor is: the seat lives on the joiner, and binding it to the hub for a
+row the hub wrote on its behalf would strand it.
 
 **An unreachable hub delays a report; it never loses one.** The act queues in the joiner's push
 like every other message and is counted when it lands. This is the opposite of ADR 367's refusal,
@@ -186,9 +190,11 @@ rule in §2 is the whole of its protection.
 - `musterd report` counts every machine's tool calls, bounces and surface weight. The seed thread is
   whole everywhere. An incident opens once, on the hub, when the team — not one machine — reaches the
   threshold, and resolve fan-out reaches reporters on every machine.
-- The fold has a sixth kind and three new stop shapes: `unknown_record_event`, `seed_unborn`,
-  `record_not_hub_minted`. `seed_unborn` should be transient (one relay poll); one that persists is
-  a relay-ingest defect wearing a thread entry's shape.
+- The fold has a sixth kind and two new stop shapes: `unknown_record_event` and `seed_unborn`.
+  `seed_unborn` should be transient (one relay poll); one that persists is a relay-ingest defect
+  wearing a thread entry's shape. The hub-origin rule lives at ingest, not in the fold.
+- `foldBatch` returns the ids of the messages it inserted, and the hub's pull fires the incident
+  hook from that list — never from a re-scan of `messages`, which would re-fire it every tick.
 - The audit log now holds seed-thread bodies (briefs, conclusions) and blocked-report signatures,
   daemon-side only, never git — the ADR 366 consequence, one table wider. A brief is bounded by its
   own schema; nothing new is unbounded.
@@ -205,10 +211,11 @@ rule in §2 is the whole of its protection.
 
 ## Observability & Evaluation
 
-**Traces.** No new span. Three new log lines, all expected to be zero: `sync_fold_record_not_hub`
-(a joiner minted a pool row — a second counter exists), `sync_fold_seed_unborn_persisted` (a
-`seed_unborn` stop older than two relay polls — relay ingest is behind on that daemon), and the
-existing `ledger_stamp_failed` now covering the widened set. Falsify on two live daemons: record a
+**Traces.** No new span. Two log lines to watch, both expected to be quiet: `sync_fold_seed_unborn`
+(reported once per blocker like every stop; one that outlives two relay polls means relay ingest is
+behind on that daemon), and the hub's `forbidden` refusal of a pushed `record.incident_report` (a
+joiner minted a pool row — a build downstream of it counts on its own). The existing
+`ledger_stamp_failed` now covers the widened set. Falsify on two live daemons: record a
 tool call on the joiner, `musterd report` on the hub after a tick — the tool's `calls` must rise by
 the batch; append a brief on the joiner, read the seed on the hub — the entry is there with the
 same id; post a `blocked_by` from a joiner seat, `SELECT COUNT(*) FROM incident_reports` on the hub
@@ -247,8 +254,9 @@ Between two real daemons in `sync/record.test.ts`, plus the readers in `store/re
 3. Three seats blocked on the same gate — two posting to the hub, one to the joiner — open exactly
    one `incident: <gate>` lane, on the hub, and `incidentReporters` lists all three on **both**
    daemons after one tick. Before this ADR: zero lanes. Fails without §2.
-4. A `record.incident_report` stamped by the joiner stops the hub-mirrored fold as
-   `record_not_hub_minted` and inserts nothing. Fails without §2's origin rule.
+4. A `record.incident_report` pushed by any node but the hub is refused 403 at ingest, stages
+   nothing and inserts nothing — both hand-built from a second enrolled node and stamped through the
+   joiner's own writer. Fails without §2's origin rule.
 5. A folded `residency.host_suspended` from the joiner leaves the hub's `awakeMsSince` exactly
    where it was; removing `MINTED_HERE` from `hostAsleepMs` makes this fail. Fails without §4.
 6. The raw `recordToolCalls` / `appendThread` / pool INSERT still ship nothing (`census.test.ts`).

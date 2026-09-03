@@ -7,7 +7,7 @@ import {
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { monotonicFactory as monotonicUlid } from 'ulid';
-import { appendAudit } from './audit.js';
+import { appendAudit, appendReplicatedEvent } from './audit.js';
 import { getLane, listLanes, openLane, updateLane } from './lanes.js';
 import { getMemberByRole } from './members.js';
 import { getPolicy } from './teams.js';
@@ -44,6 +44,43 @@ export type IncidentOutcome =
 /** The team's incident knobs, defaults applied on read (never on write — ADR 185). */
 export function incidentPolicy(db: Database, teamId: string): IncidentPolicy {
   return getPolicy(db, teamId).incident;
+}
+
+/** One pool row as the wire carries it (ADR 371 §2) — the hub's row, verbatim. */
+interface ReportRow {
+  id: string;
+  gate: string;
+  seat: string;
+  sig: string | null;
+  ref: string | null;
+  message_id: string | null;
+  lane_id: string | null;
+  created_at: number;
+}
+
+/**
+ * Stamp one pool row as a `record.incident_report` event. Only the hub ever runs this — a joiner
+ * never records (its report crosses on the act it rides, `protocol/route.ts`), and a joiner-pushed
+ * one is refused at ingest (`sync/log.ts`). `actor` is the reporter: the fold keys the mirror on
+ * the seat NAME and resolves nothing, and ingest binds nothing on the hub's own loopback.
+ */
+function stampReport(db: Database, teamId: string, row: ReportRow): void {
+  appendReplicatedEvent(db, teamId, {
+    actor: row.seat,
+    action: 'record.incident_report',
+    target: row.lane_id ?? row.gate,
+    result: 'allow',
+    detail: {
+      report_id: row.id,
+      gate: row.gate,
+      seat: row.seat,
+      sig: row.sig,
+      ref: row.ref,
+      message_id: row.message_id,
+      lane_id: row.lane_id,
+      created_at: row.created_at,
+    },
+  });
 }
 
 /** The derived, deterministic lane title — also the open-incident lookup key. */
@@ -191,23 +228,36 @@ export function recordBlockedReport(
   // accumulating a pool that springs into an incident the moment someone turns it back on.
   if (!policy.enabled) return { kind: 'disabled' };
   const open = findOpenIncident(db, teamId, teamSlug, report.gate);
-  const insert = (laneId: string | null) =>
-    db
-      .prepare(
-        `INSERT INTO incident_reports (id, team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        mintReportId(),
-        teamId,
-        report.gate,
-        seat,
-        report.sig ?? null,
-        report.ref ?? null,
-        messageId,
-        laneId,
-        now,
-      );
+  // Every pool row is stamped `record.incident_report` as it is written (ADR 371 §2): the pool is
+  // the hub's, and the row replicates back to every joiner as a read-only mirror so
+  // `incidentReporters` answers there. The `lane_id` stamp at open is the same verb again.
+  const insert = (laneId: string | null) => {
+    const id = mintReportId();
+    db.prepare(
+      `INSERT INTO incident_reports (id, team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      teamId,
+      report.gate,
+      seat,
+      report.sig ?? null,
+      report.ref ?? null,
+      messageId,
+      laneId,
+      now,
+    );
+    stampReport(db, teamId, {
+      id,
+      seat,
+      gate: report.gate,
+      sig: report.sig ?? null,
+      ref: report.ref ?? null,
+      message_id: messageId,
+      lane_id: laneId,
+      created_at: now,
+    });
+  };
 
   if (open) {
     insert(open.id);
@@ -243,8 +293,17 @@ export function recordBlockedReport(
   const rows = db
     .prepare<
       [string, string],
-      { id: string; seat: string; sig: string | null; ref: string | null }
-    >('SELECT id, seat, sig, ref FROM incident_reports WHERE team_id = ? AND gate = ? AND lane_id IS NULL ORDER BY id')
+      {
+        id: string;
+        seat: string;
+        sig: string | null;
+        ref: string | null;
+        message_id: string | null;
+        created_at: number;
+      }
+    >(
+      'SELECT id, seat, sig, ref, message_id, created_at FROM incident_reports WHERE team_id = ? AND gate = ? AND lane_id IS NULL ORDER BY id',
+    )
     .all(teamId, report.gate);
   const lane = openLane(
     db,
@@ -262,6 +321,7 @@ export function recordBlockedReport(
   db.prepare(
     'UPDATE incident_reports SET lane_id = ? WHERE team_id = ? AND gate = ? AND lane_id IS NULL',
   ).run(lane.id, teamId, report.gate);
+  for (const r of rows) stampReport(db, teamId, { ...r, gate: report.gate, lane_id: lane.id });
   appendAudit(db, teamId, {
     actor: seat,
     action: 'incident.opened',

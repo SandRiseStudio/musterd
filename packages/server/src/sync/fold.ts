@@ -1,8 +1,15 @@
-import { ActSchema, type SyncPullEvent, type SyncPullLaneEvent } from '@musterd/protocol';
+import {
+  ActSchema,
+  ToolCallEventSchema,
+  type SyncPullEvent,
+  type SyncPullLaneEvent,
+} from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { z } from 'zod';
 import { getMemberByName } from '../store/members.js';
 import { upsertForeignNode } from '../store/nodes.js';
 import type { MessageRow } from '../store/rows.js';
+import { recordToolCalls } from '../store/toolCalls.js';
 
 /**
  * The fold (ADR 325 increment 3b-ii): apply the team's canonical order to THIS daemon's `messages`.
@@ -59,7 +66,15 @@ export type FoldStop =
   // position it describes does not exist locally. Blocking is the point: skipping would leave the
   // cursor pointing at a place this daemon cannot resolve, and the next tick has the message.
   | { kind: 'unknown_continuity_event'; action: string; hub_seq: number }
-  | { kind: 'cursor_unborn'; message: string; seat: string; hub_seq: number };
+  | { kind: 'cursor_unborn'; message: string; seat: string; hub_seq: number }
+  // Record events (ADR 371, residence-2 census gap 3): the sixth kind. A record projects into a
+  // TABLE (unlike the ledger), so a verb this build cannot project stops — a row nothing reads is
+  // not a fact held honestly. `seed_unborn` is the seed thread's own `unborn`: the relay seed the
+  // entry names has not been ingested here yet. The relay runs on every daemon, so it is at most one
+  // poll away; blocking is the `lane_unborn` discipline — an entry with no seed to hang on would be
+  // a row nothing can find.
+  | { kind: 'unknown_record_event'; action: string; hub_seq: number }
+  | { kind: 'seed_unborn'; relay_id: string; hub_seq: number };
 
 /** The `lane.*` verbs the fold can project. Anything else stops as `unknown_lane_event`. */
 const LANE_VERBS = new Set([
@@ -239,6 +254,96 @@ function projectPolicyEvent(
     teamId,
   );
   return 'applied';
+}
+
+/** The `record.*` verbs the fold can project. Anything else stops as `unknown_record_event`. */
+const RECORD_VERBS = new Set(['record.tool_calls', 'record.seed_thread', 'record.incident_report']);
+
+/**
+ * Project a replicated record (ADR 371) into its table. Nothing here decides: every projection is
+ * an additive UPSERT or an idempotent INSERT, and the fold's Rule 2 (a held `(origin_node,
+ * origin_seq)` pair is skipped before this runs) is what makes the additive one exactly-once.
+ *
+ * - `tool_calls`: the same hourly fold `recordToolCalls` runs, under the ORIGIN's `bucket_start` —
+ *   the batch landed in that hour on the machine that measured it, and the report groups by hour.
+ * - `seed_thread`: `seeds.id` and `members.id` are daemon-private, so the entry names the relay id
+ *   and the member; both resolve HERE. The entry keeps the origin's id — one row, one key, on every
+ *   machine — and the member is resolved by the caller (the seat rule every seat-fact kind shares).
+ * - `incident_report`: the hub's pool row, mirrored read-only so `incidentReporters` answers on a
+ *   joiner. The same verb carries the later `lane_id` stamp, hence the upsert on the id.
+ */
+function projectRecordEvent(
+  db: Database,
+  teamId: string,
+  event: SyncPullLaneEvent['event'],
+  memberId: string | null,
+): 'applied' | 'unknown' | 'seed_unborn' {
+  const d = event.detail ?? {};
+  if (event.action === 'record.tool_calls') {
+    const seat = typeof d['seat'] === 'string' ? d['seat'] : event.actor;
+    const bucket = typeof d['bucket_start'] === 'number' ? d['bucket_start'] : event.ts;
+    const parsed = z.array(ToolCallEventSchema).safeParse(d['events']);
+    if (!seat || !parsed.success) return 'unknown';
+    recordToolCalls(
+      db,
+      teamId,
+      seat,
+      typeof d['role'] === 'string' ? d['role'] : null,
+      parsed.data,
+      bucket,
+    );
+    return 'applied';
+  }
+  if (event.action === 'record.seed_thread') {
+    const entryId = d['entry_id'];
+    const relayId = d['relay_id'];
+    const kind = d['kind'];
+    const body = d['body'];
+    const createdAt = typeof d['created_at'] === 'number' ? d['created_at'] : event.ts;
+    if (
+      typeof entryId !== 'string' ||
+      typeof relayId !== 'string' ||
+      typeof kind !== 'string' ||
+      typeof body !== 'string' ||
+      !memberId
+    )
+      return 'unknown';
+    const seed = db
+      .prepare<
+        [string, string],
+        { id: string }
+      >('SELECT id FROM seeds WHERE team_id = ? AND relay_id = ?')
+      .get(teamId, relayId);
+    if (!seed) return 'seed_unborn';
+    db.prepare(
+      `INSERT OR IGNORE INTO seed_thread_entries (id, seed_id, kind, body, member_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(entryId, seed.id, kind, body, memberId, createdAt);
+    return 'applied';
+  }
+  if (event.action === 'record.incident_report') {
+    const reportId = d['report_id'];
+    const gate = d['gate'];
+    const seat = typeof d['seat'] === 'string' ? d['seat'] : event.actor;
+    if (typeof reportId !== 'string' || typeof gate !== 'string' || !seat) return 'unknown';
+    db.prepare(
+      `INSERT INTO incident_reports (id, team_id, gate, seat, sig, ref, message_id, lane_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET lane_id = COALESCE(excluded.lane_id, lane_id)`,
+    ).run(
+      reportId,
+      teamId,
+      gate,
+      seat,
+      typeof d['sig'] === 'string' ? d['sig'] : null,
+      typeof d['ref'] === 'string' ? d['ref'] : null,
+      typeof d['message_id'] === 'string' ? d['message_id'] : null,
+      typeof d['lane_id'] === 'string' ? d['lane_id'] : null,
+      typeof d['created_at'] === 'number' ? d['created_at'] : event.ts,
+    );
+    return 'applied';
+  }
+  return 'unknown';
 }
 
 /** The `continuity.*` verbs the fold can project. Anything else stops as `unknown_continuity_event`. */
@@ -449,6 +554,12 @@ export interface FoldResult {
   /** The cursor after this call — the last hub_seq applied or skipped. */
   last_hub_seq: number;
   stop: FoldStop | null;
+  /**
+   * The ids of the messages this call inserted, in fold order — the hub's route-time hooks that a
+   * folded message must still fire (the incident pool, ADR 371 §2) run from this list, never from a
+   * re-scan of `messages`, which would re-fire them on every tick.
+   */
+  messages: string[];
 }
 
 export function readPullCursor(db: Database, teamId: string): number {
@@ -531,12 +642,13 @@ export function foldBatch(
     let applied = 0;
     let skipped = 0;
     let stop: FoldStop | null = null;
+    const messages: string[] = [];
 
     // A `return finish()` inside db.transaction COMMITS what ran before it: the prefix and the
     // cursor go together. Only an unclassified throw rolls the batch back.
     const finish = (): FoldResult => {
       if (cursor !== startCursor) writePullCursor(db, teamId, cursor, now);
-      return { applied, skipped, last_hub_seq: cursor, stop };
+      return { applied, skipped, last_hub_seq: cursor, stop, messages };
     };
 
     for (const event of events) {
@@ -611,6 +723,66 @@ export function foldBatch(
         }
         if (projectPolicyEvent(db, teamId, e, now) === 'unknown') {
           stop = { kind: 'unknown_policy_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        db.prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          e.id,
+          teamId,
+          e.ts,
+          e.actor,
+          e.action,
+          e.target,
+          e.result,
+          e.detail ? JSON.stringify(e.detail) : null,
+          now,
+          event.origin_node,
+          event.origin_seq,
+        );
+        applied += 1;
+        cursor = event.hub_seq;
+        continue;
+      }
+
+      // The sixth kind: a record (ADR 371, residence-2 census gap 3) — a tool-call batch, a seed
+      // thread entry, or the hub's incident pool row. Project first, then hold the row in `audit`
+      // with its stamp, the discipline every projecting kind follows. The seed thread names a
+      // member and must resolve it here (git lag otherwise); the other two key on seat NAMES and
+      // resolve nothing, as the ledger kind does.
+      if (event.kind === 'record') {
+        const e = event.event;
+        if (!RECORD_VERBS.has(e.action)) {
+          stop = { kind: 'unknown_record_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        let memberId: string | null = null;
+        if (e.action === 'record.seed_thread') {
+          const by = e.detail?.['by'];
+          const member = getMemberByName(db, teamId, typeof by === 'string' ? by : (e.actor ?? ''));
+          if (!member) {
+            stop = {
+              kind: 'unresolved_seat',
+              seat: typeof by === 'string' ? by : (e.actor ?? ''),
+              hub_seq: event.hub_seq,
+            };
+            return finish();
+          }
+          memberId = member.id;
+        }
+        const outcome = projectRecordEvent(db, teamId, e, memberId);
+        if (outcome === 'unknown') {
+          stop = { kind: 'unknown_record_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        if (outcome === 'seed_unborn') {
+          const relayId = e.detail?.['relay_id'];
+          stop = {
+            kind: 'seed_unborn',
+            relay_id: typeof relayId === 'string' ? relayId : '',
+            hub_seq: event.hub_seq,
+          };
           return finish();
         }
         db.prepare(
@@ -839,6 +1011,7 @@ export function foldBatch(
          VALUES
            (@id, @team_id, @from_member, @to_kind, @to_member, @act, @body, @thread_id, @meta, @from_provenance, @origin_node, @origin_seq, @ts, @created_at)`,
       ).run(row);
+      messages.push(row.id);
       applied += 1;
       cursor = event.hub_seq;
     }

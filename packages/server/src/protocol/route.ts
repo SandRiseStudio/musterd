@@ -26,7 +26,8 @@ import { adminHumanPresent } from '../store/reachability.js';
 import { pickHumanReviewer } from '../store/review.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
-import { getPolicy } from '../store/teams.js';
+import { getPolicy, getTeamBySlug } from '../store/teams.js';
+import { joinerEnrollment } from '../sync/claim.js';
 import {
   recordActModel,
   recordDeliveryOutcome,
@@ -381,7 +382,16 @@ function routeEnvelopeInner(
   // opens, or appends to an incident lane. Best-effort like every daemon-side hook here — a failure
   // must never fail the status_update that carried the report. `!daemonComposed` is the recursion
   // belt; the composed replies being `act:'message'` (which this hook ignores) is the suspenders.
-  if (!daemonComposed && env.act === 'status_update') {
+  //
+  // On an enrolled JOINER the hook does not run at all (ADR 371 §2): the pool is the hub's. The
+  // report crosses on this very status_update, and the hub pools it when the message folds there
+  // (`handleFoldedMessages`, called from the hub's pull). Counting here too would be one pool per
+  // machine — one incident lane per machine past the threshold, the exact thing §2 refuses.
+  if (
+    !daemonComposed &&
+    env.act === 'status_update' &&
+    !joinerEnrollment(ctx.db, team.id, team.slug)
+  ) {
     try {
       handleBlockedReport(ctx, team, sender, outgoingEnv);
     } catch (err) {
@@ -480,6 +490,34 @@ function routeEnvelopeInner(
  * creator (the seat whose report tripped the threshold) — same posture as `fireGatedHumanAsk`,
  * which routes as the lane owner: incident traffic reads as coming from whoever carries the lane.
  */
+/**
+ * The hub's half of ADR 371 §2: run the route-time hooks a FOLDED message still owes. A joiner's
+ * `status_update` carrying a `blocked_by` report was never routed here — it folded — so the pool
+ * never saw it. Called from the hub's pull with the ids the fold just inserted (never from a scan
+ * of `messages`, which would re-fire on every tick). Only the incident hook lives here: every other
+ * route-time hook is either residence-local by design or already replicated as its own kind.
+ */
+export function handleFoldedMessages(ctx: Ctx, teamSlug: string, messageIds: string[]): void {
+  const team = getTeamBySlug(ctx.db, teamSlug);
+  if (!team) return;
+  for (const id of messageIds) {
+    const row = ctx.db
+      .prepare<[string, string], MessageRow>('SELECT * FROM messages WHERE team_id = ? AND id = ?')
+      .get(team.id, id);
+    if (!row || row.act !== 'status_update' || !row.meta) continue;
+    const sender = getMemberById(ctx.db, row.from_member);
+    if (!sender) continue;
+    const to = row.to_member ? getMemberById(ctx.db, row.to_member) : null;
+    const env = rowToEnvelope(row, team.slug, sender.name, to?.name ?? null);
+    if (!blockedByOf(env.meta)) continue;
+    try {
+      handleBlockedReport(ctx, team, sender, env);
+    } catch (err) {
+      log.warn({ msg: 'incident_hook_failed', message: id, err: String(err) });
+    }
+  }
+}
+
 function handleBlockedReport(ctx: Ctx, team: TeamRow, sender: MemberRow, env: Envelope): void {
   const report = blockedByOf(env.meta);
   if (!report) return;

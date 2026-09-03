@@ -66,7 +66,8 @@ export class SyncResidenceError extends Error {
       | 'presence'
       | 'ledger'
       | 'policy'
-      | 'continuity' = 'presence',
+      | 'continuity'
+      | 'record' = 'presence',
   ) {
     super(
       `a ${kind} event names seat "${seat}", which is bound to node "${boundLabel}"; this node may not speak for it`,
@@ -187,7 +188,20 @@ export function ingestBatch(
             'forwards to the hub and re-authorizes the actor there',
         );
       }
-      const actor = event.kind === 'policy' ? null : syncEventActor(event);
+      // The incident pool is the hub's (ADR 371 §2): a `record.incident_report` is admissible only
+      // on the hub's own loopback push, the policy rule again. A joiner never mints one — its
+      // report crosses on the `status_update` it rides and the hub records it at fold — so a
+      // pushed one is a second counter in the making, and it is refused before residence for the
+      // same reason a policy event is: the reporter is resident on the joiner, and binding them to
+      // the hub for a row the hub wrote on their behalf would strand them.
+      const hubRecord = event.kind === 'record' && event.event.action === 'record.incident_report';
+      if (hubRecord && !loopback) {
+        throw new SyncOriginError(
+          "an incident report is the hub's to record (ADR 371): it crosses on the status_update " +
+            'that carries it, and the hub pools it there',
+        );
+      }
+      const actor = event.kind === 'policy' || hubRecord ? null : syncEventActor(event);
       const seat = actor ? getMemberByName(db, teamId, actor) : undefined;
       if (seat && seat.kind !== 'service') {
         const bound = bindSeatToNode(db, teamId, seat.id, nodeId, now);

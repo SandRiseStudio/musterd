@@ -6,6 +6,7 @@ import {
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
+import { handleFoldedMessages } from '../protocol/route.js';
 import { listActiveTeams } from '../store/teams.js';
 import { foldBatch, foldNodeLiveness, readPullCursor, type FoldStop } from './fold.js';
 import { hasEnrolledJoiners, readStaged } from './log.js';
@@ -139,6 +140,37 @@ function reportStop(ctx: Ctx, team: string, stop: FoldStop): void {
           'a projected verb arrived under the non-projecting ledger tag; the origin runs a build that mis-tags — terminal, needs operator attention',
       });
       return;
+    case 'unknown_policy_event':
+    case 'unknown_continuity_event':
+    case 'unknown_record_event':
+      log.error({
+        msg: 'sync_fold_unknown_event',
+        team,
+        action: stop.action,
+        hub_seq: stop.hub_seq,
+        detail: 'a peer runs a newer build; upgrade this daemon — retrying each tick',
+      });
+      return;
+    case 'cursor_unborn':
+      log.error({
+        msg: 'sync_fold_cursor_unborn',
+        team,
+        message: stop.message,
+        seat: stop.seat,
+        hub_seq: stop.hub_seq,
+        detail: 'a cursor names a message not yet folded here; transient — retrying each tick',
+      });
+      return;
+    case 'seed_unborn':
+      log.error({
+        msg: 'sync_fold_seed_unborn',
+        team,
+        relay_id: stop.relay_id,
+        hub_seq: stop.hub_seq,
+        detail:
+          'a seed-thread entry names a relay seed this daemon has not ingested yet (ADR 371 §3); transient — one relay poll — and a persisting one is a relay-ingest defect',
+      });
+      return;
   }
 }
 
@@ -204,6 +236,17 @@ export async function pullTeam(
   } else {
     const reported = reportedFor(ctx);
     for (const key of reported) if (key.startsWith(`${team.slug}:`)) reported.delete(key);
+  }
+  // The incident pool is the hub's (ADR 371 §2): a joiner's `blocked_by` report crosses on the
+  // status_update it rides, and the hub records it HERE, when that message folds — the route-time
+  // hook a message posted directly to the hub gets, fired for a folded one. Only the hub: a joiner
+  // folding the same message must not count it, or there would be one pool per machine again.
+  if (isHub && result.messages.length > 0) {
+    try {
+      handleFoldedMessages(ctx, team.slug, result.messages);
+    } catch (err) {
+      log.warn({ msg: 'incident_hook_failed', team: team.slug, err: String(err) });
+    }
   }
   return result.applied;
 }

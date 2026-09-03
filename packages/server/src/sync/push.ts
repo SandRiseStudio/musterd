@@ -187,7 +187,7 @@ function toSyncEvent(pending: Pending, slug: string): SyncEvent {
     // continuity 2026-09-03). The hub and the fold branch on the TAG, never on the prefix — a
     // reader that re-derived the kind from the action would be a second copy of this rule, free to
     // disagree with the one that shipped it.
-    const kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' =
+    const kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' | 'record' =
       REPLICATED_LEDGER_VERBS.has(row.action)
         ? 'ledger'
         : row.action.startsWith('presence.')
@@ -196,7 +196,9 @@ function toSyncEvent(pending: Pending, slug: string): SyncEvent {
             ? 'policy'
             : row.action.startsWith('continuity.')
               ? 'continuity'
-              : 'lane';
+              : row.action.startsWith('record.')
+                ? 'record'
+                : 'lane';
     return {
       kind,
       team: slug,

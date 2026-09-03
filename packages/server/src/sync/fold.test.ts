@@ -96,7 +96,7 @@ describe('foldBatch', () => {
       foreign('f-2', 2, 2),
       foreign('f-3', 3, 3),
     ]);
-    expect(res).toEqual({ applied: 3, skipped: 0, last_hub_seq: 3, stop: null });
+    expect(res).toMatchObject({ applied: 3, skipped: 0, last_hub_seq: 3, stop: null });
     expect(localNextSeq(db, team.id)).toBe(before);
     const rows = db
       .prepare<
@@ -151,7 +151,7 @@ describe('foldBatch', () => {
       .get(team.id)!.node_id;
     const own: SyncPullEvent = { ...foreign('local-1', 1, 7), origin_node: local };
     const res = foldBatch(db, team.id, [own]);
-    expect(res).toEqual({ applied: 0, skipped: 1, last_hub_seq: 7, stop: null });
+    expect(res).toMatchObject({ applied: 0, skipped: 1, last_hub_seq: 7, stop: null });
     expect(db.prepare('SELECT COUNT(*) AS n FROM messages').get()).toEqual({ n: 1 });
     db.close();
   });
@@ -168,7 +168,7 @@ describe('foldBatch', () => {
       .get(team.id)!.node_id;
     const own: SyncPullEvent = { ...foreign('local-99', 99, 7), origin_node: local };
     const res = foldBatch(db, team.id, [own]);
-    expect(res).toEqual({ applied: 0, skipped: 1, last_hub_seq: 7, stop: null });
+    expect(res).toMatchObject({ applied: 0, skipped: 1, last_hub_seq: 7, stop: null });
     expect(db.prepare('SELECT COUNT(*) AS n FROM messages').get()).toEqual({ n: 1 });
     db.close();
   });
@@ -177,7 +177,7 @@ describe('foldBatch', () => {
     const { db, team } = seed();
     foldBatch(db, team.id, [foreign('f-1', 1, 1)]);
     const res = foldBatch(db, team.id, [foreign('f-1', 1, 1), foreign('f-2', 2, 2)]);
-    expect(res).toEqual({ applied: 1, skipped: 1, last_hub_seq: 2, stop: null });
+    expect(res).toMatchObject({ applied: 1, skipped: 1, last_hub_seq: 2, stop: null });
     db.close();
   });
 
@@ -188,7 +188,7 @@ describe('foldBatch', () => {
       foreign('f-2', 2, 2, { from: 'ghost' }),
       foreign('f-3', 3, 3),
     ]);
-    expect(res).toEqual({
+    expect(res).toMatchObject({
       applied: 1,
       skipped: 0,
       last_hub_seq: 1,
@@ -217,7 +217,7 @@ describe('foldBatch', () => {
     const batch = [foreign('f-1', 1, 1, { from: 'late' })];
     expect(foldBatch(db, team.id, batch).stop?.kind).toBe('unresolved_seat');
     addMember(db, team, { name: 'late', kind: 'agent' });
-    expect(foldBatch(db, team.id, batch)).toEqual({
+    expect(foldBatch(db, team.id, batch)).toMatchObject({
       applied: 1,
       skipped: 0,
       last_hub_seq: 1,
@@ -308,7 +308,7 @@ describe('foldBatch — the lane kind', () => {
       }),
       foreignLane('e-2', 2, 2, 'lane.claimed', { lane: 'L1', owner: 'nick', kind: 'claim' }),
     ]);
-    expect(res).toEqual({ applied: 2, skipped: 0, last_hub_seq: 2, stop: null });
+    expect(res).toMatchObject({ applied: 2, skipped: 0, last_hub_seq: 2, stop: null });
     expect(localNextSeq(db, team.id)).toBe(before);
     expect(
       db
@@ -377,7 +377,7 @@ describe('foldBatch — the lane kind', () => {
       foreignLane('e-2', 2, 2, 'lane.opened', { lane: 'L1', title: 't' }),
       foreign('f-3', 3, 3),
     ]);
-    expect(res).toEqual({ applied: 3, skipped: 0, last_hub_seq: 3, stop: null });
+    expect(res).toMatchObject({ applied: 3, skipped: 0, last_hub_seq: 3, stop: null });
     db.close();
   });
 });

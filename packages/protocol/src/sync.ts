@@ -127,6 +127,22 @@ export const SyncContinuityEventSchema = SyncLaneEventSchema.extend({
 });
 export type SyncContinuityEvent = z.infer<typeof SyncContinuityEventSchema>;
 
+/**
+ * One replicated RECORD event (ADR 371, residence-2 census gap 3): a `record.*` audit row whose
+ * projection is an additive or append-only table and decides nothing — the sixth kind, in the lane
+ * event's shape under its own tag. Three verbs: `record.tool_calls` (an adapter flush, folded into
+ * `tool_call_stats` under the ORIGIN's hour bucket), `record.seed_thread` (a seed-thread entry,
+ * keyed by `relay_id` and the member's NAME because `seeds.id` and `members.id` are daemon-private)
+ * and `record.incident_report` (a pool row the HUB wrote — the pool is the hub's, ADR 371 §2, and
+ * a joiner-minted one is refused at ingest exactly as a policy event is).
+ *
+ * The first two are seat facts and residence-bound like continuity; the third is hub-minted and
+ * never passes ingest at all. Unlike the ledger kind, an unknown verb here STOPS the fold — a
+ * record projects into a table, so a verb this build cannot project would be a row nothing reads.
+ */
+export const SyncRecordEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('record') });
+export type SyncRecordEvent = z.infer<typeof SyncRecordEventSchema>;
+
 /** Any replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
 export const SyncEventSchema = z.union([
   SyncLaneEventSchema,
@@ -134,6 +150,7 @@ export const SyncEventSchema = z.union([
   SyncLedgerEventSchema,
   SyncPolicyEventSchema,
   SyncContinuityEventSchema,
+  SyncRecordEventSchema,
   SyncMessageEventSchema,
 ]);
 export type SyncEvent = z.infer<typeof SyncEventSchema>;
@@ -146,13 +163,14 @@ export function syncEventId(event: SyncEvent): string {
 /** The kinds whose payload is an audit row, as opposed to the message's envelope. */
 export function isAuditKind<T extends { kind?: string | undefined }>(
   event: T,
-): event is T & { kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' } {
+): event is T & { kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' | 'record' } {
   return (
     event.kind === 'lane' ||
     event.kind === 'presence' ||
     event.kind === 'ledger' ||
     event.kind === 'policy' ||
-    event.kind === 'continuity'
+    event.kind === 'continuity' ||
+    event.kind === 'record'
   );
 }
 
@@ -237,12 +255,18 @@ export const SyncPullContinuityEventSchema = SyncContinuityEventSchema.extend({
 });
 export type SyncPullContinuityEvent = z.infer<typeof SyncPullContinuityEventSchema>;
 
+export const SyncPullRecordEventSchema = SyncRecordEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullRecordEvent = z.infer<typeof SyncPullRecordEventSchema>;
+
 export const SyncPullEventSchema = z.union([
   SyncPullLaneEventSchema,
   SyncPullPresenceEventSchema,
   SyncPullLedgerEventSchema,
   SyncPullPolicyEventSchema,
   SyncPullContinuityEventSchema,
+  SyncPullRecordEventSchema,
   SyncPullMessageEventSchema,
 ]);
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;

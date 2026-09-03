@@ -6,7 +6,7 @@ import type {
   ToolUsageRow,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
-import { appendAudit } from './audit.js';
+import { appendAudit, appendReplicatedEvent } from './audit.js';
 
 /**
  * Tool-call telemetry (ADR 144 increment 1) — the store behind the surface-redesign evals:
@@ -62,6 +62,35 @@ export function recordToolCalls(
     }
   });
   tx(events);
+}
+
+/**
+ * Record a flush AND stamp it (ADR 371 §1): the batch lands in this daemon's aggregate through
+ * `recordToolCalls`, and crosses the wire as one `record.tool_calls` event carrying the events and
+ * the hour they landed in, so every peer folds the same delta into the same bucket. The two writes
+ * share one transaction — a stamped event for a batch that was never counted here, or the reverse,
+ * would be a report that disagrees with itself across machines. `recordToolCalls` stays the fold's
+ * silent projector primitive (the `setPolicy` / `saveMemory` shape).
+ */
+export function applyToolCalls(
+  db: Database,
+  teamId: string,
+  seat: string,
+  role: string | null,
+  events: ToolCallEvent[],
+  now: number = Date.now(),
+): void {
+  if (events.length === 0) return;
+  db.transaction(() => {
+    recordToolCalls(db, teamId, seat, role, events, now);
+    appendReplicatedEvent(db, teamId, {
+      actor: seat,
+      action: 'record.tool_calls',
+      target: seat,
+      result: 'allow',
+      detail: { seat, role, bucket_start: now - (now % BUCKET_MS), events },
+    });
+  })();
 }
 
 /**

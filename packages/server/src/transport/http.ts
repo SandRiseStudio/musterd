@@ -281,7 +281,7 @@ import {
   rotateAgentKey,
   applyPolicyChange,
 } from '../store/teams.js';
-import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
+import { applyToolCalls, recordSurfaceRender } from '../store/toolCalls.js';
 import {
   applyTrust,
   arbitrateClaim,
@@ -4292,7 +4292,8 @@ export async function handleHttp(
       if (method === 'POST' && rest === '/telemetry/tool-calls') {
         const { team, member } = authTouch(ctx, slug, req);
         const body = parseOrBadRequest(ToolTelemetryReportSchema, await readJson(req));
-        recordToolCalls(ctx.db, team.id, member.name, member.role || null, body.events);
+        // Stamped and replicated (ADR 371 §1): the report on every machine counts this flush.
+        applyToolCalls(ctx.db, team.id, member.name, member.role || null, body.events);
         if (body.surface) recordSurfaceRender(ctx.db, team.id, member.name, body.surface);
         return sendJson(res, 200, {});
       }
