@@ -71,7 +71,7 @@ export function renderReapResult(result: ReapResultLike): string {
 }
 
 export async function reapCommand(parsed: Parsed): Promise<number> {
-  const { http, team } = resolveRead(parsed.flags, { reclaimAgentLease: true });
+  const { http, team } = resolveRead(parsed.flags, { claimSeatPerRequest: true });
   const tick = await http.footprint(team);
   if (!tick) {
     process.stdout.write(

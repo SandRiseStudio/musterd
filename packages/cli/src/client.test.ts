@@ -40,7 +40,7 @@ describe('claimSessionLease — settlement (lane 01M1F7Y4N)', () => {
     const sock = new FakeSocket();
     const client = new HttpClient({
       ...baseOpts,
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       createClaimSocket: () => sock,
     });
 
@@ -58,7 +58,7 @@ describe('claimSessionLease — settlement (lane 01M1F7Y4N)', () => {
     const sock = new FakeSocket();
     const client = new HttpClient({
       ...baseOpts,
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       createClaimSocket: () => sock,
     });
 
@@ -75,7 +75,7 @@ describe('claimSessionLease — settlement (lane 01M1F7Y4N)', () => {
     const sock = new FakeSocket();
     const client = new HttpClient({
       ...baseOpts,
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       createClaimSocket: () => sock,
     });
 
@@ -109,7 +109,7 @@ describe('claimSessionLease — settlement (lane 01M1F7Y4N)', () => {
     const sock = new FakeSocket();
     const client = new HttpClient({
       ...baseOpts,
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       createClaimSocket: () => sock,
     });
 
@@ -143,7 +143,7 @@ describe('HttpClient.request — reclaim degrades to stored lease (lane 01M1F7Y4
     const client = new HttpClient({
       ...baseOpts,
       sessionLease: 'stored-lease-999',
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       createClaimSocket: () => sock,
     });
 
@@ -179,7 +179,7 @@ describe('HttpClient.request — reclaim degrades to stored lease (lane 01M1F7Y4
       key: 'msac_test1234567890abcdef',
       seat: 'Ada',
       surface: 'cli',
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       createClaimSocket: () => sock,
     });
 
@@ -207,7 +207,7 @@ describe('HttpClient.request — reclaim degrades to stored lease (lane 01M1F7Y4
     const client = new HttpClient({
       ...baseOpts,
       sessionLease: 'stored-lease-999',
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       createClaimSocket: () => sock,
     });
 

@@ -235,7 +235,7 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
         ? { sessionLease: match.identity.sessionLease }
         : {}),
       surface: match.identity.surface,
-      reclaimAgentLease: true,
+      claimSeatPerRequest: true,
       ...(model !== undefined ? { model } : {}),
     }),
   };
@@ -272,14 +272,14 @@ export interface ResolveReadOptions {
    * answers 200, so opting it in buys no safety and costs a claim — see `role.ts`, which takes the
    * default for exactly that reason. Interactive is not the test; refusable is.
    */
-  reclaimAgentLease?: boolean;
+  claimSeatPerRequest?: boolean;
 }
 
 export function resolveRead(
   flags: Record<string, string | boolean>,
   opts: ResolveReadOptions = {},
 ): ResolvedRead {
-  const reclaimAgentLease = opts.reclaimAgentLease ?? false;
+  const claimSeatPerRequest = opts.claimSeatPerRequest ?? false;
   const { config, server, sources, team, workspace, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
@@ -310,7 +310,7 @@ export function resolveRead(
             seat: identity.name,
             ...(identity.sessionLease !== undefined ? { sessionLease: identity.sessionLease } : {}),
             surface: identity.surface,
-            reclaimAgentLease,
+            claimSeatPerRequest,
             ...(model !== undefined ? { model } : {}),
           }
         : { server },

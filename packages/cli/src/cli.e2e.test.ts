@@ -1165,9 +1165,9 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
     return { ...live, key: auth.key };
   }
 
-  it('a hook read (reclaimAgentLease: false) presents the stale lease and fails closed — it never claims', async () => {
+  it('a hook read (claimSeatPerRequest: false) presents the stale lease and fails closed — it never claims', async () => {
     await bindAvaWithStaleLease();
-    const { http, explicit } = resolveRead({}, { reclaimAgentLease: false });
+    const { http, explicit } = resolveRead({}, { claimSeatPerRequest: false });
     expect(explicit).toBe(true);
     // No reclaim: the stale lease is refused by the server and the read fails — instead of the
     // hook seizing the seat, evicting the live adapter's presence, and killing ITS lease.
@@ -1215,7 +1215,7 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
     // callsites #1138 opted out were re-claimed anyway by other reads in the same process
     // (reachabilityNudge, inbox --interrupt-check, infra-gate). Measured on main @ fcb92af8:
     // 2 claim.superseded rows per hook invocation, 0 once suppressed.
-    const { http } = resolveRead({}, { reclaimAgentLease: true });
+    const { http } = resolveRead({}, { claimSeatPerRequest: true });
     const res = await http.inbox('dawn', { unread: true, limit: 1 });
     expect(Array.isArray(res.messages)).toBe(true);
   });

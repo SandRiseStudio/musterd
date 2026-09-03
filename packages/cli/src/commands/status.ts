@@ -16,7 +16,7 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   // no active identity (ADR 036). The per-member comeback summary needs a genuine actor, so it only
   // runs when someone is explicitly active here.
   const { config, team, identity, explicit, http } = resolveRead(parsed.flags, {
-    reclaimAgentLease: true,
+    claimSeatPerRequest: true,
   });
   const res = await http.roster(team);
   if (parsed.flags['json']) {
