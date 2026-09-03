@@ -22,6 +22,7 @@ import { readAndConsumeResolution, writePendingMarker } from './pending.js';
 import { instrumentToolRepair } from './repair.js';
 import { scopeToolSurface } from './scope.js';
 import { instrumentTools, recordAdapterInitialization, startMcpTelemetry } from './telemetry.js';
+import { registerAvailability } from './tools/availability.js';
 import { registerGoals } from './tools/goals.js';
 import { registerInboxCheck } from './tools/inboxCheck.js';
 import { registerInsights } from './tools/insights.js';
@@ -263,6 +264,7 @@ export function buildMcpServer(
   registerInboxCheck(server, client);
   registerStatus(server, client);
   registerMembers(server, client);
+  registerAvailability(server, client);
   registerMemory(server, client);
   registerWakeContext(server, client);
   registerSeeds(server, client);

@@ -2,7 +2,7 @@
 
 > **Living document.** This is the initial direction, not gospel. It will evolve. If you (the executing agent) find an error, contradiction, or better approach during implementation: (1) do not silently deviate — record the issue and your proposed change in `docs/decisions/NNN-<slug>.md` (a short ADR: context, problem, decision, consequences), (2) make the smallest correct change, (3) update the affected doc in the same commit. Docs and code must never disagree at the end of a commit.
 
-The **universal harness adapter**. One MCP (stdio) server exposing **twenty-eight tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the Seed, Lane, Goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209/318/319). `team_insight_search` is canonical (its `team_memory_search` alias and `lane_submit`'s `lane_ready` alias were removed 2026-09-03 after their one-epoch retention — ADR 327 amendment, ADR 192). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
+The **universal harness adapter**. One MCP (stdio) server exposing **twenty-nine tools** (`toolNames.ts`) — the six core team tools documented verbatim below, plus the Seed, Lane, Goal, seat-memory, report, and portable-wake-context tools added by later ADRs (083/084/091/093/209/318/319). `team_insight_search` is canonical (its `team_memory_search` alias and `lane_submit`'s `lane_ready` alias were removed 2026-09-03 after their one-epoch retention — ADR 327 amendment, ADR 192). Any MCP-capable harness (Claude Code, Codex, …) that launches it gets the musterd tools — but the session is **dormant by default** (ADR 007 / v0.2 M3): registering the adapter makes the tools _available_, it does **not** occupy the Member's seat. The agent goes online only when it calls `team_join`. This is where harness-agnosticism comes for free: we don't integrate per-harness; we speak MCP. Depends on `@musterd/protocol`; talks to the Team Server over HTTP/WS; never imports `@musterd/server`.
 
 ## Stack
 
@@ -397,6 +397,7 @@ src/
     inboxCheck.ts // refuses until ready (pending → claim; dormant → join); appends the ADR 135 build-skew warning
     status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending
+    availability.ts // team_availability — set your OWN availability (ADR 044), the MCP twin of `musterd availability`; not a WRITE_TOOL, a muted seat may still say it is away (surface survey #1245 item 6)
     memory.ts     // team_memory_save/read — the seat's continuity blob + the join one-liner (ADR 093)
     wakeContext.ts // team_wake_context — recipient-scoped, body-free orientation index (ADR 209)
     lanes.ts      // lane_open/claim/board/handoff/update/resolve + team_next; lane_update.goal_id (ADR 083/084/256); counterpart resolve omits merged (ADR 305)

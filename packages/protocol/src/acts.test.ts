@@ -20,8 +20,8 @@ describe('SURFACES (ADR 352)', () => {
   });
 });
 
-describe('FEATURE_EPOCH (presence replication, ADR 356)', () => {
-  it('is 18 — presence.* pushes must not reach an older hub', () => {
-    expect(FEATURE_EPOCH).toBe(18);
+describe('FEATURE_EPOCH (team_availability, surface survey #1245 item 6)', () => {
+  it('is 19 — an MCP seat can set its own availability; an older seat keeps shelling out', () => {
+    expect(FEATURE_EPOCH).toBe(19);
   });
 });

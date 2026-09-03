@@ -19,7 +19,7 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 | `status` | `team_status` | same | the roster; CLI leads with the waiting banner |
 | `next` | `team_next` | same | the orientation brief (ADR 049/084) |
 | `whoami` | — | none (the primer tells the agent who it is) | which seat this folder resolves to |
-| `availability` | — | **none — an agent cannot set away/dnd** | availability (ADR 044) |
+| `availability` | `team_availability` (added 2026-09-03, lane item 6) | same | availability (ADR 044) |
 | `wake-context` | `team_wake_context` | same | bounded wake packet (ADR 209) |
 | `notify` | — | none | OS notification poller while away (ADR 035) |
 
@@ -28,7 +28,7 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 | CLI | MCP | twin | question |
 | --- | --- | --- | --- |
 | `send --act <act>` | `team_send {act}` | same | one typed act; the 13 act names are shared verbatim |
-| — | `team_members` | **none — CLI `status` has no per-member detail or `--role` filter** | who holds a duty, one member's detail (ADR 227) |
+| `role show <name>` (holders) | `team_members` | meaning — ~~none~~ corrected 2026-09-03: `musterd role show <name>` lists a role's holders; `status` still has no per-member detail | who holds a duty, one member's detail (ADR 227) |
 
 ### Work
 
@@ -41,7 +41,7 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 | `done` | — | meaning ≈ `lane_submit` (with `--pr/--sha`) or `lane_resolve`, then `team_next` | close your live lane and chain into the brief; says which close it recorded (2026-09-03) |
 | `lanes` | `lane_board` | meaning | the board |
 | `goal declare/list` | `team_goal_declare` / `team_goals` | same | outcomes above lanes |
-| — | `team_goal_outcome`, `team_goal_retract` | **none — the CLI cannot record an outcome or retract a goal** | — |
+| `goal outcome / retract` | `team_goal_outcome`, `team_goal_retract` | same — ~~none~~ CORRECTED 2026-09-03: the CLI had both; only the help signature omitted them (fixed) | — |
 | `seed list/show/claim/ask/answer/brief/conclude/promote` | `team_seed_list/get/update{claim,ask,answer,submit,promote}` | meaning (`show`↔`get`, `brief/conclude`↔`submit`) | shared ideas before lanes (ADR 291) |
 | `report` | `team_report` | same | the insight report at three altitudes |
 | `board`, `live` | — | none (browser) | open /board, /live signed in |
@@ -61,7 +61,7 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 | `claim [<name>] / --role` | `team_join {as, role}` | meaning | occupy a seat from this folder (ADR 075 "claim handshake") |
 | `join <slug> --as <name>` | `team_join` | meaning | occupy a seat, naming the team; **a second CLI verb for the same handshake** |
 | `unbind` | — | none | leave this folder's seat, keep it on the team |
-| — | `team_leave` | **none — no CLI `leave`; `unbind` is stronger (drops the binding), `availability away` is weaker** | go offline, seat held ~45 s |
+| — | `team_leave` | none, and NOT a gap (corrected 2026-09-03): a CLI one-shot holds no resident presence to leave — ambient presence (ADR 057) expires on its own; `unbind` releases the folder's seat | go offline, seat held ~45 s |
 | `reclaim <member>` | — | none (admin) | drop someone's stale live session |
 | `requests` | — | none (admin) | decide claim requests (ADR 077) |
 | `team create/add/remove/archive/export/credential/agent-key/bootstrap/…` | — | none (admin) | the standing roster |
@@ -85,9 +85,9 @@ Ranked by how likely a reader is to act on the wrong meaning. Each carries the s
 
 ## Parity gaps (2026-09-03)
 
-- **An agent cannot set its availability** — no MCP twin for `availability`; a seat that wants `away` must shell out. Falsifier: `toolNames.ts` has no availability entry.
-- **The CLI cannot record a goal outcome or retract a goal**, and has no `leave`: `team_goal_outcome`, `team_goal_retract`, `team_leave` are MCP-only. Falsifier: `goal.ts` handles `declare|list` only.
-- **CLI `status` cannot answer "who is platform?"** — `team_members {role}` (ADR 227) has no CLI form.
+- ~~**An agent cannot set its availability** — no MCP twin for `availability`.~~ FIXED 2026-09-03: `team_availability` (FEATURE_EPOCH 19).
+- ~~**The CLI cannot record a goal outcome or retract a goal**, and has no `leave`.~~ RETRACTED 2026-09-03: `goal.ts` handled `outcome` and `retract` all along (the falsifier was run and failed — only the help signature omitted them; fixed), and a CLI `leave` is meaningless because a one-shot holds no presence.
+- ~~**CLI `status` cannot answer "who is platform?"**~~ CORRECTED 2026-09-03: `musterd role show platform` lists holders; the gap is only that `status` itself has no `--role` lens.
 - ~~**`surface` is invisible** from `musterd help` though it is the ADR 332 user-facing verb.~~ FIXED 2026-09-03 (catalogued under Setup).
 
 ## Help grouping (2026-09-03, `catalog.ts`)
@@ -103,7 +103,7 @@ Checked and NOT a defect: every catalogued command renders a summary and a detai
 3. ~~Catalog repairs: unhide `surface`, regroup by question (help grouping). Docs-only lane.~~ DONE 2026-09-03: `musterd help` has eight rooms by question (waiting / talking / work / remembering / team / insight / setup / ops) and `surface` is catalogued.
 4. ~~`done` says *unconfirmed* or routes to `submit` (collision 2). Own lane.~~ DONE 2026-09-03 (lane 01M1MNCZDY): `done --pr --sha` is a submit with the shared routing report; a bare `done` says unconfirmed (or acceptance-exempt); a lane already awaiting acceptance is refused.
 5. Seat occupancy gets one name (collision 3). ADR first.
-6. Parity: `availability` tool; CLI `goal outcome|retract`, `leave`, `status --role`. One lane, after 5.
+6. ~~Parity: `availability` tool; CLI `goal outcome|retract`, `leave`, `status --role`. One lane, after 5.~~ DONE 2026-09-03: `team_availability` added; the three CLI "gaps" were survey errors and are corrected above.
 7. ~~`reclaimAgentLease` → `renewAgentLease` (collision 5). Fold into whichever lane next touches `resolveRead`.~~ DONE 2026-09-03 as `claimSeatPerRequest` — "renew" was the wrong word too: the option claims the seat afresh before every request (ADR 339), which is neither a renewal nor the admin `reclaim`.
 
 Related: [what-is-waiting-for-me.md](what-is-waiting-for-me.md) (the four "waiting" surfaces are two), [musterd-cli-messaging.md](musterd-cli-messaging.md).

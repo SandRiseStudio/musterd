@@ -577,7 +577,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'goal',
     signature:
-      'declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>,…]  |  list [--json]',
+      'declare "<title>" --goal-id <id> [--story "<line>"] [--wave later] [--depends <id>,…]  |  outcome <id> "<text>"  |  retract <id>  |  list [--json]',
     summary: 'declare a team Goal; lanes join it and status is derived',
     group: 'work',
     primary: true,
@@ -735,7 +735,8 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'availability',
     signature: '<available|away|dnd> [--until <iso>]',
-    summary: 'set your availability (away holds notifications; dnd passes urgent)',
+    summary:
+      'set your availability (away holds notifications; dnd passes urgent) — MCP: team_availability',
     group: 'waiting',
     primary: true,
   },

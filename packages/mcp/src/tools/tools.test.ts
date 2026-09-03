@@ -11,6 +11,7 @@ import {
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
+import { registerAvailability } from './availability.js';
 import { formatMessage, notJoinedMessage, textResult } from './format.js';
 import { registerInboxCheck } from './inboxCheck.js';
 import { registerJoin } from './join.js';
@@ -1873,5 +1874,33 @@ describe('lane_resolve merge verification (done means landed — the #997/#998 a
       state: 'done',
       merged: { authorized_by: 'nick', verification: 'unattested' },
     });
+  });
+});
+
+describe('team_availability — the MCP twin of `musterd availability` (surface survey #1245 item 6)', () => {
+  it('sets away with an until and names the roster it shows on', async () => {
+    const setAvailability = vi.fn(async () => ({ member: { name: 'Ada' } }));
+    const h = captureAll(registerAvailability, { setAvailability } as Partial<MusterdClient>);
+    const out = text(
+      await h['team_availability']!({ status: 'away', until: '2026-09-04T09:00:00Z' }),
+    );
+    expect(setAvailability).toHaveBeenCalledWith({
+      status: 'away',
+      until: Date.parse('2026-09-04T09:00:00Z'),
+    });
+    expect(out).toContain('availability set to away until 2026-09-04T09:00:00.000Z');
+    expect(out).toContain('team_status');
+  });
+
+  it('refuses `until` on anything but away, and an unparseable until, before any call', async () => {
+    const setAvailability = vi.fn();
+    const h = captureAll(registerAvailability, { setAvailability } as Partial<MusterdClient>);
+    expect(
+      text(await h['team_availability']!({ status: 'dnd', until: '2026-09-04T09:00:00Z' })),
+    ).toContain('only applies to `away`');
+    expect(text(await h['team_availability']!({ status: 'away', until: 'tomorrowish' }))).toContain(
+      'not a valid date',
+    );
+    expect(setAvailability).not.toHaveBeenCalled();
   });
 });

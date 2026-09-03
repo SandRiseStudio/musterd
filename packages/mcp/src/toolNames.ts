@@ -23,6 +23,7 @@ export const TOOL_NAMES = [
   'team_members',
   'team_memory_save',
   'team_memory_read',
+  'team_availability',
   'team_wake_context',
   'team_seed_list',
   'team_seed_get',
