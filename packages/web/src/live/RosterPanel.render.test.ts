@@ -5,6 +5,7 @@ import type { MemberSummary } from '@musterd/protocol';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import type { DwellLog } from './dwell';
 import { RosterPanel } from './RosterPanel';
 
 /**
@@ -198,4 +199,59 @@ describe('the woken marks stay fill-free — 4.60:1 leaves no room for a tint', 
       expect(rule).toMatch(/color:\s*var\(--lc-accent-ink\)/);
     });
   }
+});
+
+/**
+ * A short visit leaves a trace after it ends (lane 01M1JQENBK).
+ *
+ * The claim worth pinning is the honesty one, not the feature one: the trace is past tense, it
+ * carries a real elapsed time, and it NEVER appears on a seat that is still here. A trace on a
+ * present seat would be the surface saying someone left who has not, which is the failure this
+ * whole design is arranged around.
+ */
+describe('the dwell trace', () => {
+  const T0 = 1_700_000_000_000;
+
+  const withDwell = (roster: MemberSummary[], dwell: DwellLog, now: number) =>
+    renderToStaticMarkup(createElement(RosterPanel, { roster, dwell, dwellNow: now }));
+
+  it('says a departed seat was here, and how long ago it left', () => {
+    const html = withDwell(
+      [seat({ name: 'gptbot', presence: 'offline', posture: 'offline' })],
+      { gptbot: { arrivedAt: T0, lastOnlineAt: T0 + 11_000, departed: true } },
+      T0 + 11_000 + 9_000,
+    );
+    expect(html).toContain('was here · left 9s ago');
+  });
+
+  it('says nothing about a seat that is still in the room', () => {
+    const html = withDwell(
+      [seat({ name: 'gptbot', presence: 'online', posture: 'working' })],
+      { gptbot: { arrivedAt: T0, lastOnlineAt: T0 + 11_000 } },
+      T0 + 11_000,
+    );
+    expect(html).not.toContain('was here');
+  });
+
+  it('renders nothing at all when no dwell log is passed — every other surface is untouched', () => {
+    const html = renderToStaticMarkup(
+      createElement(RosterPanel, {
+        roster: [seat({ name: 'gptbot', presence: 'offline', posture: 'offline' })],
+      }),
+    );
+    expect(html).not.toContain('was here');
+  });
+});
+
+/** The trace must stay inside what the contrast gate can measure — same rule as `.lc-stat__node`. */
+describe('.lc-roster__dwell', () => {
+  const rule = /\.lc-roster__dwell\s*\{([^}]*)\}/.exec(css)?.[1];
+
+  it('exists as a rule at all', () => {
+    expect(rule).toBeDefined();
+  });
+
+  it('declares no alpha — an opacity pass over the faintest ink lands below AA', () => {
+    expect(rule).not.toMatch(/(^|[;\s])opacity\s*:/);
+  });
 });
