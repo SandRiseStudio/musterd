@@ -193,7 +193,7 @@ function toSyncEvent(pending: Pending, slug: string): SyncEvent {
         ? 'presence'
         : row.action.startsWith('policy.')
           ? 'policy'
-        : 'lane';
+          : 'lane';
     return {
       kind,
       team: slug,

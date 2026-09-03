@@ -131,7 +131,12 @@ export function syncEventId(event: SyncEvent): string {
 export function isAuditKind<T extends { kind?: string | undefined }>(
   event: T,
 ): event is T & { kind: 'lane' | 'presence' | 'ledger' | 'policy' } {
-  return event.kind === 'lane' || event.kind === 'presence' || event.kind === 'ledger' || event.kind === 'policy';
+  return (
+    event.kind === 'lane' ||
+    event.kind === 'presence' ||
+    event.kind === 'ledger' ||
+    event.kind === 'policy'
+  );
 }
 
 /** The team slug the event claims, for the hub's "pushed into the team it names" check. */

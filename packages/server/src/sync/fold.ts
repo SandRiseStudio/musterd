@@ -48,7 +48,7 @@ export type FoldStop =
   // refusal is a PROJECTED verb wearing the non-projecting tag: a `lane.*`/`presence.*` action
   // under `kind: 'ledger'` would land in `audit` with its stamp and never reach its projector,
   // leaving this daemon's `lanes` silently behind the origin's with no gap to find it by.
-  | { kind: 'mistagged_ledger_event'; action: string; hub_seq: number };
+  | { kind: 'mistagged_ledger_event'; action: string; hub_seq: number }
   // Policy events (residence-2 census gap 1, 2026-09-03): the fourth kind. Only the first shape —
   // there is no `unborn` for policy, because a team's row always exists here (the fold runs for a
   // team this daemon holds) and the event carries the WHOLE stored doc, not a delta. A verb this

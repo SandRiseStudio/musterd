@@ -52,11 +52,37 @@ straight face, and the ledger they feed reads as one team's spend.
 4. **An unreachable hub refuses**, `hub_unreachable`, changing nothing (ADR 325 §Offline semantics).
    Policy is not an act that may fork: a provisional local value would be exactly the divergence
    this ADR closes, with the admin believing it had been set.
-5. **The policy kind is exempt from residence binding at ingest.** Residence answers "may this node
-   speak AS this seat" (ADR 328 §4); a `policy.change` is a fact about the TEAM that only the hub
-   ever mints, on a joiner admin's behalf. Binding the admin to the hub would strand the seat — its
-   next message from the laptop it actually lives on would be refused for having set a policy it was
-   told to forward. `sync/policy.test.ts` holds that case.
+5. **The policy kind is exempt from residence binding at ingest, and hub-origin-only in exchange.**
+   Residence answers "may this node speak AS this seat" (ADR 328 §4); a `policy.change` is a fact
+   about the TEAM that only the hub ever mints, on a joiner admin's behalf. Binding the admin to the
+   hub would strand the seat — its next message from the laptop it actually lives on would be refused
+   for having set a policy it was told to forward.
+
+   Residence is what normally stops one node writing under another's authority, so a kind that opts
+   out of it has to earn the exemption some other way: **a `policy` event is admissible only on the
+   hub's own loopback push**, and any other origin is refused at ingest. Without that, the exemption
+   was the hole — `SyncPushRequestSchema` admits the kind (it must; the loopback push carries them),
+   so any enrolled node could push a hand-built `policy.change` and the fold's replace semantics
+   would install it as the team's policy everywhere, bypassing the forward and its re-authorization
+   entirely.
+6. **A forwarded policy change requires the actor to be ALREADY resident on the requesting node.**
+   The strict form of residence, not the first-writer-wins `assertSeatResident` the lane routes use.
+   Binding on first use is right for ordinary work — a seat's first act has to bind somewhere — but
+   for an act that changes the team it is the opening: an unbound admin seat could be claimed by
+   whichever enrolled machine named it first, in the same call that used it. "Not yet bound" reads
+   here as "not entitled", never as a free claim.
+
+   The cost is a constraint on the legitimate path, stated rather than discovered: an admin whose
+   very first act on a fresh joiner is `policy set` is refused until the seat has done anything else
+   there. It is self-healing (nearly any act binds the seat, and the refusal says so) and no real
+   admin is in that state — the seat lives on the machine its human works from.
+
+   Both of 5 and 6 come from gptbot's review of #1228, which declined the first cut for exactly these
+   two gaps. `sync/policy.test.ts` holds all of it, negative and positive: a second enrolled node
+   refused on the forward for a seat that lives elsewhere, refused again for an unbound seat (with
+   the binding checked absent afterwards, so the refusal did not create what it refused for want of),
+   refused on the direct push — and the hub's own loopback still carrying policy through to the
+   joiner, so the checks cannot pass by having switched the kind off.
 
 ### Rejected
 
@@ -79,6 +105,12 @@ straight face, and the ledger they feed reads as one team's spend.
   cursor at that event (`unknown_policy_event`) and retries each tick, the same discipline as the
   lane and presence kinds; there is no `unborn` shape, because the team row always exists locally
   and the event carries the whole doc rather than a delta.
+- **`policy set` from a joiner now has a precondition an admin can hit: the seat must be resident on
+  that machine.** The refusal names it and any ordinary act clears it, but it is a real new way for
+  the command to fail on a freshly enrolled laptop whose admin does nothing else first.
+- **Every future replicated kind that claims a residence exemption inherits decision 5's obligation.**
+  The exemption is not free: whatever kind takes it must say who is allowed to mint it and enforce
+  that at ingest instead. `REPLICATED_LEDGER_VERBS` in `store/audit.ts` is where the next one lands.
 - Census gap 1 closes; gaps 2 (`seat_memory` / `inbox_cursors`, lane `01M1JNY14F`) and 3 (the
   insight substrate, lane `01M1JNY95C`) stay open.
 

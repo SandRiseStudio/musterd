@@ -162,11 +162,25 @@ export function ingestBatch(
       // refusal. This transaction rolls the whole batch back on the throw, so a refused batch
       // binds nothing.
       //
-      // The policy kind is exempt (residence-2 census gap 1, 2026-09-03). Residence answers "may
-      // this node speak AS this seat"; a `policy.change` is a fact about the TEAM that only the hub
-      // ever mints — a joiner's admin forwards precisely so the hub is the author. Binding the
-      // admin to the hub here would strand them: the seat lives on the joiner, and its next
-      // message from there would be refused for having set a policy it was told to forward.
+      // The policy kind is exempt from residence (residence-2 census gap 1, 2026-09-03). Residence
+      // answers "may this node speak AS this seat"; a `policy.change` is a fact about the TEAM that
+      // only the hub ever mints — a joiner's admin forwards precisely so the hub is the author.
+      // Binding the admin to the hub here would strand them: the seat lives on the joiner, and its
+      // next message from there would be refused for having set a policy it was told to forward.
+      //
+      // That exemption is only safe because ORIGIN is checked first (gptbot's review of #1228,
+      // 2026-09-03). Residence is what normally stops one node writing under another's authority,
+      // so a kind that opts out of it must earn the exemption some other way: a policy event is
+      // admissible ONLY on the hub's own loopback push. Without this, any enrolled node could push
+      // a hand-built `policy.change` and the fold's REPLACE semantics would install it as the
+      // team's policy on every machine — the joiner→hub forward, and its re-authorization of the
+      // actor, bypassed entirely. `loopback` is the same fact the residence check below reads.
+      if (event.kind === 'policy' && !loopback) {
+        throw new SyncOriginError(
+          "a policy event is the hub's to mint (ADR 367): set policy through POST /policy, which " +
+            'forwards to the hub and re-authorizes the actor there',
+        );
+      }
       const actor = event.kind === 'policy' ? null : syncEventActor(event);
       const seat = actor ? getMemberByName(db, teamId, actor) : undefined;
       if (seat && seat.kind !== 'service') {

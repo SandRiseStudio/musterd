@@ -286,6 +286,7 @@ import {
   applyTrust,
   arbitrateClaim,
   arbitrateLanePatch,
+  assertSeatAlreadyResident,
   assertSeatResident,
   ClaimRefusedError,
   decideLanePatch,
@@ -3841,6 +3842,21 @@ export async function handleHttp(
         const body = parseOrBadRequest(SyncPolicyRequestSchema, await readJson(req));
         const actor = getMemberByName(ctx.db, team.id, body.actor);
         if (!actor) throw new MusterdError('not_found', `no seat "${body.actor}" on this roster`);
+        try {
+          // Residence before capability, the order `/sync/lane` uses: an unentitled node learns
+          // nothing, not even whether the name it guessed is an admin. This is the check gptbot's
+          // review of #1228 found missing — authenticating the machine and then trusting the
+          // caller-supplied `actor` let ANY enrolled node forward a change as the admin seat,
+          // because a node credential says which machine speaks and never for whom.
+          //
+          // The STRICT form, not `assertSeatResident`: this act changes the team, so an unbound
+          // seat must not be claimable by whoever names it first. For a human admin trusted on
+          // several machines (ADR 358) every one of them is in the set and passes.
+          assertSeatAlreadyResident(ctx.db, team.id, actor, node, 'policy change');
+        } catch (err) {
+          if (err instanceof TrustRefusedError) return sendTrustRefusal(res, err);
+          throw err;
+        }
         // The same capability the local admin route resolves — not a string compare on `role`,
         // which ADR 227 made one of several the seat may hold.
         if (!resolveCapabilities(actor).is_admin) {
