@@ -24,7 +24,7 @@ export async function insightCommand(parsed: Parsed): Promise<number> {
         2,
       );
     }
-    if (!identity) throw new CliError('no identity — run: musterd join <team>', 4);
+    if (!identity) throw new CliError('no identity — run: musterd claim <name> --team <slug>', 4);
     const body = parsed.positionals.slice(1).join(' ');
     if (Buffer.byteLength(body, 'utf8') > 2048) {
       throw new CliError('insight body is limited to 2048 bytes', 2);

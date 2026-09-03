@@ -657,7 +657,7 @@ describe('inspectProvisioning — the dead binding (install-topology §6(a))', (
 
     const report = await inspectProvisioning('/ws');
 
-    expect(report.drift.join(' ')).toContain('musterd join dawn --as nick');
+    expect(report.drift.join(' ')).toContain('musterd claim nick --team dawn');
     // The destructive verb must NOT be suggested when nothing needs re-issuing.
     expect(report.drift.join(' ')).not.toContain('musterd team credential');
   });
@@ -670,7 +670,7 @@ describe('inspectProvisioning — the dead binding (install-topology §6(a))', (
     const report = await inspectProvisioning('/ws');
 
     expect(report.drift.join(' ')).toContain('musterd team credential nick');
-    expect(report.drift.join(' ')).not.toContain('musterd join');
+    expect(report.drift.join(' ')).not.toContain('musterd claim nick');
   });
 
   it('stays silent for an agent seat holding the same key — that is the correct shape', async () => {

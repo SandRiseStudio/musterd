@@ -827,7 +827,7 @@ async function teamAdd(parsed: Parsed): Promise<number> {
       theme.meta(`they authenticate with their credential (shown once — store it now):`) + '\n',
     );
     process.stdout.write(
-      theme.meta(`  musterd join ${team} --as ${name} --key ${res.human_credential}`) + '\n',
+      theme.meta(`  musterd claim ${name} --team ${team} --key ${res.human_credential}`) + '\n',
     );
   }
   return 0;
@@ -1073,7 +1073,8 @@ async function teamCredential(parsed: Parsed): Promise<number> {
     process.stdout.write(hint('open the board signed in: musterd board') + '\n');
   } else {
     process.stdout.write(
-      hint(`hand it over: musterd join ${team} --as ${res.member} --key <the line above>`) + '\n',
+      hint(`hand it over: musterd claim ${res.member} --team ${team} --key <the line above>`) +
+        '\n',
     );
   }
   return 0;

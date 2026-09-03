@@ -150,7 +150,7 @@ src/
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // Team/member management, scoped bootstrap lifecycle + readiness-gated legacy cutover (ADR 344/350), policy, and roster export
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
-    join.ts           // join
+    join.ts           // hidden alias of `claim <name> --team <slug>` since 2026-09-03 (ADR 374): same handshake, prints the new spelling; removed one epoch on
     send.ts           // send
     inbox.ts          // inbox [--watch] [--wait] [--limit <n>] — bounded recent window + day-grouped smart dates, always-show-unread (ADR 054/117)
     nudge.ts          // `inbox --waiting`: the waiting-acts banner + the acts behind it, read-only — the approval-prompt hook target (ADR 053); `musterd nudge` is the hidden pre-2026-09-03 alias
@@ -162,7 +162,7 @@ src/
     insight.ts        // insight save/search — team-visible findings via the insight act + FTS search (ADR 327)
     surface.ts        // musterd surface list|decline|accept (ADR 332): the vocabulary for refusing a provisioned surface. `decline` removes it AND records the tombstone (one command, one outcome); `list` names what is refusable here plus any refusal this build no longer recognises; `accept` clears one. `init --refresh-hooks` overrides every tombstone in the folder and says which it resurrected
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
-    claim.ts          // claim a seat by name or open role (ADR 032/034/036)
+    claim.ts          // claim a seat by name or open role (ADR 032/034/036); the ONE occupancy verb since ADR 374 — `--team/--key/--grant` cover the fresh-folder bootstrap `join` used to; MCP twin `team_join`
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)
     seed.ts           // shared Seed tray/read/claim/clarification/brief/conclude/promote Surface (ADR 319)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)
@@ -349,7 +349,7 @@ Tell the running **service-managed** daemon to re-resolve its roster roots and r
 
 Local clean-slate (ADR 022) — wipes the daemon's SQLite db (every team, member, presence, message) by deleting the db file + its `-wal`/`-shm` siblings, and clears the local CLI `identities`/`bindings`/`current` in `config.json` (the `server` URL is kept). A fresh `musterd serve` re-creates an empty db at the current schema. Pure filesystem + config: it never imports `@musterd/server` (ADR 002) or opens the db, and talks to a running daemon only through the read-only `/health` probe. **Safety, three layers:** (1) **refuses while a daemon is live on the target db** — `/health` reports the served db path (ADR 016); deleting an open SQLite file orphans the daemon onto a ghost inode, so it tells you to stop the daemon first (exit 11). A daemon on a _different_ db doesn't block. (2) **Backs up first** by default — db files + `config.json` → `~/.musterd/backups/*.<ts>.bak`; `--no-backup` opts out. (3) **Confirms** — interactive `y/N` on a TTY, and on a non-TTY refuses unless `--force`/`--yes`. Per-folder `.musterd/binding.json` files are not touched (run `musterd init` to repoint them). Output: `✓ reset — wiped <db>; cleared N local identities`.
 
-### `musterd join <slug> --as <name> [--token <tok>] [--surface cli]`
+### `musterd join <slug> --as <name> …` — hidden alias (ADR 374, 2026-09-03) of `musterd claim <name> --team <slug> [--key …] [--grant …]`
 
 Attaches a Presence for an existing member, stores identity locally, and **auto-binds the current folder** to it (ADR 036) so you can act here without `--as`. If `--token` omitted, uses config (and refuses to relabel a different member's token — see Identity resolution above). Opens a short WS `hello` to confirm + register presence, then exits 0 (presence is held by `inbox --watch` or one-shot pings; plain `join` just registers and confirms). Output: `cmd/join` (`✓ <name> joined <slug>` + presence line).
 
