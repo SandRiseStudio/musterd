@@ -9,18 +9,25 @@ function seat(name: string, presence: 'online' | 'away' | 'offline', last_seen_a
 }
 
 describe('observeSeats', () => {
-  test('records the arrival of a seat first seen online', () => {
+  test('records NO arrival for a seat already online in the first read — that beginning was not watched', () => {
     const log = observeSeats({}, [seat('gptbot', 'online')], T0);
-    expect(log.gptbot).toEqual({ arrivedAt: T0, lastOnlineAt: T0 });
+    expect(log.gptbot).toEqual({ lastOnlineAt: T0 });
   });
 
-  test('does not record an arrival for a seat first seen offline', () => {
+  test('records the arrival of a seat this page first read absent', () => {
+    let log = observeSeats({}, [seat('gptbot', 'offline')], T0);
+    log = observeSeats(log, [seat('gptbot', 'online')], T0 + 3_000);
+    expect(log.gptbot).toEqual({ arrivedAt: T0 + 3_000, lastOnlineAt: T0 + 3_000 });
+  });
+
+  test('a seat first read offline is remembered as absent, with no visit to it', () => {
     const log = observeSeats({}, [seat('gptbot', 'offline')], T0);
-    expect(log.gptbot).toBeUndefined();
+    expect(log.gptbot).toEqual({ departed: true });
   });
 
   test('keeps the original arrival across later reads while the seat stays online', () => {
-    const first = observeSeats({}, [seat('gptbot', 'online')], T0);
+    const absent = observeSeats({}, [seat('gptbot', 'offline')], T0);
+    const first = observeSeats(absent, [seat('gptbot', 'online')], T0);
     const later = observeSeats(first, [seat('gptbot', 'online')], T0 + 8_000);
     expect(later.gptbot).toEqual({ arrivedAt: T0, lastOnlineAt: T0 + 8_000 });
   });
@@ -40,10 +47,13 @@ describe('observeSeats', () => {
     expect(log.gptbot).toEqual({ arrivedAt: T0 + 20_000, lastOnlineAt: T0 + 20_000 });
   });
 
-  test('forgets a departed seat once its trace has expired, so the log cannot grow forever', () => {
+  test('a departed seat keeps its record past the window — the trace expires on age, and the log is bounded by the roster', () => {
     const visit = observeSeats({}, [seat('gptbot', 'online')], T0);
     const stale = observeSeats(visit, [seat('gptbot', 'offline')], T0 + DWELL_WINDOW_MS + 1);
-    expect(stale.gptbot).toBeUndefined();
+    expect(stale.gptbot).toEqual({ lastOnlineAt: T0, departed: true });
+    expect(dwellTrace(stale, seat('gptbot', 'offline'), T0 + DWELL_WINDOW_MS + 1)).toBeNull();
+    // Bounded: only names in the read survive the fold, so the log can never outgrow the team.
+    expect(Object.keys(observeSeats(stale, [], T0 + DWELL_WINDOW_MS + 2))).toEqual([]);
   });
 });
 
@@ -66,7 +76,8 @@ describe('dwellTrace', () => {
   });
 
   test('names the visit length only when this page watched the seat arrive', () => {
-    let log = observeSeats({}, [seat('gptbot', 'online')], T0);
+    let log = observeSeats({}, [seat('gptbot', 'offline')], T0);
+    log = observeSeats(log, [seat('gptbot', 'online')], T0);
     log = observeSeats(log, [seat('gptbot', 'online')], T0 + 11_000);
     const trace = dwellTrace(log, seat('gptbot', 'offline'), T0 + 12_000);
     expect(trace?.title).toContain('11s');
@@ -87,5 +98,35 @@ describe('dwellTrace', () => {
 
   test('a seat with no observed visit at all gets no trace', () => {
     expect(dwellTrace({}, seat('gptbot', 'offline'), T0)).toBeNull();
+  });
+});
+
+describe('the arrival this page did not witness (gptbot, lane 01M1JQENBK)', () => {
+  test('a seat already online in the first roster read gets no arrival, so its trace claims no duration', () => {
+    // The page opens onto a room that already has gptbot in it. Nothing here was witnessed
+    // beginning: eight seconds later it leaves, and the only honest thing to say is that it was
+    // here and when it went.
+    let log = observeSeats({}, [seat('gptbot', 'online')], T0);
+    log = observeSeats(log, [seat('gptbot', 'online')], T0 + 8_000);
+    log = observeSeats(log, [seat('gptbot', 'offline')], T0 + 8_000);
+    expect(log.gptbot?.arrivedAt).toBeUndefined();
+    const trace = dwellTrace(log, seat('gptbot', 'offline'), T0 + 9_000);
+    expect(trace?.label).toBe('was here · left 1s ago');
+    expect(trace?.title).not.toMatch(/\d+s/);
+    expect(trace?.title).not.toContain('Watched from this page');
+  });
+
+  test('a seat read offline and then online HAS a witnessed arrival — that is the wake this rail exists for', () => {
+    let log = observeSeats({}, [seat('gptbot', 'offline')], T0);
+    log = observeSeats(log, [seat('gptbot', 'online')], T0 + 5_000);
+    log = observeSeats(log, [seat('gptbot', 'online')], T0 + 16_000);
+    log = observeSeats(log, [seat('gptbot', 'offline')], T0 + 17_000);
+    expect(log.gptbot?.arrivedAt).toBe(T0 + 5_000);
+    expect(dwellTrace(log, seat('gptbot', 'offline'), T0 + 18_000)?.title).toContain('11s');
+  });
+
+  test('a seat only ever read offline gets no trace at all', () => {
+    const log = observeSeats({}, [seat('gptbot', 'offline')], T0);
+    expect(dwellTrace(log, seat('gptbot', 'offline'), T0 + 1_000)).toBeNull();
   });
 });

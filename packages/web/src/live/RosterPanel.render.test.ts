@@ -233,6 +233,27 @@ describe('the dwell trace', () => {
     expect(html).not.toContain('was here');
   });
 
+  it('claims no duration for a seat that was already here when the page loaded', () => {
+    // The log this page actually builds for that seat: a last-seen, and no arrival to measure from.
+    const html = withDwell(
+      [seat({ name: 'gptbot', presence: 'offline', posture: 'offline' })],
+      { gptbot: { lastOnlineAt: T0 + 8_000, departed: true } },
+      T0 + 9_000,
+    );
+    expect(html).toContain('was here · left 1s ago');
+    expect(html).not.toContain('in the room for');
+    expect(html).not.toContain('Watched from this page');
+  });
+
+  it('says nothing about a seat it has only ever read absent', () => {
+    const html = withDwell(
+      [seat({ name: 'gptbot', presence: 'offline', posture: 'offline' })],
+      { gptbot: { departed: true } },
+      T0,
+    );
+    expect(html).not.toContain('was here');
+  });
+
   it('renders nothing at all when no dwell log is passed — every other surface is untouched', () => {
     const html = renderToStaticMarkup(
       createElement(RosterPanel, {

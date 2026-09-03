@@ -30,8 +30,11 @@ export function useDwell(roster: readonly DwellSeat[]): { log: DwellLog; now: nu
     setNow(at);
   }, [roster]);
 
+  // A record with no `lastOnlineAt` is a seat this page has only ever read absent — remembered so its
+  // next arrival counts as witnessed, but never a trace, and so never a reason to run the tick.
   const hasTrace = Object.values(log).some(
-    (v) => v.departed === true && now - v.lastOnlineAt <= DWELL_WINDOW_MS,
+    (v) =>
+      v.departed === true && v.lastOnlineAt !== undefined && now - v.lastOnlineAt <= DWELL_WINDOW_MS,
   );
 
   useEffect(() => {
