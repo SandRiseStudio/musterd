@@ -186,6 +186,29 @@ export const CONTROLS: Control[] = [
     ],
   },
   {
+    id: 'adr-373-forward-reference-names-a-disposition',
+    kind: 'gate',
+    claim:
+      'A sentence in an ADR, a wiki page or the roadmap data that promises future work names a lane, a dated deferral with a reopen trigger, or a dated none — and `pnpm intents:check` fails when it names nothing.',
+    where: 'scripts/check-intents.ts, run from format:check (so every PR); shapes and baselines in scripts/intents.ts',
+    exercise:
+      'Add a line reading "That is left for a sibling lane." to any docs/wiki page and run `pnpm intents:check` — it must exit 1 naming that file and line. Then delete the line.',
+    motivatedBy:
+      "2026-09-03 sweep: 62 wiki pages, 364 ADRs, 86 roadmap items and all 843 lanes read against the code turned up 9 items of recorded work with no lane, no goal and no implementation. ADR 354 §Consequences said \"Left for a sibling lane\" and no lane was opened; census.ts said \"increment 3 will auto-provision\" and increment 3 had no owner.",
+    counterfactual:
+      'Partly. It flags ADR 354\'s sentence and the roadmap building: strings — the three ADR 373 pre-registered — but it would have missed the frontier-cadence manifest (docs/research/, outside the scanned surfaces) and census.ts (code comments are out of scope by design). Precision is 66% at merge: 16 of 47 matches are past-tense or descriptive, baselined as noise. Both numbers print on every run.',
+    lastExercised: '2026-09-03',
+    everTripped: true,
+    lastTripped: '2026-09-03',
+    staleAfterDays: 90,
+    refs: [
+      'ADR 373',
+      'PR #1251',
+      'lane 01M1MNTTNCAYYF08BVYYCXKSKP',
+      'docs/wiki/defect-gate-coverage.md (the coverage-meter precedent)',
+    ],
+  },
+  {
     id: 'wiki-falsifier-must-be-able-to-fail',
     kind: 'gate',
     claim:

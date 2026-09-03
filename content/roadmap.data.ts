@@ -776,6 +776,7 @@ const RAW: RawItem[] = [
   {
     id: 'research-intake',
     frozenBy: 56,
+    // Follows-up: 01M1MMJKBYJ4DDD4S9QCF02TD9
     building:
       'M1–M3 landed (#359/#360) and hand-run; what remains is M4–M5 — the weekly digest emit + seen.json append + notify, then the scheduled routine. ADR 056 accepted 2026-08-24 with this named as a seam, not a promise.',
     wave: 'later',
@@ -1088,6 +1089,7 @@ const RAW: RawItem[] = [
   {
     id: 'codex-harness-parity',
     frozenBy: 216,
+    // Follows-up: 01M0V03Z37QQY8H60W6FE4N15B
     building:
       'increment 1 — capability, identity, and liveness contract; then the CLI backend, owner-gated acceptance, and desktop evidence matrix',
     wave: 6,
@@ -1210,6 +1212,7 @@ const RAW: RawItem[] = [
   {
     id: 'coordination-dataset',
     frozenBy: 56,
+    // Follows-up: 01M12FKJBMRF7T282J23NXYQPT
     building:
       'the export path shipped 2026-08-19 (`pnpm dataset:export`, structural-only per ADR 184); what remains is the first authorised HuggingFace release (per-release human sign-off) and the MAST detectors as a shipped view. ADR 056 accepted 2026-08-24; the ladder above the dataset rung stays direction, not delivery.',
     wave: 6,
@@ -1446,6 +1449,7 @@ const RAW: RawItem[] = [
   {
     id: 'role-routing-profiles',
     frozenBy: 272,
+    // Follows-up: deferred — ADR 272 §5 reopens on the restored measured trigger: a role-filtered discovery→directed-send join, or a repeatedly hand-contested multi-holder pick (2026-09-03)
     building:
       'nothing is in flight — the toolkit migration (ADR 272 §4, under its era name `profiles`), the only build the ADR authorizes, shipped in #921 (pure rename, built-in round-trip) and #922 (label and charter decouple from the `profile`). What remains is §5 — the four-level registry, Git reconciliation, role-addressed sends, and the ordered routing resolver — DEFERRED, not building: it reopens only when ADR 227’s restored measured trigger fires (the role-filtered discovery→directed-send join, vacuously never fired: zero `roster.role_query` rows have ever been written) or a multi-holder pick is repeatedly contested by hand. If role sends do proceed, increment 1 rides the shipped ADR 254 eligible-set rail rather than a new resolver.',
     wave: 8,
@@ -1505,6 +1509,7 @@ const RAW: RawItem[] = [
   {
     id: 'ledger-seats',
     frozenBy: 232,
+    // Follows-up: 01M1MMK3339B06Q328HYWXARJF
     building:
       'increments 3–5 — remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance. Increments 1–2 landed: kind service + the auto-refresher’s seat, and the warn-only census in doctor/init --check.',
     wave: 8,
