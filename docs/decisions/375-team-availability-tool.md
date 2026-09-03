@@ -24,5 +24,6 @@ ADR 044 gave every member an availability axis — `available`, `away [--until]`
 
 ## Observability & Evaluation
 
-- **Eval:** within one epoch, at least one `member.availability` audit row whose surface is an MCP harness (not `cli`). Falsifier: every availability change in the audit log still arrives via the CLI — then agents did not need the tool and it should be folded back.
-- **Falsifier for rule 2:** a muted seat calling `team_availability` is refused — then the tool is wrongly scoped.
+- **Traces:** every call lands as a `member.availability` audit row (the existing route), now with an MCP surface (`claude-code`, `codex`, …) instead of `cli`; the roster renders the result as `away`/`off until <t>`/`dnd`.
+- **Eval:** within one FEATURE_EPOCH, at least one `member.availability` audit row whose surface is an MCP harness. Falsifier: every availability change in the audit log still arrives via `cli` — then agents did not need the tool and it should be folded back. Second falsifier (rule 2): a muted seat calling `team_availability` is refused — then the tool is wrongly scoped.
+- **Experiment:** n/a — a parity tool; the only comparison worth running is the eval above.
