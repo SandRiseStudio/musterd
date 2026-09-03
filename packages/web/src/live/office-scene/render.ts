@@ -1629,6 +1629,8 @@ const RECEPTIONIST_NODE: OfficeNode = {
   name: 'receptionist',
   kind: 'human',
   service: false,
+  // The house's own staff — nobody wakes the receptionist.
+  woken: false,
   presence: 'online',
   activity: 'working',
   posture: 'working',

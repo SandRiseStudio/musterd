@@ -1624,6 +1624,27 @@
   text-transform: lowercase;
   color: var(--lc-warn-ink);
 }
+/* The woken tag (ADR 131 residency): like `dnd` this is a STATE rather than an identity, so it
+   takes dnd's grammar — border + text in an `-ink` token on the plate's own paper, and NO FILL.
+   The no-fill part is not taste, it is dnd's own measured scar one comment up: a 14% tint under
+   that tag lightened the ground and took a 5.11 to 4.35. `--lc-accent-ink` is 4.60 worst case, so
+   there is even less room here than there was there — any tint at all would fail.
+   Quieter than dnd in weight and border alpha, because dnd is an instruction to the room (do not
+   walk to me) and this is context you read after something has caught your eye. */
+.lc-gl-label__woken {
+  flex: none;
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--lc-accent-ink) 40%, transparent);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--lc-type-tag);
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  text-transform: lowercase;
+  color: var(--lc-accent-ink);
+}
 /* ── the expand, animated ───────────────────────────────────────────────────────────────────────
    The detail used to be a `display: none` -> `inline-flex` swap, which is a jump cut: there is no
    in-between state to animate, so the plate teleported to its wide size.
@@ -3073,6 +3094,26 @@
 .lc-stat--danger {
   color: var(--lc-danger-ink);
   background: color-mix(in srgb, var(--lc-danger) 16%, transparent);
+}
+/* Why a seat is in the room at all (ADR 131) — a wake, not a person opening a session. It sits
+   BESIDE the posture chip rather than replacing it, so it must not out-shout it: posture is the
+   thing you scan for, provenance is what you check once something has caught your eye.
+
+   NO FILL, and this one is measured-by-proxy rather than measured, so the reasoning has to stand on
+   its own. `--lc-accent-ink` is 4.60:1 worst case — a tenth of a point of headroom — and the `dnd`
+   tag's own comment records what a tint does to exactly that kind of margin: a 14% amber under
+   `--lc-warn-ink` lightened the ground and took 5.11 down to 4.35. At 4.60 there is no tint this
+   survives, so it takes the border-and-text grammar instead.
+
+   Why measured-by-proxy: the contrast gate CANNOT reach this chip. Its fixture joins every seat
+   with a team bootstrap key (`mskey_`), and provenance is gated to seat credentials (`msac_`,
+   cli/src/client.ts:321) precisely because it is a harness fact a human must not stamp (ADR 121).
+   I tried seeding it and the gate correctly refused. The same ink and the same no-fill recipe IS
+   swept, on the office nameplate's `woken` tag via /office-preview, which the preview now seats. */
+.lc-stat--woken {
+  color: var(--lc-accent-ink);
+  border-color: color-mix(in srgb, var(--lc-accent-ink) 40%, transparent);
+  background: transparent;
 }
 .lc-stat--muted {
   color: var(--lc-muted);

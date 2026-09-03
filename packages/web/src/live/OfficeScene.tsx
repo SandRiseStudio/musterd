@@ -9,6 +9,7 @@ import { OfficeOverlay } from './OfficeOverlay';
 import { captionFor, type Caption } from './captions';
 import { WorkStack } from './WorkStack';
 import { presentCount, type RoomEntry } from './workingOn';
+import { wokenSeat } from './wokenSeat';
 import type { OfficeRoomProps } from './officeRoom';
 import { projectWallBoard } from './office-scene/wallboard';
 
@@ -57,6 +58,10 @@ function computeData(
         last_seen_at: m.presences?.length
           ? Math.max(...m.presences.map((p) => p.last_seen_at))
           : null,
+        // Reads the same live row `surface` and `model` came from just above, via the shared
+        // helper — a plate that took its harness from one attachment and its provenance from
+        // another would be describing two sessions as one.
+        woken: wokenSeat(m),
       };
     }),
   };

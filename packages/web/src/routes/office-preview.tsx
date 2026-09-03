@@ -52,6 +52,18 @@ const POOL: Mock[] = [
 ];
 
 /**
+ * The seat a wake put in the room (ADR 131), for the same reason Jib is a service seat: a state the
+ * fixture cannot reach is a state reviewed for the first time in production.
+ *
+ * A woken seat is the hardest one to catch by waiting, not the easiest — the measured window on a
+ * real codex wake was ELEVEN SECONDS (claim 14:19:04 → ws_close 14:19:15), which is why the lane
+ * exists at all. `Dev` is deliberately an `active` agent rather than a `working` one: the point is
+ * that provenance is orthogonal to posture, and pinning it to a busy seat would let the two read as
+ * the same fact.
+ */
+const WOKEN: ReadonlySet<string> = new Set(['Dev']);
+
+/**
  * Harness + model per fixture member. Deliberately varied, including a long id and a `null` model:
  * the nameplate's provider icon + expand detail have to survive both the widest label it will ever
  * see and the seat that has nothing to report.
@@ -434,6 +446,9 @@ function OfficePreviewPage() {
           workSource: null,
           laneState: null,
           moreLanes: 0,
+          // Why the seat is here at all — a wake, not someone opening a session. Orthogonal to
+          // posture on purpose, so the preview shows the two facts side by side.
+          woken: WOKEN.has(m.name) && !isOffline,
           dnd: dndSet.has(m.name) && !isOffline,
           // The first offline fixture wears the amber `disconnected` glint; the rest read released.
           offline_reason: isOffline

@@ -111,6 +111,8 @@ function CharacterSheet() {
               dnd: false,
               offline_reason: null,
               last_seen_at: null,
+              // The character sheet draws BODIES, not sessions — nothing here came from a wake.
+              woken: false,
             };
             const seed = seedOf(name);
             const skel = solveSkeleton({
