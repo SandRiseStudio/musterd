@@ -18,6 +18,8 @@ import {
   ClaimTargetSchema,
   DecideRequestSchema,
   IssueGrantSchema,
+  type Policy,
+  type PolicyOverride,
   PolicyOverrideSchema,
   EnrollResidencyBodySchema,
   RevokeResidencyBodySchema,
@@ -76,6 +78,7 @@ import {
   SyncPullResponseSchema,
   SyncClaimRequestSchema,
   SyncLanePatchRequestSchema,
+  SyncPolicyRequestSchema,
   SyncTrustRequestSchema,
   SyncPushRequestSchema,
   SyncPushResponseSchema,
@@ -276,19 +279,21 @@ import {
   requireTeam,
   revokeBootstrapCredential,
   rotateAgentKey,
-  setPolicy,
+  applyPolicyChange,
 } from '../store/teams.js';
 import { recordSurfaceRender, recordToolCalls } from '../store/toolCalls.js';
 import {
   applyTrust,
   arbitrateClaim,
   arbitrateLanePatch,
+  assertSeatAlreadyResident,
   assertSeatResident,
   ClaimRefusedError,
   decideLanePatch,
   HubUnreachableError,
   isOwnershipOrStatePatch,
   joinerEnrollment,
+  policyAtHub,
   localNodeWithLabel,
   patchAtHub,
   SeatBoundElsewhereError,
@@ -2499,16 +2504,36 @@ export async function handleHttp(
         // back to life. The audit records the request, not the parsed result: the old row wrote
         // `detail: policy` post-parse, which is exactly why nothing could later say whether a stored
         // value was chosen or baked in.
+        //
+        // Residence-2 census gap 1 (2026-09-03): policy is hub-authoritative (ADR 325 residence 1),
+        // and until now it never left the machine it was edited on — 21 readers, `claimWakeLeases`
+        // among them, consult the LOCAL blob, so a joiner's host ran different caps and cooldowns
+        // than the hub after every `policy set`. An enrolled joiner now forwards to the hub (the
+        // `/sync/lane` pattern, ADR 361) and learns the answer back through the fold; the hub
+        // stamps the change so every machine converges. Unreachable hub REFUSES: policy is not an
+        // act that may fork.
         const stored = parseOrBadRequest(PolicyOverrideSchema, await readJson(req));
-        const policy = setPolicy(ctx.db, team.id, stored);
-        appendAudit(ctx.db, team.id, {
-          actor: member.name,
-          action: 'policy.change',
-          target: null,
-          result: 'allow',
-          detail: stored,
-        });
-        return sendJson(res, 200, { policy, stored });
+        const enrollment = joinerEnrollment(ctx.db, team.id, team.slug);
+        if (enrollment) {
+          let answer: { policy: Policy; stored: PolicyOverride };
+          try {
+            answer = await policyAtHub(enrollment, team.slug, {
+              actor: member.name,
+              policy: stored,
+            });
+          } catch (err) {
+            if (err instanceof HubUnreachableError)
+              throw new MusterdError('hub_unreachable', err.message);
+            throw err;
+          }
+          // Best effort, as on the lane path: pull the hub's decision now so the admin's next read
+          // agrees with the answer they were just handed. A failed pull changes nothing.
+          await pullTeam(ctx, team).catch(() => undefined);
+          return sendJson(res, 200, answer);
+        }
+        const applied = applyPolicyChange(ctx.db, team.id, member.name, stored);
+        await pushTeam(ctx, team).catch(() => undefined);
+        return sendJson(res, 200, applied);
       }
 
       // The read half of the policy verb (increment 5): `musterd residency policy` does
@@ -3799,6 +3824,47 @@ export async function handleHttp(
           }
           throw err;
         }
+      }
+
+      // Residence-2 census gap 1, hub side: a joiner forwards its admin's policy change. The node
+      // credential proves the MACHINE; the actor is re-authorized against the hub's own roster,
+      // because a joiner saying "this seat is an admin" is a claim about a roster it does not own.
+      if (method === 'POST' && rest === '/sync/policy') {
+        const team = requireTeam(ctx.db, slug);
+        const node = authenticateNode(ctx.db, team.id, bearer(req));
+        if (!node) {
+          throw new MusterdError(
+            'unauthorized',
+            'the sync surface authenticates with a machine credential (msnode_) for this team',
+          );
+        }
+        touchNode(ctx.db, node.id, Date.now());
+        const body = parseOrBadRequest(SyncPolicyRequestSchema, await readJson(req));
+        const actor = getMemberByName(ctx.db, team.id, body.actor);
+        if (!actor) throw new MusterdError('not_found', `no seat "${body.actor}" on this roster`);
+        try {
+          // Residence before capability, the order `/sync/lane` uses: an unentitled node learns
+          // nothing, not even whether the name it guessed is an admin. This is the check gptbot's
+          // review of #1228 found missing — authenticating the machine and then trusting the
+          // caller-supplied `actor` let ANY enrolled node forward a change as the admin seat,
+          // because a node credential says which machine speaks and never for whom.
+          //
+          // The STRICT form, not `assertSeatResident`: this act changes the team, so an unbound
+          // seat must not be claimable by whoever names it first. For a human admin trusted on
+          // several machines (ADR 358) every one of them is in the set and passes.
+          assertSeatAlreadyResident(ctx.db, team.id, actor, node, 'policy change');
+        } catch (err) {
+          if (err instanceof TrustRefusedError) return sendTrustRefusal(res, err);
+          throw err;
+        }
+        // The same capability the local admin route resolves — not a string compare on `role`,
+        // which ADR 227 made one of several the seat may hold.
+        if (!resolveCapabilities(actor).is_admin) {
+          throw new MusterdError('forbidden', `"${body.actor}" is not an admin on ${slug}`);
+        }
+        const applied = applyPolicyChange(ctx.db, team.id, actor.name, body.policy);
+        await pushTeam(ctx, team).catch(() => undefined);
+        return sendJson(res, 200, applied);
       }
 
       // ADR 358, hub side: a joiner forwards its resident human's trust act. The authenticated

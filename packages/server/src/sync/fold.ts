@@ -48,7 +48,12 @@ export type FoldStop =
   // refusal is a PROJECTED verb wearing the non-projecting tag: a `lane.*`/`presence.*` action
   // under `kind: 'ledger'` would land in `audit` with its stamp and never reach its projector,
   // leaving this daemon's `lanes` silently behind the origin's with no gap to find it by.
-  | { kind: 'mistagged_ledger_event'; action: string; hub_seq: number };
+  | { kind: 'mistagged_ledger_event'; action: string; hub_seq: number }
+  // Policy events (residence-2 census gap 1, 2026-09-03): the fourth kind. Only the first shape —
+  // there is no `unborn` for policy, because a team's row always exists here (the fold runs for a
+  // team this daemon holds) and the event carries the WHOLE stored doc, not a delta. A verb this
+  // build cannot project stops, retried each tick, the same as every other kind.
+  | { kind: 'unknown_policy_event'; action: string; hub_seq: number };
 
 /** The `lane.*` verbs the fold can project. Anything else stops as `unknown_lane_event`. */
 const LANE_VERBS = new Set([
@@ -197,6 +202,37 @@ function projectLaneEvent(
     default:
       return 'applied';
   }
+}
+
+/** The `policy.*` verbs the fold can project. Anything else stops as `unknown_policy_event`. */
+const POLICY_VERBS = new Set(['policy.change']);
+
+/**
+ * Project a replicated policy change into this daemon's `teams.policy` (residence-2 census gap 1).
+ *
+ * Replace semantics, exactly as `setPolicy` has them: the event's `detail` is the whole STORED
+ * sparse override, so a key it omits is unset here too and this build's own default comes back to
+ * life for it. Nothing is merged into the local row — a merge would let a knob an admin cleared on
+ * the hub survive forever on every machine that once held it.
+ *
+ * `policy` is hub-authoritative, so this is a one-writer projection: last hub event wins, and there
+ * is no per-machine value to reconcile against. `updated_at` is the local clock at fold time, like
+ * every other folded row's receipt stamp.
+ */
+function projectPolicyEvent(
+  db: Database,
+  teamId: string,
+  event: SyncPullLaneEvent['event'],
+  now: number,
+): 'applied' | 'unknown' {
+  if (event.action !== 'policy.change') return 'unknown';
+  const stored = event.detail ?? {};
+  db.prepare('UPDATE teams SET policy = ?, updated_at = ? WHERE id = ?').run(
+    JSON.stringify(stored),
+    now,
+    teamId,
+  );
+  return 'applied';
 }
 
 const PRESENCE_VERBS = new Set(['presence.attached', 'presence.detached', 'presence.reattested']);
@@ -425,6 +461,41 @@ export function foldBatch(
         const e = event.event;
         if (e.action.startsWith('lane.') || e.action.startsWith('presence.')) {
           stop = { kind: 'mistagged_ledger_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        db.prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          e.id,
+          teamId,
+          e.ts,
+          e.actor,
+          e.action,
+          e.target,
+          e.result,
+          e.detail ? JSON.stringify(e.detail) : null,
+          now,
+          event.origin_node,
+          event.origin_seq,
+        );
+        applied += 1;
+        cursor = event.hub_seq;
+        continue;
+      }
+
+      // The policy kind: a policy change (residence-2 census gap 1). Held in `audit` with its
+      // stamp, then projected into `teams.policy` in the same transaction — the same discipline as
+      // the lane and presence kinds. No seat resolution: the actor is an admin on the HUB's roster
+      // and may not be a member here at all, and the fact is about the team, not about a seat.
+      if (event.kind === 'policy') {
+        const e = event.event;
+        if (!POLICY_VERBS.has(e.action)) {
+          stop = { kind: 'unknown_policy_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        if (projectPolicyEvent(db, teamId, e, now) === 'unknown') {
+          stop = { kind: 'unknown_policy_event', action: e.action, hub_seq: event.hub_seq };
           return finish();
         }
         db.prepare(

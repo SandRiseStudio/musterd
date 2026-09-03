@@ -11,7 +11,7 @@ import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import type { z } from 'zod';
 import { MusterdError } from '../errors.js';
-import { appendAuditRequired } from './audit.js';
+import { appendAuditRequired, appendReplicatedEvent } from './audit.js';
 import { hashToken, newSecret } from './members.js';
 import { resolveAccountStatus, type MemberRow, type TeamRow } from './rows.js';
 
@@ -564,6 +564,38 @@ export function setPolicy(
     teamId,
   );
   return getPolicy(db, teamId);
+}
+
+/**
+ * Set the policy AND stamp the change for replication (residence-2 census gap 1, 2026-09-03).
+ *
+ * The write and its `policy.change` event are one unit, the way every lane transition is: the row
+ * this daemon holds and the fact its peers will fold are the same fact, or neither happened. The
+ * stamped `detail` is the STORED sparse doc — the same thing `setPolicy` put in the row, so a peer
+ * that folds it stores exactly what the admin chose and keeps its own defaults alive for the rest
+ * (ADR 185).
+ *
+ * Only the HUB calls this. Policy is hub-authoritative (ADR 325 residence 1): a joiner forwards to
+ * the hub and learns the answer back through the fold, so no second origin ever mints the verb.
+ */
+export function applyPolicyChange(
+  db: Database,
+  teamId: string,
+  actor: string,
+  policy: z.input<typeof PolicyOverrideSchema>,
+): { policy: Policy; stored: PolicyOverride } {
+  return db.transaction(() => {
+    const stored = PolicyOverrideSchema.parse(policy);
+    const effective = setPolicy(db, teamId, stored);
+    appendReplicatedEvent(db, teamId, {
+      actor,
+      action: 'policy.change',
+      target: null,
+      result: 'allow',
+      detail: stored,
+    });
+    return { policy: effective, stored };
+  })();
 }
 
 function readStored(db: Database, teamId: string): unknown {

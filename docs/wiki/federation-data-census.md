@@ -17,12 +17,13 @@ pre-federation baseline.
 | `messages` | 2 (event) | `insertMessage` stamps `(origin_node, origin_seq)`; push ships every stamped row; fold inserts by name | **yes** | residence-checked at ingest per kind (ADR 360) |
 | `audit` — `lane.*` | 1 (via events) / 2 | `appendReplicatedEvent` stamps; fold projects onto `lanes` | **yes** | ownership/state edges decided on the hub first (ADR 355/361) |
 | `audit` — `presence.*` | 3, amended → 2 | same stamped path; fold writes `presence` rows with `node` | **yes** | ADR 356 |
-| `audit` — everything else (`residency.*`, `seat.*`, `policy.change`, `memory.*`, `claim.*`, `incident.*`, `ask.*`, `handoff.*`, `git.pr_merged`, …) | 2 ("the audited verbs") | `appendAudit`, best-effort, `origin_seq = 0` — never selected by `unpushed` | **no** | a stamped row of any other action would poison the fold (`unknown_lane_event`); widening the filter alone is unsafe |
+| `audit` — `policy.change` | 1 | `appendReplicatedEvent` via `applyPolicyChange` (hub only); fold projects onto `teams.policy` | **yes** (2026-09-03, ADR 367) | the fourth replicated kind; exempt from residence binding at ingest — the hub mints it on a joiner admin's behalf |
+| `audit` — everything else (`residency.*`, `seat.*`, `memory.*`, `claim.*`, `incident.*`, `ask.*`, `handoff.*`, `git.pr_merged`, …) | 2 ("the audited verbs") | `appendAudit`, best-effort, `origin_seq = 0` — never selected by `unpushed` | **no** | a stamped row of any other action would poison the fold (`unknown_lane_event`); widening the filter alone is unsafe |
 | `lanes` | 1 | projection of folded `lane.*`; hub-authoritative CAS for every ownership/state patch | **yes** (as events) | field edits (title, scope, branch) stay local-authoritative and replicate as `lane.updated` |
 | `presence` | 3 → 2 (transitions) | folded rows carry `node`; heartbeats/grace/`conn_id` local | **yes** (transitions) | liveness of a remote row = its node's `last_seen_at` |
 | `seat_nodes` | hub decision input | hub-minted (ADR 355 §5, 358) | n/a — hub-only by design | a joiner asks, never reads it |
 | `nodes` (liveness) | hub | `upsertForeignNode` on the pull summary | **yes** (identity + `last_seen_at`) | credentials never leave the hub |
-| `teams.policy` | 1 ("admission/policy" is hub-authoritative by intent) | `setPolicy` UPDATEs the local blob; nothing ships it | **no** — GAP | 21 readers incl. `claimWakeLeases`: a joiner's host caps/cooldowns/loops diverge from the hub's the moment an admin edits policy there. Falsify: `census.test.ts` "policy change on the hub never reaches the joiner" |
+| `teams.policy` | 1 (admission/policy is hub-authoritative) | hub `POST /policy` → `applyPolicyChange` (stamped); a joiner forwards to `POST /sync/policy` and writes nothing; fold applies the sparse doc with replace semantics | **yes** (2026-09-03, ADR 367 — GAP 1 CLOSED) | the 21 readers incl. `claimWakeLeases` now agree across machines after one tick. An unreachable hub refuses `hub_unreachable`. Falsify: `sync/policy.test.ts`; `census.test.ts` also pins that raw `setPolicy` still ships nothing |
 | `seat_memory` | 2 (LWW blob, named in the baseline) | local UPSERT | **no** — GAP | a seat that moves machines (ADR 358 trust) reads no memory there. Falsify: census test "seat memory and the inbox cursor are per-machine" |
 | `inbox_cursors` | 2 (monotone max, promised explicitly) | local UPSERT | **no** — GAP | a human on two machines re-reads on each; same falsifier |
 | `tool_call_stats` | 2 (additive counters, promised explicitly) | local UPSERT | **no** — GAP | insights (`report`) count one machine only |
@@ -37,15 +38,14 @@ pre-federation baseline.
 **What the push selects, verbatim** (`sync/push.ts` `unpushed`, 2026-09-03): every `messages`
 row and every `audit` row with `origin_node = <this node>` and `origin_seq > cursor`. There is no
 action filter on the audit side — the *stamp* is the filter, and only `appendReplicatedEvent`
-stamps. Falsify: stamp any other verb and push; the hub stages it and the joiner's fold stops at
+stamps. The action *prefix* picks the wire tag (`presence.` → `presence`, `policy.` → `policy`,
+otherwise `lane`), and the hub and fold branch on the tag, never on the prefix. Falsify: stamp a
+verb with none of those prefixes and push; the hub stages it and the joiner's fold stops at
 `unknown_lane_event`.
 
 ### Gaps, ranked, with the lane each needs
 
-1. **`teams.policy`** — the one that changes behaviour, not just insight: wake caps and loop
-   switches are read on every machine from a blob only the editing machine holds. Hub-authoritative
-   (residence 1) like a claim: `setPolicy` on a joiner forwards; the hub's `policy.change` replicates
-   as a stamped event and the fold applies it. Lane opened from this census.
+1. ~~**`teams.policy`**~~ — **closed 2026-09-03 by [ADR 367](../decisions/367-team-policy-is-the-hubs-and-replicates.md)** (lane `01M1JNXSV7`), exactly as shaped here: a joiner's `POST /policy` forwards to the hub, the hub's `policy.change` is stamped, and the fold applies the sparse doc. Two things the shape learned in the building: the event carries the **stored** doc, not the effective one (shipping defaults would kill the schema default on every peer — ADR 185's #530 failure, replicated), and the policy kind is **exempt from residence binding**, or setting policy from a laptop would bind the admin's seat to the hub.
 2. **Per-seat continuity: `seat_memory` + `inbox_cursors`** — both promised, both LWW/max-merge
    trivially; they matter the moment ADR 358 lets a human hold two machines. One lane, two tables.
 3. **Insight substrate: `tool_call_stats` + the unstamped `residency.*` cost/lease verbs +

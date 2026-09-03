@@ -8,6 +8,9 @@ import {
   type SyncClaimRequest,
   SyncClaimRefusalSchema,
   type SyncLanePatchRequest,
+  type Policy,
+  type PolicyOverride,
+  type SyncPolicyRequest,
   type SyncTrustRequest,
   type UpdateLane,
 } from '@musterd/protocol';
@@ -20,7 +23,7 @@ import { appendAudit } from '../store/audit.js';
 import { getLane, LaneConflictError, type LaneExpectation, updateLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { localNodeForTeam } from '../store/messages.js';
-import { bindSeatToNode, seatBinding, trustNodeForSeat } from '../store/nodes.js';
+import { bindSeatToNode, seatBinding, seatBindings, trustNodeForSeat } from '../store/nodes.js';
 import { hasLivePresence } from '../store/presence.js';
 
 /**
@@ -146,6 +149,58 @@ export function applyTrust(
           `one (${speaker.label}) is not in the set; run it from "${holder.label}".`
       : `"${seat.name}" is not bound to any machine yet, so no session can vouch for another — ` +
           'act as the seat from this machine once (a claim, a presence) and it binds here first.',
+    holder?.node_id ?? null,
+    holder?.label ?? null,
+  );
+}
+
+/**
+ * The strict form of residence, for a forwarded act that CHANGES THE TEAM (gptbot's review of
+ * #1228, 2026-09-03): the node must ALREADY be in the seat's set. It never creates the binding.
+ *
+ * `assertSeatResident` is first-writer-wins, which is right for ordinary work — a seat's first act
+ * has to bind somewhere, and a lane claim is that act as readily as anything else. It is wrong for
+ * an admin forward. There the seat being unbound is exactly the opening: any enrolled machine could
+ * name an admin nobody had spoken for yet, take the binding in the same call that uses it, and set
+ * the team's policy on every machine. "Not yet bound" must read as "not entitled here", not as a
+ * free claim.
+ *
+ * A privileged forward never needs the lenient form, because it is never a seat's first act: the
+ * seat lives on the joiner and has been acting there, and those acts bind it on the hub as they
+ * replicate. If the seat is unbound, the request did not come from where the seat lives.
+ *
+ * Refusals reuse `TrustRefusedError` for its nullable node — an unbound seat has no holder to name
+ * — and leave the same `seat.bound_elsewhere` deny row ADR 328 §Experiment counts.
+ */
+export function assertSeatAlreadyResident(
+  db: Database,
+  teamId: string,
+  seat: { id: string; name: string },
+  node: { id: string; label: string },
+  act: string,
+): void {
+  const holders = seatBindings(db, seat.id);
+  if (holders.some((h) => h.node_id === node.id)) return;
+  const holder = holders[0];
+  appendAudit(db, teamId, {
+    actor: seat.name,
+    action: 'seat.bound_elsewhere',
+    target: seat.name,
+    result: 'deny',
+    detail: {
+      node: node.id,
+      bound_to: holder?.node_id ?? null,
+      bound_label: holder?.label ?? null,
+      act,
+    },
+  });
+  throw new TrustRefusedError(
+    'bound_elsewhere',
+    holder
+      ? `"${seat.name}" lives on "${holder.label}" — a ${act} is forwarded from a machine the ` +
+          `seat is resident on, and this one (${node.label}) is not in its set.`
+      : `"${seat.name}" is not resident on any machine yet, so no node may forward a ${act} as ` +
+          'that seat — act as the seat from its own machine once and it binds there first.',
     holder?.node_id ?? null,
     holder?.label ?? null,
   );
@@ -499,4 +554,56 @@ export async function trustAtHub(
     throw new Error(`the hub answered ${res.status} to the trust act: ${JSON.stringify(body)}`);
   }
   return SeatNodeTrustedSchema.parse(body);
+}
+
+/**
+ * Joiner side of the policy act (residence-2 census gap 1): forward the admin's sparse override to
+ * the hub, write nothing locally. The hub's row is the fact; this daemon learns the answer back
+ * through the fold, the same way it learns a lane it did not decide.
+ *
+ * Refusals relay with the hub's own code — an actor who is not an admin THERE is a 403 here, not a
+ * local success. `HubUnreachableError` when no answer came: policy is not an act that may fork
+ * (ADR 325 §Offline semantics), so the caller turns this into `hub_unreachable` and changes nothing.
+ */
+export async function policyAtHub(
+  enrollment: { hub_url: string; credential: string },
+  slug: string,
+  req: SyncPolicyRequest,
+): Promise<{ policy: Policy; stored: PolicyOverride }> {
+  let res: Response;
+  try {
+    res = await fetch(new URL(`/teams/${slug}/sync/policy`, enrollment.hub_url), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${enrollment.credential}`,
+      },
+      body: JSON.stringify(req),
+      signal: AbortSignal.timeout(CLAIM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    log.warn({ msg: 'sync_policy_hub_unreachable', team: slug, err: String(err) });
+    throw new HubUnreachableError(enrollment.hub_url, String(err));
+  }
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const b = body as { error?: { code?: string; message?: string } } | null;
+    // The hub's refusal is the answer, relayed with its code — `forbidden` for an actor who is no
+    // admin there, `not_found` for a seat its roster lacks, `bound_elsewhere` for a seat that does
+    // not live on this machine (gptbot's review of #1228). Anything else is a fault, not a verdict:
+    // a 500 here would tell the admin the hub is broken when it has in fact answered them.
+    if (
+      b?.error?.code === 'forbidden' ||
+      b?.error?.code === 'not_found' ||
+      b?.error?.code === 'bound_elsewhere'
+    ) {
+      throw new MusterdError(
+        b.error.code === 'bound_elsewhere' ? 'forbidden' : b.error.code,
+        b.error.message ?? 'the hub refused the policy change',
+      );
+    }
+    throw new Error(`the hub answered ${res.status} to the policy change: ${JSON.stringify(body)}`);
+  }
+  const parsed = body as { policy: Policy; stored: PolicyOverride };
+  return { policy: parsed.policy, stored: parsed.stored };
 }
