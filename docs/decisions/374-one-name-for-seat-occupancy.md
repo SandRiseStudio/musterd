@@ -55,6 +55,8 @@ Two options, decided on this PR:
 
 ## Observability & Evaluation
 
+- **Traces:** the existing `claim.*` audit rows (ADR 075/087) — a `musterd claim` and a `musterd join` produce identical rows, since both end in `POST /claim`; the alias's stderr note is the only surface difference until the alias is removed.
 - **Eval (increment 1):** after the fold, `grep -r "musterd join" docs packages` returns only the alias note and ADR history; `musterd help` lists `claim` once under Team & seats. Falsifier: any provisioning path, hook, or skill that still emits `musterd join` as the spelling to use.
-- **Eval (increment 2b):** `team_join`'s description contains `musterd claim`; `claim`'s catalog summary contains `team_join`. Falsifier: a seat's first `team_join` result that does not say the word "claim".
+- **Eval (increment 2b):** `team_join`'s description contains `musterd claim`; `claim`'s catalog summary contains `team_join`. Falsifier: a fresh seat that, reading only `musterd help` and the tool list, cannot describe `team_join` in `claim`'s words — that is the trigger for 2a.
+- **Experiment:** n/a — a naming decision; the 2b eval above is the only comparison, and 2a is its fallback.
 - **Retirement of the `join` alias:** one FEATURE_EPOCH after increment 1 lands, remove the dispatch case, the way #1253 removed `lane_ready`.
