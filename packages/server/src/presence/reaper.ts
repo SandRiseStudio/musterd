@@ -29,12 +29,19 @@ export function startReaper(ctx: Ctx): () => void {
   // outstanding across a break in that run tells us nothing about the host: nothing was there.
   let lastTickAt = Date.now();
   let continuousSince = lastTickAt;
+  // Presence keeps its own continuity clock. It is the same argument as `continuousSince` but at a
+  // different scale: the wake ledger asks "was the HOST there?" (90 s discriminates a suspend from
+  // jitter), while presence asks "were WE there to hear a 45 s heartbeat?" — and this loop shares an
+  // event loop with the sockets it judges, so any gap as long as the timeout itself already means
+  // no row could have been heard. Both start at boot, because before that neither was running.
+  let presenceWatchedSince = lastTickAt;
 
   const tick = () => {
     const now = Date.now();
 
     const tickGap = now - lastTickAt;
     lastTickAt = now;
+    if (tickGap >= ctx.config.presenceTimeoutMs) presenceWatchedSince = now;
     if (tickGap >= HOST_SUSPEND_GAP_MS) {
       continuousSince = now;
       for (const teamId of listResidencyTeamIds(ctx.db)) {
@@ -203,7 +210,9 @@ export function startReaper(ctx: Ctx): () => void {
       log.info({ msg: 'reap_observers_excess', count: reapedExcess.length });
     }
 
-    const removed = reapStale(ctx.db, ctx.config.presenceTimeoutMs);
+    // Gated the same way the wake ledger is gated above: a row cannot be called silent over a
+    // window in which nothing was listening for it.
+    const removed = reapStale(ctx.db, ctx.config.presenceTimeoutMs, presenceWatchedSince);
     if (removed.length === 0) return;
     const seen = new Set<string>();
     for (const row of removed) {

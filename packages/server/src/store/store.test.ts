@@ -44,7 +44,7 @@ import {
   release,
   touchAmbientPresence,
 } from './presence.js';
-import { mintSessionLease } from './session-leases.js';
+import { hasValidSessionLease, mintSessionLease } from './session-leases.js';
 import {
   bootstrapCutoverReadiness,
   createTeam,
@@ -887,6 +887,41 @@ describe('presence', () => {
       surface: 'claude-code',
     });
     expect(JSON.parse(rows[2]!.detail)).toEqual({ presence: row.id, reason: 'goodbye' });
+  });
+
+  it('a resumed reaper judges nobody silent until it has watched for a full timeout — and the session lease survives with the presence', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const a = attach(db, ada.row.id, 'claude-code', 'c1');
+    const lease = mintSessionLease(db, {
+      teamId: team.id,
+      memberId: ada.row.id,
+      presenceId: a.id,
+    });
+    // The daemon was down for ten minutes: nothing could heartbeat, so last_seen_at is ancient.
+    db.prepare('UPDATE presence SET last_seen_at = ? WHERE id = ?').run(Date.now() - 600_000, a.id);
+
+    // The loop resumed 10s ago — less than the 45s timeout it is about to judge by.
+    expect(reapStale(db, 45_000, Date.now() - 10_000)).toEqual([]);
+    expect(presenceById(db, a.id)).toBeDefined();
+    expect(
+      hasValidSessionLease(db, {
+        teamId: team.id,
+        memberId: ada.row.id,
+        token: lease.session_lease,
+      }),
+    ).toBe(true);
+
+    // Once it has watched a full window and the row still has not spoken, it is genuinely silent.
+    expect(reapStale(db, 45_000, Date.now() - 60_000).map((r) => r.id)).toEqual([a.id]);
+    expect(presenceById(db, a.id)).toBeUndefined();
+    expect(
+      hasValidSessionLease(db, {
+        teamId: team.id,
+        memberId: ada.row.id,
+        token: lease.session_lease,
+      }),
+    ).toBe(false);
   });
 
   it('every removal path names its reason; release into grace is not a detach; reap of the grace is', () => {

@@ -508,9 +508,21 @@ export function listReclaimableMemberIds(db: Database, teamId: string, now: numb
 /**
  * Remove dead presence rows — stale live ones (no heartbeat past the timeout) and release holds
  * whose reclaim grace has expired. Returns the removed rows (for offline events).
+ *
+ * `watchedSince` is when this reaper's current unbroken run began (ADR 236's `continuousSince`).
+ * Silence is only evidence over time something was listening: while the daemon is down or suspended
+ * no socket can heartbeat and no grace can be proven, so at resumption EVERY local row looks stale
+ * at once — and because a session lease is only valid while its presence row lives
+ * (`hasValidSessionLease` joins on it), reaping them cascades into every live agent's authority
+ * dying with no revocation row to explain it. So the resumed loop judges nobody until it has
+ * watched for a full timeout window, which is the same window a live adapter needs to reconnect.
+ * The default of 0 means "always been watching" — callers with no continuity to declare are
+ * unaffected. Measured 2026-09-02: seats saw "invalid, expired, or revoked agent session lease"
+ * after daemon bounces, with no `claim.superseded` row anywhere (lane 01M1HNY302).
  */
-export function reapStale(db: Database, timeoutMs: number): PresenceRow[] {
+export function reapStale(db: Database, timeoutMs: number, watchedSince = 0): PresenceRow[] {
   const now = Date.now();
+  if (now - watchedSince < timeoutMs) return [];
   const cutoff = now - timeoutMs;
   return db.transaction(() => {
     // The heartbeat cutoff is a LOCAL rule: only this machine's sockets and ambient touches animate
