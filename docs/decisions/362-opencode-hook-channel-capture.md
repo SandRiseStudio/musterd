@@ -13,7 +13,7 @@ That factual premise is now stale. Upstream ships a documented plugin event chan
 - Two load paths: project-local `.opencode/plugins/` files (auto-loaded at startup) and npm packages via the config `plugin: [...]` key (installed with Bun at startup, cached under `~/.cache/opencode/`).
 - Working community proof for exactly our use case: the opencode-throughput plugin captures per-message tokens, cost, and model from `message.updated` and logs them to JSONL outside the LLM context.
 
-Related and checked in the same pass: `opencode run --format json` `step_finish` events carry `part.cost` in USD plus the full token breakdown (`input/output/reasoning/cache.read/cache.write`), which answers the "no cost source" half of the wake-cost question — but pricing wakes off that stream is [dolly's lane 01M1HJY3JF](https://github.com/SandRiseStudio/musterd/pull/1216), linked here, not decided here.
+Related and checked in the same pass: `opencode run --format json` `step_finish` events carry `part.cost` in USD plus the full token breakdown (`input/output/reasoning/cache.read/cache.write`), which answers the "no cost source" half of the wake-cost question — but pricing wakes off that stream is [dolly's lane 01M1HJY3JF](https://github.com/SandRiseStudio/musterd/pull/1219), linked here, not decided here.
 
 ## Problem
 
