@@ -24,8 +24,8 @@ pre-federation baseline.
 | `seat_nodes` | hub decision input | hub-minted (ADR 355 §5, 358) | n/a — hub-only by design | a joiner asks, never reads it |
 | `nodes` (liveness) | hub | `upsertForeignNode` on the pull summary | **yes** (identity + `last_seen_at`) | credentials never leave the hub |
 | `teams.policy` | 1 (admission/policy is hub-authoritative) | hub `POST /policy` → `applyPolicyChange` (stamped); a joiner forwards to `POST /sync/policy` and writes nothing; fold applies the sparse doc with replace semantics | **yes** (2026-09-03, ADR 367 — GAP 1 CLOSED) | the 21 readers incl. `claimWakeLeases` now agree across machines after one tick. An unreachable hub refuses `hub_unreachable`. Falsify: `sync/policy.test.ts`; `census.test.ts` also pins that raw `setPolicy` still ships nothing |
-| `seat_memory` | 2 (LWW blob, named in the baseline) | local UPSERT | **no** — GAP | a seat that moves machines (ADR 358 trust) reads no memory there. Falsify: census test "seat memory and the inbox cursor are per-machine" |
-| `inbox_cursors` | 2 (monotone max, promised explicitly) | local UPSERT | **no** — GAP | a human on two machines re-reads on each; same falsifier |
+| `seat_memory` | 2 (LWW blob, on the ORIGIN's `saved_at`) | `applyMemorySave` / `applyMemoryClear` (stamped, `continuity.memory_saved` / `_cleared`); fold applies LWW; raw `saveMemory` still ships nothing | **yes** (2026-09-03, ADR 366 — GAP 2 CLOSED) | the event CARRIES THE BODY — ADR 093 hard rule 5 overturned by decision; the audit log now holds notes, daemon-side only, never git. A clear is a fact with a clock. Falsify: `sync/continuity.test.ts`; `census.test.ts` pins that the raw primitive is silent |
+| `inbox_cursors` | 2 — but NOT the "monotone max" the baseline promised | `applyCursorAdvance` (stamped, `continuity.cursor_advanced`, carries the MESSAGE ID only); fold resolves the id against its own `messages.created_at` and takes the max there | **yes** (2026-09-03, ADR 366 — GAP 2 CLOSED) | `last_read_ts` is a receipt clock and differs per machine, so the raw number never crosses (lane `01M1FAYTHQ`'s defect in federated form). A cursor naming an unfolded message stops the fold (`cursor_unborn`) |
 | `tool_call_stats` | 2 (additive counters, promised explicitly) | local UPSERT | **no** — GAP | insights (`report`) count one machine only |
 | `seed_thread_entries` | 2 (promised explicitly) | `appendThread` in `store/seeds.ts`, unstamped | **no** — GAP | seeds themselves converge through the Slack relay on every daemon (`startSeedsIngest` runs unconditionally, `index.ts:181`); the *thread* a seat writes on one machine stays there |
 | `seeds` (lifecycle) | 2 | relay-ingested per daemon; state moves local | partial — the relay, not the hub | two daemons can move one seed differently; not re-measured here |
@@ -46,8 +46,7 @@ verb with none of those prefixes and push; the hub stages it and the joiner's fo
 ### Gaps, ranked, with the lane each needs
 
 1. ~~**`teams.policy`**~~ — **closed 2026-09-03 by [ADR 367](../decisions/367-team-policy-is-the-hubs-and-replicates.md)** (lane `01M1JNXSV7`), exactly as shaped here: a joiner's `POST /policy` forwards to the hub, the hub's `policy.change` is stamped, and the fold applies the sparse doc. Two things the shape learned in the building: the event carries the **stored** doc, not the effective one (shipping defaults would kill the schema default on every peer — ADR 185's #530 failure, replicated), and the policy kind is **exempt from residence binding**, or setting policy from a laptop would bind the admin's seat to the hub.
-2. **Per-seat continuity: `seat_memory` + `inbox_cursors`** — both promised, both LWW/max-merge
-   trivially; they matter the moment ADR 358 lets a human hold two machines. One lane, two tables.
+2. ~~**Per-seat continuity: `seat_memory` + `inbox_cursors`**~~ — **closed 2026-09-03 by [ADR 366](../decisions/366-seat-continuity-replicates-with-the-note.md)** (lane `01M1JNY14F`), one lane, two tables, as shaped here — with one correction to the shape: "max-merge trivially" was wrong for the cursor. `last_read_ts` is this daemon's receipt clock for the row and differs on every machine that folded the message, so the event carries the **message id** and the receiver re-reads the position against its own order; max-merging the number would have swallowed unread acts. And the memory event carries the **body**, by decision (nick, ask `01M1JS1PXH0NPZBPPS6V2WYTHY`): a headline is not continuity. That overturns ADR 093 hard rule 5 — the audit log now holds notes, daemon-side only.
 3. **Insight substrate: `tool_call_stats` + the unstamped `residency.*` cost/lease verbs +
    `incident_reports` + `seed_thread_entries`** — nothing here decides anything; all of it makes the
    report and the ledger one-machine views. The audit half needs a *typed* replicated kind (the fold
@@ -70,6 +69,9 @@ Four residences, by what replication would have to do with them:
 blob), `seeds` (lifecycle machine, transactional), `grants`, `requests` (short TTL), `residency`,
 `seat_memory` (LWW blob). Two merge trivially without ordering: `inbox_cursors` (monotone max —
 `last_read_ts` only ever advances) and `tool_call_stats` (additive counters + MAX).
+*Invalidated 2026-09-03 for `inbox_cursors` (ADR 366): the max is monotone within ONE daemon only.
+`last_read_ts` is a receipt clock, so across machines the cursor replicates as a message id and is
+re-read locally — it does not merge as a number. `tool_call_stats` still stands as written.*
 
 **C. Local-only, never replicate:** `presence` (15s heartbeat, reaped at 45s, host-bound by
 construction; ADR 058's live tier), `wake_leases` (~120s TTL, host-scoped mutual exclusion),

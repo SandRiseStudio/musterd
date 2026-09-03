@@ -165,7 +165,12 @@ describe('residence-2 census — what crosses the wire at this build', () => {
     expect(getPolicy(joiner.db, joinerTeam().id).residency.hourly_cap).toBe(1);
   });
 
-  it('GAP (ADR 325 residence 2, promised): seat memory and the inbox cursor are per-machine — a seat that moves reads neither', async () => {
+  it('GAP 2 CLOSED (ADR 366) — but the raw primitives still ship nothing: seat memory and the cursor cross only through the stamped writers', async () => {
+    // Until ADR 366 this test pinned the gap itself. Now it pins the seam: `saveMemory` and
+    // `setCursor` are the fold's projector primitives and stay silent, exactly as `setPolicy` does
+    // above. A future in-process caller that reaches for them instead of `applyMemorySave` /
+    // `applyCursorAdvance` writes a note no other machine will ever see — this is the test that
+    // says so. The replicating path itself is `sync/continuity.test.ts`.
     const nickJ = getMemberByName(joiner.db, joinerTeam().id, 'nick')!;
     saveMemory(joiner.db, nickJ.id, { headline: 'left off here', body: 'mid-flight' });
     setCursor(joiner.db, nickJ.id, 'j-0');
@@ -182,7 +187,7 @@ describe('residence-2 census — what crosses the wire at this build', () => {
     ).toEqual({ n: 0 });
   });
 
-  it('GAP (ADR 325 residence 2, promised): audit verbs written best-effort carry no origin stamp and never push — residency.* and memory.save among them (policy.change left this list with ADR 367)', async () => {
+  it('GAP (ADR 325 residence 2, promised): audit verbs written best-effort carry no origin stamp and never push — residency.* among them (policy.change left this list with ADR 367; memory.save with ADR 366, as continuity.memory_saved)', async () => {
     const jt = joinerTeam();
     appendAudit(joiner.db, jt.id, {
       actor: 'nick',

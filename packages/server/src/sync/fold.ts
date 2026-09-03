@@ -53,7 +53,13 @@ export type FoldStop =
   // there is no `unborn` for policy, because a team's row always exists here (the fold runs for a
   // team this daemon holds) and the event carries the WHOLE stored doc, not a delta. A verb this
   // build cannot project stops, retried each tick, the same as every other kind.
-  | { kind: 'unknown_policy_event'; action: string; hub_seq: number };
+  | { kind: 'unknown_policy_event'; action: string; hub_seq: number }
+  // Continuity events (residence-2 census gap 2, 2026-09-03): the fifth kind. `cursor_unborn` is
+  // the cursor's own `unborn` shape — the message the cursor names has not folded here yet, so the
+  // position it describes does not exist locally. Blocking is the point: skipping would leave the
+  // cursor pointing at a place this daemon cannot resolve, and the next tick has the message.
+  | { kind: 'unknown_continuity_event'; action: string; hub_seq: number }
+  | { kind: 'cursor_unborn'; message: string; seat: string; hub_seq: number };
 
 /** The `lane.*` verbs the fold can project. Anything else stops as `unknown_lane_event`. */
 const LANE_VERBS = new Set([
@@ -233,6 +239,115 @@ function projectPolicyEvent(
     teamId,
   );
   return 'applied';
+}
+
+/** The `continuity.*` verbs the fold can project. Anything else stops as `unknown_continuity_event`. */
+const CONTINUITY_VERBS = new Set([
+  'continuity.memory_saved',
+  'continuity.memory_cleared',
+  'continuity.cursor_advanced',
+]);
+
+/**
+ * Project a replicated continuity event into this daemon's `seat_memory` / `inbox_cursors`
+ * (residence-2 census gap 2). The seat is already resolved by the caller.
+ *
+ * MEMORY is last-writer-wins on the ORIGIN's clock. `saved_at` (or `cleared_at`) travels in the
+ * event and is compared against the local row's `saved_at`; an older event loses and is applied as
+ * a no-op rather than stopping, because a note that lost a race is not a hole in the log. One clock
+ * per fact, the origin's — the rule ADR 335 sets for `ts` and the only one that survives two
+ * machines whose wall clocks disagree by more than the gap between two saves.
+ *
+ * A CLEAR is a fact with a timestamp, not an absence: without one, a note a seat deliberately
+ * dropped walks back in from the next peer that still holds it.
+ *
+ * CURSORS never carry a timestamp across. `last_read_message_id` is resolved against THIS daemon's
+ * `messages.created_at`, and the cursor takes the max of that and where it already sits. This is
+ * the ts-cursor defect (lane 01M1FAYTHQA881M35PDPXRTGM1) in federated form: `last_read_ts` is a
+ * receipt clock, and the same message has a different one on every machine that folded it, so
+ * max-merging the raw number would move the cursor to a position no local row ever occupied and
+ * swallow the unread acts in between. A cursor is a place in the log; the place is re-read here.
+ */
+function projectContinuityEvent(
+  db: Database,
+  seat: { id: string },
+  event: SyncPullLaneEvent['event'],
+  now: number,
+): 'applied' | 'unknown' | 'cursor_unborn' {
+  const detail = event.detail ?? {};
+  if (event.action === 'continuity.memory_saved') {
+    const savedAt = typeof detail['saved_at'] === 'number' ? detail['saved_at'] : event.ts;
+    const local = db
+      .prepare<
+        [string],
+        { saved_at: number }
+      >('SELECT saved_at FROM seat_memory WHERE member_id = ?')
+      .get(seat.id);
+    if (local && local.saved_at >= savedAt) return 'applied';
+    db.prepare(
+      `INSERT INTO seat_memory (member_id, headline, body, saved_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(member_id) DO UPDATE SET
+         headline = excluded.headline, body = excluded.body, saved_at = excluded.saved_at`,
+    ).run(
+      seat.id,
+      typeof detail['headline'] === 'string' ? detail['headline'] : '',
+      typeof detail['body'] === 'string' ? detail['body'] : '',
+      savedAt,
+    );
+    return 'applied';
+  }
+  if (event.action === 'continuity.memory_cleared') {
+    const clearedAt = typeof detail['cleared_at'] === 'number' ? detail['cleared_at'] : event.ts;
+    const local = db
+      .prepare<
+        [string],
+        { saved_at: number }
+      >('SELECT saved_at FROM seat_memory WHERE member_id = ?')
+      .get(seat.id);
+    // A save made after the clear wins: the seat wrote a new note on another machine, and the
+    // clear it raced is about the note that note replaced.
+    if (local && local.saved_at > clearedAt) return 'applied';
+    db.prepare('DELETE FROM seat_memory WHERE member_id = ?').run(seat.id);
+    return 'applied';
+  }
+  if (event.action === 'continuity.cursor_advanced') {
+    const messageId = detail['last_read_message_id'];
+    if (typeof messageId !== 'string') return 'unknown';
+    const row = db
+      .prepare<[string], { created_at: number }>('SELECT created_at FROM messages WHERE id = ?')
+      .get(messageId);
+    if (!row) return 'cursor_unborn';
+    const local = db
+      .prepare<
+        [string],
+        { last_read_ts: number; last_read_message_id: string | null }
+      >('SELECT last_read_ts, last_read_message_id FROM inbox_cursors WHERE member_id = ?')
+      .get(seat.id);
+    // Forward only, measured in this daemon's own order — and that order is the `(created_at, id)`
+    // point `listMessages` reads unread against (store/messages.ts), not `created_at` alone. Two
+    // messages folded in one batch share a millisecond, and a cursor that compared only the clock
+    // would refuse to move from the first to the second while `unread` still listed the second.
+    // The continuity test caught exactly that. An event naming an EARLIER place is not a conflict
+    // to resolve — the seat read further on some other machine, and that is already here.
+    if (
+      local &&
+      (local.last_read_ts > row.created_at ||
+        (local.last_read_ts === row.created_at && (local.last_read_message_id ?? '') >= messageId))
+    ) {
+      return 'applied';
+    }
+    db.prepare(
+      `INSERT INTO inbox_cursors (member_id, last_read_message_id, last_read_ts, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(member_id) DO UPDATE SET
+         last_read_message_id = excluded.last_read_message_id,
+         last_read_ts = excluded.last_read_ts,
+         updated_at = excluded.updated_at`,
+    ).run(seat.id, messageId, row.created_at, now);
+    return 'applied';
+  }
+  return 'unknown';
 }
 
 const PRESENCE_VERBS = new Set(['presence.attached', 'presence.detached', 'presence.reattested']);
@@ -496,6 +611,58 @@ export function foldBatch(
         }
         if (projectPolicyEvent(db, teamId, e, now) === 'unknown') {
           stop = { kind: 'unknown_policy_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        db.prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          e.id,
+          teamId,
+          e.ts,
+          e.actor,
+          e.action,
+          e.target,
+          e.result,
+          e.detail ? JSON.stringify(e.detail) : null,
+          now,
+          event.origin_node,
+          event.origin_seq,
+        );
+        applied += 1;
+        cursor = event.hub_seq;
+        continue;
+      }
+
+      // The fifth kind: a seat's continuity — its memory note and its inbox cursor (residence-2
+      // census gap 2). Seat facts, so the seat must resolve here before anything is projected: an
+      // unknown name is git lag, the same rule the message and presence kinds follow.
+      if (event.kind === 'continuity') {
+        const e = event.event;
+        if (!CONTINUITY_VERBS.has(e.action)) {
+          stop = { kind: 'unknown_continuity_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        const seat = getMemberByName(db, teamId, e.actor ?? '');
+        if (!seat) {
+          stop = { kind: 'unresolved_seat', seat: e.actor ?? '', hub_seq: event.hub_seq };
+          return finish();
+        }
+        // Project first, so a stop lands BEFORE the audit row does — a row present for an event
+        // this daemon never applied would advance heldHead past it.
+        const outcome = projectContinuityEvent(db, seat, e, now);
+        if (outcome === 'unknown') {
+          stop = { kind: 'unknown_continuity_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        if (outcome === 'cursor_unborn') {
+          const messageId = e.detail?.['last_read_message_id'];
+          stop = {
+            kind: 'cursor_unborn',
+            message: typeof messageId === 'string' ? messageId : '',
+            seat: seat.name,
+            hub_seq: event.hub_seq,
+          };
           return finish();
         }
         db.prepare(

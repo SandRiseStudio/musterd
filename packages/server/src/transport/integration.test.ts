@@ -6793,7 +6793,11 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     expect(noHeadline.status).toBe(400);
   });
 
-  it('audit rows for memory.save carry sizes only — never the headline or body text', async () => {
+  it('a save writes ONE stamped continuity.memory_saved row that carries the note (ADR 366 overturns ADR 093 hard rule 5)', async () => {
+    // Until ADR 366 this test asserted the opposite — `memory.save` with sizes only, never the
+    // text. That rule was overturned by decision (nick, 2026-09-03): a headline is not continuity,
+    // and a human on a second machine (ADR 358) needs the note itself, so the replicated row IS the
+    // note. Daemon-side only, never git; bounded by the 8 KiB cap. The old verbs write nothing now.
     const { ada } = await dawn();
     await req(
       'PUT',
@@ -6803,17 +6807,22 @@ describe('seat memory endpoints + occupy envelope (ADR 093)', () => {
     );
 
     const teamId = getTeamBySlug(server.db, 'dawn')!.id;
-    const rows = listAudit(server.db, teamId).filter((r) => r.action === 'memory.save');
+    expect(listAudit(server.db, teamId).filter((r) => r.action === 'memory.save')).toHaveLength(0);
+    const rows = listAudit(server.db, teamId).filter((r) => r.action === 'continuity.memory_saved');
     expect(rows).toHaveLength(1);
     const detail = JSON.parse(rows[0]!.detail!);
-    expect(detail).toEqual({ size_bytes: 16, headline_len: 17 });
-    // the content itself never appears in the audit row
-    expect(rows[0]!.detail).not.toContain('hunter2');
-    expect(rows[0]!.detail).not.toContain('sensitive subject');
+    expect(detail).toMatchObject({ headline: 'sensitive subject', body: 'PASSWORD=hunter2' });
+    expect(typeof detail.saved_at).toBe('number');
+    // Stamped for replication — the whole point of carrying the body.
+    expect(rows[0]!.origin_seq).toBeGreaterThan(0);
 
     await req('DELETE', '/teams/dawn/memory', undefined, ada);
-    const clears = listAudit(server.db, teamId).filter((r) => r.action === 'memory.clear');
+    expect(listAudit(server.db, teamId).filter((r) => r.action === 'memory.clear')).toHaveLength(0);
+    const clears = listAudit(server.db, teamId).filter(
+      (r) => r.action === 'continuity.memory_cleared',
+    );
     expect(clears).toHaveLength(1);
+    expect(JSON.parse(clears[0]!.detail!)).toMatchObject({ had_memory: true });
   });
 });
 
