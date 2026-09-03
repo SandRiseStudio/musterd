@@ -76,6 +76,7 @@ Grok has a Claude-shaped hook table. Use every event Claude uses that Grok fires
 
 - `Notification` → `musterd nudge` (ADR 053)
 - `PostToolUse` (no matcher) → `musterd inbox --interrupt-check` (ADR 088)
+  _(Amended 2026-09-03: Grok 1.0.13 ignores PostToolUse stdout and additionalContext JSON. Injection is PreToolUse additionalContext + Stop. See the amendment below.)_
 - `PreToolUse` matcher `Edit|Write|MultiEdit|NotebookEdit|Bash|run_terminal_command|search_replace` → `musterd gate check --stdin` (ADR 150)
 - `SessionStart` → `musterd session start --stdin` (stdout not discarded: if Grok injects it, orientation rides; if not, extra output is harmless)
 - `SessionEnd` → `musterd session end --stdin` (silent)
@@ -110,6 +111,7 @@ If project `.grok/config.toml` has no `[ui.status_line]`, write `type = "command
 - Stdio MCP does not respawn on a list refresh (measured 2026-09-02: PID started before the rebuild kept attesting the old stamp). Activation copy names disable+enable or a session restart.
 - Architecture trees, SPEC, wiki matrix, and harness-residency table update in the same commits that land the files (`arch-trees:check`, hard rule 3).
 - This product repo gitignores `.grok/skills/` and `.grok/commands/` because `writeGuidance` stamps the dogfood team name into them. User projects follow §9 and commit those shells.
+- **2026-09-03 — interrupt injection.** Decision 8's PostToolUse wiring ran the ADR 088 probe and discarded the line; Grok 1.0.13 also ignores PostToolUse stdout and additionalContext JSON. Measured with canary hooks: PreToolUse additionalContext and Stop `decision:block` reach the model; PostToolUse does not. [ADR 370](370-grok-interrupt-injection.md) is the replacement. Decision 8 is marked, not rewritten.
 
 ## Observability & Evaluation
 

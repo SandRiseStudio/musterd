@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildEntry } from '../mcpEntry.js';
 import { STANDARD_FLOOR } from '../permissions.js';
-import { GATE_MARKER, INTERRUPT_MARKER, grok, inspectGrokHookDrift } from './grok.js';
+import { GATE_MARKER, INTERRUPT_MARKER, STOP_MARKER, grok, inspectGrokHookDrift } from './grok.js';
 
 const binding = {
   server: 'http://localhost:4849',
@@ -104,9 +104,10 @@ describe('grok hooks (Claude-parity set)', () => {
       hooks: Record<string, { hooks: { command: string }[] }[]>;
     };
     expect(file.hooks['Notification']?.[0]?.hooks[0]?.command).toContain('musterd inbox --waiting');
-    expect(file.hooks['PostToolUse']?.[0]?.hooks[0]?.command).toContain(INTERRUPT_MARKER);
-    expect(file.hooks['PostToolUse']?.[0]?.hooks[0]?.command).toContain('interrupt-check');
-    expect(file.hooks['PreToolUse']?.[0]?.hooks[0]?.command).toContain(GATE_MARKER);
+    const preCmds = (file.hooks['PreToolUse'] ?? []).flatMap((g) => g.hooks.map((h) => h.command));
+    expect(preCmds.some((c) => c.includes(INTERRUPT_MARKER))).toBe(true);
+    expect(preCmds.some((c) => c.includes(GATE_MARKER))).toBe(true);
+    expect(file.hooks['Stop']?.[0]?.hooks[0]?.command).toContain(STOP_MARKER);
     expect(file.hooks['SessionStart']?.[0]?.hooks[0]?.command).toContain('session start');
     expect(file.hooks['SessionEnd']?.[0]?.hooks[0]?.command).toContain('session end');
   });

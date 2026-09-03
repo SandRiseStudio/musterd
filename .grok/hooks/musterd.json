@@ -5,28 +5,38 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v musterd >/dev/null 2>&1 && musterd nudge >/dev/null 2>&1 || true # musterd-grok-notify"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check >/dev/null 2>&1 || true # musterd-grok-interrupt"
+            "command": "command -v musterd >/dev/null 2>&1 && musterd inbox --waiting >/dev/null 2>&1 || true # musterd-grok-notify"
           }
         ]
       }
     ],
     "PreToolUse": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v musterd >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && musterd inbox --interrupt-check 2>/dev/null | node -e 'let s=\"\";process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{const t=s.trim();if(t)console.log(JSON.stringify({hookSpecificOutput:{hookEventName:\"PreToolUse\",additionalContext:t}}))})' || true # musterd-grok-interrupt",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|run_terminal_command|search_replace",
         "hooks": [
           {
             "type": "command",
             "command": "command -v musterd >/dev/null 2>&1 && musterd gate check --stdin >/dev/null 2>&1 || true # musterd-grok-gate",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v musterd >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && node -e 'const fs=require(\"fs\");const {execFileSync}=require(\"child_process\");let ev={};try{ev=JSON.parse(fs.readFileSync(0,\"utf8\"))}catch{}if(ev.reason!==\"end_turn\"||ev.stopHookActive)process.exit(0);let line=\"\";try{line=execFileSync(\"musterd\",[\"inbox\",\"--interrupt-check\"],{encoding:\"utf8\",stdio:[\"ignore\",\"pipe\",\"ignore\"]}).trim()}catch{}if(line)console.log(JSON.stringify({decision:\"block\",reason:line}))' || true # musterd-grok-stop",
             "timeout": 10
           }
         ]

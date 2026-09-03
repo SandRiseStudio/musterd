@@ -40,7 +40,7 @@ Observed against Grok 1.0.13 docs on this machine. Parity target is Claude Code 
 | Feature | Grok CLI (terminal) | Grok CLI (headless `-p`) |
 | --- | --- | --- |
 | Session labeling | terminal OSC 0 only — no sidebar write API | none |
-| Hook capture | Notification, PostToolUse interrupt, PreToolUse gate, SessionStart/End. **No** ADR 167 observer (Grok has no peer-session tool). UserPromptSubmit additionalContext is discarded, so no repeating orient-nudge | same hook files if the harness runs them |
+| Hook capture | Notification, PreToolUse gate, SessionStart/End. ~~PostToolUse interrupt (2026-09-02, ADR 352 assumed Claude-parity stdout injection)~~ MEASURED 2026-09-03 Grok 1.0.13: PostToolUse stdout and additionalContext JSON do not reach the model (falsify: a PostToolUse additionalContext canary appears in that session's `chat_history.jsonl`). Mid-loop injection is PreToolUse additionalContext; idle-at-turn-end is Stop `decision:block` (ADR 370; falsify: those canaries absent from `chat_history.jsonl` after `musterd init --refresh-hooks`). **No** ADR 167 observer (Grok has no peer-session tool). UserPromptSubmit additionalContext is discarded, so no repeating orient-nudge | same hook files if the harness runs them |
 | Skills / guidance | `.grok/skills/musterd/` + `.grok/commands` + AGENTS.md (native) | same files |
 | Persistent seat indicator | `[ui.status_line] type = "command"` — yes (falsify: that key gone from Grok status-line docs) | **none** — no TUI |
 | Model attestation | `summary.json` `current_model_id` + hook `sessionId` | same files |
