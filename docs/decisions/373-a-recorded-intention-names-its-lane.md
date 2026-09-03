@@ -52,10 +52,24 @@ Two adjacent measurements from the same sweep bound the problem:
 
 ## Problem
 
-musterd represents **work in flight** (a lane) and **a mission** (a goal). It has no representation
-for an **intention that has been recorded and not started**.
+musterd represents **work in flight** (a lane) and **a mission** (a goal). It has exactly one
+representation for an **intention that has been recorded and not started**, and that one rail
+covers a single intake channel.
 
-Every such intention in this repo lives as prose in git — a sentence in an ADR's Consequences, a
+**The rail that exists, and what it proves.** [ADR 248](248-a-seed-is-captured-in-the-open-and-lands-as-a-lane.md)
+built `seeds`: an idea arrives by SMS or Slack, the relay buffers it verbatim, and the daemon
+promotes it into an open unowned lane on ingest. The table carries `state`, `promotion_kind` and —
+the field that matters here — **`linked_lane_id`**, the edge from the thing that asked to the lane
+that answers. Twelve rows exist. The shape is right and it is already in the schema; what it is
+wired to is a phone number and a Slack channel.
+
+**Where the nine findings came from instead.** Not one of them arrived by SMS. They were recorded in
+the repo's own documents by the people best placed to know — an ADR's Consequences, a `building:`
+string, a comment above a constant. That channel has no relay, no promotion and no `linked_lane_id`,
+so an intention entering musterd through the front door of its own git history gets less tracking
+than one texted in from a phone.
+
+Every such intention lives as prose in git — a sentence in an ADR's Consequences, a
 `building:` string, a comment above a constant, a wiki line dated and falsifiable and true. Prose in
 git has no identity the board can hold. So the question "what has been decided and never started?"
 is not merely unanswered; it is **unaskable**, and the only way to answer it is the four-hour
@@ -112,7 +126,11 @@ undisposed", never "every intention is tracked."
 ### Increment 2 — a lane carries the document that asked for it
 
 Add one optional field to the lane record: **`sourced_from`**, a short reference to the artifact that
-called for the work.
+called for the work. It is deliberately the same edge `seeds.linked_lane_id` already draws, pointed
+at a document instead of a text message — **not a second, unrelated way for a lane to say where it
+came from**. Whether the two should converge on one representation, and which direction the edge
+should point, is a question for the surface survey on lane `01M1MKSMBP` (dolly), whose deliverable is
+exactly the collision list a new field name has to clear.
 
 ```
 sourced_from: "adr:354"            // an ADR, optionally #section
@@ -141,8 +159,9 @@ for two months while being perfectly legible to any human who opened the file.
   gate is increment 3.
 - **No new "what is waiting for me" surface.** Lane `01M1MB7WCW` measured on 2026-09-03 that `inbox`,
   `nudge`, `next` and `status` are two questions wearing four commands, and its recommendation was
-  two surfaces, not four. Reporting unstarted intentions belongs inside `next`, and that is
-  increment 4.
+  two surfaces, not four. Reporting unstarted intentions belongs inside `next` — and **where exactly
+  is dolly's call, not this ADR's**: she holds the live surface work (`01M1MKSMBP` survey,
+  `01M1MMFSS0` folding `nudge` into `inbox --waiting`). That is increment 4, and it is hers to place.
 
 ## Consequences
 
@@ -159,6 +178,14 @@ for two months while being perfectly legible to any human who opened the file.
   and `census.ts` is a code comment, deliberately excluded. Increment 2 is what reaches ADR 095 and
   the three undisposed multi-admin ADRs. **Neither increment reaches all nine, and this ADR does not
   claim otherwise** — the pair is a large improvement on zero, not a solution.
+- **`sourced_from` is a new word on both surfaces**, and this ADR does not get to mint it alone.
+  It appears in `lane_open` and `lane_update` on the MCP tool surface and in the CLI's lane verbs, so
+  it is subject to ADR 296's one-meaning-per-word gate, to `context:check`'s standing-byte budget
+  (every byte in the tools/list render is paid by every seat on every turn, and that gate is NOT in
+  the usual local list), and to dolly's rule on lane `01M1MKSMBP`: anything that changes a name
+  others depend on becomes its own lane with its own approval. **Increment 2 does not proceed until
+  the surface survey has judged the name** — including whether `seeds.linked_lane_id` and this should
+  be one thing.
 - **`sourced_from` is a protocol change** and lands under AGENTS.md hard rule 1 with this ADR as its
   authority. It needs a migration; per
   [migration-high-water-mark](../wiki/migration-high-water-mark.md), the number must not be reserved
