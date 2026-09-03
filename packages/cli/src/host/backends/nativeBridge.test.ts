@@ -21,6 +21,35 @@ describe('nativeMcpConfig', () => {
     autojoin: true,
   };
 
+  it('carries a workspace_key so a native seat is not evicted by its own label change (ADR 365)', () => {
+    const config = nativeMcpConfig({
+      binding: binding as never,
+      server: 'http://127.0.0.1:4849',
+      team: 'revive',
+      seat: 'izzo',
+      workspace: 'agents-izzo@main',
+      workspaceKey: '/Users/x/agents-izzo',
+      leaseId: 'L123',
+      model: 'claude-opus-5',
+      modelSource: 'binding',
+    });
+    expect(config.workspaceKey).toBe('/Users/x/agents-izzo');
+  });
+
+  it('defaults the key to the workspace it was pointed at rather than sending none', () => {
+    const config = nativeMcpConfig({
+      binding: binding as never,
+      server: 'http://127.0.0.1:4849',
+      team: 'revive',
+      seat: 'izzo',
+      workspace: '/tmp/ws',
+      leaseId: 'L123',
+      model: 'claude-opus-5',
+      modelSource: 'binding',
+    });
+    expect(config.workspaceKey).toBe('/tmp/ws');
+  });
+
   it('attests wake provenance, the lease token, the musterd surface, and the seat claim', () => {
     const config = nativeMcpConfig({
       binding: binding as never,
