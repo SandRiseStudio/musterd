@@ -498,6 +498,32 @@ function startPerfRecording(
 /** How long a single CDP call may go unanswered before we stop waiting on a socket that may be dead. */
 const CDP_TIMEOUT_MS = 15_000;
 
+/**
+ * `Page.navigate`'s own deadline. It is the only startup call that leaves the machine.
+ *
+ * The others — `Page.enable`, `Runtime.enable`, `Emulation.setDeviceMetricsOverride` — are local
+ * bookkeeping and answer in microseconds, so 15s is a generous ceiling for them. `Page.navigate`
+ * resolves when the navigation COMMITS: Chrome has to reach the laptop's daemon across Tailscale
+ * and begin the document, on a cold machine, with a Chrome that started seconds ago, beside an
+ * encoder already burning most of a core. On 2026-09-03 that cost machine 8799e4b0267668 its life
+ * 27s in, and the run that survived spent 16s between `streaming` and `◉ live` — a span containing
+ * navigate AND waitBroadcastReady's poll, so navigate was sitting close enough to the bar that
+ * which side it landed on was chance.
+ *
+ * 60s is sized against that observation with room for a slow tailnet, and it is deliberately NOT a
+ * new global default: the 15s ceiling is what makes a wedged compositor detectable, and raising it
+ * everywhere would trade a startup flake for a hang nothing reports.
+ */
+const CDP_NAVIGATE_TIMEOUT_MS = 60_000;
+
+/**
+ * The deadline for one CDP call. A network call gets a network budget; everything else keeps the
+ * short ceiling that makes a dead socket look dead.
+ */
+export function cdpTimeoutFor(method: string): number {
+  return method === 'Page.navigate' ? CDP_NAVIGATE_TIMEOUT_MS : CDP_TIMEOUT_MS;
+}
+
 /** How often a live stream checks whether the code under it has moved. Well inside the ADR 152
  * auto-refresher's 120s tick, so a rebuild is picked up on the next poll rather than the next hour. */
 const BUILD_POLL_MS = 60_000;
@@ -829,7 +855,7 @@ async function connectCdp(debugPort: number): Promise<Cdp> {
         const id = ++msgId;
         const timer = setTimeout(() => {
           if (pending.delete(id)) rej(new CliError(`Chrome did not answer ${method} in time`, 1));
-        }, CDP_TIMEOUT_MS);
+        }, cdpTimeoutFor(method));
         pending.set(id, {
           res: (v) => {
             clearTimeout(timer);

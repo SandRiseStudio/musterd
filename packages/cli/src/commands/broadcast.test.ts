@@ -29,6 +29,7 @@ import {
   chromeDefault,
   compositorHz,
   stagePixels,
+  cdpTimeoutFor,
   ffmpegArgs,
   killGroup,
   makeFramePump,
@@ -217,6 +218,34 @@ describe('resolveSink (stream-key resolution)', () => {
       'rtmps://live.twitch.tv/app/kc',
     );
     await expect(resolveSink(o, async () => null, {})).rejects.toThrow(/no stream key/);
+  });
+});
+
+// 2026-09-03: machine 8799e4b0267668 logged `streaming (rtmps)` at 18:44:40 and died 27s later on
+// `✗ Chrome did not answer Page.navigate in time` — fatal, `--restart no`, and the supervisor spent a
+// flap slot relaunching. One deadline covered every CDP call, but the calls are not alike:
+// Page.enable / Runtime.enable / Emulation.* are local bookkeeping that answer in microseconds,
+// while Page.navigate resolves only when the navigation COMMITS — Chrome reaching the laptop daemon
+// across Tailscale, on a cold box, beside a running encoder. The run that SUCCEEDED took 16s from
+// `streaming` to `◉ live`, and that span contains navigate plus waitBroadcastReady's own poll, so
+// navigate alone was close enough to the 15s bar that the margin was a coin flip.
+describe('cdpTimeoutFor', () => {
+  it('keeps the short default for the local bookkeeping calls', () => {
+    expect(cdpTimeoutFor('Page.enable')).toBe(15_000);
+    expect(cdpTimeoutFor('Runtime.enable')).toBe(15_000);
+    expect(cdpTimeoutFor('Emulation.setDeviceMetricsOverride')).toBe(15_000);
+  });
+
+  it('gives Page.navigate a network-sized budget, because it crosses the tailnet', () => {
+    expect(cdpTimeoutFor('Page.navigate')).toBeGreaterThan(cdpTimeoutFor('Page.enable'));
+    expect(cdpTimeoutFor('Page.navigate')).toBeGreaterThanOrEqual(45_000);
+  });
+
+  // The 15s default is what makes a wedged compositor detectable. Raising it globally would trade a
+  // startup flake for an undetectable hang, so the exception must stay an exception.
+  it('does not blunt the default for calls it was not asked about', () => {
+    expect(cdpTimeoutFor('Page.startScreencast')).toBe(15_000);
+    expect(cdpTimeoutFor('Runtime.evaluate')).toBe(15_000);
   });
 });
 
