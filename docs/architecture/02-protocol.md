@@ -79,7 +79,7 @@ Handshake state machine: `connecting → hello → authenticated → subscribed 
    - Server → `deliver`: `{ "type":"deliver", "envelope": <Envelope> }` for each message routed to this member's presence — or, for a `team-all` subscriber, every envelope on the team (deduped against recipients + sender, so a normal recipient never gets it twice).
    - Client → `heartbeat`: `{ "type":"heartbeat", "model"?, "model_source"?, "surface"? }` every **15s**; server updates `last_seen_at`. Optional `model` re-attests (ADR 101); optional `model_source` is the tier that produced it (ADR 301; absent ⇒ no change, never defaulted); optional `surface` follows capture (ADR 275; absent ⇒ no change). (Server may also treat any inbound frame as a heartbeat.)
    - Server → `presence`: `{ "type":"presence", "member":"Lin", "status":"online", "surface":"codex" }` on roster presence changes.
-   - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`. A `superseded` error MAY carry `"same_workspace": true` (ADR 092) — the displacing claim came from the client's own workspace (a reload successor), signalling the replaced adapter to **exit** rather than linger dormant; absent ⇒ a cross-workspace takeover (stay dormant).
+   - Either → `error`: `{ "type":"error", "code":"...", "message":"..." }`. A `superseded` error MAY carry `"same_workspace": true` (ADR 092) — the displacing claim came from the client's own workspace (a reload successor), signalling the replaced adapter to **exit** rather than linger dormant; absent ⇒ a cross-workspace takeover (stay dormant). "Own workspace" is decided by `workspace_key` when both sides sent one, by the `workspace` label otherwise (ADR 368).
 5. **Close:** server removes the presence row (or marks offline) and emits a `presence` offline event to the team.
 
 Heartbeat/timeout values are defined in `03-server.md` (heartbeat 15s, offline after 45s missed = 3 intervals).
@@ -178,7 +178,7 @@ The CLI maps these to exit codes (`04-cli.md`).
 
 The governed successor to `hello` — **additive schemas, not yet wired into `WSClientFrame`/`WSServerFrame`** (that wiring is Cleo's P3.2 cutover step, part of the one atomic merge; ADR 069 decision 2). Landing the frame shapes first lets June's P3.1 substrate + Cleo's P3.2 handshake import a stable contract.
 
-- `ClaimFrame` (client→server) — `{ type:'claim', v, team, key, target:{seat}|{role}|{observe:true}, grant?, surface }`. `key` = agent key (harness) or human credential; `grant` present → occupy, omitted → open a claim request (A.5).
+- `ClaimFrame` (client→server) — `{ type:'claim', v, team, key, target:{seat}|{role}|{observe:true}, grant?, surface, workspace?, workspace_key?, provenance?, driver?, model?, model_source? }`. `key` = agent key (harness) or human credential; `grant` present → occupy, omitted → open a claim request (A.5). `workspace` is the ADR 014 display label; **`workspace_key` is the workspace's identity** — the git work tree root from `resolveWorkspaceKey` (ADR 368), which is what displacement compares (`03-server.md`). They are two fields because the label is branch-qualified and so changes under the session that holds it; both optional, and with either side missing a key the server falls back to label equality.
 - `OccupiedFrame` (server→client) — `{ type:'occupied', seat:Member, presence_id, server_time, charter?, memory:MemoryEnvelope|null }`. `memory` is the seat-scoped continuity envelope (ADR 093) — `MemoryEnvelope = { headline (≤120), saved_at, size_bytes }` (`.strict()`, so the body never rides the frame) — or `null` when nothing is saved; the body is fetched on demand via `GET /teams/:slug/memory`.
 - `RefusedFrame` (server→client) — `{ type:'refused', code:RefusedCode, message, claimable:[…], hint }`. `RefusedCode` = `claim_conflict|forbidden|not_found|disabled|banned|expired_grant` (A.8; `disabled`/`banned` surface the seat's account state — HTTP maps those to `forbidden` 403).
 - `PendingFrame` (server→client) — `{ type:'pending', request_id, message }`. The WS stays open; the server pushes the terminal `occupied`/`refused` when an admin decides (spec-gap 3, no client polling).
@@ -216,11 +216,16 @@ export const P3_AUDIT_ACTIONS = ['grant.issue','grant.use','grant.revoke','claim
 // ADR 078 (P3, SPEC A.3) — the claim handshake frames. Additive; NOT yet in WSClientFrame/WSServerFrame (Cleo's P3.2 cutover wires them).
 export const ClaimTarget = z.union([ z.object({seat:string}), z.object({role:string}), z.object({observe:z.literal(true)}) ]);
 export const RefusedCode = z.enum(['claim_conflict','forbidden','not_found','disabled','banned','expired_grant']);
-export const ClaimFrame = z.object({ type:'claim', v, team, key:string, target:ClaimTarget, grant?:string, surface:Surface });
+export const ClaimFrame = z.object({ type:'claim', v, team, key:string, target:ClaimTarget, grant?:string, surface:Surface, workspace?:string, workspace_key?:string(<=200), provenance?:Provenance, driver?:string, model?:string(<=120), model_source?:ModelSource });
+// ADR 368 — `workspace` is ADR 014's display LABEL (branch-qualified, changes under its own session); `workspace_key` is the IDENTITY displacement compares (work tree root). Absent on either side ⇒ label equality, exactly as before.
 export const MemoryEnvelopeSchema = z.object({ headline:string(1..120), saved_at:int, size_bytes:int>=0 }).strict();
 export const OccupiedFrame = z.object({ type:'occupied', seat:Member, presence_id, server_time:int, charter?:string, memory:MemoryEnvelopeSchema.nullable() });
 export const RefusedFrame = z.object({ type:'refused', code:RefusedCode, message, claimable:string[], hint:string });
 export const PendingFrame = z.object({ type:'pending', request_id, message });
+
+// ADR 014/177/368 — workspace & project resolution (project.ts). Local-only helpers; two deliberately opposite invariants.
+export function resolveWorkspaceKey(env?, cwd?): string;   // ADR 368 — the workspace IDENTITY sent as `workspace_key`: MUSTERD_WORKSPACE if declared, else `git rev-parse --show-toplevel`, else cwd; capped at 200. Work-tree-SPECIFIC, so two seats on one repo are two workspaces. Never throws.
+export function repoProject(cwd?): string | null;          // ADR 177 — the project name: `--git-common-dir`, so it is work-tree-INvariant and N seats share one surface space. Same repo, opposite invariant, on purpose.
 
 // ADR 018/075/080/281 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
 export const WorkspaceSpec = z.object({ version:2, server:string, team:string, claim?:ClaimPolicy }).strict();  // the committed, secret-free `.musterd/workspace.json`; v2 carries NO surface (runtime Surface is launcher-only, ADR 286)
