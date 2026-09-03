@@ -58,8 +58,8 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 
 | CLI | MCP | twin | question |
 | --- | --- | --- | --- |
-| `claim [<name>] [--team] [--key]` | `team_join {as, role}` | meaning — and since 2026-09-03 each description names the other (ADR 374 2b) | occupy a seat from this folder (ADR 075 "claim handshake") |
-| ~~`join <slug> --as <name>`~~ | `team_join` | hidden alias of `claim <name> --team <slug>` since 2026-09-03 (ADR 374) | — |
+| `claim [<name>] [--team] [--key]` | `team_join {as, role}` | meaning — and since 2026-09-03 each description names the other (ADR 377 2b) | occupy a seat from this folder (ADR 075 "claim handshake") |
+| ~~`join <slug> --as <name>`~~ | `team_join` | hidden alias of `claim <name> --team <slug>` since 2026-09-03 (ADR 377) | — |
 | `unbind` | — | none | leave this folder's seat, keep it on the team |
 | — | `team_leave` | none, and NOT a gap (corrected 2026-09-03): a CLI one-shot holds no resident presence to leave — ambient presence (ADR 057) expires on its own; `unbind` releases the folder's seat | go offline, seat held ~45 s |
 | `reclaim <member>` | — | none (admin) | drop someone's stale live session |
@@ -102,7 +102,7 @@ Checked and NOT a defect: every catalogued command renders a summary and a detai
 2. ~~Delete the two deprecated aliases `lane_ready` / `lane ready` and `team_memory_search`; mark `team_memory_*` seat-private (collisions 2, 4). Own lane, small.~~ DONE 2026-09-03 (lane 01M1MMRHY6).
 3. ~~Catalog repairs: unhide `surface`, regroup by question (help grouping). Docs-only lane.~~ DONE 2026-09-03: `musterd help` has eight rooms by question (waiting / talking / work / remembering / team / insight / setup / ops) and `surface` is catalogued.
 4. ~~`done` says *unconfirmed* or routes to `submit` (collision 2). Own lane.~~ DONE 2026-09-03 (lane 01M1MNCZDY): `done --pr --sha` is a submit with the shared routing report; a bare `done` says unconfirmed (or acceptance-exempt); a lane already awaiting acceptance is refused.
-5. ~~Seat occupancy gets one name (collision 3). ADR first.~~ DONE 2026-09-03: ADR 374 accepted (nick: 2b); `join` is a hidden alias of `claim`, every prescription says `claim <name> --team <slug>`, `team_join` and `claim` name each other.
+5. ~~Seat occupancy gets one name (collision 3). ADR first.~~ DONE 2026-09-03: ADR 377 accepted (nick: 2b); `join` is a hidden alias of `claim`, every prescription says `claim <name> --team <slug>`, `team_join` and `claim` name each other.
 6. ~~Parity: `availability` tool; CLI `goal outcome|retract`, `leave`, `status --role`. One lane, after 5.~~ DONE 2026-09-03: `team_availability` added; the three CLI "gaps" were survey errors and are corrected above.
 7. ~~`reclaimAgentLease` → `renewAgentLease` (collision 5). Fold into whichever lane next touches `resolveRead`.~~ DONE 2026-09-03 as `claimSeatPerRequest` — "renew" was the wrong word too: the option claims the seat afresh before every request (ADR 339), which is neither a renewal nor the admin `reclaim`.
 

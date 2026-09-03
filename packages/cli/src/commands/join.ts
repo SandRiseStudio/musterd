@@ -8,7 +8,7 @@ import { theme } from '../render/theme.js';
 import { success, sym } from '../render/ui.js';
 
 /**
- * `musterd join <slug> --as <name>` — HIDDEN ALIAS since 2026-09-03 (ADR 374): the same handshake is
+ * `musterd join <slug> --as <name>` — HIDDEN ALIAS since 2026-09-03 (ADR 377): the same handshake is
  * `musterd claim <name> --team <slug> [--key …] [--grant …]`, which is the verb the help catalog and
  * every prescription now name. Kept dispatchable for one FEATURE_EPOCH so pasted lines keep working;
  * prints the new spelling on stderr. Original doc follows.
@@ -31,7 +31,7 @@ export async function joinCommand(parsed: Parsed): Promise<number> {
   if (!parsed.flags['json']) {
     process.stderr.write(
       theme.meta(
-        `musterd join is now: musterd claim ${name} --team ${slug} (ADR 374) — this spelling stays one epoch`,
+        `musterd join is now: musterd claim ${name} --team ${slug} (ADR 377) — this spelling stays one epoch`,
       ) + '\n',
     );
   }

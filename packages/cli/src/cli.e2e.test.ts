@@ -688,7 +688,7 @@ describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
     expect(ok.out).toContain('joined');
   });
 
-  it('`claim <name> --team <slug>` is the same handshake — the vault key is found without --key (ADR 374)', async () => {
+  it('`claim <name> --team <slug>` is the same handshake — the vault key is found without --key (ADR 377)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     const ok = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
     expect(ok.code).toBe(0);

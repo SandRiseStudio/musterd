@@ -63,7 +63,7 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
     process.env['MUSTERD_AGENT_KEY'] ??
     binding?.agent_key ??
     // The ADR 059 vault: a fresh folder claiming a seat this machine has held before needs no key
-    // pasted — the same fallback `musterd join` always had, so folding join into claim (ADR 374)
+    // pasted — the same fallback `musterd join` always had, so folding join into claim (ADR 377)
     // loses nothing.
     (parsed.positionals[0]
       ? config.knownIdentities.find((i) => i.team === team && i.name === parsed.positionals[0])?.key
