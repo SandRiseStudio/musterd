@@ -112,12 +112,28 @@ export type SyncLedgerEvent = z.infer<typeof SyncLedgerEventSchema>;
 export const SyncPolicyEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('policy') });
 export type SyncPolicyEvent = z.infer<typeof SyncPolicyEventSchema>;
 
+/**
+ * One replicated CONTINUITY event (residence-2 census gap 2, 2026-09-03): the `continuity.*` audit
+ * row a daemon writes when a seat saves or clears its memory, or advances its inbox cursor. The
+ * fifth kind, in the lane event's shape under its own tag.
+ *
+ * Unlike `policy`, these are SEAT facts and any daemon mints them — the seat saves its note on the
+ * machine it is working from. So residence binding applies here exactly as it does to messages and
+ * lanes: a node may stamp continuity only for the seats resident on it, which is what makes ADR 358's
+ * two-machine human the case worth testing.
+ */
+export const SyncContinuityEventSchema = SyncLaneEventSchema.extend({
+  kind: z.literal('continuity'),
+});
+export type SyncContinuityEvent = z.infer<typeof SyncContinuityEventSchema>;
+
 /** Any replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
 export const SyncEventSchema = z.union([
   SyncLaneEventSchema,
   SyncPresenceEventSchema,
   SyncLedgerEventSchema,
   SyncPolicyEventSchema,
+  SyncContinuityEventSchema,
   SyncMessageEventSchema,
 ]);
 export type SyncEvent = z.infer<typeof SyncEventSchema>;
@@ -130,12 +146,13 @@ export function syncEventId(event: SyncEvent): string {
 /** The kinds whose payload is an audit row, as opposed to the message's envelope. */
 export function isAuditKind<T extends { kind?: string | undefined }>(
   event: T,
-): event is T & { kind: 'lane' | 'presence' | 'ledger' | 'policy' } {
+): event is T & { kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' } {
   return (
     event.kind === 'lane' ||
     event.kind === 'presence' ||
     event.kind === 'ledger' ||
-    event.kind === 'policy'
+    event.kind === 'policy' ||
+    event.kind === 'continuity'
   );
 }
 
@@ -215,11 +232,17 @@ export const SyncPullPolicyEventSchema = SyncPolicyEventSchema.extend({
 });
 export type SyncPullPolicyEvent = z.infer<typeof SyncPullPolicyEventSchema>;
 
+export const SyncPullContinuityEventSchema = SyncContinuityEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullContinuityEvent = z.infer<typeof SyncPullContinuityEventSchema>;
+
 export const SyncPullEventSchema = z.union([
   SyncPullLaneEventSchema,
   SyncPullPresenceEventSchema,
   SyncPullLedgerEventSchema,
   SyncPullPolicyEventSchema,
+  SyncPullContinuityEventSchema,
   SyncPullMessageEventSchema,
 ]);
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;

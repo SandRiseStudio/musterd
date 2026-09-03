@@ -183,17 +183,20 @@ function unpushed(ctx: Ctx, teamId: string, nodeId: string, after: number): Pend
 function toSyncEvent(pending: Pending, slug: string): SyncEvent {
   if (pending.kind === 'lane') {
     const { row } = pending;
-    // The action decides the tag: one allocator, one query, one rule (ADR 365; policy 2026-09-03).
-    // The hub and the fold branch on the TAG, never on the prefix — a reader that re-derived the
-    // kind from the action would be a second copy of this rule, free to disagree with the one that
-    // shipped it.
-    const kind: 'lane' | 'presence' | 'ledger' | 'policy' = REPLICATED_LEDGER_VERBS.has(row.action)
-      ? 'ledger'
-      : row.action.startsWith('presence.')
-        ? 'presence'
-        : row.action.startsWith('policy.')
-          ? 'policy'
-          : 'lane';
+    // The action decides the tag: one allocator, one query, one rule (ADR 365; policy and
+    // continuity 2026-09-03). The hub and the fold branch on the TAG, never on the prefix — a
+    // reader that re-derived the kind from the action would be a second copy of this rule, free to
+    // disagree with the one that shipped it.
+    const kind: 'lane' | 'presence' | 'ledger' | 'policy' | 'continuity' =
+      REPLICATED_LEDGER_VERBS.has(row.action)
+        ? 'ledger'
+        : row.action.startsWith('presence.')
+          ? 'presence'
+          : row.action.startsWith('policy.')
+            ? 'policy'
+            : row.action.startsWith('continuity.')
+              ? 'continuity'
+              : 'lane';
     return {
       kind,
       team: slug,

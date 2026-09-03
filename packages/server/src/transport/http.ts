@@ -108,7 +108,7 @@ import {
   listAudit,
   standingAcceptance,
 } from '../store/audit.js';
-import { getCursor, setCursor } from '../store/cursors.js';
+import { applyCursorAdvance, getCursor } from '../store/cursors.js';
 import { deferralFold } from '../store/deferralFold.js';
 import { actDelivery, crossedBySeen } from '../store/delivery.js';
 import { latestFootprint } from '../store/footprint.js';
@@ -161,7 +161,7 @@ import {
   setMemberGovernance,
   teamHasAdmin,
 } from '../store/members.js';
-import { clearMemory, getMemory, memoryEnvelope, saveMemory } from '../store/memory.js';
+import { applyMemoryClear, applyMemorySave, getMemory, memoryEnvelope } from '../store/memory.js';
 import {
   countInbox,
   countUnread,
@@ -5287,8 +5287,9 @@ export async function handleHttp(
         if (!exists) throw new MusterdError('not_found', 'unknown message id');
         const prev = getCursor(ctx.db, member.id);
         // The position is the row's `created_at`, read by setCursor itself — receipt order, never
-        // the envelope's `ts` (see store/cursors.ts).
-        const cursor = setCursor(ctx.db, member.id, body.last_read_message_id);
+        // the envelope's `ts` (see store/cursors.ts). Stamped for replication (ADR 366) carrying
+        // the MESSAGE ID only: the receiver re-reads the position against its own rows.
+        const cursor = applyCursorAdvance(ctx.db, team.id, member, body.last_read_message_id);
         // seen_latency (ADR 090): each act this advance crossed was just "seen" — emit the
         // send→seen histogram, the read-side twin of loop_latency. Watermark semantics: every act
         // covered by one advance shares this instant. Scope lives in crossedBySeen (store).
@@ -5373,18 +5374,13 @@ export async function handleHttp(
         assertSeatCanRead(member); // inert seats (disabled/banned/archived) can't touch memory either
         const parsed = parseOrBadRequest(MemorySaveBody, await readJson(req));
         const input = { headline: parsed.headline, body: parsed.body ?? '' };
-        saveMemory(ctx.db, member.id, input); // enforces the caps, throws bad_request with the limit named
-        appendAudit(ctx.db, team.id, {
-          actor: member.name,
-          action: 'memory.save',
-          target: member.name,
-          result: 'allow',
-          // Sizes only, never the content (hard rule 5): the audit log is not a copy of the note.
-          detail: {
-            size_bytes: Buffer.byteLength(input.body, 'utf8'),
-            headline_len: input.headline.length,
-          },
-        });
+        // ADR 366: the save and its stamped `continuity.memory_saved` row are one transaction, and
+        // the row CARRIES THE NOTE. This is where ADR 093's hard rule 5 ("sizes only, never the
+        // content: the audit log is not a copy of the note") used to be enforced, and it is
+        // overturned here by decision (nick, 2026-09-03): a headline is not continuity, and a human
+        // on a second machine (ADR 358) needs the note itself. Daemon-side only, never git; bounded
+        // by the 8 KiB cap `saveMemory` still enforces (it throws bad_request naming the limit).
+        applyMemorySave(ctx.db, team.id, member, input);
         return sendNoContent(res);
       }
 
@@ -5419,16 +5415,11 @@ export async function handleHttp(
           agentSessionLease(req),
         );
         assertSeatCanRead(member);
-        const existed = clearMemory(ctx.db, member.id);
-        // Idempotent: DELETE always 204s. Only audit an actual clear (nothing happened otherwise).
-        if (existed) {
-          appendAudit(ctx.db, team.id, {
-            actor: member.name,
-            action: 'memory.clear',
-            target: member.name,
-            result: 'allow',
-          });
-        }
+        // Idempotent: DELETE always 204s. The stamped `continuity.memory_cleared` row is written
+        // even when nothing was here to clear (ADR 366) — a peer may hold a note this daemon has
+        // not folded yet, and the clear is a fact with a clock that must reach it. `had_memory`
+        // says which case this was.
+        applyMemoryClear(ctx.db, team.id, member);
         return sendNoContent(res);
       }
 

@@ -75,10 +75,22 @@ export type AuditAction =
   // at whom. The raised→read pair (this row, then the recipient's inbox read of `detail.act`) is the
   // delivery-confirmation signal.
   | 'interrupt.raised'
-  // ADR 093: a seat wrote or cleared its private memory blob. `detail` carries sizes only
+  // ADR 093: a seat wrote or cleared its private memory blob. `detail` carried sizes only
   // (`size_bytes`, `headline_len`) — never the headline or body text (the no-secrets hard rule 5).
+  // SUPERSEDED by the `continuity.*` verbs below (ADR 366, 2026-09-03): no new rows are written
+  // under these names; the union keeps them so old rows still type.
   | 'memory.save'
   | 'memory.clear'
+  // ADR 366 (residence-2 census gap 2): a seat's continuity, stamped and replicated. These CARRY
+  // THE NOTE — `detail: { headline, body, saved_at }` — which overturns ADR 093's hard rule 5 by
+  // decision (nick, 2026-09-03), because a headline is not continuity and a second machine (ADR 358)
+  // needs the note itself. Daemon-side only, never git (the ADR 058 line is unmoved); bounded by the
+  // 8 KiB cap. A clear is `{ cleared_at, had_memory }` — a fact with a clock, so it can win against
+  // a stale save from a peer. A cursor advance is `{ last_read_message_id }` and NEVER a timestamp:
+  // `last_read_ts` is a receipt clock and differs per machine (store/cursors.ts).
+  | 'continuity.memory_saved'
+  | 'continuity.memory_cleared'
+  | 'continuity.cursor_advanced'
   // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
   // `{ occupancy, old, new, source: 'claim'|'heartbeat'|'ambient' }` — this append-only trail IS the
   // occupancy's model-switch history (the ADR keeps no history column). `ambient` is ADR 119: a

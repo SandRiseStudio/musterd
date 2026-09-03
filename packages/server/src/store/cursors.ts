@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3';
+import { appendReplicatedEvent } from './audit.js';
 
 /**
  * A seat's read cursor: a `(last_read_ts, last_read_message_id)` point in the inbox's order.
@@ -51,4 +52,34 @@ export function setCursor(db: Database, memberId: string, lastReadMessageId: str
     last_read_ts: row.created_at,
     updated_at: now,
   };
+}
+
+/**
+ * Advance the cursor AND stamp it for replication (ADR 366, residence-2 census gap 2), so a human
+ * on a second machine (ADR 358) does not re-read an inbox they have already read.
+ *
+ * The event carries the MESSAGE ID, never `last_read_ts`. This is the ts-cursor defect in its
+ * federated form: `last_read_ts` is THIS daemon's `created_at` for that row, and the same message
+ * has a different `created_at` on every machine that folded it. Max-merging the raw number across
+ * machines would move a cursor to a clock no local row ever carried and silently swallow unread
+ * acts. The receiver resolves the id against its OWN `messages.created_at` and takes the max there
+ * — a place in the log, re-read locally, which is what a cursor has always been.
+ */
+export function applyCursorAdvance(
+  db: Database,
+  teamId: string,
+  seat: { id: string; name: string },
+  lastReadMessageId: string,
+): Cursor {
+  return db.transaction(() => {
+    const cursor = setCursor(db, seat.id, lastReadMessageId);
+    appendReplicatedEvent(db, teamId, {
+      actor: seat.name,
+      action: 'continuity.cursor_advanced',
+      target: seat.name,
+      result: 'allow',
+      detail: { last_read_message_id: lastReadMessageId },
+    });
+    return cursor;
+  })();
 }

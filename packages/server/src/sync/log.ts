@@ -60,7 +60,13 @@ export class SyncResidenceError extends Error {
     readonly seat: string,
     readonly boundTo: string,
     readonly boundLabel: string,
-    readonly kind: 'message' | 'lane' | 'presence' | 'ledger' | 'policy' = 'presence',
+    readonly kind:
+      | 'message'
+      | 'lane'
+      | 'presence'
+      | 'ledger'
+      | 'policy'
+      | 'continuity' = 'presence',
   ) {
     super(
       `a ${kind} event names seat "${seat}", which is bound to node "${boundLabel}"; this node may not speak for it`,

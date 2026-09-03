@@ -1,6 +1,7 @@
 import type { MemoryEnvelope } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import { MusterdError } from '../errors.js';
+import { appendReplicatedEvent } from './audit.js';
 
 /**
  * Seat memory (ADR 093): a daemon-private, seat-scoped continuity blob — the working state a
@@ -100,4 +101,59 @@ export function memoryEnvelope(db: Database, memberId: string): MemoryEnvelope |
 export function clearMemory(db: Database, memberId: string): boolean {
   const info = db.prepare('DELETE FROM seat_memory WHERE member_id = ?').run(memberId);
   return info.changes > 0;
+}
+
+/**
+ * Save the seat's memory AND stamp it for replication (ADR 366, residence-2 census gap 2).
+ *
+ * ADR 325 named `seat_memory` residence 2 with an LWW merge and shipped neither, so a human who
+ * trusts a second laptop (ADR 358) found no continuity there — the one thing seat memory exists to
+ * carry across a gap. The write and its event are one transaction, as everywhere else.
+ *
+ * The event carries the BODY, because a headline is not continuity. Two consequences, both stated
+ * in ADR 366 rather than discovered later: the audit log now holds memory bodies (daemon-side only,
+ * never git — the ADR 058 line is unmoved), and a blob ADR 093 called history-less gains an
+ * implicit history in that log, bounded by the 8 KiB cap.
+ */
+export function applyMemorySave(
+  db: Database,
+  teamId: string,
+  seat: { id: string; name: string },
+  input: { headline: string; body: string },
+): void {
+  db.transaction(() => {
+    saveMemory(db, seat.id, input);
+    const saved = getMemory(db, seat.id)!;
+    appendReplicatedEvent(db, teamId, {
+      actor: seat.name,
+      action: 'continuity.memory_saved',
+      target: seat.name,
+      result: 'allow',
+      detail: { headline: saved.headline, body: saved.body, saved_at: saved.saved_at },
+    });
+  })();
+}
+
+/**
+ * Clear the seat's memory and stamp the clearing (ADR 366). Replicated for the obvious reason: a
+ * note a seat deliberately dropped must not walk back in from a peer that still holds it.
+ * `cleared_at` is what the fold compares against the local `saved_at` — same LWW rule, one clock
+ * per fact, the origin's.
+ */
+export function applyMemoryClear(
+  db: Database,
+  teamId: string,
+  seat: { id: string; name: string },
+): boolean {
+  return db.transaction(() => {
+    const cleared = clearMemory(db, seat.id);
+    appendReplicatedEvent(db, teamId, {
+      actor: seat.name,
+      action: 'continuity.memory_cleared',
+      target: seat.name,
+      result: 'allow',
+      detail: { cleared_at: Date.now(), had_memory: cleared },
+    });
+    return cleared;
+  })();
 }
