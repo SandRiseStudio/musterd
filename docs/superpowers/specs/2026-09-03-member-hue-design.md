@@ -1,6 +1,7 @@
 # A member's colour is a fact the team owns — design
 
-**Date:** 2026-09-03 · **Lane:** 01M1MM0VGJKYFSHP3Q1C10BTQN · **Seat:** miley · **Asked by:** nick
+**Date:** 2026-09-03 · **Lane:** 01M1MM0VGJKYFSHP3Q1C10BTQN · **Seat:** miley · **Asked by:** nick ·
+**Reviewed by:** dolly (ask 01M1MMBAY3, accepted with four findings — all taken, see *Review*)
 
 ## The ask
 
@@ -45,7 +46,11 @@ visor) and from the roster chip, which were always the load-bearing tell.
   the roster carries it with no further change. Nullish for back-compat: an older daemon omits it
   and every consumer falls back exactly as today.
 - `HUE_MIN_SEPARATION = 15` (degrees). 24 fully separated slots on the wheel; the dogfood team has
-  18 seats.
+  18 seats. **HSL hue is not perceptually uniform** (finding 2): 15° across yellow→green reads
+  closer than 15° across blue. Before settling on the metric, a falsifier test renders the 24 HSL
+  slots through `memberAvatar`, converts to OKLab and asserts a pairwise ΔE floor. If the floor
+  fails, `assignHue`/`hueConflict` measure separation in OKLCH hue (the stored number stays an HSL
+  degree — only the distance changes). The measured numbers go in the ADR either way.
 - `defaultHue(name): number` — the existing golden-ratio hash, over the full wheel.
 - `assignHue(seed, taken: readonly number[]): number` — the nearest hue to `seed` (walking outward
   alternately ±1°) that is ≥ `HUE_MIN_SEPARATION` from every value in `taken`, on the circle. When
@@ -55,30 +60,60 @@ visor) and from the roster chip, which were always the load-bearing tell.
 - All three are pure and shared by server and CLI, so the two cannot disagree about what "taken"
   means.
 
+### Seat file — `packages/protocol/src/seatfile.ts` (the source of truth on a file-backed team)
+
+- `hue = 212` — optional integer 0–359 in `.musterd/seats/<name>.toml`. On a file-backed team
+  **the file owns the hue and the DB column is its projection**, exactly like every other member
+  fact the team owns (`role`, `lifecycle`, `working_hours`, `slack_user_id`). `members` never
+  replicates row-by-row (federation-data-census: "D (git)"); the seat file travels with the repo,
+  so two machines reconcile the same hue. A DB-invented hue would have been a different colour per
+  machine — dolly's finding (1).
+- **A file without a hue projects NULL**, and the web falls back to today's hash — which is
+  deterministic, so every machine still agrees. The daemon never invents a hue for a file-backed
+  member.
+
 ### Server
 
-- **Migration v65**: `ALTER TABLE members ADD COLUMN hue INTEGER` (guarded, the v31 pattern), then
-  backfill: for each team, live members in `created_at` order, `hue = assignHue(defaultHue(name),
-  taken-so-far)`. Departed members (`left_at` set) are left NULL and get a hue on revive. An
-  existing DB comes out with no two live teammates within 15°.
-- `AddMemberInput.hue?: number | null`. Explicit → validate 0–359 and refuse a collision with
-  `MusterdError('conflict', 'hue 210 is within 15° of "ryder" (214)')`; absent → `assignHue`.
-  `reviveMember` keeps an existing hue and assigns one only when the row has none.
-- `MemberRow.hue: number | null`; `toMember` maps it.
+- **Migration v65**: `ALTER TABLE members ADD COLUMN hue INTEGER` (guarded, the v31 pattern).
+  **No backfill.** A backfill would recolour the whole dogfood team in one upgrade (finding 3) and,
+  on a file-backed team, would be overwritten by the next reconcile anyway. Hues are assigned by
+  the CLI pass below, where they are reviewable.
+- **Reconcile** (`projection/reconcile.ts`): `hue` joins `MemberIdentityFields` — projected on ADD,
+  REVIVE and UPDATE, compared like the other fields, `seat.hue ?? null`. Reconcile is the writer
+  (finding 8).
+- `AddMemberInput.hue?: number | null`. Explicit → validate 0–359 and refuse a collision with the
+  live members of the team: `MusterdError('conflict', 'hue 210 is within 15° of "ryder" (214)')`.
+  Absent → on a **DB-only team** (no roster home) the server assigns via `assignHue`; on a
+  file-backed team the value comes from the file (the CLI wrote it there before `addMember`, the
+  ADR 058 §5 order).
+- `MemberRow.hue: number | null`; `toMember` maps it; `MemberSummary` carries it.
 - **Route** `POST /teams/:slug/members/:name/hue` `{ hue }` — the member themself or a team admin
-  (`resolveCapabilities(viewer).is_admin`), the same authority split the governance routes use.
-  Same collision refusal. Returns the member's summary.
+  (`resolveCapabilities(viewer).is_admin`), the governance-route split. DB-only teams only: on a
+  file-backed team the route refuses with "edit `.musterd/seats/<name>.toml` — the file owns it",
+  the same refusal `team add` gives for a file-backed roster.
 - `AddMemberBody.hue` optional on `POST /teams/:slug/members`.
-- **Reconcile** (`projection/reconcile.ts`) does not touch the column, so a file-backed team keeps
-  its hues across every reconcile. A hue declared in the seat file is a follow-up, not this lane.
-- **Sync**: the `members` table does not replicate row-by-row (nodes read the roster over HTTP),
-  so nothing changes in `sync/`.
 
 ### CLI
 
-- `musterd agent <name> --hue <0-359>` and `musterd human … --hue <0-359>` at creation.
-- `musterd hue <name> [<deg>]` — bare prints the member's hue; with a degree sets it, refusing a
-  collision by name. `--as` for authority as everywhere else.
+- `musterd agent <name> --hue <0-359>`, `musterd human … --hue`, `musterd team add … --hue`. On a
+  file-backed team the CLI reads the other seat files, takes their hues, and writes
+  `assignHue(defaultHue(name), taken)` — or the explicit value, refusing a collision by name —
+  into the new seat file before calling `addMember`. On a DB-only team it passes the flag through.
+- `musterd team hue <name> [<deg>]` (under `team`, beside `credential` — a per-member roster
+  fact; not a 47th top-level verb, finding 5). Bare prints the member's hue and where it comes
+  from. With a degree: file-backed → parse the seat file, set `hue`, `serializeSeat`, write (the
+  `role.ts` edit pattern), refusing a collision against the other seat files; DB-only → the route.
+- `musterd team hue --assign-missing` — the one-time pass that gives every seat without a hue one,
+  **seeded with today's banded hash** (`memberHue(name, kind)` as the web computes it now) and
+  walking only the seats that actually collide, so the colours people already know survive the
+  upgrade and only the near-duplicates move (finding 3). Full-wheel `defaultHue` is for NEW
+  members. Writes the seat files (file-backed) or calls the route per member (DB-only); the
+  result is a reviewable diff.
+- Past 24 seats `assignHue` returns the largest-gap midpoint; the CLI prints
+  `colour shared with <name> — the wheel holds 24 fully separated hues` at assign time (finding 4:
+  said out loud, never refused). Not an audit row yet — nothing reads one, and a new replicated
+  audit kind is the seam ADR 371 just settled; when the roster wants to say "colour shared", add
+  it then.
 - `client.ts`: `setHue(team, name, hue)`.
 
 ### Web — `packages/web/src/live/format.ts`
@@ -96,11 +131,15 @@ visor) and from the roster chip, which were always the load-bearing tell.
 
 - protocol: `assignHue` yields N distinct hues pairwise ≥ 15° for N ≤ 24; walks to the nearest
   free slot; picks the largest gap past 24; `hueConflict` finds the neighbour across 359→0.
-- server: default assignment is unique on a fresh team; explicit collision refused naming the
-  neighbour; migration backfills a pre-v65 DB collision-free; the route round-trips and the roster
-  shows the new hue; a non-admin cannot set another member's hue; revive keeps the hue.
-- CLI: `--hue` reaches the create body; `hue` prints and sets; a collision renders the server's
-  message.
+- protocol: the 24-slot ΔE falsifier above.
+- server: reconcile projects a file hue on add / update / revive and NULLs it when the file drops
+  it; DB-only default assignment is unique; explicit collision refused naming the neighbour; the
+  route round-trips on a DB-only team and refuses on a file-backed one; a non-admin cannot set
+  another member's hue; **two daemons reconciling the same seat files report the same hue per name**
+  (dolly's falsifier for finding 1).
+- CLI: `--hue` lands in the seat file (file-backed) or the create body (DB-only); `team hue`
+  prints, sets, refuses a collision by name; `--assign-missing` seeds from the banded hash and
+  moves only colliding seats; the past-24 warning prints.
 - web: stored hue wins, null falls back to the hash; the office node's colour comes from the
   stored hue.
 
@@ -112,5 +151,16 @@ where authority sits) with falsifiers.
 ## Out of scope
 
 The office surfaces themselves (lane 01M1MM1Y5H): rail dot, nameplate and bubble borders, sender
-prefix, act glyphs, the broadcast notice, the asks rail. File-declared hue for file-backed teams.
-A colour swatch in the terminal roster.
+prefix, act glyphs, the broadcast notice, the asks rail. A colour swatch in the terminal roster.
+A `member.hue_assigned` audit row (see the CLI section for when).
+
+## Review (dolly, 01M1MMF2H6, 2026-09-03)
+
+Accepted approach C and hue-not-hex. Four findings, all taken: (1) on a file-backed team the seat
+file must own the hue or the colour differs per machine — restructured above, the file is the
+source and the column its projection; (2) HSL hue is not perceptually uniform — the ΔE falsifier
+decides the metric; (3) a migration backfill would recolour every existing seat at once — no
+backfill, `--assign-missing` seeds from today's hash and moves only collisions; (4) past 24 seats
+the shared colour must be said, not silent — the CLI says it (an audit row deferred, reason
+above). Also taken: `team hue` rather than a top-level verb (5). Confirmed as-is: self-or-admin
+authority (6), explicit pass-through over a module map (7).
