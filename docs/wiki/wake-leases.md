@@ -97,3 +97,9 @@ Fixed by ADR 357: the poll IS the heartbeat (`host_liveness`, newest wins), `sea
 ## Related
 
 `claimWakeLeases` already reasons per-act (`isExhausted` keyed on act_id) — an act-scoped gate mirrors `liveLease` keyed on `act_id` instead of `member_id`. A live seat is never woken (`hasLivePresence` guard), so "wake only if none live" is free.
+
+## A wake crosses machines by being read, not by being sent (2026-09-02, lane 01M1JBQRA3; falsify: `sync/claim.test.ts` "folded from another machine")
+
+ADR 361 §Consequences said a handoff decided on one machine for a seat resident on another "spends no wake lease anywhere, because the fold does not consult the wake ledger". Measured 2026-09-02 on two real daemons: **false.** There is no wake ledger to consult at fold time — `claimWakeLeases` (`store/residency.ts`) runs on the host actuator's poll and derives candidates from `messages` (`listInterruptCandidates` for the immediate lane, `openDirectedLedger` for the batched lane, both plain queries over acts and their `accept`/`decline`/`resolve` replies). A folded row is a row. So a handoff minted on the hub for a seat enrolled on the joiner leases exactly one wake on the joiner's next poll and none on the hub, where the seat has no residency row; and the recipient's folded `accept` drops the act from the sender's open ledger. What does NOT cross: the residency row and the lease (residence 3) — a seat is woken only where it is enrolled, which is the point.
+
+Falsify: enroll a seat on a joiner, hand it a lane from the hub, `pullTeam` on the joiner, then `claimWakeLeases(joiner.db, …)` — anything but one order for that act, or any order on the hub, breaks this.
