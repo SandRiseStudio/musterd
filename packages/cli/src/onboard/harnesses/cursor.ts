@@ -82,6 +82,7 @@ function readHooksSafe(path: string): CursorHooksFile | null {
 /** Markers so upsert/drop target our entries without absorbing the user's other hooks. */
 export const CURSOR_OBSERVE_HOOK_MARKER = 'musterd-cursor-observe';
 export const CURSOR_END_HOOK_MARKER = 'musterd-cursor-end';
+export const CURSOR_GATE_HOOK_MARKER = 'musterd-cursor-gate';
 
 function observeHookCommand(): string {
   // ADR 198: pipe Cursor's common-schema stdin (conversation_id, model_id, …) into session observe.
@@ -90,6 +91,27 @@ function observeHookCommand(): string {
     'cd "${CURSOR_PROJECT_DIR:-.}" 2>/dev/null; ' +
     'command -v musterd >/dev/null 2>&1 && musterd session observe --stdin >/dev/null 2>&1 || true ' +
     `# ${CURSOR_OBSERVE_HOOK_MARKER}`
+  );
+}
+
+/** ADR 369: postToolUse observes model, plus checks for urgent interrupt acts via --interrupt.
+ *  Stderr discarded; stdout is the Cursor injection seam for { additional_context } (do NOT redirect it). */
+function postToolUseHookCommand(): string {
+  return (
+    'cd "${CURSOR_PROJECT_DIR:-.}" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd session observe --stdin --interrupt 2>/dev/null || true ' +
+    `# ${CURSOR_OBSERVE_HOOK_MARKER}`
+  );
+}
+
+/** ADR 369: PreToolUse enforcement gate for Cursor Agent.
+ *  Pipe stdin ({tool_name, tool_input, cwd}) into gate check. Stderr discarded; stdout kept so
+ *  Cursor receives JSON `{ permission: 'deny', ... }`. Matcher filters to write/shell/task tools. */
+function preToolUseHookCommand(): string {
+  return (
+    'cd "${CURSOR_PROJECT_DIR:-.}" 2>/dev/null; ' +
+    'command -v musterd >/dev/null 2>&1 && musterd gate check --stdin 2>/dev/null || true ' +
+    `# ${CURSOR_GATE_HOOK_MARKER}`
   );
 }
 
@@ -124,6 +146,7 @@ function upsertCursorHook(
   event: string,
   marker: string,
   command: string,
+  matcher?: string,
 ): string | undefined {
   const file = readHooksSafe(path);
   if (!file) {
@@ -133,7 +156,7 @@ function upsertCursorHook(
   file.hooks = file.hooks ?? {};
   const list = file.hooks[event] ?? [];
   const kept = list.filter((h) => !isMusterdCursorHook(h, marker));
-  kept.push({ command });
+  kept.push({ command, ...(matcher ? { matcher } : {}) });
   file.hooks[event] = kept;
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(file, null, 2) + '\n', 'utf8');
@@ -152,25 +175,30 @@ function dropCursorHook(path: string, event: string, marker: string): void {
 }
 
 /**
- * Install musterd's Cursor Agent hooks (ADR 198 / 265): sessionStart + postToolUse +
- * afterShellExecution + afterMCPExecution observe the live `model_id`; sessionEnd stamps
- * ended_at. Project-local `.cursor/hooks.json` only. The extra observe events exist because
- * cursor-agent does not dispatch the IDE set.
+ * Install musterd's Cursor Agent hooks (ADR 198 / 265 / 369): preToolUse gate + sessionStart + postToolUse
+ * interrupt + afterShellExecution + afterMCPExecution observe the live `model_id`; sessionEnd stamps
+ * ended_at. Project-local `.cursor/hooks.json` only.
  */
 export function installMusterdCursorHooks(dir: string = process.cwd()): string[] {
   const path = projectHooksPath(dir);
   const warnings: string[] = [];
-  for (const [event, marker, command] of [
-    ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, sessionStartHookCommand()] as const,
-    ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
+  for (const [event, marker, command, matcher] of [
+    [
+      'preToolUse',
+      CURSOR_GATE_HOOK_MARKER,
+      preToolUseHookCommand(),
+      'Shell|Write|Delete|Edit|Task',
+    ] as const,
+    ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, sessionStartHookCommand(), undefined] as const,
+    ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER, postToolUseHookCommand(), undefined] as const,
     // ADR 265: cursor-agent's event surface is a subset of the IDE's. Older CLIs (measured:
     // 2026.01.23) never dispatch sessionStart/postToolUse/sessionEnd; they do dispatch
     // afterShellExecution. afterMCPExecution covers a CLI session that is almost entirely MCP.
-    ['afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
-    ['afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand()] as const,
-    ['sessionEnd', CURSOR_END_HOOK_MARKER, sessionEndHookCommand()] as const,
+    ['afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand(), undefined] as const,
+    ['afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand(), undefined] as const,
+    ['sessionEnd', CURSOR_END_HOOK_MARKER, sessionEndHookCommand(), undefined] as const,
   ]) {
-    const w = upsertCursorHook(path, event, marker, command);
+    const w = upsertCursorHook(path, event, marker, command, matcher);
     if (w) warnings.push(w);
   }
   return warnings;
@@ -179,6 +207,7 @@ export function installMusterdCursorHooks(dir: string = process.cwd()): string[]
 export function removeMusterdCursorHooks(dir: string = process.cwd()): void {
   const path = projectHooksPath(dir);
   if (!existsSync(path)) return;
+  dropCursorHook(path, 'preToolUse', CURSOR_GATE_HOOK_MARKER);
   dropCursorHook(path, 'sessionStart', CURSOR_OBSERVE_HOOK_MARKER);
   dropCursorHook(path, 'postToolUse', CURSOR_OBSERVE_HOOK_MARKER);
   dropCursorHook(path, 'afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER);
@@ -325,29 +354,37 @@ export const cursor: Harness = {
 // replacement. All access rides the injected FsSeam.
 
 const CURSOR_HOOK_EVENTS = [
-  ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER],
-  ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER],
-  ['afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER],
-  ['afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER],
-  ['sessionEnd', CURSOR_END_HOOK_MARKER],
+  ['preToolUse', CURSOR_GATE_HOOK_MARKER, 'Shell|Write|Delete|Edit|Task'],
+  ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, undefined],
+  ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER, undefined],
+  ['afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER, undefined],
+  ['afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER, undefined],
+  ['sessionEnd', CURSOR_END_HOOK_MARKER, undefined],
 ] as const;
 
-function cursorHooksPayload(): { event: string; command: string }[] {
+function cursorHooksPayload(): { event: string; command: string; matcher?: string }[] {
   return sortHookList(
-    CURSOR_HOOK_EVENTS.map(([event, marker]) => ({
+    CURSOR_HOOK_EVENTS.map(([event, marker, matcher]) => ({
       event,
       command:
         marker === CURSOR_END_HOOK_MARKER
           ? sessionEndHookCommand()
-          : event === 'sessionStart'
-            ? sessionStartHookCommand()
-            : observeHookCommand(),
+          : marker === CURSOR_GATE_HOOK_MARKER
+            ? preToolUseHookCommand()
+            : event === 'sessionStart'
+              ? sessionStartHookCommand()
+              : event === 'postToolUse'
+                ? postToolUseHookCommand()
+                : observeHookCommand(),
+      ...(matcher ? { matcher } : {}),
     })),
   );
 }
 
 /** One canonical order, shared by desire and observation, so equal state hashes equal. */
-function sortHookList<T extends { event: string; command: string }>(list: T[]): T[] {
+function sortHookList<T extends { event: string; command: string; matcher?: string }>(
+  list: T[],
+): T[] {
   return [...list].sort((a, b) =>
     a.event === b.event ? (a.command < b.command ? -1 : 1) : a.event < b.event ? -1 : 1,
   );
@@ -483,14 +520,19 @@ export const cursorAdapter: HarnessAdapter = {
         }
         // Fingerprint the SORTED physical form — payload-independent, so a release intent rebuilt
         // from ledger evidence observes the same fingerprint the write recorded.
-        const observed: { event: string; command: string }[] = [];
+        const observed: { event: string; command: string; matcher?: string }[] = [];
         for (const [event, defs] of Object.entries(file.hooks ?? {})) {
           for (const def of defs) {
             if (
               isMusterdCursorHook(def, CURSOR_OBSERVE_HOOK_MARKER) ||
-              isMusterdCursorHook(def, CURSOR_END_HOOK_MARKER)
+              isMusterdCursorHook(def, CURSOR_END_HOOK_MARKER) ||
+              isMusterdCursorHook(def, CURSOR_GATE_HOOK_MARKER)
             ) {
-              observed.push({ event, command: def.command });
+              observed.push({
+                event,
+                command: def.command,
+                ...(def.matcher ? { matcher: def.matcher } : {}),
+              });
             }
           }
         }
@@ -556,19 +598,25 @@ export const cursorAdapter: HarnessAdapter = {
           hooks: { ...(file.hooks ?? {}) },
         };
         const desired =
-          (intent.payload as { event: string; command: string }[] | undefined) ??
+          (intent.payload as { event: string; command: string; matcher?: string }[] | undefined) ??
           cursorHooksPayload();
         const events = new Set(desired.map((d) => d.event));
         for (const event of events) {
           const keep = (next.hooks![event] ?? []).filter(
             (h) =>
               !isMusterdCursorHook(h, CURSOR_OBSERVE_HOOK_MARKER) &&
-              !isMusterdCursorHook(h, CURSOR_END_HOOK_MARKER),
+              !isMusterdCursorHook(h, CURSOR_END_HOOK_MARKER) &&
+              !isMusterdCursorHook(h, CURSOR_GATE_HOOK_MARKER),
           );
           const added =
             mutation.kind === 'remove'
               ? []
-              : desired.filter((d) => d.event === event).map((d) => ({ command: d.command }));
+              : desired
+                  .filter((d) => d.event === event)
+                  .map((d) => ({
+                    command: d.command,
+                    ...(d.matcher ? { matcher: d.matcher } : {}),
+                  }));
           const merged = [...keep, ...added];
           if (merged.length > 0) next.hooks![event] = merged;
           else delete next.hooks![event];

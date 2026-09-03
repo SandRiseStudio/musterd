@@ -11,6 +11,7 @@ import { resolveClaimWorkspace } from './helpers.js';
 import {
   attestSlotIfUnattested,
   captureSession,
+  checkCursorInterrupt,
   LABEL_SWEEP_STALE_MS,
   labelSweepDue,
   lookupCcdMeta,
@@ -712,6 +713,27 @@ describe('musterd session (capture)', () => {
       ]);
       expect(readBinding(wsA).session?.id).toBe('365e3420-cli');
       expect(readBinding(wsA).model_observed).toBeUndefined();
+    });
+
+    it('checkCursorInterrupt returns the line when interrupt is raised (ADR 369)', async () => {
+      const spy = vi
+        .spyOn(HttpClient.prototype, 'interruptCheck')
+        .mockResolvedValue({ raised: true, line: '⚑ 1 urgent request' });
+      const line = await checkCursorInterrupt(wsA);
+      expect(line).toBe('⚑ 1 urgent request');
+      spy.mockRestore();
+    });
+
+    it('checkCursorInterrupt returns null when no interrupt is raised or nudges are muted', async () => {
+      const spy = vi
+        .spyOn(HttpClient.prototype, 'interruptCheck')
+        .mockResolvedValue({ raised: false });
+      expect(await checkCursorInterrupt(wsA)).toBeNull();
+
+      process.env['MUSTERD_NO_NUDGE'] = '1';
+      expect(await checkCursorInterrupt(wsA)).toBeNull();
+      delete process.env['MUSTERD_NO_NUDGE'];
+      spy.mockRestore();
     });
   });
 
