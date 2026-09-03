@@ -71,6 +71,8 @@ coverage/
 # `musterd wire` writes these per-workspace; they are machine-local, not project config.
 .cursor/hooks.json
 .codex/hooks.json
+# OpenCode's MCP config carries absolute machine paths (node binary + checkout dir).
+.opencode/opencode.json
 
 # Qoder editor workspace state — local tooling, never committed
 .qoder/
