@@ -21,7 +21,7 @@ describe('nativeMcpConfig', () => {
     autojoin: true,
   };
 
-  it('carries a workspace_key so a native seat is not evicted by its own label change (ADR 365)', () => {
+  it('carries a workspace_key so a native seat is not evicted by its own label change (ADR 368)', () => {
     const config = nativeMcpConfig({
       binding: binding as never,
       server: 'http://127.0.0.1:4849',

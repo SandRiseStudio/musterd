@@ -76,7 +76,7 @@ export function nativeMcpConfig(opts: {
   team: string;
   seat: string;
   workspace: string;
-  /** The workspace's stable identity (ADR 365) — the work tree root behind `workspace`, which is a
+  /** The workspace's stable identity (ADR 368) — the work tree root behind `workspace`, which is a
    *  display label. Displacement compares this, so a native seat must send it like any other
    *  session; defaults to the workspace dir this bridge was pointed at. */
   workspaceKey?: string;

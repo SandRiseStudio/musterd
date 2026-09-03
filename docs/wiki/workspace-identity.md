@@ -24,7 +24,7 @@ sqlite3 -readonly ~/.musterd/musterd.db "select datetime(ts/1000,'unixepoch','lo
   and action in ('presence.attached','claim.superseded') order by ts desc limit 20"
 ```
 
-Fixed by [ADR 365](../decisions/365-a-workspace-is-identified-by-its-work-tree-not-its-label.md): the claim frame carries `workspace_key` (the git work tree root, `resolveWorkspaceKey` in `@musterd/protocol/project`) and displacement compares that; the label keeps its ADR 014 job. Both sides missing a key fall back to label equality, so an un-rebuilt dist behaves exactly as before — the mixed-version window is a rebuild, not a release.
+Fixed by [ADR 368](../decisions/368-a-workspace-is-identified-by-its-work-tree-not-its-label.md): the claim frame carries `workspace_key` (the git work tree root, `resolveWorkspaceKey` in `@musterd/protocol/project`) and displacement compares that; the label keeps its ADR 014 job. Both sides missing a key fall back to label equality, so an un-rebuilt dist behaves exactly as before — the mixed-version window is a rebuild, not a release.
 
 ## Two wrong diagnoses this defect supported for a while, both from reading one column (2026-09-02)
 

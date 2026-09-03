@@ -1,4 +1,4 @@
-# 365 — A workspace is identified by its work tree, not by the label the roster shows
+# 368 — A workspace is identified by its work tree, not by the label the roster shows
 
 - Status: accepted
 - Date: 2026-09-03
