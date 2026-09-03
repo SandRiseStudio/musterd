@@ -344,7 +344,7 @@ describe('the pull loop', () => {
   it('does nothing on a single-machine install', async () => {
     send(hub, 'h-1');
     expect(await pullTeam(hubCtx(), hubTeam())).toBe(0);
-    expect(foldBatch(hub.db, hubTeam().id, [])).toEqual({
+    expect(foldBatch(hub.db, hubTeam().id, [])).toMatchObject({
       applied: 0,
       skipped: 0,
       last_hub_seq: 0,

@@ -91,6 +91,16 @@ export type AuditAction =
   | 'continuity.memory_saved'
   | 'continuity.memory_cleared'
   | 'continuity.cursor_advanced'
+  // ADR 371 (residence-2 census gap 3): the record kind — rows whose projection is an additive or
+  // append-only table and that decide nothing. `tool_calls` carries one adapter flush
+  // `{ seat, role, bucket_start, events }` and folds into `tool_call_stats` under the ORIGIN's hour;
+  // `seed_thread` carries `{ entry_id, relay_id, kind, body, by, created_at }` — relay id and member
+  // NAME, because `seeds.id` and `members.id` are daemon-private; `incident_report` carries the pool
+  // row `{ report_id, gate, seat, sig, ref, message_id, lane_id, created_at }` and is minted by the
+  // HUB only (the pool is the hub's, §2) — a later `lane_id` stamp is the same verb again.
+  | 'record.tool_calls'
+  | 'record.seed_thread'
+  | 'record.incident_report'
   // ADR 101: a harness attested (or re-attested) the model on an occupancy. `detail` carries
   // `{ occupancy, old, new, source: 'claim'|'heartbeat'|'ambient' }` — this append-only trail IS the
   // occupancy's model-switch history (the ADR keeps no history column). `ambient` is ADR 119: a
@@ -461,9 +471,15 @@ export const appendLaneEventRequired = appendReplicatedEvent;
  * because the failure mode of a per-site opt-in is a new call site that silently does not
  * replicate — the exact defect this closes, one verb later. Adding a verb here is the whole change.
  *
- * A verb belongs here only if NOTHING decides on it across machines. These six are read by
+ * A verb belongs here only if NOTHING decides on it across machines. The six wake verbs are read by
  * deciders locally (rate cap, ADR 262 breaker, wakeability), and those readers are pinned to rows
  * this machine minted — ADR 365 §3. Widening this set means checking that pinning again.
+ *
+ * ADR 371 §4 widened it by the rest of `residency.*` and `mcp.surface_rendered`, after pinning the
+ * three deciding readers that were not: `hostAsleepMs` (the ADR 236 ceiling — a suspension is a
+ * fact about THIS host), `firstWakeLeaseTs` (the ceiling's clock starts on a lease this host
+ * issued) and `leaseCapturedSession` (the ADR 252 join, by a host-local lease id). Reporting
+ * readers stay unpinned: the insight is team-wide, the decision is machine-local.
  */
 export const REPLICATED_LEDGER_VERBS = new Set([
   'residency.woke',
@@ -472,6 +488,16 @@ export const REPLICATED_LEDGER_VERBS = new Set([
   'residency.wake_exhausted',
   'residency.wake_cost',
   'residency.wake_report_rejected',
+  // ADR 371 §4 — the residence ledger's own birth rows, the lease, the capture, the suspension.
+  'residency.enrolled',
+  'residency.revoked',
+  'residency.wake_leased',
+  'residency.host_suspended',
+  'residency.session_captured',
+  'residency.session_ended',
+  'residency.context_read',
+  // ADR 371 §4 — a seat's attested surface weight (ADR 144), read by the report's surface block.
+  'mcp.surface_rendered',
 ]);
 
 /** Insert an audit row and surface failure when the caller's transaction requires the evidence. */

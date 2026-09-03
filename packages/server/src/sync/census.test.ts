@@ -127,7 +127,7 @@ afterEach(async () => {
 });
 
 describe('residence-2 census — what crosses the wire at this build', () => {
-  it('the replicated kinds are exactly message, lane, presence and policy; nothing else is ever staged', async () => {
+  it('the replicated kinds are exactly message, lane, presence and policy on this path; nothing else is ever staged', async () => {
     // A lane transition and a message on the joiner, a claim on the hub: every kind that replicates.
     const opened = await post(
       joinerBase,
@@ -187,30 +187,55 @@ describe('residence-2 census — what crosses the wire at this build', () => {
     ).toEqual({ n: 0 });
   });
 
-  it('GAP (ADR 325 residence 2, promised): audit verbs written best-effort carry no origin stamp and never push — residency.* among them (policy.change left this list with ADR 367; memory.save with ADR 366, as continuity.memory_saved)', async () => {
+  it('GAP 3 CLOSED (ADR 371 §4): the residency.* remainder crosses as ledger rows — an audit verb OUTSIDE every replicated set still carries no stamp and never pushes', async () => {
     const jt = joinerTeam();
+    // Until ADR 371 this test pinned `residency.wake_leased` as the gap. It is in the ledger set
+    // now; the seam this pins is that the set is the only door — a verb no set names stays local.
     appendAudit(joiner.db, jt.id, {
       actor: 'nick',
       action: 'residency.wake_leased',
       target: 'ada',
       result: 'allow',
-      detail: { lease: 'L1' },
+      detail: { lease: 'L1', act: 'a1' },
+    });
+    appendAudit(joiner.db, jt.id, {
+      actor: 'nick',
+      action: 'inbox.deferred',
+      target: 'ada',
+      result: 'allow',
+      detail: { until: 'lane' },
     });
     await roundTrip();
-    const rows = joiner.db
+    const leased = joiner.db
       .prepare<
         [],
         { origin_seq: number }
       >("SELECT origin_seq FROM audit WHERE action = 'residency.wake_leased'")
       .all();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.origin_seq).toBe(0); // no stamp — `appendAudit`, not `appendReplicatedEvent`
+    expect(leased).toHaveLength(1);
+    expect(leased[0]!.origin_seq).toBeGreaterThan(0); // stamped — the ledger set, inside appendAudit
     expect(
       hub.db
         .prepare<
           [],
           { n: number }
         >("SELECT COUNT(*) AS n FROM audit WHERE action = 'residency.wake_leased'")
+        .get(),
+    ).toEqual({ n: 1 });
+    const deferred = joiner.db
+      .prepare<
+        [],
+        { origin_seq: number }
+      >("SELECT origin_seq FROM audit WHERE action = 'inbox.deferred'")
+      .all();
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]!.origin_seq).toBe(0); // no stamp — `appendAudit`, not in any set
+    expect(
+      hub.db
+        .prepare<
+          [],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM audit WHERE action = 'inbox.deferred'")
         .get(),
     ).toEqual({ n: 0 });
   });

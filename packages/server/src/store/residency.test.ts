@@ -17,7 +17,10 @@ import {
   effectiveWakePolicy,
   enrollResidency,
   expireWakeLeases,
+  firstWakeLeaseTs,
   getResidency,
+  hostAsleepMs,
+  leaseCapturedSession,
   listWakeableMemberIds,
   parsePolicyOverride,
   recordSessionAttestation,
@@ -243,6 +246,54 @@ describe('claimWakeLeases — the transactional wake derivation', () => {
     });
 
     expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+  });
+
+  it("ignores a peer machine's suspension, lease and capture rows: the three ADR 371 §4 deciders are pinned", () => {
+    // ADR 371 §4 widened the ledger set by the residency.* remainder. `hostAsleepMs` feeds the ADR
+    // 236 ceiling, `firstWakeLeaseTs` starts its clock, `leaseCapturedSession` is the ADR 252
+    // join — all three were unpinned deciders. A folded row from a peer must not move any of them.
+    const { db, team } = seed();
+    const now = Date.now();
+    const peer = (id: string, seq: number, action: string, detail: Record<string, unknown>) =>
+      db
+        .prepare(
+          `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
+           VALUES (?, ?, ?, NULL, ?, 'Ada', 'allow', ?, ?, 'peer-node', ?)`,
+        )
+        .run(id, team.id, now - 30_000, action, JSON.stringify(detail), now, seq);
+    peer('p-1', 1, 'residency.host_suspended', { from: now - 60_000, to: now - 10_000 });
+    peer('p-2', 2, 'residency.wake_leased', { act: 'a1', lease_id: 'L-peer' });
+    peer('p-3', 3, 'residency.session_captured', { wake_lease: 'L-peer' });
+
+    expect(hostAsleepMs(db, team.id, now - 120_000, now)).toBe(0);
+    expect(firstWakeLeaseTs(db, team.id, 'a1')).toBeNull();
+    expect(leaseCapturedSession(db, team.id, 'L-peer')).toBe(false);
+
+    // The same three rows minted HERE (unstamped — the `''` arm) decide as they always did.
+    appendAudit(db, team.id, {
+      actor: null,
+      action: 'residency.host_suspended',
+      target: null,
+      result: 'allow',
+      detail: { from: now - 60_000, to: now - 10_000 },
+    });
+    appendAudit(db, team.id, {
+      actor: null,
+      action: 'residency.wake_leased',
+      target: 'Ada',
+      result: 'allow',
+      detail: { act: 'a1', lease_id: 'L-here' },
+    });
+    appendAudit(db, team.id, {
+      actor: 'Ada',
+      action: 'residency.session_captured',
+      target: 'Ada',
+      result: 'allow',
+      detail: { wake_lease: 'L-here' },
+    });
+    expect(hostAsleepMs(db, team.id, now - 120_000, now)).toBe(50_000);
+    expect(firstWakeLeaseTs(db, team.id, 'a1')).not.toBeNull();
+    expect(leaseCapturedSession(db, team.id, 'L-here')).toBe(true);
   });
 
   it('holds mutual exclusion: a live lease blocks a second order for the same seat', () => {

@@ -1522,6 +1522,11 @@ export function listResidencyTeamIds(db: Database): string[] {
  * `residency.host_suspended` interval clipped to that window (ADR 236). Derived from the ledger, in
  * the ADR 131 §4 shape: the audit rows ARE the state, and they survive a daemon restart, which
  * in-memory tick bookkeeping does not.
+ *
+ * Pinned to rows THIS machine minted (ADR 371 §4): `residency.host_suspended` replicates now, and a
+ * suspension is a fact about the host that slept — folding a peer's into this ceiling would make
+ * the hub believe it was asleep while a laptop's lid was shut. The same pin on `firstWakeLeaseTs`
+ * and `leaseCapturedSession` below: a lease is host-scoped by construction (ADR 361).
  */
 export function hostAsleepMs(db: Database, teamId: string, from: number, to: number): number {
   const row = db
@@ -1529,7 +1534,7 @@ export function hostAsleepMs(db: Database, teamId: string, from: number, to: num
       `SELECT COALESCE(SUM(MAX(0,
                 MIN(json_extract(detail, '$.to'), ?) - MAX(json_extract(detail, '$.from'), ?))), 0) AS ms
          FROM audit
-        WHERE team_id = ? AND action = 'residency.host_suspended' AND ts >= ?`,
+        WHERE team_id = ? AND action = 'residency.host_suspended' AND ts >= ? ${MINTED_HERE}`,
     )
     .get(to, from, teamId, from);
   return row?.ms ?? 0;
@@ -1546,7 +1551,7 @@ export function firstWakeLeaseTs(db: Database, teamId: string, actKey: string): 
     .prepare<[string, string], { ts: number }>(
       `SELECT MIN(ts) AS ts FROM audit
         WHERE team_id = ? AND action = 'residency.wake_leased'
-          AND json_extract(detail, '$.act') = ?`,
+          AND json_extract(detail, '$.act') = ? ${MINTED_HERE}`,
     )
     .get(teamId, actKey);
   return row?.ts ?? null;
@@ -1567,7 +1572,7 @@ export function leaseCapturedSession(db: Database, teamId: string, leaseId: stri
     .prepare<[string, string], { n: number }>(
       `SELECT COUNT(*) AS n FROM audit
         WHERE team_id = ? AND action = 'residency.session_captured'
-          AND json_extract(detail, '$.wake_lease') = ?`,
+          AND json_extract(detail, '$.wake_lease') = ? ${MINTED_HERE}`,
     )
     .get(teamId, leaseId);
   return (row?.n ?? 0) > 0;

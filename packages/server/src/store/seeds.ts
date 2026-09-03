@@ -8,6 +8,7 @@ import {
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
 import { MusterdError } from '../errors.js';
+import { appendReplicatedEvent } from './audit.js';
 import { openLane } from './lanes.js';
 import type { MemberRow } from './rows.js';
 
@@ -144,18 +145,56 @@ function requireSeed(db: Database, teamId: string, seedId: string): Seed {
   return seed;
 }
 
+type ThreadKind = 'clarification' | 'answer' | 'brief' | 'conclusion';
+
+/** The fold's silent projector primitive: one thread row, no stamp (ADR 371 §1). */
 function appendThread(
   db: Database,
+  entryId: string,
   seedId: string,
   memberId: string,
-  kind: 'clarification' | 'answer' | 'brief' | 'conclusion',
+  kind: ThreadKind,
   body: string,
   now: number,
 ): void {
   db.prepare(
     `INSERT INTO seed_thread_entries (id, seed_id, kind, body, member_id, created_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(ulid(now), seedId, kind, body, memberId, now);
+  ).run(entryId, seedId, kind, body, memberId, now);
+}
+
+/**
+ * Append a thread entry AND stamp it as `record.seed_thread` (ADR 371 §3), in the caller's
+ * transaction. The event names the seed by `relay_id` and the writer by NAME — `seeds.id` and
+ * `members.id` are minted per daemon and mean nothing off this machine — and carries the entry's
+ * own id, so both machines hold the same row under the same key. The seed's lifecycle state does
+ * NOT cross with it (§3): a brief replicates, the `state = 'completed'` beside it stays local.
+ */
+function applyThread(
+  db: Database,
+  teamId: string,
+  seed: { id: string; relay_id: string },
+  actor: MemberRow,
+  kind: ThreadKind,
+  body: string,
+  now: number,
+): void {
+  const entryId = ulid(now);
+  appendThread(db, entryId, seed.id, actor.id, kind, body, now);
+  appendReplicatedEvent(db, teamId, {
+    actor: actor.name,
+    action: 'record.seed_thread',
+    target: seed.relay_id,
+    result: 'allow',
+    detail: {
+      entry_id: entryId,
+      relay_id: seed.relay_id,
+      kind,
+      body,
+      by: actor.name,
+      created_at: now,
+    },
+  });
 }
 
 export function claimSeed(
@@ -189,7 +228,7 @@ export function askSeedClarification(
   if (seed.state !== 'exploring' || seed.explorer !== actor.name)
     throw new MusterdError('forbidden', 'only the active explorer may ask a clarification');
   const tx = db.transaction(() => {
-    appendThread(db, seedId, actor.id, 'clarification', body, now);
+    applyThread(db, teamId, seed, actor, 'clarification', body, now);
     db.prepare(
       `UPDATE seeds SET state = 'needs_clarification', explorer_id = NULL, updated_at = ?
        WHERE team_id = ? AND id = ?`,
@@ -213,7 +252,7 @@ export function answerSeedClarification(
   if (seed.state !== 'needs_clarification')
     throw new MusterdError('conflict', `Seed "${seedId}" is not awaiting clarification`);
   const tx = db.transaction(() => {
-    appendThread(db, seedId, actor.id, 'answer', body, now);
+    applyThread(db, teamId, seed, actor, 'answer', body, now);
     db.prepare(
       `UPDATE seeds SET state = 'clarified', updated_at = ? WHERE team_id = ? AND id = ?`,
     ).run(now, teamId, seedId);
@@ -264,7 +303,7 @@ export function submitSeedBrief(
     throw new MusterdError('forbidden', 'only the active explorer may submit a final brief');
   if (input.result === 'promote') {
     const tx = db.transaction(() => {
-      appendThread(db, seedId, actor.id, 'brief', JSON.stringify(input.brief), now);
+      applyThread(db, teamId, seed, actor, 'brief', JSON.stringify(input.brief), now);
       db.prepare(
         'UPDATE seeds SET final_brief = ?, updated_at = ? WHERE team_id = ? AND id = ?',
       ).run(JSON.stringify(input.brief), now, teamId, seedId);
@@ -284,8 +323,8 @@ export function submitSeedBrief(
     return tx();
   }
   const tx = db.transaction(() => {
-    appendThread(db, seedId, actor.id, 'brief', JSON.stringify(input.brief), now);
-    appendThread(db, seedId, actor.id, 'conclusion', input.conclusion, now);
+    applyThread(db, teamId, seed, actor, 'brief', JSON.stringify(input.brief), now);
+    applyThread(db, teamId, seed, actor, 'conclusion', input.conclusion, now);
     db.prepare(
       `UPDATE seeds
        SET state = 'completed', explorer_id = NULL, final_brief = ?, conclusion = ?,
