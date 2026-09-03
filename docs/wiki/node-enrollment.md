@@ -123,7 +123,7 @@ match the first, not the second (`sync/push.test.ts`, "keeps its first-seen cloc
 on the HUB's own roster would be a defect — its loopback push is never refused (ADR 360 §2);
 falsify: `sync.wedged` non-null on a daemon with no `node.json` entry for the team.
 
-## Which machine is the hub (2026-09-03, ADR 375)
+## Which machine is the hub (2026-09-03, ADR 376)
 
 The one the team was created on — the daemon holding the creator's admin credential mints the
 first invite, and every other machine joins it. Two doors enforce it: `musterd node invite` on an
@@ -132,7 +132,7 @@ already has enrolled joiners refuses before any request leaves it.
 
 Before the refusals a joiner could mint an invite and a third machine could join *it*. Everything
 that third machine pushed was then folded by nobody (2026-09-03 at `17706ff9`; falsify:
-`node-enroll-http.test.ts` "ADR 375") — it sat in the joiner's `sync_log`, and a joiner's pull
+`node-enroll-http.test.ts` "ADR 376") — it sat in the joiner's `sync_log`, and a joiner's pull
 loop never reads its own staging.
 
-Moving the hub (laptop → always-on VM) is not built; ADR 375 §4 names what it would take.
+Moving the hub (laptop → always-on VM) is not built; ADR 376 §4 names what it would take.

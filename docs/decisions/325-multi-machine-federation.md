@@ -192,7 +192,7 @@ at once.
   [the federation data census](../wiki/federation-data-census.md) — facts, dated, falsifiable,
   kept current there rather than restated here.
 - _(2026-09-03)_ **Which machine is the hub** is answered by
-  [ADR 375](375-the-hub-is-the-machine-the-team-was-created-on.md): the one the team was created
+  [ADR 376](376-the-hub-is-the-machine-the-team-was-created-on.md): the one the team was created
   on, enforced at the invite and enroll doors; relocating it is a named future increment.
 - _(2026-09-03)_ **The Durable Streams re-evaluation trigger fired** (push + pull + log passed 1,000
   lines) and was answered: keep ours — the lines are mostly ingest policy the transport cannot

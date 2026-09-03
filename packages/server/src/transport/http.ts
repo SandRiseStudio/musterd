@@ -1556,14 +1556,14 @@ export async function handleHttp(
             'logged act, so send something on this machine before enrolling it',
         );
       }
-      // A hub cannot enroll (ADR 375 §3): a machine with joiners attached is the team's authority,
+      // A hub cannot enroll (ADR 376 §3): a machine with joiners attached is the team's authority,
       // and flipping its loops to the joiner branch would strand every event they push. Refused
       // here, before any secret leaves the machine — the target hub is never contacted.
       if (hasEnrolledJoiners(ctx.db, team.id, local.node_id)) {
         throw new MusterdError(
           'conflict',
           `this machine is the hub of "${body.team}" — it has enrolled joiners, and a hub does not ` +
-            'enroll elsewhere (ADR 375). Revoke them first, or enroll the other machine here instead',
+            'enroll elsewhere (ADR 376). Revoke them first, or enroll the other machine here instead',
         );
       }
 
@@ -3609,7 +3609,7 @@ export async function handleHttp(
       // admitted and a seat being authorized are independent axes (§3).
       if (method === 'POST' && rest === '/nodes/invite') {
         const { team, member } = authAdmin(ctx, slug, req);
-        // The hub is the machine the team was created on (ADR 375 §2): there is one door into a
+        // The hub is the machine the team was created on (ADR 376 §2): there is one door into a
         // team's federation and it is the hub's. An enrolled joiner minting an invite would let a
         // third machine join IT — and a joiner's pull loop never reads its own staging, so every
         // event that third machine pushed would sit in `sync_log` folded by nobody, silently.
@@ -3618,7 +3618,7 @@ export async function handleHttp(
           throw new MusterdError(
             'conflict',
             `this machine is enrolled as a joiner of "${team.slug}" — invites are minted on the hub ` +
-              `(ADR 375): run \`musterd node invite\` from ${enrolledAt.hub_url}`,
+              `(ADR 376): run \`musterd node invite\` from ${enrolledAt.hub_url}`,
           );
         }
         const body = (await readJson(req)) as { label?: unknown };

@@ -218,7 +218,7 @@ describe('POST /node/enroll — the joiner daemon enrolls itself at a hub', () =
   });
 });
 
-describe('the hub is the machine the team was created on (ADR 375)', () => {
+describe('the hub is the machine the team was created on (ADR 376)', () => {
   async function enrolled() {
     mintLocalRow(joiner, 'bravo', 'm-joiner');
     const { json: minted } = await post(

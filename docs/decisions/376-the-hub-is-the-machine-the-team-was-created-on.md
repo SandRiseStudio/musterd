@@ -1,4 +1,4 @@
-# 375 — The hub is the machine the team was created on, until someone moves it
+# 376 — The hub is the machine the team was created on, until someone moves it
 
 - Status: accepted
 - Date: 2026-09-03
