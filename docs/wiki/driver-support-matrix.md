@@ -54,6 +54,19 @@ driver on Cursor). The doctor already narrates the labeling row per capability a
 emits it as **notes, never drift**: capability gaps are environment facts, not misconfiguration
 (`packages/cli/src/onboard/doctor.ts`).
 
+### OpenCode (added 2026-09-03, ADR 321/362; live-doorbell eval `opencode-live-doorbell-eval.md`)
+
+Observed against opencode 1.18.27 server docs, `@opencode-ai/plugin` 1.18.27 types, and one
+headless live measurement (scratch port, isolated `XDG_DATA_HOME`).
+
+| Feature | OpenCode (TUI, musterd-spawned on a known `--port`) | OpenCode (TUI, human-launched, random port) | OpenCode (headless `serve`) |
+| --- | --- | --- | --- |
+| Peer inject (doorbell in) | **yes** — `POST /session/:id/prompt_async` (measured: noReply persist + reply-mode wake both worked once); `abort` for the interrupt half (measured harmless on idle) | **unreachable** — no discovery API for the random port; a parallel `serve` starts a new server (docs) | same as spawned-TUI (measured here) |
+| Tool-boundary → model | `tool.execute.after` output mutation, in place (community-measured); MCP-path mutation unconfirmed on 1.18.x — re-verify before building | same | same |
+| Turn continuation | `session.idle` event + in-process `client.session.prompt` (shipped precedent: code-review plugin); `noReply`/`synthetic` transcript-only mode | same, if a plugin is installed | same |
+| Idle-at-prompt | covered — `prompt_async` needs no turn-end (measured); TUI may not render injected messages (#8564) | n/a (unreachable) | covered |
+| Hook drift detection | not populated | not populated | not populated |
+
 ## The wire is not this page
 
 The glossary entry for *driver* says "Already the wire field (`presence.driver`)". Observed
