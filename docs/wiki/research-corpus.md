@@ -129,6 +129,7 @@ first.
   file committed under `docs/research/radar/`). `seen.json` is verbatim `{"arxiv": [], "hf": []}`,
   there is no `radar:sweep` LaunchAgent, and `package.json` wires no `--emit` script. What remains is
   M5 plus a first real run. That is the ingest side; see the goal `research-radar`, marked shipped.
+  Follows-up: 01M1MMJKBYJ4DDD4S9QCF02TD9
 
 ## The sibling corpus: Exploring Next
 
