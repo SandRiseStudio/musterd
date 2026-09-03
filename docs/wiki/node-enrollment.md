@@ -100,3 +100,25 @@ signals failure by returning a value commits that failure.**
   machine naming itself is the more trustworthy of the two — but the operator's label is silently
   dropped (2026-08-27), so `node list` cannot be matched against the invites you sent. Falsify:
   `musterd node invite --label X` then join, and read `label` on the resulting `nodes` row.
+
+## When a push wedges
+
+Since [ADR 360](../decisions/360-push-level-residence.md) (2026-09-02) the hub refuses a joiner's
+whole push batch when any event in it speaks as a seat bound to another node — and every event
+minted after it queues behind. The failure is loud in the daemon log (`sync_push_refused_residence`
+at ERROR, every tick) and, since the same day, loud where the seat actually is:
+
+- **The roster carries it.** `GET /teams/:slug/members` gains `sync.wedged` on the refused machine
+  (`null` elsewhere), so `team_status`, `team_inbox_check` and `musterd status` print one line naming
+  the seat, the node it is bound to, the event kind, how long, and the remedy. `musterd node list`
+  prints the same line above the nodes.
+- **The remedy is one of two acts.** From a session on the machine the seat lives on:
+  `musterd node trust <wedged node id>` (ADR 358, human seats only). Or an admin:
+  `musterd node unbind <seat>`, after which the next act as that seat binds it wherever it happens.
+- **It clears itself.** The next accepted push nulls the record; nothing to reset by hand.
+
+The first-seen clock survives repeats: a refusal every 60 s keeps the original `since`. Falsify:
+`SELECT refused_json FROM sync_push_cursor` on the joiner after two refused ticks — `since` must
+match the first, not the second (`sync/push.test.ts`, "keeps its first-seen clock"). And a wedge
+on the HUB's own roster would be a defect — its loopback push is never refused (ADR 360 §2);
+falsify: `sync.wedged` non-null on a daemon with no `node.json` entry for the team.

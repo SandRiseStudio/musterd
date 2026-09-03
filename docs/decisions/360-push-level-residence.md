@@ -91,7 +91,12 @@ stream; it cannot take work.
   attach: the batch is refused every tick at ERROR until `musterd node trust`, an admin unbind, or
   acting from where the seat lives. This is ADR 356's existing behaviour with more triggers, and
   ADR 358 is the release valve built for it. The joiner-side UX that says *that* rather than a log
-  line is the next thing to build, not this increment.
+  line is the next thing to build, not this increment. **Built 2026-09-02 (lane `01M1JACVN0`):**
+  the refusal persists on the push cursor (migration v64), rides the roster payload as
+  `sync.wedged` so `team_status`, `team_inbox_check` and `musterd status` show it to the seat
+  named, appears in `musterd node list`, and names the remedy — `musterd node trust <this node>`
+  from where the seat lives, or the new `musterd node unbind <seat>`. Cleared by the next
+  accepted push.
 - Test fixtures that opened lanes on the hub *as nick* and then claimed as nick from the joiner now
   open them as a separate hub-resident human (`hana`) — the rule was refusing them correctly.
 - ADR 355 §5's "Push-level residence … is the next increment" is closed; the topology table's 3c

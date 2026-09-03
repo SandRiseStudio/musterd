@@ -1,4 +1,10 @@
-import { MODEL_UNKNOWN, type Envelope, type MemberSummary } from '@musterd/protocol';
+import {
+  MODEL_UNKNOWN,
+  type Envelope,
+  type MemberSummary,
+  describeSyncWedge,
+  type SyncWedge,
+} from '@musterd/protocol';
 
 /**
  * The roster, rendered for an **agent** to read (`team_status` / `team_members`).
@@ -250,4 +256,30 @@ export async function buildSkewWarning(client: {
     `\n⚠ your musterd adapter (${mine.slice(0, 7)}) differs from the daemon (${daemon.slice(0, 7)})` +
     ` — this session runs stale tools. Rebuild this worktree (pnpm build) and /mcp reload to pick it up.`
   );
+}
+
+/**
+ * ADR 360 follow-on: a joiner whose push the hub refuses is invisible to the team — every act from
+ * this machine is stuck behind the refused one — and the seat named in the refusal is exactly who
+ * can clear it. Say so where that seat reads: the roster and the inbox. Silent when the daemon
+ * predates the field or the sync is fine.
+ */
+export function syncWedgeWarning(
+  roster: { sync?: { wedged: SyncWedge | null } } | undefined,
+  now: number = Date.now(),
+): string {
+  const w = roster?.sync?.wedged;
+  return w ? `\n${describeSyncWedge(w, now)}` : '';
+}
+
+/** The wedge line for a client — best-effort: an older daemon, a stub, or a failed read all read as silence. */
+export async function syncWedgeWarningFor(client: {
+  roster?: () => Promise<{ sync?: { wedged: SyncWedge | null } }>;
+}): Promise<string> {
+  try {
+    if (typeof client.roster !== 'function') return '';
+    return syncWedgeWarning(await client.roster());
+  } catch {
+    return '';
+  }
 }

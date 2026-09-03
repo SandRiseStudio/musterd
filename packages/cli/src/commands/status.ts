@@ -1,3 +1,4 @@
+import { describeSyncWedge } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
 import {
   renderMachineLine,
@@ -5,6 +6,7 @@ import {
   renderRoster,
   renderStatusHeader,
 } from '../render/rows.js';
+import { theme } from '../render/theme.js';
 import { cliBuild } from '../version.js';
 import { pendingActionSummary, resolveRead } from './helpers.js';
 import { renderMemoryLine } from './memory.js';
@@ -54,6 +56,9 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   process.stdout.write(
     '\n' + renderRoster(res.members, undefined, undefined, health?.build) + '\n',
   );
+  // ADR 360 follow-on: a wedged push says so here, on the surface a human on this machine reads.
+  if (res.sync?.wedged)
+    process.stdout.write('\n' + theme.warn(describeSyncWedge(res.sync.wedged)) + '\n');
   // The machine cost line (ADR 242): the footprint sampler's latest tick, best-effort — an older
   // daemon, an unbound folder, or a non-darwin host all read as null and render as absence.
   const machineLine = renderMachineLine(await http.footprint(team).catch(() => null));

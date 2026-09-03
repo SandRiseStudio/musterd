@@ -5,6 +5,7 @@ import type { MusterdClient } from '../client.js';
 import { linkReceived } from '../otel.js';
 import {
   buildSkewWarning,
+  syncWedgeWarningFor,
   errorResult,
   formatMessage,
   notReadyMessage,
@@ -141,6 +142,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
           return textResult(
             'no new messages — nothing waiting on you; check again at your next task boundary' +
               recall +
+              (await syncWedgeWarningFor(client)) +
               (await buildSkewWarning(client)),
           );
         }
@@ -174,7 +176,11 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
               `marked read — they are still waiting. Call again with limit: ${plan.drainLimit} to ` +
               `see all ${plan.drainLimit}.\n\n`
             : '';
-        const text = notice + messages.map(line).join('\n') + (await buildSkewWarning(client));
+        const text =
+          notice +
+          messages.map(line).join('\n') +
+          (await syncWedgeWarningFor(client)) +
+          (await buildSkewWarning(client));
         return {
           content: [{ type: 'text' as const, text }],
           structuredContent: {

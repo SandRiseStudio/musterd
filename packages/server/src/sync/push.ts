@@ -1,4 +1,10 @@
-import { SYNC_PUSH_MAX_BATCH, SyncPushResponseSchema, type SyncEvent } from '@musterd/protocol';
+import {
+  SYNC_PUSH_MAX_BATCH,
+  SyncPushResponseSchema,
+  type SyncEvent,
+  type SyncWedge,
+  SyncWedgeSchema,
+} from '@musterd/protocol';
 import type { Ctx } from '../context.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
@@ -74,13 +80,54 @@ function readCursor(ctx: Ctx, teamId: string, nodeId: string): number {
 }
 
 function advanceCursor(ctx: Ctx, teamId: string, nodeId: string, seq: number, now: number): void {
+  // An accepted batch clears any wedge: the hub took what it had refused.
   ctx.db
     .prepare(
-      `INSERT INTO sync_push_cursor (team_id, node_id, last_seq, updated_at) VALUES (?, ?, ?, ?)
+      `INSERT INTO sync_push_cursor (team_id, node_id, last_seq, updated_at, refused_json)
+       VALUES (?, ?, ?, ?, NULL)
        ON CONFLICT(team_id, node_id) DO UPDATE SET last_seq = excluded.last_seq,
-                                                  updated_at = excluded.updated_at`,
+                                                  updated_at = excluded.updated_at,
+                                                  refused_json = NULL`,
     )
     .run(teamId, nodeId, seq, now);
+}
+
+/**
+ * Remember the hub's residence refusal on the cursor row it stalled (ADR 360 follow-on): the seat
+ * who can clear it reads it from the roster and the inbox, not from this daemon's log. `since` is
+ * the FIRST refusal for this seat — a repeat every tick does not restart the clock.
+ */
+export function recordPushRefusal(
+  ctx: Ctx,
+  teamId: string,
+  nodeId: string,
+  refusal: Omit<SyncWedge, 'since' | 'node_id'>,
+  now: number,
+): void {
+  const prior = readPushRefusal(ctx.db, teamId);
+  const since = prior && prior.seat === refusal.seat ? prior.since : now;
+  const wedge: SyncWedge = { ...refusal, node_id: nodeId, since };
+  ctx.db
+    .prepare(
+      `INSERT INTO sync_push_cursor (team_id, node_id, last_seq, updated_at, refused_json)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(team_id, node_id) DO UPDATE SET refused_json = excluded.refused_json`,
+    )
+    .run(teamId, nodeId, readCursor(ctx, teamId, nodeId), now, JSON.stringify(wedge));
+}
+
+/** This daemon's standing wedge for the team, or null — read by the roster and `node list`. */
+export function readPushRefusal(db: Ctx['db'], teamId: string): SyncWedge | null {
+  const row = db
+    .prepare<[string], { refused_json: string | null }>(
+      `SELECT c.refused_json FROM sync_push_cursor c
+         JOIN local_node l ON l.team_id = c.team_id AND l.node_id = c.node_id
+        WHERE c.team_id = ?`,
+    )
+    .get(teamId);
+  if (!row?.refused_json) return null;
+  const parsed = SyncWedgeSchema.safeParse(JSON.parse(row.refused_json));
+  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -305,8 +352,25 @@ export async function pushTeam(
     // unbinds it, or the session acts from where the seat lives.
     const body = (await res.json().catch(() => null)) as {
       seat?: unknown;
+      node_id?: unknown;
       node_label?: unknown;
+      kind?: unknown;
     } | null;
+    if (typeof body?.seat === 'string' && typeof body?.node_id === 'string') {
+      const kind = body.kind === 'lane' || body.kind === 'message' ? body.kind : 'presence';
+      recordPushRefusal(
+        ctx,
+        team.id,
+        nodeId,
+        {
+          seat: body.seat,
+          bound_to: typeof body.node_label === 'string' ? body.node_label : body.node_id,
+          bound_node_id: body.node_id,
+          kind,
+        },
+        now,
+      );
+    }
     log.error({
       msg: 'sync_push_refused_residence',
       team: team.slug,

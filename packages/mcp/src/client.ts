@@ -26,6 +26,7 @@ import {
   WakeContextRequestSchema,
   WakeContextResponseSchema,
   type WSServerFrame,
+  type SyncWedge,
 } from '@musterd/protocol';
 import { WebSocket } from 'ws';
 import { clearGrantFromBinding } from './binding.js';
@@ -368,6 +369,8 @@ export class MusterdClient {
     /** The team's role library (ADR 227 discovery): name + one-line summary. Absent from an older
      *  daemon — every consumer degrades to members-only. */
     roles?: Array<{ name: string; summary: string | null }>;
+    /** ADR 360 follow-on: this machine's standing push refusal, if any. Absent from an older daemon. */
+    sync?: { wedged: SyncWedge | null };
   }> {
     // ADR 227 close-out: the role filter rides the wire so the daemon can see (and audit) the
     // discovery query. An older daemon ignores the param and returns the unfiltered roster —

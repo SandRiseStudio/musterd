@@ -5,6 +5,7 @@ import {
   errorResult,
   evictionNotice,
   formatRoster,
+  syncWedgeWarning,
   textResult,
 } from './format.js';
 
@@ -15,7 +16,8 @@ const DESCRIPTION =
 export function registerStatus(server: McpServer, client: MusterdClient): void {
   server.registerTool('team_status', { description: DESCRIPTION, inputSchema: {} }, async () => {
     try {
-      const { members } = await client.roster();
+      const roster = await client.roster();
+      const { members } = roster;
       // ADR 237 decision 3: a session that knows it was evicted must not read the roster as its own
       // unqualified state — the banner leads, because "you are ryder" was the false positive evidence
       // that kept the incident's session working for twenty minutes.
@@ -23,6 +25,7 @@ export function registerStatus(server: McpServer, client: MusterdClient): void {
       return textResult(
         evictionNotice(client.lastJoinError) +
           formatRoster(members, client.member) +
+          syncWedgeWarning(roster) +
           (await buildSkewWarning(client)),
       );
     } catch (err) {
