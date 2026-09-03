@@ -1,6 +1,6 @@
 # 374 — One name for seat occupancy: `claim` on the CLI, and what `team_join` is called
 
-- Status: proposed — 2026-09-03 (nick decides increment 2 on the PR)
+- Status: accepted — 2026-09-03 (nick: "lets go with 2b" — increment 1 and 2b build together; 2a stays the fallback if the eval fails)
 - Date: 2026-09-03
 - Builds on: [ADR 075](075-p3.3-cli-claim-surface-migration.md) (the claim handshake), [ADR 087](087-seat-resume-vs-claim-one-verb.md) (`musterd claim` ≡ MCP `team_join{}`), [ADR 296](296-terminology-architecture.md) (one meaning per word), the surface survey (`docs/wiki/command-and-tool-surface-map.md`, #1245, collision 3)
 - Lane: item 5 of the survey's ranked recommendation
@@ -40,7 +40,7 @@ Two options, decided on this PR:
 - **2a. Rename to `team_claim`, keep `team_join` as a deprecated alias for one epoch.** One word across both surfaces. Cost: the alias itself is small (the `lane_ready` / `team_memory_search` pattern, #1253), but `team_join` is the most-cited tool name in the repo — 50 docs, 23 source files, the guidance skill (a `GUIDANCE_CONTENT_VERSION` bump reaching every seat), ADR 007/087 prose, and every seat's harness memory. Falsifier for "worth it": a fresh seat, reading only `musterd help` and the tool list, describes seat occupancy with one word.
 - **2b. Keep `team_join`; make the two descriptions name each other.** `team_join`'s description opens "Claim your seat (the CLI spelling is `musterd claim`, ADR 075)"; `claim`'s summary ends "(MCP: `team_join`)". Two words remain, but each surface tells you the other's. Cost: two strings. This is the ADR 296 "one meaning per word" floor: neither word carries a second meaning, they just differ per surface.
 
-**Recommendation: 2b now, 2a only if the survey's falsifier fails after 2b** — that is, if a fresh seat still cannot say what `team_join` does in `claim`'s words. The rename's cost is real and its benefit is the difference between "one word" and "two words that explain each other", which 2b buys for two strings.
+**Decided (nick, 2026-09-03): 2b now, 2a only if the survey's falsifier fails after 2b** — that is, if a fresh seat still cannot say what `team_join` does in `claim`'s words. The rename's cost is real and its benefit is the difference between "one word" and "two words that explain each other", which 2b buys for two strings.
 
 ### Not in this ADR
 
