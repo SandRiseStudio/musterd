@@ -3024,6 +3024,92 @@ describe('model attestation (ADR 101)', () => {
     await Promise.all([a.close(), l.close(), b.close()]);
   });
 
+  it('the tier SURVIVES the heartbeat — re-affirming the same model must not erase model_source', async () => {
+    // Measured on revive, 2026-09-03: every live presence row had a model and a NULL tier, and 100
+    // of 113 `observed` acts were sent within 16s of a claim. The claim stored the pair; the first
+    // heartbeat (15s) re-attested the id alone and wrote the tier back to NULL. The ADR 301 commit
+    // updated both claim sites and missed the heartbeat re-attest.
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const tok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, tok);
+    await post('/teams/dawn/members', { name: 'Lin', kind: 'agent' }, tok);
+    const a = new TestWs();
+    const l = new TestWs();
+    await Promise.all([a.open(), l.open()]);
+    await a.claim('dawn', team.json.agent_key, 'Ada', 'claude-code', await standingGrant(tok, 'Ada'), 'claude-opus-5', undefined, 'observed');
+    await l.claim('dawn', team.json.agent_key, 'Lin', 'codex', await standingGrant(tok, 'Lin'));
+
+    const deliverOf = async (ws: TestWs, id: string): Promise<any> => {
+      const deadline = Date.now() + 1000;
+      for (;;) {
+        const f = (ws as unknown as { frames: any[] }).frames.find(
+          (x) => x.type === 'deliver' && x.envelope?.id === id,
+        );
+        if (f) return f;
+        if (Date.now() > deadline) throw new Error(`timeout waiting for deliver ${id}`);
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
+    const say = (id: string) =>
+      a.send({
+        type: 'send',
+        envelope: {
+          id,
+          v: PROTOCOL_VERSION,
+          team: 'dawn',
+          from: 'Ada',
+          to: { kind: 'member', name: 'Lin' },
+          act: 'status_update',
+          body: 'x',
+          ts: Date.now(),
+        },
+      });
+    const teamRow = getTeamBySlug(server.db, 'dawn')!;
+    const attestAudits = () =>
+      listAudit(server.db, teamRow.id).filter((r) => r.action === 'occupancy.model_attested');
+
+    // 1. The steady-state heartbeat: same id, same tier. Nothing changed, so nothing is written
+    //    and nothing audits — and the tier is still on the next act.
+    a.send({ type: 'heartbeat', model: 'claude-opus-5', model_source: 'observed' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(attestAudits().length).toBe(1); // claim-time only
+    say('hb1');
+    const afterSteady = await deliverOf(l, 'hb1');
+    expect(afterSteady.envelope.meta.model).toBe('claude-opus-5');
+    expect(afterSteady.envelope.meta.model_source).toBe('observed');
+
+    // 2. An older client re-affirms the id with no tier. Absent means "no change", never a clear
+    //    (the HeartbeatFrame contract) — the claim-time observation stands.
+    a.send({ type: 'heartbeat', model: 'claude-opus-5' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb2');
+    const afterBare = await deliverOf(l, 'hb2');
+    expect(afterBare.envelope.meta.model_source).toBe('observed');
+
+    // 3. A real switch carries its own tier, and the stamp follows the pair.
+    a.send({ type: 'heartbeat', model: 'claude-fable-5-1', model_source: 'environment' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb3');
+    const afterSwitch = await deliverOf(l, 'hb3');
+    expect(afterSwitch.envelope.meta.model).toBe('claude-fable-5-1');
+    expect(afterSwitch.envelope.meta.model_source).toBe('environment');
+
+    // 4. A switch with NO tier cannot inherit the old one — that tier described a different id.
+    a.send({ type: 'heartbeat', model: 'claude-sonnet-5' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb4');
+    const afterBlindSwitch = await deliverOf(l, 'hb4');
+    expect(afterBlindSwitch.envelope.meta.model).toBe('claude-sonnet-5');
+    expect(afterBlindSwitch.envelope.meta.model_source).toBeUndefined();
+
+    // 5. A heal that only corrects the tier (same id, now observed) is a real change and is written.
+    a.send({ type: 'heartbeat', model: 'claude-sonnet-5', model_source: 'observed' });
+    await new Promise((r) => setTimeout(r, 50));
+    say('hb5');
+    const afterHeal = await deliverOf(l, 'hb5');
+    expect(afterHeal.envelope.meta.model_source).toBe('observed');
+  });
+
   it('claim attests, acts carry the server-side meta.model stamp, heartbeat re-attests + audits', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const tok = team.json.human_credential;

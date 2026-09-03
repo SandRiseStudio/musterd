@@ -32,7 +32,7 @@ This is a claim that something is **fine**, so per [the wiki's rule 3](README.md
 | ryder, stanley | `claude-fable-5` | `claude-fable-5` |
 | miley | `claude-opus-5` | `claude-fable-5` (see above — fine) |
 | **gptbot** | `claude-opus-5` | **none** |
-| **wanderer** | `grok-4.6` | **none** |
+| **wanderer** | `grok-4.6` | ~~**none** (2026-08-21)~~ OBSERVED 2026-09-03: `grok-4.6` via ADR 352's `summary.json` probe; 3 `observed` acts on revive |
 
 Those last two attest a bare declaration. Under stable model assignment that is a decent proxy; under the switching pattern above it is a value that persists while the runtime moves out from under it. **The operating pattern makes this worse, not better** — frequent switching is exactly the condition that turns a baked declaration from "usually right" into "unverifiable and probably stale".
 
@@ -62,6 +62,14 @@ Per-act `meta.model` carried the model id and **not** which tier produced it, so
 **Fixed 2026-08-21 by [ADR 301](../decisions/301-per-act-model-source-tier.md)** (nick's call: mark the tier rather than attest `unknown` — see below; land vehicle [#981](https://github.com/SandRiseStudio/musterd/pull/981), product originated on #975). The claim/heartbeat carries `model_source`, migration 42 stores it on `presence` beside `model`, and every act is stamped `meta.model_source`. Three properties are mutation-pinned: the stamp itself, the strip of a client-supplied tier, and the refusal to default an unknown tier to `binding`.
 
 Read it as **`observed` = measurement, `environment`/`binding` = assumption**, and note that **absent is a third answer, not a synonym for declared** — rows written before migration 42, or by clients too old to send it, genuinely do not know. Aggregates over acts from before 2026-08-21 have no tier at all and cannot acquire one.
+
+### The tier survived exactly one heartbeat (2026-09-03; falsify: `sqlite3 ~/.musterd/musterd.db "select model, model_source from presence where status='online'"` on a daemon past the fix — a live row with a model and a NULL tier means it is back)
+
+Two weeks after ADR 301 the corpus still read as if nobody sent the tier: on revive since 2026-08-21, 2,950 acts carried a model with no `model_source` and 162 carried `observed`. wanderer read that as a collection gap and proposed making the pair mandatory on claim/heartbeat. It was not collection. Every adapter already sent the pair on both frames, and the claim path stored it — then the first 15s heartbeat re-attested the id alone: `ws.ts` called `reattestModel(db, presenceId, frame.model)` without `frame.model_source`, the store compared the pair, read `observed` → `null` as a real change, and wrote the tier to NULL. Measured: every live presence row had a model and a null tier, including seats on the newest build; 100 of 113 `observed` acts were sent within 16s of a claim against 109 of 1,324 unlabeled; the audit trail shows `occupancy.model_attested old=grok-4.6 new=grok-4.6` rows, which are this write with only the tier changing. The ADR 301 commit (`e13a79c6`) updated both claim sites and missed the heartbeat re-attest, a line from 2026-07-07.
+
+Fixed the same day (this page's PR): the heartbeat passes the pair, and `reattestModel` treats an absent tier on an unchanged id as "no change, never a clear", the HeartbeatFrame's own contract. A tier absent on a *changed* id is still stored as null, because the old tier described a different model. The 2,950 unlabeled rows stay unlabeled: the tier they lost is not recoverable from the act log.
+
+Two lessons for the corpus. The four-percent `observed` share was an instrument reading its own defect, not a fact about the seats, and the proposal built on it (pair-required at the protocol) would have masked the bug as a hard failure instead of surfacing it. And a "did the fix land" check for a stamped field has to read the field *after* the steady-state path has run, not at the moment the write happens; the ADR 301 tests read the stamp before any heartbeat.
 
 ### Why not attest `unknown` instead (nick's decision, 2026-08-21)
 
