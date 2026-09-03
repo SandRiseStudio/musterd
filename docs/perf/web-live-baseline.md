@@ -669,3 +669,62 @@ calibration failure this file keeps re-learning.
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit — initial
   should read ≈138.0 KiB against 140.6 KiB (144,000 B). Then revert the two imports in `format.ts`
   to the barrel, rebuild, and watch the eager graph go back to ≈150.6 KiB: that is the whole claim.
+
+## 2026-09-03 — un-splitting to recover `totalJsGzipBytes`: measured and REJECTED
+
+`totalJsGzipBytes` is the binding constraint and has been for a week: 248.3 KB against a 249.0 KB
+ceiling on main @ `cd4d2934`, **715 bytes free**, 38 chunks. It has been RAISED five times since
+2026-08-24 with no tightening between them. ADR 183's ritual cannot repair it — a re-baseline may
+only tighten, measured + 15% loosens (so a re-baseline is unavailable), and tightening toward the
+measured 248.3 leaves zero headroom against the known ~0.7 KB CI gzip delta, which makes every web
+PR a coin flip. The trend is the finding.
+
+**The hypothesis.** This file and `budgets.json` both say only deleting code or dropping a
+dependency can move total, because lazy-loading cannot. That pair looked incomplete against this
+file's own evidence: splitting has RAISED total twice — 36 → 38 chunks cost ~1 KB (BoardOverlay),
+37 → 38 cost ~0.7 KB (the zod deep-import directly above). Per-chunk overhead is real and additive,
+so **un-splitting should lower total**, and nothing in ADR 183 forbids it. Eleven chunks measure
+under 1.5 KB gzip (5,208 B); four are near-empty public-site route stubs (`docs._slug` 289 B,
+`docs.index` 310 B, `blog._slug` 305 B, `blog.index` 327 B) whose real content is prerendered HTML.
+Bounded estimate: 1.5–2.5 KB recovered, 2–3x the headroom that exists.
+
+**Measured, it goes the wrong way.** A `build.rollupOptions.output.manualChunks` grouping the four
+route source files into one `site-routes` chunk:
+
+| | total JS gzip | initial (/live) | chunks | largest chunk |
+|---|---|---|---|---|
+| main @ `cd4d2934` | 248.3 KB / 249.0 | 138.6 KB / 140.6 | 38 | 97.5 KB |
+| `manualChunks` | **249.7 KB (RED)** | **139.9 KB** | 38 | 86.0 KB |
+
+Both budgets got worse and the chunk count did not move.
+
+**Why — the part worth keeping.** The four stubs *survived as four separate chunks* (275–314 B
+each, ~1,177 B). What the grouping actually did was hoist 16.1 KB of shared page code out of the
+entry chunk into a new `site-routes-` chunk (entry 99.6 → 87.9 KB). The route stubs TanStack Start
+emits are **virtual modules created by the plugin's route-splitting**, not the `src/routes/*.tsx`
+files on disk; a `manualChunks` predicate matching source paths therefore cannot address the stubs
+at all — it grabs the real page components instead and splits *more*, paying fresh per-chunk
+overhead (+1.4 KB total) and dragging /live's eager graph up with it (+1.3 KB). A stray
+`site-routes-*.css` bundle also appeared and correctly failed the ADR 313 classification gate,
+which is that gate working as designed.
+
+This is the same shape as the 2026-08-21 `index.lazy.tsx` rejection recorded above: an intuitive
+chunk-boundary change that rolldown answers by re-chunking shared modules into a worse arrangement.
+**Two rejections now share one lesson: you cannot steer this build's chunk graph from the outside
+by naming source files.**
+
+**What survives and what does not.** The hypothesis is *not* disproved — per-chunk overhead is
+still real, and un-splitting is still the only lever besides deletion that can move total. What is
+disproved is that `manualChunks` over source paths can reach it. Any future attempt has to go
+through the Start plugin's own splitting behaviour, and it should be measured before it is
+believed. The dependency arm is separately closed: `react`, `react-dom`, two TanStack packages, two
+`@fontsource` packages and the workspace protocol — nothing droppable without an architecture
+change. Do not re-chase either arm on intuition.
+
+`budgets.json`'s "only deleting code or dropping a dependency" note is corrected in this pass to
+name the third lever and its one measured failure, so the next reader does not spend the hour again.
+
+- Falsify: re-apply the `manualChunks` predicate from this entry on top of `cd4d2934`, rebuild, and
+  run `pnpm perf:check` — total should read ≈249.7 KB RED with the four stub chunks still present
+  and a ~16 KB `site-routes-` chunk beside them. If instead the stubs merge and total falls, the
+  Start plugin's splitting has changed and this entry is stale.
