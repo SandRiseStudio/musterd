@@ -85,12 +85,18 @@ export function parseToolCall(raw: string): GateToolCall | null {
         : typeof o['toolInput'] === 'object' && o['toolInput'] !== null
           ? (o['toolInput'] as Record<string, unknown>)
           : {};
-    // Grok CLI names (ADR 352): map onto the class-table vocabulary Claude already uses.
-    const grokAlias: Record<string, string> = {
+    // Tool aliases: map other harnesses onto the class-table vocabulary Claude already uses.
+    // - Grok CLI (ADR 352)
+    // - Cursor Agent (ADR 369)
+    const toolAlias: Record<string, string> = {
       run_terminal_command: 'Bash',
       search_replace: 'Edit',
+      Shell: 'Bash',
+      StrReplace: 'Edit',
+      Delete: 'Write',
+      Task: 'Agent',
     };
-    const tool = grokAlias[rawTool] ?? rawTool;
+    const tool = toolAlias[rawTool] ?? rawTool;
     const input = inputRaw;
     const path =
       typeof input['file_path'] === 'string'
@@ -99,16 +105,32 @@ export function parseToolCall(raw: string): GateToolCall | null {
           ? input['notebook_path']
           : typeof input['target_file'] === 'string'
             ? input['target_file']
-            : undefined;
+            : typeof input['path'] === 'string'
+              ? input['path']
+              : undefined;
     const command = typeof input['command'] === 'string' ? input['command'] : undefined;
     // ADR 163 — the payload ENVELOPE, not the tool input. `agent_id`/`agent_type` are present only on a
     // subagent's own tool calls and absent on the parent seat's; measured on Claude Code 2.1.220. On a
-    // spawn call (`tool_name: Agent`) the requested type + `model:` override live in tool_input instead,
-    // and carry no agent_id — the two halves share no key, which is why nothing joins them here.
-    const actorId = typeof o['agent_id'] === 'string' ? o['agent_id'] : undefined;
-    const actorType = typeof o['agent_type'] === 'string' ? o['agent_type'] : undefined;
+    // spawn call (`tool_name: Agent` / `Task`) the requested type + `model:` override live in tool_input
+    // instead, and carry no agent_id — the two halves share no key, which is why nothing joins them here.
+    const actorId =
+      typeof o['agent_id'] === 'string'
+        ? o['agent_id']
+        : typeof o['subagent_id'] === 'string'
+          ? o['subagent_id']
+          : undefined;
+    const actorType =
+      typeof o['agent_type'] === 'string'
+        ? o['agent_type']
+        : typeof o['subagent_type'] === 'string'
+          ? o['subagent_type']
+          : undefined;
     const spawnType =
-      typeof input['subagent_type'] === 'string' ? input['subagent_type'] : undefined;
+      typeof input['subagent_type'] === 'string'
+        ? input['subagent_type']
+        : typeof input['subagentType'] === 'string'
+          ? input['subagentType']
+          : undefined;
     const spawnModel = typeof input['model'] === 'string' ? input['model'] : undefined;
     // ADR 167 — the harness session-messaging send. The raw body and raw target session id are reduced
     // to sha256-16 HERE, inside this frame, and never assigned onto the returned object: what the rest
@@ -184,11 +206,14 @@ export function workingTreeWarning(
   return stale.length > 0 ? stalePathWarning(stale, command) : undefined;
 }
 
-/** Emit the PreToolUse deny control JSON Claude Code reads — the tool is blocked and `reason` is the
- *  repair string surfaced to the model (in its action loop, not its background context). */
+/** Emit the PreToolUse deny control JSON. Claude Code reads `hookSpecificOutput`; Cursor Agent reads
+ *  `permission: deny` and surfaces `user_message` / `agent_message` (ADR 369). */
 function emitDeny(reason: string): void {
   process.stdout.write(
     JSON.stringify({
+      permission: 'deny',
+      user_message: reason,
+      agent_message: reason,
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
@@ -198,12 +223,14 @@ function emitDeny(reason: string): void {
   );
 }
 
-/** Surface a warn-posture advisory without blocking or auto-granting. `additionalContext` proceeds
- *  normally and best-effort adds the note to the model's context; a Claude Code build that ignores it
- *  simply proceeds silently (warn's guaranteed half is the server-side audit row, not this surface). */
+/** Surface a warn-posture advisory without blocking or auto-granting. `additionalContext` (Claude Code)
+ *  and `additional_context` (Cursor Agent) proceed normally and best-effort add the note to the model's
+ *  context; a harness build that ignores it simply proceeds silently (warn's guaranteed half is the
+ *  server-side audit row, not this surface). */
 function emitWarn(reason: string): void {
   process.stdout.write(
     JSON.stringify({
+      additional_context: reason,
       hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: reason },
     }) + '\n',
   );

@@ -65,7 +65,7 @@ export async function sessionCommand(parsed: Parsed): Promise<number> {
   if (sub === 'bind') return bindCommand(parsed);
   if (sub === 'show' || sub === undefined) return showCommand(parsed);
   throw new CliError(
-    'usage: musterd session start --stdin | end --stdin | observe --stdin [--orient] | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | statusline --stdin | bind --thread <id> | show  ' +
+    'usage: musterd session start --stdin | end --stdin | observe --stdin [--orient] [--interrupt] | resolve-labels --stdin | label-nudge | orient-nudge | orient-stamp | statusline --stdin | bind --thread <id> | show  ' +
       '(start/end/observe are hook-driven — `musterd init` provisions the hooks; humans want `show`)',
     2,
   );
@@ -382,14 +382,20 @@ async function statuslineCommand(parsed: Parsed): Promise<number> {
 async function observeCommand(parsed: Parsed): Promise<number> {
   if (parsed.flags['stdin'] !== true) {
     throw new CliError(
-      'usage: musterd session observe --stdin [--orient]  — Cursor hook-driven (ADR 198 / ADR 333): pipe the Agent hook JSON in',
+      'usage: musterd session observe --stdin [--orient] [--interrupt]  — Cursor hook-driven (ADR 198 / ADR 333 / ADR 369): pipe the Agent hook JSON in',
       2,
     );
   }
   const payload = parseHookPayload(await readStdin());
   await observeCursorSession(payload);
+  const captureDir = resolveCaptureDir(payload);
   if (parsed.flags['orient'] === true) {
-    const json = formatCursorOrientation(await emitSessionOrientation(resolveCaptureDir(payload)));
+    const json = formatCursorOrientation(await emitSessionOrientation(captureDir));
+    if (json) process.stdout.write(json + '\n');
+  }
+  if (parsed.flags['interrupt'] === true) {
+    const line = await checkCursorInterrupt(captureDir);
+    const json = formatCursorInterrupt(line);
     if (json) process.stdout.write(json + '\n');
   }
   return 0;
@@ -399,6 +405,38 @@ async function observeCommand(parsed: Parsed): Promise<number> {
  *  Null in → null out (hook stays silent). Exported for the unit that pins the shape. */
 export function formatCursorOrientation(block: string | null): string | null {
   return block ? JSON.stringify({ additional_context: block }) : null;
+}
+
+/** Cursor postToolUse interrupt injection (ADR 369): wrap the interrupt line as the host's JSON seam.
+ *  Null in → null out (hook stays silent). Exported for the unit that pins the shape. */
+export function formatCursorInterrupt(line: string | null): string | null {
+  return line ? JSON.stringify({ additional_context: line }) : null;
+}
+
+/** Cursor postToolUse interrupt probe (ADR 369): query the daemon for waiting interrupt-class acts.
+ *  Returns the daemon-composed line or null. Best-effort, fail-open, silent on any error. */
+export async function checkCursorInterrupt(dir: string | null): Promise<string | null> {
+  if (process.env['MUSTERD_NO_NUDGE'] === '1') return null;
+  const binding = dir ? requireUsableBinding(dir) : null;
+  const seat = binding ? bindingSeat(binding) : undefined;
+  const key = binding?.seat_credential ?? binding?.agent_key;
+  if (!binding || !seat || !key) return null;
+  const team = binding.team;
+  const model = attestedModel(binding, process.env);
+  const http = new HttpClient({
+    server: binding.server,
+    key,
+    seat,
+    ...(binding.session_lease !== undefined ? { sessionLease: binding.session_lease } : {}),
+    surface: 'cli',
+    ...(model !== undefined ? { model } : {}),
+  });
+  try {
+    const res = await http.interruptCheck(team);
+    return res.raised && res.line ? res.line : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

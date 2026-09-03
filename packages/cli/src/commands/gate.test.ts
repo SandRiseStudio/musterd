@@ -46,6 +46,73 @@ describe('parseToolCall (ADR 150 PreToolUse payload)', () => {
     ).toEqual({ tool: 'Edit', path: 'src/x.ts' });
   });
 
+  it('maps Cursor Agent tool shapes onto class-table vocabulary (ADR 369)', () => {
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          tool_name: 'Shell',
+          tool_input: { command: 'git push origin main' },
+        }),
+      ),
+    ).toEqual({ tool: 'Bash', command: 'git push origin main' });
+
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          tool_name: 'Write',
+          tool_input: { path: 'packages/server/src/foo.ts', contents: '// hello' },
+        }),
+      ),
+    ).toEqual({ tool: 'Write', path: 'packages/server/src/foo.ts' });
+
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          tool_name: 'Delete',
+          tool_input: { path: 'packages/server/src/bar.ts' },
+        }),
+      ),
+    ).toEqual({ tool: 'Write', path: 'packages/server/src/bar.ts' });
+
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          tool_name: 'StrReplace',
+          tool_input: { path: 'src/a.ts', old_string: 'a', new_string: 'b' },
+        }),
+      ),
+    ).toEqual({ tool: 'Edit', path: 'src/a.ts' });
+
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          tool_name: 'Task',
+          tool_input: {
+            subagent_type: 'generalPurpose',
+            model: 'claude-opus-5',
+            prompt: 'do things',
+          },
+        }),
+      ),
+    ).toEqual({ tool: 'Agent', spawnType: 'generalPurpose', spawnModel: 'claude-opus-5' });
+
+    expect(
+      parseToolCall(
+        JSON.stringify({
+          tool_name: 'Write',
+          tool_input: { path: 'packages/cli/src/x.ts' },
+          subagent_id: 'sub-1',
+          subagent_type: 'explore',
+        }),
+      ),
+    ).toEqual({
+      tool: 'Write',
+      path: 'packages/cli/src/x.ts',
+      actorId: 'sub-1',
+      actorType: 'explore',
+    });
+  });
+
   it('extracts an Edit/Write file path', () => {
     expect(
       parseToolCall(JSON.stringify({ tool_name: 'Write', tool_input: { file_path: 'src/x.ts' } })),

@@ -118,7 +118,7 @@ src/
     harnesses/        // per-harness feature differences (labeling, hooks, skills discovery) are observed environment facts — documented in docs/wiki/driver-support-matrix.md, not modelled (ADR 296)
       index.ts        // registry of supported run targets (pluggable)
       claudeCode.ts   // detect/configure via the `claude mcp` CLI (`-s local`, this folder only)
-      cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks for model_id observe (ADR 198); CLI also wires afterShellExecution + afterMCPExecution (ADR 265); sessionStart emits observe --orient JSON additional_context (ADR 333)
+      cursor.ts       // detect/configure via .cursor/mcp.json + Agent hooks: preToolUse gate (ADR 150/369), postToolUse interrupt (ADR 088/369), sessionStart orient (ADR 333), model_id observe (ADR 198), afterShellExecution + afterMCPExecution (ADR 265)
       codex.ts        // detect/configure via project-local .codex/config.toml + marker-owned observational hooks (ADR 031/249); toolkit-declared plugin fragments write [plugins."id"] enable tables in the same file (ADR 323)
       opencode.ts     // detect/configure via project-local .opencode/opencode.json (`mcp.musterd`, McpLocalConfig shape); plain JSON only — an opencode.jsonc sibling is refused, never raced (ADR 321 §3/§4); no hooks, guidance rides the AGENTS.md primer opencode reads natively; orient skill is canonical `.musterd/skill/orient.md` (ADR 333)
       grok.ts         // detect/configure via project-local .grok/config.toml + Claude-parity hooks in .grok/hooks/musterd.json (nudge, interrupt, gate, capture, end), statusline, permission floor; Cursor hook compat off (ADR 352)

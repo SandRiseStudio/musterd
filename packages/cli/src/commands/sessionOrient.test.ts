@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Binding } from '../config.js';
 import {
   ORIENT_NUDGE_TEXT,
+  formatCursorInterrupt,
   formatCursorOrientation,
   orientNudgeDue,
   writeOrientStamp,
@@ -83,6 +84,15 @@ describe('session orient stamp/nudge', () => {
     expect(json).not.toBeNull();
     expect(JSON.parse(json!)).toEqual({
       additional_context: 'musterd orientation — seat "scout" on team "dawn"',
+    });
+  });
+
+  it('formatCursorInterrupt wraps the interrupt line as Cursor additional_context JSON (ADR 369)', () => {
+    expect(formatCursorInterrupt(null)).toBeNull();
+    const json = formatCursorInterrupt('⚑ 1 urgent request waiting for you since 11:30');
+    expect(json).not.toBeNull();
+    expect(JSON.parse(json!)).toEqual({
+      additional_context: '⚑ 1 urgent request waiting for you since 11:30',
     });
   });
 });

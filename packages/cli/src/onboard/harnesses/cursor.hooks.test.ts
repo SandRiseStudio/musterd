@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   CURSOR_END_HOOK_MARKER,
+  CURSOR_GATE_HOOK_MARKER,
   CURSOR_OBSERVE_HOOK_MARKER,
   installMusterdCursorHooks,
   removeMusterdCursorHooks,
@@ -22,17 +23,20 @@ function tmpProject(): string {
   return dir;
 }
 
-describe('Cursor hooks install (ADR 198)', () => {
-  it('writes sessionStart, postToolUse, afterShellExecution, afterMCPExecution, and sessionEnd with musterd markers', () => {
+describe('Cursor hooks install (ADR 198 / 369)', () => {
+  it('writes preToolUse, sessionStart, postToolUse, afterShellExecution, afterMCPExecution, and sessionEnd with musterd markers', () => {
     const dir = tmpProject();
     const warnings = installMusterdCursorHooks(dir);
     expect(warnings).toEqual([]);
     const raw = readFileSync(join(dir, '.cursor', 'hooks.json'), 'utf8');
     const file = JSON.parse(raw) as {
       version: number;
-      hooks: Record<string, { command: string }[]>;
+      hooks: Record<string, { command: string; matcher?: string }[]>;
     };
     expect(file.version).toBe(1);
+    expect(file.hooks['preToolUse']?.[0]?.command).toContain(CURSOR_GATE_HOOK_MARKER);
+    expect(file.hooks['preToolUse']?.[0]?.command).toContain('gate check --stdin 2>/dev/null');
+    expect(file.hooks['preToolUse']?.[0]?.matcher).toBe('Shell|Write|Delete|Edit|Task');
     expect(file.hooks['sessionStart']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
     expect(file.hooks['sessionStart']?.[0]?.command).toContain(
       'session observe --stdin --orient 2>/dev/null',
@@ -42,7 +46,10 @@ describe('Cursor hooks install (ADR 198)', () => {
     );
     expect(file.hooks['postToolUse']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
     expect(file.hooks['postToolUse']?.[0]?.command).toContain(
-      'session observe --stdin >/dev/null 2>&1',
+      'session observe --stdin --interrupt 2>/dev/null',
+    );
+    expect(file.hooks['postToolUse']?.[0]?.command).not.toContain(
+      'session observe --stdin --interrupt >/dev/null',
     );
     expect(file.hooks['afterShellExecution']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
     expect(file.hooks['afterMCPExecution']?.[0]?.command).toContain(CURSOR_OBSERVE_HOOK_MARKER);
@@ -97,6 +104,7 @@ describe('Cursor hooks install (ADR 198)', () => {
       hooks: Record<string, { command: string }[]>;
     };
     expect(file.hooks['postToolUse']).toEqual([{ command: './mine.sh' }]);
+    expect(file.hooks['preToolUse']).toBeUndefined();
     expect(file.hooks['sessionStart']).toBeUndefined();
     expect(existsSync(join(dir, '.cursor', 'hooks.json'))).toBe(true);
   });
