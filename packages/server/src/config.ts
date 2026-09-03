@@ -80,8 +80,14 @@ export const OBSERVER_IDLE_CAP = 8;
 /** A seat resume grant (ADR 087) is valid for this long, refreshed on every clean occupy. */
 export const RESUME_TTL_MS = 86_400_000; // 24h
 /** A same-workspace successor waits this long, still attached, before reaping its predecessor (ADR
- * 092). Above the ~ms lifetime of a Claude Code health-check probe, below a human-noticeable stall. */
-export const SUPERSEDE_GRACE_MS = 5_000;
+ * 092). Above the ~ms lifetime of a Claude Code health-check probe, below a human-noticeable stall.
+ *
+ * Must clear the ADR 346 one-shot reclaim's own worst case, not just the probe case ADR 092 was
+ * written for: `CLAIM_LEASE_TIMEOUT_MS` (cli/client.ts) alone budgets 3s for the claim step, before
+ * the reclaim's HTTP attest + close even start. At the original 5s, a momentarily busy daemon made
+ * that math too tight and evicted a healthy incumbent that had done nothing wrong (lane 01M1J8HS63,
+ * measured on seat ryder 2026-09-02) — raised to 10s for real margin. */
+export const SUPERSEDE_GRACE_MS = 10_000;
 /** Footprint sampler tick (seat-footprint design): one cheap `ps` scan per minute. */
 export const FOOTPRINT_INTERVAL_MS = 60_000;
 /** Footprint samples older than this are pruned each tick — the table stays bounded. */
