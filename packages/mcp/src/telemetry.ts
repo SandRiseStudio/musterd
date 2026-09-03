@@ -90,7 +90,7 @@ export function recordAdapterInitialization(
       `musterd MCP is attesting a declared model (${config.model ?? 'unset'}, tier ` +
         `${config.modelSource}) on ${config.surface}, which can observe the model it is actually ` +
         `running${source}. No observation reached this session, so the roster shows a snapshot. ` +
-        'Run `musterd wire` to (re)install this harness\'s hooks, then start a new session.',
+        "Run `musterd wire` to (re)install this harness's hooks, then start a new session.",
     );
   }
 
