@@ -160,13 +160,13 @@ describe('claudeCode notification hook (ADR 053)', () => {
   const entry = { command: 'node', args: ['mcp.js'], env: { MUSTERD_TEAM: 'dawn' } };
   const binding = { team: 'dawn', member: 'Ada', token: 't', surface: 'claude-code' as const };
 
-  it('configure installs a Notification hook that runs `musterd nudge`, marked for reversal', async () => {
+  it('configure installs a Notification hook that runs `musterd inbox --waiting`, marked for reversal', async () => {
     await claudeCode.configure(entry, binding);
     const written = JSON.parse(readFileSync(settingsPath(), 'utf8'));
     const hooks = written.hooks.Notification as { hooks: { command: string }[] }[];
     expect(hooks).toHaveLength(1);
     const cmd = hooks[0].hooks[0].command;
-    expect(cmd).toContain('musterd nudge');
+    expect(cmd).toContain('musterd inbox --waiting');
     expect(cmd).toContain('musterd-notify-hook');
   });
 

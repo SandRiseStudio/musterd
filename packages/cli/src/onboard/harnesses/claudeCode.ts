@@ -165,10 +165,10 @@ function globalSettingsPath(): string {
 
 function notificationHookCommand(): string {
   // Best-effort, never failing the approval it rides on: cd to the project dir so the bound seat
-  // resolves, run `musterd nudge` only if the CLI is on PATH, swallow all output-noise on error.
+  // resolves, run `musterd inbox --waiting` only if the CLI is on PATH, swallow all output-noise on error.
   return (
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
-    'command -v musterd >/dev/null 2>&1 && musterd nudge 2>/dev/null || true ' +
+    'command -v musterd >/dev/null 2>&1 && musterd inbox --waiting 2>/dev/null || true ' +
     `# ${NOTIFICATION_HOOK_MARKER}`
   );
 }

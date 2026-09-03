@@ -103,7 +103,7 @@ describe('grok hooks (Claude-parity set)', () => {
     const file = JSON.parse(readFileSync(hooksPath(), 'utf8')) as {
       hooks: Record<string, { hooks: { command: string }[] }[]>;
     };
-    expect(file.hooks['Notification']?.[0]?.hooks[0]?.command).toContain('musterd nudge');
+    expect(file.hooks['Notification']?.[0]?.hooks[0]?.command).toContain('musterd inbox --waiting');
     expect(file.hooks['PostToolUse']?.[0]?.hooks[0]?.command).toContain(INTERRUPT_MARKER);
     expect(file.hooks['PostToolUse']?.[0]?.hooks[0]?.command).toContain('interrupt-check');
     expect(file.hooks['PreToolUse']?.[0]?.hooks[0]?.command).toContain(GATE_MARKER);

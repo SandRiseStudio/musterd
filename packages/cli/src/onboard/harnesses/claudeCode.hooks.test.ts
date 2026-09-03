@@ -55,7 +55,7 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     const local = read(localPath());
     const global = read(globalPath());
     expect(cmdFor(local, 'Notification')).toContain(NOTIFICATION_HOOK_MARKER);
-    expect(cmdFor(local, 'Notification')).toContain('musterd nudge');
+    expect(cmdFor(local, 'Notification')).toContain('musterd inbox --waiting');
     // The LOCAL SessionStart is the inc-4 session-capture hook — a different marker and concern
     // from the global orientation hook; exactly one entry, piping stdin, fully silent.
     expect(local.hooks?.['SessionStart']).toHaveLength(1);

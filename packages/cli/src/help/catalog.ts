@@ -431,15 +431,6 @@ export const CATALOG: readonly CommandEntry[] = [
     ],
   },
   {
-    name: 'nudge',
-    signature: '',
-    summary: 'the waiting-acts banner and the acts behind it (read-only)',
-    group: 'messaging',
-    primary: true,
-    detail:
-      'The one-line banner and, under it, the directed acts waiting for this seat, oldest first. Read-only — never moves the cursor; the approval-prompt hook target. `musterd inbox` is the full answer.',
-  },
-  {
     name: 'reap',
     signature: '[--yes]',
     summary: 'reclaim orphaned MCP sidecar processes (list first; --yes applies)',
@@ -630,7 +621,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'inbox',
     signature:
-      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
+      '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  --waiting  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
     summary: 'read what’s waiting for you; watch or block for the next act',
     group: 'inbox',
     primary: true,
@@ -640,6 +631,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'advances the cursor only past what it showed. `--limit <n>` resizes the window; `--limit 0` ' +
       'shows the full history; `--peek` reads without marking anything read; `--unread` shows only new. ' +
       '`--watch` streams live; `--wait` blocks until the next directed act then exits (pairs with /loop); ' +
+      '`--waiting` prints the waiting-acts banner and the directed acts behind it, read-only and silent when nothing waits (the ADR 053 approval-prompt Notification hook target; `musterd nudge` until 2026-09-03). ' +
       '`--interrupt-check` is silent unless an urgent act waits (the ADR 088 PostToolUse interrupt hook). ' +
       '`defer <act_id>` postpones one act until a condition fires — `--until-lane <id>` (that lane moves) ' +
       'or `--until-reply` (someone answers on its thread); it comes back on its own then, even if the ' +
@@ -648,6 +640,7 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: [
       'musterd inbox',
       'musterd inbox --unread',
+      'musterd inbox --waiting',
       'musterd inbox --limit 40',
       'musterd inbox --wait --timeout 300',
       'musterd inbox defer 01KZ4PAE1E --until-reply',
