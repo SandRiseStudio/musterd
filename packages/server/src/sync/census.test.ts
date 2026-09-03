@@ -149,7 +149,7 @@ describe('residence-2 census — what crosses the wire at this build', () => {
     ).toBe(true);
   });
 
-  it('CLOSED (gap 1, ADR 365): a policy change on the hub reaches the joiner — an UNSTAMPED one still does not', async () => {
+  it('CLOSED (gap 1, ADR 367): a policy change on the hub reaches the joiner — an UNSTAMPED one still does not', async () => {
     // The gap this census named is closed: the admin route stamps, so the change replicates.
     await post(hubBase, '/teams/bravo/policy', { residency: { hourly_cap: 1 } }, nickOnHub);
     expect(getPolicy(hub.db, hubTeam().id).residency.hourly_cap).toBe(1);
@@ -182,7 +182,7 @@ describe('residence-2 census — what crosses the wire at this build', () => {
     ).toEqual({ n: 0 });
   });
 
-  it('GAP (ADR 325 residence 2, promised): audit verbs written best-effort carry no origin stamp and never push — residency.* and memory.save among them (policy.change left this list with ADR 365)', async () => {
+  it('GAP (ADR 325 residence 2, promised): audit verbs written best-effort carry no origin stamp and never push — residency.* and memory.save among them (policy.change left this list with ADR 367)', async () => {
     const jt = joinerTeam();
     appendAudit(joiner.db, jt.id, {
       actor: 'nick',

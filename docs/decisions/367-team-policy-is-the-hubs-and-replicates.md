@@ -1,4 +1,4 @@
-# 365 — Team policy is the hub's, and it replicates
+# 367 — Team policy is the hub's, and it replicates
 
 - Status: accepted
 - Date: 2026-09-03

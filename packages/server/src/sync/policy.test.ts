@@ -16,7 +16,7 @@ import { pullTeam } from './pull.js';
 import { pushTeam } from './push.js';
 
 /**
- * Policy replication (ADR 365, residence-2 census gap 1) between two real daemons.
+ * Policy replication (ADR 367, residence-2 census gap 1) between two real daemons.
  *
  * The census measured the gap: `setPolicy` wrote a local blob and nothing shipped it, so a joiner's
  * host actuator ran different `hourly_cap`/`cooldown`/`loops` than the hub after every `policy set`
@@ -121,7 +121,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('policy replication (ADR 365)', () => {
+describe('policy replication (ADR 367)', () => {
   it('the hub sets a wake cap and the joiner runs it after one round trip', async () => {
     const set = await post(
       hubBase,
