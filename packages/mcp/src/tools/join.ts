@@ -8,7 +8,7 @@ import { repairHint, textResult } from './format.js';
 import { memoryLine } from './memory.js';
 
 const DESCRIPTION =
-  "Claim your seat and go online — the CLI spelling is `musterd claim` (ADR 075/374). Use as, role, or this Workspace's policy. May wait for approval; check your Inbox after.";
+  "Claim your seat and go online — the CLI spelling is `musterd claim` (ADR 075/377). Use as, role, or this Workspace's policy. May wait for approval; check your Inbox after.";
 
 /** How long team_join blocks waiting for an admin to approve a claim before returning (ADR 087). A
  *  later approval still occupies in the background — a follow-up team_join then reports already-joined. */

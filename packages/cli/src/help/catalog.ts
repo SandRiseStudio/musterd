@@ -746,7 +746,7 @@ export const CATALOG: readonly CommandEntry[] = [
       'already live here); a name/role claims that seat; `--token` adopts a teammate’s seat; `--force` ' +
       'repoints a folder bound to a live member. A held seat opens a request and blocks until an admin ' +
       'approves, then occupies (ADR 087). In a fresh folder name the team and present the key: ' +
-      '`claim <name> --team <slug> --key <mskey_|mscr_>` (the former `musterd join`, folded in by ADR 374; ' +
+      '`claim <name> --team <slug> --key <mskey_|mscr_>` (the former `musterd join`, folded in by ADR 377; ' +
       'a key this machine has held before is found in the vault). The MCP spelling is `team_join`.',
     examples: [
       'musterd claim',

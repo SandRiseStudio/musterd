@@ -1,4 +1,4 @@
-# 374 — One name for seat occupancy: `claim` on the CLI, and what `team_join` is called
+# 377 — One name for seat occupancy: `claim` on the CLI, and what `team_join` is called
 
 - Status: accepted — 2026-09-03 (nick: "lets go with 2b" — increment 1 and 2b build together; 2a stays the fallback if the eval fails)
 - Date: 2026-09-03

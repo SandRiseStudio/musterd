@@ -124,7 +124,7 @@ name:<human>}` and their `mscr_` credential. This is the load-bearing item: iden
 
 The deliberate mirror of `musterd agent <name>`; the pair _is_ the model. `agent` mints a seat and
 stands it in a worktree; `human` mints (or recovers) a credential and stands the person in the team
-home. Today's `team add --kind human` prints a `musterd claim … --team …` line (`musterd join …` before ADR 374) and stops — `human` is that
+home. Today's `team add --kind human` prints a `musterd claim … --team …` line (`musterd join …` before ADR 377) and stops — `human` is that
 line, executed, with a floor under it.
 
 The composition (all glue over existing parts; the only new server surface is the re-issue route,
@@ -167,7 +167,7 @@ Fix shape (lane L-claim-kind): one invariant, stated once — **an agent-key-aut
 only occupy an agent seat** — enforced _after_ target resolution (so role-targets that resolve to a
 human seat are caught) and _before_ the grant/request branches (so an admin can never be asked to
 approve a poisoned claim, and no pending-request row leaks). Refusal message reuses
-`authByAgentKey`'s wording plus the repair: `musterd claim <name> --team <team> --key <mscr_…>` (spelled `musterd join <team> --as <name>` before ADR 374).
+`authByAgentKey`'s wording plus the repair: `musterd claim <name> --team <team> --key <mscr_…>` (spelled `musterd join <team> --as <name>` before ADR 377).
 No ADR: this enforces a decided posture (ADR 069/075); it is a bug fix.
 
 Companions (lane L-doctor): `init --check`/doctor gains _"this binding claims seat X; the roster
