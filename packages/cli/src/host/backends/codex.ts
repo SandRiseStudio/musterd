@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
-import type { WakeLeaseFile } from '@musterd/protocol';
+import type { WakeLeaseFile, WakeUsage } from '@musterd/protocol';
 import { z } from 'zod';
 import { resolveCodexBin } from '../../codexBin.js';
 import { findBinding, saveBinding } from '../../config.js';
@@ -42,6 +42,47 @@ const ThreadStartedSchema = z.object({
   type: z.literal('thread.started'),
   thread_id: z.string().min(1),
 });
+
+/** Codex's turn-end record (`codex exec --json`, 0.152.1, captured from a real run 2026-09-02):
+ *  `{"type":"turn.completed","usage":{"input_tokens","cached_input_tokens",
+ *  "cache_write_input_tokens","output_tokens","reasoning_output_tokens"}}`. Token counts only — no
+ *  model name, no price (ADR 364). Extra keys tolerated; a missing count is a missing count. */
+const TurnCompletedSchema = z.object({
+  type: z.literal('turn.completed'),
+  usage: z.object({
+    input_tokens: z.number().int().nonnegative(),
+    output_tokens: z.number().int().nonnegative(),
+    cached_input_tokens: z.number().int().nonnegative().optional(),
+    cache_write_input_tokens: z.number().int().nonnegative().optional(),
+    reasoning_output_tokens: z.number().int().nonnegative().optional(),
+  }),
+});
+
+/** External JSONL boundary: the usage a turn-end record carries, or nothing. Never a guess. */
+export function parseCodexUsageLine(line: string): WakeUsage | undefined {
+  try {
+    const result = TurnCompletedSchema.safeParse(JSON.parse(line));
+    return result.success ? result.data.usage : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Sum two usage records field by field — a run is one exec, but resume can carry more than one
+ *  turn, and the ledger wants the run's total. Optional counts sum only when either side has one. */
+export function addUsage(a: WakeUsage | undefined, b: WakeUsage): WakeUsage {
+  if (!a) return b;
+  const opt = (
+    k: 'cached_input_tokens' | 'cache_write_input_tokens' | 'reasoning_output_tokens',
+  ) => (a[k] === undefined && b[k] === undefined ? {} : { [k]: (a[k] ?? 0) + (b[k] ?? 0) });
+  return {
+    input_tokens: a.input_tokens + b.input_tokens,
+    output_tokens: a.output_tokens + b.output_tokens,
+    ...opt('cached_input_tokens'),
+    ...opt('cache_write_input_tokens'),
+    ...opt('reasoning_output_tokens'),
+  };
+}
 
 /** External JSONL boundary: only Codex's typed thread-start record supplies an identity. */
 export function parseCodexThreadLine(line: string): string | undefined {
@@ -175,12 +216,17 @@ async function attempt(
     });
   }
   let threadId: string | undefined;
+  let usage: WakeUsage | undefined;
   let buffer = '';
   child.stdout?.on('data', (chunk: Buffer) => {
     buffer += chunk.toString();
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
-    for (const line of lines) threadId ??= parseCodexThreadLine(line);
+    for (const line of lines) {
+      threadId ??= parseCodexThreadLine(line);
+      const turn = parseCodexUsageLine(line);
+      if (turn) usage = addUsage(usage, turn);
+    }
   });
   let timedOut = false;
   let spawnError = false;
@@ -209,7 +255,13 @@ async function attempt(
       `run for ${spec.order.seat} (${label}) settled: exit=${code ?? 'error'}` +
         `${timedOut ? ' (watchdog)' : ''} wall=${(duration_ms / 1000).toFixed(1)}s`,
     );
-    return { duration_ms };
+    // ADR 364: the tokens codex printed ride the row; a price does not exist to print. The reason
+    // is a property of the harness, so it is stated even on a run that died before turn end.
+    return {
+      duration_ms,
+      ...(usage ? { usage } : {}),
+      unpriced_reason: 'harness_prints_no_price',
+    };
   });
   const verified = await Promise.race([
     ctx.verifyOccupied(

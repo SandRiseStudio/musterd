@@ -8,6 +8,8 @@ import {
   codexBackend,
   codexWakeEnv,
   parseCodexThreadLine,
+  parseCodexUsageLine,
+  addUsage,
 } from './codex.js';
 
 class Child extends EventEmitter {
@@ -513,6 +515,74 @@ describe('the completion record — every settled run reports what the host meas
       spawn: (() => child) as never,
       recordFreshThread: () => undefined,
     });
+
+  // Verbatim from `codex exec --json` 0.152.1 on 2026-09-02 (lane 01M1HJY3JF): token counts, no
+  // model, no price. The shape this adapter reads is the shape codex actually prints.
+  const TURN_COMPLETED =
+    '{"type":"turn.completed","usage":{"input_tokens":19818,"cached_input_tokens":11136,' +
+    '"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}';
+
+  it('parses the usage a real turn.completed line carries, and nothing from any other line', () => {
+    expect(parseCodexUsageLine(TURN_COMPLETED)).toEqual({
+      input_tokens: 19818,
+      cached_input_tokens: 11136,
+      cache_write_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+    });
+    expect(parseCodexUsageLine('{"type":"turn.started"}')).toBeUndefined();
+    expect(parseCodexUsageLine('{"type":"turn.completed"}')).toBeUndefined();
+    expect(
+      parseCodexUsageLine(
+        '{"type":"turn.completed","usage":{"input_tokens":-1,"output_tokens":1}}',
+      ),
+    ).toBeUndefined();
+    expect(parseCodexUsageLine('not json')).toBeUndefined();
+  });
+
+  it('sums usage across turns, keeping an optional count absent only when no turn had it', () => {
+    const a = { input_tokens: 10, output_tokens: 1 };
+    const b = { input_tokens: 5, output_tokens: 2, reasoning_output_tokens: 3 };
+    expect(addUsage(undefined, a)).toEqual(a);
+    expect(addUsage(a, b)).toEqual({
+      input_tokens: 15,
+      output_tokens: 3,
+      reasoning_output_tokens: 3,
+    });
+  });
+
+  it('a settled run carries the tokens codex printed and names why there is no price (ADR 364)', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    child.out(TURN_COMPLETED);
+    child.exit(0);
+    const completion = await result.settled;
+    expect(completion?.usage).toEqual({
+      input_tokens: 19818,
+      cached_input_tokens: 11136,
+      cache_write_input_tokens: 0,
+      output_tokens: 5,
+      reasoning_output_tokens: 0,
+    });
+    expect(completion?.unpriced_reason).toBe('harness_prints_no_price');
+    expect(completion?.cost_usd).toBeUndefined();
+    expect(completion?.harness_cost_usd).toBeUndefined();
+  });
+
+  it('a run killed before turn end still names the reason — it is a property of the harness', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"thread.started","thread_id":"new"}');
+    const result = await wake;
+    child.exit(137);
+    const completion = await result.settled;
+    expect(completion?.usage).toBeUndefined();
+    expect(completion?.unpriced_reason).toBe('harness_prints_no_price');
+  });
 
   it('a woke run that exits cleanly carries duration_ms', async () => {
     const child = new Child();

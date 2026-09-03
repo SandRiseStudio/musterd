@@ -1,4 +1,4 @@
-import type { WakeOrder, WakeReportBody } from '@musterd/protocol';
+import type { UnpricedReason, WakeOrder, WakeReportBody, WakeUsage } from '@musterd/protocol';
 
 /**
  * The actuator seam (ADR 131 §7): the host loop drives this interface and knows nothing about CLI
@@ -40,6 +40,12 @@ export type WakeOutcome = Omit<WakeReportBody, 'lease_id'>;
 export interface WakeCompletion {
   cost_usd?: number;
   duration_ms?: number;
+  /** ADR 364: tokens the harness printed at turn end; rides the supplementary report as-is. */
+  usage?: WakeUsage;
+  /** ADR 364: why `cost_usd` is absent — a fact about the harness's output, set by the adapter. */
+  unpriced_reason?: UnpricedReason;
+  /** ADR 364: a price the harness printed that the host cannot attest (opencode). */
+  harness_cost_usd?: number;
 }
 
 /**

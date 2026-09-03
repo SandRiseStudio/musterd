@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import type { WakeUsage } from '@musterd/protocol';
 import { z } from 'zod';
 import { findBinding, saveBinding } from '../../config.js';
 import { resolveOpencodeBin } from '../../opencodeBin.js';
@@ -11,6 +12,7 @@ import type {
   WakeSpec,
 } from '../backend.js';
 import { ensurePinnedMusterd, wakeEnv } from '../pinnedBin.js';
+import { addUsage } from './codex.js';
 
 const KILL_GRACE_MS = 10_000;
 const RESUME_VERIFY_WINDOW_MS = 30_000;
@@ -35,6 +37,51 @@ export const OpencodeEventSchema = z.object({
   type: z.string().min(1),
   sessionID: z.string().min(1),
 });
+
+/** opencode's step-end record (`opencode run --format json`, 1.18.27, captured from a real run
+ *  2026-09-02): `part.tokens {total,input,output,reasoning,cache{write,read}}` and `part.cost` — a
+ *  price opencode computed from its own model table, which the host does not hold and cannot
+ *  attest; on this machine it printed a literal `0` (ADR 364). Extra keys tolerated. */
+const StepFinishSchema = z.object({
+  type: z.literal('step_finish'),
+  part: z.object({
+    tokens: z.object({
+      input: z.number().int().nonnegative(),
+      output: z.number().int().nonnegative(),
+      reasoning: z.number().int().nonnegative().optional(),
+      cache: z
+        .object({
+          read: z.number().int().nonnegative().optional(),
+          write: z.number().int().nonnegative().optional(),
+        })
+        .optional(),
+    }),
+    cost: z.number().nonnegative().optional(),
+  }),
+});
+
+/** External JSONL boundary: one step's usage and the harness's own price claim, or nothing. */
+export function parseOpencodeStepLine(
+  line: string,
+): { usage: WakeUsage; harness_cost_usd?: number } | undefined {
+  try {
+    const result = StepFinishSchema.safeParse(JSON.parse(line));
+    if (!result.success) return undefined;
+    const { tokens, cost } = result.data.part;
+    const usage: WakeUsage = {
+      input_tokens: tokens.input,
+      output_tokens: tokens.output,
+      ...(tokens.cache?.read !== undefined ? { cached_input_tokens: tokens.cache.read } : {}),
+      ...(tokens.cache?.write !== undefined
+        ? { cache_write_input_tokens: tokens.cache.write }
+        : {}),
+      ...(tokens.reasoning !== undefined ? { reasoning_output_tokens: tokens.reasoning } : {}),
+    };
+    return { usage, ...(cost !== undefined ? { harness_cost_usd: cost } : {}) };
+  } catch {
+    return undefined;
+  }
+}
 
 /** External JSONL boundary: only a typed event record supplies an identity. */
 export function parseOpencodeSessionLine(line: string): string | undefined {
@@ -159,12 +206,22 @@ async function attempt(
     };
   }
   let sessionId: string | undefined;
+  let usage: WakeUsage | undefined;
+  let harnessCost: number | undefined;
   let buffer = '';
   child.stdout?.on('data', (chunk: Buffer) => {
     buffer += chunk.toString();
     const lines = buffer.split('\n');
     buffer = lines.pop() ?? '';
-    for (const line of lines) sessionId ??= parseOpencodeSessionLine(line);
+    for (const line of lines) {
+      sessionId ??= parseOpencodeSessionLine(line);
+      const step = parseOpencodeStepLine(line);
+      if (step) {
+        usage = addUsage(usage, step.usage);
+        if (step.harness_cost_usd !== undefined)
+          harnessCost = (harnessCost ?? 0) + step.harness_cost_usd;
+      }
+    }
   });
   let timedOut = false;
   let spawnError = false;
@@ -187,7 +244,14 @@ async function attempt(
       `run for ${spec.order.seat} (${label}) settled: exit=${code ?? 'error'}` +
         `${timedOut ? ' (watchdog)' : ''} wall=${(duration_ms / 1000).toFixed(1)}s`,
     );
-    return { duration_ms };
+    // ADR 364: tokens ride the row; the price opencode printed rides beside them as ITS claim —
+    // `cost_usd` stays absent because the host holds no table to check it against.
+    return {
+      duration_ms,
+      ...(usage ? { usage } : {}),
+      ...(harnessCost !== undefined ? { harness_cost_usd: harnessCost } : {}),
+      unpriced_reason: 'harness_price_unverified',
+    };
   });
   const verified = await Promise.race([
     ctx.verifyOccupied(
