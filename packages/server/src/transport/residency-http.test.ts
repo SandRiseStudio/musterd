@@ -607,6 +607,47 @@ describe('supplementary wake-cost report (ADR 131 inc 5)', () => {
     );
   });
 
+  it('an unpriced report records tokens and the reason, and never enters the cost totals (ADR 364)', async () => {
+    const leaseId = await reportedLease();
+    const supplement = await post(
+      '/teams/dawn/residency/wake-report',
+      {
+        lease_id: leaseId,
+        occupied: true,
+        duration_ms: 12_000,
+        usage: { input_tokens: 19818, cached_input_tokens: 11136, output_tokens: 5 },
+        unpriced_reason: 'harness_prints_no_price',
+        harness_cost_usd: 0,
+      },
+      agentKey,
+    );
+    expect(supplement.status).toBe(200);
+    expect(supplement.json.status).toBe('cost_recorded');
+    const rows = audits('residency.wake_cost');
+    expect(rows).toHaveLength(1);
+    const detail = JSON.parse(rows[0]!.detail as string);
+    expect(detail).toMatchObject({
+      lease_id: leaseId,
+      duration_ms: 12_000,
+      usage: { input_tokens: 19818, cached_input_tokens: 11136, output_tokens: 5 },
+      unpriced_reason: 'harness_prints_no_price',
+      harness_cost_usd: 0,
+    });
+    expect(detail.cost_usd).toBeUndefined();
+    const report = await get('/teams/dawn/report', nickCred);
+    expect(report.json.wake.cost_reported).toBe(0);
+  });
+
+  it('a malformed unpriced_reason is refused, not stored as prose', async () => {
+    const leaseId = await reportedLease();
+    const bad = await post(
+      '/teams/dawn/residency/wake-report',
+      { lease_id: leaseId, occupied: true, duration_ms: 1, unpriced_reason: 'subscription' },
+      agentKey,
+    );
+    expect(bad.status).toBe(400);
+  });
+
   it('a second report carrying cost lands as residency.wake_cost (200 cost_recorded)', async () => {
     const leaseId = await reportedLease();
     const supplement = await post(

@@ -8,6 +8,7 @@ import {
   opencodeBackend,
   opencodeWakeEnv,
   parseOpencodeSessionLine,
+  parseOpencodeStepLine,
 } from './opencode.js';
 
 class Child extends EventEmitter {
@@ -332,6 +333,52 @@ describe('the completion record — every settled run reports what the host meas
       spawn: (() => child) as never,
       recordFreshSession: () => undefined,
     });
+
+  // Verbatim from `opencode run --format json` 1.18.27 on 2026-09-02 (lane 01M1HJY3JF), ids
+  // shortened: tokens, and a `cost` opencode computed itself — 0 here.
+  const STEP_FINISH =
+    '{"type":"step_finish","timestamp":1788396624363,"sessionID":"ses_new","part":{"id":"prt_1",' +
+    '"reason":"stop","messageID":"msg_1","sessionID":"ses_new","type":"step-finish",' +
+    '"tokens":{"total":10769,"input":10453,"output":11,"reasoning":64,"cache":{"write":0,"read":241}},"cost":0}}';
+
+  it("parses a real step_finish line into usage plus the harness's own price claim", () => {
+    expect(parseOpencodeStepLine(STEP_FINISH)).toEqual({
+      usage: {
+        input_tokens: 10453,
+        output_tokens: 11,
+        cached_input_tokens: 241,
+        cache_write_input_tokens: 0,
+        reasoning_output_tokens: 64,
+      },
+      harness_cost_usd: 0,
+    });
+    expect(
+      parseOpencodeStepLine('{"type":"step_start","timestamp":1,"sessionID":"ses_new"}'),
+    ).toBeUndefined();
+    expect(parseOpencodeStepLine('{"type":"step_finish","part":{}}')).toBeUndefined();
+  });
+
+  it('a settled run carries summed tokens, the harness price as ITS claim, and no cost_usd (ADR 364)', async () => {
+    const child = new Child();
+    const wake = fresh(child).wake(spec, ctx);
+    await Promise.resolve();
+    child.out('{"type":"step_start","timestamp":1,"sessionID":"ses_new"}');
+    const result = await wake;
+    child.out(STEP_FINISH);
+    child.out(STEP_FINISH);
+    child.exit(0);
+    const completion = await result.settled;
+    expect(completion?.usage).toEqual({
+      input_tokens: 20906,
+      output_tokens: 22,
+      cached_input_tokens: 482,
+      cache_write_input_tokens: 0,
+      reasoning_output_tokens: 128,
+    });
+    expect(completion?.harness_cost_usd).toBe(0);
+    expect(completion?.unpriced_reason).toBe('harness_price_unverified');
+    expect(completion?.cost_usd).toBeUndefined();
+  });
 
   it('a woke run that exits cleanly carries duration_ms', async () => {
     const child = new Child();

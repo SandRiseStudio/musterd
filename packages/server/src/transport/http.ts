@@ -2808,6 +2808,13 @@ export async function handleHttp(
                 ...(settled.edge ? { edge: settled.edge } : {}),
                 ...(body.cost_usd !== undefined ? { cost_usd: body.cost_usd } : {}),
                 ...(body.duration_ms !== undefined ? { duration_ms: body.duration_ms } : {}),
+                // ADR 364: tokens and the reason there is no price — recorded as the harness said
+                // them; `harness_cost_usd` is its claim and never enters the totals.
+                ...(body.usage ? { usage: body.usage } : {}),
+                ...(body.unpriced_reason ? { unpriced_reason: body.unpriced_reason } : {}),
+                ...(body.harness_cost_usd !== undefined
+                  ? { harness_cost_usd: body.harness_cost_usd }
+                  : {}),
                 ...(body.delivery_outcome ? { delivery_outcome: body.delivery_outcome } : {}),
                 ...(body.exact_match ? { exact_match: body.exact_match } : {}),
                 ...(body.transcript_bytes !== undefined

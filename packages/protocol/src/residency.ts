@@ -473,6 +473,28 @@ export type WakeLeasesResponse = z.infer<typeof WakeLeasesResponseSchema>;
  */
 const HostMeasuredCount = z.number().nonnegative().transform(Math.round);
 
+/** Why a settled wake carries no `cost_usd` (ADR 364). Each value is a fact about what the harness
+ *  PRINTED, attestable from the event shape alone — never a guess about billing:
+ *  - `harness_prints_no_price`: the harness's turn-end event carries token counts and no price
+ *    (codex `turn.completed`). A subscription seat has no marginal price the host could vouch for.
+ *  - `harness_price_unverified`: the harness prints a price the host cannot attest (opencode
+ *    `step_finish.cost`, computed from a table the host does not hold; a literal `0` is the common
+ *    case). The figure rides as `harness_cost_usd`, labelled as the harness's claim, never as ours. */
+export const UNPRICED_REASONS = ['harness_prints_no_price', 'harness_price_unverified'] as const;
+export type UnpricedReason = (typeof UNPRICED_REASONS)[number];
+
+const TokenCount = z.number().int().nonnegative();
+/** Token usage the harness printed at turn end (ADR 364) — copied from its typed JSON event, summed
+ *  across turns, never derived from wall clock or transcript size. */
+export const WakeUsageSchema = z.object({
+  input_tokens: TokenCount,
+  output_tokens: TokenCount,
+  cached_input_tokens: TokenCount.optional(),
+  cache_write_input_tokens: TokenCount.optional(),
+  reasoning_output_tokens: TokenCount.optional(),
+});
+export type WakeUsage = z.infer<typeof WakeUsageSchema>;
+
 /**
  * Body of `POST /teams/:slug/residency/wake-report` — the host's `WakeOutcome`, minus anything the
  * daemon must never learn: no session ids, no transcript paths (ADR 131 §5 — the resumable
@@ -507,6 +529,13 @@ export const WakeReportBodySchema = z.object({
   cost_usd: z.number().nonnegative().optional(),
   /** Wall-clock of the settled run (harness-reported), riding the same supplementary report. */
   duration_ms: z.number().nonnegative().optional(),
+  /** ADR 364: the tokens the run used, when the harness printed them. Present with `cost_usd` absent
+   *  is the honest shape for a harness that prices nothing the host can attest. */
+  usage: WakeUsageSchema.optional(),
+  /** ADR 364: why `cost_usd` is absent on a run that settled — a fact about the harness's output. */
+  unpriced_reason: z.enum(UNPRICED_REASONS).optional(),
+  /** ADR 364: a price the HARNESS printed and the host did not verify. Never folded into totals. */
+  harness_cost_usd: z.number().nonnegative().optional(),
   /** Failure summary for a not-occupied outcome (watchdog timeout, spawn error) — host-composed,
    *  never model output. */
   reason: z.string().max(200).optional(),
