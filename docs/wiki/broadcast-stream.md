@@ -55,3 +55,44 @@ This raises the ceiling on a hiccup; it does not make the pipeline faster. Measu
 load average **5.50 / 4.54 / 2.49 on 4 cores**, chromium ~2.2 cores across four processes, ffmpeg
 0.83 — Chrome's render is still the bottleneck this page has recorded since 2026-07-29, and
 `performance-4x` still cannot step down. If `speed=` sits below 1.0x, no queue size fixes that.
+
+## `Page.navigate` ran on a deadline sized for local calls (2026-09-03; falsify: cold-boot a machine and time `streaming (rtmps)` → `◉ live`)
+
+`CDP_TIMEOUT_MS` is 15s and applied to **every** CDP call, but the startup calls are not alike.
+`Page.enable`, `Runtime.enable` and `Emulation.setDeviceMetricsOverride` are local bookkeeping that
+answer in microseconds. `Page.navigate` resolves only when the navigation **commits** — Chrome
+reaching the laptop's daemon across Tailscale and beginning the document, on a cold machine, with a
+Chrome seconds old, beside an encoder already burning most of a core.
+
+Machine `8799e4b0267668` logged `streaming (rtmps)` at 18:44:40 and died at 18:45:07 on `✗ Chrome did
+not answer Page.navigate in time` — fatal, `--restart no`, and the ADR 293 supervisor then spent a
+flap slot relaunching it. The margin was never comfortable: the machine that *survived* the same
+night took **16s** from `streaming` to `◉ live`, and that span contains navigate **plus**
+`waitBroadcastReady`'s own poll, so navigate alone was close enough to the 15s bar that which side it
+landed on was chance. This is the 2026-08-18 death class, and the supervisor was built to survive it
+rather than prevent it.
+
+`cdpTimeoutFor(method)` now gives `Page.navigate` 60s and leaves everything else at 15s.
+Deliberately **not** a new global default: the 15s ceiling is what makes a wedged compositor
+detectable, and raising it everywhere would trade a startup flake for a hang nothing reports.
+Note `waitBroadcastReady` already had its own 30s budget for exactly this reason — navigate is the
+same kind of wait and had simply never been given one.
+
+## A digest the registry has not published yet is not a failed start (2026-09-03; falsify: `stream build` then `stream start` immediately)
+
+`stream start` failed **twice** with `MANIFEST_UNKNOWN ... manifest unknown [http 404]` against a
+digest `stream build` had just pushed — while flyctl's own `image found: img_…` line said it had
+resolved it — then succeeded about four minutes later with nothing changed. Registry propagation lag
+against a digest-pinned launch. Pinning the digest is right and stays (a tag can resolve to a stale
+image; a digest cannot); what was wrong is that a failure which heals itself in minutes was fatal.
+
+Worse than the failed command: `start` records `desired: live` **before** launching, on purpose
+(ADR 293), so giving up handed the supervisor a retry loop that would have burned all three flap
+slots on a 404 that was about to stop happening, then stood down and asked a human about a
+non-problem. On the night, the stream came back only because the state was stopped by hand first.
+
+`start` now re-attempts up to 4 times, 45s apart, **only** on that signature. Every other launch
+failure — no capacity, bad secrets, a broken entrypoint — stays fatal on the first try, because a
+retry loop over real errors is how you bill for machines that were never going to run. Same reasoning
+as the prerender crawl's `retryCount: 3`, which exists because one transient fetch failure used to
+fail an entire build.

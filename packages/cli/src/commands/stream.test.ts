@@ -60,7 +60,7 @@ describe('musterd stream', () => {
       // Hermetic supervisor plumbing: no test may touch ~/.musterd, the real fly, or the daemon.
       statePath: join(repo, 'stream-state.json'),
       who: () => 'miley',
-      launch: () => 0,
+      launch: () => ({ code: 0, output: '' }),
       sendAsk: async () => {},
     };
   });
@@ -194,9 +194,56 @@ describe('musterd stream', () => {
       statePath,
       now: () => NOW,
       who: () => 'miley',
-      launch: () => ((launches += 1), 0),
+      launch: () => ((launches += 1), { code: 0, output: '' }),
       sendAsk: async (body: string) => void asks.push(body),
       ...over,
+    });
+
+    // 2026-09-03: `stream start` failed TWICE with `MANIFEST_UNKNOWN ... manifest unknown` (http
+    // 404) against a digest `stream build` had just pushed and flyctl itself resolved, then
+    // succeeded ~4 minutes later untouched. Registry propagation lag against a digest-pinned
+    // launch. Giving up hands the supervisor a retry loop that would burn all three flap slots on
+    // a 404 that was about to stop happening — the same reasoning as the prerender crawl's
+    // retryCount, which exists because one transient fetch failure used to fail a whole build.
+    it('retries a launch that failed on a not-yet-propagated image digest, then succeeds', async () => {
+      withImage();
+      let n = 0;
+      const code = await run(
+        ['start'],
+        sup({
+          launch: () => {
+            n += 1;
+            return n === 1
+              ? {
+                  code: 1,
+                  output:
+                    'failed to get manifest ...: request failed: not found [http 404]: ' +
+                    '{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}',
+                }
+              : { code: 0, output: '' };
+          },
+          sleep: async () => {},
+        }),
+      );
+      expect(code).toBe(0);
+      expect(n).toBe(2);
+    });
+
+    // A retry loop over real errors is how you bill for nothing. Anything but the transient
+    // registry signature stays fatal on the first try.
+    it('does NOT retry a launch that failed for any other reason', async () => {
+      withImage();
+      let n = 0;
+      await expect(
+        run(
+          ['start'],
+          sup({
+            launch: () => ((n += 1), { code: 1, output: 'Error: insufficient capacity in sjc' }),
+            sleep: async () => {},
+          }),
+        ),
+      ).rejects.toThrow(/fly machine run failed/);
+      expect(n).toBe(1);
     });
 
     it('start records desired live with provenance before launching', async () => {
@@ -286,7 +333,7 @@ describe('musterd stream', () => {
       statePath,
       now: () => NOW,
       who: () => 'miley',
-      launch: () => ((launches += 1), 0),
+      launch: () => ((launches += 1), { code: 0, output: '' }),
       sendAsk: async (body: string) => void asks.push(body),
       ...over,
     });
@@ -370,7 +417,7 @@ describe('musterd stream', () => {
     it('a failed relaunch still spends the budget (the next ticks converge on stand-down)', async () => {
       withImage();
       writeStreamState(statePath, { desired: 'live', at: NOW - 60_000, restarts: [] });
-      expect(await run(['ensure'], sup({ launch: () => 1 }))).toBe(0);
+      expect(await run(['ensure'], sup({ launch: () => ({ code: 1, output: 'boom' }) }))).toBe(0);
       expect(readStreamState(statePath)!.restarts).toEqual([NOW]);
     });
   });

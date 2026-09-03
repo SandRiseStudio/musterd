@@ -16,7 +16,7 @@
  * machine; `stream` runs that same capture on a **rented** one and manages its lifetime. Different
  * failure modes, different preconditions, so a different verb.
  */
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { makeEnvelope } from '@musterd/protocol';
@@ -69,7 +69,8 @@ export interface StreamDeps {
   who?: () => string;
   /** Run `fly machine run` with these args; returns the exit code. Injected so tests never
    * reach the real Fly API (the default inherits stdio for the interactive `start`). */
-  launch?: (flyArgs: string[]) => number;
+  launch?: (flyArgs: string[]) => LaunchResult | Promise<LaunchResult>;
+  sleep?: (ms: number) => Promise<void>;
   /** Raise the stand-down ask to the team (streamwatch service seat; ADR 293). */
   sendAsk?: (body: string) => Promise<void>;
 }
@@ -102,8 +103,9 @@ export async function streamCommand(parsed: Parsed, deps: StreamDeps = {}): Prom
   const now = deps.now ?? (() => Date.now());
   const who = deps.who ?? currentSeatName;
   const launch = deps.launch ?? realLaunch;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const sendAsk = deps.sendAsk ?? defaultSendAsk;
-  const sup = { statePath, now, who, launch, sendAsk };
+  const sup = { statePath, now, who, launch, sleep, sendAsk };
 
   switch (sub) {
     case 'doctor':
@@ -277,7 +279,8 @@ interface Sup {
   statePath: string;
   now: () => number;
   who: () => string;
-  launch: (flyArgs: string[]) => number;
+  launch: (flyArgs: string[]) => LaunchResult | Promise<LaunchResult>;
+  sleep: (ms: number) => Promise<void>;
   sendAsk: (body: string) => Promise<void>;
 }
 
@@ -375,18 +378,71 @@ async function startVerb(
   a.out(
     `${theme.accent('stream')} ${theme.meta(`${team} · via ${addr} · ${VM_SIZE} ${REGION}`)}\n`,
   );
-  const code = a.launch(launchArgs({ app: a.app, digest, addr, team, extra }));
-  if (code !== 0) throw new CliError('fly machine run failed — see the output above', 1);
+  const args = launchArgs({ app: a.app, digest, addr, team, extra });
+  let result = await a.launch(args);
+  for (let attempt = 1; attempt <= LAUNCH_RETRIES && result.code !== 0; attempt++) {
+    if (!isUnpropagatedImage(result.output)) break;
+    a.out(
+      `${theme.warn('↻')} ${theme.meta(
+        `the registry has not published ${digest.slice(7, 15)} yet — retrying in ` +
+          `${LAUNCH_RETRY_DELAY_MS / 1000}s (${attempt}/${LAUNCH_RETRIES})`,
+      )}\n`,
+    );
+    await a.sleep(LAUNCH_RETRY_DELAY_MS);
+    result = await a.launch(args);
+  }
+  if (result.code !== 0) throw new CliError('fly machine run failed — see the output above', 1);
   a.out(
     `${theme.ok('◉ live')} ${theme.meta(`watch: fly logs -a ${a.app} · end: musterd stream stop`)}\n`,
   );
   return 0;
 }
 
-/** The real launcher: interactive stdio so `start`'s output streams to the operator. */
-function realLaunch(flyArgs: string[]): number {
-  const r = spawnSync('fly', flyArgs, { encoding: 'utf8', stdio: 'inherit' });
-  return r.status ?? 1;
+/** What a launch attempt reported: its exit code, and the output the retry decision reads. */
+export interface LaunchResult {
+  code: number;
+  output: string;
+}
+
+/** How many times `start` re-attempts a launch the registry is not ready for, and the wait between.
+ * Sized against the observation that cost the 2026-09-03 restart: two failures, then success about
+ * four minutes after the push, with nothing changed in between. */
+const LAUNCH_RETRIES = 4;
+const LAUNCH_RETRY_DELAY_MS = 45_000;
+
+/**
+ * Is this failure the registry not having caught up with a digest we just pushed?
+ *
+ * Deliberately narrow. `stream build` pushes a digest and `start` pins it — which is the whole point
+ * (a tag can resolve to a stale image; a digest cannot) — but the manifest is not immediately
+ * resolvable everywhere, and flyctl reports that as a 404 `MANIFEST_UNKNOWN` even while its own
+ * `image found:` line says it resolved. That heals itself in minutes.
+ *
+ * Everything else stays fatal on the first try. A retry loop over real errors — no capacity, bad
+ * secrets, a broken entrypoint — is how you bill for machines that were never going to run.
+ */
+export function isUnpropagatedImage(output: string): boolean {
+  return /MANIFEST_UNKNOWN|manifest unknown/i.test(output);
+}
+
+/** The real launcher: output is teed to the operator as it arrives AND captured, because the retry
+ * decision has to read the failure and a `fly machine run` is slow enough that silence reads as a
+ * hang. (Same shape, and the same reason, as the build verb above.) */
+async function realLaunch(flyArgs: string[]): Promise<LaunchResult> {
+  return new Promise<LaunchResult>((resolve) => {
+    const child = spawn('fly', flyArgs, { stdio: ['inherit', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout?.on('data', (d: Buffer) => {
+      output += d.toString();
+      process.stdout.write(d);
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      output += d.toString();
+      process.stderr.write(d);
+    });
+    child.on('error', () => resolve({ code: 127, output }));
+    child.on('close', (code) => resolve({ code: code ?? 1, output }));
+  });
 }
 
 /** The CLI's resolved seat for the current team — the `by` on start/stop provenance. */
@@ -542,7 +598,7 @@ async function ensureVerb(
       a.out(`${theme.warn('↻')} ${d.note}\n`);
       const { digest, addr } = launchPreconditions(a);
       const team = d.state.team ?? process.env['MUSTERD_TEAM'] ?? 'revive';
-      const code = a.launch(launchArgs({ app: a.app, digest, addr, team }));
+      const { code } = await a.launch(launchArgs({ app: a.app, digest, addr, team }));
       if (code !== 0)
         a.err(`${theme.err('✗')} relaunch failed (fly exit ${code}) — next tick retries\n`);
       else a.out(`${theme.ok('◉ live again')} ${theme.meta(`machine relaunched · ${a.app}`)}\n`);
