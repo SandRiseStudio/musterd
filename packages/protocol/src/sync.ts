@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AuditEntrySchema } from './audit.js';
+import { PolicyOverrideSchema } from './credentials.js';
 import { EnvelopeSchema } from './envelope.js';
 import { UpdateLaneSchema } from './lanes.js';
 
@@ -96,25 +97,41 @@ export type SyncPresenceEvent = z.infer<typeof SyncPresenceEventSchema>;
 export const SyncLedgerEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('ledger') });
 export type SyncLedgerEvent = z.infer<typeof SyncLedgerEventSchema>;
 
+/**
+ * One replicated POLICY event (residence-2 census gap 1, 2026-09-03): the `policy.change` audit row
+ * the HUB writes when an admin sets team policy. Its own tag, in the lane event's shape under
+ * its own tag — same allocator, same composed `AuditEntrySchema`.
+ *
+ * Policy is hub-authoritative (ADR 325 residence 1): a joiner never mints one of these. Its own
+ * `POST /policy` forwards to the hub (the `/sync/lane` pattern, ADR 361), the hub decides and
+ * stamps, and this event is how every other machine learns. The row's `detail` is the STORED sparse
+ * override (ADR 185) verbatim — never the effective policy, which would bake this build's defaults
+ * into every peer's row and kill the schema default there, the #530 failure the sparse row exists
+ * to prevent.
+ */
+export const SyncPolicyEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('policy') });
+export type SyncPolicyEvent = z.infer<typeof SyncPolicyEventSchema>;
+
 /** Any replicated kind. A plain `z.union`, not discriminated, because the message tag is optional. */
 export const SyncEventSchema = z.union([
   SyncLaneEventSchema,
   SyncPresenceEventSchema,
   SyncLedgerEventSchema,
+  SyncPolicyEventSchema,
   SyncMessageEventSchema,
 ]);
 export type SyncEvent = z.infer<typeof SyncEventSchema>;
 
-/** The id the hub keys `sync_log` on: the envelope's for a message, the audit row's for a lane or presence. */
+/** The id the hub keys `sync_log` on: the envelope's for a message, the audit row's for every other kind. */
 export function syncEventId(event: SyncEvent): string {
   return isAuditKind(event) ? event.event.id : event.envelope.id;
 }
 
-/** The three kinds whose payload is an audit row, as opposed to the message's envelope. */
+/** The kinds whose payload is an audit row, as opposed to the message's envelope. */
 export function isAuditKind<T extends { kind?: string | undefined }>(
   event: T,
-): event is T & { kind: 'lane' | 'presence' | 'ledger' } {
-  return event.kind === 'lane' || event.kind === 'presence' || event.kind === 'ledger';
+): event is T & { kind: 'lane' | 'presence' | 'ledger' | 'policy' } {
+  return event.kind === 'lane' || event.kind === 'presence' || event.kind === 'ledger' || event.kind === 'policy';
 }
 
 /** The team slug the event claims, for the hub's "pushed into the team it names" check. */
@@ -188,11 +205,16 @@ export const SyncPullLedgerEventSchema = SyncLedgerEventSchema.extend({
   hub_seq: z.number().int().positive(),
 });
 export type SyncPullLedgerEvent = z.infer<typeof SyncPullLedgerEventSchema>;
+export const SyncPullPolicyEventSchema = SyncPolicyEventSchema.extend({
+  hub_seq: z.number().int().positive(),
+});
+export type SyncPullPolicyEvent = z.infer<typeof SyncPullPolicyEventSchema>;
 
 export const SyncPullEventSchema = z.union([
   SyncPullLaneEventSchema,
   SyncPullPresenceEventSchema,
   SyncPullLedgerEventSchema,
+  SyncPullPolicyEventSchema,
   SyncPullMessageEventSchema,
 ]);
 export type SyncPullEvent = z.infer<typeof SyncPullEventSchema>;
@@ -283,6 +305,18 @@ export const SeatNodeTrustedSchema = z.object({
   already: z.boolean(),
 });
 export type SeatNodeTrusted = z.infer<typeof SeatNodeTrustedSchema>;
+
+/**
+ * The joiner→hub policy forward (residence-2 census gap 1): the sparse override an admin chose on
+ * the joiner, and the seat that chose it. The hub re-authorizes the actor against its OWN roster —
+ * a node credential proves the machine, never that the person behind the request is an admin there.
+ * `policy` carries replace semantics all the way through (ADR 185): what the wire omits is unset.
+ */
+export const SyncPolicyRequestSchema = z.object({
+  actor: z.string().min(1),
+  policy: PolicyOverrideSchema,
+});
+export type SyncPolicyRequest = z.infer<typeof SyncPolicyRequestSchema>;
 
 export const SyncPullResponseSchema = z.object({
   events: z.array(SyncPullEventSchema).max(SYNC_PULL_MAX_BATCH),

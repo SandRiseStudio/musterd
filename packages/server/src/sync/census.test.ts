@@ -127,7 +127,7 @@ afterEach(async () => {
 });
 
 describe('residence-2 census — what crosses the wire at this build', () => {
-  it('the replicated kinds are exactly message, lane and presence; nothing else is ever staged', async () => {
+  it('the replicated kinds are exactly message, lane, presence and policy; nothing else is ever staged', async () => {
     // A lane transition and a message on the joiner, a claim on the hub: every kind that replicates.
     const opened = await post(
       joinerBase,
@@ -142,17 +142,27 @@ describe('residence-2 census — what crosses the wire at this build', () => {
       .all()
       .map((r) => (JSON.parse(r.payload) as { kind?: string }).kind ?? 'message');
     expect(new Set(kinds)).toEqual(
-      new Set(['message', 'lane', 'presence'].filter((k) => kinds.includes(k))),
+      new Set(['message', 'lane', 'presence', 'policy'].filter((k) => kinds.includes(k))),
     );
-    expect(kinds.every((k) => k === 'message' || k === 'lane' || k === 'presence')).toBe(true);
+    expect(
+      kinds.every((k) => k === 'message' || k === 'lane' || k === 'presence' || k === 'policy'),
+    ).toBe(true);
   });
 
-  it('GAP (ADR 325 residence 1, promised): a team policy change on the hub never reaches the joiner', async () => {
-    setPolicy(hub.db, hubTeam().id, { residency: { hourly_cap: 1 } });
+  it('CLOSED (gap 1, ADR 365): a policy change on the hub reaches the joiner — an UNSTAMPED one still does not', async () => {
+    // The gap this census named is closed: the admin route stamps, so the change replicates.
+    await post(hubBase, '/teams/bravo/policy', { residency: { hourly_cap: 1 } }, nickOnHub);
     expect(getPolicy(hub.db, hubTeam().id).residency.hourly_cap).toBe(1);
     await roundTrip();
-    // The joiner's host poll caps wakes by ITS policy — the default, not the hub's.
-    expect(getPolicy(joiner.db, joinerTeam().id).residency.hourly_cap).not.toBe(1);
+    expect(getPolicy(joiner.db, joinerTeam().id).residency.hourly_cap).toBe(1);
+
+    // …and the store's raw `setPolicy` still writes nothing to the wire. It is the fold's own
+    // projector and the seam a future in-process caller could fall through: the stamp comes from
+    // `applyPolicyChange`, never from the UPDATE. This half is why the assertion above means what
+    // it says rather than "any local write happens to converge".
+    setPolicy(hub.db, hubTeam().id, { residency: { hourly_cap: 7 } });
+    await roundTrip();
+    expect(getPolicy(joiner.db, joinerTeam().id).residency.hourly_cap).toBe(1);
   });
 
   it('GAP (ADR 325 residence 2, promised): seat memory and the inbox cursor are per-machine — a seat that moves reads neither', async () => {
@@ -172,7 +182,7 @@ describe('residence-2 census — what crosses the wire at this build', () => {
     ).toEqual({ n: 0 });
   });
 
-  it('GAP (ADR 325 residence 2, promised): audit verbs written best-effort carry no origin stamp and never push — residency.*, policy.change, memory.save among them', async () => {
+  it('GAP (ADR 325 residence 2, promised): audit verbs written best-effort carry no origin stamp and never push — residency.* and memory.save among them (policy.change left this list with ADR 365)', async () => {
     const jt = joinerTeam();
     appendAudit(joiner.db, jt.id, {
       actor: 'nick',

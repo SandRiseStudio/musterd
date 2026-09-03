@@ -188,5 +188,6 @@
   "## The supervisor used to duplicate a healthy start (2026-09-03; falsify: `fly machine list --json` during a boot, then run `stream ensure`)": "defect",
   "## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream)": "defect",
   "## `Page.navigate` ran on a deadline sized for local calls (2026-09-03; falsify: cold-boot a machine and time `streaming (rtmps)` → `◉ live`)": "defect",
-  "## A digest the registry has not published yet is not a failed start (2026-09-03; falsify: `stream build` then `stream start` immediately)": "defect"
+  "## A digest the registry has not published yet is not a failed start (2026-09-03; falsify: `stream build` then `stream start` immediately)": "defect",
+  "| `teams.policy` | 1 (admission/policy is hub-authoritative) | hub `POST /policy` → `applyPolicyChange` (stamped); a joiner forwards to `POST /sync/policy` and writes nothing; fold applies the sparse doc with replace semantics | **yes** (2026-09-03, ADR 365 — GAP 1 CLOSED) | the 21 readers incl. `claimWakeLeases` now agree across machines after one tick. An unreachable hub refuses `hub_unreachable`. Falsify: `sync/policy.test.ts`; `census.test.ts` also pins that raw `setPolicy` still ships nothing |": "other"
 }

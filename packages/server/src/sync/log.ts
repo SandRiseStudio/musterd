@@ -60,7 +60,7 @@ export class SyncResidenceError extends Error {
     readonly seat: string,
     readonly boundTo: string,
     readonly boundLabel: string,
-    readonly kind: 'message' | 'lane' | 'presence' | 'ledger' = 'presence',
+    readonly kind: 'message' | 'lane' | 'presence' | 'ledger' | 'policy' = 'presence',
   ) {
     super(
       `a ${kind} event names seat "${seat}", which is bound to node "${boundLabel}"; this node may not speak for it`,
@@ -161,7 +161,13 @@ export function ingestBatch(
       // name — `autorefresh` bounces each daemon — so it is resident everywhere: no binding, no
       // refusal. This transaction rolls the whole batch back on the throw, so a refused batch
       // binds nothing.
-      const actor = syncEventActor(event);
+      //
+      // The policy kind is exempt (residence-2 census gap 1, 2026-09-03). Residence answers "may
+      // this node speak AS this seat"; a `policy.change` is a fact about the TEAM that only the hub
+      // ever mints — a joiner's admin forwards precisely so the hub is the author. Binding the
+      // admin to the hub here would strand them: the seat lives on the joiner, and its next
+      // message from there would be refused for having set a policy it was told to forward.
+      const actor = event.kind === 'policy' ? null : syncEventActor(event);
       const seat = actor ? getMemberByName(db, teamId, actor) : undefined;
       if (seat && seat.kind !== 'service') {
         const bound = bindSeatToNode(db, teamId, seat.id, nodeId, now);

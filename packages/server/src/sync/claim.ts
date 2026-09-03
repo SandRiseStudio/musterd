@@ -8,6 +8,9 @@ import {
   type SyncClaimRequest,
   SyncClaimRefusalSchema,
   type SyncLanePatchRequest,
+  type Policy,
+  type PolicyOverride,
+  type SyncPolicyRequest,
   type SyncTrustRequest,
   type UpdateLane,
 } from '@musterd/protocol';
@@ -499,4 +502,47 @@ export async function trustAtHub(
     throw new Error(`the hub answered ${res.status} to the trust act: ${JSON.stringify(body)}`);
   }
   return SeatNodeTrustedSchema.parse(body);
+}
+
+/**
+ * Joiner side of the policy act (residence-2 census gap 1): forward the admin's sparse override to
+ * the hub, write nothing locally. The hub's row is the fact; this daemon learns the answer back
+ * through the fold, the same way it learns a lane it did not decide.
+ *
+ * Refusals relay with the hub's own code — an actor who is not an admin THERE is a 403 here, not a
+ * local success. `HubUnreachableError` when no answer came: policy is not an act that may fork
+ * (ADR 325 §Offline semantics), so the caller turns this into `hub_unreachable` and changes nothing.
+ */
+export async function policyAtHub(
+  enrollment: { hub_url: string; credential: string },
+  slug: string,
+  req: SyncPolicyRequest,
+): Promise<{ policy: Policy; stored: PolicyOverride }> {
+  let res: Response;
+  try {
+    res = await fetch(new URL(`/teams/${slug}/sync/policy`, enrollment.hub_url), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${enrollment.credential}`,
+      },
+      body: JSON.stringify(req),
+      signal: AbortSignal.timeout(CLAIM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    log.warn({ msg: 'sync_policy_hub_unreachable', team: slug, err: String(err) });
+    throw new HubUnreachableError(enrollment.hub_url, String(err));
+  }
+  const body: unknown = await res.json().catch(() => null);
+  if (!res.ok) {
+    const b = body as { error?: { code?: string; message?: string } } | null;
+    // The hub's refusal is the answer, relayed with its code — `forbidden` for an actor who is no
+    // admin there, `not_found` for a seat its roster lacks. Anything else is a fault, not a verdict.
+    if (b?.error?.code === 'forbidden' || b?.error?.code === 'not_found') {
+      throw new MusterdError(b.error.code, b.error.message ?? 'the hub refused the policy change');
+    }
+    throw new Error(`the hub answered ${res.status} to the policy change: ${JSON.stringify(body)}`);
+  }
+  const parsed = body as { policy: Policy; stored: PolicyOverride };
+  return { policy: parsed.policy, stored: parsed.stored };
 }
