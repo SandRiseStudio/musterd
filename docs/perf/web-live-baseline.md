@@ -626,3 +626,46 @@ described itself as lazy for months and was not.
 
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit; total
   should read ≈245.3 KiB against 249.0 KiB (255,000 B), and main's CI gates stay green.
+
+## 2026-09-02 — `initialJsGzipBytes` 154,500 → 144,000 (re-baseline, tightening): zod was never architectural
+
+The entry above it, written by me the same day, is wrong, and this is the correction. It records
+that /live's real headroom "needs architecture (defer roster parsing), not an import tidy". The
+reasoning was: `packages/web/src/live/format.ts` value-imports three pure helpers from the
+`@musterd/protocol` **barrel** and looks like the culprit, but `live/client.ts` also value-imports
+the zod schemas it parses the roster with and genuinely needs them — so moving format.ts alone
+could not move zod off the eager graph.
+
+Measured, that has it backwards. **format.ts was the only eager path into zod.**
+
+| | eager `dist-` chunk | /live eager graph |
+|---|---|---|
+| main @ dac0f083 | 23,031 B gzip | 154,197 B (150.6 KiB), 13 chunks |
+| deep imports | 10,048 B gzip | **141,341 B (138.0 KiB), 13 chunks** |
+
+The change is two lines. `normalizeModelId` and `reviewGrade` come from
+`@musterd/protocol/model` and `resolvePosture` from `@musterd/protocol/posture` instead of the
+barrel, with those two subpaths added to the protocol package's `exports` (enumerated, not a `./*`
+wildcard — a wildcard would make every internal module public API of a published package as a side
+effect of a perf fix). With no eager importer left, rolldown tree-shakes zod out of the shared
+protocol chunk; it lands in a lazy `posture-` chunk fetched alongside the roster request instead of
+before first paint.
+
+**Nothing was deferred, deleted, or made less strict.** `fetchRoster` still validates every row
+with `MemberSummarySchema` exactly as before, per-row tolerance intact (ADR 148); 964 web tests,
+typecheck and the build are unchanged and green. The architectural remedy the previous entry
+described — defer roster parsing — is **not needed for these bytes** and should not be chased for
+them. If it is ever wanted, it will have to earn its own justification.
+
+Per ADR 183 the total moved the other way as predicted: 247.1 → 247.8 KiB (+~0.7 KiB per-chunk
+overhead, 37 → 38 chunks), inside the 255,000 ceiling. That ceiling is now **99.5% consumed** and
+is the number to watch — the trend the entry above flags as a trend is unchanged by this.
+
+New budget is measured 141,341 + the known ~0.7 KB CI gzip delta + ~1.2% slack (2026-08-12
+precedent) = 144,000, leaving ~2.6 KB of true headroom. Deliberately **not** padded further for the
+dwell work in flight (lane 01M1JQENBK): sizing a budget for work that has not landed is the
+calibration failure this file keeps re-learning.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit — initial
+  should read ≈138.0 KiB against 140.6 KiB (144,000 B). Then revert the two imports in `format.ts`
+  to the barrel, rebuild, and watch the eager graph go back to ≈150.6 KiB: that is the whole claim.
