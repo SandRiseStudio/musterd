@@ -3078,6 +3078,18 @@
   font-weight: 400;
   letter-spacing: 0;
 }
+/* The dwell trace (lane 01M1JQENBK) — what this page remembers of a visit that has ENDED.
+   Italic prose, not a chip: the chips beside it all describe NOW, and a past-tense fact wearing
+   their shape would be read as one of them. No `opacity`, for the reason `.lc-stat__node` records
+   two rules up — an alpha pass over the faintest ink in the system lands below AA, and the contrast
+   gate measures what a reader actually gets. `--lc-faint` is already gate-measured here. */
+.lc-roster__dwell {
+  color: var(--lc-faint);
+  font-size: 10.5px;
+  font-style: italic;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
 .lc-stat--quiet {
   color: var(--lc-faint);
   background: transparent;

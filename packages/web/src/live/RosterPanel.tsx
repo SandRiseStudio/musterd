@@ -9,6 +9,7 @@ import {
   rosterOrder,
   rosterPrimaryChip,
 } from './format';
+import { dwellTrace, type DwellLog } from './dwell';
 import { CollapseButton, PanelRail } from './PanelChrome';
 import { wokenBadge, wokenSeat } from './wokenSeat';
 
@@ -25,6 +26,8 @@ export function RosterPanel({
   daemonEpoch,
   unreadable = 0,
   stale = false,
+  dwell,
+  dwellNow,
 }: {
   roster: MemberSummary[];
   collapsed?: boolean;
@@ -38,6 +41,12 @@ export function RosterPanel({
   unreadable?: number;
   /** The roster refetch is failing persistently, so these rows are frozen at their last good read. */
   stale?: boolean;
+  /** Visits this page has watched (lane 01M1JQENBK). Optional: with no log, no row says anything
+   *  about dwell, which is what every other caller and every render test gets. */
+  dwell?: DwellLog;
+  /** The clock the trace ages against, passed rather than read so the rail has one `now` per render
+   *  and a test can state the moment it means. */
+  dwellNow?: number;
 }) {
   const members = [...roster].sort(rosterOrder);
   const admins = members.filter((m) => m.capabilities?.is_admin).length;
@@ -67,7 +76,13 @@ export function RosterPanel({
           <p className="lc-roster__empty">No seats on this team yet.</p>
         )}
         {members.map((m) => (
-          <SeatRow key={m.id} m={m} daemonBuild={daemonBuild} daemonEpoch={daemonEpoch} />
+          <SeatRow
+            key={m.id}
+            m={m}
+            daemonBuild={daemonBuild}
+            daemonEpoch={daemonEpoch}
+            trace={dwell && dwellNow !== undefined ? dwellTrace(dwell, m, dwellNow) : null}
+          />
         ))}
       </div>
       {/* The two ways this list can quietly lie, each said out loud in one line. Deliberately NOT an
@@ -113,10 +128,14 @@ function SeatRow({
   m,
   daemonBuild,
   daemonEpoch,
+  trace = null,
 }: {
   m: MemberSummary;
   daemonBuild?: string | undefined;
   daemonEpoch?: number | undefined;
+  /** What this page remembers of a visit that has ENDED, or null. Never rendered for a live seat —
+   *  `dwellTrace` refuses that case at the source, so this row cannot reintroduce it. */
+  trace?: { label: string; title: string } | null;
 }) {
   const kind = m.kind === 'human' ? 'human' : 'agent';
   const online = m.presence !== 'offline';
@@ -269,6 +288,13 @@ function SeatRow({
               title="A captured harness session is resumable — a wake continues the seat's own transcript"
             >
               resumable
+            </span>
+          )}
+          {/* Last, and deliberately not a `lc-stat` chip: the visit is over, and a trace that looked
+              like the live chips beside it would be competing with facts about now. */}
+          {trace && (
+            <span className="lc-roster__dwell" title={trace.title}>
+              {trace.label}
             </span>
           )}
         </div>

@@ -29,6 +29,7 @@ import {
 import { firehoseSound, roomTone } from '../live/sound';
 import { useLiveStream } from '../live/useLiveStream';
 import { officeRoom } from '../live/officeRoom';
+import { useDwell } from '../live/useDwell';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { useReport } from '../live/useReport';
 import { roomEntries } from '../live/workingOn';
@@ -180,6 +181,11 @@ function LivePage() {
   // scene) so both routes hand the scene the same already-projected shape.
   const board = useWorkingOn(cfg, envelopes);
   const report = useReport(cfg, envelopes);
+  // What this page has watched come and go (lane 01M1JQENBK). Only the roster rail reads it: a
+  // short visit's trace is a fact about the recent past, and the room itself must keep describing
+  // now. Costs nothing until someone actually leaves — the hook schedules no tick while no trace is
+  // live.
+  const dwell = useDwell(roster);
   const entries = roomEntries(roster, board);
 
   /**
@@ -518,6 +524,8 @@ function LivePage() {
             />
             <RosterPanel
               roster={roster}
+              dwell={dwell.log}
+              dwellNow={dwell.now}
               collapsed={collapsed.roster}
               onCollapse={() => toggleCollapse('roster')}
               daemonBuild={daemonBuild}
