@@ -56,7 +56,7 @@ add required GitHub reviews or block squash on acceptance.
 | Today | Canonical |
 | --- | --- |
 | `ready_for_review` | `awaiting_acceptance` |
-| `lane_ready` / `musterd lane ready` | `lane_submit` / `musterd lane submit` |
+| `lane_ready` / `musterd lane ready` | `lane_submit` / `musterd lane submit` (the old names stayed as deprecated aliases until 2026-09-03 — removed by surface survey #1245 item 2) |
 | reviewer / confirm / send back | acceptor / accept / reject |
 | verified / unverified (UI copy) | accepted / unconfirmed |
 

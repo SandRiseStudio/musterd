@@ -36,7 +36,7 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 | --- | --- | --- | --- |
 | `lane open/claim/release/handoff/update` | `lane_open/claim/release/handoff/update` | same | declare and own a unit of work |
 | `lane submit` | `lane_submit` | same | after merge: attest and ask acceptance (ADR 192) |
-| `lane ready` | `lane_ready` | same, **deprecated alias of submit** on both | — |
+| ~~`lane ready`~~ | ~~`lane_ready`~~ | deprecated alias of submit on both — REMOVED 2026-09-03 (lane 01M1MMRHY6) | — |
 | `lane resolve` | `lane_resolve` | same | self-close, recorded *unconfirmed* unless exempt |
 | `done` | — | meaning ≈ `lane_resolve` then `team_next` | close your live lane and chain into the brief |
 | `lanes` | `lane_board` | meaning | the board |
@@ -52,7 +52,7 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 | --- | --- | --- | --- |
 | `memory show/save/clear` | `team_memory_read/save` | same in meaning; **the MCP prefix says `team_`, the note is seat-PRIVATE** | continuity note (ADR 093) |
 | `insight save/search` | `team_insight_save/search` | same | team-visible findings (ADR 327) |
-| — | `team_memory_search` | **deprecated alias of `team_insight_search` — it searches insights, not memory** | — |
+| — | ~~`team_memory_search`~~ | deprecated alias of `team_insight_search` that searched insights, not memory — REMOVED 2026-09-03 (lane 01M1MMRHY6) | — |
 
 ### Being on the team
 
@@ -99,7 +99,7 @@ Checked and NOT a defect: every catalogued command renders a summary and a detai
 ## Recommendation, ranked
 
 1. ~~`nudge` → `inbox --waiting` with alias and hook re-point (collision 1). Own lane, small.~~ DONE 2026-09-03 (lane 01M1MMFSS0).
-2. Delete the two deprecated aliases `lane_ready` / `lane ready` and `team_memory_search`; mark `team_memory_*` seat-private (collisions 2, 4). Own lane, small.
+2. ~~Delete the two deprecated aliases `lane_ready` / `lane ready` and `team_memory_search`; mark `team_memory_*` seat-private (collisions 2, 4). Own lane, small.~~ DONE 2026-09-03 (lane 01M1MMRHY6).
 3. ~~Catalog repairs: unhide `surface`, regroup by question (help grouping). Docs-only lane.~~ DONE 2026-09-03: `musterd help` has eight rooms by question (waiting / talking / work / remembering / team / insight / setup / ops) and `surface` is catalogued.
 4. `done` says *unconfirmed* or routes to `submit` (collision 2). Own lane.
 5. Seat occupancy gets one name (collision 3). ADR first.

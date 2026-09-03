@@ -33,7 +33,6 @@ export const TOOL_NAMES = [
   'lane_handoff',
   'lane_update',
   'lane_submit',
-  'lane_ready',
   'lane_resolve',
   'lane_board',
   'team_next',
@@ -44,5 +43,4 @@ export const TOOL_NAMES = [
   'team_report',
   'team_insight_save',
   'team_insight_search',
-  'team_memory_search', // deprecated alias — remove after one epoch (ADR 296)
 ] as const;

@@ -91,6 +91,7 @@ no standing-context injection (ADR 212).
   line (search before you re-derive; promote durable findings into docs/wiki/). The standing-context
   budgets were raised for the tool pair under that file's own raise protocol, each justification
   naming this ADR and the eval that must show the bytes earn their rent.
+- _Amendment (dated 2026-09-03, surface survey #1245 item 2): the one-epoch retention of the `team_memory_search` alias elapsed (FEATURE_EPOCH moved 17 → 18 on 2026-09-02, #1200); the alias is removed. `team_memory_save` / `team_memory_read` now say **seat-private** in their descriptions, because every MCP tool wears the `team_` namespace prefix and this pair is where a reader's first guess (shared) is wrong._
 - _Amendment (dated 2026-08-27, ryder review of #1073): two dead ADR-325 links cited `325-federation-prereqs-guarded-lane-cas.md` (the PR title) — fixed to `325-multi-machine-federation.md` — and the MCP read name `team_memory_search` drifted from the write/CLI vocabulary `insight` (ADR 296 one-meaning-per-word). Canonical is now `team_insight_search`; `team_memory_search` stays as a deprecated alias for one epoch so existing callers do not bounce. `wiki:check` covers `docs/wiki/` only, so ADR link rot had no gate — follow-up to add a `docs/decisions/` link check is tracked separately._
 
 ## Observability & Evaluation

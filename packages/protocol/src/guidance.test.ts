@@ -126,6 +126,7 @@ describe('version-bump discipline (ADR 085)', () => {
     17: '0fe7e98a513e636e', // + musterd-orient skill unit + team_wake_context in the tool reference (session-orientation spec 2026-08-25)
     18: 'c5ea40b9c6cdd791', // + team memory: insight save/search + the search-before-you-re-derive playbook (ADR 327)
     19: '3b7db362a4f5eeb9', // + rename team_memory_search → team_insight_search, alias retained one epoch (ADR 327 amendment, ADR 296)
+    21: 'f3ee0a5d2a4808b7', // − the `lane_ready` / `musterd lane ready` alias line: both deprecated aliases (and team_memory_search) removed after their one-epoch retention (surface survey #1245, item 2)
     20: '199e0096a14dec89', // orient tier 1 = everything ADDRESSED to the seat: a routed acceptance/review request is done, not asked about, and announced with accept+reply_to so it discharges for co-addressees (ADR 326 amendment 2026-08-27 UTC)
   };
 

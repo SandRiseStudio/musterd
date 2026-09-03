@@ -282,17 +282,6 @@ describe('empty states name the next action', () => {
       await captureAll(registerLanes, client)['lane_submit']!({ id: 'L-1' });
       expect(patches[0]).not.toHaveProperty('branch');
     });
-
-    it('takes it on the deprecated lane_ready alias too', async () => {
-      // Same handler, but the schemas are declared separately — a param added to one and not the
-      // other bounces every seat still using the old name.
-      const { client, patches } = patchSpy();
-      await captureAll(registerLanes, client)['lane_ready']!({
-        id: 'L-1',
-        branch: 'izzo/the-work',
-      });
-      expect(patches[0]).toMatchObject({ branch: 'izzo/the-work' });
-    });
   });
 
   it('lane_board and team_next with nothing in flight', async () => {

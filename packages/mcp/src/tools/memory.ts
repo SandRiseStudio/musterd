@@ -13,7 +13,8 @@ import { errorResult, notReadyMessage, textResult } from './format.js';
  */
 
 const SAVE_DESCRIPTION =
-  "Saves this seat's working state for the next session or occupant: what you were doing, " +
+  'SEAT-PRIVATE (the team_ prefix is the tool namespace, not the audience — for the whole team use ' +
+  "team_insight_save). Saves this seat's working state for the next session or occupant: what you were doing, " +
   'decisions mid-flight, where you left off. Working state ONLY — durable knowledge (traps, ' +
   'technique, learned facts) goes in docs/wiki/ pages, not here (ADR 259). Use at wrap-up or ' +
   'handoff, not mid-task. One note per seat, last-write-wins. headline ≤120 chars (shown on ' +
@@ -29,7 +30,7 @@ const SAVE_DESCRIPTION =
 const NO_MEMORY = /no memory saved/i;
 
 const READ_DESCRIPTION =
-  "Load this seat's saved memory — the full note behind the headline team_join showed. Call " +
+  "Load this seat's saved memory (seat-private; team findings are team_insight_search) — the full note behind the headline team_join showed. Call " +
   'when the headline looks relevant; judge staleness from its age.';
 
 function ago(ms: number): string {
