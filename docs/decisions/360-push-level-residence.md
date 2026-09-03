@@ -1,6 +1,6 @@
 # 360 — Push-level residence: ingest checks the seat, not just the team, for every replicated kind
 
-- Status: proposed — 2026-09-02. Authored by stanley on lane `01M1J6F9M2T2AE8WM6SR786GK7`, the
+- Status: accepted — 2026-09-03 (merged `f05d2517`, #1206; proposed 2026-09-02). Authored by stanley on lane `01M1J6F9M2T2AE8WM6SR786GK7`, the
   increment ADR 355 §5 named as "the general form of this same rule and … the next increment, not a
   footnote here." (359 is reserved for ryder's codex-hooks ADR, which collided on 357.)
 - Date: 2026-09-02

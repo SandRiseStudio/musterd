@@ -1,6 +1,6 @@
 # 356 — presence replication: `presence.*` is the third replicated kind, and the hub's displacement rule sees every machine's seats
 
-- Status: proposed — 2026-09-02. Authored by stanley on lane `01M1HZRWBW63HRHNSC0KSQZQ9J`
+- Status: accepted — 2026-09-03 (merged `94c788b5`, #1200; proposed 2026-09-02). Authored by stanley on lane `01M1HZRWBW63HRHNSC0KSQZQ9J`
   (Federation: presence replication), from the 2026-09-02 brainstorm with nick. Builds directly on
   #1195 / ADR 355 §5, which minted the seat→node binding this extends to the presence kind.
 - Date: 2026-09-02

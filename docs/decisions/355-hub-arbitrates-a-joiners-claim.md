@@ -1,6 +1,6 @@
 # 355 — federation 3c: the hub arbitrates a joiner's claim, and an unreachable hub refuses it
 
-- Status: proposed — 2026-09-02. Authored by stanley on lane `01M12FKHB01R0RJMDSS6SJRYC9`
+- Status: accepted — 2026-09-03 (merged `11b0cffe`, #1195; proposed 2026-09-02). Authored by stanley on lane `01M12FKHB01R0RJMDSS6SJRYC9`
   (Federation increment 3c), opened by wanderer 2026-08-27 with dependencies corrected 2026-09-01.
   Builds directly on #1185 / ADR 353, which gave the hub every joiner's lane transitions to
   arbitrate over.

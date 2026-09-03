@@ -1,6 +1,6 @@
 # 353 — lane transitions replicate: the `lane.*` audit row is the second kind on the sync wire
 
-- Status: proposed — 2026-09-02. Authored by stanley on lane `01M1G2J80CQGX9H3MBQYKJ70HA`, the
+- Status: accepted — 2026-09-03 (merged `24bc3938`, #1185; proposed 2026-09-02). Authored by stanley on lane `01M1G2J80CQGX9H3MBQYKJ70HA`, the
   lane-replication slice of the ADR 325 federation build. Landed as #1185, stacked behind #1179 and
   #1182 (which gave every lane birth a `lane.opened` row) and behind #1181 (migration v57; this ADR's
   v58 must run after it).
