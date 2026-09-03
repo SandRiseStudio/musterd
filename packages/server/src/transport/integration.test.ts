@@ -3036,7 +3036,16 @@ describe('model attestation (ADR 101)', () => {
     const a = new TestWs();
     const l = new TestWs();
     await Promise.all([a.open(), l.open()]);
-    await a.claim('dawn', team.json.agent_key, 'Ada', 'claude-code', await standingGrant(tok, 'Ada'), 'claude-opus-5', undefined, 'observed');
+    await a.claim(
+      'dawn',
+      team.json.agent_key,
+      'Ada',
+      'claude-code',
+      await standingGrant(tok, 'Ada'),
+      'claude-opus-5',
+      undefined,
+      'observed',
+    );
     await l.claim('dawn', team.json.agent_key, 'Lin', 'codex', await standingGrant(tok, 'Lin'));
 
     const deliverOf = async (ws: TestWs, id: string): Promise<any> => {
