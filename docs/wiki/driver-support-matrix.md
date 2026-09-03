@@ -81,6 +81,7 @@ this — this page only records the fact. The nearest real enum on the wire is `
 ## Related
 
 - [ADR 296 terminology eval](adr-296-terminology-eval.md) — Q2 half-passed until this page existed.
+- [Cursor-agent live-doorbell eval](cursor-agent-live-doorbell-eval.md) — live measurement of peer inject, PostToolUse vs afterShellExecution stdout reach, Stop hook continuation, and idle-at-prompt coverage.
 - [Model attestation](model-attestation.md) — per-harness observe behavior, measured; linked not duplicated.
 - [Harness statusline seams](harness-statusline-seams.md) — why the `persistent seat indicator` row reads
   as it does: the per-harness survey behind those cells, each verdict dated with its own falsifier.
