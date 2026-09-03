@@ -7,6 +7,7 @@ import {
   probeUpgradeHost,
   runChecks,
   serveForwardsPort,
+  occupiedMachines,
   startedMachines,
   type Check,
   type Exec,
@@ -107,6 +108,38 @@ describe('parsers', () => {
     ]);
     expect(startedMachines(doc)).toEqual(['bbb']);
     expect(startedMachines(JSON.stringify([{ ID: 'ccc', State: 'started' }]))).toEqual(['ccc']);
+  });
+
+  // The 2026-09-03 incident. `started` is the wrong question for "is a machine already there":
+  // Fly reports `created`, then `starting`, for the whole boot — 29.0s on the run that caught this,
+  // 26.5s of it pulling the image. During that window startedMachines() is empty, the ADR 293
+  // supervisor read liveCount 0 under desired:'live' as a crash, and launched a SECOND
+  // performance-4x machine on top of a perfectly healthy start. Twitch refuses a second ingest on
+  // one key, so one of the two died on `Input/output error` and the survivor was chosen by a race.
+  it('occupiedMachines counts a machine that is still booting, which started does not', () => {
+    const booting = JSON.stringify([{ id: 'aaa', state: 'created' }]);
+    expect(startedMachines(booting)).toEqual([]);
+    expect(occupiedMachines(booting)).toEqual(['aaa']);
+
+    const starting = JSON.stringify([{ ID: 'bbb', State: 'starting' }]);
+    expect(startedMachines(starting)).toEqual([]);
+    expect(occupiedMachines(starting)).toEqual(['bbb']);
+  });
+
+  it('occupiedMachines still counts a started machine, and ignores ones that are truly gone', () => {
+    const mixed = JSON.stringify([
+      { id: 'gone', state: 'destroyed' },
+      { id: 'off', state: 'stopped' },
+      { id: 'dying', state: 'destroying' },
+      { id: 'up', state: 'started' },
+    ]);
+    expect(occupiedMachines(mixed)).toEqual(['up']);
+  });
+
+  // A machine mid-replacement is still holding the Twitch key — launching beside it is the same
+  // double-ingest as launching beside a booting one.
+  it('occupiedMachines counts a replacing machine', () => {
+    expect(occupiedMachines(JSON.stringify([{ id: 'r', state: 'replacing' }]))).toEqual(['r']);
   });
 
   // The trap this exists for: a rebuilt tag resolved to the PREVIOUS digest and two machines

@@ -201,6 +201,24 @@ export function keychainLookup(service: string): Promise<string | null> {
  * silence is cheaper than explaining that in a runbook. Keyframe every 2s (`-g 2*fps`), the spacing
  * Twitch asks for. File mode keeps the same encode so a local proof exercises the streaming path.
  */
+/**
+ * Packets ffmpeg may buffer per input before the producer blocks. Applies to each real input, so it
+ * goes before the `-i` it belongs to — an ffmpeg input option is positional, and one written after
+ * its input silently belongs to the next one.
+ *
+ * The default is 8, which the 2026-09-03 hosted run reported against BOTH inputs within a second of
+ * going live: `Thread message queue blocking; consider raising the thread_queue_size option
+ * (current value: 8)`. Eight packets is a third of a second at 25fps, so a single missed frame
+ * deadline in Chrome — on a box measured at ~3.1 of 4 cores, where the wiki already records Chrome's
+ * render as the bottleneck — blocks the reader instead of being absorbed, and the viewer sees it.
+ * 512 buys ~20s of video at 25fps for a few MB of RAM on an 8 GB machine, which is the right side
+ * of that trade by a wide margin. `anullsrc` is exempt: a synthetic source cannot fall behind.
+ *
+ * This raises the CEILING on a hiccup, it does not make the pipeline faster. If `speed=` sits below
+ * 1.0x the encoder is genuinely behind and no queue size fixes that.
+ */
+const INPUT_QUEUE = ['-thread_queue_size', '512'] as const;
+
 /** The null sink the hosted entrypoint creates. Chrome plays into it; ffmpeg reads its monitor. */
 export const PULSE_SINK = 'musterd';
 
@@ -220,6 +238,7 @@ export function ffmpegArgs(
     '-stats_period',
     '10',
     // video: image frames on stdin (codec sniffed per-frame), already constant-rate via the pump
+    ...INPUT_QUEUE,
     '-f',
     'image2pipe',
     '-framerate',
@@ -229,7 +248,7 @@ export function ffmpegArgs(
     // audio: the page's own output when --audio (a Pulse null sink the entrypoint created), else
     // silence — ingests require an audio track either way.
     ...(opts.audio
-      ? ['-f', 'pulse', '-i', `${PULSE_SINK}.monitor`]
+      ? [...INPUT_QUEUE, '-f', 'pulse', '-i', `${PULSE_SINK}.monitor`]
       : ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']),
     '-c:v',
     vcodec,

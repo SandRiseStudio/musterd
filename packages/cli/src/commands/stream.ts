@@ -33,6 +33,7 @@ import {
   realExec,
   REGION,
   runChecks,
+  occupiedMachines,
   startedMachines,
   VM_SIZE,
   type Check,
@@ -342,7 +343,10 @@ async function startVerb(
     err: (s: string) => void;
   } & Sup,
 ): Promise<number> {
-  const live = startedMachines(machineListJson(a.exec, a.app));
+  // `occupied`, not `started`: a machine that is still booting already holds the Twitch key, and
+  // asking the running question during its ~29s boot returns a false empty that lets this launch a
+  // second one beside it (2026-09-03).
+  const live = occupiedMachines(machineListJson(a.exec, a.app));
   if (live.length > 0) {
     throw new CliError(`already live (machine ${live[0]}) — \`musterd stream stop\` first`, 1);
   }
@@ -427,7 +431,9 @@ function stopVerb(
     ...(prev?.team ? { team: prev.team } : {}),
     restarts: [],
   });
-  const live = startedMachines(machineListJson(a.exec, a.app));
+  // Same question as `start`'s guard, so the same answer: stopping during the boot window used to
+  // report "nothing live" and walk away from a machine that then came up and billed unattended.
+  const live = occupiedMachines(machineListJson(a.exec, a.app));
   const machine = live[0];
   if (!machine) {
     a.out(theme.meta('○ nothing live') + '\n');
@@ -500,7 +506,10 @@ async function ensureVerb(
   } & Sup,
 ): Promise<number> {
   const state = readStreamState(a.statePath);
-  const liveCount = startedMachines(machineListJson(a.exec, a.app)).length;
+  // The crash predicate asks whether a machine EXISTS, never whether it is up yet — a booting
+  // machine read as absent is the 2026-09-03 duplicate-launch, where the supervisor put a second
+  // performance-4x beside a healthy start and Twitch killed one of them.
+  const liveCount = occupiedMachines(machineListJson(a.exec, a.app)).length;
   const d = decideEnsure({
     state,
     liveCount,

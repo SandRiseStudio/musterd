@@ -184,5 +184,7 @@
   "## What codex and opencode actually print at turn end — tokens, no attestable price (2026-09-02, lane 01M1HJY3JF, ADR 364; falsify: `codex exec --json --skip-git-repo-check \"Reply ok\" | tail -1` and `opencode run --format json \"Reply ok\" | tail -1`)": "other",
   "## The label is branch-qualified, so it changes under the session holding it (2026-09-02, lane 01M1JQYYAC; falsify: `resolveWorkspace` in `packages/mcp/src/workspace.ts` — check whether its qualifier can change without the process restarting)": "defect",
   "## Comparing that label with `===` made a seat's own re-attach look foreign (2026-09-02; falsify: the audit query below across a HEAD detach)": "defect",
-  "## The two git invariants point opposite ways, on purpose (2026-09-03; falsify: read `repoProject` and `resolveWorkspaceKey` in `packages/protocol/src/project.ts` — one resolves `--git-common-dir`, the other `--show-toplevel`)": "other"
+  "## The two git invariants point opposite ways, on purpose (2026-09-03; falsify: read `repoProject` and `resolveWorkspaceKey` in `packages/protocol/src/project.ts` — one resolves `--git-common-dir`, the other `--show-toplevel`)": "other",
+  "## The supervisor used to duplicate a healthy start (2026-09-03; falsify: `fly machine list --json` during a boot, then run `stream ensure`)": "defect",
+  "## Both ffmpeg inputs ran an 8-packet queue (2026-09-03; falsify: watch the log in the first seconds of a stream)": "defect"
 }
