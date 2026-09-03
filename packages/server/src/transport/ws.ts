@@ -920,7 +920,14 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               // ADR 101 re-attestation: a mid-occupancy model switch rides the heartbeat. Only a
               // real change writes + audits (occupancy.model_attested, old → new).
               if (frame.model) {
-                const changed = reattestModel(ctx.db, conn.presenceId, frame.model);
+                const changed = reattestModel(
+                  ctx.db,
+                  conn.presenceId,
+                  frame.model,
+                  // The pair, not the id alone: without the tier the store cannot tell a
+                  // re-affirmation from a tier-erasing write (see reattestModel).
+                  frame.model_source,
+                );
                 if (changed) {
                   appendAudit(ctx.db, conn.teamId, {
                     actor: conn.memberName,

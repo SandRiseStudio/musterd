@@ -571,7 +571,22 @@ export function reattestModel(
   const row = presenceById(db, presenceId);
   if (!row) return undefined;
   const next = model ?? null;
-  const nextSource = next ? (modelSource ?? null) : null;
+  // The tier describes the id, so it travels with it. Three cases for `modelSource`:
+  //   - a string: the caller knows the tier — store the pair;
+  //   - `undefined` with the SAME id: the caller said nothing about the tier (an older client
+  //     re-affirming on the heartbeat). Absent means "no change", never a clear, or the first
+  //     heartbeat after a claim erases what the claim stored (measured on revive 2026-09-03: every
+  //     live occupancy had a model and a NULL tier, and `observed` acts survived exactly one
+  //     heartbeat interval);
+  //   - `undefined` with a DIFFERENT id: the old tier described a different model and cannot be
+  //     inherited — the new id is stored untiered, which reads as "unknown tier" downstream.
+  const nextSource = !next
+    ? null
+    : modelSource !== undefined
+      ? modelSource
+      : (row.model ?? null) === next
+        ? (row.model_source ?? null)
+        : null;
   // Compare BOTH: a heal that only corrects the tier (same id, observation now backing what was a
   // declaration) is a real change and must be written, or the stamp keeps under-reporting itself.
   if ((row.model ?? null) === next && (row.model_source ?? null) === nextSource) return undefined;
