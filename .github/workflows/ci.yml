@@ -7,6 +7,11 @@
 # not depend on each other — the Chrome contrast sweep (227s) and tests+coverage (157s). Every
 # gate still runs on every PR; only the wall clock changed. Each leaf does its own checkout+build
 # (.github/actions/setup) so nothing is shared through an artifact.
+#
+# Every leaf checks out FULL history (fetch-depth: 0, ~3s). The serial job had it for
+# roadmap-truth:check and change-adr:check, and the first fanned-out run showed a third reader:
+# scripts/wiki-probe.test.ts walks `git ls-tree` / `rev-list` against old SHAs and failed on the
+# depth-1 default in the coverage leaf. History is cheap; discovering the next reader is not.
 name: CI
 
 on:
@@ -29,6 +34,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup
 
       - name: Typecheck
@@ -57,6 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup
 
       - name: Tests + coverage
@@ -80,6 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup
 
       - name: A11y contrast (prerendered routes)
@@ -92,6 +103,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/setup
 
       - name: A11y contrast (connected board + live)
@@ -107,9 +120,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        # Full history so roadmap-truth:check can verify shipped items against merged-PR commits
-        # (`git log --grep "(#N)"`) and change-adr:check can diff against the base branch; the
-        # default shallow depth-1 checkout would hide both. Only this leaf needs it.
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup

@@ -2,6 +2,9 @@
 
 - Status: accepted — settings applied 2026-07-07; CI + protection land with this ADR
 - Date: 2026-07-07
+- Snapshot-debt: none — the one frequency word in §Decision ("Bugbot occasionally reports
+  `skipping` on binary-only diffs", §4) describes a third-party tool's behaviour that protection
+  already treats as non-blocking; nothing in this ADR's own claims is a rate it would re-measure.
 
 ## Context
 
@@ -157,8 +160,10 @@ wall clock on every merge — roughly fifteen a day that week.
 **What changed.** `ci.yml` now runs five leaves in parallel — `static` (typecheck, lint, perf and
 context budgets), `coverage`, `a11y-prerender`, `a11y-connected`, `docs` (the `format:check` chain
 and the diff-based ADR gate) — and a sixth job named **`gates`** that `needs:` all five and asserts
-each one's result is `success`. Each leaf checks out and builds on its own runner
-(`.github/actions/setup`); a rebuild is ~22s in parallel and avoids an artifact round-trip. The
+each one's result is `success`. Each leaf checks out full history and builds on its own runner
+(`.github/actions/setup`); a rebuild is ~22s in parallel and avoids an artifact round-trip, and full
+history is ~3s — the first fanned-out run found `scripts/wiki-probe.test.ts` reading old SHAs from a
+depth-1 checkout, a third reader of history beside `roadmap-truth:check` and `change-adr:check`. The
 contrast gate grew a `--connected-only` flag to pair with its existing `--static-only`, so its two
 phases can run as two leaves. **No gate was removed or narrowed: every check that ran serially runs
 on every PR still.**
