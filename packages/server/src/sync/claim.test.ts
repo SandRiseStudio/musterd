@@ -247,7 +247,7 @@ describe('federation 3c — the hub arbitrates a claim', () => {
     expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.owner_seat).toBeNull();
   });
 
-  it('a handoff to someone else stays local — only a self-claim is arbitrated', async () => {
+  it("a handoff while the hub is unreachable refuses hub_unreachable — every ownership edge is the hub's (ADR 361); a title edit stays local", async () => {
     const laneId = await laneOnBoth();
     await hub.close();
     const res = await patch(
@@ -256,8 +256,18 @@ describe('federation 3c — the hub arbitrates a claim', () => {
       { owner_seat: 'ada' },
       nickOnJoiner,
     );
-    expect(res.status).toBe(200);
-    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.owner_seat).toBe('ada');
+    expect(res.status).toBe(503);
+    expect(res.json.error.code).toBe('hub_unreachable');
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.owner_seat).toBeNull();
+    // Residence 2 stays available while partitioned: an edit that moves neither owner nor state.
+    const edit = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { title: 'renamed offline' },
+      nickOnJoiner,
+    );
+    expect(edit.status).toBe(200);
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.title).toBe('renamed offline');
   });
 
   it('a claim binds the seat to the claiming node; a claim for a seat bound elsewhere is refused 403 naming that node (ADR 328 §4)', async () => {
@@ -470,5 +480,145 @@ describe('ADR 358 — a human seat trusts a set of machines by an explicit act f
     );
     expect(unbound.status).toBe(200);
     expect(bindingsOf('nick')).toEqual([]);
+  });
+});
+
+describe('ADR 361 — release, handoff and close on a joiner are decided by the hub, and the origin speaks', () => {
+  const joinerNode = () => readNodeState().nodes['bravo']!.node_id;
+  const laneAudit = (db: RunningServer['db'], laneId: string, action: string) =>
+    db
+      .prepare<
+        [string, string],
+        { actor: string; origin_node: string | null; detail: string }
+      >('SELECT actor, origin_node, detail FROM audit WHERE action = ? AND target = ?')
+      .all(action, laneId);
+  const actsOn = (db: RunningServer['db'], teamId: string, metaKey: string, laneId: string) =>
+    db
+      .prepare<
+        [string, string],
+        { n: number }
+      >(`SELECT COUNT(*) AS n FROM messages WHERE team_id = ? AND meta LIKE ?`)
+      .get(teamId, `%"${metaKey}":{"lane":"${laneId}"%`)!.n;
+  async function claimedOnJoiner(title: string): Promise<string> {
+    const laneId = await laneOnBoth(title);
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { owner_seat: 'nick' },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(200);
+    await hubToJoiner();
+    return laneId;
+  }
+
+  it('a release on the joiner is decided by the hub: the hub writes the row, the joiner writes nothing and speaks the act', async () => {
+    const laneId = await claimedOnJoiner('r');
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { state: 'open' },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(200);
+    expect(res.json.lane).toMatchObject({ id: laneId, owner_seat: null, state: 'open' });
+    expect(getLane(hub.db, hubTeam().id, laneId, 'bravo')).toMatchObject({
+      owner_seat: null,
+      state: 'open',
+    });
+    const released = laneAudit(hub.db, laneId, 'lane.released');
+    expect(released).toHaveLength(1);
+    expect(JSON.parse(released[0]!.detail)).toMatchObject({ node: joinerNode() });
+    expect(
+      laneAudit(joiner.db, laneId, 'lane.released').filter((r) => r.origin_node === joinerNode()),
+    ).toHaveLength(0);
+    // The origin speaks: one `[lane] released` act, minted on the joiner as nick.
+    expect(actsOn(joiner.db, joinerTeam().id, 'lane_release', laneId)).toBe(1);
+    await hubToJoiner();
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')).toMatchObject({
+      owner_seat: null,
+      state: 'open',
+    });
+  });
+
+  it('a handoff on a stale joiner row is refused by the hub naming the real holder; the joiner row is untouched', async () => {
+    const laneId = await claimedOnJoiner('h');
+    // The hub's row moves under the joiner: ada takes it there, the joiner has not pulled.
+    updateLane(hub.db, hubTeam().id, laneId, 'bravo', { owner_seat: 'ada' }, 7, undefined, {
+      actor: 'ada',
+    });
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { owner_seat: 'hana' },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(409);
+    expect(res.json.error.code).toBe('conflict');
+    expect(res.json.holder).toBe('ada');
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')!.owner_seat).toBe('nick');
+    expect(actsOn(joiner.db, joinerTeam().id, 'lane_handoff', laneId)).toBe(0);
+  });
+
+  it("a handoff on the joiner lands on the hub with the joiner named, and the recipient's handoff act is minted once, on the joiner", async () => {
+    const laneId = await claimedOnJoiner('g');
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { owner_seat: 'ada', handoff_note: 'yours now' },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(200);
+    expect(res.json.lane).toMatchObject({ owner_seat: 'ada' });
+    expect(getLane(hub.db, hubTeam().id, laneId, 'bravo')!.owner_seat).toBe('ada');
+    const handoffs = joiner.db
+      .prepare<
+        [string],
+        { n: number }
+      >("SELECT COUNT(*) AS n FROM messages WHERE team_id = ? AND act = 'handoff' AND body LIKE '%yours now%'")
+      .get(joinerTeam().id)!.n;
+    expect(handoffs).toBe(1);
+    expect(
+      hub.db
+        .prepare<
+          [string],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM messages WHERE team_id = ? AND act = 'handoff' AND body LIKE '%yours now%'")
+        .get(hubTeam().id)!.n,
+    ).toBe(0); // the hub emitted nothing of its own
+  });
+
+  it('a terminal close while the hub is unreachable refuses hub_unreachable and moves nothing', async () => {
+    const laneId = await claimedOnJoiner('c');
+    await hub.close();
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { state: 'done', merged: { pr: 1, sha: 'abc', authorized_by: 'nick' } },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(503);
+    expect(res.json.error.code).toBe('hub_unreachable');
+    expect(getLane(joiner.db, joinerTeam().id, laneId, 'bravo')).toMatchObject({
+      owner_seat: 'nick',
+      state: 'claimed',
+    });
+  });
+
+  it("an arbitrated claim produces exactly one `[lane] claimed` act on every machine — the origin's", async () => {
+    const laneId = await laneOnBoth('one');
+    const res = await patch(
+      joinerBase,
+      `/teams/bravo/lanes/${laneId}`,
+      { owner_seat: 'nick' },
+      nickOnJoiner,
+    );
+    expect(res.status).toBe(200);
+    expect(actsOn(joiner.db, joinerTeam().id, 'lane_claim', laneId)).toBe(1);
+    await pushTeam(joinerCtx, joinerTeam());
+    await pullTeam(hubCtx(), hubTeam()); // the hub folds its own staged log on its pull tick
+    await hubToJoiner();
+    expect(actsOn(hub.db, hubTeam().id, 'lane_claim', laneId)).toBe(1);
+    expect(actsOn(joiner.db, joinerTeam().id, 'lane_claim', laneId)).toBe(1);
   });
 });
