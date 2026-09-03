@@ -562,13 +562,17 @@ export const CATALOG: readonly CommandEntry[] = [
   },
   {
     name: 'done',
-    signature: '[<lane-id>] [--json]',
-    summary: 'close your work — mark the lane done, then show what’s next',
+    signature: '[<lane-id>] [--pr <n>] [--sha <sha>] [--authorized-by <human>] [--json]',
+    summary:
+      'close your work — mark the lane done (or submit it, with a merge attestation), then show what’s next',
     group: 'work',
     primary: true,
     detail:
       'Mark the lane done (the terminal that drives derived Goal status) and chain into orientation. ' +
-      'Auto-targets your single live lane when no id is given.',
+      'Auto-targets your single live lane when no id is given. It says what it records: with `--pr`/`--sha` ' +
+      'it IS `lane submit` (awaiting_acceptance, acceptor routed, ADR 192); without, it is an unconfirmed ' +
+      'self-close (ADR 169) and prints that — unless the lane is acceptance-exempt (ADR 234). A lane already ' +
+      'awaiting acceptance is refused rather than overridden.',
   },
   {
     name: 'goal',

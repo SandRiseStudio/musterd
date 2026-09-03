@@ -38,7 +38,7 @@ Twin grade: **same** = same name, same meaning; **meaning** = same meaning, diff
 | `lane submit` | `lane_submit` | same | after merge: attest and ask acceptance (ADR 192) |
 | `lane ready` | `lane_ready` | same, **deprecated alias of submit** on both | — |
 | `lane resolve` | `lane_resolve` | same | self-close, recorded *unconfirmed* unless exempt |
-| `done` | — | meaning ≈ `lane_resolve` then `team_next` | close your live lane and chain into the brief |
+| `done` | — | meaning ≈ `lane_submit` (with `--pr/--sha`) or `lane_resolve`, then `team_next` | close your live lane and chain into the brief; says which close it recorded (2026-09-03) |
 | `lanes` | `lane_board` | meaning | the board |
 | `goal declare/list` | `team_goal_declare` / `team_goals` | same | outcomes above lanes |
 | — | `team_goal_outcome`, `team_goal_retract` | **none — the CLI cannot record an outcome or retract a goal** | — |
@@ -101,7 +101,7 @@ Checked and NOT a defect: every catalogued command renders a summary and a detai
 1. ~~`nudge` → `inbox --waiting` with alias and hook re-point (collision 1). Own lane, small.~~ DONE 2026-09-03 (lane 01M1MMFSS0).
 2. Delete the two deprecated aliases `lane_ready` / `lane ready` and `team_memory_search`; mark `team_memory_*` seat-private (collisions 2, 4). Own lane, small.
 3. ~~Catalog repairs: unhide `surface`, regroup by question (help grouping). Docs-only lane.~~ DONE 2026-09-03: `musterd help` has eight rooms by question (waiting / talking / work / remembering / team / insight / setup / ops) and `surface` is catalogued.
-4. `done` says *unconfirmed* or routes to `submit` (collision 2). Own lane.
+4. ~~`done` says *unconfirmed* or routes to `submit` (collision 2). Own lane.~~ DONE 2026-09-03 (lane 01M1MNCZDY): `done --pr --sha` is a submit with the shared routing report; a bare `done` says unconfirmed (or acceptance-exempt); a lane already awaiting acceptance is refused.
 5. Seat occupancy gets one name (collision 3). ADR first.
 6. Parity: `availability` tool; CLI `goal outcome|retract`, `leave`, `status --role`. One lane, after 5.
 7. `reclaimAgentLease` → `renewAgentLease` (collision 5). Fold into whichever lane next touches `resolveRead`.
