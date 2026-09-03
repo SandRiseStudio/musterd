@@ -22,11 +22,13 @@ no lane and no implementation. It found nine such items. Four are verifiable in 
   kill. **Left for a sibling lane**; this ADR fixes the attestation, not the judgement." No sibling
   lane was ever opened. Zero of 843 lanes match it. The actuator still kills a session it spawned
   ninety seconds earlier (`backends/claudeCode.ts:371`).
+  Follows-up: 01M1MMHJP3PQY1QWNJCHV3XEMA
 - **`content/roadmap.data.ts`** carries five `building:` strings naming exactly what remains on an
   accepted-ADR arc. Two of them — `ledger-seats` increments 3–5, `research-intake` M4–M5 — have no
   lane of any kind.
 - **`packages/cli/src/service/census.ts:23`** reads "Platform services increment 3 will
-  auto-provision." Increment 3 has no lane and no owner.
+  auto-provision." Increment 3 had no lane and no owner when this was written.
+  Follows-up: 01M1MMK3339B06Q328HYWXARJF
 - **ADR 095** (2026-07-06) has a committed implementation plan at
   `docs/superpowers/plans/2026-07-06-non-blocking-team-join.md` and scores **0 references in code, 0
   in the wiki, 0 across all 843 lanes**. `team_join`'s wait is still the `JOIN_WAIT_MS` constant the
@@ -241,9 +243,39 @@ the document and line that recorded it, plus the corpus state at the merge commi
    lanes existed. It must flag the ADR 354 sentence and both unlaned `building:` strings — the three
    this ADR claims by name. Fewer than three means `INTENT_RE` does not match the phrasings this
    corpus actually uses, and the list is wrong rather than the idea.
-2. **Coverage, stated not assumed.** The printed coverage number at merge is the baseline. It is
-   expected to be well under 100% and the ADR is not falsified by a low number — it is falsified by a
-   number that is never printed, or by a green run being read as an inventory.
+2. **Coverage, stated not assumed.** The printed number at merge is the baseline. It is expected to
+   be well under 100% and the ADR is not falsified by a low number — it is falsified by a number that
+   is never printed, or by a green run being read as an inventory.
+
+**Measured at merge (increment 1, 2026-09-03).** `intents:check` reports **55 matches in known
+shapes — 36 real, 19 noise (precision 65%); 7 disposed, 29 on the burn-down.** Read it honestly:
+
+- **Recall against the pre-registered targets: 3 of 3.** ADR 354's "Left for a sibling lane" is
+  flagged, and so are both unlaned `building:` strings — but the second one only because the phrase
+  list *failed* and a structural rule replaced it there. `ledger-seats.building` opens "increments
+  3–5 — remaining platform services…" and matches nothing in `FORWARD_RE`; widening the list to
+  catch it (`increments? \d+`) would have matched every incidental mention of an increment in the
+  corpus. A `building:` string names a remainder by construction — `roadmap-truth:check` rule 3 only
+  permits the field on an unshipped item whose ADR is accepted — so the gate now treats the genre as
+  a promise rather than guessing at its wording. **When a kind of line is a promise by definition,
+  say so once instead of enumerating how people phrase it.**
+- **Precision is 65%, and that is the number to watch.** 19 of 55 matches promise nothing: a lane
+  already opened ("became its own lane (`01M1D3…`)"), a set remainder ("what remains is one empty
+  marker file"), ADR 112 quoting "not yet built" as an example of stale prose, and one line of UI
+  copy. They are baselined **separately** from the debt, so the burn-down count means what it says
+  and precision stays visible. A gate at 65% precision is one people learn to skim; if this falls
+  further the answer is a sharper discriminator, not a longer list.
+- **The 29 on the burn-down are real debt**, and this ADR does not pretend otherwise: they are
+  genuine forward references that predate the gate, exempted the way ADR 296 grandfathered its 28
+  `DESIGN_BASELINE` docs — a burn-down, not a silent exemption. Baseline rot is itself a failure.
+- **The known misses stand.** The frontier-cadence manifest lives in `docs/research/`, outside the
+  scanned surfaces; `census.ts` is a code comment, out of scope by design.
+- **The noise labels are one seat's**, which is the weakest joint here. `defect-gate-coverage.md`'s
+  rule is that a relabeling pass by another seat is the check. Three of the nineteen are this very
+  section: the paragraphs explaining that quotations are noise are themselves quotations, and the
+  gate flagged its own author writing them. That is the instrument working, and it is also exactly
+  how a 65% number turns into a habit of skimming.
+  Follows-up: deferred — a second seat relabels `FALSE_POSITIVE_BASELINE` and diffs against ryder's labels (2026-09-03)
 
 **Experiment (pre-registered).** The claim this ADR actually rests on is that a marked forward
 reference gets acted on and an unmarked one does not. Ninety days from merge, take every
