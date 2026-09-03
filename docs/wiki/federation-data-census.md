@@ -5,7 +5,55 @@ What each table in the daemon's store is (event, state, or ephemera), how writes
 All codebase claims measured 2026-08-25 at `3162aa16` (migrations at v44). The store evolves;
 re-verify against `packages/server/src/db/migrations.ts` before leaning on a row below.
 
-## Table classification
+## Residence census, per table (2026-09-03 at `6a6304a7`, migrations at v64; lane 01M1JNNF42)
+
+Re-measured on two real daemons after the 3a–3e increments (ADRs 328–361). "Crosses" means a
+row minted on one machine is read back on the other after one push/pull round trip
+(`sync/census.test.ts`). The 2026-08-25 four-residence classification below is kept as the
+pre-federation baseline.
+
+| table | ADR 325 residence | mechanism today | crosses? | note |
+|---|---|---|---|---|
+| `messages` | 2 (event) | `insertMessage` stamps `(origin_node, origin_seq)`; push ships every stamped row; fold inserts by name | **yes** | residence-checked at ingest per kind (ADR 360) |
+| `audit` — `lane.*` | 1 (via events) / 2 | `appendReplicatedEvent` stamps; fold projects onto `lanes` | **yes** | ownership/state edges decided on the hub first (ADR 355/361) |
+| `audit` — `presence.*` | 3, amended → 2 | same stamped path; fold writes `presence` rows with `node` | **yes** | ADR 356 |
+| `audit` — everything else (`residency.*`, `seat.*`, `policy.change`, `memory.*`, `claim.*`, `incident.*`, `ask.*`, `handoff.*`, `git.pr_merged`, …) | 2 ("the audited verbs") | `appendAudit`, best-effort, `origin_seq = 0` — never selected by `unpushed` | **no** | a stamped row of any other action would poison the fold (`unknown_lane_event`); widening the filter alone is unsafe |
+| `lanes` | 1 | projection of folded `lane.*`; hub-authoritative CAS for every ownership/state patch | **yes** (as events) | field edits (title, scope, branch) stay local-authoritative and replicate as `lane.updated` |
+| `presence` | 3 → 2 (transitions) | folded rows carry `node`; heartbeats/grace/`conn_id` local | **yes** (transitions) | liveness of a remote row = its node's `last_seen_at` |
+| `seat_nodes` | hub decision input | hub-minted (ADR 355 §5, 358) | n/a — hub-only by design | a joiner asks, never reads it |
+| `nodes` (liveness) | hub | `upsertForeignNode` on the pull summary | **yes** (identity + `last_seen_at`) | credentials never leave the hub |
+| `teams.policy` | 1 ("admission/policy" is hub-authoritative by intent) | `setPolicy` UPDATEs the local blob; nothing ships it | **no** — GAP | 21 readers incl. `claimWakeLeases`: a joiner's host caps/cooldowns/loops diverge from the hub's the moment an admin edits policy there. Falsify: `census.test.ts` "policy change on the hub never reaches the joiner" |
+| `seat_memory` | 2 (LWW blob, named in the baseline) | local UPSERT | **no** — GAP | a seat that moves machines (ADR 358 trust) reads no memory there. Falsify: census test "seat memory and the inbox cursor are per-machine" |
+| `inbox_cursors` | 2 (monotone max, promised explicitly) | local UPSERT | **no** — GAP | a human on two machines re-reads on each; same falsifier |
+| `tool_call_stats` | 2 (additive counters, promised explicitly) | local UPSERT | **no** — GAP | insights (`report`) count one machine only |
+| `seed_thread_entries` | 2 (promised explicitly) | `appendThread` in `store/seeds.ts`, unstamped | **no** — GAP | seeds themselves converge through the Slack relay on every daemon (`startSeedsIngest` runs unconditionally, `index.ts:181`); the *thread* a seat writes on one machine stays there |
+| `seeds` (lifecycle) | 2 | relay-ingested per daemon; state moves local | partial — the relay, not the hub | two daemons can move one seed differently; not re-measured here |
+| `wake_turns` | 2 (promised explicitly) | `appendWakeTurn`, lease-scoped, unstamped | **no** — GAP, but see note | a wake runs where the seat is enrolled (ADR 361 correction); its turns are read only by that host's report path. Cross-machine *cost* insight is the loss, and that is the unstamped `residency.wake_cost` verb above, not this table |
+| `incident_reports` | 2 | local ULID rows (v45) | **no** — GAP | a blocked report on a joiner never reaches the hub's incident routing |
+| `requests`, `grants`, `session_leases`, `agent_bootstrap_credentials` | 3 / local secrets | local | no, by design | short-TTL or credential-bearing |
+| `residency`, `wake_leases`, `host_liveness`, `footprint_*`, `sync_*`, `local_node`, `schema_meta` | 3 | local | no, by design | ADR 325 residence 3; the wake ledger is derived from `messages` on the host's poll, so a folded act still wakes (wake-leases.md, 2026-09-03) |
+| `members`, `roles`, team/seat identity | D (git) | projection from `.musterd/*.toml` | via git | unchanged |
+
+**What the push selects, verbatim** (`sync/push.ts` `unpushed`, 2026-09-03): every `messages`
+row and every `audit` row with `origin_node = <this node>` and `origin_seq > cursor`. There is no
+action filter on the audit side — the *stamp* is the filter, and only `appendReplicatedEvent`
+stamps. Falsify: stamp any other verb and push; the hub stages it and the joiner's fold stops at
+`unknown_lane_event`.
+
+### Gaps, ranked, with the lane each needs
+
+1. **`teams.policy`** — the one that changes behaviour, not just insight: wake caps and loop
+   switches are read on every machine from a blob only the editing machine holds. Hub-authoritative
+   (residence 1) like a claim: `setPolicy` on a joiner forwards; the hub's `policy.change` replicates
+   as a stamped event and the fold applies it. Lane opened from this census.
+2. **Per-seat continuity: `seat_memory` + `inbox_cursors`** — both promised, both LWW/max-merge
+   trivially; they matter the moment ADR 358 lets a human hold two machines. One lane, two tables.
+3. **Insight substrate: `tool_call_stats` + the unstamped `residency.*` cost/lease verbs +
+   `incident_reports` + `seed_thread_entries`** — nothing here decides anything; all of it makes the
+   report and the ledger one-machine views. The audit half needs a *typed* replicated kind (the fold
+   must know what to do with a verb it has never projected), not a filter widening.
+
+## Table classification (2026-08-25 baseline, pre-federation)
 
 Four residences, by what replication would have to do with them:
 
@@ -53,21 +101,21 @@ system, and the pattern ADR 325 generalizes.
 
 ADR 325's prereq-fix lane addresses the first four; strike-and-date here as they land.
 
-- **No global ordering primitive** (2026-08-25; falsify: find an `origin_seq`/HLC/logical-clock
-  column in `migrations.ts` — there is none). Ordering is wall-clock `(ts, ULID)`.
+- ~~**No global ordering primitive** (2026-08-25; falsify: find an `origin_seq`/HLC/logical-clock
+  column in `migrations.ts` — there is none).~~ **Landed:** `(origin_node, origin_seq)` on `messages` (v48) and `audit` (v58), ADR 331/335; `incident_reports` on ULIDs (v45). Ordering is wall-clock `(ts, ULID)`.
   `store/residency.ts` tie-breaks on local `rowid` in two queries (~:596, :622), and
   `incident_reports` is the schema's only `INTEGER AUTOINCREMENT` id — both meaningless once rows
   originate on more than one machine.
-- **Lane claim is a TOCTOU, not a CAS** (2026-08-25; falsify: read the lane PATCH handler,
+- ~~**Lane claim is a TOCTOU, not a CAS**~~ **Landed:** guarded `updateLane` CAS (ADR 325 prereq), hub-arbitrated for every ownership/state edge (ADR 355/361). (2026-08-25; falsify: read the lane PATCH handler,
   `transport/http.ts` ~:3115 — look for an enclosing `db.transaction` or a `WHERE
   owner_seat/state` guard on the write; neither exists). `getLane` → ~65 lines of JS policy →
   unconditional `updateLane`. The 2026-08-01 double-claim (lanes 01KYX8J5XD / 01KYXWNX9R, noted at
   ~http.ts:3133) is the recorded cost.
-- **The claim's arbitration input is host-local** (2026-08-25; falsify: read ADR 203's guard —
+- ~~**The claim's arbitration input is host-local**~~ **Closed by ADR 356** (presence transitions replicate; the hub's incumbent rule sees every machine). (2026-08-25; falsify: read ADR 203's guard —
   `hasLivePresence` — and check whether `presence` is replicated anywhere; it is not, by design).
   Under any multi-writer topology, no peer can evaluate the current rule. Not fixable by the
   prereq lane — this is why ADR 325 makes claims hub-authoritative.
-- **`updateLane` is a blind full-row overwrite** (2026-08-25; falsify: read the UPDATE at
+- ~~**`updateLane` is a blind full-row overwrite**~~ **Landed:** per-field UPDATE + `lane.updated` diff rows (ADR 325 prereq). (2026-08-25; falsify: read the UPDATE at
   `store/lanes.ts:242` — it sets every column from a merged object). Concurrent patches to
   unrelated fields clobber; non-ownership field changes (branch, scope, title, stakes…) emit no
   audit or event at all.
