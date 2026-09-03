@@ -88,7 +88,7 @@ Ranked by how likely a reader is to act on the wrong meaning. Each carries the s
 - **An agent cannot set its availability** — no MCP twin for `availability`; a seat that wants `away` must shell out. Falsifier: `toolNames.ts` has no availability entry.
 - **The CLI cannot record a goal outcome or retract a goal**, and has no `leave`: `team_goal_outcome`, `team_goal_retract`, `team_leave` are MCP-only. Falsifier: `goal.ts` handles `declare|list` only.
 - **CLI `status` cannot answer "who is platform?"** — `team_members {role}` (ADR 227) has no CLI form.
-- **`surface` is invisible** from `musterd help` though it is the ADR 332 user-facing verb.
+- ~~**`surface` is invisible** from `musterd help` though it is the ADR 332 user-facing verb.~~ FIXED 2026-09-03 (catalogued under Setup).
 
 ## Help grouping (2026-09-03, `catalog.ts`)
 
@@ -100,7 +100,7 @@ Checked and NOT a defect: every catalogued command renders a summary and a detai
 
 1. ~~`nudge` → `inbox --waiting` with alias and hook re-point (collision 1). Own lane, small.~~ DONE 2026-09-03 (lane 01M1MMFSS0).
 2. Delete the two deprecated aliases `lane_ready` / `lane ready` and `team_memory_search`; mark `team_memory_*` seat-private (collisions 2, 4). Own lane, small.
-3. Catalog repairs: unhide `surface`, regroup by question (help grouping). Docs-only lane.
+3. ~~Catalog repairs: unhide `surface`, regroup by question (help grouping). Docs-only lane.~~ DONE 2026-09-03: `musterd help` has eight rooms by question (waiting / talking / work / remembering / team / insight / setup / ops) and `surface` is catalogued.
 4. `done` says *unconfirmed* or routes to `submit` (collision 2). Own lane.
 5. Seat occupancy gets one name (collision 3). ADR first.
 6. Parity: `availability` tool; CLI `goal outcome|retract`, `leave`, `status --role`. One lane, after 5.

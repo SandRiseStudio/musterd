@@ -11,7 +11,15 @@
  * guidance check imports it on Node's native TypeScript with no build step and no color dependency.
  */
 
-export type GroupId = 'setup' | 'team' | 'messaging' | 'work' | 'insight' | 'inbox' | 'admin';
+export type GroupId =
+  | 'waiting'
+  | 'messaging'
+  | 'work'
+  | 'remembering'
+  | 'team'
+  | 'insight'
+  | 'setup'
+  | 'ops';
 
 export interface CommandGroup {
   id: GroupId;
@@ -47,30 +55,48 @@ export interface CommandEntry {
   freeTextPositional?: boolean;
 }
 
-/** The rooms of the floor, in display order. */
+/**
+ * The rooms of the floor, in display order — one room per QUESTION a reader brings, not per
+ * implementation. Regrouped 2026-09-03 (surface survey, docs/wiki/command-and-tool-surface-map.md):
+ * "what is waiting for me" used to be answered from three rooms, and `whoami`/`memory`/`insight` sat
+ * under "Inbox" though none of them reads an inbox.
+ */
 export const GROUPS: readonly CommandGroup[] = [
-  { id: 'setup', title: 'Setup & daemon', blurb: 'get wired up and run the coordination daemon' },
   {
-    id: 'team',
-    title: 'Team & seats',
-    blurb: 'create teams, add members, give agents a workspace',
+    id: 'waiting',
+    title: 'Waiting & orientation',
+    blurb: 'what is waiting for you, what to pick up next, who you are here',
   },
-  { id: 'messaging', title: 'Messaging', blurb: 'send acts, nudge a teammate, get notified' },
+  {
+    id: 'messaging',
+    title: 'Talking',
+    blurb: 'send a typed act to a teammate, a few, or everyone',
+  },
   {
     id: 'work',
     title: 'Work & lanes',
-    blurb: 'explore shared Seeds; own, hand off, and close Lanes',
-  },
-  { id: 'insight', title: 'Insight', blurb: 'the roster, flow metrics, and the governance trail' },
-  {
-    id: 'inbox',
-    title: 'Inbox & presence',
-    blurb: 'read what is waiting; set who you are and when',
+    blurb: 'explore shared Seeds; own, hand off, and close Lanes; the board',
   },
   {
-    id: 'admin',
-    title: 'Seats & admin',
-    blurb: 'claim a seat, approve requests, release and recover',
+    id: 'remembering',
+    title: 'Remembering',
+    blurb: "this seat's private continuity note; findings for the whole team",
+  },
+  {
+    id: 'team',
+    title: 'Team & seats',
+    blurb: 'who is on the team; create, claim, join, release, and recover seats',
+  },
+  {
+    id: 'insight',
+    title: 'Insight & audit',
+    blurb: 'flow metrics, the wasted-work collector, and the governance trail',
+  },
+  { id: 'setup', title: 'Setup & daemon', blurb: 'get wired up and run the coordination daemon' },
+  {
+    id: 'ops',
+    title: 'Residency & sessions',
+    blurb: 'wake enrolled seats while offline; the captured harness session',
   },
 ];
 
@@ -173,6 +199,20 @@ export const CATALOG: readonly CommandEntry[] = [
       'musterd harness configure --select claude-code,musterd --yes',
       'musterd harness status',
       'musterd harness status --json',
+    ],
+  },
+  {
+    name: 'surface',
+    signature: 'list | decline <name> | accept <name>',
+    summary:
+      'record a refusal — remove a provisioned surface and remember that you meant to (ADR 332)',
+    group: 'setup',
+    detail:
+      'Provisioning used to know only installed and absent, and absence carries no intent. `list` shows what can be refused here and what has been; `decline <name>` removes the surface (a hook, a statusline chip) and records the refusal so `init --check` reports drift about it as a choice, not a gap; `accept <name>` clears the refusal (re-install with `init --refresh-hooks`).',
+    examples: [
+      'musterd surface list',
+      'musterd surface decline statusline',
+      'musterd surface accept statusline',
     ],
   },
   {
@@ -446,7 +486,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'notify',
     signature: '[--interval <seconds>] [--once]',
     summary: 'background OS notification when a directed act lands while away',
-    group: 'messaging',
+    group: 'waiting',
   },
 
   // ── Work & lanes ───────────────────────────────────────────────────────────────────────────
@@ -501,7 +541,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'node',
     signature: '<invite|join|rotate|revoke|list>',
     summary: 'machine credentials — admit a second machine to this team',
-    group: 'admin',
+    group: 'team',
     detail:
       'The machine credential (ADR 328). An admin runs `node invite` on the hub to mint a single-use, ' +
       '15-minute `msinv_` code; the joining machine runs `node join <hub-url> <code>`, which asks ITS ' +
@@ -514,7 +554,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'next',
     signature: '[--json]',
     summary: 'the orientation brief — what you carry, what to pick up next',
-    group: 'work',
+    group: 'waiting',
     primary: true,
     detail:
       'The orientation brief (ADR 049/084): what you’re carrying, what just shipped, open lanes you ' +
@@ -562,7 +602,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'board',
     signature: '[--team <slug>] [--print] [--no-open]',
     summary: 'open the work board in your browser, signed in as yourself',
-    group: 'insight',
+    group: 'work',
     primary: true,
     detail:
       'Opens /board signed in as the seat this folder resolves to, without you handling a secret ' +
@@ -576,7 +616,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'live',
     signature: '[--team <slug>] [--print] [--no-open]',
     summary: 'open the office in your browser, signed in as yourself',
-    group: 'insight',
+    group: 'team',
     primary: false,
     detail:
       'Opens /live signed in as the seat this folder resolves to, so the asks waiting on you are ' +
@@ -604,7 +644,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'status',
     signature: '',
     summary: 'the roster — who’s on the team, present, and working; leads with what waits for you',
-    group: 'insight',
+    group: 'team',
     primary: true,
     detail:
       'The team roster: members, presence, and what each is working on — plus, up top, anything waiting ' +
@@ -623,7 +663,7 @@ export const CATALOG: readonly CommandEntry[] = [
     signature:
       '[--watch] [--all] [--unread] [--peek] [--deferred] [--limit <n>] [--from <name>] [--act <act>]  |  --waiting  |  defer <act_id> --until-lane <id> | --until-reply  |  --wait [--timeout <s>]  |  --interrupt-check',
     summary: 'read what’s waiting for you; watch or block for the next act',
-    group: 'inbox',
+    group: 'waiting',
     primary: true,
     detail:
       'Your durable mailbox. By default it shows a bounded RECENT window (newest last), grouped under ' +
@@ -651,7 +691,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'whoami',
     signature: '',
     summary: 'the seat this folder resolves to (member, team, surface, source)',
-    group: 'inbox',
+    group: 'waiting',
     primary: true,
     detail:
       'Show the seat this folder resolves to right now and where it came from (env > binding > --as > ' +
@@ -661,7 +701,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'memory',
     signature: '[show] | save --headline "<subject>" [body…] | clear',
     summary: 'this seat’s private continuity note (save before you hand off)',
-    group: 'inbox',
+    group: 'remembering',
     primary: true,
     detail:
       'This seat’s private continuity note (ADR 093): save before handing off or wrapping up; claim/status ' +
@@ -672,7 +712,7 @@ export const CATALOG: readonly CommandEntry[] = [
     signature:
       'save --headline "<subject>" [body…] [--tags a,b] [--repo slug] | search "<keywords>"',
     summary: 'save a finding for the whole team; search what teammates already saved',
-    group: 'inbox',
+    group: 'remembering',
     primary: false,
     detail:
       'Team memory (ADR 327): `save` writes an insight act — team-visible, attributed, dated — for traps, ' +
@@ -683,7 +723,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'wake-context',
     signature: '--act <id> | --lane <id>',
     summary: 'read a bounded, body-free wake orientation index',
-    group: 'inbox',
+    group: 'waiting',
     primary: false,
     detail:
       'Read ADR 209 portable wake context for a directed Act or owned Lane. It names only canonical IDs, state, delivery intent, and explicit follow-up reads; it never loads an Act or memory body.',
@@ -692,7 +732,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'availability',
     signature: '<available|away|dnd> [--until <iso>]',
     summary: 'set your availability (away holds notifications; dnd passes urgent)',
-    group: 'inbox',
+    group: 'waiting',
     primary: true,
   },
 
@@ -701,7 +741,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'claim',
     signature: '[<name>] [--token <code>] | --role <role> [--for <code>] [--surface <s>] [--force]',
     summary: 'get onto the team from this folder — occupy or adopt a seat',
-    group: 'admin',
+    group: 'team',
     primary: true,
     detail:
       'Get onto the team from this folder: bare `claim` occupies your bound seat (or confirms it if ' +
@@ -715,7 +755,7 @@ export const CATALOG: readonly CommandEntry[] = [
     signature:
       '[--pending] [--json]  |  decide <id> --approve [--once | --standing | --ttl-hours <n>] | --deny',
     summary: 'list and decide claim/teammate requests (admin-only)',
-    group: 'admin',
+    group: 'team',
     primary: true,
     detail:
       'List claim/teammate requests and decide them (admin-only, ADR 077). Approve grant lifetimes: ' +
@@ -727,7 +767,7 @@ export const CATALOG: readonly CommandEntry[] = [
     signature:
       'on [--harness <class>] [--host <name>] [knobs] | off | status | policy [knobs]  [--seat <name>] [--json]',
     summary: 'enroll this seat for wake-on-message while offline (ADR 131)',
-    group: 'admin',
+    group: 'ops',
     detail:
       'Harness residency (ADR 131): an enrolled seat that goes offline stays reachable — the daemon ' +
       'derives wake-due directed acts and `musterd host` resurrects the harness session. ' +
@@ -756,7 +796,7 @@ export const CATALOG: readonly CommandEntry[] = [
     signature:
       'show [--json]  |  start --stdin | end --stdin  |  bind --thread <id>  |  resolve-labels --stdin  |  label-nudge',
     summary: 'this workspace’s captured harness session — what a wake would resume (ADR 131)',
-    group: 'admin',
+    group: 'ops',
     detail:
       'Session capture (ADR 131 inc 4): the SessionStart/SessionEnd hooks (`musterd init` wires ' +
       'them) pipe the harness hook JSON into `start`/`end`, which record the session in the ' +
@@ -785,7 +825,7 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'host',
     signature: '[--once] [--interval <s>] [--timeout <s>] [--host <label>]',
     summary: 'the wake actuator — resurrect enrolled offline seats on this machine (ADR 131)',
-    group: 'admin',
+    group: 'ops',
     detail:
       'The per-machine wake actuator (ADR 131 inc 3): polls the daemon for wake leases ' +
       '(agent-key, presence-neutral), spawns the harness fresh in the seat’s registered workspace ' +
@@ -800,12 +840,12 @@ export const CATALOG: readonly CommandEntry[] = [
     name: 'unbind',
     signature: '',
     summary: 'release this folder’s seat — keeps it on the team, free to re-claim',
-    group: 'admin',
+    group: 'team',
   },
   {
     name: 'reclaim',
     signature: '<member>',
     summary: 'drop a member’s stuck/stale live session so it can rejoin',
-    group: 'admin',
+    group: 'team',
   },
 ];
