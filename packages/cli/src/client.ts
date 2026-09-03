@@ -8,6 +8,7 @@ import {
   NodeListSchema,
   type SeatNodeTrusted,
   SeatNodeTrustedSchema,
+  type SyncWedge,
   type NodeInviteMint,
   type NodeList,
   GoalSchema,
@@ -472,6 +473,8 @@ export class HttpClient {
       charter?: string | null;
       capabilities?: unknown;
     }>;
+    /** ADR 360 follow-on: this machine's standing push refusal. Absent from an older daemon. */
+    sync?: { wedged: SyncWedge | null };
   }> {
     return this.request('GET', `/teams/${slug}/members`);
   }
@@ -870,6 +873,14 @@ export class HttpClient {
     const parsed = SeatNodeTrustedSchema.safeParse(json);
     if (!parsed.success) throw new CliError('trust response did not match the protocol schema', 1);
     return parsed.data;
+  }
+
+  /** ADR 328 §4's explicit re-bind act: drop a seat's residence binding (admin). */
+  async nodeUnbind(slug: string, seat: string): Promise<{ seat: string; unbound: string | null }> {
+    return (await this.request(
+      'DELETE',
+      `/teams/${slug}/nodes/bindings/${encodeURIComponent(seat)}`,
+    )) as { seat: string; unbound: string | null };
   }
 
   async nodes(slug: string): Promise<NodeList> {

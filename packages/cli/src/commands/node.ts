@@ -1,4 +1,4 @@
-import type { NodeSummary } from '@musterd/protocol';
+import { describeSyncWedge, type NodeSummary } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
@@ -23,6 +23,7 @@ const USAGE =
   '  musterd node rotate <node-id>\n' +
   '  musterd node revoke <node-id>\n' +
   '  musterd node trust <node-id>\n' +
+  '  musterd node unbind <seat>\n' +
   '  musterd node list [--json]';
 
 function renderNode(n: NodeSummary): string {
@@ -135,13 +136,29 @@ export async function nodeCommand(parsed: Parsed): Promise<number> {
     return 0;
   }
 
+  if (sub === 'unbind') {
+    const seat = parsed.positionals[1];
+    if (!seat) throw new CliError(USAGE, 2);
+    const { team, http } = resolve(parsed.flags);
+    const { unbound } = await http.nodeUnbind(team, seat);
+    process.stdout.write(
+      unbound
+        ? success(
+            `${seat} unbound from node ${unbound} — the next act as ${seat} binds it to that machine`,
+          ) + '\n'
+        : theme.meta(`nothing to do — ${seat} was not bound to any node\n`),
+    );
+    return 0;
+  }
+
   if (sub === 'list') {
     const { team, http } = resolveRead(parsed.flags, { reclaimAgentLease: true });
-    const { nodes } = await http.nodes(team);
+    const { nodes, push } = await http.nodes(team);
     if (parsed.flags['json']) {
-      process.stdout.write(`${JSON.stringify({ nodes }, null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify({ nodes, push }, null, 2)}\n`);
       return 0;
     }
+    if (push?.wedged) process.stdout.write(theme.warn(describeSyncWedge(push.wedged)) + '\n');
     if (nodes.length === 0) {
       process.stdout.write(theme.meta('no nodes — this team has never been enrolled anywhere\n'));
       return 0;

@@ -1523,6 +1523,20 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Wedged-push UX (ADR 360 follow-on, 2026-09-02): the last residence refusal the hub gave this
+    // node's push, as JSON, on the cursor row it stalled. Cleared by the next accepted push. Local
+    // (residence 3) like the row it sits on.
+    version: 64,
+    up: (db) => {
+      const cols = db
+        .prepare<[], { name: string }>('PRAGMA table_info(sync_push_cursor)')
+        .all()
+        .map((c) => c.name);
+      if (!cols.includes('refused_json'))
+        db.exec('ALTER TABLE sync_push_cursor ADD COLUMN refused_json TEXT');
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

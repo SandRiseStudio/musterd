@@ -64,7 +64,43 @@ export const NodeSummarySchema = z.object({
 });
 export type NodeSummary = z.infer<typeof NodeSummarySchema>;
 
-export const NodeListSchema = z.object({ nodes: z.array(NodeSummarySchema) });
+/**
+ * A joiner whose push the hub refuses on residence (ADR 360): every event after the refused one is
+ * stuck behind it, and the seat named is the one who can clear it. Local to the refused machine
+ * (ADR 325 residence 3) — it describes THIS daemon's conversation with its hub.
+ */
+export const SyncWedgeSchema = z.object({
+  /** The seat the refused event spoke as. */
+  seat: z.string(),
+  /** The node the hub says that seat lives on — label and id. */
+  bound_to: z.string(),
+  bound_node_id: z.string(),
+  /** This machine's node id — what a `musterd node trust` from `bound_to` must name. */
+  node_id: z.string(),
+  kind: z.enum(['message', 'lane', 'presence']),
+  /** When the hub first refused this seat, ms epoch. */
+  since: z.number().int(),
+});
+export type SyncWedge = z.infer<typeof SyncWedgeSchema>;
+
+/** One wording for every surface that shows a wedge — the roster, the inbox, `node list`. */
+export function describeSyncWedge(w: SyncWedge, now: number = Date.now()): string {
+  const mins = Math.max(0, Math.round((now - w.since) / 60_000));
+  const ago = mins < 1 ? 'just now' : mins < 60 ? `${mins}m` : `${Math.round(mins / 60)}h`;
+  return (
+    `⚠ this machine's sync is wedged: the hub refuses its push because seat "${w.seat}" is bound ` +
+    `to "${w.bound_to}" (a ${w.kind} event, since ${ago}). Nothing this machine writes reaches the ` +
+    `team until it clears. Fix: from a session on "${w.bound_to}", run ` +
+    `\`musterd node trust ${w.node_id}\` (ADR 358) — or an admin runs ` +
+    `\`musterd node unbind ${w.seat}\` and the next act as ${w.seat} binds it here.`
+  );
+}
+
+export const NodeListSchema = z.object({
+  nodes: z.array(NodeSummarySchema),
+  /** Present on a joiner whose push is refused; absent or null otherwise. Additive. */
+  push: z.object({ wedged: SyncWedgeSchema.nullable() }).optional(),
+});
 export type NodeList = z.infer<typeof NodeListSchema>;
 
 /**

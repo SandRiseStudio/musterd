@@ -15,7 +15,7 @@ import { bindSeatToNode, seatBinding } from '../store/nodes.js';
 import { attach } from '../store/presence.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { Hub } from '../transport/hub.js';
-import { pushTeam } from './push.js';
+import { pushTeam, readPushRefusal } from './push.js';
 
 /**
  * The daemon-side push loop (ADR 325 increment 3b-i), exercised between two real daemons.
@@ -31,6 +31,8 @@ let joiner: RunningServer;
 let hubBase: string;
 let joinerBase: string;
 let nickCredential: string;
+let nickOnJoinerCredential: string;
+const nickCredentialOnJoiner = () => nickOnJoinerCredential;
 let dir: string;
 /** The joiner's own context — pushTeam runs inside the joiner daemon, not the hub. */
 let joinerCtx: Ctx;
@@ -163,7 +165,11 @@ beforeEach(async () => {
     creator: { name: 'nick', kind: 'human' },
   });
   nickCredential = created.json.human_credential;
-  await post(joinerBase, '/teams', { slug: 'bravo', creator: { name: 'nick', kind: 'human' } });
+  const onJoiner = await post(joinerBase, '/teams', {
+    slug: 'bravo',
+    creator: { name: 'nick', kind: 'human' },
+  });
+  nickOnJoinerCredential = onJoiner.json.human_credential;
 });
 
 afterEach(async () => {
@@ -558,6 +564,69 @@ describe("push-level residence — every kind, not only presence (ADR 355 §5's 
         >('SELECT COUNT(*) AS n FROM seat_nodes WHERE member_id = ?')
         .get(memberId(hub, 'autorefresh')),
     ).toEqual({ n: 1 });
+  });
+});
+
+describe('a wedged push says so where the seat is (ADR 360 follow-on)', () => {
+  const hubTeam = () => getTeamBySlug(hub.db, 'bravo')!;
+  const memberId = (server: RunningServer, name: string) =>
+    server.db
+      .prepare<
+        [string, string],
+        { id: string }
+      >('SELECT id FROM members WHERE team_id = ? AND name = ?')
+      .get(getTeamBySlug(server.db, 'bravo')!.id, name)!.id;
+  async function get(base: string, path: string, auth: string) {
+    const response = await fetch(base + path, { headers: { authorization: `Bearer ${auth}` } });
+    return { status: response.status, json: (await response.json()) as any };
+  }
+
+  it('the refusal persists on the cursor row, names the seat, the bound node and the kind, keeps its first-seen clock, and rides the roster and node list', async () => {
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id);
+    bindSeatToNode(hub.db, hubTeam().id, memberId(hub, 'nick'), hubNode.id);
+    expect(readPushRefusal(joiner.db, joinerTeam().id)).toBeNull();
+
+    await expect(pushTeam(joinerCtx, joinerTeam(), 1000)).rejects.toThrow(/bound_elsewhere|403/);
+    const joinerNode = readNodeState().nodes['bravo']!.node_id;
+    const wedge = readPushRefusal(joiner.db, joinerTeam().id);
+    expect(wedge).toMatchObject({
+      seat: 'nick',
+      bound_node_id: hubNode.id,
+      node_id: joinerNode,
+      kind: 'message',
+      since: 1000,
+    });
+    // A repeat refusal every tick does not restart the clock.
+    await expect(pushTeam(joinerCtx, joinerTeam(), 61_000)).rejects.toThrow(/403/);
+    expect(readPushRefusal(joiner.db, joinerTeam().id)?.since).toBe(1000);
+
+    // The joiner's roster — what every seat session on this machine reads — carries it.
+    const roster = await get(joinerBase, '/teams/bravo/members', nickCredentialOnJoiner());
+    expect(roster.status).toBe(200);
+    expect(roster.json.sync.wedged).toMatchObject({ seat: 'nick', node_id: joinerNode });
+    const nodes = await get(joinerBase, '/teams/bravo/nodes', nickCredentialOnJoiner());
+    expect(nodes.json.push.wedged).toMatchObject({ seat: 'nick' });
+    // The hub's own roster says nothing — its push is not wedged.
+    const hubRoster = await get(hubBase, '/teams/bravo/members', nickCredential);
+    expect(hubRoster.json.sync.wedged).toBeNull();
+  });
+
+  it('the wedge clears on the next accepted push', async () => {
+    send(joiner, 'j-0');
+    await enrollJoiner();
+    const hubNode = localNodeForTeam(hub.db, hubTeam().id);
+    bindSeatToNode(hub.db, hubTeam().id, memberId(hub, 'nick'), hubNode.id);
+    await expect(pushTeam(joinerCtx, joinerTeam())).rejects.toThrow(/403/);
+    expect(readPushRefusal(joiner.db, joinerTeam().id)).not.toBeNull();
+    // The remedy: the seat moves (an admin unbind here), and the same batch goes through.
+    const { unbindSeat } = await import('../store/nodes.js');
+    unbindSeat(hub.db, memberId(hub, 'nick'));
+    await expect(pushTeam(joinerCtx, joinerTeam())).resolves.toBeGreaterThan(0);
+    expect(readPushRefusal(joiner.db, joinerTeam().id)).toBeNull();
+    const roster = await get(joinerBase, '/teams/bravo/members', nickCredentialOnJoiner());
+    expect(roster.json.sync.wedged).toBeNull();
   });
 });
 

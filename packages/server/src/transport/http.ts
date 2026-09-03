@@ -305,7 +305,7 @@ import {
   SyncResidenceError,
 } from '../sync/log.js';
 import { pullTeam } from '../sync/pull.js';
-import { pushTeam } from '../sync/push.js';
+import { readPushRefusal, pushTeam } from '../sync/push.js';
 import {
   recordCcdNudge,
   recordNudgeDecision,
@@ -1818,6 +1818,10 @@ export async function handleHttp(
           // the roles themselves are visible beside the seats that hold them. Additive — an older
           // client ignores it.
           roles: listRoles(ctx.db, team.id),
+          // ADR 360 follow-on: a joiner whose push the hub refuses says so on the roster — the one
+          // payload every seat session on this machine reads — naming the seat and the remedy.
+          // Null on a machine whose sync is fine (or that has no hub). Additive.
+          sync: { wedged: readPushRefusal(ctx.db, team.id) },
         });
       }
 
@@ -3692,7 +3696,14 @@ export async function handleHttp(
 
       if (method === 'GET' && rest === '/nodes') {
         const { team } = authAdmin(ctx, slug, req);
-        return sendJson(res, 200, NodeListSchema.parse({ nodes: listNodes(ctx.db, team.id) }));
+        return sendJson(
+          res,
+          200,
+          NodeListSchema.parse({
+            nodes: listNodes(ctx.db, team.id),
+            push: { wedged: readPushRefusal(ctx.db, team.id) },
+          }),
+        );
       }
 
       // ── The sync surface (ADR 325 increment 3b-i). Authenticated by `msnode_` and by nothing
@@ -3885,6 +3896,7 @@ export async function handleHttp(
               seat: err.seat,
               node_id: err.boundTo,
               node_label: err.boundLabel,
+              kind: err.kind,
             });
           }
           // Both refusals are things the caller can act on, not faults. A 500 here would read as
