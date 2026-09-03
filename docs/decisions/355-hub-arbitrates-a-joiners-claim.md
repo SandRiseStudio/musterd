@@ -59,6 +59,9 @@ race: there is one row the decision is made against, and one event that says wha
 Handoffs (naming someone else), releases, state moves and closes stay local and replicate as before.
 They are residence-1 facts too, and each will move behind the hub in its own increment; this one is
 the claim, because the claim is the edge where two machines building the same lane is created.
+**Closed by [ADR 361](361-every-ownership-edge-is-the-hubs.md), 2026-09-02:** every patch that
+moves `owner_seat` or `state` is the hub's; the hub emits no act (the `[lane] claimed` this route
+delivered was a duplicate of the joiner's).
 
 ### 2. On the hub, `arbitrateClaim` runs the existing guard and rule against the hub's row
 

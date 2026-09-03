@@ -1,4 +1,5 @@
 import {
+  LANE_TERMINAL_STATES,
   type Lane,
   LaneSchema,
   SeatBoundElsewhereRefusalSchema,
@@ -6,14 +7,17 @@ import {
   SeatNodeTrustedSchema,
   type SyncClaimRequest,
   SyncClaimRefusalSchema,
+  type SyncLanePatchRequest,
   type SyncTrustRequest,
+  type UpdateLane,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
 import type { Ctx } from '../context.js';
+import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
 import { appendAudit } from '../store/audit.js';
-import { getLane, LaneConflictError, updateLane } from '../store/lanes.js';
+import { getLane, LaneConflictError, type LaneExpectation, updateLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { localNodeForTeam } from '../store/messages.js';
 import { bindSeatToNode, seatBinding, trustNodeForSeat } from '../store/nodes.js';
@@ -220,19 +224,92 @@ export function joinerEnrollment(
 }
 
 /**
- * Hub side. Throws `ClaimRefusedError` for every "no" the caller can act on; anything else is a
- * fault. The three refusals, in the order they are checked:
- *  - the seat is not on this roster yet (git lag) — retry after the roster reconciles;
- *  - the seat is bound to another node (ADR 328 §4) — `SeatBoundElsewhereError`, not a refusal a
- *    retry clears: the node is not entitled to speak for that seat;
- *  - the lane is not here yet (the origin's `lane.opened` has not folded) — retry after sync;
- *  - the CAS: the lane moved since the joiner read it, or a live incumbent holds it (ADR 203).
+ * The policy that runs BEFORE an ownership/state write, in one place for both the local PATCH
+ * handler and the hub's arbitration (ADR 361): what the daemon decides about a patch given the
+ * row it can see. Service seats hold no lanes (ADR 232); a self-directed takeover is refused while
+ * the incumbent is live (ADR 203); a counterpart's terminal close must not rewrite the worker's
+ * stage-one merge attestation (ADR 305). Returns the patch to write and the guard the write must
+ * carry — the caller's read, so the write is a CAS. Throws `MusterdError`.
  */
-export function arbitrateClaim(
+export function decideLanePatch(
+  db: Database,
+  teamId: string,
+  member: { name: string; kind: string },
+  before: Lane,
+  body: UpdateLane,
+  presenceTimeoutMs: number,
+): { patch: UpdateLane; guard: LaneExpectation | undefined } {
+  if (body.owner_seat !== undefined && member.kind === 'service')
+    throw new MusterdError(
+      'forbidden',
+      `"${member.name}" is a service seat — ledger seats never claim or hold lanes (ADR 232)`,
+    );
+  if (body.owner_seat) {
+    const newOwner = getMemberByName(db, teamId, body.owner_seat);
+    if (newOwner?.kind === 'service')
+      throw new MusterdError(
+        'forbidden',
+        `"${body.owner_seat}" is a service seat — a lane cannot be handed to a ledger seat (ADR 232)`,
+      );
+  }
+  // A CLAIM is distinguishable from a HANDOFF by who the new owner is: taking it for yourself is
+  // a claim; naming someone else is a deliberate give-away that must keep working. Only a
+  // self-directed takeover of a LIVE incumbent is refused — an offline or departed owner stays
+  // claimable (ADR 196's posture). Since presence replication (ADR 356) the presence consulted
+  // here is the whole team's on every machine.
+  const takingForSelf =
+    body.owner_seat !== undefined &&
+    body.owner_seat === member.name &&
+    before.owner_seat !== null &&
+    before.owner_seat !== member.name;
+  if (takingForSelf) {
+    const incumbent = getMemberByName(db, teamId, before.owner_seat!);
+    const incumbentLive =
+      incumbent !== undefined && hasLivePresence(db, incumbent.id, presenceTimeoutMs);
+    if (incumbentLive) {
+      throw new MusterdError(
+        'conflict',
+        `lane "${before.id}" is owned by ${before.owner_seat}, who is live — claiming it would ` +
+          `duplicate their work. Pick another lane, or ask them to hand it over ` +
+          `(lane_handoff) or release it.`,
+      );
+    }
+  }
+  const counterpartTerminal =
+    body.state !== undefined &&
+    LANE_TERMINAL_STATES.has(body.state) &&
+    !LANE_TERMINAL_STATES.has(before.state) &&
+    before.owner_seat !== null &&
+    member.name !== before.owner_seat;
+  const patch = counterpartTerminal ? { ...body, merged: undefined } : body;
+  const guard =
+    body.owner_seat !== undefined || body.state !== undefined
+      ? { owner_seat: before.owner_seat, state: before.state }
+      : undefined;
+  return { patch, guard };
+}
+
+/** Does this patch move ownership or state — the edges ADR 325 residence 1 makes the hub's? */
+export function isOwnershipOrStatePatch(body: UpdateLane): boolean {
+  return body.owner_seat !== undefined || body.state !== undefined;
+}
+
+/**
+ * Hub side, every ownership/state edge (ADR 361; the claim since ADR 355). Throws
+ * `ClaimRefusedError` for every "no" the caller can act on; anything else is a fault. In order:
+ *  - the seat is not on this roster yet (git lag) — retry after the roster reconciles;
+ *  - the seat is bound to another node (ADR 328 §4) — `SeatBoundElsewhereError`;
+ *  - the lane is not here yet (the origin's `lane.opened` has not folded) — retry after sync;
+ *  - the policy (`decideLanePatch`) against the HUB's row — a live incumbent, a service seat;
+ *  - the CAS with the JOINER's expectation: the lane moved since the joiner read it.
+ * The hub writes the transition row as the seat, from its own allocator, with `node` naming the
+ * joiner; it emits no act — the origin speaks (ADR 361 §2).
+ */
+export function arbitrateLanePatch(
   ctx: Ctx,
   team: { id: string; slug: string },
   node: { id: string; label: string },
-  req: SyncClaimRequest,
+  req: SyncLanePatchRequest,
   now: number = Date.now(),
 ): Lane {
   const seat = getMemberByName(ctx.db, team.id, req.seat);
@@ -243,7 +320,7 @@ export function arbitrateClaim(
       'unknown',
     );
   }
-  if (seat.kind === 'service') {
+  if (seat.kind === 'service' && req.patch.owner_seat !== undefined) {
     throw new ClaimRefusedError(
       `"${req.seat}" is a service seat — ledger seats never claim or hold lanes (ADR 232)`,
       null,
@@ -261,35 +338,27 @@ export function arbitrateClaim(
       'unknown',
     );
   }
-  // ADR 203's rule, evaluated where the deciding input lives: the hub's presence — which, since
-  // presence replication (spec 2026-09-02, ADR 356), holds every machine's seats. A remote row is
-  // live while its node is (REMOTE_PRESENCE_TTL_MS); that is the staleness ADR 325 §Consequences
-  // priced, and the falsifier is sync/presence.test.ts cases 2 and 3.
-  if (before.owner_seat !== null && before.owner_seat !== req.seat) {
-    const incumbent = getMemberByName(ctx.db, team.id, before.owner_seat);
-    const incumbentLive =
-      incumbent !== undefined &&
-      hasLivePresence(ctx.db, incumbent.id, ctx.config.presenceTimeoutMs);
-    if (incumbentLive) {
-      throw new ClaimRefusedError(
-        `lane "${req.lane}" is owned by ${before.owner_seat}, who is live — claiming it would ` +
-          `duplicate their work. Pick another lane, or ask them to hand it over.`,
-        before.owner_seat,
-        before.state,
-      );
-    }
-  }
+  let decided: { patch: UpdateLane; guard: LaneExpectation | undefined };
   try {
-    return updateLane(
+    decided = decideLanePatch(
       ctx.db,
       team.id,
-      req.lane,
-      team.slug,
-      { owner_seat: req.seat },
-      now,
-      req.expect,
-      { actor: req.seat, node: node.id },
-    )!;
+      seat,
+      before,
+      req.patch,
+      ctx.config.presenceTimeoutMs,
+    );
+  } catch (err) {
+    if (err instanceof MusterdError && err.code === 'conflict') {
+      throw new ClaimRefusedError(err.message, before.owner_seat, before.state);
+    }
+    throw err;
+  }
+  try {
+    return updateLane(ctx.db, team.id, req.lane, team.slug, decided.patch, now, req.expect, {
+      actor: req.seat,
+      node: node.id,
+    })!;
   } catch (err) {
     if (err instanceof LaneConflictError) {
       throw new ClaimRefusedError(
@@ -304,19 +373,37 @@ export function arbitrateClaim(
   }
 }
 
+/** The claim, as the special case of `arbitrateLanePatch` it always was (ADR 355). */
+export function arbitrateClaim(
+  ctx: Ctx,
+  team: { id: string; slug: string },
+  node: { id: string; label: string },
+  req: SyncClaimRequest,
+  now: number = Date.now(),
+): Lane {
+  return arbitrateLanePatch(
+    ctx,
+    team,
+    node,
+    { lane: req.lane, seat: req.seat, patch: { owner_seat: req.seat }, expect: req.expect },
+    now,
+  );
+}
+
 /**
- * Joiner side. Returns the hub's lane on success. Throws `ClaimRefusedError` on a 409 with the
- * hub's holder/state, `HubUnreachableError` when no answer came, and a plain Error for anything the
- * hub answered that is neither — an upgrade skew, say — so it surfaces as a fault, not a refusal.
+ * Joiner side, every ownership/state edge. Returns the hub's lane on success. Throws
+ * `ClaimRefusedError` on a 409 with the hub's holder/state, `SeatBoundElsewhereError` on a 403,
+ * `HubUnreachableError` when no answer came, and a plain Error for anything the hub answered that
+ * is neither — an upgrade skew, say — so it surfaces as a fault, not a refusal.
  */
-export async function claimAtHub(
+export async function patchAtHub(
   enrollment: { hub_url: string; credential: string },
   slug: string,
-  req: SyncClaimRequest,
+  req: SyncLanePatchRequest,
 ): Promise<Lane> {
   let res: Response;
   try {
-    res = await fetch(new URL(`/teams/${slug}/sync/claim`, enrollment.hub_url), {
+    res = await fetch(new URL(`/teams/${slug}/sync/lane`, enrollment.hub_url), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -348,9 +435,23 @@ export async function claimAtHub(
     }
   }
   if (!res.ok) {
-    throw new Error(`the hub answered ${res.status} to the claim: ${JSON.stringify(body)}`);
+    throw new Error(`the hub answered ${res.status} to the lane patch: ${JSON.stringify(body)}`);
   }
   return LaneSchema.parse((body as { lane: unknown }).lane);
+}
+
+/** The claim, forwarded as the lane patch it is. Kept for callers that speak the claim shape. */
+export async function claimAtHub(
+  enrollment: { hub_url: string; credential: string },
+  slug: string,
+  req: SyncClaimRequest,
+): Promise<Lane> {
+  return patchAtHub(enrollment, slug, {
+    lane: req.lane,
+    seat: req.seat,
+    patch: { owner_seat: req.seat },
+    expect: req.expect,
+  });
 }
 
 /**

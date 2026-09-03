@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AuditEntrySchema } from './audit.js';
 import { EnvelopeSchema } from './envelope.js';
+import { UpdateLaneSchema } from './lanes.js';
 
 /**
  * The daemon↔hub sync surface (ADR 325), increment 3b-i of the federation build.
@@ -190,6 +191,25 @@ export const SyncClaimRequestSchema = z.object({
   }),
 });
 export type SyncClaimRequest = z.infer<typeof SyncClaimRequestSchema>;
+
+/**
+ * Federation residence 1, every ownership/state edge (ADR 361): the generalisation of the claim.
+ * A joiner forwards ANY lane patch that carries `owner_seat` or `state` — a claim, a release
+ * (`state: open`), a handoff, a submit, a terminal close — with its read as `expect`, and the hub
+ * runs the same policy and the same guarded CAS against ITS row. `patch` is the whole
+ * `UpdateLane` body so one write lands one row; handler-level fields (`acceptor`,
+ * `handoff_note`) ride along and the hub's store ignores them — the origin runs the post-effects.
+ */
+export const SyncLanePatchRequestSchema = z.object({
+  lane: z.string().min(1),
+  seat: z.string().min(1),
+  patch: UpdateLaneSchema,
+  expect: z.object({
+    owner_seat: z.string().nullable(),
+    state: z.string().min(1),
+  }),
+});
+export type SyncLanePatchRequest = z.infer<typeof SyncLanePatchRequestSchema>;
 
 /**
  * A refused claim carries WHO holds the lane beside the error envelope, the way a sync gap carries
