@@ -16,13 +16,23 @@
  * when they could be working from a number. This is the same line held for lapsed asks: a surface
  * may be slow to forget, and may never be wrong about now.
  *
- * SECOND LINE — it states only what this page watched. `arrivedAt` is set when THIS client first
- * sees the seat online, so it exists only for a visit whose beginning we witnessed. A seat that was
- * already in the room when the page loaded has an unknown arrival, and gets a trace that says it was
- * here and when it left, with NO duration. The roster's `last_seen_at` would let us guess one, and
- * guessing is exactly what makes a surface untrustworthy about the visits it did not see: an
- * eleven-second wake and a page opened eleven seconds ago are indistinguishable from the wire, and
- * only one of them is a wake worth showing. ADR 236 — absence is not an assertion.
+ * SECOND LINE — it states only what this page watched. `arrivedAt` exists only for a visit whose
+ * beginning we witnessed, and witnessing an arrival means having first read the seat NOT here: the
+ * fold sets it on an observed absent→present transition and at no other moment. A seat that was
+ * already in the room when the page loaded therefore has an unknown arrival, and gets a trace that
+ * says it was here and when it left, with NO duration. The roster's `last_seen_at` would let us
+ * guess one, and guessing is exactly what makes a surface untrustworthy about the visits it did not
+ * see: an eleven-second wake and a page opened eleven seconds ago are indistinguishable from the
+ * wire, and only one of them is a wake worth showing. ADR 236 — absence is not an assertion.
+ *
+ * "The first read of the page" is deliberately not a flag anyone has to remember to pass. It was
+ * one, briefly, and it is the wrong shape: `useLiveStream` hands out `[]` until the backfill lands,
+ * so the first FOLD is over an empty roster and the first real read is the second one — a flag set
+ * on call number one would have re-armed the exact lie it was added to stop. The log itself is the
+ * record instead: every seat in a roster read is remembered, offline ones included, and only a name
+ * we have already read absent can arrive. A roster carries the whole team with a presence each, so
+ * an empty room reads as "all offline" rather than as "no seats", and the honest wake case — a seat
+ * read offline, then online — still names its length.
  *
  * Web-only by design. The server refuses to own thresholds (protocol/src/member.ts:115-119,
  * "thresholds live in the CONSUMER"), and it is right to: how long a room remembers a visitor is a
@@ -35,14 +45,17 @@ export interface DwellSeat {
   presence: 'online' | 'away' | 'offline';
 }
 
-/** One seat's currently-remembered visit. */
+/** One seat's currently-remembered visit — or, for a seat only ever read offline, the bare fact that
+ *  this page has watched it be absent, which is what lets its next arrival be a witnessed one. */
 export interface Visit {
-  /** When THIS client first saw the seat online. Absent when the seat was already here — see the
-   *  second line in the module header; its absence is why the trace can stay silent about length. */
+  /** When THIS client watched the seat arrive: read absent, then present. Absent when the seat was
+   *  already here — see the second line in the module header; its absence is why the trace can stay
+   *  silent about length rather than inventing one. */
   arrivedAt?: number;
-  /** When this client last saw the seat present. The departure clock runs from here. */
-  lastOnlineAt: number;
-  /** Set once the seat has been observed offline. Its presence is what makes a return a NEW visit. */
+  /** When this client last read the seat present. The departure clock runs from here. Absent while
+   *  the page has only ever read the seat offline, which is a record, not a visit. */
+  lastOnlineAt?: number;
+  /** Set once the seat has been read offline. Its presence is what makes a return a NEW visit. */
   departed?: true;
 }
 
@@ -66,23 +79,28 @@ export function observeSeats(prev: DwellLog, seats: readonly DwellSeat[], now: n
   for (const seat of seats) {
     const before = prev[seat.name];
     if (seat.presence !== 'offline') {
-      // Present now. A seat returning after its trace expired is a NEW visit, not a resumed one —
-      // carrying the old arrival forward would report one long stay where there were two short ones,
-      // which is the single most misleading thing this module could say.
-      // A seat we have watched continuously keeps its arrival; one we saw leave starts over. The
-      // trace reports CONTIGUOUS presence only — stitching a visit back across an observed absence
-      // would report one long stay where there were two short ones, which is the most misleading
-      // thing this module could say, and the flicker case is common (a wake that retries).
-      next[seat.name] =
-        before && !before.departed
-          ? { ...before, lastOnlineAt: now }
-          : { arrivedAt: now, lastOnlineAt: now };
+      if (before?.lastOnlineAt !== undefined && !before.departed) {
+        // A visit we are already watching. The trace reports CONTIGUOUS presence only — stitching a
+        // visit back across an observed absence would report one long stay where there were two
+        // short ones, which is the most misleading thing this module could say, and the flicker case
+        // is common (a wake that retries).
+        next[seat.name] = { ...before, lastOnlineAt: now };
+      } else if (before) {
+        // We read this seat before and it was not here: an arrival, watched from this page. This is
+        // the wake the rail exists for, and the only branch entitled to set `arrivedAt`.
+        next[seat.name] = { arrivedAt: now, lastOnlineAt: now };
+      } else {
+        // The first time this page has read the seat at all, and it is already here. The visit began
+        // before we were looking, so its length is not ours to state.
+        next[seat.name] = { lastOnlineAt: now };
+      }
       continue;
     }
-    // Departed. Keep the visit only while its trace is still live, so the log is bounded by the
-    // window rather than by how long the page has been open.
-    if (before && now - before.lastOnlineAt <= DWELL_WINDOW_MS)
-      next[seat.name] = { ...before, departed: true };
+    // Not here. Remember that, even for a seat we have never read online — that record is what makes
+    // its next appearance a witnessed arrival rather than another unknown one. Nothing accumulates:
+    // `next` is rebuilt from the roster on every fold, so the log is bounded by the size of the team,
+    // and an expired trace stops rendering on its age (`dwellTrace`) rather than by being forgotten.
+    next[seat.name] = before ? { ...before, departed: true } : { departed: true };
   }
   return next;
 }
@@ -110,7 +128,9 @@ export function dwellTrace(
 ): { label: string; title: string } | null {
   if (seat.presence !== 'offline') return null;
   const visit = log[seat.name];
-  if (!visit) return null;
+  // No visit, or a seat this page has only ever read offline: nothing was watched happening here,
+  // and a row saying "was here" about a seat it never saw here is the lie this module is against.
+  if (visit?.lastOnlineAt === undefined) return null;
   const since = now - visit.lastOnlineAt;
   if (since > DWELL_WINDOW_MS) return null;
   const stayed = visit.arrivedAt === undefined ? null : visit.lastOnlineAt - visit.arrivedAt;
