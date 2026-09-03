@@ -250,6 +250,25 @@ describe('ffmpegArgs', () => {
     expect(args).not.toContain('videotoolbox');
   });
 
+  // 2026-09-03, the live run: ffmpeg logged `Thread message queue blocking; consider raising the
+  // thread_queue_size option (current value: 8)` against BOTH inputs within a second of going live.
+  // The default queue is 8 packets, so a brief producer hiccup — Chrome missing a frame deadline on
+  // a box already at ~3.1 of 4 cores — blocks the input thread instead of being absorbed, and the
+  // viewer sees the stutter. ffmpeg names its own remedy in the warning; this is it. The queue must
+  // sit BEFORE the -i it belongs to, which is why the assertions check order, not just presence.
+  it('gives both inputs a thread queue, before their own -i (ffmpeg option order)', () => {
+    const args = ffmpegArgs(parseOptions({ team: 't', out: 'p.mp4', audio: true }, 'linux'), {
+      kind: 'rtmp',
+      target: 'rtmps://x/app/k',
+    });
+    const joined = args.join(' ');
+    expect(joined).toContain('-thread_queue_size');
+    // video: the queue precedes the image2pipe input
+    expect(joined).toMatch(/-thread_queue_size \d+ -f image2pipe/);
+    // audio: and the pulse one gets its own
+    expect(joined).toMatch(/-thread_queue_size \d+ -f pulse/);
+  });
+
   it('no -t when duration is 0 (run until stopped)', () => {
     const forever = parseOptions({ team: 't', out: 'p.mp4' }, 'darwin');
     expect(ffmpegArgs(forever, { kind: 'file', target: 'p.mp4' })).not.toContain('-t');

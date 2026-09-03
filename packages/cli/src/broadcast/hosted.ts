@@ -132,17 +132,51 @@ export function parseSecrets(json: string): SecretRow[] {
  * encoders on one Twitch key, and double billing.
  */
 export function startedMachines(json: string): string[] {
+  return machineIds(json, (state) => state === 'started');
+}
+
+/** The shared parse behind both machine queries — one place for flyctl's casing, one for its
+ * shape. A parse failure is an empty list, and every caller treats that as "cannot tell", which is
+ * why neither query is allowed to be the only thing standing between a start and a second machine. */
+function machineIds(json: string, keep: (state: string) => boolean): string[] {
   try {
     const doc: unknown = JSON.parse(json);
     if (!Array.isArray(doc)) return [];
     return doc
       .map((m) => m as { id?: unknown; ID?: unknown; state?: unknown; State?: unknown })
-      .filter((m) => (m.state ?? m.State) === 'started')
+      .filter((m) => {
+        const state = m.state ?? m.State;
+        return typeof state === 'string' && keep(state);
+      })
       .map((m) => (typeof m.id === 'string' ? m.id : typeof m.ID === 'string' ? m.ID : null))
       .filter((id): id is string => id !== null);
   } catch {
     return [];
   }
+}
+
+/**
+ * Fly states that mean a machine is HOLDING this app's one slot — booting included.
+ *
+ * `started` answers "is it running", which is the right question for status and the wrong one for
+ * "may I launch". A machine reports `created`, then `starting`, for the whole boot: 29.0s on the
+ * 2026-09-03 run, 26.5s of it pulling the 593 MB image. Ask the running question during that window
+ * and the answer is a false empty — which is exactly the failure `startedMachines` warns about one
+ * doc comment above, arriving through the door it left open.
+ */
+const OCCUPYING = new Set(['created', 'starting', 'started', 'replacing']);
+
+/**
+ * `fly machine list --json` → ids of machines occupying the app, whether or not they are up yet.
+ *
+ * Use this for every "is something already there" decision — the supervisor's crash predicate and
+ * `start`'s own double-launch guard both are one. Two machines on one Twitch key means one of them
+ * dies on `Input/output error` and the survivor is chosen by a race, while both bill as
+ * performance-4x. Deliberately NOT the states that mean gone (`stopped`, `stopping`, `destroying`,
+ * `destroyed`, `suspended`): a stream that really has ended must still be restartable.
+ */
+export function occupiedMachines(json: string): string[] {
+  return machineIds(json, (state) => OCCUPYING.has(state));
 }
 
 /**
