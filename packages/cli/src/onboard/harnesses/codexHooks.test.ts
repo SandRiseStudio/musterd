@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   CODEX_HOOK_MARKER,
+  codexCommonDirRoot,
   inspectCodexHookDrift,
   installCodexHooks,
   removeCodexHooks,
@@ -79,5 +80,83 @@ describe('Codex project hooks', () => {
   it('does not create a file when removing an absent install', () => {
     removeCodexHooks(root);
     expect(existsSync(hooksPath)).toBe(false);
+  });
+});
+
+// codex-cli resolves `.codex/hooks.json` against the git COMMON dir's root, not the directory it
+// actually runs in (lane 01M1JBH9CR, measured on seat gptbot, 2026-09-02) — a canary hook in a
+// worktree's own `.codex/hooks.json` never fires; the identical file at the main checkout does.
+describe('Codex hooks in a git worktree (common-dir resolution)', () => {
+  let mainRoot: string;
+  let worktreeRoot: string;
+
+  beforeEach(() => {
+    mainRoot = mkdtempSync(join(tmpdir(), 'musterd-codex-main-'));
+    worktreeRoot = mkdtempSync(join(tmpdir(), 'musterd-codex-worktree-'));
+    // The exact shape `git worktree add` writes: a `.git` FILE (not directory) naming the real
+    // gitdir under the main checkout's `.git/worktrees/<name>`.
+    writeFileSync(
+      join(worktreeRoot, '.git'),
+      `gitdir: ${join(mainRoot, '.git', 'worktrees', 'seat')}\n`,
+    );
+  });
+  afterEach(() => {
+    rmSync(mainRoot, { recursive: true, force: true });
+    rmSync(worktreeRoot, { recursive: true, force: true });
+  });
+
+  it('resolves the main checkout as the common-dir root for a worktree', () => {
+    expect(codexCommonDirRoot(worktreeRoot)).toBe(mainRoot);
+  });
+
+  it('returns undefined for a plain (non-worktree) checkout', () => {
+    mkdirSync(join(mainRoot, '.git'));
+    expect(codexCommonDirRoot(mainRoot)).toBeUndefined();
+  });
+
+  it('returns undefined when there is no .git at all', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'musterd-codex-bare-'));
+    expect(codexCommonDirRoot(bare)).toBeUndefined();
+    rmSync(bare, { recursive: true, force: true });
+  });
+
+  it('installCodexHooks writes both the worktree copy and the common-dir copy', () => {
+    installCodexHooks(worktreeRoot);
+    const worktreeHooks = JSON.parse(
+      readFileSync(join(worktreeRoot, '.codex', 'hooks.json'), 'utf8'),
+    ) as { hooks: Record<string, unknown> };
+    const commonHooks = JSON.parse(
+      readFileSync(join(mainRoot, '.codex', 'hooks.json'), 'utf8'),
+    ) as { hooks: Record<string, unknown> };
+    expect(JSON.stringify(worktreeHooks)).toContain(CODEX_HOOK_MARKER);
+    expect(JSON.stringify(commonHooks)).toContain(CODEX_HOOK_MARKER);
+    expect(commonHooks).toEqual(worktreeHooks);
+  });
+
+  it('inspectCodexHookDrift reports drift when the common-dir copy is missing, even if the worktree copy looks healthy', () => {
+    // Install normally (writes both copies), then delete the common-dir copy to reproduce the
+    // exact bug this fixes: a healthy-looking worktree file that codex never actually reads.
+    installCodexHooks(worktreeRoot);
+    rmSync(join(mainRoot, '.codex'), { recursive: true, force: true });
+
+    const drift = inspectCodexHookDrift(worktreeRoot);
+    expect(drift).toHaveLength(1);
+    expect(drift[0]).toContain('git common dir');
+  });
+
+  it('removeCodexHooks only touches the worktree copy, never the shared common-dir one', () => {
+    installCodexHooks(worktreeRoot);
+    removeCodexHooks(worktreeRoot);
+
+    const worktreeHooks = JSON.parse(
+      readFileSync(join(worktreeRoot, '.codex', 'hooks.json'), 'utf8'),
+    ) as { hooks?: Record<string, unknown> };
+    expect(worktreeHooks.hooks ?? {}).toEqual({});
+    // The common-dir copy is shared by every worktree of this checkout — one seat unprovisioning
+    // must not strip hooks another seat's worktree still needs.
+    const commonHooks = JSON.parse(
+      readFileSync(join(mainRoot, '.codex', 'hooks.json'), 'utf8'),
+    ) as { hooks: Record<string, unknown> };
+    expect(JSON.stringify(commonHooks)).toContain(CODEX_HOOK_MARKER);
   });
 });
