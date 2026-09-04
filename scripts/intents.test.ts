@@ -237,4 +237,30 @@ describe('ingestCandidates — which references become Seeds (ADR 373 increment 
     });
     expect(ingestCandidates(undisposed)).toHaveLength(FORWARD_BASELINE.size);
   });
+
+  it("a bare `building:` key carries its string's first line, so five keys are five references", () => {
+    const roadmap = [
+      '    building:',
+      "      'increments 3–5 — remaining platform services',",
+      '  },',
+      '  {',
+      '    building:',
+      "      'M4–M5 — the weekly digest emit',",
+    ].join('\n');
+    const refs = findForwardReferences('content/roadmap.data.ts', roadmap);
+    expect(refs.map((r) => r.text)).toEqual([
+      "building: 'increments 3–5 — remaining platform services',",
+      "building: 'M4–M5 — the weekly digest emit',",
+    ]);
+    const out = ingestCandidates(refs, new Set());
+    expect(new Set(out.map((c) => c.ref)).size).toBe(2);
+  });
+
+  it('numbers colliding anchors in file order rather than folding them into one Seed', () => {
+    const refs = f('Undo is not yet built.\n\n\n\n\n\nUndo is not yet built.');
+    expect(ingestCandidates(refs, new Set()).map((c) => c.ref)).toEqual([
+      'docs/decisions/999-x.md#undo-is-not-yet-built',
+      'docs/decisions/999-x.md#undo-is-not-yet-built~2',
+    ]);
+  });
 });

@@ -130,11 +130,19 @@ export function findForwardReferences(file: string, text: string): ForwardRefere
     const structural = STRUCTURAL_RE.exec(line);
     const hit = structural ?? FORWARD_RE.map((re) => re.exec(line)).find((m) => m !== null);
     if (!hit) continue;
+    // A structural `building:` key usually sits alone on its line with the string wrapped below it.
+    // Five such keys share the text "building:", so keyed on the line alone they are one reference
+    // — one baseline entry, one Seed — for five different promises (2026-09-03: the first ingest
+    // made one Seed of five). Carry the string's first line so the text names WHICH promise.
+    const text =
+      structural && line.trim() === structural[0].trim()
+        ? `${line.trim()} ${(lines.slice(i + 1).find((l) => l.trim() !== '') ?? '').trim()}`
+        : line.trim();
     out.push({
       file,
       line: i + 1,
       phrase: hit[0],
-      text: line.trim().slice(0, 120),
+      text: text.slice(0, 120),
       disposition: dispositionNear(lines, i),
     });
   }
@@ -332,12 +340,18 @@ export function ingestCandidates(
   noise: Set<string> = FALSE_POSITIVE_BASELINE,
 ): IngestCandidate[] {
   const out: IngestCandidate[] = [];
+  const seen = new Map<string, number>();
   for (const r of refs) {
     const key = baselineKey(r);
     if (noise.has(key)) continue;
     const d = r.disposition;
     if (d?.kind === 'none' || d?.kind === 'malformed') continue;
-    const ref = `${r.file}#${anchorOf(key.slice(r.file.length + 2))}`;
+    // Two references whose text heads coincide would be one Seed; number the repeats in file
+    // order so each promise keeps its own identity. A backstop — the text is meant to differ.
+    const base = `${r.file}#${anchorOf(key.slice(r.file.length + 2))}`;
+    const n = (seen.get(base) ?? 0) + 1;
+    seen.set(base, n);
+    const ref = n === 1 ? base : `${base}~${n}`;
     const body = `${r.text}\n— ${r.file}:${r.line}`;
     if (d?.kind === 'lane') out.push({ ref, body, lane_id: d.lane, kind: 'lane' });
     else if (d?.kind === 'deferred') out.push({ ref, body, kind: 'deferred' });
