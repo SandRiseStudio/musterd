@@ -728,3 +728,37 @@ name the third lever and its one measured failure, so the next reader does not s
   run `pnpm perf:check` — total should read ≈249.7 KB RED with the four stub chunks still present
   and a ~16 KB `site-routes-` chunk beside them. If instead the stubs merge and total falls, the
   Start plugin's splitting has changed and this entry is stale.
+
+## 2026-09-03 — `totalJsGzipBytes` 255,000 → 258,000 (office surfaces batch, PR #1265)
+
+Lane 01M1MM1Y5H: bubbles drop the sender's own `name:` prefix, the act mark on a bubble grows from a
+15 px tag to a 22 px coin, and `/broadcast` carries a notice (the feed may blink while the room ships
+the thing being watched) and a contact line (`musterd.io`, `revive@musterd.io`) in a new `cornerSlot`
+on `OfficeScene`. Two of those are facts asserted on a public surface and are not shaveable.
+
+| | total JS gzip | headroom |
+|---|---|---|
+| main @ 179235bd, local | 254,536 B (99.82% of 255,000) | 464 B |
+| branch, local | 254,849 B | 151 B |
+| branch, CI | 249.2 KiB against 249.0 KiB (**red**) | none |
+
+Feature cost: **+313 B** local. CI read ~0.3 KB above local on this PR (the delta the 2026-08-25
+entry records as ~0.7 KB has narrowed, not gone). Trimming came first and recovered what it could:
+`stripSenderPrefix` compacted to three lines, the per-team contact map folded to a literal. What
+is left is the notice's two sentences, the address, the coin's CSS (not counted here) and the
+slot's one conditional — the feature.
+
+No remedy on this budget by construction: lazy-loading cannot move total (ADR 183), the
+dependency arm is closed (2026-09-03 entry above), and the un-splitting lever was measured and
+rejected the same day. A re-baseline may only tighten and measured + 15% loosens, so this is a
+raise, recorded as one, to CI-measured (~255,150) + ~1.2% per precedent.
+
+**The finding, restated because it has grown**: sixth raise of `totalJsGzipBytes` since 2026-08-24
+(241,000 → 246,000 → 249,000 → 252,000 → 255,000 → 258,000) with no tightening between them, and
+after the un-splitting rejection there is no known lever that repays it. Every raise was justified
+on its own measurement. The budget is now measuring the product's growth, not catching waste — which
+is a different instrument from the one ADR 151 set up, and worth its own decision rather than a
+seventh entry here.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit — total should
+  read ≈248.9 KiB against 252.0 KiB (258,000 B), and main's CI gates stay green.
