@@ -111,4 +111,13 @@ and answered `OK` (3 turns, $0.085). The seat's `presence.attached` / `presence.
 that run reached the **hub** — occupancy from the second machine, replicated. The hub's `sync_log`
 holds 52 rows stamped with the VM's origin, up from 2 before the roster reconcile.
 
+9. **A fresh joiner folds the whole team history before it can see a new act.** Enrollment admits
+   a machine; it does not draw a line under the log (node-enrollment.md says so for push, and pull
+   starts at cursor 0 for the same reason). So delta's first wake could not fire on a message sent
+   minutes earlier: the daemon was still pulling forward through ~22,500 hub events, and a wake is
+   derived from *folded* messages. **Disposition:** expected, worth stating — the first wake on a
+   new machine waits on the backlog, and on a team with history that is minutes, not seconds. If it
+   ever becomes hours, the lever is a pull that starts near the head and backfills behind, which is
+   a real design change and not something to reach for yet.
+
 Wake latency, cost, and the ADR 365/366/371 experiments: next entry.
