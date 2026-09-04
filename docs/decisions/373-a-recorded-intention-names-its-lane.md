@@ -1,7 +1,9 @@
 # 373 — A recorded intention names its lane, or names why it has none
 
-- Status: proposed — 2026-09-03. Authored by ryder on lane `01M1MMVY2A6YY7JV0DS95B95ME`, on nick's
-  word after the 2026-09-03 planning sweep.
+- Status: accepted — 2026-09-03 (nick, after increments 1 and 2 landed and were accepted: #1251
+  5fe92d71 gate, #1267 2ab1cb4b deferral-needs-a-reason, #1271 3871127d repo Seeds, #1273 78b9c75b
+  structural anchor). Authored by ryder on lane `01M1MMVY2A6YY7JV0DS95B95ME`, on nick's word after
+  the 2026-09-03 planning sweep. Increment 4 (open Seeds in `next`) is dolly's surface and unbuilt.
 - Date: 2026-09-03
 - Builds on: [ADR 220](220-adr-numbers-allocated-against-open-prs.md) / [ADR 223](223-adr-numbers-are-published-not-just-read.md)
   (the machinery that already reads open PRs to reconcile a document against work in flight),
