@@ -5,8 +5,11 @@ import { broadcastCorner, WORKSHOP_NOTICE } from '../routes/broadcast';
 
 /**
  * The corner /broadcast speaks from — facts asserted on a public surface, so they are pinned at the
- * construction: the notice that the feed may blink because the room is shipping the thing being
- * watched, and where to find the TEAM. The address is per team, never derived from the slug: a team
+ * construction: that a build just landed (only when one did), and where to find the TEAM.
+ *
+ * There is no resting caption. "live from the workshop" was cut on 2026-09-04 (nick), finishing the
+ * arc that began with a 900px sentence parked over the floor: at rest the corner is the live dot and
+ * nothing else, and the long form survives on the title as the copy of record. The address is per team, never derived from the slug: a team
  * that streams has not thereby claimed a mailbox.
  *
  * The PRODUCT's address is deliberately not here any more. The corner used to carry `musterd.io`
@@ -15,9 +18,8 @@ import { broadcastCorner, WORKSHOP_NOTICE } from '../routes/broadcast';
  * where it was already going to be read; what is left here is only the thing this line was for.
  */
 describe('broadcastCorner', () => {
-  it('carries the workshop notice and its long form on the title', () => {
+  it('keeps the long form on the title, which is the copy of record either way', () => {
     const html = renderToStaticMarkup(broadcastCorner('anyteam'));
-    expect(html).toContain(WORKSHOP_NOTICE.chip);
     expect(html).toContain(`title="${WORKSHOP_NOTICE.full}"`);
   });
   it('names the address only for a team that has one, and never the bare product domain', () => {
@@ -35,12 +37,15 @@ describe('broadcastCorner', () => {
    * it is the copy of record on a public surface either way.
    */
   describe('the ship beat', () => {
-    it('rests as a mark, with no claim about the feed blinking', () => {
+    it('rests as a mark with no caption at all — the dot, and nothing it has to say', () => {
       const html = renderToStaticMarkup(broadcastCorner('revive'));
-      expect(html).toContain(WORKSHOP_NOTICE.chip);
+      expect(html).not.toContain('bc__notice-text'); // the whole element is gone, not just its words
+      expect(html).not.toContain('live from the workshop');
       expect(html).not.toContain(WORKSHOP_NOTICE.shipped);
       expect(html).not.toContain('blink while we ship');
       expect(html).not.toContain('bc__notice--shipped');
+      // The dot is now the only thing in the resting chip, so it has to name itself.
+      expect(html).toContain('aria-label="live"');
     });
 
     it('names the blink in the past tense only when a build just landed', () => {

@@ -147,6 +147,14 @@
   }
 }
 
+/* At rest the chip has no words in it, so it is not a pill any more — a pill with one 7px item and
+   26px of side padding reads as an empty label. It becomes a small round paper stud around the live
+   dot, and the ship beat re-opens it into a lozenge for as long as there is a line to say. */
+.bc__notice:not(.bc__notice--shipped) {
+  gap: 0;
+  padding: 6px;
+}
+
 /* A build landed. The paper warms toward the accent and lifts a glow, and the live dot goes from
    the red of "on air" to the mustard of "something just happened" — the same accent /live uses for
    `now`. It is a beat, not a banner: `SHIPPED_MS` later this class is gone. */
@@ -192,17 +200,30 @@
      string is mostly consonants around it. Tracking buys the whole line, not just that character. */
   letter-spacing: 0.055em;
   white-space: nowrap;
-  opacity: 0.86;
+  /* MUTED BY WEIGHT, NOT BY ALPHA (nick, 2026-09-04: "make the revive@musterd.io line more muted
+     like we had originally"). The obvious lever is the wrong one here: this ink is #2b1f13 over the
+     stage's composited rgb(180,171,162), which is 7.1:1 at full strength but falls THROUGH AA on
+     the way down — 0.86 measures 5.5:1, 0.72 is already 3.98:1, and the quiet 0.45 the watermark
+     wears is 2.4:1. `/broadcast` is swept connected by `pnpm a11y:check`, and this line is an
+     address a stranger is meant to read, so alpha has a floor here that the mark below it does not
+     have. Weight and colour do the muting instead: 400 rather than 600, and the ink held one step
+     off black — same drop in presence, none of the contrast. */
+  font-weight: 400;
+  opacity: 0.82;
 }
 
-/* The mark now carries the product's address (MusterdWord `domain`), so on the stream it is doing a
-   job a watermark cannot do at 45% — someone has to be able to READ it. /live keeps the watermark
-   weighting, where the address bar is a glance away and the mark is only a signature. */
+/* The mark goes back to the watermark's own quiet (nick, same note). #1300 lifted it to 0.72 on the
+   argument that it now carries the address and someone has to be able to READ it — true of the
+   address, but the mark is a signature on a frame that leaves the app, and at 0.72 in a corner that
+   also holds a paper chip it was competing with the room instead of stamping it. It is `aria-hidden`
+   decoration, so the alpha floor above does not apply. The SIZE bump stays: that was the 720p fix
+   (12.5px on a 1920 stage arrives as ~8.3px), and it is not what was loud. */
 .bc .lc-office__mark {
-  opacity: 0.72;
+  opacity: 0.5;
 }
 .bc .lc-office__mark-lockup {
   font-size: 15px;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 

@@ -101,12 +101,21 @@ function captureFpsFromUrl(): number {
  * no address bar was already looking; this line is now only ever the one thing it was for.
  */
 export const WORKSHOP_NOTICE = {
-  /** At rest: what this is. Three words, because the corner is a mark and not a caption. "Workshop"
-   * is a third noun for one referent (room / workshop / stream) and is in no glossary — kept on
-   * sloane's own recommendation, because it violates no Not entry and carries the show's premise in
-   * three words. The airtight alternatives, if it ever needs to be: "live from the team"
-   * (canonical, duller) or "musterd, building musterd" (self-explaining). */
-  chip: 'live from the workshop',
+  /**
+   * There is no resting caption any more. At rest the corner is the breathing live dot and no words
+   * (nick, 2026-09-04: "lets get rid of 'live from the workshop'").
+   *
+   * That finishes an arc rather than starting one. The first cut was a 900px sentence parked over
+   * the floor for the whole broadcast; the second was three words; this is the end of the same line
+   * of reasoning — at rest there is no fact here that a viewer of a live stream does not already
+   * have. The dot is the one thing the corner knows that a still frame would not say. And the
+   * string that went was also the one that owed the most explaining: "workshop" was a third noun for
+   * one referent (room / workshop / stream) and was in no glossary, kept last time only because it
+   * violated no Not entry.
+   *
+   * The copy of record stays on the title, and the ship beat still speaks — so the corner has words
+   * exactly when something has happened, which is what the beat was for.
+   */
   /** The beat after a build lands — past tense, and it names the blink the viewer just saw. */
   shipped: 'just shipped — that was the blink',
   /**
@@ -129,10 +138,10 @@ export function broadcastCorner(team: string | null, shipped = false) {
         className={`bc__notice${shipped ? ' bc__notice--shipped' : ''}`}
         title={WORKSHOP_NOTICE.full}
       >
-        <span className="bc__pulse" aria-hidden="true" />
-        <span className="bc__notice-text">
-          {shipped ? WORKSHOP_NOTICE.shipped : WORKSHOP_NOTICE.chip}
-        </span>
+        {/* The dot is the whole resting state, so it stops being decoration when the text is gone:
+            it carries the accessible name that the missing caption used to carry. */}
+        <span className="bc__pulse" role="img" aria-label="live" />
+        {shipped && <span className="bc__notice-text">{WORKSHOP_NOTICE.shipped}</span>}
       </span>
       {team === 'revive' && <span className="bc__contact">revive@musterd.io</span>}
     </>
