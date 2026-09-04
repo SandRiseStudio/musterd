@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
-import { resolveWorkspace } from '@musterd/mcp';
 import {
   GUIDANCE_CONTENT_VERSION,
   bindingSeat,
@@ -10,6 +9,7 @@ import {
   TOKEN_PREFIXES,
   type Binding,
 } from '@musterd/protocol';
+import { resolveWorkspace } from '@musterd/protocol/project';
 import { HttpClient } from '../client.js';
 import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';

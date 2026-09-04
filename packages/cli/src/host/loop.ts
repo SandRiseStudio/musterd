@@ -1,10 +1,10 @@
-import { resolveWorkspace } from '@musterd/mcp';
 import {
   wakeabilityFromFacts,
   type MemberSummary,
   type WakeLeasesResponse,
   type WakeReportBody,
 } from '@musterd/protocol';
+import { resolveWorkspace } from '@musterd/protocol/project';
 import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';

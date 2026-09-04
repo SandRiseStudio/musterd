@@ -1,4 +1,3 @@
-import { resolveWorkspace } from '@musterd/mcp';
 import {
   bindingSeat,
   type Binding,
@@ -8,6 +7,7 @@ import {
   type Surface,
   TOKEN_PREFIXES,
 } from '@musterd/protocol';
+import { resolveWorkspace } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
 import {

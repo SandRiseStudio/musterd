@@ -377,7 +377,7 @@ src/
   pending.ts      // pending markers (.musterd/pending/<code>.json) + resolution sidecars (ADR 034)
   binding.ts      // locate + parse .musterd/binding.json + the committed .musterd/workspace.json (ADR 018/080; shared format with the CLI); clearGrantFromBinding on stale-grant refuse (ADR 193); ADR 143 env leak guard + ADR 213/218 foreign-binary warn (real checkouts only); saveBinding preserves omitted capture fields and same-seat claimed seat_credential, capture writers pass { drop: { model_observed: true } } (ADR 270/340)
   brand.ts        // canonical chip SVG + MCP serverInfo.icons data URI (ADR 154)
-  workspace.ts    // the gracefully-degrading "where" label captured at join (ADR 014)
+  workspace.ts    // provenance / driver / model / wake-lease resolvers for the attach; the "where" label itself (`resolveWorkspace`, ADR 014) lives in @musterd/protocol/project since 2026-09-04 and is re-exported here one epoch
   wakeLeaseFile.ts // reads the actuator-written wake lease (ADR 354) — consulted only when env is silent on BOTH provenance and lease, honoured only when spawner_pid is in our bounded ancestry and unexpired: an attestation with a source, never a default (ADR 236)
   processAncestry.ts // this process's ancestors via `ps -o ppid=`, nearest first, bounded — the wake-lease file names the pid the actuator spawned, and the `codex` launcher is a Node wrapper one generation above the native binary that launches us (ADR 354 correction, 2026-09-02)
   otel.ts         // cross-runtime trace-context propagation through the envelope (ADR 011)
