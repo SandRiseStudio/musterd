@@ -283,7 +283,10 @@ describe('presence replication — every machine sees every seat', () => {
     });
   });
 
-  it('6. a reattested whose attach never folded stops the fold; a detached for one is a no-op that advances', async () => {
+  // ADR 383 rewrote this one: the reattest half no longer stops. The row it waited for is one the
+  // receiving daemon reaps itself during a long replay, so the wait never ended — and a stop that
+  // cannot clear is a wedge, not a guard. The batch now advances and invents nothing.
+  it('6. a reattested whose attach never folded advances with its audit row, and so does a detached', async () => {
     // Drain the joiner's j-0 first so the ghost is the next seq and the only thing the fold meets.
     await pushTeam(joinerCtx, joinerTeam());
     await pullTeam(hubCtx(), hubTeam());
@@ -318,119 +321,33 @@ describe('presence replication — every machine sees every seat', () => {
     );
     expect(re.status).toBe(200);
     expect(re.json.accepted).toBe(1);
-    expect(await pullTeam(hubCtx(), hubTeam())).toBe(0);
+    expect(await pullTeam(hubCtx(), hubTeam())).toBe(1);
     expect(hub.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE id = 'ghost-re'").get()).toEqual({
+      n: 1,
+    });
+    expect(hub.db.prepare("SELECT COUNT(*) AS n FROM presence WHERE id = 'ghost'").get()).toEqual({
       n: 0,
     });
-    // The stop is per event, not per origin: a detached for the ghost, staged AFTER the blocker,
-    // still waits behind it — everything up to N is applied means exactly that.
-    const cursorBefore = hub.db
-      .prepare<
-        [string],
-        { last_hub_seq: number }
-      >('SELECT last_hub_seq FROM sync_pull_cursor WHERE team_id = ?')
-      .get(hubTeam().id)!.last_hub_seq;
-    expect(await pullTeam(hubCtx(), hubTeam())).toBe(0);
-    expect(
-      hub.db
-        .prepare<
-          [string],
-          { last_hub_seq: number }
-        >('SELECT last_hub_seq FROM sync_pull_cursor WHERE team_id = ?')
-        .get(hubTeam().id)!.last_hub_seq,
-    ).toBe(cursorBefore);
-  });
-
-  /**
-   * ADR 382, found by the first real joiner: a `presence.attached` for a seat the receiving roster
-   * does not hold used to stop the fold as `unresolved_seat` and retry forever. For a seat git will
-   * never carry — a web sign-in, minted db-only — that wait never ends, and the cloud seat stopped
-   * dead on one at hub_seq 9657. Presence for a seat we do not hold projects into nothing, so it
-   * advances with its audit row; a MESSAGE from the same seat still blocks, because an inbox counts
-   * it.
-   */
-  it('8. presence for a seat this roster does not hold advances with its audit row; a message from it still blocks', async () => {
-    await pushTeam(joinerCtx, joinerTeam());
-    await pullTeam(hubCtx(), hubTeam());
-    const enrolled = readNodeState().nodes['bravo']!;
-    const head = hub.db
-      .prepare<
-        [string],
-        { high: number }
-      >('SELECT MAX(origin_seq) AS high FROM sync_log WHERE origin_node = ?')
-      .get(enrolled.node_id)!.high;
-    // `web-ghost` exists on neither roster: the shape of a db-only web seat, which no git pull can
-    // ever deliver.
-    expect(getMemberByName(hub.db, hubTeam().id, 'web-ghost')).toBeUndefined();
-    const staged = await post(
+    // And the fold keeps moving: a detached for the same ghost, staged behind it, applies too
+    // rather than queueing behind a stop that would never clear.
+    const det = await post(
       hubBase,
       '/teams/bravo/sync/push',
       {
         events: [
-          {
-            kind: 'presence',
-            team: 'bravo',
-            origin_node: enrolled.node_id,
-            origin_seq: head + 1,
-            event: {
-              id: 'web-ghost-attach',
-              ts: 1,
-              actor: 'web-ghost',
-              action: 'presence.attached',
-              target: 'web-ghost',
-              result: 'allow',
-              detail: { presence: 'p-web-ghost', surface: 'web', provenance: 'session' },
-            },
-          },
+          ghost('ghost-det', head + 2, 'presence.detached', {
+            presence: 'ghost',
+            reason: 'reaped',
+          }),
         ],
       },
       enrolled.credential,
     );
-    expect(staged.status).toBe(200);
-
+    expect(det.status).toBe(200);
     expect(await pullTeam(hubCtx(), hubTeam())).toBe(1);
-    // The transition is kept as evidence — a skip with a record, not a hole in the trail.
-    expect(
-      hub.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE id = 'web-ghost-attach'").get(),
-    ).toEqual({ n: 1 });
-    // And nothing was invented: no presence row, because there is no member to hang one on.
-    expect(
-      hub.db.prepare("SELECT COUNT(*) AS n FROM presence WHERE id = 'p-web-ghost'").get(),
-    ).toEqual({ n: 0 });
-
-    // The control. A message from the same unheld seat must still stop the fold: the inbox counts
-    // messages, so an unresolved seat there is a gap worth finding rather than a fact that decides
-    // nothing. Without it, "skip what cannot arrive" would quietly become "skip".
-    const msg = await post(
-      hubBase,
-      '/teams/bravo/sync/push',
-      {
-        events: [
-          {
-            kind: 'message',
-            team: 'bravo',
-            origin_node: enrolled.node_id,
-            origin_seq: head + 2,
-            from_provenance: 'session',
-            envelope: makeEnvelope({
-              id: 'web-ghost-msg',
-              team: 'bravo',
-              from: 'web-ghost',
-              to: { kind: 'team' },
-              act: 'message',
-              body: 'from a seat nobody holds',
-              ts: 2,
-            }),
-          },
-        ],
-      },
-      enrolled.credential,
-    );
-    expect(msg.status).toBe(200);
-    expect(await pullTeam(hubCtx(), hubTeam())).toBe(0);
-    expect(
-      hub.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE id = 'web-ghost-msg'").get(),
-    ).toEqual({ n: 0 });
+    expect(hub.db.prepare("SELECT COUNT(*) AS n FROM audit WHERE id = 'ghost-det'").get()).toEqual({
+      n: 1,
+    });
   });
 
   it('7. a fresh hello for a seat on the joiner clears its local rows with reason cleared and leaves the hub-origin row alone', async () => {
