@@ -504,12 +504,15 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'huddle',
     signature:
-      'open --topic <goal|lane|design>:<id> --anchor <path|pr|lane> [--to a,b|@team] [--turns N] [--until <ms|ISO>] "<why>"  |  say <id> [--act <act>] [--to <seat>] "<turn>"  |  close <id> --anchor-ref <ref|none> "<what landed>"',
+      'list [--all]  |  show <id>  |  open --topic <goal|lane|design>:<id> --anchor <path|pr|lane> [--to a,b|@team] [--turns N] [--until <ms|ISO>] "<why>"  |  say <id> [--act <act>] "<turn>"  |  close <id> --anchor-ref <ref|none> "<what landed>"',
     summary:
       'a bounded burst of collaboration on one topic, leaving one artifact — a thread with a room',
     group: 'messaging',
     detail:
-      'A huddle is a thread (ADR 378). `open` sends the root act with meta.huddle — the topic it is bound to, ' +
+      'A huddle is a thread (ADR 378), so the room is a VIEW over the log rather than a second ' +
+      'message system: `list` shows the open huddles you are in, `show` reads one as a transcript — ' +
+      'who is in it, who has yet to speak, turns taken against the budget declared, and where the ' +
+      'output will land. `open` sends the root act with meta.huddle — the topic it is bound to, ' +
       'the whiteboard room (laid out as anchor + turns when the service is up; never spawned), where the ' +
       'output will land, and a declared budget readers display by counting the thread. `say` is a turn: an ' +
       'ordinary act in the thread (message, challenge, steer, insight, wait). `close` is the resolve, naming ' +
@@ -517,6 +520,8 @@ export const CATALOG: readonly CommandEntry[] = [
       'huddle is `musterd send --act ask --thread <id>` with a tier, not a turn. The daemon stores no clock ' +
       'and enforces no budget; the participants own both.',
     examples: [
+      'musterd huddle list',
+      'musterd huddle show 01M1…',
       'musterd huddle open --topic lane:01M1N7Q2K5 --anchor docs/design/asks-rail.md --to miley,sloane --turns 12 "the asks rail arc — ring or bar?"',
       'musterd huddle say 01M1… --act challenge "why a ring at all when the strip already has the tier?"',
       'musterd huddle close 01M1… --anchor-ref docs/design/asks-rail.md@9ab435f0 "ring, drawn from the stored hue"',

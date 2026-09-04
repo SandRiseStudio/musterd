@@ -8,6 +8,7 @@ import {
   type MemberSummary,
   type PresenceStatus,
 } from '@musterd/protocol';
+import { huddleTopics } from './huddles.js';
 import { clock, dayLabel, sinceLabel, theme } from './theme.js';
 import { heading, hint, padEndVisible, sym, termWidth, visibleLen, wrapText } from './ui.js';
 
@@ -83,6 +84,9 @@ export function renderInbox(
   const now = opts.now ?? Date.now();
   const out: string[] = [];
   let lastDay: string | null = null;
+  // ADR 378: a turn carries no huddle meta of its own, so without the root it renders as a loose
+  // message from a teammate and the reader cannot tell which conversation it belongs to.
+  const topics = huddleTopics(messages);
   for (const m of messages) {
     const day = dayLabel(m.ts, now);
     if (day !== lastDay) {
@@ -95,6 +99,7 @@ export function renderInbox(
       renderMessageRow(m, kindOf, {
         unread: envelopePosition(m) > opts.cursorTs,
         ...(by ? { dischargedBy: by } : {}),
+        ...(m.thread && topics.has(m.thread) ? { huddleTopic: topics.get(m.thread)! } : {}),
       }),
     );
   }
@@ -106,11 +111,15 @@ export function renderMessageRow(
   kindOf: KindOf,
   /** ADR 254: `dischargedBy` names the seat that already answered this eligible-set act, when one
    *  has. Omitted ⇒ the act is still owed (or is not an eligible-set act at all). */
-  opts: { unread?: boolean; dischargedBy?: string } = {},
+  opts: { unread?: boolean; dischargedBy?: string; huddleTopic?: string } = {},
 ): string {
   const marker = opts.unread ? theme.accent('▌') + ' ' : '  ';
   const eligible = eligibleOf(env.meta as Record<string, unknown> | null | undefined);
-  const head = `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf, eligible)}`;
+  // A turn says which room it is in, and drops the recipient label: "to the team" is noise for a
+  // huddle turn — the room IS the address (ADR 378).
+  const head = opts.huddleTopic
+    ? `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${theme.meta(`in huddle ${opts.huddleTopic}`)}`
+    : `${theme.meta(clock(env.ts))} ${theme.memberName(env.from, kindOf(env.from))} ${theme.actBadge(env.act)} ${toLabel(env.to, kindOf, eligible)}`;
   const indent = '    ';
   const body = wrapText(env.body, termWidth() - indent.length)
     .map((line) => `${indent}${line}`)

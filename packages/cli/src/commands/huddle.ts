@@ -10,6 +10,7 @@ import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { readBindingAt } from '../config.js';
 import { CliError } from '../errors.js';
+import { deriveHuddles, type HuddleView } from '../render/huddles.js';
 import { renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { bindThread } from '../session/continuity.js';
@@ -31,6 +32,8 @@ import { parseRecipients } from './send.js';
  */
 const USAGE =
   'usage:\n' +
+  '  musterd huddle list [--all]\n' +
+  '  musterd huddle show <huddle-id>\n' +
   '  musterd huddle open --topic <goal|lane|design>:<id> --anchor <path|pr|lane> [--to a,b|@team] [--turns N] [--until <ms|ISO>] [--room <url>] "<why we are huddling>"\n' +
   '  musterd huddle say <huddle-id> [--act message|challenge|steer|insight] [--to <seat>] "<turn>"\n' +
   '  musterd huddle close <huddle-id> --anchor-ref <ref|none> "<what landed, or why nothing did>"';
@@ -136,9 +139,90 @@ export async function mirrorTurn(board: string, actor: string, body: string): Pr
   }
 }
 
+/**
+ * How far back a room view reads. A huddle is a bounded burst, so the recent window holds it; a
+ * huddle older than this is history and belongs to whatever reads history (the wiki page it landed
+ * on). Named rather than inlined so the bound is arguable instead of accidental.
+ */
+const TIMELINE_WINDOW = 1000;
+
+function ago(ts: number, now = Date.now()): string {
+  const s = Math.max(0, Math.round((now - ts) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86_400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86_400)}d ago`;
+}
+
+/** Turns taken against turns declared — DISPLAY only; nobody enforces a budget (ADR 378 §4). */
+function budgetLabel(h: HuddleView): string {
+  const spent = h.turns.length;
+  const declared = h.budget?.turns;
+  const turns = declared ? `${spent}/${declared} turns` : `${spent} turn${spent === 1 ? '' : 's'}`;
+  if (!h.budget?.until) return turns;
+  const left = h.budget.until - Date.now();
+  return `${turns} · ${left > 0 ? `${ago(Date.now() - left)} left`.replace(' ago', '') : 'past its time'}`;
+}
+
+function huddleSummary(h: HuddleView): string {
+  const state = h.closed ? theme.meta('closed') : theme.ok('open');
+  const last = h.turns.at(-1);
+  return (
+    `  ${theme.accent(h.id)}  ${h.topic}  ${state} ${theme.meta(`· ${budgetLabel(h)} · ` + (last ? `last ${ago(last.ts)}` : `opened ${ago(h.openedAt)}`))}\n` +
+    `    ${theme.meta(`opened by ${h.opener} · in it: ${h.spoke.join(', ')}`)}`
+  );
+}
+
+/** The room: who is in it, what has been said, what it is for, and how to answer. */
+function renderHuddle(h: HuddleView, kindOf: (name: string) => 'agent' | 'human'): string {
+  const out: string[] = [];
+  const state = h.closed ? theme.meta('closed') : theme.ok('open');
+  out.push(`${theme.accent(`huddle ${h.topic}`)} ${state} ${theme.meta(`· ${budgetLabel(h)}`)}`);
+  out.push(`  ${theme.meta('id     ')} ${h.id}`);
+  if (h.room) out.push(`  ${theme.meta('room   ')} ${h.room}`);
+  if (h.anchor) out.push(`  ${theme.meta('anchor ')} ${h.anchor}`);
+  // Named but silent is the useful distinction: it is who still owes the room a turn.
+  const silent = h.named.filter((n) => !h.spoke.includes(n));
+  out.push(
+    `  ${theme.meta('in it  ')} ${h.spoke.map((n) => theme.memberName(n, kindOf(n))).join(', ')}` +
+      (silent.length > 0 ? theme.meta(`  (yet to speak: ${silent.join(', ')})`) : ''),
+  );
+  out.push('');
+  out.push(`  ${theme.memberName(h.opener, kindOf(h.opener))} ${theme.meta(ago(h.openedAt))}`);
+  for (const line of wrapTurn(h.body)) out.push(line);
+  for (const t of h.turns) {
+    out.push('');
+    out.push(
+      `  ${theme.memberName(t.from, kindOf(t.from))} ${theme.actBadge(t.act)} ${theme.meta(ago(t.ts))}`,
+    );
+    for (const line of wrapTurn(t.body)) out.push(line);
+  }
+  out.push('');
+  if (h.closed) {
+    const ref = h.closed.anchorRef;
+    out.push(
+      theme.meta(
+        `  closed by ${h.closed.by} ${ago(h.closed.at)} — ` +
+          (ref && ref !== 'none' ? `landed at ${ref}` : 'nothing landed'),
+      ),
+    );
+  } else {
+    out.push(theme.meta(`  answer with: musterd huddle say ${h.id} "<turn>"`));
+  }
+  return out.join('\n');
+}
+
+function wrapTurn(body: string): string[] {
+  return body
+    .split('\n')
+    .flatMap((line) => (line.length > 92 ? (line.match(/.{1,92}(\s|$)/g) ?? [line]) : [line]))
+    .map((line) => `    ${line.trimEnd()}`);
+}
+
 export async function huddleCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
-  if (sub !== 'open' && sub !== 'say' && sub !== 'close') throw new CliError(USAGE, 2);
+  if (sub !== 'open' && sub !== 'say' && sub !== 'close' && sub !== 'show' && sub !== 'list')
+    throw new CliError(USAGE, 2);
   const { team, identity, http } = resolve(parsed.flags);
   // Echo rows coloured by kind; the roster is best-effort for colour only.
   let kindOf = (_: string) => 'agent' as const;
@@ -149,6 +233,54 @@ export async function huddleCommand(parsed: Parsed): Promise<number> {
     // colour only
   }
   const json = parsed.flags['json'] === true;
+
+  // The room as a VIEW over the log, not a second message system: a huddle is a thread, so the
+  // transcript is rows the timeline already holds (ADR 378). Nothing is fetched per-huddle and
+  // nothing is stored.
+  if (sub === 'list' || sub === 'show') {
+    const { messages } = await http.messages(team, { limit: TIMELINE_WINDOW });
+    const huddles = deriveHuddles(messages, identity.name);
+
+    if (sub === 'list') {
+      const all = parsed.flags['all'] === true;
+      const mine = huddles.filter((h) => (all || h.mine) && (all || !h.closed));
+      if (json) {
+        process.stdout.write(JSON.stringify({ huddles: mine }) + '\n');
+        return 0;
+      }
+      if (mine.length === 0) {
+        process.stdout.write(
+          theme.meta(
+            all
+              ? 'no huddles in the recent timeline'
+              : "no open huddles you are in — `musterd huddle list --all` shows everyone's, closed included",
+          ) + '\n',
+        );
+        return 0;
+      }
+      process.stdout.write(
+        `${theme.accent('huddles')} ${theme.meta(`· ${mine.length} ${all ? 'in the window' : 'you are in'}`)}\n\n`,
+      );
+      for (const h of mine) process.stdout.write(huddleSummary(h) + '\n');
+      return 0;
+    }
+
+    const wanted = parsed.positionals[1];
+    if (!wanted) throw new CliError(`name the huddle id\n${USAGE}`, 2);
+    const view = huddles.find((h) => h.id === wanted || h.id.startsWith(wanted));
+    if (!view) {
+      throw new CliError(
+        `no huddle ${wanted} in the recent timeline — \`musterd huddle list --all\` shows what is there`,
+        4,
+      );
+    }
+    if (json) {
+      process.stdout.write(JSON.stringify(view) + '\n');
+      return 0;
+    }
+    process.stdout.write(renderHuddle(view, kindOf) + '\n');
+    return 0;
+  }
 
   if (sub === 'open') {
     const body = parsed.positionals.slice(1).join(' ').trim();
