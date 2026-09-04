@@ -9,6 +9,7 @@ import { acquireObserver, forgetObserver, type LiveConfig } from '../live/client
 import { firehoseSound, roomTone } from '../live/sound';
 import type { OfficeHandle } from '../live/office-scene';
 import { useLiveStream } from '../live/useLiveStream';
+import { justShipped } from '../live/buildSync';
 import { officeRoom } from '../live/officeRoom';
 import { useWorkingOn } from '../live/useWorkingOn';
 import { roomEntries } from '../live/workingOn';
@@ -70,26 +71,52 @@ function captureFpsFromUrl(): number {
  * that ever streams). musterd.io is shown for every team; the address only where one exists.
  */
 /**
- * The corner block: the notice the stream carries about itself, then where to find us.
+ * The corner block: what this stream is, where to find us, and — only when it is true — that a
+ * build just landed.
  *
- * The people in this room are building and deploying musterd — the thing being watched — so a
- * deploy can restart the feed for a moment; a viewer who sees the room blink should read "they
- * shipped", not "the stream broke". Long form on the chip's title. Sloane was asked for the copy
- * (01M1MM0E8Z) and the clock ran out — this is miley's draft, hers to revise.
+ * The first cut said all of it, always: one 900px-wide pill reading "live from the workshop — the
+ * feed may blink while we ship", parked over the floor for the whole broadcast (nick, 2026-09-03:
+ * "the banner about the stream refreshing looks horrible"). Two faults, and the visual one is
+ * downstream of the other. A pill that wide is not a pill, it is a bar with rounded ends, and it is
+ * that wide because it is carrying a *sentence*. The sentence is there because the corner was
+ * explaining, at all times, an event that happens occasionally — a permanent apology for an
+ * intermittent blink. Nothing about the styling could fix a persistent notice about a rare thing.
+ *
+ * So the notice moves to where it is true. `justShipped()` reads the exact fact: this pageview is
+ * the result of build-sync landing a new bundle, seconds ago. At rest the corner is a mark, not a
+ * message — a live dot and three words. When a build lands, the mark says so for a beat, and then
+ * it is a mark again. That is the same information, delivered at the moment a viewer is actually
+ * asking the question ("did it just break?"), and it costs the floor nothing the rest of the time.
+ *
+ * The long form stays on the chip's title for anyone reading the DOM, and as the copy of record.
  *
  * The address is a fact asserted on a public surface, so it is named per team rather than derived
  * (`<slug>@musterd.io` would claim a mailbox for every team that ever streams). Pure, so the render
- * test can hold both facts.
+ * test can hold all of it.
  */
 export const WORKSHOP_NOTICE = {
-  chip: 'live from the workshop — the feed may blink while we ship',
+  /** At rest: what this is. Three words, because the corner is a mark and not a caption. */
+  chip: 'live from the workshop',
+  /** The beat after a build lands — past tense, and it names the blink the viewer just saw. */
+  shipped: 'just shipped — that was the blink',
   full: 'The people in this room are building musterd while you watch, and every deploy can restart the stream for a moment. It comes back on its own.',
 };
-export function broadcastCorner(team: string | null) {
+
+/** How long the "just shipped" beat holds before easing back to the resting mark. Long enough to
+ * read twice at a glance across a room, short enough that it is a moment and not a second banner. */
+export const SHIPPED_MS = 9000;
+
+export function broadcastCorner(team: string | null, shipped = false) {
   return (
     <>
-      <span className="bc__notice" title={WORKSHOP_NOTICE.full}>
-        {WORKSHOP_NOTICE.chip}
+      <span
+        className={`bc__notice${shipped ? ' bc__notice--shipped' : ''}`}
+        title={WORKSHOP_NOTICE.full}
+      >
+        <span className="bc__pulse" aria-hidden="true" />
+        <span className="bc__notice-text">
+          {shipped ? WORKSHOP_NOTICE.shipped : WORKSHOP_NOTICE.chip}
+        </span>
       </span>
       <span className="bc__contact">
         <span>musterd.io</span>
@@ -97,6 +124,22 @@ export function broadcastCorner(team: string | null) {
       </span>
     </>
   );
+}
+
+/**
+ * The corner's one piece of state: whether a build landed into this pageview. Read once on mount
+ * (the fact is about how the page got here, so it cannot become true later) and cleared after the
+ * beat. Never true in dev or under test — there is no baked build id there, and no publisher.
+ */
+export function useJustShipped(): boolean {
+  const [shipped, setShipped] = useState(false);
+  useEffect(() => {
+    if (!justShipped()) return;
+    setShipped(true);
+    const timer = setTimeout(() => setShipped(false), SHIPPED_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return shipped;
 }
 
 /** Hooks a capturer (or a headless check) probes — see ADR 157 "Observability & Evaluation". */
@@ -127,6 +170,8 @@ function BroadcastPage() {
   const [team, setTeam] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scale, setScale] = useState(1);
+  // Whether a build landed into this pageview — the corner's "just shipped" beat (see above).
+  const shipped = useJustShipped();
   // Read once per page load — a stream source's URL is its whole configuration, and it never
   // changes under a running capture.
   const [stage, setStage] = useState<{ w: number; h: number }>(DEFAULT_STAGE);
@@ -229,7 +274,7 @@ function BroadcastPage() {
             captureFps={captureFps}
             workCues="stack"
             topSlot={<AsksReel envelopes={envelopes} roster={roster} board={board} />}
-            cornerSlot={broadcastCorner(team)}
+            cornerSlot={broadcastCorner(team, shipped)}
             onReady={onSceneReady}
           />
         )}

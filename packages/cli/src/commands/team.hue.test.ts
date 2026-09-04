@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { legacyHue } from '@musterd/protocol/hue';
+import { defaultHue, legacyHue } from '@musterd/protocol/hue';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from '../args.js';
@@ -127,6 +127,27 @@ describe('team hue', () => {
       expect(got).not.toBe(legacy);
       expect(res.out).toContain('miley');
       expect(res.out).toContain(String(got));
+    });
+
+    it('`--spread` seeds the same pass from the whole wheel instead of the kind band', async () => {
+      // The point of the flag, stated as a falsifier rather than as a colour: with the default seed
+      // an agent can only ever land in 150-280 (walked, but walked from inside the band); with
+      // --spread it starts wherever the whole-wheel hash puts it. `escapee` hashes outside the agent
+      // band, so the two seeds disagree — which is exactly the case the flag exists for.
+      writeFileSync(seatPath('escapee'), 'kind = "agent"\nrole = ""\n');
+      const res = await team(['hue', '--assign-missing', '--spread']);
+      expect(res.code).toBe(0);
+      const got = Number(/hue = (\d+)/.exec(readFileSync(seatPath('escapee'), 'utf8'))![1]);
+      expect(got).toBe(defaultHue('escapee'));
+      expect(got).not.toBe(legacyHue('escapee', 'agent'));
+    });
+
+    it('without `--spread` the same seat stays inside the legacy agent band', async () => {
+      writeFileSync(seatPath('escapee'), 'kind = "agent"\nrole = ""\n');
+      const res = await team(['hue', '--assign-missing']);
+      expect(res.code).toBe(0);
+      const got = Number(/hue = (\d+)/.exec(readFileSync(seatPath('escapee'), 'utf8'))![1]);
+      expect(got).toBe(legacyHue('escapee', 'agent'));
     });
   });
 });
