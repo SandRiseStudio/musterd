@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { ActSchema, type Act } from './acts.js';
 import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
-import { BlockedBySchema } from './incident.js';
 import { AnchorRefSchema, HuddleMetaSchema } from './huddle.js';
+import { BlockedBySchema } from './incident.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 /** Recipient of an envelope: a specific member, the whole team, or broadcast. */

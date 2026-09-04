@@ -8,8 +8,8 @@ import {
 } from '@musterd/protocol';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
-import { CliError } from '../errors.js';
 import { readBindingAt } from '../config.js';
+import { CliError } from '../errors.js';
 import { renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { bindThread } from '../session/continuity.js';

@@ -192,6 +192,10 @@ envelopes).
 
 - One additive meta shape on the wire, validated in `actMetaRules`; no version bump, no new act,
   no new table, no new replicated kind, no new daemon endpoint.
+- **Increment 1 landed 2026-09-03** (PR #1274, lane 01M1NBEP26YVXS30SWHWPGJNFB): `meta.huddle` and
+  `meta.anchor_ref` validated in `packages/protocol/src/huddle.ts` + `envelope.ts`;
+  `musterd huddle open|say|close`; the whiteboard room laid out over its HTTP port only when the
+  service already answers, never spawned. Runbook: `docs/wiki/huddles.md`.
 - The visual layers (office gathering, canvas, hybrid) project from the thread and presence on the
   firehose, the same feed `/live` reads today, plus the whiteboard room they embed or link.
 - Cross-host huddles are honest about their latency: bounded by the sync tick. A faster push on a
