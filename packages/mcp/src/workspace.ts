@@ -1,37 +1,17 @@
-import { basename, relative } from 'node:path';
 import {
   PROVENANCES,
   resolveAttestedModel,
   resolveAttestedWakeLease,
   type Provenance,
 } from '@musterd/protocol';
-import { gitOutput, gitToplevel } from '@musterd/protocol/project';
 
 /**
- * The "where"-on-attach seed (human-agent-dynamics §2; ADR 014). A gracefully-degrading workspace
- * label, captured once at join and read out of the roster — never asked of the agent per status.
- *
- * Degradation ladder (locked decisions):
- *   1. declared override — `MUSTERD_WORKSPACE` wins verbatim (one-time "what are you working on?").
- *   2. floor — the cwd folder name, which always exists.
- *   3. qualifier — the *most specific* available leads: git branch when informative, else the cwd
- *      subpath within the repo, else nothing. A git-less project degrades cleanly to the bare folder.
- *
- * Rendered dim, as location context — it is approximately right by design, not an authoritative scope.
+ * The "where"-on-attach label (ADR 014) lives in `@musterd/protocol/project` since 2026-09-04
+ * (ADR 379 amendment) — the CLI's wake actuator and the adapter must run the SAME resolver, and
+ * only `@musterd/protocol` may be imported across package boundaries (AGENTS.md). Re-exported here
+ * for one FEATURE_EPOCH so `import { resolveWorkspace } from '@musterd/mcp'` keeps working.
  */
-export function resolveWorkspace(
-  env: NodeJS.ProcessEnv = process.env,
-  cwd: string = process.cwd(),
-): string {
-  const declared = env['MUSTERD_WORKSPACE']?.trim();
-  if (declared) return declared.slice(0, 120);
-
-  const folder = basename(cwd) || cwd;
-  const git = gitContext(cwd);
-  const qualifier = git?.branch || git?.subpath || '';
-  const label = qualifier ? `${folder}@${qualifier}` : folder;
-  return label.slice(0, 120);
-}
+export { resolveWorkspace } from '@musterd/protocol/project';
 
 /**
  * The wake correlation token (ADR 241) for this session, from `MUSTERD_WAKE_LEASE` via the shared
@@ -74,20 +54,4 @@ export function resolveDriver(env: NodeJS.ProcessEnv = process.env): string | un
  */
 export function resolveModel(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return resolveAttestedModel(env);
-}
-
-interface GitContext {
-  /** Current branch, or '' when detached/unavailable (a detached HEAD is not informative). */
-  branch: string;
-  /** Path from the repo root down to cwd, or '' at the root. */
-  subpath: string;
-}
-
-function gitContext(cwd: string): GitContext | null {
-  const top = gitToplevel(cwd);
-  if (!top) return null;
-  const branchRaw = gitOutput(['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
-  const branch = branchRaw && branchRaw !== 'HEAD' ? branchRaw : '';
-  const subpath = relative(top, cwd);
-  return { branch, subpath: subpath === '' || subpath.startsWith('..') ? '' : subpath };
 }

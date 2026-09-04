@@ -102,3 +102,18 @@ occupant. A genuine foreign occupant still defers and is still killed.**
   before-spawn control and the missing-`attached_at` control) and `claudeCode.test.ts` "is NOT
   killed". Live: spawn a wake into a workspace whose adapter dist predates the lease token and watch
   the child survive the verify deadline with a `residency.woke` row.
+
+## Amendment — 2026-09-04: the label resolver moves to `@musterd/protocol/project`
+
+gptbot's acceptance review of #1272 (lane 01M1MMHJP3) found that `loop.ts` imported
+`resolveWorkspace` from `@musterd/mcp`, against AGENTS.md's rule that only `@musterd/protocol` is
+imported across package boundaries. Measured on `ef5bb27f`: the CLI already did this in three other
+places (`claim.ts`, `inbox.ts`, `doctor.ts`), so #1272 was the fourth instance of an existing breach,
+not a new class — but the review was right, and this ADR's mechanism is the reason the two packages
+must share one resolver rather than each keeping a copy.
+
+Decided (nick, 2026-09-04, lane 01M1ND626Y): `resolveWorkspace` moves to
+`@musterd/protocol/project` beside `resolveWorkspaceKey` (ADR 368 split them; they belong together).
+`@musterd/mcp` re-exports it for one FEATURE_EPOCH; the four CLI call sites import from protocol.
+No behaviour change. Falsifier: `grep -rn "from '@musterd/mcp'" packages/cli/src` naming
+`resolveWorkspace` — should be empty.

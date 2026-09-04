@@ -224,6 +224,7 @@ export const RefusedFrame = z.object({ type:'refused', code:RefusedCode, message
 export const PendingFrame = z.object({ type:'pending', request_id, message });
 
 // ADR 014/177/368 — workspace & project resolution (project.ts). Local-only helpers; two deliberately opposite invariants.
+export function resolveWorkspace(env?, cwd?): string;      // ADR 014 — the workspace LABEL sent as `workspace`: MUSTERD_WORKSPACE if declared, else `<folder>@<branch|subpath>`, else the folder; capped at 120. Moved here from @musterd/mcp 2026-09-04 (ADR 379 amendment) so the CLI's wake actuator and the adapter run one resolver without crossing the package boundary.
 export function resolveWorkspaceKey(env?, cwd?): string;   // ADR 368 — the workspace IDENTITY sent as `workspace_key`: MUSTERD_WORKSPACE if declared, else `git rev-parse --show-toplevel`, else cwd; capped at 200. Work-tree-SPECIFIC, so two seats on one repo are two workspaces. Never throws.
 export function repoProject(cwd?): string | null;          // ADR 177 — the project name: `--git-common-dir`, so it is work-tree-INvariant and N seats share one surface space. Same repo, opposite invariant, on purpose.
 

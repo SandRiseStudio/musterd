@@ -1,4 +1,3 @@
-import { resolveWorkspace } from '@musterd/mcp';
 import {
   envelopePosition,
   makeEnvelope,
@@ -6,6 +5,7 @@ import {
   type Envelope,
   type MemberKind,
 } from '@musterd/protocol';
+import { resolveWorkspace } from '@musterd/protocol/project';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { watchClaim } from '../client.js';

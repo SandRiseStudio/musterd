@@ -1,9 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_PROJECT, repoProject, resolveProject, resolveWorkspaceKey } from './project.js';
+import {
+  DEFAULT_PROJECT,
+  repoProject,
+  resolveProject,
+  resolveWorkspace,
+  resolveWorkspaceKey,
+} from './project.js';
 
 function git(args: string[], cwd: string): void {
   execFileSync('git', args, { cwd, stdio: 'ignore' });
@@ -136,5 +142,43 @@ describe('resolveWorkspaceKey (branch-invariant workspace identity, lane 01M1JQY
 
   it('degrades to the cwd outside a work tree, and never throws', () => {
     expect(resolveWorkspaceKey({}, '/')).toBe('/');
+  });
+});
+
+describe('resolveWorkspace (where-on-attach label, ADR 014 — moved here from @musterd/mcp, ADR 379 amendment)', () => {
+  it('uses the declared override verbatim, capped at 120 chars', () => {
+    expect(resolveWorkspace({ MUSTERD_WORKSPACE: 'auth rewrite' }, '/tmp/whatever')).toBe(
+      'auth rewrite',
+    );
+    const long = 'x'.repeat(200);
+    expect(resolveWorkspace({ MUSTERD_WORKSPACE: long }, '/tmp/whatever').length).toBe(120);
+  });
+
+  it('falls back to the cwd folder name when not a git repo and nothing declared', () => {
+    const label = resolveWorkspace({}, '/');
+    expect(typeof label).toBe('string');
+    expect(label.length).toBeGreaterThan(0);
+  });
+
+  it('qualifies the folder with the git branch (folder@branch) on a named branch', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-ws-'));
+    try {
+      const g = (...args: string[]) =>
+        execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+          cwd: dir,
+          stdio: 'ignore',
+        });
+      g('init');
+      g('checkout', '-b', 'my-branch');
+      g('commit', '--allow-empty', '-m', 'seed');
+      expect(resolveWorkspace({}, dir)).toBe(`${basename(dir)}@my-branch`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the label and the key agree on the declared override — one workspace on both axes (ADR 368)', () => {
+    const env = { MUSTERD_WORKSPACE: 'one-workspace' };
+    expect(resolveWorkspace(env, '/a')).toBe(resolveWorkspaceKey(env, '/b'));
   });
 });
