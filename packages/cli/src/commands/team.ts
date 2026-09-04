@@ -28,6 +28,7 @@ import {
   defaultHue,
   hueConflict,
   legacyHue,
+  type HueKind,
 } from '@musterd/protocol/hue';
 import { flagHue, flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
@@ -924,7 +925,7 @@ async function teamHue(parsed: Parsed): Promise<number> {
   // The seed the pass starts each seat from: the banded legacy hash (continuity, the default) or
   // the whole wheel (range). `assignHue` walks either one clear of the seats already placed.
   const spread = Boolean(parsed.flags.spread);
-  const seedHue = (n: string, k: MemberKind): number => (spread ? defaultHue(n) : legacyHue(n, k));
+  const seedHue = (n: string, k: HueKind): number => (spread ? defaultHue(n) : legacyHue(n, k));
   const name = parsed.positionals[1];
   const degRaw = parsed.positionals[2];
 
