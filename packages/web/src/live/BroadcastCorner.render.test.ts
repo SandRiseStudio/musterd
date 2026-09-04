@@ -7,9 +7,10 @@ import { broadcastCorner, WORKSHOP_NOTICE } from '../routes/broadcast';
  * The corner /broadcast speaks from — facts asserted on a public surface, so they are pinned at the
  * construction: that a build just landed (only when one did), and where to find the TEAM.
  *
- * There is no resting caption. "live from the workshop" was cut on 2026-09-04 (nick), finishing the
- * arc that began with a 900px sentence parked over the floor: at rest the corner is the live dot and
- * nothing else, and the long form survives on the title as the copy of record. The address is per team, never derived from the slug: a team
+ * There is no resting state. "live from the workshop" was cut on 2026-09-04 (nick) and the live dot
+ * with it, finishing the arc that began with a 900px sentence parked over the floor: at rest the
+ * corner holds the address and nothing that is only ever true. The long form survives on the beat's
+ * title as the copy of record. The address is per team, never derived from the slug: a team
  * that streams has not thereby claimed a mailbox.
  *
  * The PRODUCT's address is deliberately not here any more. The corner used to carry `musterd.io`
@@ -18,9 +19,10 @@ import { broadcastCorner, WORKSHOP_NOTICE } from '../routes/broadcast';
  * where it was already going to be read; what is left here is only the thing this line was for.
  */
 describe('broadcastCorner', () => {
-  it('keeps the long form on the title, which is the copy of record either way', () => {
-    const html = renderToStaticMarkup(broadcastCorner('anyteam'));
-    expect(html).toContain(`title="${WORKSHOP_NOTICE.full}"`);
+  it('keeps the long form on the title of the beat, which is the copy of record', () => {
+    expect(renderToStaticMarkup(broadcastCorner('anyteam', true))).toContain(
+      `title="${WORKSHOP_NOTICE.full}"`,
+    );
   });
   it('names the address only for a team that has one, and never the bare product domain', () => {
     expect(renderToStaticMarkup(broadcastCorner('revive'))).toContain('revive@musterd.io');
@@ -37,15 +39,16 @@ describe('broadcastCorner', () => {
    * it is the copy of record on a public surface either way.
    */
   describe('the ship beat', () => {
-    it('rests as a mark with no caption at all — the dot, and nothing it has to say', () => {
+    it('rests as nothing at all — no caption, no chip, and no live dot', () => {
       const html = renderToStaticMarkup(broadcastCorner('revive'));
-      expect(html).not.toContain('bc__notice-text'); // the whole element is gone, not just its words
+      // The whole notice is absent, not emptied: an empty paper stud is still a mark on every frame.
+      expect(html).not.toContain('bc__notice');
+      expect(html).not.toContain('bc__pulse');
       expect(html).not.toContain('live from the workshop');
       expect(html).not.toContain(WORKSHOP_NOTICE.shipped);
       expect(html).not.toContain('blink while we ship');
-      expect(html).not.toContain('bc__notice--shipped');
-      // The dot is now the only thing in the resting chip, so it has to name itself.
-      expect(html).toContain('aria-label="live"');
+      // What survives at rest is the address, and nothing that is only ever true.
+      expect(html).toContain('revive@musterd.io');
     });
 
     it('names the blink in the past tense only when a build just landed', () => {

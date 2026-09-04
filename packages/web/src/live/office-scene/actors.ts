@@ -533,10 +533,11 @@ export function createActors(): Actors {
     return home ? DIR_ANGLE[home.dir] : null;
   }
 
-  /** The laptop, unless it is docked (laptop/dock design §0). Read off `live` every frame rather than
-   * off the baked home pose, so the object in the hand and the object in the dock swap on the same
-   * roster update — `homes` only rebuilds when placements change, and posture can move without them. */
-  function laptopNow(name: string): CarryKind | null {
+  /** The laptop AT HOME — docked only for a member who is working at the desk they are sitting at.
+   * Read off `live` every frame rather than off the baked home pose, so the object in the hand and
+   * the object in the dock swap on the same roster update; `homes` only rebuilds when placements
+   * change, and posture can move without them. */
+  function laptopAtHome(name: string): CarryKind | null {
     return carriesLaptop(live.get(name)) ? 'laptop' : null;
   }
 
@@ -557,7 +558,7 @@ export function createActors(): Actors {
         ...p,
         lx: p.lx - f[0] * shift,
         ly: p.ly - f[1] * shift,
-        carry: laptopNow(n), // a member at home carries only their laptop — errands are walks
+        carry: laptopAtHome(n), // a member at home carries only their laptop — errands are walks
 
         gesture: g?.kind ?? p.gesture,
         gestureT: gT,
@@ -593,11 +594,17 @@ export function createActors(): Actors {
         ly: leg.fy + (leg.ty - leg.fy) * e,
         dir: dirOfHeading(a.head), // the 4-way legibility read follows the swivel, flipping at 45°
         small: w.small,
-        // Carry precedence: an errand's carry WINS for its duration (design §0) — you set the laptop
-        // down to fetch a plate, take a call or hand over a box, and it is back on your arm when the
-        // errand ends. A leg that asked for nothing gets the laptop, which is what makes the entrance
-        // and exit walks carry one without either of them naming it.
-        carry: leg.carry ?? laptopNow(name),
+        // A WALKING MEMBER HAS THEIR LAPTOP, full stop — the design's biconditional is "docked ⟺
+        // working AT THEIR DESK", and someone crossing the floor is not at their desk whatever the
+        // roster says about their posture. Reading posture here instead was the bug: a member who
+        // came online already `working` walked in empty-handed, because the predicate said their
+        // laptop was in a dock they had not reached yet (nick, 2026-09-04).
+        //
+        // Carry precedence is the `??`: an errand's carry WINS for its duration — you set the laptop
+        // down to take the plate, the bottle, the call or the handoff box — and it is back on the arm
+        // when the errand ends. A leg that asked for nothing gets the laptop, which is what makes the
+        // entrance and exit walks carry one without either of them naming it.
+        carry: leg.carry ?? 'laptop',
         bubble: leg.bubble,
         alpha,
         // Travelling (not the hold leg) → `walking`; urgent walks → `run`.

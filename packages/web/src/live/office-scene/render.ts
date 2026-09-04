@@ -3601,11 +3601,54 @@ function lampHeadPoint(slot: { lx: number; ly: number; dir: Dir }, fit: Fit): Pt
 const LAMP_ALONG = 8;
 const LAMP_ACROSS = 42;
 
-/** Where the dock stands: back of the desk beside the monitor, on the opposite side from the lamp so
- * the two tall silhouettes don't stack. Same across-band the retired laptop rigs used, pulled in a
- * little to clear the plant at −40. */
-const DOCK_ALONG = 18;
-const DOCK_ACROSS = -26;
+/**
+ * Where the dock stands, and why it is the one prop whose across is computed rather than written.
+ *
+ * **A docked laptop must never cover the front of a screen** (nick, 2026-09-04), and on this floor
+ * that is two conditions, not one — outboard of the widest panel, AND behind it in the painter's
+ * order, so an overlap that survives the first still cannot paint over the glass.
+ *
+ * Outboard is the easy half: `DOCK_ACROSS` sits past 35, which is as far as any setup reaches (a
+ * dual's two 34-wide panels centred at ±18).
+ *
+ * Behind is the half that cannot be a constant. `at()` sorts by `(f[0]+f[1])·along + (p[0]+p[1])·across`,
+ * and the sign of the ACROSS term flips between the two camera-facing rows — +1 on an N desk, −1 on a
+ * W one. So one fixed across puts the dock behind the monitor on one row and in front of it on the
+ * other, which is exactly how a prop ends up covering a screen on half the floor and looking fine on
+ * the half you happened to check. Sending it to `-j · DOCK_ACROSS` makes the across term subtract at
+ * every facing, so "behind the monitor" is a property of the geometry rather than of the desk id.
+ *
+ * `dockAcross` and `deskPropSort` are exported so that property can be a TEST rather than a claim —
+ * see render.test.ts, which walks every facing against the widest setup on the floor.
+ */
+const DOCK_ALONG = 26;
+const DOCK_ACROSS = 40;
+
+/** Where the monitor sits along the desk — the back of the slab, `at(Df / 2 - 12, 0)`. */
+export const MONITOR_ALONG = DESK_D / 2 - 12;
+
+/** How far a panel reaches from the desk's centreline, across the shoulders: a dual's outer edge —
+ *  two 34-wide panels centred at ±18 — which is wider than an ultrawide's 54. */
+export const WIDEST_PANEL_HALF = 35;
+
+/** Half the dock's footprint across the shoulders. The LAPTOP is the widest piece, not the cradle
+ *  under it — 20 across against the cradle's 17, because the slab stands with its broad face to the
+ *  room. Getting this wrong understates the overlap by the exact amount that matters. */
+export const DOCK_HALF_ACROSS = 10;
+
+/** The dock's across for a given facing: outboard, and on the side whose sort term SUBTRACTS. */
+export function dockAcross(dir: Dir): number {
+  const f = FWD[dir];
+  return -(-f[1] + f[0]) * DOCK_ACROSS; // p = [-f[1], f[0]], so j = p[0] + p[1] = -f[1] + f[0]
+}
+
+/** The painter's key `drawWorkstation`'s `at()` gives a desk-relative prop — larger paints later,
+ *  i.e. nearer the viewer. Exported so the dock's "behind the monitor" claim can be falsified. */
+export function deskPropSort(dir: Dir, along: number, across: number): number {
+  const f = FWD[dir];
+  const p: [number, number] = [-f[1], f[0]];
+  return f[0] * along + p[0] * across + (f[1] * along + p[1] * across);
+}
 
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
@@ -3626,6 +3669,18 @@ function drawWorkstation(
   hide?: Set<PropKind>,
   /** Is it dark enough out for desk lamps to be on? (`LightEnv.lampsOn`, threaded from the scene.) */
   lampsLit = false,
+  /**
+   * Is this desk's laptop in its dock right now — the owner working AND sitting here?
+   *
+   * Deliberately NOT the same boolean as `working`, and this is the one place the laptop model needs
+   * a body-position term. A dock is a statement about where a physical object IS, so it depends on
+   * whether the person who carries it has arrived; a lit screen is a statement about work happening,
+   * which does not. Collapsing the two is what made a member who came online already `working` walk
+   * in empty-handed past a dock that had somehow filled itself before they reached the desk (nick,
+   * 2026-09-04). The monitor is untouched — it still lights off `audiblyWorking` alone, which is the
+   * E2 one-predicate contract shared with the room's typing sound.
+   */
+  docked = false,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -3717,11 +3772,12 @@ function drawWorkstation(
       ctx.stroke();
     });
   at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t));
-  // The dock, beside the monitor on every desk — not a hashed personality prop and not owner-dependent:
-  // the cradle is always there, and the laptop in it is there exactly when the owner is working. An
-  // empty dock on a desk with a body at it is honest, not a gap — that member is not working, and the
-  // room is now saying so in three places at once (dark screen, empty dock, laptop in their lap).
-  at(DOCK_ALONG, DOCK_ACROSS, (ix, iy) => deskDock(ctx, fit, ix, iy, dir, up, working));
+  // The dock, beside and behind the monitor on every desk — not a hashed personality prop and not
+  // owner-dependent: the cradle is always there, and the laptop in it is there exactly when its owner
+  // is working AND sitting at it. An empty dock on a desk with a body at it is honest, not a gap —
+  // that member is not working, and the room says so in three places at once (dark screen, empty
+  // dock, laptop in their lap).
+  at(DOCK_ALONG, dockAcross(dir), (ix, iy) => deskDock(ctx, fit, ix, iy, dir, up, docked));
   at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
   // The desk lamp is work gear, not a hashed personality prop: every OCCUPIED desk has one (the
@@ -3791,12 +3847,21 @@ function benchStation(
   slot: DeskSlot,
   node: OfficeNode | null,
   t: number,
+  /** Owner working AND sitting here — see the note on `drawWorkstation`'s parameter of the same name. */
+  docked = false,
 ): void {
   const working = node?.posture === 'working';
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(slot.id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
   monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, working, DESK_UP, slot.id, t);
-  // A bench seat is a workstation like any other, so it docks like one — same cradle, same rule.
-  deskDock(ctx, fit, slot.lx + DOCK_ACROSS, slot.ly - DOCK_ALONG, slot.dir, DESK_UP, working);
+  // A bench seat is a workstation like any other, so it docks like one — same cradle, same rule. The
+  // bench faces N, so the across term subtracts at −DOCK_ACROSS (see the note on the constant).
+  {
+    const f = FWD[slot.dir];
+    const c = dockAcross(slot.dir);
+    const dx = slot.lx + f[0] * DOCK_ALONG - f[1] * c;
+    const dy = slot.ly + f[1] * DOCK_ALONG + f[0] * c;
+    deskDock(ctx, fit, dx, dy, slot.dir, DESK_UP, docked);
+  }
   deskKeyboard(ctx, fit, slot.lx, slot.ly - KEYBOARD_ALONG, true, DESK_UP, kbShoulder);
 }
 
@@ -4071,13 +4136,20 @@ export function renderScene(
     if (sipping) hidden.push('coffee');
     if (name && fx?.bottleCarriers.has(name)) hidden.push('water');
     const hide = hidden.length ? new Set<PropKind>(hidden) : undefined;
+    // The laptop is in the dock only once its owner has actually walked over and sat down. Same
+    // `sit > 0.9` the chair pieces use two blocks below, so the laptop lands on the frame the body
+    // settles into the chair, not the frame the roster changed.
+    const seatedWorking = node?.posture === 'working' && !!ownerPose && ownerPose.sit > 0.9;
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
-      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t) });
+      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
     } else {
       if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
-      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn) });
+      items.push({
+        d: depth(slot.lx, slot.ly),
+        fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
+      });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between

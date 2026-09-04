@@ -45,13 +45,18 @@ export function audiblyWorking(m: Pick<Seatable, 'posture'>): boolean {
 }
 
 /**
- * Does this member have their laptop **on their person** right now?
+ * Does this member, **at home in their own seat**, have their laptop on their person?
  *
- * The whole laptop model is one biconditional (2026-09-04 laptop/dock design §0): **the laptop is
- * docked ⟺ the member is working at their desk; every other moment it is on their person.** So this
- * is `audiblyWorking` negated and nothing else — deliberately not `&& docked`, not a second
- * condition, not a body-position term. The dock, the monitor, and the object under the arm all read
- * off the one predicate, which is why none of the three can end up saying different things.
+ * The model is one biconditional (2026-09-04 laptop/dock design §0): **the laptop is docked ⟺ the
+ * member is working AT THEIR DESK; every other moment it is on their person.** This function is the
+ * second clause of that — given a member who is already where they belong, working is what decides.
+ *
+ * The "at their desk" half is not in here on purpose, because it is not a roster fact. A member
+ * crossing the floor is not at their desk whatever their posture says, so `posesNow` gives every
+ * walk the laptop outright and never calls this; and a dock only fills once its owner is actually
+ * sitting at it (`render.ts`, the `docked` parameter). Folding the position into this predicate is
+ * what made a member who came online already `working` walk in empty-handed past a dock that had
+ * filled itself before they arrived (nick, 2026-09-04).
  *
  * A member the floor has no node for (a ghost walking out of the door) carries it: they are leaving,
  * and an empty dock is exactly what their desk should say.

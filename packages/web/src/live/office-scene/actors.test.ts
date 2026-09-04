@@ -1049,16 +1049,47 @@ describe('the laptop on the person (laptop/dock design §0)', () => {
     expect(pose.carry).toBe('laptop');
   });
 
-  it('the entrance walk carries it: an idle member arrives with it under their arm', () => {
+  /** Walk `who` in from the door onto an empty floor, and return their pose one step in. */
+  function arriving(who: OfficeNode) {
     const actors = createActors();
     const empty = world([]);
     actors.setHomes(empty.placements, empty.byName, true); // an empty floor, settled
-    const { placements, byName } = world([idle('Ada')]);
-    actors.setHomes(placements, byName, true); // …then Ada appears: a walk in from the door
+    const { placements, byName } = world([who]);
+    actors.setHomes(placements, byName, true); // …then they appear: a walk in from the door
     actors.step(0.05);
-    const p = actors.poses().get('Ada')!;
+    return actors.poses().get(who.name)!;
+  }
+
+  it('the entrance walk carries it: an idle member arrives with it under their arm', () => {
+    const p = arriving(idle('Ada'));
     expect(Math.hypot(p.lx - ENTRANCE.lx, p.ly - ENTRANCE.ly)).toBeLessThan(40); // still at the door
     expect(p.carry).toBe('laptop');
+  });
+
+  it('so does a member who comes online ALREADY working — a walker is not at their desk', () => {
+    // The regression nick caught (2026-09-04): reading posture here meant someone who appeared as
+    // `working` walked in empty-handed, because the predicate said their laptop was already in a
+    // dock they had not reached yet. Crossing the floor is not being at your desk, whatever the
+    // roster says — so the walk carries it, and the dock stays empty until they sit (render side).
+    const p = arriving(node('Ada'));
+    expect(Math.hypot(p.lx - ENTRANCE.lx, p.ly - ENTRANCE.ly)).toBeLessThan(40);
+    expect(p.carry).toBe('laptop');
+  });
+
+  it('and they still have it mid-walk, not only at the door', () => {
+    const actors = createActors();
+    const empty = world([]);
+    actors.setHomes(empty.placements, empty.byName, true);
+    const { placements, byName } = world([node('Ada')]);
+    actors.setHomes(placements, byName, true);
+    let carried = 0;
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) {
+      actors.step(0.05);
+      if (actors.poses().get('Ada')!.carry === 'laptop') carried++;
+    }
+    expect(carried).toBeGreaterThan(5); // held for the crossing, not a single frame at the threshold
+    expect(actors.poses().get('Ada')!.carry).toBeNull(); // …and docked once they are home and working
   });
 
   it('an errand outranks the laptop for its duration, and the laptop is back when it ends', () => {

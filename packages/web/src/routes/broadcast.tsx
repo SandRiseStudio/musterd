@@ -102,19 +102,17 @@ function captureFpsFromUrl(): number {
  */
 export const WORKSHOP_NOTICE = {
   /**
-   * There is no resting caption any more. At rest the corner is the breathing live dot and no words
-   * (nick, 2026-09-04: "lets get rid of 'live from the workshop'").
+   * There is no resting state here at all — no caption, and no live dot (nick, 2026-09-04: "lets get
+   * rid of 'live from the workshop'", then "no need for even the small live dot").
    *
    * That finishes an arc rather than starting one. The first cut was a 900px sentence parked over
-   * the floor for the whole broadcast; the second was three words; this is the end of the same line
-   * of reasoning — at rest there is no fact here that a viewer of a live stream does not already
-   * have. The dot is the one thing the corner knows that a still frame would not say. And the
-   * string that went was also the one that owed the most explaining: "workshop" was a third noun for
-   * one referent (room / workshop / stream) and was in no glossary, kept last time only because it
-   * violated no Not entry.
+   * the floor for the whole broadcast; the second was three words; then the words went and the dot
+   * stayed; now the dot has gone too. Every step removed the same thing — a permanent explanation of
+   * something the surface itself already says. At rest the corner holds the address and the mark,
+   * and nothing that is only ever true.
    *
-   * The copy of record stays on the title, and the ship beat still speaks — so the corner has words
-   * exactly when something has happened, which is what the beat was for.
+   * The copy of record survives on the beat's title, and the beat still speaks — so the corner has
+   * words exactly when something has happened, which is what it was for.
    */
   /** The beat after a build lands — past tense, and it names the blink the viewer just saw. */
   shipped: 'just shipped — that was the blink',
@@ -134,15 +132,22 @@ export const SHIPPED_MS = 9000;
 export function broadcastCorner(team: string | null, shipped = false) {
   return (
     <>
-      <span
-        className={`bc__notice${shipped ? ' bc__notice--shipped' : ''}`}
-        title={WORKSHOP_NOTICE.full}
-      >
-        {/* The dot is the whole resting state, so it stops being decoration when the text is gone:
-            it carries the accessible name that the missing caption used to carry. */}
-        <span className="bc__pulse" role="img" aria-label="live" />
-        {shipped && <span className="bc__notice-text">{WORKSHOP_NOTICE.shipped}</span>}
-      </span>
+      {/* AT REST THERE IS NO NOTICE AT ALL — not a caption, and not the live dot either (nick,
+          2026-09-04). The dot was the last thing standing after the caption went, and it was
+          answering a question the surface it lives on has already answered: this is a live stream,
+          on a page whose whole content is a room moving. A "we are live" light on a live picture is
+          the same permanent explanation of a self-evident thing that the 900px pill was, just
+          smaller. The element is gone rather than emptied, so nothing paints and nothing composites
+          — an empty paper stud is still a mark in the corner of every frame.
+
+          The beat is untouched: when a build lands the notice appears with its line, holds, and
+          leaves again. The corner speaks only when it has something to say. */}
+      {shipped && (
+        <span className="bc__notice bc__notice--shipped" title={WORKSHOP_NOTICE.full}>
+          <span className="bc__pulse" aria-hidden="true" />
+          <span className="bc__notice-text">{WORKSHOP_NOTICE.shipped}</span>
+        </span>
+      )}
       {team === 'revive' && <span className="bc__contact">revive@musterd.io</span>}
     </>
   );
