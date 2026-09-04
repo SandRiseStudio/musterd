@@ -17,7 +17,10 @@ function stubFetch(status: number, body: unknown) {
   return fn;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
   it('200 → occupied outcome', async () => {
@@ -73,6 +76,9 @@ describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
   });
 
   it('posts { key, target, grant?, surface } (no WS type/v) to /teams/:slug/claim', async () => {
+    // Pin provenance off for the exact-body assertion: this suite can run inside a WOKEN session,
+    // whose MUSTERD_PROVENANCE the claim now inherits by design (it has its own tests below).
+    vi.stubEnv('MUSTERD_PROVENANCE', '');
     const fn = stubFetch(200, {
       type: 'occupied',
       seat,
@@ -100,6 +106,48 @@ describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
     });
     expect(body.type).toBeUndefined();
     expect(body.v).toBeUndefined();
+  });
+
+  // ADR 131 §6. The wake actuators read `provenance` back off the roster to tell their own spawned
+  // child from a stranger holding the seat, so a claim that never puts it on the wire costs the
+  // actuator that judgement — and until now this route never did.
+  it('puts the inherited provenance on the wire under an agent key', async () => {
+    vi.stubEnv('MUSTERD_PROVENANCE', 'wake');
+    const fn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', input);
+    expect(JSON.parse(fn.mock.calls[0][1].body).provenance).toBe('wake');
+  });
+
+  it("never puts it on the wire from a HUMAN credential — a person's shell must not say `wake`", async () => {
+    vi.stubEnv('MUSTERD_PROVENANCE', 'wake');
+    const fn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', { ...input, key: 'mscr_nick' });
+    expect(JSON.parse(fn.mock.calls[0][1].body).provenance).toBeUndefined();
+  });
+
+  it('omits it when the session inherited none', async () => {
+    vi.stubEnv('MUSTERD_PROVENANCE', '');
+    const fn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', input);
+    expect(JSON.parse(fn.mock.calls[0][1].body).provenance).toBeUndefined();
   });
 
   it('5xx → CliError server error (exit 1)', async () => {

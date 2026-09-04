@@ -6,7 +6,7 @@ import {
   PROTOCOL_VERSION,
   RefusedFrame,
 } from '@musterd/protocol';
-import type { ClaimTarget, RefusedCode, Surface } from '@musterd/protocol';
+import type { ClaimTarget, Provenance, RefusedCode, Surface } from '@musterd/protocol';
 
 /**
  * The pure client-side half of the v0.3 `claim` handshake (ADR 075/078, SPEC A.3) — the frame builder
@@ -55,6 +55,9 @@ export function buildClaimFrame(input: {
   workspaceKey?: string;
   model?: string;
   build?: string;
+  /** What ANIMATES this session (ADR 131 §6) — `wake` for an actuator-spawned harness, `session`
+   *  for a person's own. Not identity: the seat is who, this is what caused it to be here. */
+  provenance?: Provenance;
 }): ClaimFrame {
   return ClaimFrame.parse({
     type: 'claim',
@@ -74,6 +77,9 @@ export function buildClaimFrame(input: {
     ...(input.model !== undefined ? { model: input.model } : {}),
     // Build attestation (ADR 135) — the client dist's own stamp; absent for unstamped builds.
     ...(input.build !== undefined ? { build: input.build } : {}),
+    // Provenance (ADR 131 §6) — the wake actuators read it back to tell their own spawned child
+    // from a stranger holding the seat, so a claim that drops it costs the actuator that judgement.
+    ...(input.provenance !== undefined ? { provenance: input.provenance } : {}),
     // Feature epoch (ADR 148) — this CLI dist's compiled-in capability counter; always attested (a
     // constant, not a stamp), so a CLI-claimed seat carries the roster's skew signal like any other.
     epoch: FEATURE_EPOCH,

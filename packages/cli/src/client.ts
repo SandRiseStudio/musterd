@@ -1204,6 +1204,13 @@ export class HttpClient {
     // resolved by the caller into `this.opts.model` (see `helpers.ts:attestedModel`), so use it
     // when present; fall back to the env declaration alone for callers that have no binding.
     const model = this.opts.model ?? resolveAttestedModel(process.env);
+    // ADR 131 §6: provenance rides the claim on the same gate the ambient header uses — never from
+    // a human credential, because the wake actuators read this word to decide a seat is their own
+    // child, and a human shell must not be able to say `wake`. The server applies the authoritative
+    // gate on the target member's kind; this one keeps the client from ever putting it on the wire.
+    const claimProvenance = input.key.startsWith(TOKEN_PREFIXES.credential)
+      ? undefined
+      : resolveAttestedProvenance(process.env);
     if (process.env['MUSTERD_DEBUG_ATTEST']) {
       console.error(
         `[musterd debug] HttpClient.claim model: opts=${this.opts.model ?? 'none'} env=${resolveAttestedModel(process.env) ?? 'none'} => ${model ?? 'none'}`,
@@ -1219,6 +1226,7 @@ export class HttpClient {
       ...(input.grant !== undefined ? { grant: input.grant } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
+      ...(claimProvenance !== undefined ? { provenance: claimProvenance } : {}),
     });
     const body = {
       key: frame.key,
@@ -1233,6 +1241,8 @@ export class HttpClient {
       ...(frame.model !== undefined ? { model: frame.model } : {}),
       ...(frame.build !== undefined ? { build: frame.build } : {}),
       ...(frame.epoch !== undefined ? { epoch: frame.epoch } : {}),
+      // ADR 131 §6: the last field that kept this route from being the mirror SPEC A.7 calls it.
+      ...(frame.provenance !== undefined ? { provenance: frame.provenance } : {}),
     };
     let res: Response;
     try {

@@ -2426,6 +2426,153 @@ describe('WebSocket', () => {
     });
   });
 
+  // The stateless mirror records what animates the session, on EVERY branch that occupies.
+  //
+  // Two gaps, one route. The 2026-09-04 workspace repair (#1289) added `workspace`/`workspace_key`
+  // to this body but edited only the FIRST of three `attach` calls, so its own stated consequences
+  // — no location on the roster, and ADR 379's `own_unattested` unable to match a null — survived
+  // on the credential and re-seat branches, the latter being the ordinary path for an agent
+  // re-claiming its own bound seat. `provenance` was never in the body at all, so every row born
+  // here read null while every WS-claimed and ambient-touched row carried a value.
+  describe('the stateless claim records provenance and workspace on every occupy branch (ADR 131 §6)', () => {
+    it('the grant branch records both', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      const claimed = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(claimed.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBe('wake');
+      expect(ada.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('the credential self-authorize branch records both — it used to hardcode workspace null', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      // First claim mints Ada's own seat credential (ADR 337).
+      const first = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+      });
+      expect(first.status).toBe(200);
+
+      // Ada reconnects on her OWN credential — no grant, so this is the self-authorize branch.
+      const again = await post('/teams/dawn/claim', {
+        key: first.json.seat_credential,
+        target: { seat: 'Ada' },
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(again.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBe('wake');
+      expect(ada.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('the dogfood re-seat branch records both — the ordinary path for an agent re-claiming its own seat (ADR 146)', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      // Bind the seat, then opt the team into re-seat.
+      await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+      });
+      await post('/teams/dawn/policy', { standing_reseat_known_agents: true }, nickCred);
+
+      // A fresh session, team agent key only, no grant and no credential.
+      const reseat = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(reseat.status).toBe(200);
+      expect(reseat.json.type).toBe('occupied');
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBe('wake');
+      expect(ada.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('a human seat cannot stamp its own occupancy `wake` (the ADR 121 gate the ambient path already applies)', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+
+      // nick self-authorizes on his own credential and claims `wake` — the word the actuators read
+      // to conclude a seat is their own spawned child. A human shell must never be able to say it.
+      const claimed = await post('/teams/dawn/claim', {
+        key: nickCred,
+        target: { seat: 'nick' },
+        surface: 'cli',
+        workspace: 'repo@main',
+        provenance: 'wake',
+      });
+      expect(claimed.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const row = roster.json.members.find((m: any) => m.name === 'nick');
+      expect(row.presences[0].provenance).toBeNull();
+      // The workspace is not gated — it is a location, not an assertion about what animates it.
+      expect(row.presences[0].workspace).toBe('repo@main');
+    });
+
+    it('a client that sends no provenance still lands null — additive, not a new default', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      const claimed = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+      });
+      expect(claimed.status).toBe(200);
+
+      const roster = await get('/teams/dawn/members', nickCred);
+      const ada = roster.json.members.find((m: any) => m.name === 'Ada');
+      expect(ada.presences[0].provenance).toBeNull();
+    });
+
+    it('refuses a provenance that is not in the vocabulary', async () => {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickCred = team.json.human_credential;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickCred);
+
+      const claimed = await post('/teams/dawn/claim', {
+        key: team.json.agent_key,
+        target: { seat: 'Ada' },
+        grant: await standingGrant(nickCred, 'Ada'),
+        surface: 'cli',
+        provenance: 'definitely-not-a-provenance',
+      });
+      expect(claimed.status).toBe(400);
+    });
+  });
+
   it('a WS claim audits its eviction of a stateless incumbent', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, team.json.human_credential);
