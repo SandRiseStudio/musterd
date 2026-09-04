@@ -95,11 +95,21 @@ function captureFpsFromUrl(): number {
  * test can hold all of it.
  */
 export const WORKSHOP_NOTICE = {
-  /** At rest: what this is. Three words, because the corner is a mark and not a caption. */
+  /** At rest: what this is. Three words, because the corner is a mark and not a caption. "Workshop"
+   * is a third noun for one referent (room / workshop / stream) and is in no glossary — kept on
+   * sloane's own recommendation, because it violates no Not entry and carries the show's premise in
+   * three words. The airtight alternatives, if it ever needs to be: "live from the team"
+   * (canonical, duller) or "musterd, building musterd" (self-explaining). */
   chip: 'live from the workshop',
   /** The beat after a build lands — past tense, and it names the blink the viewer just saw. */
   shipped: 'just shipped — that was the blink',
-  full: 'The people in this room are building musterd while you watch, and every deploy can restart the stream for a moment. It comes back on its own.',
+  /**
+   * The copy of record — the one string here a stranger might quote, so it says Team the way the
+   * brand says Team. The first cut said "the people in this room", and "room" is in brand.md §5's
+   * Not column for Team: enforced vocabulary (ADR 296), not a preference. Two sentences rather than
+   * one long one, per §4 — the premise, then the consequence. sloane's spec, verbatim.
+   */
+  full: 'This team is building musterd while you watch. Every deploy can restart the stream for a moment, and it comes back on its own.',
 };
 
 /** How long the "just shipped" beat holds before easing back to the resting mark. Long enough to
