@@ -156,8 +156,11 @@ in that repo's config):
 
 Durability there is worse, not better: all of it plus 4.99 GB of audio sits in one Supabase project.
 The snapshot rail reads the versioned read-only API (`pnpm dataset:exn-snapshot` — metadata +
-scripts + transcripts, never audio; first live run pending an API key), so the export path exists
-even before the first archive lands. Its audio will not compress, so this page's
+scripts + transcripts, never audio; landed #1277, paced #1279, unique refs #1284). First archive
+2026-09-04: 874/874/874, checksums verified, at `~/.musterd/research/exn-2026-09-04`; off-machine
+copy in the new Supabase project `exn-corpus-backup` (private bucket `corpus-backups`: tarball +
+manifest, both sha256-verified on re-download; falsify: list that bucket). Runtime keys live in
+`/Users/nick/agents/.env` (gitignored), never in the repo. Its audio will not compress, so this page's
 5.7 MB economics do not transfer.
 
 [^v42]: Measured at v41 on 2026-08-18. Migration 42 (`presence.model_source`, 2026-08-21) lands with [#975](https://github.com/SandRiseStudio/musterd/pull/975) — the dated measurement above stands; the live schema moves past it. See [model attestation](model-attestation.md).
