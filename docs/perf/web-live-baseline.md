@@ -765,6 +765,8 @@ seventh entry here.
 
 ## 2026-09-04 — zod leaves the browser: the repayment the six raises were owed
 
+Decision: [ADR 380](../decisions/380-the-protocol-has-a-validator-free-face.md).
+
 nick's steer, after the entry above named the trend and found no lever: **find and land the
 repayment, or write the decision that says why the ceiling moves — not a seventh raise.** This is the
 repayment.
