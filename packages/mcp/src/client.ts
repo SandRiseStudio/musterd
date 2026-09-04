@@ -128,6 +128,12 @@ function connectionNeverEstablished(err: unknown): boolean {
 }
 
 /**
+ * What a {@link MusterdClient.join} call settled as. `'pending'` is reachable only through the ADR 095
+ * non-blocking mode: the claim request is open and parked, and the seat is NOT held.
+ */
+export type JoinOutcome = 'occupied' | 'pending';
+
+/**
  * HTTP client + background WS that holds presence and buffers inbound deliveries.
  * The buffer is a convenience; the server log + cursor are authoritative, so a
  * dropped socket never loses messages (they resurface via the inbox cursor).
@@ -145,12 +151,17 @@ export class MusterdClient {
   private wantPresence = false;
   private joinedFlag = false;
   /** Resolves/rejects the in-flight join() on the first welcome / error frame. */
-  private pendingJoin: { resolve: () => void; reject: (e: Error) => void } | null = null;
+  private pendingJoin: {
+    resolve: (outcome?: JoinOutcome) => void;
+    reject: (e: Error) => void;
+  } | null = null;
   /** Bounds a parked join() waiting on admin approval (ADR 087) — cleared on any terminal frame. */
   private joinTimer: NodeJS.Timeout | null = null;
   /** True for a blocking join() (team_join): a `pending` frame parks (waits for the pushed decision)
    *  instead of rejecting. False for best-effort autojoin, which stays a pending presence on `pending`. */
   private waitOnPending = false;
+  /** ADR 095: park on `pending` but hand the caller a pending outcome instead of blocking. */
+  private returnOnPending = false;
   /** The open claim request id while parked on `pending` (surfaced by team_join on a wait timeout). */
   private pendingRequestId: string | null = null;
   /** The seat's memory envelope delivered on the occupied frame (ADR 093) — headline + age + size,
@@ -630,9 +641,15 @@ export class MusterdClient {
    * Claim the member's seat: open the WS, `hello`, and resolve once the server sends `welcome`.
    * Rejects if the seat is already live in another session (`member_busy`) or the hello is refused.
    * Idempotent while already joined. Explicit activation — nothing claims presence before this (M3).
+   *
+   * Resolves `'occupied'` when the seat is held. Resolves `'pending'` ONLY in the non-blocking
+   * keep-parking mode (ADR 095: `timeoutMs === 0` with `parkOnPending`) — the claim request is open,
+   * the socket stays parked, and a later approval still occupies in the background. Callers that
+   * ignore the value keep today's meaning, because every other path either resolves occupied or
+   * rejects.
    */
-  join(timeoutMs?: number): Promise<void> {
-    if (this.joinedFlag) return Promise.resolve();
+  join(timeoutMs?: number, opts?: { parkOnPending?: boolean }): Promise<JoinOutcome> {
+    if (this.joinedFlag) return Promise.resolve<JoinOutcome>('occupied');
     if (!this.config.agent_key && !this.config.seatCredential) {
       return Promise.reject(
         new Error('no agent key — set MUSTERD_AGENT_KEY (the team agent key) to claim a seat'),
@@ -646,9 +663,14 @@ export class MusterdClient {
       );
     }
     this.wantPresence = true;
-    this.waitOnPending = (timeoutMs ?? 0) > 0;
+    // Who parks on a `pending` frame. Blocking team_join parks and waits; the ADR 095 non-blocking
+    // mode parks and RETURNS; best-effort launch autojoin neither parks nor waits. The old
+    // derivation from the timeout alone could not express the middle one — a zero timeout meant
+    // "give up and close", which is why `wait: 0` could not simply reuse the autojoin path.
+    this.waitOnPending = opts?.parkOnPending ?? (timeoutMs ?? 0) > 0;
+    this.returnOnPending = (opts?.parkOnPending ?? false) && (timeoutMs ?? 0) === 0;
     this.staleGrantRetried = false;
-    return new Promise<void>((resolve, reject) => {
+    return new Promise<JoinOutcome>((resolve, reject) => {
       let settled = false;
       const clearTimer = () => {
         if (this.joinTimer) clearTimeout(this.joinTimer);
@@ -657,11 +679,11 @@ export class MusterdClient {
       // One blocking call (ADR 087): resolve on `occupied`, reject on a terminal refusal — and, when a
       // claim parks on `pending`, keep waiting for the admin's pushed decision instead of returning.
       this.pendingJoin = {
-        resolve: () => {
+        resolve: (outcome: JoinOutcome = 'occupied') => {
           if (settled) return;
           settled = true;
           clearTimer();
-          resolve();
+          resolve(outcome);
         },
         reject: (e: Error) => {
           if (settled) return;
@@ -849,6 +871,8 @@ export class MusterdClient {
         this.lastJoinErrorMsg = null;
         this.pendingRequestId = null;
         this.waitOnPending = false;
+        this.returnOnPending = false;
+        this.returnOnPending = false;
         this.config.member = frame.seat.name;
         if (frame.seat_credential) this.config.seatCredential = frame.seat_credential;
         if (frame.session_lease) this.config.sessionLease = frame.session_lease;
@@ -932,6 +956,8 @@ export class MusterdClient {
         this.wantPresence = false;
         this.pendingRequestId = null;
         this.waitOnPending = false;
+        this.returnOnPending = false;
+        this.returnOnPending = false;
         const msg = `${frame.code}: ${frame.message}`;
         this.lastJoinErrorMsg = msg;
         this.pendingJoin?.reject(new Error(msg));
@@ -941,7 +967,15 @@ export class MusterdClient {
         // No grant — the server opened a claim request (A.5) and holds this socket open.
         this.pendingRequestId = frame.request_id;
         this.lastJoinErrorMsg = `pending approval — request ${frame.request_id} (an admin must approve)`;
-        if (this.waitOnPending) {
+        if (this.returnOnPending) {
+          // ADR 095 `wait: 0`: hand the caller the pending handle NOW, and keep the socket parked so
+          // the admin's later approval still occupies in the background — the same keep-open the
+          // blocking timeout path already relies on, minus the wait. `pendingJoin` is dropped
+          // because this call is answered; `wantPresence` stays true so nothing tears the socket down.
+          const settle = this.pendingJoin;
+          this.pendingJoin = null;
+          settle?.resolve('pending');
+        } else if (this.waitOnPending) {
           // Blocking team_join (ADR 087, spec-gap 3): park — keep the socket + pendingJoin so the
           // admin's pushed terminal `occupied`/`refused` resolves this same call. No reject, no close,
           // no reconnect thrash. join()'s timeout bounds the wait; a later push still occupies silently.
@@ -969,6 +1003,8 @@ export class MusterdClient {
           this.wantPresence = false;
           this.pendingRequestId = null;
           this.waitOnPending = false;
+          this.returnOnPending = false;
+          this.returnOnPending = false;
           this.pendingJoin?.reject(new Error(msg));
           this.pendingJoin = null;
           ws.close();
@@ -983,6 +1019,8 @@ export class MusterdClient {
         this.joinedFlag = false;
         this.pendingRequestId = null;
         this.waitOnPending = false;
+        this.returnOnPending = false;
+        this.returnOnPending = false;
         this.lastJoinErrorMsg = `${frame.code}: ${frame.message}`;
         this.pendingJoin?.reject(new Error(this.lastJoinErrorMsg));
         this.pendingJoin = null;
@@ -1000,6 +1038,7 @@ export class MusterdClient {
       this.joinedFlag = false;
       this.pendingRequestId = null;
       this.waitOnPending = false;
+      this.returnOnPending = false;
       if (this.heartbeat) clearInterval(this.heartbeat);
       this.heartbeat = null;
       if (this.pendingJoin) {

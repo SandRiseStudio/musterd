@@ -8,10 +8,18 @@ import { clearPendingMarker } from './pending.js';
 export type ClaimTarget = { seat: string } | { role: string };
 
 export interface ClaimResult {
-  /** The resolved seat name (a role pool's `<role>-<n>` is resolved server-side). */
+  /** The resolved seat name (a role pool's `<role>-<n>` is resolved server-side). While `pending`
+   *  nothing is resolved yet, so this carries the seat or role that was ASKED for. */
   member: string;
   /** True when this session re-occupied a seat it already held rather than claiming a new one. */
   reused: boolean;
+  /**
+   * ADR 095: set when the caller asked not to block (`wait: 0`) and the server opened an approval
+   * request instead of seating. **The seat is not held.** The socket stays parked, so a later
+   * approval occupies in the background and the next `team_join` reports already-joined; nothing is
+   * persisted here, because a binding written now would claim an identity this session does not have.
+   */
+  pending?: { requestId: string | null };
 }
 
 export class ClaimConflictError extends Error {
@@ -99,7 +107,17 @@ async function performClaim(
   config.claim =
     'seat' in target ? { mode: 'seat', name: target.seat } : { mode: 'role', role: target.role };
   try {
-    await client.join(waitMs);
+    const outcome = await client.join(waitMs, { parkOnPending: true });
+    if (outcome === 'pending') {
+      // Non-blocking return (ADR 095). Deliberately BEFORE persistBinding/clearPendingMarker: this
+      // session holds no seat, and the pending marker is what a later `musterd claim --for <code>`
+      // resolves against.
+      return {
+        member: 'seat' in target ? target.seat : target.role,
+        reused: false,
+        pending: { requestId: client.awaitingRequestId },
+      };
+    }
   } catch (err) {
     const msg = (err as Error).message;
     if (/claim_conflict|conflict|occupied|busy/i.test(msg)) {

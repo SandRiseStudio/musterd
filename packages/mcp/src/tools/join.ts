@@ -8,11 +8,27 @@ import { repairHint, textResult } from './format.js';
 import { memoryLine } from './memory.js';
 
 const DESCRIPTION =
-  "Claim your seat and go online — the CLI spelling is `musterd claim` (ADR 075/377). Use as, role, or this Workspace's policy. May wait for approval; check your Inbox after.";
+  "Claim your seat and go online — the CLI spelling is `musterd claim` (ADR 075/377). Use as, role, or this Workspace's policy. May wait for approval; wait:0 returns at once.";
 
-/** How long team_join blocks waiting for an admin to approve a claim before returning (ADR 087). A
- *  later approval still occupies in the background — a follow-up team_join then reports already-joined. */
+/** Default block while waiting for an admin to approve a claim (ADR 087); `wait` overrides it per
+ *  call (ADR 095). A later approval still occupies in the background either way — a follow-up
+ *  team_join then reports already-joined.
+ *
+ *  Measured 2026-09-03 on this daemon: of 33 claim requests opened from an MCP surface, 28 could not
+ *  be satisfied inside this budget — 18 were decided later than 120s (median ~150s, longest 52min)
+ *  and 10 were never decided at all. So the default is the interactive DX, not a wait that usually
+ *  works; an autonomous seat should pass `wait: 0`. Falsify: re-run the join in
+ *  `docs/wiki/claim-approval-latency.md`. */
 const JOIN_WAIT_MS = 120_000;
+
+/** Resolve the `wait` control to a block budget in ms (ADR 095 decision 1). */
+export function resolveWaitMs(wait: number | undefined): number {
+  if (wait === undefined) return JOIN_WAIT_MS;
+  if (!Number.isFinite(wait) || wait < 0) {
+    throw new RangeError('wait must be a non-negative number of seconds (0 = do not block)');
+  }
+  return Math.round(wait * 1000);
+}
 
 function charterBlock(client: MusterdClient): string {
   const charter = client.charter?.trim();
@@ -44,6 +60,7 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
       inputSchema: {
         as: z.string().optional().describe('claim this named seat (auto-minted locally if new)'),
         role: z.string().optional().describe('claim the next open seat in this role pool'),
+        wait: z.number().optional().describe('seconds to block for approval; 0 = return at once'),
       },
     },
     async (args) => {
@@ -66,9 +83,28 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
         );
       }
 
-      // Claim the seat (mint-or-reuse, local auto-mint), then occupy it — blocking through one approval.
+      // Claim the seat (mint-or-reuse, local auto-mint), then occupy it — blocking through one
+      // approval, unless the caller set its own budget with `wait` (ADR 095).
+      let waitMs: number;
       try {
-        const result = await claimAndJoin(client, config, target, JOIN_WAIT_MS);
+        waitMs = resolveWaitMs(args.wait);
+      } catch (err) {
+        return textResult(`Can't join: ${(err as Error).message}`);
+      }
+      try {
+        const result = await claimAndJoin(client, config, target, waitMs);
+        if (result.pending) {
+          const req = result.pending.requestId;
+          const decide = req
+            ? `Ask an admin to run \`musterd requests decide ${req} --approve\`.`
+            : 'Ask an admin to approve the claim.';
+          return textResult(
+            `Claim opened on ${config.team} for ${result.member}${req ? ` — request ${req}` : ''} ` +
+              `(awaiting admin approval). You are NOT seated yet, so do not act as that seat. ` +
+              `${decide} You did not have to wait for it: keep working, and the seat occupies ` +
+              `automatically the moment the approval lands. Call team_join again to confirm you are live.`,
+          );
+        }
         const role = 'role' in target ? ` (role ${target.role})` : '';
         const charter = charterBlock(client);
         // The continuity one-liner (ADR 093 §3): at most one line — headline + age, never the body.

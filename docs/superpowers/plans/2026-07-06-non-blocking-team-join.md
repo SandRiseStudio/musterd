@@ -1,5 +1,14 @@
 # Non-blocking `team_join` Implementation Plan (ADR 095)
 
+> **STATUS 2026-09-03 — partly executed; read ADR 095 first, not this file.** Increment 1 (the `wait`
+> control on `team_join` and the return-on-pending keep-parking `join()` mode) landed on lane
+> 01M1MMKYMN. Task 1's `claim_wait` binding field and the interrupt-class act on approve did NOT land
+> and are deferred with named triggers in ADR 095's Consequences — that is the current disposition,
+> and this file's task list is the two-month-old plan it was written from, kept for its reasoning.
+> The premise was re-measured before building and is recorded in `docs/wiki/claim-approval-latency.md`.
+> Ignore the sub-skill instruction below: subagent-driven execution is disabled here; a seat does the
+> work in its own lane.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the `team_join` claim block a **caller/policy choice** instead of a hardcoded 120s. Add a `wait` control (default = today's blocking spin-then-seat) whose `wait:0` returns a pending handle immediately while keeping the socket parked for background occupy; on approval, drop an interrupt-class act at the seat so a released autonomous agent is told at its next tool boundary instead of polling.
