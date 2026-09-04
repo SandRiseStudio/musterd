@@ -34,6 +34,16 @@ describe('modelProvider', () => {
     expect(modelProvider('amazon-nova-2-pro').id).toBe('nova');
   });
 
+  it('maps muse-spark to meta (not unknown)', () => {
+    // Live defect: ghost's plate rendered the "?" mark because only 'llama' mapped to meta.
+    const p = modelProvider('muse-spark-1.3-contributor-free');
+    expect(p.id).toBe('meta');
+    expect(p.border).toBe('#0668E1');
+    const html = providerIconHtml(p);
+    expect(html).toContain('<svg');
+    expect(html).toContain('#0668E1');
+  });
+
   it('returns unknown for missing / unknown / empty', () => {
     expect(modelProvider(null).id).toBe('unknown');
     expect(modelProvider('unknown').id).toBe('unknown');

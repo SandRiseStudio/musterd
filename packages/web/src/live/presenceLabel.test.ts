@@ -33,6 +33,13 @@ describe('shortModel — the Claude families', () => {
       expect(shortModel(id)).toMatch(/\d/);
     }
   });
+
+  it('keeps the muse-spark version crumb (ghost plate defect)', () => {
+    // The fallback kept "muse spark" and dropped the rev, so 1.2 and 1.3 read identically.
+    expect(shortModel('muse-spark-1.3-contributor-free')).toBe('muse spark 1.3');
+    expect(shortModel('muse-spark-1.2-contributor-free')).toBe('muse spark 1.2');
+    expect(plateModel('muse-spark-1.3-contributor-free')).toBe('muse spark 1.3');
+  });
 });
 
 describe('plateModel', () => {
