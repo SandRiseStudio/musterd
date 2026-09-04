@@ -155,10 +155,13 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
           label === 'resumed' ? (deps.resumeVerifyWindowMs ?? RESUME_VERIFY_WINDOW_MS) : undefined,
           startedAt,
         );
-        if (verified.occupied && verified.lease_matched) {
+        // ADR 379: an unattested row the loop identified as this wake's own child is mine too.
+        const mine = verified.lease_matched || verified.own_unattested;
+        if (verified.occupied && mine) {
           ctx.log(
             `⚡ woke ${spec.order.seat}: session=${label} lease=${spec.order.lease_id} ` +
-              `provenance=${verified.provenance ?? 'none'}`,
+              `provenance=${verified.provenance ?? 'none'}` +
+              (verified.own_unattested ? ' (own child, lease unattested — ADR 379)' : ''),
           );
           if (label === 'fresh')
             (deps.recordFreshSession ?? recordFreshSession)(
@@ -169,7 +172,7 @@ export function grokBackend(deps: GrokDeps = {}): ActuatorBackend {
           return { occupied: true, reason: '', settled };
         }
         killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
-        const heldByOther = verified.occupied && !verified.lease_matched;
+        const heldByOther = verified.occupied && !mine;
         return {
           occupied: false,
           ...(heldByOther ? { deferred: true } : {}),

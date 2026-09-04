@@ -275,7 +275,15 @@ async function attempt(
     !spawnError && child.signalCode === null && (child.exitCode === null || child.exitCode === 0);
   // ADR 241: the success bar is `lease_matched` — a fresh row attesting THIS lease's token.
   // Shared mechanics with every sibling backend; nothing here is opencode-specific.
-  if (verified.occupied && verified.lease_matched && exact && processOk) {
+  // ADR 379: `own_unattested` is the loop's positive identification of this wake's own child that
+  // could not attest its lease — mine, not held-by-other, and not to be killed.
+  const mine = verified.lease_matched || verified.own_unattested;
+  if (verified.occupied && mine && exact && processOk) {
+    if (verified.own_unattested)
+      ctx.log(
+        `note: ${spec.order.seat}'s occupancy attests no lease — credited as this wake's own ` +
+          `(created in ${spec.workspace} after spawn, ADR 379)`,
+      );
     ctx.log(
       `⚡ woke ${spec.order.seat}: session=${label} lease=${spec.order.lease_id} ` +
         `provenance=${verified.provenance ?? 'none'}`,
@@ -286,7 +294,7 @@ async function attempt(
   killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
   // ADR 238/241 deferral taxonomy, identical to the codex backend: held-by-other defers
   // (budget-neutral), everything else is a charged failure with its reason named.
-  const heldByOther = verified.occupied && !verified.lease_matched;
+  const heldByOther = verified.occupied && !mine;
   return {
     occupied: false,
     ...(heldByOther ? { deferred: true } : {}),

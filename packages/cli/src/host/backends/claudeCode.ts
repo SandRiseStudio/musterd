@@ -368,7 +368,10 @@ function runAttempt(
     // running beside the real occupant. `occupied && !lease_matched` is the contract's deferral
     // (backend.ts): nothing about the act or the host is wrong, so it must not be charged — kill
     // what we spawned and let the act wait for the session that holds the seat.
-    if (verified.occupied && !verified.lease_matched) {
+    // ADR 379: unless the unattested occupant is demonstrably the child spawned here (same
+    // workspace, created after spawn) — then it is ours, it just could not attest the lease, and
+    // killing it is the self-kill ADR 354 §Consequences named.
+    if (verified.occupied && !verified.lease_matched && !verified.own_unattested) {
       killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
       return {
         occupied: false,
@@ -401,7 +404,13 @@ function runAttempt(
         `⚡ woke ${seat}: spawn→roster ${(wakeLatencyMs / 1000).toFixed(1)}s, ` +
           `session=${opts.label} provenance=${verified.provenance ?? 'unknown'}`,
       );
-      if (verified.provenance !== 'wake') {
+      if (verified.own_unattested) {
+        ctx.log(
+          `note: ${seat}'s occupancy attests no lease (${spec.order.lease_id}) — credited as this ` +
+            `wake's own on its evidence: created in ${spec.workspace} after spawn (ADR 379). ` +
+            `The workspace's musterd MCP dist may predate the lease token (rebuild it).`,
+        );
+      } else if (verified.provenance !== 'wake') {
         ctx.log(
           `note: occupancy attests provenance "${verified.provenance ?? 'none'}", not "wake" — ` +
             `the workspace's musterd MCP dist may predate ADR 131 inc 3 (rebuild it)`,

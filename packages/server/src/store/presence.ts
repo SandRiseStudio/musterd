@@ -480,6 +480,7 @@ export function listPresence(db: Database, teamId: string, timeoutMs: number): P
         build: p.build ?? null,
         epoch: p.epoch ?? null,
         wake_lease: p.wake_lease ?? null,
+        attached_at: p.created_at,
         node: p.node ?? null,
         node_label: p.node_label ?? null,
       })),

@@ -58,7 +58,12 @@ const spec = (over: Partial<WakeSpec> = {}): WakeSpec => ({
 });
 
 const ctx = (
-  verify: () => Promise<{ occupied: boolean; provenance?: string | null; lease_matched?: boolean }>,
+  verify: () => Promise<{
+    occupied: boolean;
+    provenance?: string | null;
+    lease_matched?: boolean;
+    own_unattested?: boolean;
+  }>,
 ): BackendContext & { lines: string[] } => {
   const lines: string[] = [];
   return { verifyOccupied: verify, log: (l) => lines.push(l), lines };
@@ -361,6 +366,27 @@ describe('claudeCodeBackend.wake', () => {
     );
     expect(actuation.outcome.occupied).toBe(false);
     expect(actuation.outcome.deferred).toBe(true);
+    child.exit(0);
+    await actuation.settled;
+  });
+
+  it("an unattested occupant the loop identifies as this wake's own child is NOT killed (ADR 379)", async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const context = ctx(async () => ({
+      occupied: true,
+      provenance: 'session',
+      lease_matched: false,
+      own_unattested: true,
+    }));
+    const actuation = await backend.wake(spec(), context);
+    expect(actuation.outcome.occupied).toBe(true);
+    expect(actuation.outcome.deferred).toBeUndefined();
+    // The whole point: the actuator held the evidence that this was its own child and did not
+    // kill it on the strength of one missing env var (ADR 354 §Consequences, the named residual).
+    expect(child.signals).toHaveLength(0);
+    expect(context.lines.join('\n')).toMatch(/credited as this wake's own/);
+    expect(context.lines.join('\n')).toMatch(/ADR 379/);
     child.exit(0);
     await actuation.settled;
   });

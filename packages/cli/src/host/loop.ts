@@ -1,3 +1,4 @@
+import { resolveWorkspace } from '@musterd/mcp';
 import {
   wakeabilityFromFacts,
   type MemberSummary,
@@ -8,7 +9,7 @@ import { SpanStatusCode, trace } from '@opentelemetry/api';
 import { HttpClient } from '../client.js';
 import { findBinding } from '../config.js';
 import { localSessionLiveness, type LocalSessionLiveness } from '../session/liveness.js';
-import type { ActuatorBackend, WakeBounds, WakeOutcome } from './backend.js';
+import type { ActuatorBackend, VerifyResult, WakeBounds, WakeOutcome } from './backend.js';
 import { canonicalServer, loadHostRegistry, type HostRegistryEntry } from './registry.js';
 
 /**
@@ -110,11 +111,16 @@ async function verifyOccupied(
   pollMs: number,
   sinceTs: number,
   leaseId: string,
-): Promise<{ occupied: boolean; provenance?: string | null; lease_matched?: boolean }> {
+  ownWorkspace?: string,
+): Promise<VerifyResult> {
   const deadline = Date.now() + windowMs;
   const freshBar = sinceTs - VERIFY_FRESHNESS_SLACK_MS;
   // ADR 238: the newest occupancy that is not ours, seen so far. Held, not returned — see below.
   let otherOccupancy: { occupied: boolean; provenance?: string | null } | null = null;
+  // ADR 379: among the unattested fresh rows, one the actuator can identify as its own child —
+  // created in the workspace it spawned into, after it spawned. Held to the deadline like the rest:
+  // a lease-attesting row is still the answer if one arrives inside the window.
+  let ownUnattested: { provenance?: string | null } | null = null;
   for (;;) {
     const roster = await client.roster(team).catch(() => null);
     const me = roster?.members.find((m) => m.name === seat);
@@ -135,13 +141,49 @@ async function verifyOccupied(
         // the window is spent does the other session's occupancy become the answer — which the
         // backend reads as "someone else holds the seat" and defers on, never as this wake failing.
         otherOccupancy = { occupied: true, provenance: fresh[0]?.provenance ?? null };
+        // ADR 379: the actuator spawned into `ownWorkspace` at `sinceTs`. A row with no lease, in
+        // that workspace, created at-or-after the spawn is the child it is about to kill for
+        // "not attesting" — the codex env-sanitisation class (ADR 354) and any adapter dist that
+        // predates the lease token. Every term is a positive fact on the row (ADR 236): absent
+        // `attached_at` or `workspace` never qualifies. A row created BEFORE the spawn in the same
+        // workspace is a genuine prior occupant (a human in the worktree, ADR 068) and stays foreign.
+        const own = ownWorkspace
+          ? fresh.find(
+              (p) =>
+                !p.wake_lease &&
+                p.workspace === ownWorkspace &&
+                typeof p.attached_at === 'number' &&
+                p.attached_at >= freshBar,
+            )
+          : undefined;
+        if (own) ownUnattested = { provenance: own.provenance ?? null };
       }
     }
-    if (Date.now() >= deadline)
+    if (Date.now() >= deadline) {
+      if (ownUnattested)
+        return {
+          occupied: true,
+          provenance: ownUnattested.provenance ?? null,
+          lease_matched: false,
+          own_unattested: true,
+        };
       return otherOccupancy
         ? { ...otherOccupancy, lease_matched: false }
         : { occupied: false, lease_matched: false };
+    }
     await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
+/** The `workspace` label a session attaches with from this path (ADR 014 ladder), computed on the
+ *  actuator's side so the verifier can recognise its own child's row (ADR 379). Env is deliberately
+ *  empty: a `MUSTERD_WORKSPACE` in the HOST's environment describes the host, not the child. Best
+ *  effort — a path that cannot be labelled simply disables the own-child match. */
+function ownWorkspaceLabel(workspacePath: string): string | undefined {
+  try {
+    return resolveWorkspace({}, workspacePath);
+  } catch {
+    return undefined;
   }
 }
 
@@ -350,6 +392,9 @@ export async function pollHostOnce(deps: HostPollDeps): Promise<HostPollResult> 
               // ADR 241: bound HERE, from the order the loop is actuating — never passed in by the
               // backend. A backend cannot name a lease other than the one it was handed.
               order.lease_id,
+              // ADR 379: the label the child will attest for THIS workspace — the same resolver the
+              // adapter runs in its cwd, with the host's own env kept out of it.
+              ownWorkspaceLabel(entry.workspace),
             ),
           log: deps.log,
         },

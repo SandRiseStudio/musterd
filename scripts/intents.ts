@@ -192,7 +192,6 @@ const BASELINE_GENUINE: readonly string[] = [
   'docs/decisions/354-wake-lease-file-channel.md::kill. left for a sibling lane; this adr fixes the attestatio',
   'docs/wiki/agent-permission-enforcement-patterns.md::- **not yet built, worth remembering**: per-call correlation',
   'docs/wiki/federation-data-census.md::| `seeds` (lifecycle) | 2 | relay-ingested per daemon, or re',
-  'docs/wiki/wake-leases.md::**still true, and not fixed here:** the actuator will kill a',
   "content/roadmap.data.ts::'m1–m3 landed (#359/#360) and hand-run; what remains is m4–m",
   "content/roadmap.data.ts::'the export path shipped 2026-08-19 (`pnpm dataset:export`, ",
   "content/roadmap.data.ts::'nothing is in flight — the toolkit migration (adr 272 §4, u",

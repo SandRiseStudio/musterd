@@ -207,7 +207,9 @@ export function nativeBackend(deps: NativeDeps = {}): ActuatorBackend {
           .then(() => ctx.verifyOccupied(seat, undefined, startedAt)),
       ]);
 
-      if (verified.occupied && verified.lease_matched) {
+      // ADR 379: the in-process bridge always attests its lease, so `own_unattested` should never
+      // fire here; honoured anyway so the five backends read the contract the same way.
+      if (verified.occupied && (verified.lease_matched || verified.own_unattested)) {
         const wakeLatencyMs = Date.now() - startedAt;
         ctx.log(
           `⚡ woke ${seat}: invoke→roster ${(wakeLatencyMs / 1000).toFixed(1)}s, ` +
@@ -223,7 +225,7 @@ export function nativeBackend(deps: NativeDeps = {}): ActuatorBackend {
         return { outcome: { occupied: true, session: 'fresh' }, settled };
       }
 
-      if (verified.occupied && !verified.lease_matched) {
+      if (verified.occupied && !verified.lease_matched && !verified.own_unattested) {
         // ADR 238/241: the seat is held by a session this wake did not create — defer, never
         // charge, and stop paying for a loop whose seat someone else owns.
         controller.abort();
