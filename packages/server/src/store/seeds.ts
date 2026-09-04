@@ -1,4 +1,5 @@
 import {
+  type CaptureRepoSeed,
   type PromoteSeed,
   type RelaySeed,
   type Seed,
@@ -16,10 +17,10 @@ interface SeedRow {
   id: string;
   team_id: string;
   relay_id: string;
-  source: 'slack';
+  source: 'slack' | 'repo';
   body: string;
   captured_at: number;
-  slack_user_id: string;
+  slack_user_id: string | null;
   submitted_by: string;
   state: Seed['state'];
   explorer_id: string | null;
@@ -116,6 +117,93 @@ export function createSeedFromRelay(
   );
   const row = db.prepare<[string], SeedRow>('SELECT * FROM seeds WHERE id = ?').get(id)!;
   return toSeed(row, team.slug, db);
+}
+
+/** `relay_id` for a document-recorded intention: the source's own identifier, namespaced so it can
+ *  never collide with a relay record id. */
+export function repoRelayId(ref: string): string {
+  return `repo:${ref.trim()}`;
+}
+
+/**
+ * ADR 373 increment 2: capture a document-recorded intention as a Seed — the same shape the relay
+ * ingest produces, with the repo path + anchor where the Slack record id would be. Idempotent on
+ * that key: a second capture returns the row the first one made, body untouched (the source is
+ * immutable, ADR 291), so `pnpm intents:ingest` can run on every merge.
+ *
+ * `lane_id` is a `Follows-up: <lane-id>` already written: the Seed is born (or moves to) `promoted`
+ * with `linked_lane_id` set — the seed → lane edge ADR 248 built — so "which document asked for this
+ * lane?" is a query over seeds, not a new lane field. An open Seed whose ref is later disposed with
+ * a lane id is linked the same way; a Seed already promoted elsewhere is left alone.
+ */
+export function captureRepoSeed(
+  db: Database,
+  teamId: string,
+  actor: MemberRow,
+  input: CaptureRepoSeed,
+  now = Date.now(),
+): Seed {
+  const team = db
+    .prepare<[string], { slug: string }>('SELECT slug FROM teams WHERE id = ?')
+    .get(teamId)!;
+  const relayId = repoRelayId(input.ref);
+  const tx = db.transaction((): Seed => {
+    if (input.lane_id !== undefined) {
+      const lane = db
+        .prepare<
+          [string, string],
+          { id: string }
+        >('SELECT id FROM lanes WHERE team_id = ? AND id = ?')
+        .get(teamId, input.lane_id);
+      if (!lane) throw new MusterdError('bad_request', `Lane "${input.lane_id}" not found`);
+    }
+    const prior = db
+      .prepare<[string, string], SeedRow>('SELECT * FROM seeds WHERE team_id = ? AND relay_id = ?')
+      .get(teamId, relayId);
+    if (prior) {
+      if (input.lane_id !== undefined && prior.linked_lane_id === null) {
+        db.prepare(
+          `UPDATE seeds
+           SET state = 'promoted', explorer_id = NULL, linked_lane_id = ?, promotion_kind = 'manual',
+               research_skipped = 1, promoted_at = ?, updated_at = ?
+           WHERE team_id = ? AND id = ?`,
+        ).run(input.lane_id, now, now, teamId, prior.id);
+      }
+      return toSeed(
+        db.prepare<[string], SeedRow>('SELECT * FROM seeds WHERE id = ?').get(prior.id)!,
+        team.slug,
+        db,
+      );
+    }
+    const id = ulid(now);
+    const promoted = input.lane_id !== undefined;
+    db.prepare(
+      `INSERT INTO seeds
+         (id, team_id, relay_id, source, body, captured_at, slack_user_id, submitted_by, state,
+          linked_lane_id, promotion_kind, research_skipped, promoted_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'repo', ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      teamId,
+      relayId,
+      input.body,
+      input.captured_at ?? now,
+      actor.id,
+      promoted ? 'promoted' : 'open',
+      input.lane_id ?? null,
+      promoted ? 'manual' : null,
+      promoted ? 1 : null,
+      promoted ? now : null,
+      now,
+      now,
+    );
+    return toSeed(
+      db.prepare<[string], SeedRow>('SELECT * FROM seeds WHERE id = ?').get(id)!,
+      team.slug,
+      db,
+    );
+  });
+  return tx();
 }
 
 export function listSeeds(db: Database, teamId: string): Seed[] {

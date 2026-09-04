@@ -11,8 +11,17 @@ export const SeedStateSchema = z.enum([
 ]);
 export type SeedState = z.infer<typeof SeedStateSchema>;
 
-export const SeedSourceSchema = z.literal('slack');
+/**
+ * Where a Seed was captured. `slack` arrives through the relay (ADR 248/311); `repo` is a
+ * document-recorded intention — a `Follows-up:` marker or an undisposed forward reference in this
+ * repo's own documents — captured by `pnpm intents:ingest` (ADR 373 increment 2). The relay boundary
+ * below stays Slack-only: widening THIS enum is the whole schema delta ADR 373 authorizes.
+ */
+export const SeedSourceSchema = z.enum(['slack', 'repo']);
 export type SeedSource = z.infer<typeof SeedSourceSchema>;
+
+/** ADR 311: the relay accepts Slack captures only. Unchanged by ADR 373. */
+export const RelaySeedSourceSchema = z.literal('slack');
 
 /** Raw relay boundary accepted by shared-Seed ingest (ADR 311). */
 export const RelaySeedSchema = z.object({
@@ -21,7 +30,7 @@ export const RelaySeedSchema = z.object({
     .string()
     .refine((body) => body.trim().length > 0, 'body must contain non-whitespace text'),
   ts: z.number().int().nonnegative(),
-  source: SeedSourceSchema,
+  source: RelaySeedSourceSchema,
   meta: z.object({ user: z.string().min(1) }).passthrough(),
 });
 export type RelaySeed = z.infer<typeof RelaySeedSchema>;
@@ -72,7 +81,8 @@ export const SeedSchema = z.object({
   source: SeedSourceSchema,
   body: z.string(),
   captured_at: z.number().int().nonnegative(),
-  slack_user_id: z.string().min(1),
+  /** The Slack author for a relay capture; null for a `repo` Seed, whose author is a document. */
+  slack_user_id: z.string().min(1).nullable(),
   submitted_by: z.string().min(1),
   state: SeedStateSchema,
   explorer: z.string().min(1).nullable(),
@@ -182,6 +192,21 @@ export const SeedMcpUpdateSchema = z.discriminatedUnion('action', [
     .strict(),
 ]);
 export type SeedMcpUpdate = z.infer<typeof SeedMcpUpdateSchema>;
+
+/**
+ * ADR 373 increment 2: capture a document-recorded intention as a Seed. `ref` is the source's own
+ * identifier — repo path plus an anchor (`docs/decisions/354-….md#left-for-a-sibling-lane`) — and
+ * plays the role `relay_id` plays for Slack, so a re-run captures nothing twice. `lane_id` is the
+ * lane a `Follows-up: <lane-id>` already names: the Seed is born promoted with `linked_lane_id` set,
+ * which is the provenance edge (seed → lane) ADR 248 built and ADR 373 reuses instead of a new field.
+ */
+export const CaptureRepoSeedSchema = z.object({
+  ref: z.string().trim().min(1).max(500),
+  body: z.string().refine((b) => b.trim().length > 0, 'body must contain non-whitespace text'),
+  captured_at: z.number().int().nonnegative().optional(),
+  lane_id: z.string().min(1).optional(),
+});
+export type CaptureRepoSeed = z.infer<typeof CaptureRepoSeedSchema>;
 
 export const SeedResultSchema = z.object({ seed: SeedSchema });
 export type SeedResult = z.infer<typeof SeedResultSchema>;

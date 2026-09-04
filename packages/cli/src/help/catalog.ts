@@ -485,7 +485,7 @@ export const CATALOG: readonly CommandEntry[] = [
   {
     name: 'seed',
     signature:
-      'list [--history] [--json]  |  show <id>  |  claim <id>  |  ask|answer <id> "<text>"  |  brief|conclude <id> --file <path>  |  promote <id>',
+      'list [--history] [--json]  |  show <id>  |  claim <id>  |  ask|answer <id> "<text>"  |  brief|conclude <id> --file <path>  |  promote <id>  |  capture --ref <path#anchor> "<text>"',
     summary: 'explore a shared idea before it becomes a Lane',
     group: 'work',
     primary: true,
@@ -497,7 +497,8 @@ export const CATALOG: readonly CommandEntry[] = [
       '  ask|answer <id> "<text>"      run one attributed clarification edge\n' +
       '  brief <id> --file <path>      submit an exhaustive brief and open its Lane\n' +
       '  conclude <id> --file <path> "<conclusion>"   finish without a Lane\n' +
-      '  promote <id>                  deliberately skip research and open a Lane',
+      '  promote <id>                  deliberately skip research and open a Lane\n' +
+      '  capture --ref <path#anchor> [--lane <id>] "<text>"   a document-recorded intention (ADR 373); --batch <file|-> for `pnpm intents:ingest`',
     examples: ['musterd seed list', 'musterd seed claim 01SEED…'],
   },
   {

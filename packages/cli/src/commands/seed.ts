@@ -1,5 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { SeedBriefSchema, seedInActiveTray, type Seed } from '@musterd/protocol';
+import {
+  CaptureRepoSeedSchema,
+  SeedBriefSchema,
+  seedInActiveTray,
+  type CaptureRepoSeed,
+  type Seed,
+} from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { CliError } from '../errors.js';
 import { theme } from '../render/theme.js';
@@ -14,7 +20,9 @@ const USAGE =
   '  musterd seed answer <id> "<answer>"\n' +
   '  musterd seed brief <id> --file <path>\n' +
   '  musterd seed conclude <id> --file <path> "<conclusion>"\n' +
-  '  musterd seed promote <id> [--title <title>] [--detail <detail>]';
+  '  musterd seed promote <id> [--title <title>] [--detail <detail>]\n' +
+  '  musterd seed capture --ref <path#anchor> [--lane <lane-id>] "<text>"\n' +
+  '  musterd seed capture --batch <file|->      (JSON lines of {ref, body, lane_id?})';
 
 export async function seedCommand(parsed: Parsed): Promise<number> {
   const sub = parsed.positionals[0];
@@ -27,7 +35,9 @@ export async function seedCommand(parsed: Parsed): Promise<number> {
     if (parsed.flags['json'] === true) {
       process.stdout.write(JSON.stringify({ seeds: visible }) + '\n');
     } else if (visible.length === 0) {
-      process.stdout.write("no active Seeds — send an idea through the Team's Slack capture\n");
+      process.stdout.write(
+        "no active Seeds — send an idea through the Team's Slack capture, or `pnpm intents:ingest`\n",
+      );
     } else {
       for (const seed of visible) process.stdout.write(renderSeed(seed) + '\n');
     }
@@ -38,6 +48,39 @@ export async function seedCommand(parsed: Parsed): Promise<number> {
     const seed = await http.seed(team, id);
     if (parsed.flags['json'] === true) process.stdout.write(JSON.stringify({ seed }) + '\n');
     else process.stdout.write(renderSeedDetail(seed) + '\n');
+    return 0;
+  }
+
+  // ADR 373 increment 2: a document-recorded intention is a Seed. One at a time, or a batch the
+  // `intents:ingest` script pipes in. Idempotent on `ref`: re-running captures nothing twice.
+  if (sub === 'capture') {
+    const batch = flagStr(parsed.flags, 'batch');
+    const items: CaptureRepoSeed[] = batch
+      ? readBatch(batch)
+      : [
+          parseCapture({
+            ref: flagStr(parsed.flags, 'ref'),
+            body: parsed.positionals[1],
+            ...(flagStr(parsed.flags, 'lane') ? { lane_id: flagStr(parsed.flags, 'lane') } : {}),
+          }),
+        ];
+    let linked = 0;
+    for (const item of items) {
+      const seed = await http.captureRepoSeed(team, item);
+      if (item.lane_id !== undefined && seed.linked_lane_id === item.lane_id) linked += 1;
+      if (parsed.flags['json'] === true) process.stdout.write(JSON.stringify({ seed }) + '\n');
+      else if (!batch)
+        process.stdout.write(
+          `${theme.ok('✓')} Seed ${seed.id} — ${seed.state}` +
+            (seed.linked_lane_id ? ` → Lane ${seed.linked_lane_id}` : '') +
+            '\n',
+        );
+    }
+    if (batch && parsed.flags['json'] !== true)
+      process.stdout.write(
+        `${theme.ok('✓')} ${items.length} intention(s) captured — ${linked} linked to a lane; ` +
+          `re-captures return the Seed already held\n`,
+      );
     return 0;
   }
 
@@ -98,6 +141,37 @@ export async function seedCommand(parsed: Parsed): Promise<number> {
   }
 
   throw new CliError(USAGE, 2);
+}
+
+function parseCapture(raw: unknown): CaptureRepoSeed {
+  const parsed = CaptureRepoSeedSchema.safeParse(raw);
+  if (!parsed.success) throw new CliError(USAGE, 2);
+  return parsed.data;
+}
+
+/** JSON lines of `{ref, body, lane_id?}` from a file, or stdin when the path is `-`. */
+function readBatch(path: string): CaptureRepoSeed[] {
+  let raw: string;
+  try {
+    raw = readFileSync(path === '-' ? 0 : path, 'utf8');
+  } catch {
+    throw new CliError(`can't read capture batch from ${path}`, 2);
+  }
+  return raw
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line, i) => {
+      let json: unknown;
+      try {
+        json = JSON.parse(line);
+      } catch {
+        throw new CliError(`capture batch line ${i + 1} is not JSON`, 2);
+      }
+      const parsed = CaptureRepoSeedSchema.safeParse(json);
+      if (!parsed.success)
+        throw new CliError(`capture batch line ${i + 1} does not match {ref, body, lane_id?}`, 2);
+      return parsed.data;
+    });
 }
 
 function readBrief(path: string | undefined) {

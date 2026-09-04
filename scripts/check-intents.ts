@@ -23,60 +23,10 @@
  *
  * Runs on Node's native TypeScript (no build step, no deps), like its sibling gates.
  */
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import {
-  FORWARD_BASELINE,
-  type ForwardReference,
-  failures,
-  findForwardReferences,
-  measureCoverage,
-} from './intents.ts';
+import { collectForwardReferences } from './intents-corpus.ts';
+import { FORWARD_BASELINE, failures, measureCoverage } from './intents.ts';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(here, '..');
-
-/** The scanned surfaces, in the order ADR 373 names them. */
-const SURFACES = [
-  { dir: join(repoRoot, 'docs', 'decisions'), ext: '.md' },
-  { dir: join(repoRoot, 'docs', 'wiki'), ext: '.md' },
-] as const;
-const ROADMAP = join(repoRoot, 'content', 'roadmap.data.ts');
-
-function filesUnder(dir: string, ext: string): string[] {
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return [];
-  }
-  const out: string[] = [];
-  for (const name of entries) {
-    const full = join(dir, name);
-    if (statSync(full).isDirectory()) out.push(...filesUnder(full, ext));
-    else if (name.endsWith(ext)) out.push(full);
-  }
-  return out.sort();
-}
-
-function collect(): ForwardReference[] {
-  const refs: ForwardReference[] = [];
-  for (const { dir, ext } of SURFACES) {
-    for (const file of filesUnder(dir, ext)) {
-      refs.push(...findForwardReferences(relative(repoRoot, file), readFileSync(file, 'utf8')));
-    }
-  }
-  try {
-    refs.push(...findForwardReferences(relative(repoRoot, ROADMAP), readFileSync(ROADMAP, 'utf8')));
-  } catch {
-    // The roadmap module is the one named file rather than a glob; if it moves, the arch-trees and
-    // roadmap gates say so far more loudly than this one would.
-  }
-  return refs;
-}
-
-const refs = collect();
+const refs = collectForwardReferences();
 const bad = failures(refs, FORWARD_BASELINE);
 const cov = measureCoverage(refs, FORWARD_BASELINE);
 

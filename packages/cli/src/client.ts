@@ -67,6 +67,7 @@ import {
   type Seed,
   type SubmitSeedBrief,
   type PromoteSeed,
+  type CaptureRepoSeed,
   type Member,
   type MemberKind,
   type MemberSummary,
@@ -783,6 +784,15 @@ export class HttpClient {
   async promoteSeed(slug: string, id: string, body: PromoteSeed): Promise<Seed> {
     const parsed = SeedResultSchema.safeParse(
       await this.request('POST', `/teams/${slug}/seeds/${encodeURIComponent(id)}/promote`, body),
+    );
+    if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
+    return parsed.data.seed;
+  }
+
+  /** ADR 373 inc 2: capture a document-recorded intention as a Seed (idempotent on `ref`). */
+  async captureRepoSeed(slug: string, body: CaptureRepoSeed): Promise<Seed> {
+    const parsed = SeedResultSchema.safeParse(
+      await this.request('POST', `/teams/${slug}/seeds/repo`, body),
     );
     if (!parsed.success) throw new CliError('Seed response did not match the protocol schema', 1);
     return parsed.data.seed;

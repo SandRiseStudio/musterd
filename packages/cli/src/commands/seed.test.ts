@@ -174,8 +174,51 @@ describe('seed command', () => {
     expect(promoted.out).toMatch(new RegExp(`^✓ Seed ${seedId} — promoted to Lane 01`));
 
     const tray = await capture(() => seedCommand(parseArgs(['list'])));
-    expect(tray.out).toBe("no active Seeds — send an idea through the Team's Slack capture\n");
+    expect(tray.out).toBe(
+      "no active Seeds — send an idea through the Team's Slack capture, or `pnpm intents:ingest`\n",
+    );
     const history = await capture(() => seedCommand(parseArgs(['list', '--history'])));
     expect(history.out).toContain(`${seedId} promoted`);
+  });
+
+  it('captures a document-recorded intention, once, and a batch from a file (ADR 373 inc 2)', async () => {
+    bind('Ada');
+    const one = await capture(() =>
+      seedCommand(
+        parseArgs([
+          'capture',
+          '--ref',
+          'docs/decisions/354.md#left-for-a-sibling-lane',
+          'Left for a sibling lane; this ADR fixes the attestation, not the judgement.',
+        ]),
+      ),
+    );
+    expect(one.code).toBe(0);
+    expect(one.out).toMatch(/Seed 01[0-9A-Z]{24} — open\n/);
+
+    const path = join(dir, 'batch.jsonl');
+    writeFileSync(
+      path,
+      [
+        JSON.stringify({ ref: 'docs/decisions/354.md#left-for-a-sibling-lane', body: 'dup' }),
+        JSON.stringify({ ref: 'docs/wiki/wake-leases.md#still-true', body: 'not fixed here' }),
+      ].join('\n') + '\n',
+    );
+    const batch = await capture(() => seedCommand(parseArgs(['capture', '--batch', path])));
+    expect(batch.code).toBe(0);
+    expect(batch.out).toBe(
+      '✓ 2 intention(s) captured — 0 linked to a lane; re-captures return the Seed already held\n',
+    );
+
+    const listed = await capture(() => seedCommand(parseArgs(['list', '--json'])));
+    const seeds = JSON.parse(listed.out).seeds as { source: string; body: string }[];
+    expect(seeds.filter((s) => s.source === 'repo').map((s) => s.body)).toEqual([
+      'Left for a sibling lane; this ADR fixes the attestation, not the judgement.',
+      'not fixed here',
+    ]);
+
+    await expect(capture(() => seedCommand(parseArgs(['capture', 'no ref'])))).rejects.toThrow(
+      /usage/,
+    );
   });
 });

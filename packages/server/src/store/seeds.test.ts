@@ -1,11 +1,12 @@
 import type { Database } from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { listLanes } from './lanes.js';
-import { addMember } from './members.js';
+import { listLanes, openLane } from './lanes.js';
+import { addMember, getMemberByName } from './members.js';
 import {
   answerSeedClarification,
   askSeedClarification,
+  captureRepoSeed,
   claimSeed,
   createSeedFromRelay,
   listSeeds,
@@ -212,5 +213,81 @@ describe('shared Seed store (ADR 291)', () => {
     expect(listLanes(db, team.id, team.slug)).toMatchObject([
       { title: 'A raw idea', owner_seat: null },
     ]);
+  });
+
+  describe('a document-recorded intention is a Seed (ADR 373 increment 2)', () => {
+    it('captures with source repo, no Slack author, and is idempotent on ref — body immutable', () => {
+      const team = createTeam(db, { slug: 'bravo' });
+      addMember(db, team, { name: 'ryder', kind: 'agent' });
+      const ryder = getMemberByName(db, team.id, 'ryder')!;
+      const input = {
+        ref: 'docs/decisions/354-wake-lease-file-channel.md#left-for-a-sibling-lane',
+        body: 'Left for a sibling lane; this ADR fixes the attestation, not the judgement.',
+        captured_at: 1_756_857_600_000,
+      };
+      const first = captureRepoSeed(db, team.id, ryder, input, 10);
+      expect(first).toMatchObject({
+        source: 'repo',
+        relay_id: 'repo:' + input.ref,
+        slack_user_id: null,
+        submitted_by: 'ryder',
+        state: 'open',
+        linked_lane_id: null,
+        captured_at: input.captured_at,
+      });
+      const again = captureRepoSeed(db, team.id, ryder, { ...input, body: 'edited' }, 20);
+      expect(again.id).toBe(first.id);
+      expect(again.body).toBe(input.body);
+      expect(listSeeds(db, team.id)).toHaveLength(1);
+    });
+
+    it('a lane disposition births the Seed promoted, with linked_lane_id as the provenance edge', () => {
+      const team = createTeam(db, { slug: 'bravo' });
+      addMember(db, team, { name: 'ryder', kind: 'agent' });
+      const ryder = getMemberByName(db, team.id, 'ryder')!;
+      const lane = openLane(db, team.id, 'bravo', 'ryder', { title: 'the sibling lane' }, 1);
+      const seed = captureRepoSeed(
+        db,
+        team.id,
+        ryder,
+        { ref: 'docs/decisions/354.md#a', body: 'Left for a sibling lane', lane_id: lane.id },
+        10,
+      );
+      expect(seed).toMatchObject({
+        state: 'promoted',
+        linked_lane_id: lane.id,
+        promotion: { kind: 'manual', research_skipped: true, at: 10 },
+      });
+      // No second lane was opened: the edge points at the lane the document named.
+      expect(listLanes(db, team.id)).toHaveLength(1);
+    });
+
+    it('an open repo Seed whose ref is later disposed with a lane id gets linked; a linked one is left alone', () => {
+      const team = createTeam(db, { slug: 'bravo' });
+      addMember(db, team, { name: 'ryder', kind: 'agent' });
+      const ryder = getMemberByName(db, team.id, 'ryder')!;
+      const a = openLane(db, team.id, 'bravo', 'ryder', { title: 'a' }, 1);
+      const b = openLane(db, team.id, 'bravo', 'ryder', { title: 'b' }, 2);
+      const input = { ref: 'docs/wiki/x.md#y', body: 'not yet built' };
+      expect(captureRepoSeed(db, team.id, ryder, input, 10).state).toBe('open');
+      const linked = captureRepoSeed(db, team.id, ryder, { ...input, lane_id: a.id }, 20);
+      expect(linked).toMatchObject({ state: 'promoted', linked_lane_id: a.id });
+      const relinked = captureRepoSeed(db, team.id, ryder, { ...input, lane_id: b.id }, 30);
+      expect(relinked.linked_lane_id).toBe(a.id);
+    });
+
+    it('refuses a lane id the team does not hold', () => {
+      const team = createTeam(db, { slug: 'bravo' });
+      addMember(db, team, { name: 'ryder', kind: 'agent' });
+      const ryder = getMemberByName(db, team.id, 'ryder')!;
+      expect(() =>
+        captureRepoSeed(db, team.id, ryder, {
+          ref: 'a.md#b',
+          body: 'x',
+          lane_id: '01M1MMHJP3PQY1QWNJCHV3XEMA',
+        }),
+      ).toThrow(/not found/);
+      expect(listSeeds(db, team.id)).toEqual([]);
+    });
   });
 });
