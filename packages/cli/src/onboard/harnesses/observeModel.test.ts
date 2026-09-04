@@ -14,8 +14,18 @@ function transcriptWith(model: string): string {
 }
 
 describe('observeModel — the even contract', () => {
-  it('EVERY harness declares the slot (same contract, whatever its fidelity)', () => {
+  // The evenness contract, with exactly one named exception. Absence must be deliberate: a harness
+  // that quietly loses its probe is a seat that silently attests a snapshot for the rest of its life,
+  // which is the defect this whole slot exists to prevent. So the exception is listed here rather
+  // than expressed as "some harnesses have one".
+  const NO_PROBE_BY_DECISION = new Set(['cursor']); // ADR 382 — the field misreports the model
+
+  it('EVERY harness declares the slot except the ones deliberately without one', () => {
     for (const h of HARNESSES) {
+      if (NO_PROBE_BY_DECISION.has(h.id)) {
+        expect(h.observeModel, `${h.id} must NOT declare observeModel (ADR 382)`).toBeUndefined();
+        continue;
+      }
       expect(typeof h.observeModel, `${h.id} must declare observeModel`).toBe('function');
     }
   });
@@ -46,11 +56,13 @@ describe('observeModel — the even contract', () => {
     );
   });
 
-  it('cursor observes model_id from the Agent hook payload (ADR 198)', () => {
-    expect(cursor.observeModel?.({ model_id: 'claude-opus-4-7', model: 'thinking-slug' })).toBe(
-      'claude-opus-4-7',
-    );
-    expect(cursor.observeModel?.({ model: 'gpt-5.6-sol' })).toBe('gpt-5.6-sol');
+  // ADR 382 supersedes ADR 198's cursor probe. Measured on cursor-agent 2026.09.02-c22c1a3: the
+  // hook reported `gemini-3.8-flash` on every event while the session ran kimi-k3. A payload that
+  // still carries `model_id` must now produce NOTHING — the point is that musterd stops treating
+  // that field as a measurement, not that the field stopped arriving.
+  it('cursor observes nothing, even when the payload carries a model_id (ADR 382)', () => {
+    expect(cursor.observeModel).toBeUndefined();
+    expect(cursor.observeModel?.({ model_id: 'gemini-3.8-flash', model: 'thinking-slug' })).toBeUndefined();
   });
 
   it('cursor still ignores transcript_path — Cursor JSONL has no message.model', () => {

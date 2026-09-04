@@ -589,52 +589,34 @@ describe('musterd session (capture)', () => {
     });
   });
 
-  describe('observeCursorSession (ADR 198)', () => {
-    it('stamps harness:cursor and observes model_id without a transcript', async () => {
+  describe('observeCursorSession (ADR 198, probe removed by ADR 382)', () => {
+    it('stamps harness:cursor and records NO observation, even when model_id is present', async () => {
       writeBinding(wsA, bindingOf({ model: 'grok-4.5' }));
       const got = await observeCursorSession({
         session_id: 'conv-1',
-        model_id: 'claude-opus-4-7',
+        model_id: 'gemini-3.8-flash',
         model: 'thinking-slug',
         cwd: wsA,
       });
-      expect(got).toBe('claude-opus-4-7');
+      // The field still arrives; musterd has stopped calling it a measurement (ADR 382).
+      expect(got).toBeUndefined();
       const a = readBinding(wsA);
       expect(a.session).toMatchObject({ harness: 'cursor', id: 'conv-1' });
-      expect(a.model_observed).toMatchObject({ model: 'claude-opus-4-7', harness: 'cursor' });
-      expect(a.model).toBe('grok-4.5'); // declaration untouched
+      expect(a.model_observed).toBeUndefined();
+      expect(a.model).toBe('grok-4.5'); // the declaration stands, and now wins the ladder
     });
 
-    it('prefers model_id over model, and falls back to model', async () => {
-      await observeCursorSession({ session_id: 'c1', model: 'gpt-5.6-sol', cwd: wsA });
-      expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
-    });
-
-    it('throttles identical observations within OBSERVATION_REFRESH_MS', async () => {
-      await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'claude-opus-4-7',
-        cwd: wsA,
+    it('a new conversation drops an observation the old probe left behind', async () => {
+      // The regression that matters for seats already poisoned: measured on kimi 2026-09-03, the
+      // hook wrote `gemini-3.8-flash` while the session ran kimi-k3, and because an observation
+      // outranks a declaration the seat attested the wrong model with nothing able to notice.
+      writeBinding(wsA, {
+        ...bindingOf({ model: 'kimi-k3' }),
+        model_observed: { model: 'gemini-3.8-flash', harness: 'cursor', observed_at: Date.now() },
       });
-      const firstAt = readBinding(wsA).model_observed!.observed_at;
-      const again = await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'claude-opus-4-7',
-        cwd: wsA,
-      });
-      expect(again).toBeUndefined();
-      expect(readBinding(wsA).model_observed!.observed_at).toBe(firstAt);
-    });
-
-    it('re-observes when the dropdown switches to a new model_id', async () => {
-      await observeCursorSession({ session_id: 'c1', model_id: 'claude-opus-4-7', cwd: wsA });
-      const got = await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'gpt-5.6-sol',
-        cwd: wsA,
-      });
-      expect(got).toBe('gpt-5.6-sol');
-      expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
+      await observeCursorSession({ session_id: 'conv-new', model_id: 'gemini-3.8-flash', cwd: wsA });
+      expect(readBinding(wsA).model_observed).toBeUndefined();
+      expect(readBinding(wsA).model).toBe('kimi-k3');
     });
 
     it('a new conversation_id replaces a leftover desktop capture (ADR 265)', async () => {
@@ -643,17 +625,17 @@ describe('musterd session (capture)', () => {
         model_id: 'grok-4.6',
         cwd: wsA,
       });
-      const got = await observeCursorSession({
+      await observeCursorSession({
         session_id: '365e3420-cli',
         model_id: 'cursor-grok-4.6-high',
         cwd: wsA,
       });
-      expect(got).toBe('cursor-grok-4.6-high');
+      // The capture still replaces; only the model half went away with the probe (ADR 382).
       expect(readBinding(wsA).session).toMatchObject({
         harness: 'cursor',
         id: '365e3420-cli',
       });
-      expect(readBinding(wsA).model_observed?.model).toBe('cursor-grok-4.6-high');
+      expect(readBinding(wsA).model_observed).toBeUndefined();
     });
 
     it('a new conversation_id with no model_id DROPS the leftover observation (ADR 268)', async () => {
@@ -676,11 +658,15 @@ describe('musterd session (capture)', () => {
       expect(readBinding(wsA).model_observed).toBeUndefined();
     });
 
-    it('the same conversation_id without a model KEEPS the observation (never-erase within a session)', async () => {
-      await observeCursorSession({
-        session_id: 'c1',
-        model_id: 'gpt-5.6-sol',
-        cwd: wsA,
+    it('the same conversation_id KEEPS an existing observation (never-erase within a session)', async () => {
+      // Cursor writes none of its own since ADR 382, but the never-erase branch still governs one
+      // that is already on the binding — seeded here rather than produced, which is the only
+      // difference from what this pinned before.
+      const now = Date.now();
+      writeBinding(wsA, {
+        ...bindingOf({ model: 'grok-4.5' }),
+        session: { harness: 'cursor', id: 'c1', started_at: now - 1_000 },
+        model_observed: { model: 'gpt-5.6-sol', harness: 'cursor', observed_at: now },
       });
       await observeCursorSession({ session_id: 'c1', cwd: wsA });
       expect(readBinding(wsA).model_observed?.model).toBe('gpt-5.6-sol');
