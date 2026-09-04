@@ -95,7 +95,7 @@
     0 0 calc(22px * var(--bc-flare)) calc(-6px + 4px * var(--bc-flare))
       rgba(225, 173, 1, calc(0.85 * var(--bc-flare)));
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.2;
   white-space: nowrap;
   animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
@@ -166,18 +166,44 @@
   }
 }
 
-/* The contact line hangs off the notice as its own quieter register: the notice is a message, this
-   is an address. Tabular-ish mono at a hair more letter-spacing than the first cut, which ran
-   `revive@musterd.io` tight enough that the `@` touched its neighbours at 720p. */
+/* ── the identity block: the address, and the mark under it ───────────────────────────────────────
+   The corner holds three things and only ONE of them changes: the notice. So only the notice wears
+   paper. The first cut gave the address a paper tag of its own and the corner became three mustard
+   objects stacked in a column — same material, three times, for a message, a fact and a stamp
+   (nick, 2026-09-04: "we don't have to use the same musterd color style chips for everything"). The
+   address and the mark are one register now — clean type, right-aligned, no plate under either.
+
+   THE ACTUAL LEGIBILITY BUG, corrected. The first diagnosis here said the address was dark ink on a
+   dark floor. It is not: the corner sits outside the room's diamond, over `.bc__stage`'s own
+   gradient, and the composited backdrop measures rgb(180,171,162) — #2b1f13 on that is 7.1:1, which
+   passes AA twice over, at every hour (the stage gradient does not follow the room's light).
+
+   It was the SIZE, which is what nick guessed first. The stage is 1920 wide and the stream encodes
+   at 720p, so 12.5px arrives as ~8.3px — and Space Mono's `@` closes into its neighbours well
+   before that. It is the same argument the reel already makes for running ~1.5× /live's rail; the
+   corner had simply never been held to it. Hence 15px and open tracking, not a colour change. */
 .bc__contact {
   display: inline-flex;
-  gap: 14px;
   color: var(--lc-paper-ink, #2b1f13);
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  font-weight: 700;
-  letter-spacing: 0;
+  font-size: 15px;
+  font-weight: 600;
+  /* The `@` is the glyph that fails first: mono metrics give it no side bearing to spare, and this
+     string is mostly consonants around it. Tracking buys the whole line, not just that character. */
+  letter-spacing: 0.055em;
   white-space: nowrap;
+  opacity: 0.86;
+}
+
+/* The mark now carries the product's address (MusterdWord `domain`), so on the stream it is doing a
+   job a watermark cannot do at 45% — someone has to be able to READ it. /live keeps the watermark
+   weighting, where the address bar is a glance away and the mark is only a signature. */
+.bc .lc-office__mark {
+  opacity: 0.72;
+}
+.bc .lc-office__mark-lockup {
+  font-size: 15px;
+  letter-spacing: 0.01em;
 }
 
 /* ─── the asks reel (ADR 228) ─────────────────────────────────────────────
@@ -304,14 +330,111 @@
 .bc-reel__who.is-over::after {
   background: var(--lc-danger);
 }
+/* ── the tally: what is owed, then what is answered ────────────────────────────────────────────
+   Five spans in one grey voice is a run of text, not a summary (nick, 2026-09-04). See the long
+   note on `ReelCounts` in AsksReel.tsx for the reasoning; this is the paint.
+
+   The whole group is `flex: none` so the right edge still never moves when the slot rotates — the
+   property that made the first version calm, and the one easiest to lose while restyling it. */
+.bc-reel__counts {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+/* The hairline between owed and answered. Not a border on a neighbour: as its own element it exists
+   only when BOTH sides do (AsksReel renders it conditionally), so the group never ends on a rule. */
+.bc-reel__counts-split {
+  width: 1px;
+  height: 15px;
+  background: color-mix(in srgb, var(--lc-paper-ink) 24%, transparent);
+}
+
 .bc-reel__meta {
   flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
   font-family: var(--font-mono, monospace);
-  font-size: 13px;
+  color: var(--lc-paper-ink);
+}
+
+/* The digit is the content. Tabular figures so a count ticking 9 → 10 does not shift the label
+   beside it — the reel re-renders every second, and a jittering tally reads as a glitch on video. */
+.bc-reel__meta b {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* The label is what the digit means, held quiet enough that the eye takes the number first and the
+   word only if it stopped. `em` for the tag, not the tone — nothing here is emphasis. */
+.bc-reel__meta em {
+  font-size: 11.5px;
+  font-style: normal;
+  letter-spacing: 0.02em;
   color: var(--lc-paper-dim);
 }
-.bc-reel__meta--dim {
-  opacity: 0.6;
+
+/* Colour carries the state, because colour survives the 720p encode where weight does not. The pip
+   is `aria-hidden` decoration — every count still reads as "3 waiting" with no colour at all. */
+.bc-reel__pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  align-self: center;
+  background: var(--lc-paper-dim);
+}
+.bc-reel__meta.is-waiting .bc-reel__pip {
+  background: var(--lc-accent);
+}
+.bc-reel__meta.is-waiting b {
+  color: var(--lc-accent-ink);
+}
+/* Elapsed is a DASH, not a dot — and deliberately not the warn amber it started as. `--lc-warn` sits
+   a few degrees from `--lc-accent`, so "1 elapsed" and "3 waiting" came out as two yellows side by
+   side and the colour coding cancelled itself exactly where it had to work hardest. Shape carries
+   what a second yellow could not: a spent clock is a line, not a live dot. */
+.bc-reel__meta.is-elapsed .bc-reel__pip {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--lc-paper-ink) 46%, transparent);
+}
+/* Answered and gone: a hollow ring — the outline of the shape the live counts fill in. */
+.bc-reel__meta.is-settled .bc-reel__pip {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--lc-paper-ink) 38%, transparent);
+}
+
+/* History steps back as a group — one rule, rather than a `--dim` modifier the caller has to
+   remember on each of two states. */
+.bc-reel__meta.is-past {
+  opacity: 0.62;
+}
+
+/* Something is genuinely waiting: the pip breathes. The only motion in the tally, on the one count
+   that is a demand — and gated on `--loud`, so it cannot pulse over a zero. */
+.bc-reel--loud .bc-reel__meta.is-waiting .bc-reel__pip {
+  animation: bc-pip-breathe 2.6s ease-in-out infinite;
+}
+@keyframes bc-pip-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--lc-accent) 0%, transparent);
+  }
+}
+
+/* The count still says what it says; only the breath goes. Same contract as the notice's pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .bc-reel--loud .bc-reel__meta.is-waiting .bc-reel__pip {
+    animation: none;
+  }
 }
 .bc-reel__dots {
   display: flex;

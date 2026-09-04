@@ -327,3 +327,61 @@ export function speechMark(
   }
   return null;
 }
+
+/* ─── the speaking queue: one bubble finishes before the next begins ──────────────────────────────
+ *
+ * A member who speaks again mid-sentence used to destroy their own bubble wherever the typewriter
+ * had got to. Seats speak in bursts — a status_update, then the lane act, then the insight — so what
+ * a viewer saw was a line appear, get two words in, and vanish (nick, 2026-09-04). The act was on
+ * screen and unreadable, which is worse than not showing it at all: the movement takes the eye and
+ * then gives it nothing.
+ *
+ * `office-scene/index.ts` holds the DOM half (the office runs under `environment: 'node'`, so there
+ * is no harness here that can mount a bubble and watch one supersede another). These two functions
+ * are the decisions inside it that are not about the DOM — the drop policy and the hold — pulled out
+ * so they can be stated and pinned. What they do NOT cover is the behavioural claim itself: that a
+ * second act enqueues rather than clearing the live bubble. That lives in `showSpeech`.
+ */
+
+/** How long a finished bubble holds before it fades. */
+export const SPEECH_HOLD_MS = 4200;
+export const SPEECH_HOLD_PER_CHAR_MS = 22;
+export const SPEECH_HOLD_MAX_MS = 9000;
+/** Routine status pulses linger less — they arrive constantly and shouldn't own the floor. */
+export const SPEECH_HOLD_MAX_STATUS_MS = 6000;
+/** What a bubble holds when something is already waiting behind it. The generous read is for a line
+ * nobody is queued on; with a backlog, holding the full 9s makes a three-act burst last half a
+ * minute and the room falls behind the stream it is a picture of. */
+export const SPEECH_HOLD_QUEUED_MS = 1500;
+/** How many acts may wait behind a live bubble. */
+export const SPEECH_QUEUE_MAX = 3;
+
+/**
+ * The hold for a bubble that has just finished typing.
+ *
+ * `queueDepth` is read at the moment the countdown arms, not when the bubble was built — an act can
+ * land while this one is still typing, and the whole design is that it shortens this line's stay
+ * rather than cutting it off.
+ */
+export function speechHoldMs(glanceLen: number, act: string | undefined, queueDepth: number): number {
+  if (queueDepth > 0) return SPEECH_HOLD_QUEUED_MS;
+  const cap = act === 'status_update' ? SPEECH_HOLD_MAX_STATUS_MS : SPEECH_HOLD_MAX_MS;
+  return Math.min(cap, SPEECH_HOLD_MS + glanceLen * SPEECH_HOLD_PER_CHAR_MS);
+}
+
+/**
+ * Append to a speaker's backlog, bounded.
+ *
+ * Past the cap the OLDEST unshown act is dropped, never the newest. A queue is only worth having
+ * while what it eventually shows is still roughly now: a seat mid-burst has a truer current state in
+ * its last act than in its first, and the stream panel is the complete record either way. Dropping
+ * from the back would keep the queue "in order" at the cost of showing the room a state it has
+ * already left.
+ *
+ * Mutates and returns the array it was given — the caller holds one per speaker.
+ */
+export function enqueueSpeech<T>(q: T[], next: T, max = SPEECH_QUEUE_MAX): T[] {
+  q.push(next);
+  while (q.length > max) q.shift();
+  return q;
+}

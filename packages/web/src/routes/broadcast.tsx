@@ -68,7 +68,8 @@ function captureFpsFromUrl(): number {
 /**
  * Where a viewer of the stream can find the team — a fact asserted on a public surface, so it is
  * written per team rather than derived (`<slug>@musterd.io` would claim a mailbox for every team
- * that ever streams). musterd.io is shown for every team; the address only where one exists.
+ * that ever streams). The address appears only where one exists; a team without a mailbox shows
+ * nothing here, and the mark below the corner carries musterd.io for everyone.
  */
 /**
  * The corner block: what this stream is, where to find us, and — only when it is true — that a
@@ -93,6 +94,11 @@ function captureFpsFromUrl(): number {
  * The address is a fact asserted on a public surface, so it is named per team rather than derived
  * (`<slug>@musterd.io` would claim a mailbox for every team that ever streams). Pure, so the render
  * test can hold all of it.
+ *
+ * The corner used to say `musterd.io` here too, beside the team address — the product's name twice
+ * in one 44%-wide column, once as a domain and once again as the wordmark two rows down (nick,
+ * 2026-09-04). The domain moved INTO the mark, where it costs no extra row and where a viewer with
+ * no address bar was already looking; this line is now only ever the one thing it was for.
  */
 export const WORKSHOP_NOTICE = {
   /** At rest: what this is. Three words, because the corner is a mark and not a caption. "Workshop"
@@ -128,10 +134,7 @@ export function broadcastCorner(team: string | null, shipped = false) {
           {shipped ? WORKSHOP_NOTICE.shipped : WORKSHOP_NOTICE.chip}
         </span>
       </span>
-      <span className="bc__contact">
-        <span>musterd.io</span>
-        {team === 'revive' && <span>revive@musterd.io</span>}
-      </span>
+      {team === 'revive' && <span className="bc__contact">revive@musterd.io</span>}
     </>
   );
 }

@@ -51,7 +51,9 @@ import {
 import { GESTURE } from './skeleton';
 import type { WallBoard } from './wallboard';
 import {
+  enqueueSpeech,
   shapeSpeech,
+  speechHoldMs,
   speechLength,
   speechTokens,
   SPEECH_MARK_GLYPH,
@@ -86,15 +88,10 @@ const DOT_STATE: Record<Posture, 'on' | 'idle' | 'away' | 'off'> = {
   away: 'away',
   offline: 'off',
 };
-// Speech-bubble lifecycle (ms): hold after the text finishes typing, then the exit transition length.
-// The hold is deliberately generous (plus a per-character allowance, capped) so a bubble lingers long
-// enough to actually read — and to click through to the stream — before it drifts away.
-const SPEECH_HOLD_MS = 4200;
-const SPEECH_HOLD_PER_CHAR_MS = 22;
-const SPEECH_HOLD_MAX_MS = 9000;
-/** Routine status pulses linger less — they arrive constantly and shouldn't own the floor. */
-const SPEECH_HOLD_MAX_STATUS_MS = 6000;
+// Speech-bubble lifecycle: the hold, the queue policy and their constants live in `speech.ts`
+// (`speechHoldMs` / `enqueueSpeech`) so they can be tested — this module runs the DOM half.
 const SPEECH_OUT_MS = 560;
+
 /** How far above the head anchor the bubble sits (clears the name label). */
 const SPEECH_LIFT = 26;
 /** After a real act, keep the loop alive this long so the Rive character settles into idle rather than
@@ -177,10 +174,25 @@ function pstNowHours(): number {
  */
 
 /** An in-flight speech bubble over a member's head — its DOM root plus the timers/frames to cancel when
- * it's superseded (a newer act from the same member) or the office is disposed. */
+ * the office is disposed (or the member leaves the floor mid-sentence). */
 interface Speech {
   outer: HTMLDivElement;
   cancels: Array<() => void>;
+}
+
+/** An act waiting for the speaker's current bubble to finish. Stored as the ARGUMENTS, not as a
+ * built bubble: by the time it plays the member may have walked to another desk, so the head anchor
+ * and the actor's colour have to be resolved then, not now. */
+interface Utterance {
+  raw: string;
+  tone: string;
+  // Explicitly `| undefined` on each optional: the repo runs `exactOptionalPropertyTypes`, so a
+  // field declared `id?: string` will not accept an `id` that is present and undefined — which is
+  // exactly what forwarding `showSpeech`'s own optional arguments produces.
+  id?: string | undefined;
+  act?: string | undefined;
+  addressee?: Addressee | null | undefined;
+  marking?: SpeechMarking | null | undefined;
 }
 
 /**
@@ -357,6 +369,7 @@ export function mountOffice(
 
   const labels = new Map<string, HTMLDivElement>();
   const speeches = new Map<string, Speech>(); // one live speech bubble per member (name → bubble)
+  const queued = new Map<string, Utterance[]>(); // acts waiting behind a member's live bubble
   const cues: Cue[] = [];
 
   const AUTO_COLLAPSE_MS = 5000;
@@ -874,11 +887,23 @@ export function mountOffice(
     if (speeches.get(who) === s) speeches.delete(who);
   }
 
-  /** Show a member's act body as a typed-out bubble that holds, then drifts up and fades. One bubble per
-   * member — a newer act supersedes the previous. Driven by timers/CSS (not the RAF loop), so it animates
-   * even while the office rests; reduced-motion shows the text at once with no typewriter. When the act's
-   * envelope `id` is known (and the host wired `onActClick`), the bubble is a click-through to that act
-   * in the stream panel. */
+  /**
+   * A member said something. If they are already mid-sentence, it WAITS.
+   *
+   * The floor used to supersede: a second act from the same seat destroyed the first bubble wherever
+   * its typewriter had got to. On a quiet room that is invisible, but seats speak in bursts — a
+   * status_update, then the lane act, then the insight — and what a viewer actually saw was a line
+   * appear, get two words in, and vanish (nick, 2026-09-04: "the 1st one will appear briefly and
+   * then get replaced by the next one"). The act was on screen and unreadable, which is worse than
+   * not showing it: the eye is drawn to the movement and then given nothing.
+   *
+   * So a bubble now owns the head until it has finished. The next act queues, the current one types
+   * out, holds a short beat rather than its full generous read (`SPEECH_HOLD_QUEUED_MS` — the long
+   * hold is for a line nobody is waiting behind), fades, and the next enters. Hovering still freezes
+   * everything, because the handover rides the same fade the hover already pauses.
+   *
+   * The queue is bounded and drops from the FRONT — see `SPEECH_QUEUE_MAX`.
+   */
   function showSpeech(
     who: string,
     raw: string,
@@ -888,12 +913,39 @@ export function mountOffice(
     addressee?: Addressee | null,
     marking?: SpeechMarking | null,
   ) {
+    const u: Utterance = { raw, tone, id, act, addressee, marking };
+    if (!speeches.has(who)) {
+      playSpeech(who, u);
+      return;
+    }
+    // Drop the oldest unshown, never the newest: what is worth catching up on is the recent state.
+    const q = queued.get(who) ?? [];
+    queued.set(who, enqueueSpeech(q, u));
+  }
+
+  /** Hand the head to the next queued act, if any. Called only where a bubble ended on its own
+   * schedule — a bubble torn down because the office is disposing has nothing to hand over to. */
+  function drainSpeech(who: string) {
+    const q = queued.get(who);
+    const next = q?.shift();
+    if (!q || q.length === 0) queued.delete(who);
+    if (next) playSpeech(who, next);
+  }
+
+  /** Build and run one bubble: type out, hold, drift up and fade. Driven by timers/CSS (not the RAF
+   * loop), so it animates even while the office rests; reduced-motion shows the text at once with no
+   * typewriter. When the act's envelope `id` is known (and the host wired `onActClick`), the bubble is
+   * a click-through to that act in the stream panel. */
+  function playSpeech(who: string, u: Utterance) {
+    const { raw, tone, id, act, addressee, marking } = u;
     const { glance, full, clamped } = shapeSpeech(raw, act);
     const head = heads.get(who);
-    if (!glance || !head) return; // nothing to say, or the sender isn't on the floor (offline / capped)
-
-    const prev = speeches.get(who);
-    if (prev) clearSpeech(who, prev);
+    // Nothing to say, or the sender left the floor while queued (offline / capped out of the render).
+    // Their backlog goes with them — a bubble over an empty desk is not a catch-up, it is a ghost.
+    if (!glance || !head) {
+      queued.delete(who);
+      return;
+    }
 
     const outer = document.createElement('div');
     outer.className = 'lc-speech';
@@ -1106,19 +1158,29 @@ export function mountOffice(
 
     // The dismiss countdown: begin() arms it, and it's cancelled while hovered (below) so a reader —
     // or a click — is never raced by the fade. Longer glances earn a longer base read.
-    const holdCap = act === 'status_update' ? SPEECH_HOLD_MAX_STATUS_MS : SPEECH_HOLD_MAX_MS;
-    const holdMs = Math.min(holdCap, SPEECH_HOLD_MS + glance.length * SPEECH_HOLD_PER_CHAR_MS);
     let hold: ReturnType<typeof setTimeout> | undefined;
     let counting = false; // true once the typewriter has finished and the fade timer is live
     const begin = () => {
       counting = true;
       if (STILL) return; // measurement mode: the bubble stays up, so the sweep measures a room that stops
-      hold = setTimeout(() => {
-        outer.classList.remove('is-in');
-        outer.classList.add('is-out');
-        const rm = setTimeout(() => clearSpeech(who, s), SPEECH_OUT_MS);
-        s.cancels.push(() => clearTimeout(rm));
-      }, holdMs);
+      // Read the queue HERE, not at build time: an act can arrive while this bubble is still typing,
+      // and the whole point is that it shortens this line's stay rather than cutting it off. Re-read
+      // on every begin(), so a hover that re-arms the countdown also re-asks the question.
+      const waiting = queued.get(who)?.length ?? 0;
+      hold = setTimeout(
+        () => {
+          outer.classList.remove('is-in');
+          outer.classList.add('is-out');
+          const rm = setTimeout(() => {
+            clearSpeech(who, s);
+            // The handover, at the end of the fade rather than the start of it — two bubbles over
+            // one head, one arriving as the other leaves, reads as the flicker this replaced.
+            drainSpeech(who);
+          }, SPEECH_OUT_MS);
+          s.cancels.push(() => clearTimeout(rm));
+        },
+        speechHoldMs(glance.length, act, waiting),
+      );
     };
     s.cancels.push(() => clearTimeout(hold));
 
@@ -1892,6 +1954,9 @@ export function mountOffice(
       ro?.disconnect();
       document.removeEventListener('visibilitychange', onVisibility);
       for (const [who, s] of [...speeches]) clearSpeech(who, s); // cancel timers + remove bubbles
+      // Torn down, not finished — nothing is owed a turn. `clearSpeech` deliberately does not drain
+      // (see `drainSpeech`), so the backlog is dropped here rather than replayed into a dead room.
+      queued.clear();
       for (const name of plateExpand.keys()) clearExpandTimer(name);
       plateExpand.clear();
       for (const el of labels.values()) el.remove();

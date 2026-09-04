@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  enqueueSpeech,
+  speechHoldMs,
+  SPEECH_HOLD_MS,
+  SPEECH_HOLD_MAX_MS,
+  SPEECH_HOLD_MAX_STATUS_MS,
+  SPEECH_HOLD_PER_CHAR_MS,
+  SPEECH_HOLD_QUEUED_MS,
   FULL_MAX,
   GLANCE_MAX,
   GLANCE_MAX_STATUS,
@@ -384,5 +391,59 @@ describe('the mark axis is RANKED, and every mark is drawable', () => {
     expect(glyphs).toHaveLength(Object.keys(SPEECH_MARK_WEIGHT).length);
     expect(new Set(glyphs).size).toBe(glyphs.length);
     for (const g of glyphs) expect(g.trim()).not.toBe('');
+  });
+});
+
+/**
+ * The speaking queue. A member who speaks again mid-sentence used to destroy their own bubble
+ * wherever the typewriter had got to; now the next act waits. These pin the two decisions inside
+ * that which are not about the DOM — what gets dropped when the backlog overflows, and how long a
+ * finished bubble holds when something is behind it.
+ *
+ * What they do NOT cover is the behavioural claim itself — that `showSpeech` enqueues instead of
+ * clearing the live bubble. This package runs `environment: 'node'`, so there is no harness that can
+ * mount two bubbles over one head and watch. Stated here so the gap is visible rather than implied
+ * by green.
+ */
+describe('enqueueSpeech', () => {
+  it('keeps the newest acts and drops the oldest unshown, in order', () => {
+    const q = ['a'];
+    enqueueSpeech(q, 'b', 3);
+    enqueueSpeech(q, 'c', 3);
+    expect(q).toEqual(['a', 'b', 'c']);
+    // Past the cap the FRONT goes: what the room eventually shows should still be roughly now.
+    enqueueSpeech(q, 'd', 3);
+    expect(q).toEqual(['b', 'c', 'd']);
+    enqueueSpeech(q, 'e', 3);
+    expect(q).toEqual(['c', 'd', 'e']);
+  });
+
+  it('holds a single act at a cap of one — the newest always survives', () => {
+    const q: string[] = [];
+    enqueueSpeech(q, 'a', 1);
+    enqueueSpeech(q, 'b', 1);
+    expect(q).toEqual(['b']);
+  });
+});
+
+describe('speechHoldMs', () => {
+  it('gives an unqueued line a generous read that grows with its length', () => {
+    expect(speechHoldMs(0, 'message', 0)).toBe(SPEECH_HOLD_MS);
+    expect(speechHoldMs(40, 'message', 0)).toBe(SPEECH_HOLD_MS + 40 * SPEECH_HOLD_PER_CHAR_MS);
+  });
+
+  it('caps the read, and caps a routine status pulse lower', () => {
+    expect(speechHoldMs(9999, 'message', 0)).toBe(SPEECH_HOLD_MAX_MS);
+    expect(speechHoldMs(9999, 'status_update', 0)).toBe(SPEECH_HOLD_MAX_STATUS_MS);
+  });
+
+  it('cuts the hold short the moment something is waiting, whatever the line', () => {
+    // The point of the queue is that a burst does not cost the floor half a minute. A long act with
+    // someone behind it holds the SHORT beat, not its earned one.
+    expect(speechHoldMs(9999, 'message', 1)).toBe(SPEECH_HOLD_QUEUED_MS);
+    expect(speechHoldMs(0, 'status_update', 3)).toBe(SPEECH_HOLD_QUEUED_MS);
+    // And a queued hold is always shorter than the shortest unqueued one — otherwise the backlog
+    // would make the room slower, which is the opposite of the point.
+    expect(SPEECH_HOLD_QUEUED_MS).toBeLessThan(speechHoldMs(0, 'status_update', 0));
   });
 });

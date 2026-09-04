@@ -296,7 +296,7 @@ export function OfficeScene({
         {!collapsed && cornerSlot && <div className="lc-office__corner">{cornerSlot}</div>}
         {!collapsed && (
           <div className="lc-office__mark" aria-hidden="true">
-            <MusterdWord className="lc-office__mark-lockup" chipSize={15} />
+            <MusterdWord className="lc-office__mark-lockup" chipSize={15} domain />
           </div>
         )}
       </div>

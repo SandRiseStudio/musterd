@@ -4,22 +4,28 @@ import { consumeShipped, reloadedForBuild } from './buildSync';
 import { broadcastCorner, WORKSHOP_NOTICE } from '../routes/broadcast';
 
 /**
- * The corner /broadcast speaks from — two facts asserted on a public surface, so both are pinned
- * at the construction: the notice that the feed may blink because the room is shipping the thing
- * being watched, and where to find the team. The address is per team, never derived from the slug:
- * a team that streams has not thereby claimed a mailbox.
+ * The corner /broadcast speaks from — facts asserted on a public surface, so they are pinned at the
+ * construction: the notice that the feed may blink because the room is shipping the thing being
+ * watched, and where to find the TEAM. The address is per team, never derived from the slug: a team
+ * that streams has not thereby claimed a mailbox.
+ *
+ * The PRODUCT's address is deliberately not here any more. The corner used to carry `musterd.io`
+ * beside `revive@musterd.io` — the product named twice in one narrow column, and a third time as
+ * the wordmark two rows below (nick, 2026-09-04). It moved into the mark, where it costs no row and
+ * where it was already going to be read; what is left here is only the thing this line was for.
  */
 describe('broadcastCorner', () => {
-  it('carries the workshop notice, its long form on the title, and musterd.io for every team', () => {
+  it('carries the workshop notice and its long form on the title', () => {
     const html = renderToStaticMarkup(broadcastCorner('anyteam'));
     expect(html).toContain(WORKSHOP_NOTICE.chip);
     expect(html).toContain(`title="${WORKSHOP_NOTICE.full}"`);
-    expect(html).toContain('musterd.io');
-    expect(html).not.toContain('@musterd.io');
   });
-  it('names the address only for a team that has one', () => {
+  it('names the address only for a team that has one, and never the bare product domain', () => {
     expect(renderToStaticMarkup(broadcastCorner('revive'))).toContain('revive@musterd.io');
-    expect(renderToStaticMarkup(broadcastCorner(null))).not.toContain('@musterd.io');
+    expect(renderToStaticMarkup(broadcastCorner(null))).not.toContain('musterd.io');
+    // A team with no mailbox shows no contact line at all rather than falling back to the product's
+    // — the corner would otherwise say musterd.io twice for every team but this one.
+    expect(renderToStaticMarkup(broadcastCorner('anyteam'))).not.toContain('musterd.io');
   });
 
   /**

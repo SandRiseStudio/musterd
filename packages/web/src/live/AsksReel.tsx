@@ -125,13 +125,13 @@ export function AsksReel({
         ) : (
           <ShownReview shown={shown.review!} idx={idx} />
         )}
-        {loud.length > 0 && <span className="bc-reel__meta">{loud.length} waiting</span>}
-        {reviews.length > 0 && <span className="bc-reel__meta">{reviews.length} in review</span>}
-        {deferred.length > 0 && <span className="bc-reel__meta">{deferred.length} deciding</span>}
-        {lapsed.length > 0 && (
-          <span className="bc-reel__meta bc-reel__meta--dim">{lapsed.length} elapsed</span>
-        )}
-        {settled > 0 && <span className="bc-reel__meta bc-reel__meta--dim">{settled} settled</span>}
+        <ReelCounts
+          waiting={loud.length}
+          inReview={reviews.length}
+          deciding={deferred.length}
+          elapsed={lapsed.length}
+          settled={settled}
+        />
         {shown !== null && cards.length > 1 && (
           <span className="bc-reel__dots" aria-hidden="true">
             {cards.map((c) => {
@@ -149,6 +149,96 @@ export function AsksReel({
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The tally on the right edge — what is owed, and what is already answered.
+ *
+ * It shipped as five spans in one voice: `13px` mono at `--lc-paper-dim`, with `elapsed` and
+ * `settled` at 0.6 opacity and nothing else separating them (nick, 2026-09-04: "there are a lot of
+ * counts/text at the end that all look visually the same"). Five equal greys is not a summary, it
+ * is a run of text a viewer has to *read* — and this bar is watched from across a room, through a
+ * 720p encode, by someone who will never click it.
+ *
+ * Three changes, in the order they matter.
+ *
+ * **The number leads.** In every one of these the digit is the content and the word is its label,
+ * but they were the same size and weight, so neither won. The count is now a heavier, larger
+ * tabular figure and the label is small and quiet beside it. That alone makes the row scannable
+ * without changing a single value.
+ *
+ * **Two clusters, not five items.** `waiting`, `in review` and `deciding` are things this team
+ * still owes; `elapsed` and `settled` are history. They are split by a hairline, so the eye lands
+ * on "is anything owed?" before it reads a single word. They are deliberately NOT merged into one
+ * "done" — an elapsed ask timed out unanswered and a settled one was answered, and collapsing a
+ * miss into a success is exactly the kind of tidy lie a summary row invites.
+ *
+ * **Colour carries the state**, because colour is what survives the encode when weight does not. A
+ * pip per count: accent for what is waiting, ink for the two middle states, `--lc-warn` for elapsed
+ * (a fill — text amber is `--lc-warn-ink`, per packages/web/AGENTS.md) and a hollow ring for
+ * settled. Pure decoration, so every pip is `aria-hidden` and the text still reads on its own.
+ *
+ * Zero counts stay absent rather than showing `0`: a stream is watched, not audited, and five zeroes
+ * is the same wall of grey in a different disguise.
+ */
+function ReelCounts({
+  waiting,
+  inReview,
+  deciding,
+  elapsed,
+  settled,
+}: {
+  waiting: number;
+  inReview: number;
+  deciding: number;
+  elapsed: number;
+  settled: number;
+}) {
+  // The state key drives the pip's colour; the label is what a viewer reads. They are separate
+  // because the shortest honest label is not always a good class name, and vice versa — "in review"
+  // is two words and `is-in review` is not a selector.
+  const owed: Tally[] = [
+    { state: 'waiting', label: 'waiting', n: waiting },
+    { state: 'review', label: 'in review', n: inReview },
+    { state: 'deciding', label: 'deciding', n: deciding },
+  ];
+  const past: Tally[] = [
+    { state: 'elapsed', label: 'elapsed', n: elapsed },
+    { state: 'settled', label: 'settled', n: settled },
+  ];
+  const live = owed.filter((t) => t.n > 0);
+  const done = past.filter((t) => t.n > 0);
+  if (live.length === 0 && done.length === 0) return null;
+  return (
+    <span className="bc-reel__counts">
+      {live.map((t) => (
+        <Count key={t.state} {...t} />
+      ))}
+      {/* Only where both sides exist — a rule with nothing on one side of it is a stray mark. */}
+      {live.length > 0 && done.length > 0 && (
+        <i className="bc-reel__counts-split" aria-hidden="true" />
+      )}
+      {done.map((t) => (
+        <Count key={t.state} {...t} past />
+      ))}
+    </span>
+  );
+}
+
+interface Tally {
+  state: string;
+  label: string;
+  n: number;
+}
+
+function Count({ state, label, n, past = false }: Tally & { past?: boolean }) {
+  return (
+    <span className={`bc-reel__meta is-${state}${past ? ' is-past' : ''}`}>
+      <i className="bc-reel__pip" aria-hidden="true" />
+      <b>{n}</b>
+      <em>{label}</em>
+    </span>
   );
 }
 
