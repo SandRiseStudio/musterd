@@ -236,13 +236,18 @@ export const cursor: Harness = {
     orientSkillPath: '.cursor/rules/musterd-orient.mdc',
   },
 
-  // ADR 198: Cursor Agent hooks carry `model_id` / `model` on the common schema. Prefer the
-  // structured id; ignore transcript_path — Cursor JSONL still has no message.model (Claude/Codex
-  // pattern does not apply). Empty payload → undefined (honest degradation).
-  observeModel: (payload) => {
-    const id = payload.model_id?.trim() || payload.model?.trim();
-    return id || undefined;
-  },
+  // NO `observeModel` — deliberately, since 2026-09-04 (ADR 383). ADR 198 read `model_id` off the
+  // Agent hook's common schema, and that field does not track the session's model: measured on
+  // cursor-agent 2026.09.02-c22c1a3, every hook event (sessionStart / postToolUse /
+  // afterShellExecution) reported `gemini-3.8-flash` with a live generation_id while the session ran
+  // kimi-k3. A field that is wrong is not an observation, and musterd recorded it faithfully as one
+  // — so the false `observed` outranked the seat's own declaration (ADR 158's ladder), the two
+  // became equal, and `modelDrift` could not see the disagreement it exists to catch.
+  //
+  // Dropping the slot is the whole fix: the attestation falls through to the declared tier, which is
+  // honest, and `observeCursorSession`'s ADR 268 stopped-clock branch drops a stale observation on
+  // the next new conversation. Restoring the probe is one line — do it when the falsifier in
+  // `docs/wiki/cursor-model-misreport.md` says the field tracks the session again.
 
   async detect() {
     const installed = existsSync(join(homedir(), '.cursor'));
