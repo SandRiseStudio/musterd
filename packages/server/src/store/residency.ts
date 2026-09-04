@@ -1000,7 +1000,13 @@ function dueCandidates(
   db: Database,
   teamSlug: string,
   member: MemberRow,
-  lanes: { immediate: boolean; batched: boolean; raisedDeferralWakes: boolean },
+  lanes: {
+    immediate: boolean;
+    batched: boolean;
+    raisedDeferralWakes: boolean;
+    /** ADR 378 inc 4: does a huddle OPEN that names this seat summon it? Effective seat policy. */
+    conveneHuddles: boolean;
+  },
   /**
    * The team's open directed ledger, computed ONCE for the whole poll — as a THUNK, so a team where
    * no seat reaches the batched lane pays nothing at all.
@@ -1045,7 +1051,13 @@ function dueCandidates(
         r.to_member ? (nameOf(r.to_member) ?? null) : null,
       ),
     );
-    for (const env of pendingInterrupts(envelopes, member.name)) {
+    // The ONLY opt-in this rail makes to the shared predicate. `obligations` and `huddles` stay off
+    // here on purpose (ADR 225, ADR 378): both admit acts by the handful and would route paid wakes
+    // around their own policy gates. `huddleOpens` admits exactly one act per huddle and is gated by
+    // the seat's own effective policy, which is what makes it affordable on this side.
+    for (const env of pendingInterrupts(envelopes, member.name, {
+      huddleOpens: lanes.conveneHuddles,
+    })) {
       if (seen.has(env.id)) continue;
       seen.add(env.id);
       const demoted = sentFromWake(db, env.id);
@@ -1212,6 +1224,7 @@ export function claimWakeLeases(
           immediate: policy.lane !== 'batched',
           batched: cooled && policy.lane !== 'interrupt',
           raisedDeferralWakes: policy.raised_deferral_wakes,
+          conveneHuddles: policy.convene_huddles,
         },
         teamLedger,
       );

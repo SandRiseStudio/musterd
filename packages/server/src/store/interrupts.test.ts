@@ -441,7 +441,138 @@ describe('a huddle turn rings the bell for its participants (ADR 378)', () => {
 
   it('does NOT raise on the wake rail — a paid wake per turn is the storm ADR 378 avoids', () => {
     const msgs = [namedRoot, turn('t1', 'jo')];
-    // `claimWakeLeases` calls this with no opts at all; that default is the safety property.
+    // Neither flag admits a TURN to the paid rail: `huddles` is live-only, and `huddleOpens`
+    // (increment 4) admits the root and nothing else. This is the cost property of the whole
+    // feature — a busy room must cost exactly what a quiet one does.
     expect(pendingInterrupts(msgs, 'me')).toEqual([]);
+    expect(pendingInterrupts(msgs, 'me', { huddleOpens: true }).map((m) => m.id)).toEqual(['h1']);
+  });
+});
+
+/**
+ * ADR 378 increment 4, lane 01M1PYP987 — nick's call: a huddle should CONVENE.
+ *
+ * Until this, opening a huddle summoned nobody: `claimWakeLeases` called the predicate with no opts,
+ * so a named participant who happened to be offline simply never learned a room had opened. That was
+ * the conservative default and it was right about turns — it was wrong about the open, which is one
+ * act, once, and is the difference between a huddle that gathers whoever is at their desk and a
+ * huddle that convenes the people it names.
+ */
+describe('a huddle OPEN convenes the seats it names (ADR 378 inc 4)', () => {
+  const env = (
+    over: Partial<Envelope> & Pick<Envelope, 'id' | 'from' | 'to' | 'act'>,
+  ): Envelope => ({
+    v: PROTOCOL_VERSION,
+    team: 'dawn',
+    body: 'x',
+    thread: null,
+    meta: null,
+    ts: 1,
+    ...over,
+  });
+  const huddle = {
+    huddle: {
+      topic: { kind: 'design', id: 'doorbells' },
+      room: 'http://127.0.0.1:4851/b/huddle-h1',
+      anchor: 'docs/wiki/huddles.md',
+    },
+  };
+  const team = { kind: 'team' as const };
+  const on = { huddleOpens: true } as const;
+
+  it('summons a NAMED participant', () => {
+    const root = env({
+      id: 'h1',
+      from: 'nick',
+      to: team,
+      act: 'message',
+      meta: { ...huddle, eligible: ['me', 'jo'] },
+    });
+    expect(pendingInterrupts([root], 'me', on).map((m) => m.id)).toEqual(['h1']);
+  });
+
+  it('summons a directed root', () => {
+    const root = env({
+      id: 'h1',
+      from: 'nick',
+      to: { kind: 'member', name: 'me' },
+      act: 'message',
+      meta: huddle,
+    });
+    expect(pendingInterrupts([root], 'me', on).map((m) => m.id)).toEqual(['h1']);
+  });
+
+  // The control that keeps this affordable. A @team huddle is an open invitation; waking on it would
+  // pay a wake for every enrolled seat on the roster for a room nobody was asked into by name.
+  it('never summons on a @team huddle — an invitation is not a summons', () => {
+    const root = env({ id: 'h2', from: 'nick', to: team, act: 'message', meta: huddle });
+    expect(pendingInterrupts([root], 'me', on)).toEqual([]);
+  });
+
+  it('never summons a seat the root does not name', () => {
+    const root = env({
+      id: 'h1',
+      from: 'nick',
+      to: team,
+      act: 'message',
+      meta: { ...huddle, eligible: ['me', 'jo'] },
+    });
+    expect(pendingInterrupts([root], 'ada', on)).toEqual([]);
+  });
+
+  it('never summons the opener to their own huddle', () => {
+    const root = env({
+      id: 'h1',
+      from: 'me',
+      to: team,
+      act: 'message',
+      meta: { ...huddle, eligible: ['me', 'jo'] },
+    });
+    expect(pendingInterrupts([root], 'me', on)).toEqual([]);
+  });
+
+  it('stops summoning once the huddle is closed', () => {
+    const root = env({
+      id: 'h1',
+      from: 'nick',
+      to: team,
+      act: 'message',
+      meta: { ...huddle, eligible: ['me', 'jo'] },
+    });
+    const close = env({ id: 'c', from: 'nick', to: team, act: 'resolve', thread: 'h1', ts: 9 });
+    expect(pendingInterrupts([root, close], 'me', on)).toEqual([]);
+  });
+
+  // An eligible set normally means "any one of you", and the first accept stands the rest down. A
+  // room is the opposite: it names everyone it wants IN it, so jo turning up must not un-invite me.
+  it('is not discharged by another named seat accepting — a room is not an eligible-set ask', () => {
+    const root = env({
+      id: 'h1',
+      from: 'nick',
+      to: team,
+      act: 'message',
+      meta: { ...huddle, eligible: ['me', 'jo'] },
+    });
+    const accept = env({
+      id: 'a1',
+      from: 'jo',
+      to: { kind: 'member', name: 'nick' },
+      act: 'accept',
+      meta: { in_reply_to: 'h1' },
+      ts: 2,
+    });
+    expect(pendingInterrupts([root, accept], 'me', on).map((m) => m.id)).toEqual(['h1']);
+  });
+
+  it('stays off when the seat has not opted in — the knob is the whole control', () => {
+    const root = env({
+      id: 'h1',
+      from: 'nick',
+      to: team,
+      act: 'message',
+      meta: { ...huddle, eligible: ['me', 'jo'] },
+    });
+    expect(pendingInterrupts([root], 'me', { huddleOpens: false })).toEqual([]);
+    expect(pendingInterrupts([root], 'me')).toEqual([]);
   });
 });

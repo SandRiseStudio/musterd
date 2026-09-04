@@ -56,9 +56,28 @@ So the log stays the transport — one cursor, recipient-scoped, replicated, alr
 
 - **No budget enforcement.** `budget` is a declaration; readers count the thread's rows against it. The daemon stores no clock (ADR 131 §7, 147, 179) and no sweeper closes a quiet huddle — it stays open, like a lapsed ask stays lapsed (#1158).
 - **No lock.** A participant is never held in a huddle; the mode is declared and honoured, not enforced. See the rejection above.
-- **No cross-host wake.** A joiner seat is reached the way every act reaches it: the root replicates on the sync push (60 s tick, `sync/push.ts`) and its own machine's hook loop wakes it. Wake leases never travel (ADR 241, 356).
+- **No cross-host wake.** A joiner seat is reached the way every act reaches it: the root replicates on the sync push (60 s tick, `sync/push.ts`) and its own machine's hook loop wakes it. Wake leases never travel (ADR 241, 356). The convene wake below is derived per-daemon for the seats *that daemon* holds enrollments for — so a huddle does convene across machines, just each side by its own rail and no sooner than the push that carries the root.
+- **No wake per turn.** Turns are free, forever. See below: the OPEN convenes, the turns do not.
 - **No `team_huddle_*` tools.** `team_send` with `meta.huddle` / `thread` / `meta.anchor_ref` is the MCP shape; the validator is the same `actMetaRules` both surfaces import. Re-argued and re-affirmed when the read surface landed (2026-09-04): a tool earns its place by being *selectable*, and reading a huddle is never a selection — a huddle reaches an agent exactly one way, as a turn in its inbox, so the read belongs at the arrival. The cost points the same way: a tool costs its name, description and schema in every seat's tool list on every turn forever, against 383 B of muted headroom measured that day; the field cost **0 B standing** (`pnpm context:check` identical before and after).
 - **No way to browse a room you have no unread in** (2026-09-04). `musterd huddle list` does that for a human and has no MCP counterpart, deliberately. Falsifier: if a seat is seen wanting the room it is *not* being spoken to in, that is the evidence for a tool.
+
+## Convening: the open wakes the seats it names (2026-09-04, ADR 386)
+
+Opening a huddle wakes its **named** participants — one paid wake per named seat per huddle, on the ADR 131 residency rail. Before this a huddle could only gather whoever was already at their desk: measured 2026-09-04, 5 seats were enrolled and three of the six harness representatives whose doorbell work was in flight were not among them, so the seats a cross-harness huddle most needed were the ones it could not reach.
+
+What is bounded, and why it stays affordable:
+
+- **the ROOT act only.** A turn is never a wake reason, so a busy room costs exactly what a quiet one costs. The convened seat reads the whole room on arrival (`musterd huddle show`, or the room block on `team_inbox_check`).
+- **named only.** An eligible set containing the seat, or a directed root. A `@team` huddle summons nobody — it is an invitation, and waking on it would bill every enrolled seat on the roster.
+- **never the opener**, and **nothing once the `resolve` has landed**.
+- **not discharged by another named seat accepting.** Under ADR 254 the first `accept` stands the other eligible seats down; a room is the opposite — it names everyone it wants in it.
+- every existing gate still applies above it: enrollment, wakeability, hourly cap, cooldown, attempt cap.
+
+The switch is `residency.convene_huddles`, settable as a team default and overridable per seat. **It ships OFF** (2026-09-04) and flips when the cross-machine run reports (lane 01M1Q8GQGW).
+
+The argument for shipping it on is sound and was not refuted: a huddle open is a person naming *you*, the same class as a directed urgent act, which has woken enrolled seats since ADR 131 without a rollout gate — and enrollment is already the opt-in. What it does not cover is the **second machine**. The convene is derived per-daemon and rides the **paid** wake rail, so on a two-daemon team default-on means a remote daemon spends real money on a wake derived from a root whose cross-machine arrival nobody has ever observed — the bell's root-before-turn hazard with a bill attached. Nothing today refuses a turn against a root the local daemon has never seen (`huddle say` mints `thread: <id>` straight from argv and no route resolves it), so that door is open. Default-off costs one line and a later flip; default-on costs an unmeasured paid action across an unwatched boundary.
+
+Falsify: `pnpm --filter @musterd/server exec vitest run src/store/interrupts.test.ts src/store/residency.test.ts` — the wake-rail cases were verified red with the rail wiring disabled.
 
 ## Where the rules live
 
@@ -69,6 +88,8 @@ So the log stays the transport — one cursor, recipient-scoped, replicated, alr
 | the fold both surfaces read a room with | `packages/protocol/src/huddleView.ts` |
 | the CLI and its room payload | `packages/cli/src/commands/huddle.ts`, `huddle.test.ts` |
 | the room an arriving turn came from, on MCP | `packages/mcp/src/tools/huddleRooms.ts`, `huddleRooms.test.ts` |
+| the bell (live) and the convene wake (offline, named) | `packages/server/src/store/messages.ts` (`pendingInterrupts` — `huddles` vs `huddleOpens`), `interrupts.test.ts` |
+| the convene switch and its rail | `packages/protocol/src/residency.ts` (`convene_huddles`), `packages/server/src/store/residency.ts`, `residency.test.ts` |
 | the whiteboard accepts that payload | `packages/whiteboard/src/service.test.ts` ("accepts a huddle layout") |
 
 Increment 2 (the office gathering on `/live` and the pop-out canvas) projects from the thread and presence on the firehose.
