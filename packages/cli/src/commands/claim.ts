@@ -51,6 +51,16 @@ export type ClaimSeatTarget = { seat: string } | { role: string };
  * agent-seat credential and Presence lease are minted for routine HTTP authority; a grant (`msgr_`)
  * skips the approval lane.
  */
+
+/** ms → a compact human age: 2d, 3h, 12m, 45s. Local by the same precedent as `report.ts` et al. */
+function pendingAge(ms: number): string {
+  const sec = Math.round(ms / 1000);
+  if (sec >= 86400) return `${Math.floor(sec / 86400)}d`;
+  if (sec >= 3600) return `${Math.floor(sec / 3600)}h`;
+  if (sec >= 60) return `${Math.floor(sec / 60)}m`;
+  return `${sec}s`;
+}
+
 export async function claimCommand(parsed: Parsed): Promise<number> {
   const flags = parsed.flags;
   const config = loadConfig();
@@ -170,9 +180,15 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
   const pendings = listPendingForWorkspace(process.cwd(), team, workspace);
   const forCode = flagStr(flags, 'for');
   if (!forCode && pendings.length > 1) {
+    const now = Date.now();
     const list = pendings
       .map(
-        (p) => `  ${theme.bold(p.code)}  ${p.surface}${p.driver ? ` · driven by ${p.driver}` : ''}`,
+        (p) =>
+          `  ${theme.bold(p.code)}  ${p.surface}${p.driver ? ` · driven by ${p.driver}` : ''}` +
+          // The age is the whole diagnosis when this fires on junk: a marker is stamped once at
+          // adapter boot and never refreshed, so a days-old one is a session that is long gone and
+          // was never reaped. Without it the list reads as three equally-plausible live sessions.
+          theme.meta(` · ${pendingAge(now - p.ts)} old`),
       )
       .join('\n');
     throw new CliError(

@@ -449,7 +449,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
-      ts: 1,
+      ts: Date.now(),
     });
     writePending(cwd, {
       code: 'CD34',
@@ -457,10 +457,14 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'cursor',
       connId: 'c2',
-      ts: 2,
+      ts: Date.now(),
     });
+    // The refusal names each marker's AGE. When this fires on junk it is the whole diagnosis: a
+    // marker is stamped once at adapter boot and never refreshed, so "62d" reads as a dead session
+    // nobody reaped, where a bare code reads as a live session competing for the seat.
     await expect(run(['Ada', '--team', 'dawn', '--grant', g])).rejects.toMatchObject({
       exitCode: 2,
+      message: expect.stringMatching(/AB12.*\d+[smhd] old/s),
     });
     const ok = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(ok.code).toBe(0);
@@ -477,7 +481,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
-      ts: 1,
+      ts: Date.now(),
     });
     writePending(cwd, {
       code: 'THEIRS',
@@ -485,7 +489,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'someone-elses-ws',
       surface: 'claude-code',
       connId: 'c2',
-      ts: 2,
+      ts: Date.now(),
     });
     const ok = await run(['Ada', '--team', 'dawn', '--grant', g]);
     expect(ok.code).toBe(0);
@@ -502,7 +506,7 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
       workspace: 'ws-here',
       surface: 'claude-code',
       connId: 'c1',
-      ts: 1,
+      ts: Date.now(),
     });
     const { out } = await run(['Ada', '--team', 'dawn', '--grant', g, '--for', 'AB12']);
     expect(out).toContain('going online as Ada now');
