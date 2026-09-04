@@ -308,7 +308,7 @@ whether the tray gets read**. The pre-registered experiment below is the check, 
 ninety days.
 
 **Experiment (pre-registered).** The claim this ADR actually rests on is that a marked forward
-reference gets acted on and an unmarked one does not. Ninety days from merge, take every
+reference gets acted on and an unmarked one does not. **Seven days** from merge, take every
 `Follows-up: <lane-id>` written in the window and ask what fraction of those lanes reached any state
 past `open`, against the base rate for lanes opened in the same window from any other source.
 
@@ -317,6 +317,20 @@ Then the marker is bookkeeping that changed nobody's behaviour, and the honest r
 the gate rather than widen it — the same disposition ADR 180's eval reached for the advisory
 reviewer, whose own rule ("near zero ⇒ drop it") decided its outcome. This ADR pre-commits to that
 rule now, before the number exists.
+
+**Why a week and not ninety days (nick, 2026-09-04).** The window was 90 days at merge. A 90-day
+experiment on this corpus is the pathology this ADR is about: an intention recorded, correctly, in
+the right document, that nothing downstream can see — ADR 166's sweep ran 5,679 times across 24.8
+days and was read by nobody. A week is a window someone actually returns to, and it is now
+[a registered watch](../watches/2026-09-04-adr-373-follows-up-advances.md) whose `revisit_by`
+breaks `format:check` on rollover, so failing to look is itself recorded (ADR 297 rule A).
+
+**What a week costs, stated rather than glossed.** N is small: the corpus held **9** lane-disposed
+markers on the day the window opened. So a null result at this size is a statement about volume, not
+about behaviour, and **cannot on its own fire the falsifier above** — the watch voids below a floor
+of 8 markers in the window rather than reporting a verdict it cannot support. A week buys a real
+answer if the marker is used, and an honest "not enough happened" if it is not; ninety days bought
+neither, because nothing was going to read it.
 
 **Snapshot-debt:** none. Every count above (9 lanes, 46 proposed ADRs, 28 with ≥10 citations, 843
 lanes, 62 pages, 364 ADRs, 86 roadmap items) is exact and dated 2026-09-03, not a rate.

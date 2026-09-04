@@ -52,6 +52,68 @@ export interface TailnetSelf {
   running: boolean;
 }
 
+/**
+ * The capture hostname every hosted run registers under. One name, deliberately: the machine is
+ * ephemeral, and so is the tailnet node it brings up with it.
+ */
+export const CAPTURE_HOSTNAME = 'musterd-broadcast';
+
+/**
+ * How many OFFLINE capture nodes can be on the tailnet before it means something is wrong.
+ *
+ * Two, and the number is a statement about mechanism, not a tolerance. The entrypoint runs
+ * `tailscaled --state=/tmp/...` on purpose — `/tmp` does not survive a Fly machine, so every run
+ * registers a genuinely new node, and Tailscale will not reissue a hostname that is still taken:
+ * it appends `-1`, `-2`. That is CORRECT, and paired with an ephemeral auth key it self-cleans,
+ * because the coordination server drops an ephemeral node a while after it goes offline. So a
+ * couple of dead `musterd-broadcast-N` rows during a restart is what health looks like.
+ *
+ * The failure this catches is the one that looks identical from the outside: if the auth key is
+ * NOT ephemeral, nothing is ever reaped, every run leaks a row forever, and the only symptom is
+ * the same suffixed names. Nobody would notice, because the healthy state and the leaking state
+ * are the same picture — which is exactly why it needs a number to cross rather than an eye to
+ * catch it. Above two, ephemeral reap cannot be the explanation.
+ */
+export const STALE_CAPTURE_LIMIT = 2;
+
+export interface CaptureNodes {
+  /** Every `musterd-broadcast*` peer on the tailnet, newest suffix last. */
+  names: string[];
+  /** Those of them currently offline — the ones a reap should be removing. */
+  offline: string[];
+}
+
+/**
+ * The capture nodes registered on this tailnet, from the same `tailscale status --json` the
+ * tailnet check already ran. Peers only: this laptop is never the capture machine.
+ */
+export function parseCaptureNodes(json: string): CaptureNodes | null {
+  let doc: unknown;
+  try {
+    doc = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof doc !== 'object' || doc === null) return null;
+  const peers = (doc as { Peer?: unknown }).Peer;
+  if (typeof peers !== 'object' || peers === null) return null;
+  const names: string[] = [];
+  const offline: string[] = [];
+  for (const value of Object.values(peers as Record<string, unknown>)) {
+    if (typeof value !== 'object' || value === null) continue;
+    const peer = value as { HostName?: unknown; Online?: unknown };
+    const host = typeof peer.HostName === 'string' ? peer.HostName : '';
+    // `musterd-broadcast` itself and its `-N` retries; never a `musterd-broadcaster` someone else
+    // named a box, which is why this is an exact-or-suffix test and not a prefix test.
+    if (host !== CAPTURE_HOSTNAME && !new RegExp(`^${CAPTURE_HOSTNAME}-\\d+$`).test(host)) continue;
+    names.push(host);
+    if (peer.Online !== true) offline.push(host);
+  }
+  names.sort();
+  offline.sort();
+  return { names, offline };
+}
+
 /** `tailscale status --json`. */
 export function parseTailscaleSelf(json: string): TailnetSelf | null {
   let doc: unknown;
@@ -303,11 +365,14 @@ export async function runChecks(ctx: DoctorCtx): Promise<Check[]> {
 
   // 2 — the overlay is up, and it tells us our own address
   let self: TailnetSelf | null = null;
+  let capture: CaptureNodes | null = null;
   if (!haveTs) {
     checks.push(skip('tailnet', 'tailnet up', 'needs tailscale'));
   } else {
     const st = exec('tailscale', ['status', '--json']);
     self = st.code === 0 ? parseTailscaleSelf(st.stdout) : null;
+    // Same payload, second reading — the capture-node census below costs no extra process.
+    capture = st.code === 0 ? parseCaptureNodes(st.stdout) : null;
     const up = Boolean(self?.running && self.dnsName);
     checks.push({
       key: 'tailnet',
@@ -317,6 +382,43 @@ export async function runChecks(ctx: DoctorCtx): Promise<Check[]> {
       ...(up ? {} : { fix: 'tailscale up' }),
     });
     if (!up) self = null;
+  }
+
+  // 2b — the capture nodes are being reaped
+  //
+  // Not a launch precondition: a pile of dead `musterd-broadcast-N` rows stops nothing from going
+  // live. It is here because it is otherwise INVISIBLE — the only place it shows is the Tailscale
+  // admin app, which is where nick found three of them on 2026-09-03 and had to ask why. A fact
+  // about this system that can only be learned by opening someone else's dashboard is a fact this
+  // command should be stating. See `STALE_CAPTURE_LIMIT` for why the number is the whole check:
+  // healthy churn and a permanent leak produce the identical picture, and only the count separates
+  // them.
+  if (!capture) {
+    checks.push(skip('capture-nodes', 'capture nodes reaped', 'needs the tailnet'));
+  } else {
+    const leaking = capture.offline.length > STALE_CAPTURE_LIMIT;
+    checks.push({
+      key: 'capture-nodes',
+      label: 'capture nodes reaped',
+      state: leaking ? 'fail' : 'ok',
+      detail:
+        capture.names.length === 0
+          ? 'none registered'
+          : `${capture.names.length} on the tailnet, ${capture.offline.length} offline` +
+            (capture.offline.length > 0 ? ` (${capture.offline.join(', ')})` : ''),
+      // Stated as the one cause the count actually rules in. Ephemeral nodes are dropped a while
+      // after they go offline, so more than a couple of them sitting there is not slow cleanup —
+      // it is no cleanup, which means the key they registered with is not an ephemeral one.
+      ...(leaking
+        ? {
+            fix:
+              `${capture.offline.length} dead capture nodes — more than reap can explain, so TS_AUTHKEY is not ephemeral.\n` +
+              `Mint an ephemeral + reusable key at https://login.tailscale.com/admin/settings/keys, then:\n` +
+              `fly secrets set TS_AUTHKEY=<new key> -a ${ctx.app}\n` +
+              `and delete the stale ${CAPTURE_HOSTNAME}-* devices in the admin console`,
+          }
+        : {}),
+    });
   }
 
   // 3 — the daemon is forwarded onto the tailnet

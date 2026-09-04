@@ -499,7 +499,12 @@ describe('foldBatch — the presence kind', () => {
     db.close();
   });
 
-  it('a presence for a seat this roster lacks stops as unresolved_seat, like a message', () => {
+  // Until ADR 382 this stopped as `unresolved_seat`, like a message. It cannot: a seat minted
+  // db-only — a web sign-in — is never in git, so the wait never ends, and one wedged the first
+  // real joiner permanently. Presence for a seat we do not hold projects into nothing, so it
+  // advances with its audit row. The message half of the old rule is unchanged and is asserted by
+  // its own test above; the two-daemon control lives in `sync/presence.test.ts`.
+  it('a presence for a seat this roster lacks advances with its audit row, unlike a message', () => {
     const { db, team } = seed();
     const ev = foreignPresence(
       'p-1',
@@ -509,10 +514,11 @@ describe('foldBatch — the presence kind', () => {
       { presence: 'p', surface: 'codex' },
       'stranger',
     );
-    expect(foldBatch(db, team.id, [ev]).stop).toMatchObject({
-      kind: 'unresolved_seat',
-      seat: 'stranger',
-    });
+    const result = foldBatch(db, team.id, [ev]);
+    expect(result.stop).toBeNull();
+    expect(result.applied).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM audit WHERE id = 'p-1'").get()).toEqual({ n: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM presence WHERE id = 'p'").get()).toEqual({ n: 0 });
     db.close();
   });
 
