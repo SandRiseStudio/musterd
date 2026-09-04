@@ -40,6 +40,11 @@ export function shortModel(model: string | null | undefined): string {
   // grok-4.5 → grok 4.5
   const grok = lower.match(/\bgrok[- ]?(\d+(?:\.\d+)?)/);
   if (grok) return `grok ${grok[1]}`;
+  // muse-spark-1.3-contributor-free → muse spark 1.3. Without this the generic fallback keeps the
+  // first two segments ("muse spark") and drops the version — the plate names the family but not
+  // the rev, and every rev looks identical on the roster.
+  const muse = lower.match(/\bmuse[- ]spark[- ]?(\d+(?:\.\d+)?)/);
+  if (muse) return `muse spark ${muse[1]}`;
   // fallback: first two hyphen segments, spaces
   return lower.split('-').slice(0, 2).join(' ').slice(0, 18);
 }

@@ -55,6 +55,9 @@ export function modelProvider(model: string | null | undefined): ModelProvider {
   if (lower.includes('gemini')) return chip('gemini');
   if (lower.includes('grok')) return chip('xai');
   if (lower.includes('llama')) return chip('meta');
+  // muse-spark is Meta's family on opencode (e.g. muse-spark-1.3-contributor-free) — without this
+  // it falls to unknown and the plate renders the "?" mark. Match the full token, not bare "muse".
+  if (lower.includes('muse-spark') || lower.includes('muse spark')) return chip('meta');
   if (lower.includes('mistral')) return chip('mistral');
   if (lower.includes('qwen')) return chip('qwen');
   if (lower.includes('deepseek')) return chip('deepseek');
