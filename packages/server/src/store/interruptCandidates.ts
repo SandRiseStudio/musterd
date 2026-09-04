@@ -13,7 +13,8 @@ import type { MessageRow } from './rows.js';
  * the seat's cursor has fallen.
  *
  * THE PREDICATE IS THE FOLD'S OWN, READ OFF IT. `pendingInterrupts` returns an act only if it is
- * `meta.urgent`, a `steer`, or an obligation (`ask` carrying the daemon-set `meta.lane_review`). It
+ * `meta.urgent`, a `steer`, an obligation (`ask` carrying the daemon-set `meta.lane_review`), or a
+ * turn in an open huddle this seat is in (ADR 378). It
  * can SUPPRESS one only via `resolve` (which closes a thread) or `accept`/`decline` (which discharge
  * by `meta.in_reply_to`). It can REDIRECT one only via `meta.eligible`, which replaces the default
  * obligation rule. Nothing else it reads can change its answer, so admitting exactly these shapes
@@ -33,7 +34,7 @@ export function listInterruptCandidates(
   /** `cursorTs` is the cursor row's `created_at` (see `cursors.ts`) — the window is in receipt order. */
   opts: { cursorTs?: number } = {},
 ): MessageRow[] {
-  return db
+  const rows = db
     .prepare<unknown[], MessageRow>(
       `SELECT * FROM messages
         WHERE team_id = ?
@@ -45,8 +46,47 @@ export function listInterruptCandidates(
             OR json_extract(meta, '$.urgent') = 1
             OR json_extract(meta, '$.lane_review') IS NOT NULL
             OR json_extract(meta, '$.eligible') IS NOT NULL
+            OR json_extract(meta, '$.huddle') IS NOT NULL
+            OR (
+              thread_id IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM messages root
+                 WHERE root.id = messages.thread_id
+                   AND json_extract(root.meta, '$.huddle') IS NOT NULL
+              )
+            )
           )
         ORDER BY created_at ASC, id ASC`,
     )
     .all(member.team_id, member.id, member.id, opts.cursorTs ?? 0);
+
+  // ADR 378 — the context a huddle turn cannot carry. A turn is an ordinary `message` in a thread:
+  // whether I am IN that huddle lives on the ROOT act, and where I last spoke lives in MY OWN turns.
+  // Both are normally older than the cursor window (a huddle is opened once and then talked in) and
+  // my own acts are excluded by `from_member != ?` above, so neither can come from the window. Fetch
+  // them by id, bounded by the distinct huddle threads actually present in the window — the common
+  // case is zero threads and zero extra queries.
+  const threads = [...new Set(rows.map((r) => r.thread_id).filter((t): t is string => !!t))];
+  if (threads.length === 0) return rows;
+  const marks = threads.map(() => '?').join(',');
+  const roots = db
+    .prepare<unknown[], MessageRow>(
+      `SELECT * FROM messages
+        WHERE team_id = ? AND id IN (${marks}) AND json_extract(meta, '$.huddle') IS NOT NULL`,
+    )
+    .all(member.team_id, ...threads);
+  if (roots.length === 0) return rows;
+  const rootMarks = roots.map(() => '?').join(',');
+  const mine = db
+    .prepare<unknown[], MessageRow>(
+      `SELECT * FROM messages
+        WHERE team_id = ? AND thread_id IN (${rootMarks}) AND from_member = ?`,
+    )
+    .all(member.team_id, ...roots.map((r) => r.id), member.id);
+
+  const byId = new Map<string, MessageRow>();
+  for (const r of [...roots, ...mine, ...rows]) byId.set(r.id, r);
+  return [...byId.values()].sort((a, b) =>
+    a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
+  );
 }

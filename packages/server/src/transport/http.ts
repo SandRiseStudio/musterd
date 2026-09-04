@@ -704,7 +704,15 @@ function assertSeatCanRead(member: MemberRow): void {
  * can raise the line without the `urgent` flag; everything else that raises is `urgent`. Named on the
  * line and in the audit so "who grabbed the mic, and by what right" stays legible.
  */
-function raiseClass(latest: Envelope): 'steer' | 'urgent' | 'acceptance' {
+function raiseClass(
+  latest: Envelope,
+  huddleTopic?: string,
+): 'steer' | 'urgent' | 'acceptance' | 'huddle' {
+  // ADR 378: a turn in a huddle raises on its own class. Without this it borrowed `urgent` — the
+  // scarce flag — and said so on the line, which is false twice over: the turn is not urgent, and
+  // the seat is given no way to tell a huddle apart from any other directed act. The topic is
+  // resolved by the caller from the ROOT act (a turn carries no huddle meta of its own).
+  if (huddleTopic !== undefined) return 'huddle';
   if (latest.act === 'steer') return 'steer';
   // ADR 225: a routed acceptance raises on its own class, not on `urgent` — the noun has to say so,
   // or a seat reads "urgent" for a standard-tier obligation and the urgent signal loses its meaning
@@ -726,12 +734,36 @@ function raiseClass(latest: Envelope): 'steer' | 'urgent' | 'acceptance' {
  * the content. The class noun (`steer` vs `urgent`, ADR 103) describes only `latest`, so a mixed queue
  * isn't mislabeled: the plural line uses the neutral "acts" and names the latest's class inline.
  */
-function composeInterruptLine(latest: Envelope, count: number): string {
+function composeInterruptLine(latest: Envelope, count: number, huddleTopic?: string): string {
   const head = `${latest.from} (${latest.act})`;
-  const noun = raiseClass(latest);
+  const noun = raiseClass(latest, huddleTopic);
+  // A huddle turn names the room it came from and how to answer in it. `topic` is a structured
+  // field, so this keeps the ADR 128 discipline — sender, act and topic, never `env.body`.
+  if (huddleTopic !== undefined && latest.thread) {
+    const more = count > 1 ? ` (+${count - 1} more waiting)` : '';
+    return (
+      `⚡ musterd: huddle ${huddleTopic} — ${latest.from} took a turn${more} — ` +
+      `read it with 'musterd inbox', answer with 'musterd huddle say ${latest.thread}'.`
+    );
+  }
   return count > 1
     ? `⚡ musterd: ${count} acts waiting (latest: ${noun} from ${head}) — run 'musterd inbox' to read them.`
     : `⚡ musterd: ${noun} from ${head} — run 'musterd inbox' to read it.`;
+}
+
+/**
+ * The topic label of the huddle `latest` is a turn in, or undefined when it is not one. Resolved
+ * from the ROOT act, because a turn deliberately carries no `meta.huddle` of its own (ADR 378 §2).
+ */
+function huddleTopicOf(messages: Envelope[], latest: Envelope): string | undefined {
+  if (!latest.thread) return undefined;
+  const root = messages.find((m) => m.id === latest.thread);
+  const huddle = (root?.meta as { huddle?: { topic?: { kind?: string; id?: string } } } | null)?.[
+    'huddle'
+  ];
+  const topic = huddle?.topic;
+  if (!topic?.kind || !topic.id) return undefined;
+  return `${topic.kind}:${topic.id}`;
 }
 
 // Seat-footprint design: an explicit reap names its pids; the daemon re-verifies every one
@@ -5167,10 +5199,14 @@ export async function handleHttp(
         const messages = rowsToEnvelopes(ctx.db, team.slug, rows);
         // obligations: true — this is the live rail (ADR 225). A routed acceptance belongs on it and
         // costs nothing here; the wake rail keeps its ADR 191 policy gate by NOT passing this.
-        const pending = pendingInterrupts(messages, member.name, { obligations: true });
+        const pending = pendingInterrupts(messages, member.name, {
+          obligations: true,
+          huddles: true,
+        });
         recordInterruptCheck(pending.length > 0 ? 'raised' : 'silent');
         if (pending.length === 0) return sendJson(res, 200, { raised: false });
         const latest = pending[0]!;
+        const huddleTopic = huddleTopicOf(messages, latest);
         // Audit the delivery once per (recipient, act) — who grabbed the mic, when, at whom (§Obs).
         if (!hasInterruptRaised(ctx.db, team.id, member.name, latest.id)) {
           appendAudit(ctx.db, team.id, {
@@ -5181,14 +5217,14 @@ export async function handleHttp(
             detail: {
               act: latest.id,
               act_kind: latest.act,
-              tier: raiseClass(latest),
+              tier: raiseClass(latest, huddleTopic),
               count: pending.length,
             },
           });
         }
         return sendJson(res, 200, {
           raised: true,
-          line: composeInterruptLine(latest, pending.length),
+          line: composeInterruptLine(latest, pending.length, huddleTopic),
           count: pending.length,
           act: { id: latest.id, from: latest.from, act: latest.act },
         });

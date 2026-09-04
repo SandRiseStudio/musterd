@@ -414,7 +414,7 @@ export function pendingInterrupts(
    *  gated on `loops.review` + `flow:auto` (ADR 191); admitting acceptance there would route a paid
    *  wake around its own policy gate. That the same predicate cannot serve both rails is precisely
    *  ADR 225's thesis — live and offline want different instruments — appearing in the code. */
-  opts: { obligations?: boolean } = {},
+  opts: { obligations?: boolean; huddles?: boolean } = {},
 ): Envelope[] {
   const resolved = new Set<string>();
   // ADR 254: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
@@ -437,12 +437,59 @@ export function pendingInterrupts(
     opts.obligations === true &&
     m.act === 'ask' &&
     (m.meta as { lane_review?: unknown } | null | undefined)?.['lane_review'] != null;
+  // ADR 378: a turn in a huddle I am IN rings the bell, so a live participant hears it at its next
+  // tool boundary instead of at its next inbox check. Without this a huddle is asynchronous by
+  // omission — delivery was already real-time (the ADR 061 firehose), only the bell was missing.
+  //
+  // Live rail only, like `obligations` and for ADR 225's reason: this predicate also picks PAID
+  // wakes (`claimWakeLeases`), and raising every turn there would summon every offline participant
+  // on every turn — precisely the token storm ADR 378 set out to avoid. Two flags now say
+  // "live-only"; a third should collapse them into one.
+  //
+  // Who counts as in it: a NAMED participant (an eligible set, or a directed root) is in from the
+  // root act. A `@team` huddle is an open invitation rather than a summons, so a seat joins by
+  // taking a turn — otherwise one team-addressed huddle interrupts every seat on the roster, every
+  // turn. Closed huddles go quiet for free: the root's id is in `resolved` once its `resolve` lands.
+  // Maps each open huddle I am in to the moment I last spoke in it — `-Infinity` when I have not
+  // spoken yet, so a named participant hears everything since the root. Only turns NEWER than that
+  // ring: what was said before I joined is backlog I read on the way in, and the interrupt line is
+  // for what needs me now, not for a transcript.
+  const myOpenHuddles = new Map<string, { ts: number; id: string }>();
+  if (opts.huddles === true) {
+    for (const root of messages) {
+      if ((root.meta as { huddle?: unknown } | null | undefined)?.['huddle'] == null) continue;
+      if (resolved.has(root.id)) continue;
+      const named = eligibleOf(root.meta as Record<string, unknown> | null | undefined);
+      const inFromTheRoot = named
+        ? named.includes(me)
+        : root.to.kind === 'member' && root.to.name === me;
+      // Ties on `ts` break on id, the same convention the steer scan below uses: ULIDs sort
+      // deterministically, so two turns in one millisecond still have one order everybody agrees on.
+      let spoke = { ts: Number.NEGATIVE_INFINITY, id: '' };
+      for (const t of messages) {
+        if (t.thread !== root.id || t.from !== me) continue;
+        if (t.ts > spoke.ts || (t.ts === spoke.ts && t.id > spoke.id))
+          spoke = { ts: t.ts, id: t.id };
+      }
+      const joined = spoke.ts > Number.NEGATIVE_INFINITY;
+      if (inFromTheRoot || joined || root.from === me) myOpenHuddles.set(root.id, spoke);
+    }
+  }
+  const isHuddleTurn = (m: Envelope) => {
+    if (m.thread == null) return false;
+    const since = myOpenHuddles.get(m.thread);
+    if (since === undefined) return false;
+    return m.ts > since.ts || (m.ts === since.ts && m.id > since.id);
+  };
   // ADR 254: an eligible set REPLACES the default obligation rule rather than adding to it — which is
   // what narrows `request_help` from "every seat on the team" (its behaviour without a set, below) to
   // the named few. Discharge is checked here rather than at the filter so a stood-down act stops
   // being action-needed *everywhere* at once, including in the `steer` winner scan.
   const actionNeeded = (m: Envelope) => {
     if (m.act === 'resolve') return false;
+    // A huddle turn is addressed to the room, not to me — the default rule below would reject it
+    // before its class was ever considered. Being in the huddle IS the address (ADR 378).
+    if (isHuddleTurn(m)) return true;
     const names = eligibleOf(m.meta as Record<string, unknown> | null | undefined);
     if (names) return names.includes(me) && !discharged.has(m.id);
     return m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me);
@@ -467,7 +514,7 @@ export function pendingInterrupts(
       (m) =>
         m.from !== me &&
         actionNeeded(m) &&
-        (isUrgent(m) || m.act === 'steer' || isObligation(m)) &&
+        (isUrgent(m) || m.act === 'steer' || isObligation(m) || isHuddleTurn(m)) &&
         !resolved.has(m.thread ?? m.id) &&
         // Newest steer wins: any steer that isn't the single winner is superseded — it neither
         // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).
