@@ -888,30 +888,31 @@ export function foldBatch(
           stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
           return finish();
         }
-        // A seat this roster does not hold is git lag for a MESSAGE — the inbox counts it, so the
-        // fold waits (Rule 3, below). Presence is the other case, and ADR 382 decided it: a
-        // presence row for a seat we do not hold paints no roster line and gates no claim, so it
-        // projects into nothing — and a row that projects into nothing is one this daemon can hold
-        // honestly, the ledger's own carve-out. Waiting is what hurts: a seat minted db-only (a web
-        // sign-in, never in git) can never arrive, and one stopped the first real joiner dead at
-        // hub_seq 9657 (2026-09-04). So it advances, and the audit row below still lands — evidence,
-        // not a hole. This is the attach's half of a rule detach already followed.
-        const seatHeld = Boolean(getMemberByName(db, teamId, e.actor ?? ''));
-        if (seatHeld) {
-          const outcome = projectPresenceEvent(db, teamId, event.origin_node, e);
-          if (outcome === 'unknown') {
+        // THE PRESENCE KIND NEVER BLOCKS THE FOLD (ADR 384, superseding ADR 382's narrower rule).
+        // Every other kind may stop, because every other kind decides something here: an inbox
+        // counts a message, a board shows a lane. Presence on a peer paints no roster line and gates
+        // no claim — ADR 325 keeps it local-only and replicates transitions only as a summary — so a
+        // presence event that cannot project decides nothing, and blocking on one trades a fact
+        // worth nothing for a fold worth nothing. That is the ledger's carve-out (ADR 365), applied
+        // to the kind it fits best.
+        //
+        // Both unprojectable shapes arise in the ordinary course, not only in a corrupt log:
+        //   - the seat is not on this roster — a web sign-in, minted db-only, which git never
+        //     carries (one stopped the first real joiner dead at hub_seq 9657, 2026-09-04);
+        //   - the session has no row — this daemon's OWN reaper took it. A joiner replaying a
+        //     backlog folds an attach, sweeps the row minutes later, then meets the re-attestation
+        //     hours behind and waits forever on a row it deleted itself (hub_seq 9659, same joiner,
+        //     with hundreds of sessions queued behind it).
+        // Nothing is invented either way: a re-attestation carries partial facets, so a row built
+        // from one would be a lie with a schema. The audit row below still lands, so the transition
+        // is kept as evidence. One presence stop survives, below: a build too old to store the fact.
+        if (getMemberByName(db, teamId, e.actor ?? '')) {
+          // `unknown` is the one presence stop that stays: a verb or surface this build cannot
+          // store means the ORIGIN runs a newer build, which is transient and fixed by upgrading —
+          // the same reason `unknown_lane_event` and `unknown_record_event` block. It is the
+          // never-arrives cases that must not.
+          if (projectPresenceEvent(db, teamId, event.origin_node, e) === 'unknown') {
             stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
-            return finish();
-          }
-          if (outcome === 'unborn') {
-            const presenceId =
-              typeof e.detail?.['presence'] === 'string' ? (e.detail['presence'] as string) : '';
-            stop = {
-              kind: 'presence_unborn',
-              presence: presenceId,
-              action: e.action,
-              hub_seq: event.hub_seq,
-            };
             return finish();
           }
         }

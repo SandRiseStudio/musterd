@@ -462,7 +462,11 @@ describe('foldBatch — the presence kind', () => {
     db.close();
   });
 
-  it('a reattested for a session never seen attach stops as presence_unborn; a detached for one is a no-op that advances', () => {
+  // Until ADR 384 the reattest half of this stopped as `presence_unborn`. It cannot: the row it
+  // waits for is one this daemon's own reaper takes during a long replay, so the wait never ends —
+  // it wedged the first real joiner at hub_seq 9659 with hundreds of sessions queued behind it.
+  // Both halves now advance, and neither invents a row from a partial fact.
+  it('a reattested for a session never seen attach advances like the detached for one, inventing no row', () => {
     const { db, team } = seed();
     const det = foreignPresence('p-1', 1, 1, 'presence.detached', {
       presence: 'ghost',
@@ -479,11 +483,12 @@ describe('foldBatch — the presence kind', () => {
       model_source: null,
       surface: 'codex',
     });
-    expect(foldBatch(db, team.id, [re]).stop).toMatchObject({
-      kind: 'presence_unborn',
-      presence: 'ghost',
+    expect(foldBatch(db, team.id, [re])).toMatchObject({ stop: null, applied: 1, last_hub_seq: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM audit WHERE id = 'p-2'").get()).toEqual({ n: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM presence WHERE id = 'ghost'").get()).toEqual({
+      n: 0,
     });
-    expect(readPullCursor(db, team.id)).toBe(1);
+    expect(readPullCursor(db, team.id)).toBe(2);
     db.close();
   });
 
