@@ -12,6 +12,7 @@ import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
 import { readBindingAt } from '../config.js';
 import { CliError } from '../errors.js';
+import { TIMELINE_WINDOW } from '../render/huddles.js';
 import { renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { bindThread } from '../session/continuity.js';
@@ -139,13 +140,6 @@ export async function mirrorTurn(board: string, actor: string, body: string): Pr
     return false;
   }
 }
-
-/**
- * How far back a room view reads. A huddle is a bounded burst, so the recent window holds it; a
- * huddle older than this is history and belongs to whatever reads history (the wiki page it landed
- * on). Named rather than inlined so the bound is arguable instead of accidental.
- */
-const TIMELINE_WINDOW = 1000;
 
 function ago(ts: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));
