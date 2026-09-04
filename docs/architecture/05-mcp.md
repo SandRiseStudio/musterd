@@ -395,6 +395,7 @@ src/
     leave.ts      // team_leave — go offline (release seat, ~45s grace)
     send.ts       // refuses until ready (pending → claim; dormant → join)
     inboxCheck.ts // refuses until ready (pending → claim; dormant → join); appends the ADR 135 build-skew warning
+    huddleRooms.ts // the room an arriving turn came from (ADR 378): folds the timeline with the protocol lens so a turn names its topic and the call that answers it — a FIELD on inbox_check, never a tool (ADR 144 selectability + standing-context cost)
     status.ts     // works while dormant/pending; appends the ADR 135 build-skew warning
     members.ts    // works while dormant/pending
     availability.ts // team_availability — set your OWN availability (ADR 044), the MCP twin of `musterd availability`; not a WRITE_TOOL, a muted seat may still say it is away (surface survey #1245 item 6)

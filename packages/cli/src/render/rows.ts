@@ -1,6 +1,7 @@
 import {
   eligibleOf,
   envelopePosition,
+  huddleTopics,
   MODEL_UNKNOWN,
   type Activity,
   type Envelope,
@@ -8,7 +9,6 @@ import {
   type MemberSummary,
   type PresenceStatus,
 } from '@musterd/protocol';
-import { huddleTopics } from './huddles.js';
 import { clock, dayLabel, sinceLabel, theme } from './theme.js';
 import { heading, hint, padEndVisible, sym, termWidth, visibleLen, wrapText } from './ui.js';
 

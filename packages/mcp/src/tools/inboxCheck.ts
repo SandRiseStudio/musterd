@@ -11,6 +11,7 @@ import {
   notReadyMessage,
   textResult,
 } from './format.js';
+import { renderRoom, roomStructured, roomsFor, type RoomContext } from './huddleRooms.js';
 
 // Length is gated (`pnpm context:check`, standing-context budgets): this string is in every turn's
 // tool list, so the elision contract is stated in the fewest bytes that still state it. The full
@@ -19,6 +20,14 @@ const DESCRIPTION =
   'Check unread addressed to you or the team, marking them read. Call at task start, ' +
   'task end, and after heads-down work. Past `limit` nothing is marked read; the reply ' +
   'says how many remain.';
+
+/**
+ * How far back the room fold reads (ADR 378). Matches the CLI's room view deliberately: a huddle is
+ * a bounded burst, so the recent window holds it, and the two surfaces must agree on where history
+ * stops or the same room is two different rooms. A huddle older than this is history and belongs to
+ * the artifact its close named.
+ */
+const HUDDLE_WINDOW = 1000;
 
 /** What one `team_inbox_check` should display, and how far the read cursor may move (ADR 287). */
 export interface InboxCheckPlan {
@@ -146,6 +155,19 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
               (await buildSkewWarning(client)),
           );
         }
+        // ADR 378: a turn carries no huddle meta of its own, so a threaded act is the ONLY hint that
+        // this slice might be a room speaking. Pay for the timeline read exactly then — an inbox
+        // with nothing threaded in it costs no extra request. A failed fetch degrades to the bare
+        // messages this surface has always shown: a room is a nicety, an inbox is not.
+        let context: RoomContext = { topics: new Map(), rooms: [] };
+        if (messages.some((m) => m.thread)) {
+          const timeline = await client
+            .fetchMessages(HUDDLE_WINDOW)
+            .then((r) => r.messages)
+            .catch(() => [] as Envelope[]);
+          context = roomsFor(messages, timeline, client.member ?? '');
+        }
+
         // Link any sender trace context (meta.otel) to our trace as causality (ADR 011 receiver).
         linkReceived(messages);
         // Advance the cursor only over what this call actually rendered (ADR 287). On an elision
@@ -163,7 +185,14 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const dischargedBy = new Map((fetched.discharged ?? []).map((d) => [d.id, d.by]));
         const line = (m: Envelope) => {
           const by = dischargedBy.get(m.id);
-          return formatMessage(m) + (by ? `\n  ↳ answered by ${by} — you no longer owe this` : '');
+          // A turn says which room it is in, on its own line. Without this the reader has an opaque
+          // `thread` and no reason to look further — the room block below is what it looks at.
+          const topic = m.thread ? context.topics.get(m.thread) : undefined;
+          return (
+            formatMessage(m) +
+            (topic ? `\n  ↳ in huddle ${topic}` : '') +
+            (by ? `\n  ↳ answered by ${by} — you no longer owe this` : '')
+          );
         };
 
         // Say it, and say it FIRST. An elision the reader is not told about is the same defect as
@@ -176,9 +205,19 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
               `marked read — they are still waiting. Call again with limit: ${plan.drainLimit} to ` +
               `see all ${plan.drainLimit}.\n\n`
             : '';
+        // The rooms, after the messages: the lines above say a turn arrived, these say what room it
+        // arrived from and what has been said in it. Bounded by the slice — only rooms this call is
+        // actually delivering from are described.
+        const rooms =
+          context.rooms.length > 0
+            ? '\n\n' +
+              context.rooms.map((h) => renderRoom(h, client.member ?? '')).join('\n\n') +
+              '\n'
+            : '';
         const text =
           notice +
           messages.map(line).join('\n') +
+          rooms +
           (await syncWedgeWarningFor(client)) +
           (await buildSkewWarning(client));
         return {
@@ -194,8 +233,14 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
               ts: m.ts,
               thread: m.thread ?? null,
               meta: m.meta ?? null,
+              // The topic on the message itself, so a structured reader can tell a turn from a
+              // loose DM without joining against `huddles` by hand.
+              ...(m.thread && context.topics.has(m.thread)
+                ? { huddle_topic: context.topics.get(m.thread) }
+                : {}),
               ...(dischargedBy.has(m.id) ? { discharged_by: dischargedBy.get(m.id) } : {}),
             })),
+            ...(context.rooms.length > 0 ? { huddles: context.rooms.map(roomStructured) } : {}),
           },
         };
       } catch (err) {

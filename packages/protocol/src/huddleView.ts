@@ -1,4 +1,6 @@
-import { eligibleOf, type Act, type Envelope } from '@musterd/protocol';
+import type { Act } from './acts.wire.js';
+import { eligibleOf } from './envelope.js';
+import type { Envelope } from './envelope.js';
 
 /**
  * The huddle lens (ADR 378): fold an envelope timeline into the huddles it contains.
@@ -7,8 +9,13 @@ import { eligibleOf, type Act, type Envelope } from '@musterd/protocol';
  * already holds are the transcript. This is what makes the "room" a VIEW rather than a second
  * message system: the log stays the transport, and a room is a way of looking at part of it.
  *
- * Deliberately pure and CLI-local. It is a rendering concern, not a wire contract, so it does not
- * belong in `@musterd/protocol` — the web surface will want its own, shaped by what it draws.
+ * It shipped CLI-local, on the reasoning that a fold over envelopes is a rendering concern. That
+ * was half right and the half that was wrong is the half that matters: what the CLI DRAWS is its
+ * own (colour, `ago()`, the summary line), but WHAT A HUDDLE IS — which rows belong to it, who is
+ * in it, whether it is closed — is a reading of the wire, and every surface must answer it the same
+ * way or the same room is two different rooms. The MCP surface is the second reader (an agent is
+ * told a turn belongs to a room), so the fold moves here beside `HuddleMetaSchema`, which is the
+ * thing it folds. Still pure, still stores nothing, still fetches nothing.
  */
 export interface HuddleTurn {
   id: string;
