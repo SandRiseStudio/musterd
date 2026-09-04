@@ -186,10 +186,13 @@ interface Speech {
 interface Utterance {
   raw: string;
   tone: string;
-  id?: string;
-  act?: string;
-  addressee?: Addressee | null;
-  marking?: SpeechMarking | null;
+  // Explicitly `| undefined` on each optional: the repo runs `exactOptionalPropertyTypes`, so a
+  // field declared `id?: string` will not accept an `id` that is present and undefined — which is
+  // exactly what forwarding `showSpeech`'s own optional arguments produces.
+  id?: string | undefined;
+  act?: string | undefined;
+  addressee?: Addressee | null | undefined;
+  marking?: SpeechMarking | null | undefined;
 }
 
 /**
