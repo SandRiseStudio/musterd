@@ -29,7 +29,7 @@ log() { printf '%s cloud-seat: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 # node keeps its tailnet identity across redeploys and the auth key is spent once, on first boot.
 mkdir -p /var/run/tailscale
 tailscaled --state=/data/tailscale/tailscaled.state >"$LOG_DIR/tailscaled.log" 2>&1 &
-for _ in $(seq 1 30); do tailscale status >/dev/null 2>&1 && break; sleep 1; done
+for _ in $(seq 1 60); do tailscale status >/dev/null 2>&1 && break; sleep 1; done
 if ! tailscale status >/dev/null 2>&1; then
   set +x
   for _ in $(seq 1 10); do
@@ -91,23 +91,31 @@ fi
 
 # ── 5. the seat's workspace ───────────────────────────────────────────────────────────────────────
 # The seat is an ordinary Member (spec §spine 2) that already exists on the roster; this machine
-# just gives it a workspace, wired for claude-code, and the team agent key it provisions with.
+# gives it a workspace. `musterd agent` makes a git WORKTREE of the checkout it runs in (ADR 065),
+# so the repo is cloned once at $REPO and the seat's worktree hangs off it. Identity: `team create`
+# bound the team home as nick, so admin acts run there or carry `--as nick` (first boot 2026-09-04
+# taught this: the same commands from an unbound folder exit 4 with "no active identity").
+REPO=/data/musterd
 WORKSPACE="/data/agents-$MUSTERD_SEAT"
-if [ ! -d "$WORKSPACE/.git" ]; then
-  gh auth setup-git >/dev/null 2>&1 || true
-  gh repo clone SandRiseStudio/musterd "$WORKSPACE"
+gh auth setup-git >/dev/null 2>&1 || true
+if [ ! -d "$REPO/.git" ]; then
+  gh repo clone SandRiseStudio/musterd "$REPO"
 fi
-if [ ! -f "$WORKSPACE/.musterd/binding.json" ] && [ ! -f "$WORKSPACE/.claude/musterd.json" ]; then
+# A bare clone left by a failed earlier boot is not a seat workspace — replace it with the worktree.
+if [ -d "$WORKSPACE" ] && [ ! -f "$WORKSPACE/.musterd/binding.json" ]; then
+  rm -rf "$WORKSPACE"
+fi
+if [ ! -f "$WORKSPACE/.musterd/binding.json" ]; then
   set +x
-  musterd team agent-key --key "${MUSTERD_AGENT_KEY:?}" >/dev/null
-  ( cd "$WORKSPACE" && musterd agent "$MUSTERD_SEAT" --harness claude-code --here )
+  ( cd "$TEAM_HOME" && musterd team agent-key --key "${MUSTERD_AGENT_KEY:?}" >/dev/null )
+  ( cd "$REPO" && musterd agent "$MUSTERD_SEAT" --harness claude-code --path "$WORKSPACE" --as nick )
 fi
 ( cd "$WORKSPACE" && pnpm install --frozen-lockfile >>"$LOG_DIR/workspace-install.log" 2>&1 ) || log "workspace pnpm install failed — see $LOG_DIR/workspace-install.log"
 
 # ── 6. residency (ADR 131): what makes the seat wakeable HERE ─────────────────────────────────────
 # `residency on` lands the standing resume grant in the workspace binding and registers the
-# workspace in this machine's host registry — the list `musterd host` polls for. Admin-authorized:
-# the creator credential minted by `team create` above is this machine's admin. Idempotent.
+# workspace in this machine's host registry — the list `musterd host` polls for. Admin-authorized
+# (`--as nick`, the creator credential `team create` minted above). Idempotent.
 ( cd "$WORKSPACE" && musterd residency on --as nick --seat "$MUSTERD_SEAT" ) \
   || log "residency on refused — the seat is not wakeable on this machine until it succeeds (P4 finding)"
 
