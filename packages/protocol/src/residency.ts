@@ -93,13 +93,26 @@ export const ResidencyPolicySchema = z.object({
    * desk. Measured 2026-09-04: 5 seats enrolled, and three of the six harness representatives whose
    * doorbell work was in flight were not among them.
    *
-   * ON by default, which is a deliberate break from the `raised_deferral_wakes` /
-   * `portable_inbox_replies` / `loops.*` convention of shipping dark. Those gate either a
-   * DAEMON-initiated wake (nobody asked for it) or the return of an act the Member already put
-   * down. This is neither: a huddle open is a person or an agent naming this seat and asking it to
-   * come. That is the same class as a directed urgent act, which has woken an enrolled seat since
-   * ADR 131 shipped — and enrollment is itself the opt-in, so "on by default" reaches only seats
-   * that already asked to be woken for interrupt-class acts, inside their existing caps.
+   * OFF at launch, and the reason is the SECOND MACHINE rather than the feature.
+   *
+   * The case for on-by-default stands on its own terms and is not withdrawn: a huddle open is a
+   * person or an agent NAMING this seat and asking it to come — the same class as a directed
+   * urgent act, which has woken an enrolled seat since ADR 131 shipped without a rollout gate —
+   * and enrollment is itself the opt-in, so on-by-default would reach only seats that already
+   * asked to be woken for interrupt-class acts, inside their existing caps.
+   *
+   * What that argument does not cover is a team with two daemons, which this team now is. The
+   * convene is derived PER-DAEMON off each side's own copy of the root, and it rides the PAID wake
+   * rail — so on-by-default means a remote daemon spends real money on a wake derived from a root
+   * whose cross-machine arrival has never once been observed (stanley, 2026-09-04). It is the same
+   * dependency as the bell's root-before-turn hazard, with a bill attached. Nothing currently
+   * refuses a turn against a root the local daemon has never seen: `huddle say` mints
+   * `thread: <id>` straight from argv and no route resolves it, so the door the interrupt
+   * predicate assumes is shut is open.
+   *
+   * The asymmetry decides it. Default-off costs one line and a knob flip once the cross-machine run
+   * reports (lane 01M1Q8GQGW); default-on costs an unmeasured paid action across a boundary nobody
+   * has watched, and the first person to notice would be whoever reads the wake ledger afterwards.
    *
    * Bounded by construction, which is what makes it affordable: the ROOT act only (never a turn, so
    * never per-turn), NAMED participants only (an eligible set or a directed root — a `@team` huddle
@@ -107,9 +120,10 @@ export const ResidencyPolicySchema = z.object({
    * and nothing at all once the huddle's `resolve` has landed. One paid wake per named seat per
    * huddle, and the hourly cap, cooldown, attempt cap and wakeability gates all still apply on top.
    *
-   * Set `false` per seat to refuse being convened, or on the team default to switch the class off.
+   * Set `true` on the team default to switch the class on, or per seat to convene one seat only;
+   * `false` per seat refuses being convened even where the team has enabled it.
    */
-  convene_huddles: z.boolean().default(true),
+  convene_huddles: z.boolean().default(false),
   /** Watchdog for work-order wakes only (ADR 191 / 199) — a coding session, not a reply. Default
    *  30m. Work-orders do not clamp below this on the host (ADR 199); reply wakes still honor the
    *  operator `--timeout` ceiling. */

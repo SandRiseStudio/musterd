@@ -31,20 +31,21 @@ describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE p
       flow: 'manual',
       // ADR 214: a raised deferral is not a wake reason until a seat opts in.
       raised_deferral_wakes: false,
-      // ADR 386: the ONE knob here that ships ON. Every other rollout gate on this schema is dark
-      // at launch because it turns on a wake NOBODY asked for (a loop) or resurrects an act the
-      // Member put down (a raised deferral). A huddle open is a person naming this seat, the same
-      // class as a directed urgent act — and enrollment is already the opt-in that lets any of
-      // this reach a seat at all.
-      convene_huddles: true,
+      // ADR 386: dark at launch like every other rollout gate here, though for a different reason.
+      // The others ship dark because the wake they enable is one nobody asked for; this one is a
+      // person naming the seat. It ships dark because it rides the PAID rail and is derived
+      // per-daemon from a root whose CROSS-MACHINE arrival has never been observed — an unmeasured
+      // paid action across a boundary nobody has watched. Flip after lane 01M1Q8GQGW reports.
+      convene_huddles: false,
       work_timeout_ms: 30 * 60_000,
     });
   });
 
-  it('ships huddle convening ON — the one default-on gate, and the ADR that owns it (386)', () => {
-    expect(ResidencyPolicySchema.parse({}).convene_huddles).toBe(true);
-    // A seat can refuse to be convened without leaving residency.
-    expect(ResidencyPolicySchema.parse({ convene_huddles: false }).convene_huddles).toBe(false);
+  it('ships huddle convening OFF until the cross-machine run settles it (ADR 386)', () => {
+    expect(ResidencyPolicySchema.parse({}).convene_huddles).toBe(false);
+    // The flip is one knob, per team or per seat — that cheapness is the whole argument for
+    // shipping dark rather than measuring in production on someone else's wake budget.
+    expect(ResidencyPolicySchema.parse({ convene_huddles: true }).convene_huddles).toBe(true);
   });
 
   it('ships exact-match resume OFF — ADR 210 enables it per cohort, never by default', () => {

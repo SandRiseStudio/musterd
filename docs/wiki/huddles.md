@@ -73,7 +73,9 @@ What is bounded, and why it stays affordable:
 - **not discharged by another named seat accepting.** Under ADR 254 the first `accept` stands the other eligible seats down; a room is the opposite — it names everyone it wants in it.
 - every existing gate still applies above it: enrollment, wakeability, hourly cap, cooldown, attempt cap.
 
-The switch is `residency.convene_huddles`, **on by default**, settable as a team default and overridable per seat (`false` to refuse being convened). On-by-default breaks the ship-dark convention of `raised_deferral_wakes` / `loops.*` deliberately: those gate a daemon-initiated wake or the return of an act you already put down, while a huddle open is a person naming *you* — the same class as a directed urgent act, which has woken enrolled seats since ADR 131. Enrollment is the opt-in that already exists.
+The switch is `residency.convene_huddles`, settable as a team default and overridable per seat. **It ships OFF** (2026-09-04) and flips when the cross-machine run reports (lane 01M1Q8GQGW).
+
+The argument for shipping it on is sound and was not refuted: a huddle open is a person naming *you*, the same class as a directed urgent act, which has woken enrolled seats since ADR 131 without a rollout gate — and enrollment is already the opt-in. What it does not cover is the **second machine**. The convene is derived per-daemon and rides the **paid** wake rail, so on a two-daemon team default-on means a remote daemon spends real money on a wake derived from a root whose cross-machine arrival nobody has ever observed — the bell's root-before-turn hazard with a bill attached. Nothing today refuses a turn against a root the local daemon has never seen (`huddle say` mints `thread: <id>` straight from argv and no route resolves it), so that door is open. Default-off costs one line and a later flip; default-on costs an unmeasured paid action across an unwatched boundary.
 
 Falsify: `pnpm --filter @musterd/server exec vitest run src/store/interrupts.test.ts src/store/residency.test.ts` — the wake-rail cases were verified red with the rail wiring disabled.
 

@@ -640,10 +640,14 @@ describe('claimWakeLeases — a huddle OPEN convenes the seats it names (ADR 378
   /**
    * nick opens a huddle naming Ada (offline, enrolled) and bob — the case the lane was opened for.
    * Two names because `meta.eligible` refuses a set of one: to reach a single seat you address it.
+   *
+   * `convene_huddles` is set explicitly because it ships OFF (ADR 386 — the cross-machine run has
+   * not reported). These tests are about what the rail does WHEN CONVENING IS ON; the default
+   * itself is pinned in `protocol/residency.test.ts` and by the two off-cases below.
    */
   function openHuddleNaming(seat: string) {
     const s = seed();
-    enroll(s.db, s.team, s.ada);
+    enroll(s.db, s.team, s.ada, HOST, { convene_huddles: true });
     msg(s.db, s.team, s.nick, null, 'message', 'h1', 1_000, {
       meta: { ...HUDDLE, eligible: [seat, 'bob'] },
     });
@@ -657,6 +661,17 @@ describe('claimWakeLeases — a huddle OPEN convenes the seats it names (ADR 378
     expect(orders[0]!.seat).toBe('Ada');
     expect(orders[0]!.act_id).toBe('h1');
     expect(orders[0]!.lane).toBe('immediate');
+  });
+
+  // The shipped default, exercised on the rail rather than only in the schema: an enrolled seat
+  // with no policy of its own is NOT convened. This is the case a two-machine team gets today.
+  it('orders nothing by default — convening ships dark until the cross-machine run reports', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: ['Ada', 'bob'] },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
   });
 
   // The knob nick asked for, exercised where it actually gates rather than where it is declared.
@@ -693,7 +708,7 @@ describe('claimWakeLeases — a huddle OPEN convenes the seats it names (ADR 378
   // The blast-radius control. A @team huddle must never bill every enrolled seat on the roster.
   it('orders nothing for a @team huddle that names nobody', () => {
     const { db, team, nick, ada } = seed();
-    enroll(db, team, ada);
+    enroll(db, team, ada, HOST, { convene_huddles: true });
     msg(db, team, nick, null, 'message', 'h1', 1_000, { meta: HUDDLE });
     expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
   });

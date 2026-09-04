@@ -38,24 +38,37 @@ The alternative on the table was that nick starts those sessions by hand, which 
 4. **A room is not an eligible-set ask.** Under ADR 254 the first `accept` naming an act stands the
    other eligible seats down; that is right for "any one of you" and wrong for a room, which names
    everyone it wants IN it. A huddle open is exempt from discharge.
-5. The switch is `residency.convene_huddles`, **default on**, settable as a team default and
-   overridable per seat.
+5. The switch is `residency.convene_huddles`, settable as a team default and overridable per seat.
+   It ships **off**, and flips once the cross-machine run reports (lane 01M1Q8GQGW).
 
-### Why default on, against the house convention
+### Why it ships dark, when the argument for on-by-default is sound
 
-`raised_deferral_wakes`, `portable_inbox_replies` and every `loops.*` switch ship dark, so a daemon
-upgrade is bit-identical until an admin opts in. This one does not, and the distinction is worth
-stating because it is the part most worth challenging.
+This ADR was drafted with the switch default-ON, and that argument is recorded here rather than
+deleted, because it was not refuted — it was found to be answering a smaller question than the one
+the team now has.
 
-Those switches gate one of two things: a **daemon-initiated** wake, where no person or agent asked
-for anything (the loops), or the **return of an act the Member already put down** (a raised
-deferral). A huddle open is neither. It is a person or an agent naming this seat and asking it to
-come — the same class as a directed urgent act, which has woken an enrolled seat since ADR 131
-shipped and has never needed a rollout gate.
+**The case for on.** `raised_deferral_wakes`, `portable_inbox_replies` and every `loops.*` switch
+ship dark so that a daemon upgrade is bit-identical until an admin opts in. Each of those gates one
+of two things: a **daemon-initiated** wake, where no person or agent asked for anything, or the
+**return of an act the Member already put down**. A huddle open is neither — it is a person or an
+agent naming this seat and asking it to come, the same class as a directed urgent act, which has
+woken an enrolled seat since ADR 131 shipped and never needed a rollout gate. And enrollment is
+already the opt-in: on-by-default would reach only seats that enrolled, are marked wakeable, and are
+inside their caps.
 
-And **enrollment is already the opt-in.** Default-on reaches only seats that have enrolled in
-residency, are marked wakeable, and are inside their hourly cap, cooldown and attempt cap — all of
-which still apply above this switch. A seat that has not asked to be woken is not woken by this.
+**What it does not cover: the second machine** (stanley, 2026-09-04). The convene is derived
+**per-daemon**, off each side's own copy of the root, and it rides the **paid** wake rail. On a team
+with two daemons — which this team now is — default-on means a remote daemon spends real money on a
+wake derived from a root whose **cross-machine arrival has never once been observed**. That is the
+same dependency as the bell's root-before-turn hazard, with a bill attached. Reinforcing it: nothing
+currently refuses a turn against a root the local daemon has never seen — `huddle say` mints
+`thread: <id>` straight from argv, `envelope.ts` types `thread` as a bare string, and no route
+resolves it — so the door the interrupt predicate assumes is shut is open.
+
+**The asymmetry decides it.** Default-off costs one line and a knob flip once the run reports.
+Default-on costs an unmeasured paid action across a boundary nobody has watched, and the first
+person to learn of it would be whoever read the wake ledger afterwards. Measuring a spend on
+someone else's budget is not a rollout.
 
 ## Consequences
 
