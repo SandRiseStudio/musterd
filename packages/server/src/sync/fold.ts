@@ -888,25 +888,32 @@ export function foldBatch(
           stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
           return finish();
         }
-        if (!getMemberByName(db, teamId, e.actor ?? '')) {
-          stop = { kind: 'unresolved_seat', seat: e.actor ?? '', hub_seq: event.hub_seq };
-          return finish();
-        }
-        const outcome = projectPresenceEvent(db, teamId, event.origin_node, e);
-        if (outcome === 'unknown') {
-          stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
-          return finish();
-        }
-        if (outcome === 'unborn') {
-          const presenceId =
-            typeof e.detail?.['presence'] === 'string' ? (e.detail['presence'] as string) : '';
-          stop = {
-            kind: 'presence_unborn',
-            presence: presenceId,
-            action: e.action,
-            hub_seq: event.hub_seq,
-          };
-          return finish();
+        // A seat this roster does not hold is git lag for a MESSAGE — the inbox counts it, so the
+        // fold waits (Rule 3, below). Presence is the other case, and ADR 382 decided it: a
+        // presence row for a seat we do not hold paints no roster line and gates no claim, so it
+        // projects into nothing — and a row that projects into nothing is one this daemon can hold
+        // honestly, the ledger's own carve-out. Waiting is what hurts: a seat minted db-only (a web
+        // sign-in, never in git) can never arrive, and one stopped the first real joiner dead at
+        // hub_seq 9657 (2026-09-04). So it advances, and the audit row below still lands — evidence,
+        // not a hole. This is the attach's half of a rule detach already followed.
+        const seatHeld = Boolean(getMemberByName(db, teamId, e.actor ?? ''));
+        if (seatHeld) {
+          const outcome = projectPresenceEvent(db, teamId, event.origin_node, e);
+          if (outcome === 'unknown') {
+            stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
+            return finish();
+          }
+          if (outcome === 'unborn') {
+            const presenceId =
+              typeof e.detail?.['presence'] === 'string' ? (e.detail['presence'] as string) : '';
+            stop = {
+              kind: 'presence_unborn',
+              presence: presenceId,
+              action: e.action,
+              hub_seq: event.hub_seq,
+            };
+            return finish();
+          }
         }
         db.prepare(
           `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
