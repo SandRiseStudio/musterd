@@ -2,8 +2,9 @@ import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION } from '@musterd/protocol';
+import { makeEnvelope, PROTOCOL_VERSION } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
+import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bind } from './bind.js';
 import { findBinding } from './binding.js';
@@ -236,6 +237,63 @@ describe('MCP adapter', () => {
     const open = await api('GET', '/teams/dawn/requests?status=pending', undefined, tokens['nick']);
     expect(open.json.requests).toHaveLength(1);
     again.close();
+  }, 10_000);
+
+  // Lane 01M1PV8MFA. The adapter's HTTP tools present a lease minted at claim; when that lease dies
+  // mid-session the only recovery armed was the ADR 164 liveness ladder, and the deferred autojoin
+  // fires once per process — so every later act threw and its body was discarded. Measured live
+  // 2026-09-04: `lane_open` refused twice through the adapter while the CLI succeeded from the same
+  // folder. Deleting the presence row is what a daemon bounce or a reap does to the lease
+  // (`hasValidSessionLease` joins on it) without touching this session's intent to hold the seat.
+  it('an act whose lease died mid-session re-joins once and LANDS, instead of being thrown away', async () => {
+    const client = new MusterdClient(adaConfig());
+    await client.join();
+    expect(client.joined).toBe(true);
+
+    server.db
+      .prepare(
+        "DELETE FROM presence WHERE member_id IN (SELECT id FROM members WHERE name = 'Ada')",
+      )
+      .run();
+
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'the act a dead lease used to eat',
+    });
+    await expect(client.sendEnvelope(envelope)).resolves.toBeDefined();
+    const landed = server.db
+      .prepare<[string], { body: string }>('SELECT body FROM messages WHERE id = ?')
+      .get(envelope.id);
+    expect(landed?.body).toBe('the act a dead lease used to eat');
+    client.close();
+  }, 10_000);
+
+  // The safety argument, pinned: a session that legitimately LOST the seat must stay down. Otherwise
+  // newest-wins becomes two adapters re-claiming each other forever on every refused call.
+  it('a superseded session does NOT re-join on a refusal — newest-wins is not a ping-pong', async () => {
+    const first = new MusterdClient(adaConfig());
+    await first.join();
+    const second = new MusterdClient({ ...adaConfig(), workspace: 'other-repo' });
+    await second.join();
+    for (let i = 0; i < 50 && first.holdsSeat; i++) await delay(20);
+    expect(first.holdsSeat).toBe(false); // superseded — wantPresence is false
+
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'Ada',
+      to: { kind: 'team' },
+      act: 'status_update',
+      body: 'must not land',
+    });
+    await expect(first.sendEnvelope(envelope)).rejects.toThrow();
+    expect(second.holdsSeat).toBe(true); // the live one keeps the seat
+    first.close();
+    second.close();
   }, 10_000);
 
   it('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {

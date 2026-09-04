@@ -17,7 +17,7 @@ import { z } from 'zod';
 import type { MusterdClient } from '../client.js';
 import type { McpConfig } from '../config.js';
 import { withTraceContext } from '../otel.js';
-import { errorResult, notReadyMessage, textResult } from './format.js';
+import { errorResult, notReadyMessage, repairHint, textResult } from './format.js';
 
 // ADR 318: keep the Act vocabulary and ask's conditionally-required fields in standing context;
 // examples, rationale, and plan-epoch mechanics are retrievable from the musterd skill.
@@ -269,6 +269,20 @@ export function registerSend(server: McpServer, client: MusterdClient, config: M
           },
         };
       } catch (err) {
+        // Hand the body back. On this surface there is no human to retype and no stderr anyone
+        // reads: if the act's text is not in the tool result, it exists nowhere and the model has to
+        // reconstruct from memory what it believed it had already said. The transport now re-joins
+        // once on a refused lease (lane 01M1PV8MFA), so this is the second line of defence — for the
+        // refusal that survives a fresh claim, and for every other reason a send can fail.
+        const composed = args.body?.trim();
+        if (composed) {
+          const message = err instanceof Error ? err.message : String(err);
+          return textResult(
+            `error: ${message}${repairHint(message)}\n\n` +
+              `NOT SENT — nothing was lost but the delivery. Your ${args.act} body, to send again ` +
+              `verbatim once the cause is fixed:\n${composed}`,
+          );
+        }
         return errorResult(err);
       }
     },

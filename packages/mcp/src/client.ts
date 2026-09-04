@@ -131,6 +131,15 @@ function connectionNeverEstablished(err: unknown): boolean {
  * What a {@link MusterdClient.join} call settled as. `'pending'` is reachable only through the ADR 095
  * non-blocking mode: the claim request is open and parked, and the seat is NOT held.
  */
+/**
+ * Is this refusal specifically "the session lease you presented is no longer good"? Matched on the
+ * server's own lease messages rather than on `unauthorized` alone: a bad credential is also
+ * `unauthorized`, and re-joining would not fix it — it would just fail again, twice as loudly.
+ */
+export function isSessionLeaseRefusal(error: { code: string; message: string }): boolean {
+  return error.code === 'unauthorized' && /agent session lease/i.test(error.message);
+}
+
 export type JoinOutcome = 'occupied' | 'pending';
 
 /**
@@ -282,6 +291,8 @@ export class MusterdClient {
     body?: unknown,
     opts: { headers?: Record<string, string>; timeoutMs?: number } = {},
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    /** Internal: set on the single re-join + replay that follows a refused session lease. */
+    afterLeaseRefusal = false,
   ): Promise<any> {
     let res: Response;
     for (let attempt = 0; ; attempt++) {
@@ -323,6 +334,35 @@ export class MusterdClient {
     const json = text ? JSON.parse(text) : {};
     if (!res.ok) {
       const parsed = ErrorBodySchema.safeParse(json);
+      // A refused lease is the server saying this occupancy is gone — the one piece of DIRECT
+      // evidence the recovery path never listened to.
+      //
+      // Recovery here was armed by the ADR 164 liveness ladder alone (`releasedByLiveness`), and the
+      // deferred autojoin fires once per process. So a lease that died mid-session — a daemon bounce,
+      // a reaped presence — was never re-claimed: every later HTTP tool call presented the same dead
+      // lease and threw, for the rest of the session. Measured 2026-09-04: `lane_open` refused twice
+      // in a row through the adapter while the CLI succeeded from the same folder in the same minute.
+      // Acts travel over HTTP, not the socket, which is the same reason a handoff note was lost on
+      // 2026-07-28 (see `holdsSeat`).
+      //
+      // `holdsSeat` is the whole safety argument: it is false after a `superseded` or a deliberate
+      // `leave`, so a session that legitimately lost the seat stays down and newest-wins is not
+      // turned into a ping-pong between two adapters re-claiming each other. And this never fires
+      // speculatively — only after the server has refused, so it cannot become the #1138 claim storm.
+      if (
+        !afterLeaseRefusal &&
+        parsed.success &&
+        isSessionLeaseRefusal(parsed.data.error) &&
+        this.holdsSeat
+      ) {
+        // The server has spoken: whatever this flag says, the occupancy it names is gone.
+        this.joinedFlag = false;
+        const rejoined = await this.join().then(
+          () => true,
+          () => false,
+        );
+        if (rejoined) return await this.request(method, path, body, opts, true);
+      }
       throw new Error(parsed.success ? parsed.data.error.message : `server error ${res.status}`);
     }
     return json;
