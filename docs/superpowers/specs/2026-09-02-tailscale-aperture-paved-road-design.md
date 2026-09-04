@@ -4,7 +4,7 @@
 
 **Seed:** `01M0ZXBSKGMADATTQJ13PWZ6SA` — “Paved roads - aperture (tailscale)”
 
-**Status:** approved exploration design; implementation requires increment-specific ADRs and plans
+**Status:** approved exploration design; Increment 1 is governed by [ADR 385](../../decisions/385-optional-tailscale-aperture-doctor.md) and its implementation plan; later increments require their own ADRs and plans
 
 **Security boundary:** product architecture only; no active scanning, production access, or
 infrastructure mutation was performed
