@@ -145,7 +145,10 @@
 }
 /* Loud breathes AMBER, exactly like /live's strip — urgency in this room is mustard, not red. */
 .bc-reel--loud {
-  border-color: color-mix(in srgb, var(--lc-accent) 55%, var(--lc-paper-rim));
+  /* `--lc-asks-glow`: the accent by default, the shown seat's hue under `.has-lead` — a variable,
+     never a second `animation:` list (see Live.css `.lc-asks--loud` for the measured reason). */
+  --lc-asks-glow: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-asks-glow) 55%, var(--lc-paper-rim));
   animation:
     lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
     bc-reel-breathe 2.4s ease-in-out infinite;
@@ -154,9 +157,9 @@
   50% {
     box-shadow:
       inset 0 1px 0 var(--lc-paper-sheen),
-      inset 0 0 22px -10px color-mix(in srgb, var(--lc-accent) 24%, transparent),
+      inset 0 0 22px -10px color-mix(in srgb, var(--lc-asks-glow) 24%, transparent),
       0 3px 12px -2px var(--lc-paper-drop),
-      0 0 30px -4px color-mix(in srgb, var(--lc-accent) 55%, transparent);
+      0 0 30px -4px color-mix(in srgb, var(--lc-asks-glow) 55%, transparent);
   }
 }
 
@@ -192,19 +195,8 @@
   stroke: var(--lc-asks-hue);
 }
 .bc-reel--loud.has-lead {
+  --lc-asks-glow: var(--lc-asks-hue);
   border-color: color-mix(in srgb, var(--lc-asks-hue) 84%, var(--lc-paper-rim));
-  animation:
-    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
-    bc-reel-breathe-hue 2.4s ease-in-out infinite;
-}
-@keyframes bc-reel-breathe-hue {
-  50% {
-    box-shadow:
-      inset 0 1px 0 var(--lc-paper-sheen),
-      inset 0 0 22px -10px color-mix(in srgb, var(--lc-asks-hue) 30%, transparent),
-      0 3px 12px -2px var(--lc-paper-drop),
-      0 0 30px -4px color-mix(in srgb, var(--lc-asks-hue) 60%, transparent);
-  }
 }
 .bc-reel__who {
   position: relative;

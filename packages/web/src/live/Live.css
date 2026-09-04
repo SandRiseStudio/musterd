@@ -5117,10 +5117,17 @@
   animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
 }
 .lc-asks--loud {
-  border-color: color-mix(in srgb, var(--lc-accent) 55%, transparent);
+  /* `--lc-asks-glow` is what loud breathes in: the house accent by default, the lead asker's hue
+     when there is one (`.has-lead` below). A variable rather than a second animation list on
+     purpose — re-declaring `animation:` on the has-lead rule restarted `lc-fade` on every class
+     flip, and the contrast sweep caught the strip mid-fade, translucent over the floor: every
+     avatar and paper in it measured 1.0–1.5 below AA with nothing wrong in the palette (2026-09-03,
+     measured against a green main with the line removed). */
+  --lc-asks-glow: var(--lc-accent);
+  border-color: color-mix(in srgb, var(--lc-asks-glow) 55%, transparent);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--lc-accent) 26%, transparent),
-    0 6px 22px -12px color-mix(in srgb, var(--lc-accent) 55%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--lc-asks-glow) 26%, transparent),
+    0 6px 22px -12px color-mix(in srgb, var(--lc-asks-glow) 55%, transparent);
   animation:
     lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
     lc-asks-breathe 2.4s ease-in-out infinite;
@@ -5128,8 +5135,8 @@
 @keyframes lc-asks-breathe {
   50% {
     box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--lc-accent) 44%, transparent),
-      0 6px 26px -10px color-mix(in srgb, var(--lc-accent) 70%, transparent);
+      0 0 0 1px color-mix(in srgb, var(--lc-asks-glow) 44%, transparent),
+      0 6px 26px -10px color-mix(in srgb, var(--lc-asks-glow) 70%, transparent);
   }
 }
 /* ─── who is asking, in colour ────────────────────────────────────────────
@@ -5145,20 +5152,8 @@
   stroke: var(--lc-asks-hue);
 }
 .lc-asks--loud.has-lead {
+  --lc-asks-glow: var(--lc-asks-hue);
   border-color: color-mix(in srgb, var(--lc-asks-hue) 84%, var(--lc-border));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--lc-asks-hue) 30%, transparent),
-    0 6px 22px -12px color-mix(in srgb, var(--lc-asks-hue) 60%, transparent);
-  animation:
-    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
-    lc-asks-breathe-hue 2.4s ease-in-out infinite;
-}
-@keyframes lc-asks-breathe-hue {
-  50% {
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--lc-asks-hue) 50%, transparent),
-      0 6px 26px -10px color-mix(in srgb, var(--lc-asks-hue) 76%, transparent);
-  }
 }
 
 /* The tier clock as an arc. `--lc-ask-frac` (0..1, inline) is how much of the tier is left; the
