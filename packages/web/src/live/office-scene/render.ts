@@ -53,7 +53,7 @@ import { STICKY_CAP, type WallBoard } from './wallboard';
 import { DAY_ENV, type LightEnv } from './lighting';
 import { CANVAS_EASE } from './motion';
 import { deskMoodFor, deskMoodStyle } from './moods';
-import type { Placement } from './seating';
+import { workingAtDesk, type Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, handsInLap, seedOf, solveSkeleton, typingBurst } from './skeleton';
 import type { Dir, OfficeNode, Pose } from './types';
 import { formatWorkingHours } from './workingHours';
@@ -3175,15 +3175,16 @@ function chairBack(
 // guarantee coverage, and did collapse to all-single). Every pod gets a mix, and the two camera-facing
 // desks (ids 0,1) carry the boldest setups so the variety actually reads. Every panel still lights teal
 // when its member is `working` and stays dim otherwise — the load-bearing work cue is intact.
-type MonitorSetup = 'single' | 'dual' | 'ultrawide' | 'laptopRiser' | 'laptopDock';
-// Two laptop rigs, from real desk hardware: `laptopRiser` = an open laptop raised on an aluminium stand
-// beside the monitor; `laptopDock` = a *closed* laptop stood vertically in a wooden dock. Both sit on
-// N/W-facing desks — the rows whose faces point at the camera — so the riser's lit screen and the dock's
-// silver body read. ids 2 (pod 0, N), 7/10/11 (W).
+type MonitorSetup = 'single' | 'dual' | 'ultrawide';
+// The two decorative laptop rigs (`laptopRiser`, `laptopDock`) were removed on 2026-09-04. They were
+// furniture variety and belonged to nobody — which stopped being harmless the moment a laptop started
+// meaning *this person is in the building*: four desks were telling that lie every frame, on desks whose
+// owner might be away or offline. Every desk now carries the same dock instead (see `deskDock`), empty
+// until its owner is working. Monitor variety is monitors.
 const MONITOR_SETUPS_BY_ID: readonly MonitorSetup[] = [
-  'single', 'dual', 'laptopRiser', 'ultrawide', // pod 0 (top — 2,3 face the camera)
-  'single', 'dual', 'ultrawide', 'laptopDock', // pod 1 (centre — 6,7 face the camera)
-  'single', 'dual', 'laptopRiser', 'laptopDock', // pod 2 (left — 10,11 face the camera)
+  'single', 'dual', 'single', 'ultrawide', // pod 0 (top — 2,3 face the camera)
+  'single', 'dual', 'ultrawide', 'single', // pod 1 (centre — 6,7 face the camera)
+  'single', 'dual', 'ultrawide', 'dual', // pod 2 (left — 10,11 face the camera)
 ];
 function monitorSetupFor(id: number): MonitorSetup {
   return MONITOR_SETUPS_BY_ID[id % MONITOR_SETUPS_BY_ID.length]!;
@@ -3323,11 +3324,14 @@ function screenPanel(
   t = 0,
 ): void {
   const sn = dir === 'S' || dir === 'N';
-  const pw = sn ? wAcross : 5;
-  const pd = sn ? 5 : wAcross;
-  box(ctx, fit, mx, my, pw, pd, h, '#2a2e33', up + 8);
-  const lo = (up + 8) * fit.scale;
-  const hi = (up + 8 + h) * fit.scale;
+  // 3 deep, not 5: at this camera angle the panel's own side face is what made a monitor read as a
+  // chunky all-in-one PC rather than a thin screen on a stand. Paired with the slim `monitorStand`
+  // below — the depth and the foot were both doing it, and fixing one alone leaves the tower.
+  const pw = sn ? wAcross : 3;
+  const pd = sn ? 3 : wAcross;
+  box(ctx, fit, mx, my, pw, pd, h, '#2a2e33', up + PANEL_UP);
+  const lo = (up + PANEL_UP) * fit.scale;
+  const hi = (up + PANEL_UP + h) * fit.scale;
   const dn = (p: Pt, u: number): Pt => ({ x: p.x, y: p.y - u });
   // The camera-facing face's bottom corners (BL→BR left-to-right on canvas); vertical is a straight lift.
   let BL: Pt | null = null;
@@ -3387,6 +3391,18 @@ function screenPanel(
   }
 }
 
+/** How far above the desk the panel's bottom edge floats — the height of the stand's neck. */
+const PANEL_UP = 8;
+
+/** A monitor stand: a flat base plate on the desk and a slim neck up to the panel. It replaces the
+ * 8×6×8 solid block that used to sit under every panel, which at this camera angle read as a tower —
+ * a full PC with a screen stuck to it, which is exactly the thing nick said these should stop being.
+ * `across` is the base plate's width along the shoulders (an ultrawide or a dual arm needs more foot). */
+function monitorStand(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, sn: boolean, up: number, across: number): void {
+  box(ctx, fit, mx, my, sn ? across : 11, sn ? 11 : across, 1.5, '#22262b', up); // base plate
+  box(ctx, fit, mx, my, sn ? 5 : 3, sn ? 3 : 5, PANEL_UP, '#33383f', up + 1.5); // neck
+}
+
 function monitor(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
@@ -3399,106 +3415,49 @@ function monitor(
   t = 0,
 ): void {
   const setup = id == null ? 'single' : monitorSetupFor(id);
+  const sn = dir === 'S' || dir === 'N';
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-desk unit
   if (setup === 'dual') {
     // Two full-size panels (each the size of a single monitor) on a shared dual-arm stand, sat side by
     // side so they read as two real screens, not two half-screens. `[-1,1]` order paints the nearer last.
-    box(ctx, fit, mx, my, 12, 8, 8, '#33272b', surfaceUp); // shared dual-arm foot
+    monitorStand(ctx, fit, mx, my, sn, surfaceUp, 22); // shared dual-arm foot, wide enough for two
     for (const s of [-1, 1] as const) {
       screenPanel(ctx, fit, mx + p[0] * s * 18, my + p[1] * s * 18, dir, working, surfaceUp, 34, 22, false, t);
     }
   } else if (setup === 'ultrawide') {
-    box(ctx, fit, mx, my, 10, 6, 8, '#33272b', surfaceUp);
+    monitorStand(ctx, fit, mx, my, sn, surfaceUp, 20);
     screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 54, 20, true, t);
-  } else if (setup === 'laptopRiser' || setup === 'laptopDock') {
-    // A single monitor with a laptop rig to one side (side alternates by desk id): either an open laptop
-    // raised on an aluminium stand, or a closed laptop stood in a wooden vertical dock.
-    box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
-    screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false, t);
-    const side = id != null && id % 2 === 0 ? 1 : -1;
-    const lxp = mx + p[0] * side * 30;
-    const lyp = my + p[1] * side * 30;
-    if (setup === 'laptopRiser') laptopRiser(ctx, fit, lxp, lyp, dir, working, surfaceUp, t);
-    else laptopDock(ctx, fit, lxp, lyp, dir, surfaceUp);
   } else {
-    box(ctx, fit, mx, my, 8, 6, 8, '#33272b', surfaceUp);
+    monitorStand(ctx, fit, mx, my, sn, surfaceUp, 15);
     screenPanel(ctx, fit, mx, my, dir, working, surfaceUp, 34, 22, false, t);
   }
 }
 
+/** The closed laptop's aluminium and its logo dot — shared by the desk dock and the slab under an
+ * arm (`character.ts` `drawCarry`), which must be the same object to the eye. */
 const LAPTOP_SILVER = '#c7ccd2';
+const LAPTOP_LOGO = '#a3a9b1';
 
-/** An **open** laptop raised on an aluminium stand (the elevated-riser kind): a slim column lifts a top
- * plate to near monitor height, with the silver keyboard base + a dark key deck on it and the open lid
- * standing at the back, its screen lit on the camera-facing face. Silver so it reads as a laptop, not a
- * second monitor. Placed only on N/W desks so the lid's lit face shows. */
-function laptopRiser(
-  ctx: CanvasRenderingContext2D,
-  fit: Fit,
-  mx: number,
-  my: number,
-  dir: Dir,
-  working: boolean,
-  up: number,
-  t = 0,
-): void {
+/** Every desk's dock — the one piece of furniture this floor added when a laptop started meaning
+ * *this member is in the building*. A small walnut cradle with a slot, always drawn; and, when its
+ * owner is working, the closed laptop standing in it: a thin silver slab, broad face to the room,
+ * hinge down. It is deliberately the same silver, seam and logo dot as the slab `drawCarry` tucks
+ * under an arm, so the object you watched walk through the door is the object that lands here.
+ *
+ * `docked` is `workingAtDesk(owner, sit)` — the same boolean, on the same frame, that lights the
+ * monitor two props away. That is the whole model (design §0): the dock is a second reading of the
+ * work cue, not a new fact plumbed through the scene, so an empty dock and a dark screen cannot
+ * disagree — and the member sitting down is the single event that turns both on. */
+function deskDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, dir: Dir, up: number, docked: boolean): void {
   const sn = dir === 'S' || dir === 'N';
-  const f = FWD[dir];
-  box(ctx, fit, mx, my, sn ? 20 : 14, sn ? 14 : 20, 2, '#aeb4bc', up); // stand base plate on the desk
-  box(ctx, fit, mx, my, 7, 7, 12, '#b6bcc4', up + 2); // slim support column (laptop reads as lifted)
-  const plateUp = up + 14;
-  box(ctx, fit, mx, my, sn ? 22 : 15, sn ? 15 : 22, 2, '#bcc2ca', plateUp); // top plate
-  const deckUp = plateUp + 2;
-  box(ctx, fit, mx - f[0] * 3, my - f[1] * 3, sn ? 22 : 15, sn ? 15 : 22, 2, LAPTOP_SILVER, deckUp); // keyboard base
-  box(ctx, fit, mx - f[0] * 3, my - f[1] * 3, sn ? 17 : 10, sn ? 10 : 17, 1, '#2b2f36', deckUp + 2); // dark key deck
-  // Open lid standing at the back of the base, with a lit screen on the camera-facing face.
-  const lw = sn ? 22 : 5;
-  const ld = sn ? 5 : 22;
-  const cx = mx + f[0] * 5;
-  const cy = my + f[1] * 5;
-  const lidUp = deckUp + 1;
-  box(ctx, fit, cx, cy, lw, ld, 16, dim(LAPTOP_SILVER, 0.9), lidUp); // silver lid
-  const lo = (lidUp + 2) * fit.scale;
-  const hi = (lidUp + 14) * fit.scale;
-  const dn = (pt: Pt, u: number): Pt => ({ x: pt.x, y: pt.y - u });
-  let BL: Pt | null = null;
-  let BR: Pt | null = null;
-  if (dir === 'N') {
-    BL = project(cx - lw / 2, cy + ld / 2, fit);
-    BR = project(cx + lw / 2, cy + ld / 2, fit);
-  } else if (dir === 'W') {
-    BL = project(cx + lw / 2, cy + ld / 2, fit);
-    BR = project(cx + lw / 2, cy - ld / 2, fit);
-  }
-  if (BL && BR) {
-    const bl = BL;
-    const br = BR;
-    if (working) {
-      // The laptop's little screen runs the same living desktop as the monitor — one pane, chunky details.
-      const map: FaceMap = (u, v) => ({ x: bl.x + u * (br.x - bl.x), y: bl.y + u * (br.y - bl.y) - lo - v * (hi - lo) });
-      drawScreenLife(ctx, map, Math.abs(br.x - bl.x), fit.scale, Math.abs(Math.round(cx * 7 + cy * 13)), t, 1);
-    } else {
-      quad(ctx, [dn(bl, lo), dn(br, lo), dn(br, hi), dn(bl, hi)], SCREEN_IDLE);
-    }
-  }
-  const g = project(cx, cy, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (lidUp + 16) * fit.scale }, 7 * fit.scale, 3 * fit.scale, working ? '#59c3a3' : '#33504c');
-}
-
-/** A **closed** laptop stood vertically in a wooden dock: a walnut cradle with a slot, and the laptop as a
- * thin, tall silver slab rising out of it (its broad aluminium back to the room, hinge down). A quiet logo
- * dot sells the "back of a closed laptop" read. No lit screen — it's shut. */
-function laptopDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, dir: Dir, up: number): void {
-  const sn = dir === 'S' || dir === 'N';
-  box(ctx, fit, mx, my, sn ? 22 : 14, sn ? 14 : 22, 7, '#7c5230', up); // walnut cradle
-  box(ctx, fit, mx, my, sn ? 8 : 4, sn ? 4 : 8, 2, '#5f3f24', up + 7); // dark slot groove on top
-  // The closed laptop: broad (screen width) along the shoulders, thin (closed thickness) front-to-back,
-  // tall (the laptop's depth, now vertical). Its wide silver face turns toward the camera.
-  const w = sn ? 28 : 6;
-  const d = sn ? 6 : 28;
-  box(ctx, fit, mx, my, w, d, 30, LAPTOP_SILVER, up + 6);
+  box(ctx, fit, mx, my, sn ? 17 : 11, sn ? 11 : 17, 4, '#7c5230', up); // walnut cradle
+  box(ctx, fit, mx, my, sn ? 13 : 3, sn ? 3 : 13, 1.5, '#54371f', up + 4); // the slot, dark down its length
+  if (!docked) return; // nobody has sat down here to work — the slot is empty, and that is the point
+  const w = sn ? 20 : 5;
+  const d = sn ? 5 : 20;
+  box(ctx, fit, mx, my, w, d, 22, LAPTOP_SILVER, up + 3);
   const g = project(mx, my, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (up + 22) * fit.scale }, 4 * fit.scale, 3 * fit.scale, dim(LAPTOP_SILVER, 0.82)); // logo dot
+  ellipse(ctx, { x: g.x, y: g.y - (up + 15) * fit.scale }, 3 * fit.scale, 2.4 * fit.scale, LAPTOP_LOGO); // logo dot
 }
 
 // ── desk-surface props: a keyboard + mouse on every desk, plus a deterministic personal mix ──────────
@@ -3643,6 +3602,55 @@ function lampHeadPoint(slot: { lx: number; ly: number; dir: Dir }, fit: Fit): Pt
 const LAMP_ALONG = 8;
 const LAMP_ACROSS = 42;
 
+/**
+ * Where the dock stands, and why it is the one prop whose across is computed rather than written.
+ *
+ * **A docked laptop must never cover the front of a screen** (nick, 2026-09-04), and on this floor
+ * that is two conditions, not one — outboard of the widest panel, AND behind it in the painter's
+ * order, so an overlap that survives the first still cannot paint over the glass.
+ *
+ * Outboard is the easy half: `DOCK_ACROSS` sits past 35, which is as far as any setup reaches (a
+ * dual's two 34-wide panels centred at ±18).
+ *
+ * Behind is the half that cannot be a constant. `at()` sorts by `(f[0]+f[1])·along + (p[0]+p[1])·across`,
+ * and the sign of the ACROSS term flips between the two camera-facing rows — +1 on an N desk, −1 on a
+ * W one. So one fixed across puts the dock behind the monitor on one row and in front of it on the
+ * other, which is exactly how a prop ends up covering a screen on half the floor and looking fine on
+ * the half you happened to check. Sending it to `-j · DOCK_ACROSS` makes the across term subtract at
+ * every facing, so "behind the monitor" is a property of the geometry rather than of the desk id.
+ *
+ * `dockAcross` and `deskPropSort` are exported so that property can be a TEST rather than a claim —
+ * see render.test.ts, which walks every facing against the widest setup on the floor.
+ */
+const DOCK_ALONG = 26;
+const DOCK_ACROSS = 40;
+
+/** Where the monitor sits along the desk — the back of the slab, `at(Df / 2 - 12, 0)`. */
+export const MONITOR_ALONG = DESK_D / 2 - 12;
+
+/** How far a panel reaches from the desk's centreline, across the shoulders: a dual's outer edge —
+ *  two 34-wide panels centred at ±18 — which is wider than an ultrawide's 54. */
+export const WIDEST_PANEL_HALF = 35;
+
+/** Half the dock's footprint across the shoulders. The LAPTOP is the widest piece, not the cradle
+ *  under it — 20 across against the cradle's 17, because the slab stands with its broad face to the
+ *  room. Getting this wrong understates the overlap by the exact amount that matters. */
+export const DOCK_HALF_ACROSS = 10;
+
+/** The dock's across for a given facing: outboard, and on the side whose sort term SUBTRACTS. */
+export function dockAcross(dir: Dir): number {
+  const f = FWD[dir];
+  return -(-f[1] + f[0]) * DOCK_ACROSS; // p = [-f[1], f[0]], so j = p[0] + p[1] = -f[1] + f[0]
+}
+
+/** The painter's key `drawWorkstation`'s `at()` gives a desk-relative prop — larger paints later,
+ *  i.e. nearer the viewer. Exported so the dock's "behind the monitor" claim can be falsified. */
+export function deskPropSort(dir: Dir, along: number, across: number): number {
+  const f = FWD[dir];
+  const p: [number, number] = [-f[1], f[0]];
+  return f[0] * along + p[0] * across + (f[1] * along + p[1] * across);
+}
+
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
  * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
@@ -3662,6 +3670,17 @@ function drawWorkstation(
   hide?: Set<PropKind>,
   /** Is it dark enough out for desk lamps to be on? (`LightEnv.lampsOn`, threaded from the scene.) */
   lampsLit = false,
+  /**
+   * `workingAtDesk(owner, pose.sit)` — the owner is working AND has sat down here.
+   *
+   * ONE boolean for the screen and the dock, because they are one event: the member sits, the laptop
+   * goes in the dock, and the monitor wakes (nick, 2026-09-04). It is not `audiblyWorking` alone —
+   * that is true from the instant a posture flips, so a seat that came online already `working` lit
+   * its screen and filled its dock while its body was still crossing the floor. The room's typing
+   * sound and the loop's park check read the same predicate, so the E2 §2 contract holds: eyes, ears
+   * and loop cannot disagree.
+   */
+  atWork = false,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -3674,10 +3693,11 @@ function drawWorkstation(
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
   const up = DESK_UP; // desk-surface height — where every prop sits (DH + ST)
-  // `posture`, not `activity` — a lit screen full of scrolling code is the strongest "this seat is working"
-  // signal in the room, so it must follow the same source of truth as placement. An idle member who spilled
-  // onto a desk, or a stale member still carrying `activity: working`, gets a dark screen like any empty desk.
-  const working = node?.posture === 'working';
+  // A lit screen full of scrolling code is the strongest "this seat is working" signal in the room, so
+  // it follows `workingAtDesk` — posture (never `activity`, which lags) AND a body in this chair. An
+  // idle member who spilled onto a desk, a stale member still carrying `activity: working`, and a
+  // working member still walking in from the door all get a dark screen, like any empty desk.
+  const working = atWork;
   const mood = node ? deskMoodStyle(deskMoodFor(teamName, node.name)) : null;
   // Owned empty desk (presence-honesty §4): the offline owner keeps the desk — chair in, monitor
   // dark, their name baked on a small plate. The lamp is off (nobody switched it on), a warm screen
@@ -3753,6 +3773,12 @@ function drawWorkstation(
       ctx.stroke();
     });
   at(Df / 2 - 12, 0, (ix, iy) => monitor(ctx, fit, ix, iy, dir, working, up, id, t));
+  // The dock, beside and behind the monitor on every desk — not a hashed personality prop and not
+  // owner-dependent: the cradle is always there, and the laptop in it is there exactly when its owner
+  // is working AND sitting at it. An empty dock on a desk with a body at it is honest, not a gap —
+  // that member is not working, and the room says so in three places at once (dark screen, empty
+  // dock, laptop in their lap).
+  at(DOCK_ALONG, dockAcross(dir), (ix, iy) => deskDock(ctx, fit, ix, iy, dir, up, atWork));
   at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
   // The desk lamp is work gear, not a hashed personality prop: every OCCUPIED desk has one (the
@@ -3822,10 +3848,20 @@ function benchStation(
   slot: DeskSlot,
   node: OfficeNode | null,
   t: number,
+  /** Owner working AND sitting here — see the note on `drawWorkstation`'s parameter of the same name. */
+  atWork = false,
 ): void {
-  const working = node?.posture === 'working';
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(slot.id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
-  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, working, DESK_UP, slot.id, t);
+  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, atWork, DESK_UP, slot.id, t);
+  // A bench seat is a workstation like any other, so it docks like one — same cradle, same rule. The
+  // bench faces N, so the across term subtracts at −DOCK_ACROSS (see the note on the constant).
+  {
+    const f = FWD[slot.dir];
+    const c = dockAcross(slot.dir);
+    const dx = slot.lx + f[0] * DOCK_ALONG - f[1] * c;
+    const dy = slot.ly + f[1] * DOCK_ALONG + f[0] * c;
+    deskDock(ctx, fit, dx, dy, slot.dir, DESK_UP, atWork);
+  }
   deskKeyboard(ctx, fit, slot.lx, slot.ly - KEYBOARD_ALONG, true, DESK_UP, kbShoulder);
 }
 
@@ -4100,13 +4136,21 @@ export function renderScene(
     if (sipping) hidden.push('coffee');
     if (name && fx?.bottleCarriers.has(name)) hidden.push('water');
     const hide = hidden.length ? new Set<PropKind>(hidden) : undefined;
+    // The desk comes to life only once its owner has actually walked over and sat down — screen,
+    // dock and the room's typing all off this one fact (`workingAtDesk`). Same `sit > 0.9` the chair
+    // pieces use two blocks below, so it lands on the frame the body settles into the chair, not the
+    // frame the roster changed.
+    const seatedWorking = workingAtDesk(node ?? undefined, ownerPose?.sit);
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
-      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t) });
+      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
     } else {
       if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
-      items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn) });
+      items.push({
+        d: depth(slot.lx, slot.ly),
+        fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
+      });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between

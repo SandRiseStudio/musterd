@@ -30,7 +30,7 @@ import { fitFloor, project, type Fit, type Pt } from './iso';
 import { CHAIR_OFF, COFFEE_STAND, DESK_SLOTS, ENTRANCE, FWD, LEISURE_SPOTS , RECEPTIONIST } from './layout';
 import { computeLightEnv, type LightEnv } from './lighting';
 import { isWithinWorkingHours } from './workingHours';
-import { assignSeats, audiblyWorking, type Placement } from './seating';
+import { assignSeats, workingAtDesk, type Placement } from './seating';
 import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type Caption, type CaptionRail } from '../captions';
 import { createWelcome, stepWelcome } from './welcome';
 import {
@@ -1282,7 +1282,12 @@ export function mountOffice(
     // (E2 spec §2's park invariant): keyed on activity while the renderer keyed on posture, a
     // posture-working seat with stale activity froze mid-typing on the park frame — and the sound
     // layer would have kept typing after the room visually idled.
-    for (const n of actors.nodes().values()) if (audiblyWorking(n)) return true;
+    //
+    // It now reads the pose too (`workingAtDesk`), because a desk is only alive once its owner has
+    // sat down at it. A member still walking in keeps the loop running on their walk, and their sit
+    // blend is itself reported as motion, so the loop cannot park between "seated" and `sit > 0.9`.
+    const poses = actors.poses();
+    for (const n of actors.nodes().values()) if (workingAtDesk(n, poses.get(n.name)?.sit)) return true;
     return false;
   }
 
@@ -1414,9 +1419,12 @@ export function mountOffice(
     };
     // Group present members by shared zone: a pod (desk slots), a leisure zone, or the nook.
     const zones = new Map<string, { lx: number; ly: number }[]>();
-    // Desks that may type, tap and creak (E2 spec §2/§3) — collected by `audiblyWorking` (posture,
-    // never activity) so the ears agree with the typing the eyes see. Forced empty on the park
-    // frame: the parked room is exactly the room that should be quiet.
+    const actorPoses = actors.poses(); // read once — `working[]` below needs each member's sit blend
+    // Desks that may type, tap and creak (E2 spec §2/§3) — collected by `workingAtDesk`, so the ears
+    // agree with the typing the eyes see: posture (never activity, which lags) AND a body that has
+    // sat down in that chair. The room used to type from the desk of a member who was still walking
+    // toward it (nick, 2026-09-04). Forced empty on the park frame: the parked room is exactly the
+    // room that should be quiet.
     const working: { x: number; seed: number }[] = [];
     let present = 0;
     for (const [name, pl] of placements) {
@@ -1432,7 +1440,7 @@ export function mountOffice(
           // sitters are exactly the "near each other" pair the room tone listens for.
           zone = slot.kind === 'pod' ? `pod-${slot.pod}` : slot.kind;
           at = { lx: slot.lx, ly: slot.ly };
-          if (!parked && audiblyWorking(node)) {
+          if (!parked && workingAtDesk(node, actorPoses.get(name)?.sit)) {
             working.push({ x: toX(slot.lx, slot.ly), seed: audioSeed(name) });
           }
         }

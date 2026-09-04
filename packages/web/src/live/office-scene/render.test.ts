@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
 import { fitFloor, project } from './iso';
-import { DESK_SLOTS, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { DESK_SLOTS, DESK_W, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -13,14 +13,19 @@ import {
   CLOCK_NUMERALS,
   coffeeAnchor,
   contactPool,
+  deskPropSort,
+  DOCK_HALF_ACROSS,
+  dockAcross,
   drawCue,
   drawDog,
   glassColor,
   MACHINE_H,
+  MONITOR_ALONG,
   packShelf,
   pawCycle,
   renderScene,
   shelfRnd,
+  WIDEST_PANEL_HALF,
 } from './render';
 import { assignSeats } from './seating';
 import type { OfficeNode, Pose } from './types';
@@ -836,5 +841,52 @@ describe('contact pool', () => {
     contactPool(spy, fit, 100, 100, 40, 40, 30);
     expect(ys).toHaveLength(2);
     expect(ys[1]!).toBeLessThan(ys[0]!); // higher base → higher on screen
+  });
+});
+
+/**
+ * "The docked laptop must never block the view of the front of any monitor screen" (nick,
+ * 2026-09-04) — held here as geometry rather than as a look at two desks.
+ *
+ * It takes both halves. OUTBOARD alone is not enough, because a prop nearer the viewer can still
+ * paint over a panel it overlaps diagonally in the projection; BEHIND alone is not enough either,
+ * because a dock hidden behind the screen is not a dock anyone can see. The trap the second half
+ * exists for is real: `at()`'s across term is +1 on an N desk and −1 on a W one, so a single written
+ * across sorts behind the monitor on one camera-facing row and in FRONT of it on the other — a
+ * defect that looks fine on whichever row you happened to open.
+ */
+describe('the dock never covers a screen (laptop/dock design)', () => {
+  const FACINGS = ['N', 'S', 'E', 'W'] as const;
+
+  it('sorts behind the monitor at every facing, not just the row you looked at', () => {
+    for (const dir of FACINGS) {
+      const dock = deskPropSort(dir, 26, dockAcross(dir));
+      const mon = deskPropSort(dir, MONITOR_ALONG, 0);
+      expect(dock, `dock must paint before the monitor on a ${dir} desk`).toBeLessThan(mon);
+    }
+  });
+
+  it('sits mostly clear of the widest panel, so it reads as beside it and not tucked behind it', () => {
+    // The soft half of the requirement, and deliberately not "no overlap at all": a 20-wide dock
+    // cannot fit outboard of a dual's 35 on a 100-wide slab, and the desk edge is the harder limit.
+    // Behind (above) is what makes the screen safe; this only keeps the dock worth drawing.
+    for (const dir of FACINGS) {
+      const outer = Math.abs(dockAcross(dir)) + DOCK_HALF_ACROSS;
+      const clear = (outer - WIDEST_PANEL_HALF) / (DOCK_HALF_ACROSS * 2);
+      expect(clear, `dock is mostly hidden behind a panel on a ${dir} desk`).toBeGreaterThan(0.6);
+    }
+  });
+
+  it('stays on the desk — outboard is bounded by the slab, not just by the panel', () => {
+    for (const dir of FACINGS) {
+      expect(Math.abs(dockAcross(dir)) + DOCK_HALF_ACROSS).toBeLessThanOrEqual(DESK_W / 2);
+    }
+  });
+
+  it('a fixed across would have failed the first of these — the sign flip is the whole point', () => {
+    // The shape of the bug this replaced: one written constant, used at every facing.
+    const naive = -26;
+    const behind = FACINGS.filter((dir) => deskPropSort(dir, 18, naive) < deskPropSort(dir, MONITOR_ALONG, 0));
+    expect(behind.length).toBeLessThan(FACINGS.length); // it cannot be behind on all four
   });
 });

@@ -149,7 +149,8 @@
 
 /* A build landed. The paper warms toward the accent and lifts a glow, and the live dot goes from
    the red of "on air" to the mustard of "something just happened" — the same accent /live uses for
-   `now`. It is a beat, not a banner: `SHIPPED_MS` later this class is gone. */
+   `now`. It is a beat, not a banner: `SHIPPED_MS` later the whole element is gone, not just this
+   class — there is no resting notice for it to fall back to. */
 .bc__notice--shipped {
   --bc-flare: 1;
   --bc-live: var(--lc-accent);
@@ -175,8 +176,10 @@
 
    THE ACTUAL LEGIBILITY BUG, corrected. The first diagnosis here said the address was dark ink on a
    dark floor. It is not: the corner sits outside the room's diamond, over `.bc__stage`'s own
-   gradient, and the composited backdrop measures rgb(180,171,162) — #2b1f13 on that is 7.1:1, which
-   passes AA twice over, at every hour (the stage gradient does not follow the room's light).
+   gradient, which does not follow the room's light — measured at the corner it composites to
+   rgb(224,213,198), and dark ink on that passes AA several times over at every hour. (An earlier
+   note here recorded rgb(180,171,162) from a different sample point on the same gradient; measure at
+   the element, not once for the stage.)
 
    It was the SIZE, which is what nick guessed first. The stage is 1920 wide and the stream encodes
    at 720p, so 12.5px arrives as ~8.3px — and Space Mono's `@` closes into its neighbours well
@@ -187,22 +190,34 @@
   color: var(--lc-paper-ink, #2b1f13);
   font-family: var(--font-mono);
   font-size: 15px;
-  font-weight: 600;
+  /* MUTED BY WEIGHT, NOT BY ALPHA (nick, 2026-09-04: "make the revive@musterd.io line more muted
+     like we had originally"). The obvious lever is the wrong one here. This ink falls THROUGH AA on
+     the way down, and NOTHING CHECKS IT: `/broadcast` reports "0 measured" in `pnpm a11y:check`,
+     because the corner sits over a gradient the ancestor walk cannot resolve and the pixel pass
+     finds no line box — `bc__contact` lands in that gate's SKIPPED list, not its passing one.
+     Measured by hand instead, on a composited frame of this build over the real stage: 7.16:1 at
+     0.82 (darkest ink pixel 74,62,50 against backdrop 224,213,198). Weight does the rest of the
+     muting, because weight costs no contrast. */
+  font-weight: 400;
+  opacity: 0.82;
   /* The `@` is the glyph that fails first: mono metrics give it no side bearing to spare, and this
      string is mostly consonants around it. Tracking buys the whole line, not just that character. */
   letter-spacing: 0.055em;
   white-space: nowrap;
-  opacity: 0.86;
 }
 
-/* The mark now carries the product's address (MusterdWord `domain`), so on the stream it is doing a
-   job a watermark cannot do at 45% — someone has to be able to READ it. /live keeps the watermark
-   weighting, where the address bar is a glance away and the mark is only a signature. */
+/* The mark goes back to the watermark's own quiet (nick, same note). #1300 lifted it to 0.72 on the
+   argument that it now carries the address and someone has to be able to READ it — true of the
+   address, but the mark is a signature on a frame that leaves the app, and at 0.72 in a corner that
+   also holds a paper chip it was competing with the room instead of stamping it. It is `aria-hidden`
+   decoration, so the alpha floor above does not apply. The SIZE bump stays: that was the 720p fix
+   (12.5px on a 1920 stage arrives as ~8.3px), and it is not what was loud. */
 .bc .lc-office__mark {
-  opacity: 0.72;
+  opacity: 0.5;
 }
 .bc .lc-office__mark-lockup {
   font-size: 15px;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 

@@ -135,8 +135,10 @@ export interface Pose {
   depthAt?: { lx: number; ly: number };
 }
 
-/** What a member can carry through a walk or a hold: the handoff box, or an errand's prop. */
-export type CarryKind = 'box' | 'plate' | 'bottle' | 'mug' | 'phone';
+/** What a member can carry through a walk or a hold: the handoff box, an errand's prop, or the
+ * member's own closed laptop — which is the default whenever it is not docked at their desk, and
+ * which an errand's carry outranks for the errand's duration (you set the laptop down to eat). */
+export type CarryKind = 'box' | 'plate' | 'bottle' | 'mug' | 'phone' | 'laptop';
 
 /** Motion intensity == notification tier (memory: travel-intensity == notification tiers). */
 export type Tier = 'ambient' | 'needs-attn' | 'urgent';

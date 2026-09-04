@@ -1029,3 +1029,92 @@ describe('ambient beats under an injected rng (E1 spec §2)', () => {
     expect(seatA).toEqual(seatB);
   });
 });
+
+describe('the laptop on the person (laptop/dock design §0)', () => {
+  /** An idle member: on the floor, not working — so their laptop is never in a dock. `active` is what
+   *  the composed posture calls idle-but-present (`memberPosture`), and it is what seating reads. */
+  function idle(name: string): OfficeNode {
+    return { ...node(name), activity: 'active', posture: 'active' };
+  }
+
+  it('a working member has empty hands — their laptop is docked at the desk they are sitting at', () => {
+    const { placements, byName } = world([node('Ada')]);
+    expect(homePoses(placements, byName).get('Ada')!.carry).toBeNull();
+  });
+
+  it('an idle member holds it — seated at a leisure spot, it is in their lap', () => {
+    const { placements, byName } = world([idle('Ada')]);
+    const pose = homePoses(placements, byName).get('Ada')!;
+    expect(placements.get('Ada')!.kind).toBe('leisure');
+    expect(pose.carry).toBe('laptop');
+  });
+
+  /** Walk `who` in from the door onto an empty floor, and return their pose one step in. */
+  function arriving(who: OfficeNode) {
+    const actors = createActors();
+    const empty = world([]);
+    actors.setHomes(empty.placements, empty.byName, true); // an empty floor, settled
+    const { placements, byName } = world([who]);
+    actors.setHomes(placements, byName, true); // …then they appear: a walk in from the door
+    actors.step(0.05);
+    return actors.poses().get(who.name)!;
+  }
+
+  it('the entrance walk carries it: an idle member arrives with it under their arm', () => {
+    const p = arriving(idle('Ada'));
+    expect(Math.hypot(p.lx - ENTRANCE.lx, p.ly - ENTRANCE.ly)).toBeLessThan(40); // still at the door
+    expect(p.carry).toBe('laptop');
+  });
+
+  it('so does a member who comes online ALREADY working — a walker is not at their desk', () => {
+    // The regression nick caught (2026-09-04): reading posture here meant someone who appeared as
+    // `working` walked in empty-handed, because the predicate said their laptop was already in a
+    // dock they had not reached yet. Crossing the floor is not being at your desk, whatever the
+    // roster says — so the walk carries it, and the dock stays empty until they sit (render side).
+    const p = arriving(node('Ada'));
+    expect(Math.hypot(p.lx - ENTRANCE.lx, p.ly - ENTRANCE.ly)).toBeLessThan(40);
+    expect(p.carry).toBe('laptop');
+  });
+
+  it('and they still have it mid-walk, not only at the door', () => {
+    const actors = createActors();
+    const empty = world([]);
+    actors.setHomes(empty.placements, empty.byName, true);
+    const { placements, byName } = world([node('Ada')]);
+    actors.setHomes(placements, byName, true);
+    let carried = 0;
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) {
+      actors.step(0.05);
+      if (actors.poses().get('Ada')!.carry === 'laptop') carried++;
+    }
+    expect(carried).toBeGreaterThan(5); // held for the crossing, not a single frame at the threshold
+    expect(actors.poses().get('Ada')!.carry).toBeNull(); // …and docked once they are home and working
+  });
+
+  it('an errand outranks the laptop for its duration, and the laptop is back when it ends', () => {
+    const { placements, byName } = world([idle('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.poses().get('Ada')!.carry).toBe('laptop'); // idle at home: on the person
+
+    expect(actors.errandWater('Ada')).toBe(true);
+    actors.step(0.1); // inside the pick-it-up hold
+    expect(actors.poses().get('Ada')!.carry).toBe('bottle'); // you put the laptop down to fill a bottle
+
+    let guard = 0;
+    while (actors.active() && guard++ < 2000) actors.step(0.05);
+    expect(actors.poses().get('Ada')!.carry).toBe('laptop'); // and it is back on the arm afterwards
+  });
+
+  it('posture is read live: a member who stops working picks their laptop up without a reseat', () => {
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    expect(actors.poses().get('Ada')!.carry).toBeNull();
+    // Same placements object — only the roster node changed. `homes` would not rebuild on its own,
+    // which is exactly why the carry is derived per frame rather than baked into the home pose.
+    actors.setHomes(placements, new Map([['Ada', idle('Ada')]]), true);
+    expect(actors.poses().get('Ada')!.carry).toBe('laptop');
+  });
+});
