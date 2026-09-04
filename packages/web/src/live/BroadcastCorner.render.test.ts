@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { reloadedForBuild } from './buildSync';
+import { consumeShipped, reloadedForBuild } from './buildSync';
 import { broadcastCorner, WORKSHOP_NOTICE } from '../routes/broadcast';
 
 /**
@@ -47,10 +47,13 @@ describe('broadcastCorner', () => {
 });
 
 /**
- * The signal the beat rests on. `setReloadedFor` stamps the SERVED id immediately before reloading,
+ * The signal the beat rests on. The reload path stamps the SERVED id immediately before reloading,
  * and after that reload the page's own baked id is that same id — so equality means "this bundle
  * arrived by build-sync, moments ago" and nothing else. The three false cases are the ones that
  * would otherwise let the office claim a deploy that never happened.
+ *
+ * Equality is only half of it, and the half that is PERMANENT: `consumeShipped` below carries the
+ * other half, that the marker is spent by the single navigation it describes.
  */
 describe('reloadedForBuild', () => {
   it('is true only when the stamp names the build now running', () => {
@@ -65,5 +68,47 @@ describe('reloadedForBuild', () => {
   it('is false with no baked build id at all — dev and tests never claim a ship', () => {
     expect(reloadedForBuild(null, 'b2')).toBe(false);
     expect(reloadedForBuild(null, null)).toBe(false);
+  });
+});
+
+/**
+ * The beat is a claim about ONE navigation, so the marker behind it gets spent by that navigation.
+ * The sequence in the first case is the defect this exists to pin: after build-sync reloads a tab
+ * onto b2, an ordinary ⌘R in that same tab is not a deploy and there was no blink to name.
+ */
+describe('consumeShipped', () => {
+  /** A session-storage stand-in: one slot, read and cleared like the real one. */
+  function marker(initial: string | null) {
+    let slot = initial;
+    return {
+      read: () => slot,
+      clear: () => {
+        slot = null;
+      },
+      get value() {
+        return slot;
+      },
+    };
+  }
+
+  it('claims the ship once, then never again in that tab — an ordinary reload is silent', () => {
+    const m = marker('b2');
+    expect(consumeShipped('b2', m)).toBe(true); // the build-sync reload itself
+    expect(m.value).toBe(null);
+    expect(consumeShipped('b2', m)).toBe(false); // a manual ⌘R afterwards: same build, no marker
+  });
+
+  it('is silent on an ordinary pageview that no build landed into', () => {
+    expect(consumeShipped('b2', marker(null))).toBe(false);
+  });
+
+  it('spends a stamp it rejects, so a stale marker cannot mislead a later load', () => {
+    const m = marker('b1'); // written before a build that then arrived some other way
+    expect(consumeShipped('b2', m)).toBe(false);
+    expect(m.value).toBe(null);
+  });
+
+  it('never claims a ship without a baked build id (dev, tests, prerender)', () => {
+    expect(consumeShipped(null, marker('b2'))).toBe(false);
   });
 });

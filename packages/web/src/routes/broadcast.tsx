@@ -127,9 +127,11 @@ export function broadcastCorner(team: string | null, shipped = false) {
 }
 
 /**
- * The corner's one piece of state: whether a build landed into this pageview. Read once on mount
- * (the fact is about how the page got here, so it cannot become true later) and cleared after the
- * beat. Never true in dev or under test — there is no baked build id there, and no publisher.
+ * The corner's one piece of state: whether a build landed into this pageview. The fact is about how
+ * the page got here, so it cannot become true later — `justShipped()` is decided once for the whole
+ * pageview and the marker behind it is already spent, which is why a plain reload of this tab later
+ * shows the resting mark. All this hook adds is the beat's length. Never true in dev or under test —
+ * there is no baked build id there, and no publisher.
  */
 export function useJustShipped(): boolean {
   const [shipped, setShipped] = useState(false);
