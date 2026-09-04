@@ -1,6 +1,6 @@
 # 095 — Return-immediately `team_join`: a `wait` control for the claim block
 
-- Status: proposed
+- Status: accepted — 2026-09-03 (increment 1 landed; premise re-measured and confirmed, see Context)
 - Date: 2026-07-06
 - Builds on: ADR 077 (claim handshake + request lane), ADR 087 (seat resume ≠ claim — the blocking call), ADR 088 (the interrupt line)
 - Refines: ADR 087 Fix D
@@ -60,6 +60,34 @@ Two pieces are **not** free, and the plan treats them as the real work:
    approve the daemon must also write an **interrupt-class directed act** to the seat, so the released
    agent is told at its next tool boundary rather than having to re-poll `team_join`.
 
+### Measured 2026-09-03 — the premise held, and the default is worse than this ADR assumed
+
+Two months of silence is not evidence either way, so the premise was re-measured before building
+(lane 01M1MMKYMN, ryder's orphaned-artifact sweep). Read from this daemon's `requests` joined to the
+`request.decide` audit rows — every claim request ever opened, 2026-07-03 to 2026-08-21:
+
+| | claim requests from an MCP surface |
+| --- | --- |
+| opened | 33 |
+| decided **within** the 120s budget | 5 |
+| decided **later** than 120s | 18 |
+| never decided at all (expired) | 10 |
+
+So **28 of 33** MCP claims could not be satisfied inside the block this ADR was written to make
+optional. Median approval latency is ~150s; the longest was 52 minutes. The absent-admin case this
+ADR treated as the edge is the ordinary case: a 120s block is, in practice, two minutes of a seat's
+turn spent to learn nothing 85% of the time.
+
+That sharpens the decision rather than changing it. The knob is still the right shape — an
+interactive claim with a human at the keyboard is exactly the 5 — but the honest default is now a
+documented compromise rather than a wait that usually works. Falsify: re-run the join in
+`docs/wiki/claim-approval-latency.md`; the claim fails if a fresh window shows most MCP claims
+decided inside 120s.
+
+One thing the measurement does NOT license: dropping the default to zero. The 5 in-budget approvals
+are the interactive path this ADR promised not to disturb, and a seat that returns pending without a
+human noticing is worse for them, not better.
+
 ## Problem
 
 Let an autonomous agent claim a fresh, approval-gated seat **without surrendering its turn** to a human
@@ -118,6 +146,24 @@ poll-on-next-`team_join` — strictly better than a 120s hard park for an autono
 
 - Autonomous/headless agents stop losing up to 120s per fresh claim; interactive agents keep the
   one-call-and-seated spinner (default unchanged). The knob, not the default, moves.
+- **Increment 1 landed 2026-09-03** (lane 01M1MMKYMN): the `wait` control on `team_join`, and the
+  return-on-pending keep-parking `join()` mode it needs. `wait` omitted or `true` is byte-for-byte
+  the old 120s block; `0`/`false` returns the request id at once with the socket still parked, so a
+  later approval occupies in the background; `<seconds>` generalises the constant. Decisions 2 and 3
+  are not built, and each is named below rather than left implied.
+- Decision 2 (a `claim_wait` default in `binding.json`) is not built. An explicit argument covers
+  every caller that wants it today, and a folder-level default is only worth its schema change once
+  more than one seat is provisioned autonomous.
+  Follows-up: deferred — the second autonomous seat provisioned that wants a non-blocking claim by default (2026-09-03)
+- Decision 3 (an interrupt-class act on approve) is not built, so a released caller still learns it
+  is seated at its next `team_join` rather than at its next tool boundary. This is the half that
+  turns "returned immediately" into "productive while waiting", and the measurement above makes it
+  the more valuable half — 18 of 33 approvals landed after the caller had already been released.
+  Follows-up: deferred — the first autonomous seat that uses `wait: 0` in anger and has to poll (2026-09-03)
+- The CLI `--wait` symmetry is not built either: `musterd claim --timeout` already bounds the block,
+  and the CLI caller is a human who can interrupt. 33 of the 38 measured requests came from an MCP
+  surface, which is where the control was put.
+  Follows-up: none — the CLI block is already parameterised and its caller can interrupt it (2026-09-03)
 - The change is small and mostly plumbing on existing machinery: a return-on-pending `join()` mode, a
   `wait` arg on `team_join`/`claim`, a wait default carried in the binding, and an interrupt-class act
   emitted on approve. Background occupy, stable code, request-collapse, and the `interrupt-check` hook
@@ -136,6 +182,8 @@ poll-on-next-`team_join` — strictly better than a 120s hard park for an autono
 `musterd.seat.claim_wait_ms` (histogram) to see how long callers actually block — if interactive claims
 resolve in seconds, the 120s default is mostly a floor for the absent-admin case, which is the case
 non-blocking removes.
+
+**Eval (increment 1, 2026-09-03)** — the falsifiers that shipped are `mcp.test.ts` ("a wait:0 join returns pending at once, stays parked, and occupies when the approval lands" and "repeated wait:0 joins reuse the one open request") plus `tools/join.wait.test.ts` on the resolver. The treadmill target below is the one that had to be pinned, and is: one request per seat under repeated non-blocking claims.
 
 **Eval** — the eval this ADR moves: **turn-time lost to a fresh claim** for an autonomous seat (target:
 →0 with `wait: 0`; baseline is up to 120s) and **duplicate requests per seat under a non-blocking retry

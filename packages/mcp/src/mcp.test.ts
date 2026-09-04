@@ -195,6 +195,49 @@ describe('MCP adapter', () => {
     client.close();
   }, 10_000);
 
+  // ADR 095: `wait: 0` returns the pending handle immediately and KEEPS the socket parked, so a
+  // later approval still occupies in the background. This is the mode the launch-autojoin path could
+  // not provide — it closes the socket and gives up (the test above pins that it still does).
+  it('a wait:0 join returns pending at once, stays parked, and occupies when the approval lands', async () => {
+    const client = new MusterdClient({ ...adaConfig(), grant: undefined });
+    const started = Date.now();
+    const outcome = await client.join(0, { parkOnPending: true });
+    expect(outcome).toBe('pending');
+    // Returned on the pending frame, not after any wait budget.
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect(client.joined).toBe(false);
+    const requestId = client.awaitingRequestId;
+    expect(requestId).toBeTruthy();
+
+    // The socket is still parked: approving now occupies in the background with no second join call.
+    await api(
+      'POST',
+      `/teams/dawn/requests/${requestId}/decide`,
+      { decision: 'approve', lifetime: 'ttl', ttl_hours: 24 },
+      tokens['nick'],
+    );
+    for (let i = 0; i < 50 && !client.joined; i++) await delay(50);
+    expect(client.joined).toBe(true);
+    expect(client.member).toBe('Ada');
+    client.close();
+  }, 10_000);
+
+  // The treadmill ADR 087 closed must stay closed: the server collapses one claim request per seat,
+  // so an eager non-blocking caller cannot spam an admin with duplicates.
+  it('repeated wait:0 joins reuse the one open request rather than opening another', async () => {
+    const client = new MusterdClient({ ...adaConfig(), grant: undefined });
+    expect(await client.join(0, { parkOnPending: true })).toBe('pending');
+    const first = client.awaitingRequestId;
+    client.close();
+
+    const again = new MusterdClient({ ...adaConfig(), grant: undefined });
+    expect(await again.join(0, { parkOnPending: true })).toBe('pending');
+    expect(again.awaitingRequestId).toBe(first);
+    const open = await api('GET', '/teams/dawn/requests?status=pending', undefined, tokens['nick']);
+    expect(open.json.requests).toHaveLength(1);
+    again.close();
+  }, 10_000);
+
   it('a second session for the same member takes over; the first is superseded (ADR 017)', async () => {
     const a1 = new MusterdClient(adaConfig());
     // A cross-workspace takeover must NOT trigger the self-exit (ADR 092): it's a genuinely different
