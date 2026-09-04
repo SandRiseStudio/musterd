@@ -1,4 +1,5 @@
 import type {
+  ActDelivery,
   WakeabilityFacts,
   Envelope,
   LoopEdge,
@@ -1000,6 +1001,22 @@ function dueCandidates(
   teamSlug: string,
   member: MemberRow,
   lanes: { immediate: boolean; batched: boolean; raisedDeferralWakes: boolean },
+  /**
+   * The team's open directed ledger, computed ONCE for the whole poll — as a THUNK, so a team where
+   * no seat reaches the batched lane pays nothing at all.
+   *
+   * It used to be read here, which meant `openDirectedLedger(db, member.team_id)` — a TEAM-scoped
+   * query whose answer is identical for every seat in the poll — ran once per enrolled seat. It is
+   * three correlated `NOT EXISTS` subqueries over the whole `messages` table on unindexed
+   * `json_extract`, unbounded, and then `actDeliveryOf` per returned row, which queries again per
+   * row and per recipient. Measured 2026-09-04 by big-body on the wedged daemon: a 3-second stack
+   * sample spent 2,406 of 2,407 samples inside synchronous `sqlite3_step` while `/health` timed out
+   * and the process stayed alive.
+   *
+   * Passed in rather than memoised behind a module-level cache on purpose: the lifetime that is
+   * correct here is exactly one poll transaction, and a parameter cannot outlive it or go stale.
+   */
+  ledger: () => ActDelivery[],
 ): WakeCandidate[] {
   const immediate: WakeCandidate[] = [];
   const batched: WakeCandidate[] = [];
@@ -1052,7 +1069,7 @@ function dueCandidates(
   }
 
   if (lanes.batched) {
-    for (const delivery of openDirectedLedger(db, member.team_id)) {
+    for (const delivery of ledger()) {
       if (seen.has(delivery.id)) continue;
       const mine = delivery.recipients.find((r) => r.seat === member.name);
       if (!mine || mine.state === 'answered') continue;
@@ -1074,6 +1091,12 @@ function dueCandidates(
   // The fold reads the party-scoped team timeline, not the inbox: `listInbox` excludes the member's
   // own sends and a deferring `wait` IS the member's own send.
   const due = [...immediate, ...batched];
+  // Nothing is due, so there is nothing to suppress — and the only use of the scan below is
+  // `due.flatMap`, which returns [] over an empty array whatever the deferrals say. Before this the
+  // 2,000-row window was marshalled per seat per poll to filter a list that was already empty: the
+  // common case at idle, and pure cost. An earlier fix narrowed the HYDRATION of this window (see
+  // the note below) but left the query itself running unconditionally.
+  if (due.length === 0) return due;
   const window = listTeamMessages(db, member.team_id, {
     forMemberId: member.id,
     limit: DEFERRAL_SCAN_LIMIT,
@@ -1160,6 +1183,11 @@ export function claimWakeLeases(
     const reclaimable = listReclaimableMemberIds(db, teamId, now);
     const enrollments = listResidency(db, teamId).filter((r) => r.host === host);
     const teamPolicy = getPolicy(db, teamId);
+    // One ledger read for the whole poll, and only if some seat actually reaches the batched lane —
+    // a team where every enrolled seat is on the interrupt lane, or is inside its cooldown, pays
+    // nothing. Lazy rather than eager for exactly that case; memoised for exactly this transaction.
+    let ledgerMemo: ActDelivery[] | null = null;
+    const teamLedger = (): ActDelivery[] => (ledgerMemo ??= openDirectedLedger(db, teamId));
     const teamDefaults = teamPolicy.residency;
     const reviewLoopOn = teamPolicy.loops?.review === true;
     const dispatchLoopOn = teamPolicy.loops?.dispatch === true;
@@ -1176,11 +1204,17 @@ export function claimWakeLeases(
       if (wakesSince(db, teamId, member.name, now - 3_600_000) >= policy.hourly_cap) continue;
 
       const cooled = wakesSince(db, teamId, member.name, now - policy.cooldown_ms) === 0;
-      const candidates = dueCandidates(db, teamSlug, member, {
-        immediate: policy.lane !== 'batched',
-        batched: cooled && policy.lane !== 'interrupt',
-        raisedDeferralWakes: policy.raised_deferral_wakes,
-      });
+      const candidates = dueCandidates(
+        db,
+        teamSlug,
+        member,
+        {
+          immediate: policy.lane !== 'batched',
+          batched: cooled && policy.lane !== 'interrupt',
+          raisedDeferralWakes: policy.raised_deferral_wakes,
+        },
+        teamLedger,
+      );
       // ADR 199: dispatch work-orders (continuation then handoff — handoff unshifted last so it
       // leads). ADR 191: review work-orders prefer ahead of both + inbox.
       if (dispatchLoopOn && policy.flow === 'auto' && cooled) {

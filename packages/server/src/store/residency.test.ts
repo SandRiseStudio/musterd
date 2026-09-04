@@ -541,6 +541,93 @@ describe('claimWakeLeases — a deferred act is not a wake reason (ADR 211 §4)'
   });
 });
 
+describe('claimWakeLeases — the poll costs what is due, not seats x window (big-body 2026-09-04)', () => {
+  /**
+   * The daemon wedged ALIVE: the process was up, `/health` timed out, and a 3-second stack sample
+   * spent 2,406 of 2,407 samples inside synchronous `sqlite3_step` (big-body, 2026-09-04). Two
+   * shapes in this poll made cost scale with (enrolled seats x the whole log) instead of with what
+   * was actually due.
+   *
+   * Counted as STATEMENTS, never as wall time: a timing assertion on a shared laptop is a flake
+   * generator, and the defect is a count — the same team-scoped query issued once per seat, and a
+   * 2,000-row read issued for a seat with nothing to filter.
+   */
+  function countingDb(db: Database) {
+    const seen: string[] = [];
+    const realPrepare = db.prepare.bind(db);
+    (db as unknown as { prepare: unknown }).prepare = (sql: string) => {
+      seen.push(sql.replace(/\s+/g, ' ').trim());
+      return realPrepare(sql);
+    };
+    return seen;
+  }
+  const ledgerReads = (sql: string[]) =>
+    sql.filter((q) => q.includes("m.act IN ('request_help','handoff')")).length;
+  const windowReads = (sql: string[]) =>
+    sql.filter((q) => q.includes('FROM messages') && q.includes('LIMIT')).length;
+
+  /** Three enrolled seats on one host, all reaching the batched lane, with one open directed act. */
+  function threeSeats() {
+    const s = seed();
+    const cid = addMember(s.db, s.team, { name: 'cid', kind: 'agent' }).row;
+    enroll(s.db, s.team, s.ada);
+    enroll(s.db, s.team, s.bob);
+    enroll(s.db, s.team, cid);
+    msg(s.db, s.team, s.nick, s.ada, 'request_help', 'rh1', 1_000);
+    return s;
+  }
+
+  it('reads the open directed ledger ONCE for the whole poll, not once per enrolled seat', () => {
+    const { db, team } = threeSeats();
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(ledgerReads(sql)).toBe(1);
+  });
+
+  // The ledger is unbounded and correlated; a team where nobody reaches the batched lane should not
+  // pay for it at all. Lazy, not merely hoisted — an eagerly-evaluated argument read it anyway, and
+  // this case is what caught that.
+  it('does not read the ledger when no seat reaches the batched lane', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { lane: 'interrupt' });
+    msg(db, team, nick, ada, 'request_help', 'rh1', 1_000);
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(ledgerReads(sql)).toBe(0);
+  });
+
+  // The idle case, which is most of the time: nothing is due, so the deferral window filters an
+  // already-empty list. It was marshalling 2,000 rows per seat per poll to do it.
+  it('does not scan the deferral window for a seat with nothing due', () => {
+    const { db, team, ada } = seed();
+    enroll(db, team, ada);
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(windowReads(sql)).toBe(0);
+  });
+
+  // The control: when something IS due the scan must still happen, or the deferral suppression it
+  // exists for (ADR 211 §4) silently stops working.
+  it('still scans the window when something is due, so deferral suppression survives', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, ada, 'message', 'u1', 1_000, {
+      meta: { urgent: true, urgent_reason: 'wake me' },
+    });
+    const sql = countingDb(db);
+    claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(windowReads(sql)).toBeGreaterThan(0);
+  });
+
+  // Behaviour must be identical either way — this is a cost fix, not a semantics change.
+  it('derives the same wakes it always did', () => {
+    const { db, team } = threeSeats();
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders.map((o) => o.seat)).toEqual(['Ada']);
+    expect(orders[0]!.act_id).toBe('rh1');
+  });
+});
+
 describe('claimWakeLeases — raised deferrals as wake candidates (ADR 211 increment 2)', () => {
   /** Ada defers an urgent directed act until lane L1, then L1 moves. */
   function deferredThenRaised(policy?: Record<string, unknown>) {
