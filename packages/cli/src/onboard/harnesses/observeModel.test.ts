@@ -62,7 +62,9 @@ describe('observeModel — the even contract', () => {
   // that field as a measurement, not that the field stopped arriving.
   it('cursor observes nothing, even when the payload carries a model_id (ADR 382)', () => {
     expect(cursor.observeModel).toBeUndefined();
-    expect(cursor.observeModel?.({ model_id: 'gemini-3.8-flash', model: 'thinking-slug' })).toBeUndefined();
+    expect(
+      cursor.observeModel?.({ model_id: 'gemini-3.8-flash', model: 'thinking-slug' }),
+    ).toBeUndefined();
   });
 
   it('cursor still ignores transcript_path — Cursor JSONL has no message.model', () => {

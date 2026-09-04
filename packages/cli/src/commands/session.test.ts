@@ -614,7 +614,11 @@ describe('musterd session (capture)', () => {
         ...bindingOf({ model: 'kimi-k3' }),
         model_observed: { model: 'gemini-3.8-flash', harness: 'cursor', observed_at: Date.now() },
       });
-      await observeCursorSession({ session_id: 'conv-new', model_id: 'gemini-3.8-flash', cwd: wsA });
+      await observeCursorSession({
+        session_id: 'conv-new',
+        model_id: 'gemini-3.8-flash',
+        cwd: wsA,
+      });
       expect(readBinding(wsA).model_observed).toBeUndefined();
       expect(readBinding(wsA).model).toBe('kimi-k3');
     });
