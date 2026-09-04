@@ -1,5 +1,7 @@
 # OpenCode live-doorbell eval
 
+OpenCode live-doorbell evaluation: measuring interrupt reach, peer inject, and turn-continuation on 1.18.27 (lane `01M1MK8NGYXW2YJ95PYRW8XERY`).
+
 Same eval as the Grok live-doorbell (wanderer lane `01M1MC0M6M8RWV6RQFRPASNVQD`) and the
 Cursor-agent live-doorbell (schmidt lane `01M1MFD7PW9TM5JNHWW2J1PC9J`), for the OpenCode
 harness. Question: how do we get a doorbell into a LIVE OpenCode transcript in seconds

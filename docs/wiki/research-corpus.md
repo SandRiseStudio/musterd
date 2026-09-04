@@ -148,7 +148,7 @@ in that repo's config):
   framing rather than citable specifics: verify at the original source and cite that.
 
 Durability there is worse, not better: all of it plus 4.99 GB of audio sits in one Supabase project
-with no export script (goal `exploring-next-ops`). Its audio will not compress, so this page's
+with no export script (folded into goal `research-corpus`). Its audio will not compress, so this page's
 5.7 MB economics do not transfer.
 
 [^v42]: Measured at v41 on 2026-08-18. Migration 42 (`presence.model_source`, 2026-08-21) lands with [#975](https://github.com/SandRiseStudio/musterd/pull/975) — the dated measurement above stands; the live schema moves past it. See [model attestation](model-attestation.md).

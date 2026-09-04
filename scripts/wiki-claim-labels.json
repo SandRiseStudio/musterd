@@ -201,5 +201,8 @@
   "| Hook capture | Notification, PreToolUse gate, SessionStart/End. ~~PostToolUse interrupt (2026-09-02, ADR 352 assumed Claude-parity stdout injection)~~ MEASURED 2026-09-03 Grok 1.0.13: PostToolUse stdout and additionalContext JSON do not reach the model (falsify: a PostToolUse additionalContext canary appears in that session's `chat_history.jsonl`). Mid-loop injection is PreToolUse additionalContext; idle-at-turn-end is Stop `decision:block` (ADR 370; falsify: those canaries absent from `chat_history.jsonl` after `musterd init --refresh-hooks`). **No** ADR 167 observer (Grok has no peer-session tool). UserPromptSubmit additionalContext is discarded, so no repeating orient-nudge | same hook files if the harness runs them |": "defect",
   "## What Durable Streams is now (2026-09-03; falsify: re-read the linked sources)": "other",
   "that third machine pushed was then folded by nobody (2026-09-03 at `17706ff9`; falsify:": "defect",
-  "**the instrument has never been run** (2026-09-03; falsify: a non-empty `seen.json`, or any digest": "defect"
+  "**the instrument has never been run** (2026-09-03; falsify: a non-empty `seen.json`, or any digest": "defect",
+  "> Cursor provides no documented peer-injection API (2026-09-03; falsify: discover an MCP tool, CLI command, or local RPC endpoint that allows one Cursor session to push text into another active session's conversation).": "defect",
+  "> `postToolUse` stdout `additional_context` enters the model prompt; `afterShellExecution` stdout is dropped (2026-09-03; falsify: an `afterShellExecution` stdout injection witnessed inside model context).": "other",
+  "> Cursor's `stop` hook can block turn-completion and continue execution via `followup_message` under a `loop_limit` guard (2026-09-03; falsify: verify whether `stop` with `followup_message` fails to trigger a follow-up turn in interactive `cursor-agent`).": "other"
 }
