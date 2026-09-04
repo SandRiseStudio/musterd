@@ -112,3 +112,27 @@ describe('consumeShipped', () => {
     expect(consumeShipped(null, marker('b2'))).toBe(false);
   });
 });
+
+/**
+ * The copy of record says Team the way the brand says Team.
+ *
+ * brand.md §5 lists "room" in the Not column for Team, and the shipped string opened with "the
+ * people in this room" anyway (sloane, 2026-09-04). It survived to a public surface because the gate
+ * that enforces §5 cannot see it: `pnpm vocab:check` reads `docs/glossary/terms.ts`, whose banned
+ * set is profile / kit / template / worktree — the published table and the linted table are not the
+ * same table. Widening the global ban is the wrong repair (a huddle's `room` URL is a real field,
+ * and ADR 378 names it), so the constraint is pinned where it applies: the one string here a
+ * stranger might quote.
+ */
+describe('WORKSHOP_NOTICE.full — the copy of record', () => {
+  it('says Team, never "room"', () => {
+    expect(WORKSHOP_NOTICE.full).not.toMatch(/\brooms?\b/i);
+    expect(WORKSHOP_NOTICE.full).toMatch(/\bteam\b/i);
+  });
+
+  it('is sloane’s spec verbatim', () => {
+    expect(WORKSHOP_NOTICE.full).toBe(
+      'This team is building musterd while you watch. Every deploy can restart the stream for a moment, and it comes back on its own.',
+    );
+  });
+});
