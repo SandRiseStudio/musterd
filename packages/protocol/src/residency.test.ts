@@ -31,8 +31,20 @@ describe('ResidencyPolicySchema (ADR 131 inc 5) — the knobs, defaults in ONE p
       flow: 'manual',
       // ADR 214: a raised deferral is not a wake reason until a seat opts in.
       raised_deferral_wakes: false,
+      // ADR 386: the ONE knob here that ships ON. Every other rollout gate on this schema is dark
+      // at launch because it turns on a wake NOBODY asked for (a loop) or resurrects an act the
+      // Member put down (a raised deferral). A huddle open is a person naming this seat, the same
+      // class as a directed urgent act — and enrollment is already the opt-in that lets any of
+      // this reach a seat at all.
+      convene_huddles: true,
       work_timeout_ms: 30 * 60_000,
     });
+  });
+
+  it('ships huddle convening ON — the one default-on gate, and the ADR that owns it (386)', () => {
+    expect(ResidencyPolicySchema.parse({}).convene_huddles).toBe(true);
+    // A seat can refuse to be convened without leaving residency.
+    expect(ResidencyPolicySchema.parse({ convene_huddles: false }).convene_huddles).toBe(false);
   });
 
   it('ships exact-match resume OFF — ADR 210 enables it per cohort, never by default', () => {

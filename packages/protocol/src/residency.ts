@@ -85,6 +85,31 @@ export const ResidencyPolicySchema = z.object({
    * the queue their deferral took it out of.
    */
   raised_deferral_wakes: z.boolean().default(false),
+  /**
+   * ADR 378 increment 4: does OPENING a huddle wake the seats it NAMES?
+   *
+   * A huddle rings the bell for a live participant and, until this knob, did nothing at all for an
+   * offline one — so a huddle could not CONVENE anyone, only gather whoever was already at their
+   * desk. Measured 2026-09-04: 5 seats enrolled, and three of the six harness representatives whose
+   * doorbell work was in flight were not among them.
+   *
+   * ON by default, which is a deliberate break from the `raised_deferral_wakes` /
+   * `portable_inbox_replies` / `loops.*` convention of shipping dark. Those gate either a
+   * DAEMON-initiated wake (nobody asked for it) or the return of an act the Member already put
+   * down. This is neither: a huddle open is a person or an agent naming this seat and asking it to
+   * come. That is the same class as a directed urgent act, which has woken an enrolled seat since
+   * ADR 131 shipped — and enrollment is itself the opt-in, so "on by default" reaches only seats
+   * that already asked to be woken for interrupt-class acts, inside their existing caps.
+   *
+   * Bounded by construction, which is what makes it affordable: the ROOT act only (never a turn, so
+   * never per-turn), NAMED participants only (an eligible set or a directed root — a `@team` huddle
+   * is an invitation, not a summons, and would otherwise wake the whole roster), never the opener,
+   * and nothing at all once the huddle's `resolve` has landed. One paid wake per named seat per
+   * huddle, and the hourly cap, cooldown, attempt cap and wakeability gates all still apply on top.
+   *
+   * Set `false` per seat to refuse being convened, or on the team default to switch the class off.
+   */
+  convene_huddles: z.boolean().default(true),
   /** Watchdog for work-order wakes only (ADR 191 / 199) — a coding session, not a reply. Default
    *  30m. Work-orders do not clamp below this on the host (ADR 199); reply wakes still honor the
    *  operator `--timeout` ceiling. */

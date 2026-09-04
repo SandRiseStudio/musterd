@@ -628,6 +628,83 @@ describe('claimWakeLeases — the poll costs what is due, not seats x window (bi
   });
 });
 
+describe('claimWakeLeases — a huddle OPEN convenes the seats it names (ADR 378 inc 4)', () => {
+  const HUDDLE = {
+    huddle: {
+      topic: { kind: 'design', id: 'doorbells' },
+      room: 'http://127.0.0.1:4851/b/huddle-h1',
+      anchor: 'docs/wiki/huddles.md',
+    },
+  };
+
+  /**
+   * nick opens a huddle naming Ada (offline, enrolled) and bob — the case the lane was opened for.
+   * Two names because `meta.eligible` refuses a set of one: to reach a single seat you address it.
+   */
+  function openHuddleNaming(seat: string) {
+    const s = seed();
+    enroll(s.db, s.team, s.ada);
+    msg(s.db, s.team, s.nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: [seat, 'bob'] },
+    });
+    return s;
+  }
+
+  it('orders ONE immediate wake for a named offline seat', () => {
+    const { db, team } = openHuddleNaming('Ada');
+    const orders = claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS);
+    expect(orders).toHaveLength(1);
+    expect(orders[0]!.seat).toBe('Ada');
+    expect(orders[0]!.act_id).toBe('h1');
+    expect(orders[0]!.lane).toBe('immediate');
+  });
+
+  // The knob nick asked for, exercised where it actually gates rather than where it is declared.
+  it('orders nothing when the seat has convene_huddles off', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada, HOST, { convene_huddles: false });
+    msg(db, team, nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: ['Ada', 'bob'] },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('honours the same switch set as a TEAM default', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    setPolicy(db, team.id, { residency: { convene_huddles: false } });
+    msg(db, team, nick, null, 'message', 'h1', 1_000, {
+      meta: { ...HUDDLE, eligible: ['Ada', 'bob'] },
+    });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  // The cost property, on the real rail: turns are free. Without this the feature is a per-turn
+  // wake storm wearing an open's clothes.
+  it('does not pay a second wake for the turns that follow', () => {
+    const { db, team, nick, bob } = openHuddleNaming('Ada');
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(1);
+    settleWakeLease(db, team.id, 'Ada', { result: 'woke' });
+    msg(db, team, bob, null, 'message', 't1', 2_000, { thread: 'h1' });
+    msg(db, team, nick, null, 'message', 't2', 3_000, { thread: 'h1' });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  // The blast-radius control. A @team huddle must never bill every enrolled seat on the roster.
+  it('orders nothing for a @team huddle that names nobody', () => {
+    const { db, team, nick, ada } = seed();
+    enroll(db, team, ada);
+    msg(db, team, nick, null, 'message', 'h1', 1_000, { meta: HUDDLE });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+
+  it('orders nothing once the huddle is closed', () => {
+    const { db, team, nick } = openHuddleNaming('Ada');
+    msg(db, team, nick, null, 'resolve', 'c1', 2_000, { thread: 'h1' });
+    expect(claimWakeLeases(db, team.id, team.slug, HOST, PRESENCE_TIMEOUT_MS)).toHaveLength(0);
+  });
+});
+
 describe('claimWakeLeases — raised deferrals as wake candidates (ADR 211 increment 2)', () => {
   /** Ada defers an urgent directed act until lane L1, then L1 moves. */
   function deferredThenRaised(policy?: Record<string, unknown>) {

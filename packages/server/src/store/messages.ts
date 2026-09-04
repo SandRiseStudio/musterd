@@ -414,7 +414,7 @@ export function pendingInterrupts(
    *  gated on `loops.review` + `flow:auto` (ADR 191); admitting acceptance there would route a paid
    *  wake around its own policy gate. That the same predicate cannot serve both rails is precisely
    *  ADR 225's thesis — live and offline want different instruments — appearing in the code. */
-  opts: { obligations?: boolean; huddles?: boolean } = {},
+  opts: { obligations?: boolean; huddles?: boolean; huddleOpens?: boolean } = {},
 ): Envelope[] {
   const resolved = new Set<string>();
   // ADR 254: an eligible-set act is discharged by the FIRST accept/decline naming it — for every
@@ -481,6 +481,28 @@ export function pendingInterrupts(
     if (since === undefined) return false;
     return m.ts > since.ts || (m.ts === since.ts && m.id > since.id);
   };
+  /**
+   * ADR 378 increment 4 — the OPEN act, on the wake rail: a huddle convenes the seats it names.
+   *
+   * The mirror image of `huddles` above, and deliberately the narrower half. That flag admits every
+   * TURN and is live-rail only, because paying a wake per turn is the token storm ADR 378 exists to
+   * avoid. This one admits exactly the ROOT and is what the paid rail opts into: one act, once, per
+   * named seat per huddle. A turn is never a wake reason, so a busy room costs no more than a quiet
+   * one — the seat woken by the open reads the whole room when it arrives.
+   *
+   * NAMED means named: an eligible set that includes me, or a directed root addressed to me. A
+   * `@team` huddle is an open invitation and must never summon the roster — the same line the live
+   * rail draws, for a much more expensive reason. My own open is not a summons to myself, and a
+   * huddle whose `resolve` has landed summons nobody.
+   */
+  const isHuddleOpen = (m: Envelope) => {
+    if (opts.huddleOpens !== true) return false;
+    if ((m.meta as { huddle?: unknown } | null | undefined)?.['huddle'] == null) return false;
+    if (m.from === me) return false;
+    if (resolved.has(m.id)) return false;
+    const named = eligibleOf(m.meta as Record<string, unknown> | null | undefined);
+    return named ? named.includes(me) : m.to.kind === 'member' && m.to.name === me;
+  };
   // ADR 254: an eligible set REPLACES the default obligation rule rather than adding to it — which is
   // what narrows `request_help` from "every seat on the team" (its behaviour without a set, below) to
   // the named few. Discharge is checked here rather than at the filter so a stood-down act stops
@@ -490,6 +512,11 @@ export function pendingInterrupts(
     // A huddle turn is addressed to the room, not to me — the default rule below would reject it
     // before its class was ever considered. Being in the huddle IS the address (ADR 378).
     if (isHuddleTurn(m)) return true;
+    // An eligible-set huddle open would otherwise fall to the `names.includes(me)` rule below and be
+    // discharged by the first accept naming it — right for "any one of you answers", wrong for a
+    // room: a huddle names everyone it wants IN it, and one seat turning up does not stand the rest
+    // down. Answered above the discharge check for exactly that reason.
+    if (isHuddleOpen(m)) return true;
     const names = eligibleOf(m.meta as Record<string, unknown> | null | undefined);
     if (names) return names.includes(me) && !discharged.has(m.id);
     return m.act === 'request_help' || (m.to.kind === 'member' && m.to.name === me);
@@ -514,7 +541,11 @@ export function pendingInterrupts(
       (m) =>
         m.from !== me &&
         actionNeeded(m) &&
-        (isUrgent(m) || m.act === 'steer' || isObligation(m) || isHuddleTurn(m)) &&
+        (isUrgent(m) ||
+          m.act === 'steer' ||
+          isObligation(m) ||
+          isHuddleTurn(m) ||
+          isHuddleOpen(m)) &&
         !resolved.has(m.thread ?? m.id) &&
         // Newest steer wins: any steer that isn't the single winner is superseded — it neither
         // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).
