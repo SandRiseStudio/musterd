@@ -1,4 +1,4 @@
-# 383 — The presence kind never blocks the fold
+# 384 — The presence kind never blocks the fold
 
 - Status: accepted
 - Date: 2026-09-04

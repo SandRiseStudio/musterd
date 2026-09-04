@@ -462,7 +462,7 @@ describe('foldBatch — the presence kind', () => {
     db.close();
   });
 
-  // Until ADR 383 the reattest half of this stopped as `presence_unborn`. It cannot: the row it
+  // Until ADR 384 the reattest half of this stopped as `presence_unborn`. It cannot: the row it
   // waits for is one this daemon's own reaper takes during a long replay, so the wait never ends —
   // it wedged the first real joiner at hub_seq 9659 with hundreds of sessions queued behind it.
   // Both halves now advance, and neither invents a row from a partial fact.

@@ -283,7 +283,7 @@ describe('presence replication — every machine sees every seat', () => {
     });
   });
 
-  // ADR 383 rewrote this one: the reattest half no longer stops. The row it waited for is one the
+  // ADR 384 rewrote this one: the reattest half no longer stops. The row it waited for is one the
   // receiving daemon reaps itself during a long replay, so the wait never ended — and a stop that
   // cannot clear is a wedge, not a guard. The batch now advances and invents nothing.
   it('6. a reattested whose attach never folded advances with its audit row, and so does a detached', async () => {

@@ -888,7 +888,7 @@ export function foldBatch(
           stop = { kind: 'unknown_presence_event', action: e.action, hub_seq: event.hub_seq };
           return finish();
         }
-        // THE PRESENCE KIND NEVER BLOCKS THE FOLD (ADR 383, superseding ADR 382's narrower rule).
+        // THE PRESENCE KIND NEVER BLOCKS THE FOLD (ADR 384, superseding ADR 382's narrower rule).
         // Every other kind may stop, because every other kind decides something here: an inbox
         // counts a message, a board shows a lane. Presence on a peer paints no roster line and gates
         // no claim — ADR 325 keeps it local-only and replicates transitions only as a summary — so a
