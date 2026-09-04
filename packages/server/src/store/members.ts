@@ -189,7 +189,7 @@ export function addMember(
   if (lifecycle === 'until' && !input.lifecycleUntil) {
     throw new MusterdError('bad_request', 'lifecycle "until" requires a timestamp');
   }
-  const hue = resolveHue(db, team.id, input.hue, existing?.hue ?? null, existing?.id);
+  const hue = resolveHue(db, team.id, input.name, input.hue, existing?.hue ?? null, existing?.id);
   // A *tombstoned* row (soft-removed, `left_at` set) still squats the (team, name) UNIQUE index, so a
   // plain INSERT would dead-end on a constraint error with no CLI way out — the recurring "departed
   // name can't be reused" trap (ADR 065). Re-adding a removed name is a revive, not a new row: reuse
@@ -273,6 +273,7 @@ export function takenHues(db: Database, teamId: string, except?: string): number
 function resolveHue(
   db: Database,
   teamId: string,
+  name: string,
   asked: number | null | undefined,
   had: number | null,
   except?: string,
@@ -283,7 +284,10 @@ function resolveHue(
     return asked;
   }
   if (had !== null) return had;
-  return assignHue(defaultHue(nameForSeed(db, except) ?? ''), takenHues(db, teamId, except));
+  // The name comes from the caller, never from a row lookup: a NEW member has no row yet, and the
+  // first cut looked one up by id and seeded every fresh seat from `defaultHue('')` — one colour for
+  // everyone, walked apart by `assignHue` so nobody noticed until gptbot read it (#1258 acceptance).
+  return assignHue(defaultHue(name), takenHues(db, teamId, except));
 }
 
 /** Refuse a hue within `HUE_MIN_SEPARATION` of a live teammate's, naming them. */
@@ -302,12 +306,6 @@ export function assertHueClear(db: Database, teamId: string, hue: number, except
     'conflict',
     `hue ${hue} is within ${HUE_MIN_SEPARATION}° of "${who?.name ?? '?'}" (${near}) — pick another`,
   );
-}
-
-function nameForSeed(db: Database, id: string | undefined): string | undefined {
-  if (!id) return undefined;
-  return db.prepare<[string], { name: string }>('SELECT name FROM members WHERE id = ?').get(id)
-    ?.name;
 }
 
 /** Set a live member's hue in place (the DB-only `team hue` path; ADR 374). */

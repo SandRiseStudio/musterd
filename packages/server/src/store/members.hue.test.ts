@@ -1,4 +1,4 @@
-import { HUE_MIN_SEPARATION, hueSeparation } from '@musterd/protocol/hue';
+import { HUE_MIN_SEPARATION, defaultHue, hueSeparation } from '@musterd/protocol/hue';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { addMember, getMemberByName, leaveMember } from './members.js';
@@ -29,6 +29,16 @@ describe('addMember hue (ADR 374)', () => {
     for (let i = 0; i < hues.length; i++)
       for (let j = i + 1; j < hues.length; j++)
         expect(hueSeparation(hues[i]!, hues[j]!)).toBeGreaterThanOrEqual(HUE_MIN_SEPARATION);
+  });
+
+  /* gptbot's #1258 acceptance: the seed was looked up by row id, which a NEW member does not have
+     yet, so every fresh seat started from `defaultHue('')` and only `assignHue` walking them apart
+     hid it. The default is the NAME's (ADR 374 decision 4), and the first seat on an empty team
+     must land exactly on it — nothing to walk away from. */
+  it('a fresh seat seeds from its own name, not from an empty one', () => {
+    const { db, team } = seed();
+    expect(addMember(db, team, { name: 'miley', kind: 'agent' }).row.hue).toBe(defaultHue('miley'));
+    expect(defaultHue('miley')).not.toBe(defaultHue(''));
   });
 
   it('stores an explicit hue and carries it onto the wire', () => {
