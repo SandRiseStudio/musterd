@@ -3,16 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   parsePushedDigest,
   parseSecrets,
-  parseTailscaleSelf,
-  probeUpgradeHost,
   runChecks,
-  serveForwardsPort,
   occupiedMachines,
   startedMachines,
   type Check,
-  type Exec,
-  type ExecResult,
 } from './hosted.js';
+import { parseTailscaleSelf, probeUpgradeHost, serveForwardsPort } from '../integrations/tailscale.js';
+import type { Exec, ExecResult } from '../process.js';
 
 const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
 const fail = (stderr = ''): ExecResult => ({ code: 1, stdout: '', stderr });
