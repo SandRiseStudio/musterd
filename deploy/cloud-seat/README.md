@@ -18,8 +18,10 @@ Every step marked **hub** runs on the laptop, in a folder bound to `revive` as a
 | volume `/data`      | tailscale state, seat workspace (`agents-<seat>`), logs                  | yes               |
 
 Secrets arrive as Fly secrets and are never in the image, `fly.toml` or the repo. The machine
-receives only what the design allows: the tailnet key (single use), the seat name, the team agent
-key, one invite code, a GitHub token for the work repo, and one model credential.
+receives only what the design allows: the tailnet key (single use), the seat name, one invite code,
+a GitHub token for the work repo, and one model credential. It does **not** receive the hub's team
+agent key: that key is daemon-private (the wake endpoints check the bearer against the local team
+row), so the joiner mints its own at first boot and binds the seat with it.
 
 ## Create **$**
 
@@ -36,8 +38,6 @@ Mint the three one-time credentials, each on its own machine:
 # tag it if the tailnet uses ACL tags. Copy once.
 # hub: the invite (single use, 15 minutes — mint it right before `fly deploy`)
 musterd node invite --label "fly seat $SEAT"          # → msinv_…
-# hub: the team agent key the seat provisions with
-musterd team agent-key --show                         # → mskey_…
 # a GitHub fine-grained token: contents read/write + pull requests on SandRiseStudio/musterd
 # model credential: ANTHROPIC_API_KEY (metered) or `claude setup-token` on a Max account
 ```
@@ -46,8 +46,8 @@ musterd team agent-key --show                         # → mskey_…
 fly secrets set --app musterd-seat-$SEAT --stage \
   TAILSCALE_AUTHKEY=tskey-auth-… \
   MUSTERD_SEAT=$SEAT \
-  MUSTERD_AGENT_KEY=mskey_… \
   MUSTERD_INVITE=msinv_… \
+  ROSTER_REPO=SandRiseStudio/musterd-revive \
   GH_TOKEN=github_pat_… \
   CLAUDE_CODE_OAUTH_TOKEN=…        # or ANTHROPIC_API_KEY=…
 ```
@@ -63,11 +63,15 @@ fly logs --app musterd-seat-$SEAT
 ```
 
 The entrypoint logs one line per step: `tailnet up · nicks-laptop → 100.…`, `daemon up`,
-`enrolled at http://100.…:4849`, `wake actuator starting for seat <name>`. Then, on the **hub**:
+`enrolled at http://100.…:4849`, `wake actuator starting for seat <name>`. Then, on the **hub**,
+one step the VM cannot do for itself — `team create` on the joiner minted events as nick, and nick
+is bound to the hub's node (ADR 360), so until nick trusts the new node every push from it is
+refused `403 bound_elsewhere` and queues:
 
 ```sh
 musterd node list                    # the VM's row reads `enrolled`; the laptop's `local`
-sqlite3 ~/.musterd/musterd.db 'select count(*) from sync_log'   # grows as the joiner pushes
+musterd node trust <the VM's node id>   # as nick, from the laptop (ADR 358) — clears the wedge
+sqlite3 ~/.musterd/musterd.db "select count(*) from sync_log where origin_node='<node id>'"  # >0 within a tick
 ```
 
 ADR 376's landed-outcome check: on the VM, `sync_log` stays at 0 (a joiner stages nothing):
@@ -126,17 +130,21 @@ fly apps destroy musterd-seat-$SEAT --yes      # destroys the machine AND the vo
 
 Revoke the tailnet node in the Tailscale admin console and the GitHub token.
 
-## Known unknowns going into the first boot (P4 dry-run subjects)
+## What the first boot taught (2026-09-04, node `01M1NB5B7J`, delta)
 
-Each becomes either a fix with a test or a line in `docs/perf/cloud-seat.md`'s friction list:
+The full record is `docs/perf/cloud-seat.md`. The four that changed the script or the runbook:
 
-- **The roster has no remote.** ADR 058 says roster identity converges via git, but
-  `~/musterd/revive` on the laptop has no `origin`. Until it does, the VM's team is created bare
-  (`team create revive --as nick`) and members arrive only as the hub's events carry them —
-  whether that is enough for `musterd agent <seat>` to find the seat is the first thing to learn.
-- **`team create` on a joiner mints a second creator credential** — a different `nick` identity
-  on each daemon. The two-daemon tests do the same; whether the reconciler minds is unmeasured.
-- **The wake spawns `claude -p` with a model credential in env** — fine on a VM nobody shares;
-  the resume-capture path assumes a SessionStart hook the headless run may not fire.
-- **`fly deploy` rebuilds the image from the checkout each time** — a code change on main is a
-  redeploy, and the volume carries the identity across it. No `stream build`-style digest pin yet.
+- **The roster needs a remote.** The team home is now `SandRiseStudio/musterd-revive` (private);
+  the joiner clones it before `team create`, and `delta` was on the roster at first boot. The
+  design (ADR 058) held; the repo had simply never been pushed.
+- **The hub must trust the new node** (`musterd node trust`), or the joiner's pushes wedge on
+  ADR 360 — see §First boot. A one-line hub-side step, not a defect.
+- **The team agent key is daemon-private.** Delta's binding carried the hub's key, so the wake
+  actuator polled its own daemon into `401` on every tick. The joiner now mints its own key.
+- **`musterd agent --path` makes a bare folder, not a worktree.** Run inside the checkout with no
+  path flag and the seat gets a real worktree (`/data/musterd-<seat>`, branch `agent/<seat>`).
+
+Still open: residency enrollment does not replicate, so the hub roster shows the seat plain
+`offline` while the joiner shows `offline · wakeable`; the hub's `residency status` lists the
+laptop's five seats and not delta. The wake decision is the joiner's (its daemon derives the due
+acts from folded messages), so this is a roster-truth gap, not a wake gap.
