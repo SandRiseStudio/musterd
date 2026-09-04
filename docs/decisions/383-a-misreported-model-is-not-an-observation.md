@@ -1,4 +1,4 @@
-# 382 — A misreported model is not an observation: drop the probe, never invert the ladder
+# 383 — A misreported model is not an observation: drop the probe, never invert the ladder
 
 - Status: proposed
 - Date: 2026-09-04

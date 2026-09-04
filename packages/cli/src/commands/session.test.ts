@@ -589,7 +589,7 @@ describe('musterd session (capture)', () => {
     });
   });
 
-  describe('observeCursorSession (ADR 198, probe removed by ADR 382)', () => {
+  describe('observeCursorSession (ADR 198, probe removed by ADR 383)', () => {
     it('stamps harness:cursor and records NO observation, even when model_id is present', async () => {
       writeBinding(wsA, bindingOf({ model: 'grok-4.5' }));
       const got = await observeCursorSession({
@@ -598,7 +598,7 @@ describe('musterd session (capture)', () => {
         model: 'thinking-slug',
         cwd: wsA,
       });
-      // The field still arrives; musterd has stopped calling it a measurement (ADR 382).
+      // The field still arrives; musterd has stopped calling it a measurement (ADR 383).
       expect(got).toBeUndefined();
       const a = readBinding(wsA);
       expect(a.session).toMatchObject({ harness: 'cursor', id: 'conv-1' });
@@ -634,7 +634,7 @@ describe('musterd session (capture)', () => {
         model_id: 'cursor-grok-4.6-high',
         cwd: wsA,
       });
-      // The capture still replaces; only the model half went away with the probe (ADR 382).
+      // The capture still replaces; only the model half went away with the probe (ADR 383).
       expect(readBinding(wsA).session).toMatchObject({
         harness: 'cursor',
         id: '365e3420-cli',
@@ -663,7 +663,7 @@ describe('musterd session (capture)', () => {
     });
 
     it('the same conversation_id KEEPS an existing observation (never-erase within a session)', async () => {
-      // Cursor writes none of its own since ADR 382, but the never-erase branch still governs one
+      // Cursor writes none of its own since ADR 383, but the never-erase branch still governs one
       // that is already on the binding — seeded here rather than produced, which is the only
       // difference from what this pinned before.
       const now = Date.now();

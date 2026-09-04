@@ -236,7 +236,7 @@ export const cursor: Harness = {
     orientSkillPath: '.cursor/rules/musterd-orient.mdc',
   },
 
-  // NO `observeModel` — deliberately, since 2026-09-04 (ADR 382). ADR 198 read `model_id` off the
+  // NO `observeModel` — deliberately, since 2026-09-04 (ADR 383). ADR 198 read `model_id` off the
   // Agent hook's common schema, and that field does not track the session's model: measured on
   // cursor-agent 2026.09.02-c22c1a3, every hook event (sessionStart / postToolUse /
   // afterShellExecution) reported `gemini-3.8-flash` with a live generation_id while the session ran

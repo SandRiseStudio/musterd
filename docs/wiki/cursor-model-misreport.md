@@ -20,7 +20,7 @@ Falsify, or check whether it is fixed: run a cursor-agent session on a model you
 
 That is the general shape worth remembering: **a tripwire that compares two sources is blind when the corruption is in the source it trusts more.**
 
-## What changed (2026-09-04, ADR 382)
+## What changed (2026-09-04, ADR 383)
 
 Cursor declares no `observeModel` probe, and it left `PROBE_CAPABLE_SURFACES`. A Cursor seat now attests its declared model (`MUSTERD_MODEL` / `binding.model`), which is honest, and drift can fire again. The probe is a two-line restore when the field is fixed; the pin test in `probeCapability.test.ts` makes sure the list and the registry move together.
 

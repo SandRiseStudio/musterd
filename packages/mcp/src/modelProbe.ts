@@ -22,7 +22,7 @@ import type { ModelSource } from './config.js';
  * `observeModel` slot without adding its surface here fails the CLI suite.
  *
  * `cli`, `web`, `ios`, `slack`, `other` and `musterd` are absent because none has a probe to miss.
- * `cursor` was here until 2026-09-04 and is absent for a different reason (ADR 382): its probe was
+ * `cursor` was here until 2026-09-04 and is absent for a different reason (ADR 383): its probe was
  * removed because the field it read reports a model the session is not running, so there is no
  * longer an observation for a cursor seat to have missed and the warning would be nagging about a
  * probe that deliberately does not exist.
