@@ -22,6 +22,40 @@ For how the refresher actually works — the log, the debounce stamp, and the th
 
 Both are `kind = "service"` with `role = "platform"` and nothing else (2026-08-24; falsify: `cat .musterd/seats/guardian.toml`). The guardian's operating knowledge is on [platform guardian](platform-guardian.md) instead — which is where autorefresh's now is too. **A ledger seat's charter belongs on its wiki page, not in its roster file**, and the reason is the next section.
 
+## The census cannot see guardian or streamwatch
+
+The ADR 232 census (`musterd init --check`) runs two checks, and the second one is blind to two of
+the three ledger seats on this roster.
+
+*A LaunchAgent with no seat* is reported for any `studio.sandrise.musterd-*` label. That half works,
+and it is currently loud: **five unattributed actors** — `adr260-rerun`, `host`, `live`, `otel-sink`,
+`sweep` (2026-09-04, build 064db424; falsify: `musterd init --check | grep 'no service seat'`).
+
+*A seat whose LaunchAgent is gone* is reported only for the four labels ADR 232 named on 2026-08-12,
+because `census.ts` iterates a frozen literal rather than the roster:
+
+```ts
+const PLATFORM_SERVICE_LABELS = [AUTOREFRESH_LABEL, HOST_LABEL, LIVE_LABEL, SWEEP_LABEL]
+```
+
+`GUARDIAN_LABEL` and `STREAMWATCH_LABEL` shipped afterwards (`launchd.ts:58` and `:61`) and are not
+in it, so **guardian and streamwatch can lose their jobs in silence** (2026-09-04; falsify: add
+either constant to that array and a seat-with-no-job note appears for it). Guardian is the daemon
+watchdog — the thing that notices when the daemon dies — so nothing on this machine notices when the
+noticer stops. That is the "a wedged cron goes visibly quiet, monitoring nobody built" hole ADR 232
+was written to close, reopened by a list that could not grow with the roster.
+
+The general shape, which is the part worth carrying: **a check keyed to a literal degrades every
+time the population it describes grows.** The repair is to derive the set from the roster, not to
+append the two missing names — appending fixes these two and leaves the third to be found the same
+way. Lane 01M1Q9D90XEP9FPCYPQNBFH73Q.
+
+Related: increments 4 and 5 of ADR 232 were disposed on 2026-09-04 rather than left open — 4
+deferred until a team wants a seat for automation that is not musterd's own, 5 retracted because
+ADR 241's wake lease closed it better and, across 818 wakes on this machine, **no service has ever
+caused one** (581 agent, 5 human, 0 service; falsify: join `wake_leases.act_id` to `messages.from_member`
+and group by member kind).
+
 ## Why the charter could not stay in the seat file
 
 `charter` is in `RoleFileSchema` and **not** in `SeatFileSchema` (2026-08-24; falsify: read `packages/protocol/src/seatfile.ts` — `charter: z.string().optional()` sits at line 80 inside `RoleFileSchema`, and is absent from the object at line 45). Zod's default `.strip()` therefore discards it on parse, so:

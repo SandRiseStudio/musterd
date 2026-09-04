@@ -1509,9 +1509,9 @@ const RAW: RawItem[] = [
   {
     id: 'ledger-seats',
     frozenBy: 232,
-    // Follows-up: 01M1MMK3339B06Q328HYWXARJF
+    // Follows-up: 01M1Q9D90XEP9FPCYPQNBFH73Q
     building:
-      'increments 3–5 — remaining platform services + install auto-provisioning, project services (the deploybot registration UX), wake provenance. Increments 1–2 landed: kind service + the auto-refresher’s seat, and the warn-only census in doctor/init --check.',
+      'increment 3 — remaining platform services + install auto-provisioning; the census sees five unattributed LaunchAgents and cannot see guardian or streamwatch at all. Increments 1–2 landed: kind service + the auto-refresher’s seat, and the warn-only census in doctor/init --check. Increment 4 (project services, the deploybot registration UX) is deferred until a team wants a seat for automation that is not musterd’s own; increment 5 (wake provenance) is retracted — ADR 241’s wake lease closed it better, and across 818 wakes no service has ever caused one (2026-09-04).',
     wave: 8,
     title: 'Ledger seats — every actor on the roster (services as members)',
     plan: 'reserved',
