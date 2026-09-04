@@ -294,3 +294,55 @@ export function failures(
     return r.disposition === null || r.disposition.kind === 'malformed';
   });
 }
+
+/**
+ * ADR 373 increment 2 — which forward references become Seeds, and under what key.
+ *
+ * A document-recorded intention is a Seed whose source is a repo path + anchor instead of a Slack
+ * capture. The anchor is {@link baselineKey}'s text head, so the Seed's identity survives ordinary
+ * editing above the line exactly as the baseline does, and a re-run of `pnpm intents:ingest`
+ * captures nothing twice (the daemon is idempotent on `ref`).
+ *
+ *   - undisposed (baselined or not)  → an OPEN Seed: captured, never started — the tray shows it
+ *   - `deferred — <trigger> (date)`  → an OPEN Seed: still an intention, with its reopen trigger
+ *   - `<lane-id>`                    → a Seed born PROMOTED with `linked_lane_id`: the provenance edge
+ *   - `none — <why> (date)`          → nothing: the author said no work is owed
+ *   - malformed                      → nothing: the gate fails it; fix the line, not the tray
+ *   - noise ({@link FALSE_POSITIVE_BASELINE}) → nothing: it promises nothing
+ *
+ * Capture, never interpret: the body is the line as written plus where it was written.
+ */
+export interface IngestCandidate {
+  ref: string;
+  body: string;
+  lane_id?: string;
+  kind: 'undisposed' | 'deferred' | 'lane';
+}
+
+/** A URL-safe anchor from the baseline key's text head: same stability, readable in a Seed tray. */
+export function anchorOf(textHead: string): string {
+  return textHead
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
+export function ingestCandidates(
+  refs: ForwardReference[],
+  noise: Set<string> = FALSE_POSITIVE_BASELINE,
+): IngestCandidate[] {
+  const out: IngestCandidate[] = [];
+  for (const r of refs) {
+    const key = baselineKey(r);
+    if (noise.has(key)) continue;
+    const d = r.disposition;
+    if (d?.kind === 'none' || d?.kind === 'malformed') continue;
+    const ref = `${r.file}#${anchorOf(key.slice(r.file.length + 2))}`;
+    const body = `${r.text}\n— ${r.file}:${r.line}`;
+    if (d?.kind === 'lane') out.push({ ref, body, lane_id: d.lane, kind: 'lane' });
+    else if (d?.kind === 'deferred') out.push({ ref, body, kind: 'deferred' });
+    else out.push({ ref, body, kind: 'undisposed' });
+  }
+  return out;
+}

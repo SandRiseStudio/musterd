@@ -121,6 +121,70 @@ describe('Seed lifecycle HTTP authorization', () => {
     ]);
   });
 
+  it('captures a document-recorded intention as a repo Seed, idempotent on ref, linked when a lane is named (ADR 373 inc 2)', async () => {
+    const body = {
+      ref: 'docs/decisions/354-wake-lease-file-channel.md#left-for-a-sibling-lane',
+      body: 'Left for a sibling lane; this ADR fixes the attestation, not the judgement.',
+    };
+    const first = await request('POST', '/teams/bravo/seeds/repo', body, adaAuth);
+    expect(first.status).toBe(201);
+    expect(first.json.seed).toMatchObject({
+      source: 'repo',
+      slack_user_id: null,
+      submitted_by: 'Ada',
+      state: 'open',
+      relay_id: 'repo:' + body.ref,
+    });
+
+    const again = await request('POST', '/teams/bravo/seeds/repo', { ...body, body: 'x' }, linAuth);
+    expect(again.status).toBe(200);
+    expect(again.json.seed.id).toBe(first.json.seed.id);
+    expect(again.json.seed.body).toBe(body.body);
+
+    const lane = await request(
+      'POST',
+      '/teams/bravo/lanes',
+      { title: 'the sibling lane' },
+      adaAuth,
+    );
+    expect(lane.status).toBe(201);
+    const linked = await request(
+      'POST',
+      '/teams/bravo/seeds/repo',
+      { ...body, lane_id: lane.json.lane.id },
+      adaAuth,
+    );
+    expect(linked.status).toBe(200);
+    expect(linked.json.seed).toMatchObject({
+      state: 'promoted',
+      linked_lane_id: lane.json.lane.id,
+    });
+
+    // The Slack relay boundary is unchanged (ADR 311): the stored source widened, the ingest did not.
+    const badRef = await request(
+      'POST',
+      '/teams/bravo/seeds/repo',
+      { ref: ' ', body: 'x' },
+      adaAuth,
+    );
+    expect(badRef.status).toBe(400);
+    const badLane = await request(
+      'POST',
+      '/teams/bravo/seeds/repo',
+      { ref: 'a.md#b', body: 'x', lane_id: '01M1MMHJP3PQY1QWNJCHV3XEMA' },
+      adaAuth,
+    );
+    expect(badLane.status).toBe(400);
+    const anonymous = await request('POST', '/teams/bravo/seeds/repo', body);
+    expect(anonymous.status).toBe(401);
+
+    const listed = await request('GET', '/teams/bravo/seeds', undefined, nickCredential);
+    expect(listed.json.seeds.map((s: { source: string }) => s.source).sort()).toEqual([
+      'repo',
+      'slack',
+    ]);
+  });
+
   it('requires membership to list/read and returns the Team-visible Seed', async () => {
     const unauthenticated = await request('GET', '/teams/bravo/seeds', undefined);
     expect(unauthenticated.status).toBe(401);

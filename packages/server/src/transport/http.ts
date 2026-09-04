@@ -59,6 +59,7 @@ import {
   isRailCandidate,
   AnswerSeedClarificationSchema,
   AskSeedClarificationSchema,
+  CaptureRepoSeedSchema,
   ClaimSeedSchema,
   PromoteSeedSchema,
   SeedListSchema,
@@ -252,6 +253,7 @@ import {
 import {
   answerSeedClarification,
   askSeedClarification,
+  captureRepoSeed,
   claimSeed,
   getSeed,
   listSeeds,
@@ -4112,6 +4114,31 @@ export async function handleHttp(
             ),
           }),
         );
+      }
+
+      // ADR 373 increment 2: a document-recorded intention enters as a Seed through the front door
+      // of its own repo, the way a Slack idea enters through the relay. Idempotent on `ref`.
+      if (method === 'POST' && rest === '/seeds/repo') {
+        const { team, member } = authTouch(ctx, slug, req);
+        assertSeatCanRead(member);
+        const body = parseOrBadRequest(CaptureRepoSeedSchema, await readJson(req));
+        const before = ctx.db
+          .prepare<
+            [string, string],
+            { id: string }
+          >('SELECT id FROM seeds WHERE team_id = ? AND relay_id = ?')
+          .get(team.id, `repo:${body.ref.trim()}`);
+        const seed = captureRepoSeed(ctx.db, team.id, member, body);
+        if (!before) {
+          appendAudit(ctx.db, team.id, {
+            actor: member.name,
+            action: 'seed.ingested',
+            target: seed.id,
+            result: 'allow',
+            detail: { seed_id: seed.relay_id, source: 'repo', lane_id: body.lane_id ?? null },
+          });
+        }
+        return sendJson(res, before ? 200 : 201, SeedResultSchema.parse({ seed }));
       }
 
       const seedReadMatch = rest.match(/^\/seeds\/([^/]+)$/);

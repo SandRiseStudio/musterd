@@ -48,7 +48,7 @@ src/
     delivery.ts       // the per-recipient delivery ledger, derived from log + cursors + audit: actDelivery + openDirectedLedger (ADR 090) + handoffNamedLaneOutOfPlay (#745: named-lane out of play — shared with orientation why)
     mast.ts           // the MAST failure detectors: timeToUnblock + stalledThreads + circularHandoffs → deriveMast (ADR 091)
     memory.ts         // seat memory: saveMemory/getMemory/memoryEnvelope/clearMemory — daemon-private continuity blob, LWW, caps (ADR 093)
-    seeds.ts          // shared Seed persistence + authorized lifecycle transitions; atomic retry-safe promotion to one ordinary Lane (ADR 291/311)
+    seeds.ts          // shared Seed persistence + authorized lifecycle transitions; atomic retry-safe promotion to one ordinary Lane (ADR 291/311); captureRepoSeed — a document-recorded intention as a Seed, idempotent on ref, lane_id links (ADR 373 inc 2)
     teamMemory.ts     // team-memory retrieval: searchInsights over the insights_fts fold + rebuildInsightsFts (the cache property) (ADR 327)
     audit.ts          // append-only governance audit log: appendAudit/listAudit (+ authorized_by filter, ADR 071/127)
     signinHandoff.ts  // sign-in handoff relay: stageHandoff/redeemHandoff — memory-only, single-use 60s nonces so `musterd board` hands the browser a handle, never a credential (ADR 170)
@@ -211,6 +211,9 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - **Authenticated Team reads.** `GET /teams/:slug/seeds` returns every Team Seed and
   `GET /teams/:slug/seeds/:id` returns one. Both use `authTouch`; an unauthenticated caller learns
   nothing about Seed existence. Responses are parsed through `SeedListSchema` / `SeedResultSchema`.
+- **Repo capture (ADR 373 inc 2).** `POST /teams/:slug/seeds/repo` `{ref, body, captured_at?,
+  lane_id?}` — a document-recorded intention as a Seed with `source: 'repo'`, idempotent on `ref`
+  (201 created / 200 already held); `lane_id` links + promotes. Any seated Member.
 - **Parsed lifecycle mutations.** `POST …/seeds/:id/claim`, `/clarification`, `/answer`, `/brief`,
   and `/promote` parse their bodies through the corresponding protocol schemas before calling the
   store. Only agents claim, only the active explorer asks or submits the final brief, only the

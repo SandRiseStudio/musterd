@@ -1549,6 +1549,46 @@ export const MIGRATIONS: Migration[] = [
       if (!cols.includes('hue')) db.exec('ALTER TABLE members ADD COLUMN hue INTEGER');
     },
   },
+  {
+    // ADR 373 increment 2: a document-recorded intention is a Seed with source `repo`. Such a Seed
+    // has no Slack author — its author is a document — so `slack_user_id` must be able to be NULL.
+    // SQLite cannot drop a NOT NULL in place; rebuild the table the way v5 rebuilt `messages`. The
+    // `fkOff`: with enforcement on, DROP TABLE seeds would cascade-delete every thread entry (the
+    // v66 test plants one and proves it survives). The child FK names `seeds` by name, which the
+    // rename restores, and the runner's `foreign_key_check` afterwards proves nothing was orphaned.
+    version: 66,
+    fkOff: true,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE seeds_v66 (
+          id TEXT PRIMARY KEY,
+          team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+          relay_id TEXT NOT NULL,
+          source TEXT NOT NULL,
+          body TEXT NOT NULL,
+          captured_at INTEGER NOT NULL,
+          slack_user_id TEXT,
+          submitted_by TEXT NOT NULL REFERENCES members(id),
+          state TEXT NOT NULL,
+          explorer_id TEXT REFERENCES members(id),
+          final_brief TEXT,
+          conclusion TEXT,
+          linked_lane_id TEXT REFERENCES lanes(id),
+          promotion_kind TEXT,
+          research_skipped INTEGER,
+          promoted_at INTEGER,
+          completed_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(team_id, relay_id)
+        );
+        INSERT INTO seeds_v66 SELECT * FROM seeds;
+        DROP TABLE seeds;
+        ALTER TABLE seeds_v66 RENAME TO seeds;
+        CREATE INDEX IF NOT EXISTS idx_seeds_team_state ON seeds(team_id, state, updated_at);
+      `);
+    },
+  },
 ];
 
 function currentVersion(db: Database): number {

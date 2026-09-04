@@ -1,6 +1,9 @@
 # 311 — Shared Seeds are Slack-only
 
-- Status: accepted
+- Status: accepted. Scope note 2026-09-03: this ADR governs the **relay boundary**, which stays
+  Slack-only. [ADR 373](373-a-recorded-intention-names-its-lane.md) increment 2 adds a second way a
+  Seed comes to exist — a document-recorded intention captured from this repo, `source: 'repo'`, no
+  Slack author — through its own route, not through the relay. Nothing in the Decision below moved.
 - Date: 2026-08-24
 - Deciders: nick, gptbot
 

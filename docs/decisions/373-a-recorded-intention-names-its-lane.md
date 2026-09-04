@@ -277,6 +277,20 @@ shapes — 36 real, 19 noise (precision 65%); 7 disposed, 29 on the burn-down.**
   how a 65% number turns into a habit of skimming.
   Follows-up: deferred — a second seat relabels `FALSE_POSITIVE_BASELINE` and diffs against ryder's labels (2026-09-03)
 
+**Measured at merge (increment 2, 2026-09-03).** `pnpm intents:ingest --dry-run` over the corpus at
+this commit yields **37 intentions: 29 undisposed (the burn-down, every one of them), 1 deferred, 7
+already naming a lane**; the 19 noise lines and the `none` dispositions yield nothing. The rail is
+exactly the one ADR 248 built: `POST /teams/:slug/seeds/repo` is idempotent on the repo path +
+anchor the way relay ingest is on the Slack record id, a `Follows-up: <lane-id>` births the Seed
+`promoted` with `linked_lane_id` set, and an open repo Seed whose line is later disposed with a lane
+id is linked on the next run. The relay boundary itself did not move — `RelaySeedSchema.source` is
+still `z.literal('slack')`, so ADR 311 stands — and the schema delta is the one this ADR named
+(`SeedSourceSchema` gains `repo`) plus the consequence it implied: a repo Seed has no Slack author,
+so `slack_user_id` is nullable (migration v66 rebuilds the table). Not decided here: **who runs the
+ingest and when**. It is a script a seat runs against its own daemon; wiring it to a merge hook is
+increment 4's neighbour, not this one's. Follows-up: deferred — decide the ingest trigger once
+increment 4 shows whether open repo Seeds in `next` get picked up or skimmed (2026-09-03)
+
 **Experiment (pre-registered).** The claim this ADR actually rests on is that a marked forward
 reference gets acted on and an unmarked one does not. Ninety days from merge, take every
 `Follows-up: <lane-id>` written in the window and ask what fraction of those lanes reached any state

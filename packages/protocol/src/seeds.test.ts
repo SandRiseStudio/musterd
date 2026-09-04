@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   AnswerSeedClarificationSchema,
+  CaptureRepoSeedSchema,
   ClaimSeedSchema,
   ConcludeSeedSchema,
   RelaySeedSchema,
   RelaySeedListSchema,
   SeedMcpUpdateSchema,
   SeedSchema,
+  SeedSourceSchema,
   SeedStateSchema,
   SubmitSeedBriefSchema,
   seedInActiveTray,
@@ -55,6 +57,29 @@ describe('shared Seeds (ADR 291)', () => {
         seeds: [{ id: 'relay-2', body: 'idea', ts: 1, source: 'sms', meta: {} }],
       }).success,
     ).toBe(false);
+  });
+
+  it('widens the stored source to repo while the relay boundary stays Slack-only (ADR 373 inc 2)', () => {
+    expect(SeedSourceSchema.parse('repo')).toBe('repo');
+    expect(SeedSourceSchema.safeParse('sms').success).toBe(false);
+    expect(
+      RelaySeedSchema.safeParse({
+        id: 'r',
+        body: 'idea',
+        ts: 1,
+        source: 'repo',
+        meta: { user: 'U1' },
+      }).success,
+    ).toBe(false);
+    expect(
+      CaptureRepoSeedSchema.parse({
+        ref: 'docs/decisions/354-wake-lease-file-channel.md#left-for-a-sibling-lane',
+        body: 'Left for a sibling lane; this ADR fixes the attestation, not the judgement.',
+        lane_id: '01M1MMHJP3PQY1QWNJCHV3XEMA',
+      }).lane_id,
+    ).toBe('01M1MMHJP3PQY1QWNJCHV3XEMA');
+    expect(CaptureRepoSeedSchema.safeParse({ ref: ' ', body: 'x' }).success).toBe(false);
+    expect(CaptureRepoSeedSchema.safeParse({ ref: 'a.md#b', body: '  \n' }).success).toBe(false);
   });
 
   it('validates a substantive relay body without changing the raw capture', () => {

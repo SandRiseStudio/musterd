@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
+import { addMember } from '../store/members.js';
 import { createTeam, getTeamBySlug } from '../store/teams.js';
 import { MIGRATIONS, runMigrations } from './migrations.js';
 import { openDb } from './open.js';
@@ -17,7 +18,7 @@ describe('db', () => {
     // Bumped with every migration, deliberately ABSOLUTE rather than read from the MIGRATIONS
     // array: a test written against the constant under test cannot fail (ryder's ADR 236 finding —
     // one of his five mutants survived for exactly that reason).
-    expect(ver?.value).toBe('65');
+    expect(ver?.value).toBe('66');
     const fk = db.prepare<[], { foreign_keys: number }>('PRAGMA foreign_keys').get();
     expect(fk?.foreign_keys).toBe(1);
     db.close();
@@ -104,6 +105,49 @@ describe('db', () => {
       .all()
       .map((c) => c.name);
     expect(cols).toContain('hue');
+    db.close();
+  });
+
+  it('v66 rebuilds seeds so slack_user_id may be NULL, carrying every relay Seed over (ADR 373 inc 2)', () => {
+    const db = openDb(':memory:');
+    const team = createTeam(db, { slug: 'revive' });
+    addMember(db, team, { name: 'nick', kind: 'human', slackUserId: 'U1' });
+    const member = db
+      .prepare<
+        [string],
+        { id: string }
+      >("SELECT id FROM members WHERE team_id = ? AND name = 'nick'")
+      .get(team.id)!;
+    // Rewind to before the rebuild and plant a relay Seed and one thread entry under the old shape.
+    db.prepare("UPDATE schema_meta SET value = '65' WHERE key = 'schema_version'").run();
+    db.prepare(
+      `INSERT INTO seeds (id, team_id, relay_id, source, body, captured_at, slack_user_id, submitted_by, state, created_at, updated_at)
+       VALUES ('s1', ?, 'relay-1', 'slack', 'idea', 1, 'U1', ?, 'open', 1, 1)`,
+    ).run(team.id, member.id);
+    db.prepare(
+      `INSERT INTO seed_thread_entries (id, seed_id, kind, body, member_id, created_at)
+       VALUES ('t1', 's1', 'clarification', 'why?', ?, 2)`,
+    ).run(member.id);
+    expect(runMigrations(db)).toBe(66);
+    const col = (db.pragma('table_info(seeds)') as { name: string; notnull: number }[]).find(
+      (c) => c.name === 'slack_user_id',
+    );
+    expect(col?.notnull).toBe(0);
+    expect(db.prepare('SELECT relay_id, slack_user_id FROM seeds').all()).toEqual([
+      { relay_id: 'relay-1', slack_user_id: 'U1' },
+    ]);
+    expect(db.prepare('SELECT seed_id FROM seed_thread_entries').all()).toEqual([
+      { seed_id: 's1' },
+    ]);
+    expect(db.pragma('foreign_key_check')).toEqual([]);
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO seeds (id, team_id, relay_id, source, body, captured_at, slack_user_id, submitted_by, state, created_at, updated_at)
+           VALUES ('s2', ?, 'repo:a.md#b', 'repo', 'x', 1, NULL, ?, 'open', 1, 1)`,
+        )
+        .run(team.id, member.id),
+    ).not.toThrow();
     db.close();
   });
 
@@ -272,7 +316,7 @@ describe('db', () => {
     member(1, 'm-obs', 'web-legacy');
     member(0, 'm-reg', 'nick');
 
-    expect(runMigrations(db)).toBe(65); // runs v18…v65 (including the pull cursor, bootstrap cutover evidence, host_liveness, the seat_nodes set key, and the push wedge)
+    expect(runMigrations(db)).toBe(66); // runs v18…v66 (including the pull cursor, bootstrap cutover evidence, host_liveness, the seat_nodes set key, and the push wedge)
 
     const scope = (id: string) =>
       db
@@ -336,7 +380,7 @@ describe('db', () => {
     );
     team('t2', 'dawn', null);
 
-    expect(runMigrations(db)).toBe(65);
+    expect(runMigrations(db)).toBe(66);
 
     const policy = (id: string) =>
       db
@@ -668,7 +712,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     stage(db, 'm1', 1, 1);
 
     db.prepare("UPDATE schema_meta SET value = '49' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(65);
+    expect(runMigrations(db)).toBe(66);
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM sync_log').get()).toEqual({ n: 1 });
     db.close();
@@ -683,7 +727,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
     db.exec('DROP INDEX idx_messages_origin; DROP TABLE sync_pull_cursor;');
     db.prepare("UPDATE schema_meta SET value = '55' WHERE key = 'schema_version'").run();
 
-    expect(runMigrations(db)).toBe(65);
+    expect(runMigrations(db)).toBe(66);
 
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'sync_pull_cursor'").get(),
@@ -699,7 +743,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
   it('v58 stamps audit with the origin pair, unique only where a stamp exists', () => {
     const db = withRemoteNode();
     db.prepare("UPDATE schema_meta SET value = '57' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(65);
+    expect(runMigrations(db)).toBe(66);
 
     const insert = db.prepare(
       `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at, origin_node, origin_seq)
@@ -769,7 +813,7 @@ describe('v47 — nodes table + (origin_node, origin_seq) backfill (ADR 331)', (
       INSERT INTO seat_nodes VALUES ('m', 't', 'nA', 5);
     `);
     db.prepare("UPDATE schema_meta SET value = '62' WHERE key = 'schema_version'").run();
-    expect(runMigrations(db)).toBe(65);
+    expect(runMigrations(db)).toBe(66);
     expect(db.prepare('SELECT member_id, node_id, bound_at FROM seat_nodes').all()).toEqual([
       { member_id: 'm', node_id: 'nA', bound_at: 5 },
     ]);

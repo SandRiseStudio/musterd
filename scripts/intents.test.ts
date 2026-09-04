@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  anchorOf,
   baselineKey,
+  ingestCandidates,
   DISPOSITION_WINDOW,
   FALSE_POSITIVE_BASELINE,
   failures,
@@ -175,5 +177,64 @@ describe('the meter separates debt from the instrument’s own noise', () => {
 
   it('the two shipped baselines are disjoint — a line is debt or noise, never both', () => {
     for (const k of FORWARD_BASELINE) expect(FALSE_POSITIVE_BASELINE.has(k)).toBe(false);
+  });
+});
+
+describe('ingestCandidates — which references become Seeds (ADR 373 increment 2)', () => {
+  const text = [
+    'kill. Left for a sibling lane; this ADR fixes the attestation, not the judgement.',
+    'Follows-up: 01M1MMHJP3PQY1QWNJCHV3XEMA',
+    '',
+    'The relabel is a separate lane.',
+    'Follows-up: deferred — a second seat relabels the set (2026-09-03)',
+    '',
+    'Undo is not yet built.',
+    '',
+    '',
+    '',
+    '',
+    '',
+    'The exporter is a separate lane too.',
+    'Follows-up: none — the export path shipped 2026-08-19 (2026-09-03)',
+    '',
+    'Malformed one is a separate lane.',
+    'Follows-up: deferred (2026-09-03)',
+  ].join('\n');
+
+  it('captures undisposed and deferred references open, lane-disposed ones promoted, and skips none/malformed', () => {
+    const refs = f(text);
+    const out = ingestCandidates(refs, new Set());
+    expect(out.map((c) => c.kind)).toEqual(['lane', 'deferred', 'undisposed']);
+    expect(out[0]).toMatchObject({
+      lane_id: '01M1MMHJP3PQY1QWNJCHV3XEMA',
+      ref: 'docs/decisions/999-x.md#kill-left-for-a-sibling-lane-this-adr-fixes-the-attestatio',
+    });
+    expect(out[0]!.body).toBe(
+      'kill. Left for a sibling lane; this ADR fixes the attestation, not the judgement.\n— docs/decisions/999-x.md:1',
+    );
+    expect(out[1]!.lane_id).toBeUndefined();
+  });
+
+  it('never captures the instrument’s own noise', () => {
+    const refs = f('Undo is not yet built.');
+    expect(ingestCandidates(refs, new Set([baselineKey(refs[0]!)]))).toEqual([]);
+  });
+
+  it('the anchor is stable under editing above the line and safe in a URL', () => {
+    const a = ingestCandidates(f('Undo is not yet built.'), new Set())[0]!.ref;
+    const b = ingestCandidates(f('\n\n# heading\n\nUndo is not yet built.'), new Set())[0]!.ref;
+    expect(a).toBe(b);
+    expect(a).toBe('docs/decisions/999-x.md#undo-is-not-yet-built');
+    expect(anchorOf('`init`-undo / per-folder uninstall — **follow')).toBe(
+      'init-undo-per-folder-uninstall-follow',
+    );
+  });
+
+  it('every entry on the burn-down is a candidate', () => {
+    const undisposed = [...FORWARD_BASELINE].map((key) => {
+      const [file, text] = key.split('::') as [string, string];
+      return { file, line: 1, phrase: '', text, disposition: null };
+    });
+    expect(ingestCandidates(undisposed)).toHaveLength(FORWARD_BASELINE.size);
   });
 });
