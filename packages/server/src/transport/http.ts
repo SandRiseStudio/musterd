@@ -307,6 +307,7 @@ import {
   hasEnrolledJoiners,
   hubHead,
   ingestBatch,
+  laneGenesis,
   readStaged,
   SyncDuplicateIdError,
   SyncGapError,
@@ -4127,6 +4128,7 @@ export async function handleHttp(
             events: readStaged(ctx.db, team.id, after, limit),
             hub_seq_high: head,
             nodes,
+            lane_genesis: laneGenesis(ctx.db, team.id),
           }),
         );
       }
