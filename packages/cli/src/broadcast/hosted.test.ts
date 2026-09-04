@@ -18,13 +18,20 @@ const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
 const fail = (stderr = ''): ExecResult => ({ code: 1, stdout: '', stderr });
 const absent: ExecResult = { code: 127, stdout: '', stderr: 'not found' };
 
-const TS_STATUS = JSON.stringify({
-  BackendState: 'Running',
-  Self: {
-    DNSName: 'nicks-laptop.tail400343.ts.net.',
-    TailscaleIPs: ['100.100.246.14', 'fd7a:115c:a1e0::1'],
-  },
-});
+/** `tailscale status --json`, optionally carrying capture peers. `peers` is [hostname, online]. */
+function tsStatus(peers: Array<[string, boolean]> = []): string {
+  return JSON.stringify({
+    BackendState: 'Running',
+    Self: {
+      DNSName: 'nicks-laptop.tail400343.ts.net.',
+      TailscaleIPs: ['100.100.246.14', 'fd7a:115c:a1e0::1'],
+    },
+    Peer: Object.fromEntries(
+      peers.map(([HostName, Online], i) => [`key${i}`, { HostName, Online }]),
+    ),
+  });
+}
+const TS_STATUS = tsStatus();
 
 /** A fully-green system, so each test can knock out exactly one thing. */
 function greenExec(over: Partial<Record<string, ExecResult>> = {}): Exec {
@@ -245,6 +252,81 @@ describe('runChecks', () => {
     expect(c.fix).toMatch(/no answer/);
     expect(c.fix).toMatch(/unreachable from here/);
     expect(c.fix).not.toMatch(/daemon is not answering/);
+  });
+
+  /**
+   * The capture-node census. It is the only check here that is not a launch precondition — a pile
+   * of dead nodes stops nothing — and it earns its place because the condition is otherwise only
+   * visible in Tailscale's admin console. What matters is that healthy churn stays quiet: the
+   * suffixes are CORRECT (tmpfs state, new node per run, hostname already taken), so a check that
+   * reddened on seeing one would be wrong about the mechanism and would be ignored within a week.
+   */
+  describe('capture nodes', () => {
+    const withPeers = (peers: Array<[string, boolean]>) => ({
+      ...green,
+      exec: greenExec({ 'tailscale status --json': ok(tsStatus(peers)) }),
+    });
+
+    it('is quiet when no capture node is registered', async () => {
+      const c = by(await runChecks(withPeers([])), 'capture-nodes');
+      expect(c.state).toBe('ok');
+      expect(c.detail).toBe('none registered');
+    });
+
+    it('is quiet for a live node with a couple mid-reap behind it — that is health, not a leak', async () => {
+      const c = by(
+        await runChecks(
+          withPeers([
+            ['musterd-broadcast', false],
+            ['musterd-broadcast-1', false],
+            ['musterd-broadcast-2', true],
+          ]),
+        ),
+        'capture-nodes',
+      );
+      expect(c.state).toBe('ok');
+      expect(c.detail).toContain('3 on the tailnet, 2 offline');
+      expect(c.fix).toBeUndefined();
+    });
+
+    it('fails past the point reap can explain, and names the one cause that can', async () => {
+      const c = by(
+        await runChecks(
+          withPeers([
+            ['musterd-broadcast', false],
+            ['musterd-broadcast-1', false],
+            ['musterd-broadcast-2', false],
+            ['musterd-broadcast-3', true],
+          ]),
+        ),
+        'capture-nodes',
+      );
+      expect(c.state).toBe('fail');
+      expect(c.fix).toContain('not ephemeral');
+      expect(c.fix).toContain('fly secrets set TS_AUTHKEY');
+      // Never the value, only the instruction to mint one — same contract as the secrets check.
+      expect(c.fix).not.toMatch(/tskey-/);
+    });
+
+    it('ignores a peer that merely starts with the capture name', async () => {
+      const c = by(
+        await runChecks(
+          withPeers([
+            ['musterd-broadcaster', false],
+            ['musterd-broadcast-lab', false],
+            ['nicks-laptop', true],
+          ]),
+        ),
+        'capture-nodes',
+      );
+      expect(c.state).toBe('ok');
+      expect(c.detail).toBe('none registered');
+    });
+
+    it('skips rather than claiming a clean tailnet when tailscale is absent', async () => {
+      const checks = await runChecks({ ...green, exec: greenExec({ tailscale: absent }) });
+      expect(by(checks, 'capture-nodes').state).toBe('skip');
+    });
   });
 
   it('names the missing secret and never asks for a value it could print', async () => {
