@@ -213,4 +213,65 @@ describe('musterd huddle', () => {
       expect(await mirrorTurn('huddle-y', 'izzo', 'b')).toBe(false);
     });
   });
+
+  describe('the room as a view over the log (ADR 378)', () => {
+    it('show renders the transcript, who is in it, who has yet to speak, and the budget spent', async () => {
+      await capture(() =>
+        teamCommand(parseArgs(['add', 'lin', '--kind', 'agent', '--as', 'nick'])),
+      );
+      const root = await open(['--to', 'lin']);
+      const id = String(root['id']);
+      await capture(() => huddleCommand(parseArgs(['say', id, 'a first turn', '--json'])));
+
+      const shown = await capture(() => huddleCommand(parseArgs(['show', id])));
+      expect(shown.code).toBe(0);
+      expect(shown.out).toContain('huddle lane:01LANE');
+      expect(shown.out).toContain('open');
+      expect(shown.out).toContain('1/5 turns'); // declared 5 in the fixture, one taken
+      expect(shown.out).toContain('docs/design/thing.md'); // the anchor
+      expect(shown.out).toContain('a first turn');
+      expect(shown.out).toContain('yet to speak: lin'); // named but silent — who still owes the room
+      expect(shown.out).toContain(`musterd huddle say ${id}`); // how to answer
+    });
+
+    it('show reports a closed huddle and where the artifact landed', async () => {
+      const root = await open();
+      const id = String(root['id']);
+      await capture(() =>
+        huddleCommand(
+          parseArgs(['close', id, '--anchor-ref', 'docs/a.md@abc', 'landed', '--json']),
+        ),
+      );
+      const shown = await capture(() => huddleCommand(parseArgs(['show', id])));
+      expect(shown.out).toContain('closed');
+      expect(shown.out).toContain('landed at docs/a.md@abc');
+      expect(shown.out).not.toContain('answer with'); // a closed room takes no more turns
+    });
+
+    it('list shows the open huddles I am in, and says so when there are none', async () => {
+      const empty = await capture(() => huddleCommand(parseArgs(['list'])));
+      expect(empty.out).toContain('no open huddles you are in');
+
+      const root = await open();
+      const id = String(root['id']);
+      const listed = await capture(() => huddleCommand(parseArgs(['list'])));
+      expect(listed.out).toContain(id);
+      expect(listed.out).toContain('lane:01LANE');
+
+      // A closed huddle leaves the default list — the room is over.
+      await capture(() =>
+        huddleCommand(parseArgs(['close', id, '--anchor-ref', 'none', 'nothing landed', '--json'])),
+      );
+      const after = await capture(() => huddleCommand(parseArgs(['list'])));
+      expect(after.out).toContain('no open huddles you are in');
+      const all = await capture(() => huddleCommand(parseArgs(['list', '--all'])));
+      expect(all.out).toContain(id);
+    });
+
+    it('show names an id it cannot find rather than rendering an empty room', async () => {
+      await expect(huddleCommand(parseArgs(['show', '01NOPE']))).rejects.toThrow(
+        /no huddle 01NOPE/,
+      );
+    });
+  });
 });

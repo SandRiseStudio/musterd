@@ -81,6 +81,39 @@ describe('dayLabel (smart inbox dates)', () => {
   });
 });
 
+describe('a huddle turn says which room it is in (ADR 378)', () => {
+  const ts = Date.UTC(2026, 8, 4, 10, 0);
+  const root = env({
+    id: 'h1',
+    from: 'nick',
+    act: 'message',
+    body: 'why we are huddling',
+    ts,
+    meta: {
+      huddle: {
+        topic: { kind: 'design', id: 'doorbells' },
+        room: 'http://127.0.0.1:4851/b/huddle-h1',
+        anchor: 'docs/wiki/huddles.md',
+      },
+    },
+  } as Partial<Envelope>);
+
+  it('marks a turn with its topic instead of rendering it as a loose team message', () => {
+    const turn = env({ id: 't1', from: 'jo', act: 'message', body: 'a turn', thread: 'h1', ts });
+    const out = renderInbox([root, turn], kindOf, { cursorTs: 0, now: ts + 1000 });
+    expect(out).toContain('in huddle design:doorbells');
+    // The recipient label is noise on a turn — the room is the address.
+    const turnLine = out.split('\n').find((l) => l.includes('in huddle')) ?? '';
+    expect(turnLine).not.toContain('team');
+  });
+
+  it('leaves an ordinary message alone', () => {
+    const plain = env({ id: 'p1', from: 'jo', act: 'message', body: 'unrelated', ts });
+    const out = renderInbox([plain], kindOf, { cursorTs: 0, now: ts + 1000 });
+    expect(out).not.toContain('in huddle');
+  });
+});
+
 describe('renderInbox (day-grouped)', () => {
   const now = new Date(2026, 6, 7, 15, 0).getTime();
   const at = (m: number, d: number, h: number) => new Date(2026, m, d, h).getTime();

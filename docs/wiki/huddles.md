@@ -15,6 +15,27 @@ musterd huddle close <id> --anchor-ref docs/design/asks-rail.md@9ab435f0 "ring, 
 - **`say`** is a turn: `message`, `challenge`, `steer`, `insight` or `wait` with `thread` = the huddle id. `accept`/`decline`/`ask` are refused as turns on purpose: an answer names what it answers (`musterd send --reply-to`), and a question to a human is an `ask` with a tier (ADR 147) so it lands on the asks rail with an outcome record.
 - **`close`** is the `resolve` (ADR 025) with `meta.anchor_ref` — a path@sha, a PR, a lane, or `none` with the reason in the body.
 
+## Reading a huddle: the room is a view, not a venue
+
+```
+musterd huddle list            # the open huddles you are in (--all for everyone's, closed included)
+musterd huddle show <id>       # the transcript: who is in it, who has yet to speak, turns vs budget
+```
+
+`show` renders the room — topic, state, turns taken against the budget declared, the anchor, the room URL, who has spoken and who was named but has not — then the turns in order, then how to answer. A closed huddle says where the artifact landed instead.
+
+In the inbox a turn now reads `in huddle <topic>` rather than as a loose message to the team: a turn carries no huddle meta of its own, so without the root a reader could not tell which conversation it belonged to.
+
+### Why the log stays the transport (2026-09-04)
+
+The alternative considered was a dedicated room a participant enters and cannot leave until the huddle ends — a meeting. It was rejected on two grounds, and the reasoning is worth keeping because the metaphor is attractive.
+
+**It is not enforceable.** musterd runs no agent loops: the daemon runs no clocks on anyone's behalf and never injects into a session, so an agent's turn belongs to its harness. A "room" could only be a convention a seat honours, and on Claude Code or cursor nothing could hold it there.
+
+**It is a lock with no release.** A seat that enters a huddle whose other participants never arrive is wedged — the failure measured in [claim-approval-latency](claim-approval-latency.md), where only 5 of 33 blocked claims were answered inside their window. It would also switch off the interrupt line exactly where a seat is most committed, so an urgent steer could not reach someone in a meeting.
+
+So the log stays the transport — one cursor, recipient-scoped, replicated, already audited — and the room is a lens over it. A second delivery channel for huddle traffic would be a parallel message system needing its own replication, ordering and read state, which is the seventh-replicated-kind mistake in another costume.
+
 ## What the room is, and is not
 
 `open` lays the board out over the whiteboard service's localhost HTTP port when the service is already up: an **Anchor** cluster holding the anchor ref, a **Turns** cluster the opening line lands in; `say` mirrors each turn there. It probes `/healthz` for 500 ms and **never spawns the service** — a huddle opens fine with the room dark (the JSON says `room_laid_out: false`), and the first `whiteboard_open` on that name creates the board. Nothing in the room reaches the ledger; anything that changes the anchor is a thread act with a `from` and a model (ADR 101/158). Falsify: `WHITEBOARD_PORT=1 musterd huddle open …` must still send the root act and print the room URL.
@@ -22,6 +43,7 @@ musterd huddle close <id> --anchor-ref docs/design/asks-rail.md@9ab435f0 "ring, 
 ## What is deliberately not here
 
 - **No budget enforcement.** `budget` is a declaration; readers count the thread's rows against it. The daemon stores no clock (ADR 131 §7, 147, 179) and no sweeper closes a quiet huddle — it stays open, like a lapsed ask stays lapsed (#1158).
+- **No lock.** A participant is never held in a huddle; the mode is declared and honoured, not enforced. See the rejection above.
 - **No cross-host wake.** A joiner seat is reached the way every act reaches it: the root replicates on the sync push (60 s tick, `sync/push.ts`) and its own machine's hook loop wakes it. Wake leases never travel (ADR 241, 356).
 - **No `team_huddle_*` tools.** `team_send` with `meta.huddle` / `thread` / `meta.anchor_ref` is the MCP shape; the validator is the same `actMetaRules` both surfaces import.
 
