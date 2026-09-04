@@ -26,15 +26,29 @@ const DUSK_END = 20.0;
 /** Below this daylight level, people flick their desk lamp (and the overhead) on. */
 const LAMP_THRESHOLD = 0.42;
 
-/** Interior light budget: a small never-black floor, the sun through the windows, and the ceiling fill. */
-const FLOOR_LIGHT = 0.08;
+/** Interior light budget: a small never-black floor, the sun through the windows, and the ceiling fill.
+ *
+ * Re-tuned 2026-09-03 on nick's read of the stream ("a little too dark"). The values below did not
+ * change what the room is *made of* — they changed how much of the answer the flat veil is allowed to
+ * carry. A full-canvas wash is the one light source in this model that has no shape: it dims the
+ * bookshelf, the sitter's face and the floor by the identical amount, so past a certain alpha the room
+ * stops reading as "lit dimly" and starts reading as "greyed out". The fix is to take alpha off the
+ * wash (VEIL_MAX 0.82 → 0.70) and give it back as fixed light (the floor and the two fills), which the
+ * warm sources in `drawInteriorLight` then punch through with actual direction. Measured at the three
+ * states that matter: occupied in-shift after dark 0.33 → 0.22 veil, occupied after-hours 0.62 → 0.46,
+ * empty office 0.75 → 0.62 — so the dark room is still unmistakably dark, the gaps *between* the three
+ * states are preserved, and only the inhabited ones lift. Deliberately "a little", which is what was
+ * asked: a first pass at VEIL_MAX 0.62 took the in-shift night to 0.16 and the room stopped reading as
+ * night at all. The room is meant to run on minimal light after dark — string lights, desk lamps, the
+ * members themselves — and that only means anything if there is dark for them to be minimal against. */
+const FLOOR_LIGHT = 0.12;
 const NATURAL_GAIN = 0.9;
-const OVERHEAD_FILL = 0.52;
+const OVERHEAD_FILL = 0.56;
 /** Occupied outside the team's declared hours: the ceiling bank stays off and this small spill is all the
  * fixed light — a late worker reads as a lamp pool in a dark office, while bodies stay legible. */
-const AFTER_HOURS_SPILL = 0.16;
+const AFTER_HOURS_SPILL = 0.22;
 /** How opaque the darkest possible night veil gets — kept under 1 so a dark room still reads. */
-const VEIL_MAX = 0.82;
+const VEIL_MAX = 0.7;
 
 /** Cool deep-blue the room falls toward at night (the veil colour). */
 const VEIL_COLOR = 'rgb(15, 21, 38)';

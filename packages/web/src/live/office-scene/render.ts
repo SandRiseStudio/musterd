@@ -3623,6 +3623,20 @@ function deskLamp(ctx: CanvasRenderingContext2D, fit: Fit, ix: number, iy: numbe
   const ty = g.y - (up + 26) * fit.scale;
   ellipse(ctx, { x: g.x, y: ty }, 9 * fit.scale, 5 * fit.scale, lit ? '#e9c46a' : '#aab0b8');
   if (lit) ellipse(ctx, { x: g.x, y: ty + 2 * fit.scale }, 6 * fit.scale, 3 * fit.scale, '#fff1c2'); // warm glow
+  // The bulb *itself* is not drawn here. Everything in this function is furniture, and furniture is
+  // painted before `drawInteriorLight` lays the night veil over the whole canvas — so a shade painted
+  // '#fff1c2' here comes out veiled, and the lamp reads as an unlit fixture standing in a warm puddle
+  // it cannot be the source of (nick, 2026-09-03: "those seem to be emitting a light around them but I
+  // don't see the actual desk lamps lit up"). The emissive core is painted additively *after* the veil,
+  // by `lampHead` — this shade is only the object the light comes out of.
+}
+
+/** Where a desk lamp's shade sits on screen, for the emissive pass — the same anchor `deskLamp` draws
+ * its shade at (`up + 26`), so the light and the fixture can never drift apart. */
+function lampHeadPoint(slot: { lx: number; ly: number; dir: Dir }, fit: Fit): Pt {
+  const [ix, iy] = deskPoint(slot, LAMP_ALONG, LAMP_ACROSS);
+  const g = project(ix, iy, fit);
+  return { x: g.x, y: g.y - (DESK_UP + 26) * fit.scale };
 }
 
 /** Where the lamp stands on an occupied desk (desk-relative along/across — the old #222 prop spot). */
@@ -3851,9 +3865,11 @@ function drawInteriorLight(
   ctx: CanvasRenderingContext2D,
   fit: Fit,
   env: LightEnv,
-  slotMember: Map<number, string>,
   poses: Map<string, Pose>,
   byName: Map<string, OfficeNode>,
+  /** Desk-slot ids whose lamp is actually switched on — a real sitter's desk, after dark. Built at the
+   * same place the workstation decides to draw the lit fixture, so the light and the object agree. */
+  litLamps: ReadonlySet<number>,
 ): void {
   if (env.veilAlpha > 0.01) {
     ctx.save();
@@ -3876,30 +3892,44 @@ function drawInteriorLight(
     warmPool(ctx, { x: b.x, y: b.y + 24 * fit.scale }, 52 * fit.scale, 0.95, '255, 200, 120', 0.2 * night);
   }
 
-  // Desk lamps emit — a warm pool cast from each occupied desk's lamp (the fixture drawWorkstation adds
-  // for every sitter) onto the desk corner and floor beside it. Desk-anchored where the personal glow
-  // below is body-anchored: together they read as "a person working in their own pool of lamplight".
+  // Desk lamps emit, in two parts, and the order of them is the whole point. `litLamps` is the set of
+  // desks with a real sitter (never a bench seat, which has no lamp fixture, and never an offline
+  // owner's kept desk — nobody is there to have switched it on), which is exactly the set
+  // `drawWorkstation` drew a lit shade for.
   for (const slot of DESK_SLOTS) {
-    if (!slotMember.has(slot.id)) continue;
-    const [ix, iy] = deskPoint(slot, LAMP_ALONG, LAMP_ACROSS);
-    warmPool(ctx, project(ix, iy, fit), 78 * fit.scale, 0.62, '255, 200, 120', 0.28 * night);
+    if (!litLamps.has(slot.id)) continue;
+    const head = lampHeadPoint(slot, fit);
+    // (a) The floor pool: light landing on the desk corner and the floor beside it, cast from under the
+    // shade rather than from the shade itself, so it reads as spill and not as a second bulb.
+    warmPool(ctx, { x: head.x, y: head.y + (DESK_UP + 20) * fit.scale }, 74 * fit.scale, 0.6, '255, 194, 112', 0.3 * night);
+    // (b) The bulb: a small, bright, unmistakably warm core right at the shade, painted additively over
+    // the veil so the fixture reads as ON. Two stops — a tight near-white filament inside a warm halo —
+    // because a single soft blob at this size reads as a smudge, and what has to survive the veil is the
+    // sense that there is a *source* here. This is the half that was missing: the room had lamplight
+    // with no visible lamps in it.
+    warmPool(ctx, head, 26 * fit.scale, 0.85, '255, 186, 96', 0.5 * night);
+    warmPool(ctx, head, 10 * fit.scale, 0.8, '255, 238, 198', 0.72 * night);
   }
 
-  // A personal glow travelling with each present (online) member, in two layers: a wide soft halo that
-  // lights the desk and floor AROUND them (nick, 2026-08-19: the first cut kept faces legible but lit no
-  // space — the pools read as face-paint, not lamps), and a brighter core so the character work (faces,
-  // cheeks, the round body) never dissolves into the veil.
+  // A personal glow travelling with each present (online) member. Still two layers — the glow stays, it
+  // is how a member reads as *present* after dark (nick, 2026-09-03: "I don't want to get rid of the
+  // member's glow at night, I just want to tone it down so it doesn't wash out the members").
+  //
+  // What washed them out was the second layer: a 52px core at 0.25 centred 30px UP the body, i.e. on the
+  // face. It is painted additively over the finished character, so at full night it did not light the
+  // member, it bleached them — the cheeks, the visor, the hue that says who this is, all flattened
+  // toward white. Two changes, and only one of them is the opacity: the core drops 0.25 → 0.09, and it
+  // drops DOWN the body (30 → 16) so its bright centre sits at the torso and the face catches only the
+  // falloff. Light on someone is fine; a light source centred on their face is not.
   for (const [name, pose] of poses) {
     const node = byName.get(name);
     if (!node || node.presence !== 'online') continue;
     const b = project(pose.lx, pose.ly, fit);
     const scale = pose.small ? 0.7 : 1;
-    // the halo sits lower (toward the desk surface/floor) and flatter, like light landing on things.
-    // Gentle on purpose: pools are additive, so two neighbours overlap into a wash if the halo runs hot
-    // (the first cut at 0.19 did exactly that — nick: "now it looks too bright").
-    warmPool(ctx, { x: b.x, y: b.y - 10 * fit.scale * scale }, 88 * fit.scale * scale, 0.72, '255, 206, 140', 0.11 * night);
-    // the core is centred a little up the body so it warms the face/torso, not just the feet
-    warmPool(ctx, { x: b.x, y: b.y - 30 * fit.scale * scale }, 52 * fit.scale * scale, 0.9, '255, 214, 158', 0.25 * night);
+    // the halo: wide, flat, on the floor — it separates a body from the floor behind it.
+    warmPool(ctx, { x: b.x, y: b.y - 8 * fit.scale * scale }, 88 * fit.scale * scale, 0.6, '255, 206, 140', 0.1 * night);
+    // the core: the member's own presence, at a tenth of the alpha it used to bleach them with.
+    warmPool(ctx, { x: b.x, y: b.y - 16 * fit.scale * scale }, 50 * fit.scale * scale, 0.8, '255, 214, 158', 0.09 * night);
   }
 
   ctx.restore();
@@ -4047,6 +4077,11 @@ export function renderScene(
   // The bench's shared counter, once — its seats' gear rides per-slot below.
   items.push({ d: depth(BENCH.lx, BENCH.ly), fn: () => benchCounter(ctx, fit) });
 
+  // Desks whose lamp is switched on: a real sitter's desk, after dark. Filled from the same three facts
+  // `drawWorkstation` uses to draw the lit shade (a node, not a bench seat, not an offline owner's kept
+  // desk) so the emissive pass in `drawInteriorLight` can never light a lamp the room did not draw.
+  const litLamps = new Set<number>();
+
   for (const [slotIndex, slot] of DESK_SLOTS.entries()) {
     const name = slotMember.get(slotIndex) ?? null;
     const node = name ? (byName.get(name) ?? null) : null;
@@ -4070,6 +4105,7 @@ export function renderScene(
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
       items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t) });
     } else {
+      if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
       items.push({ d: depth(slot.lx, slot.ly), fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn) });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
@@ -4171,7 +4207,7 @@ export function renderScene(
   for (const it of items) it.fn();
 
   // Interior lighting: veil the room to the night level, then let occupied desks' lamps glow through.
-  drawInteriorLight(ctx, fit, env, slotMember, poses, byName);
+  drawInteriorLight(ctx, fit, env, poses, byName, litLamps);
 
   // Collapse any queue/nook members past the render cap into a single "+N" pill, so a very large roster
   // stays bounded. Hidden count = placed-but-not-drawn (capped members get no pose in homePoses).

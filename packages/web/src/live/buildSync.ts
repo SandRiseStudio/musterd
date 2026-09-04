@@ -76,6 +76,32 @@ export function startBuildSync(deps: BuildSyncDeps): () => void {
   return () => clearInterval(timer);
 }
 
+/**
+ * Did THIS page load happen because a build landed? — the honest signal behind the "just shipped"
+ * beat in the broadcast corner.
+ *
+ * `setReloadedFor` stamps the served id immediately before the reload, and after that reload the
+ * page's own baked id IS that served id (one build produced both — the invariant `shouldReload`
+ * already rests on). So the two being equal means exactly one thing: the bundle running right now
+ * arrived by build-sync, moments ago. Any other pageview has either no stamp at all or a stamp from
+ * an older served id, and reads false.
+ *
+ * Pure, and takes both halves, so the corner's test can state the four cases without a DOM.
+ */
+export function reloadedForBuild(pageBuild: string | null, reloadedFor: string | null): boolean {
+  return pageBuild !== null && reloadedFor !== null && reloadedFor === pageBuild;
+}
+
+/** `reloadedForBuild` against the real page. False everywhere there is no baked build id (dev,
+ * tests), which is also where there is no publisher to have shipped anything. */
+export function justShipped(): boolean {
+  try {
+    return reloadedForBuild(bundleBuild(), sessionStorage.getItem(RELOADED_KEY));
+  } catch {
+    return false; // private mode: no memory, so no claim
+  }
+}
+
 /** The id Vite baked into this bundle at build time; absent in dev and under tests. */
 function bundleBuild(): string | null {
   return typeof __WEB_BUILD__ === 'string' ? __WEB_BUILD__ : null;

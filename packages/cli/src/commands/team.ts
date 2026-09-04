@@ -22,7 +22,14 @@ import {
   GuardianTierSchema,
   type TeamFile,
 } from '@musterd/protocol';
-import { HUE_MIN_SEPARATION, assignHue, hueConflict, legacyHue } from '@musterd/protocol/hue';
+import {
+  HUE_MIN_SEPARATION,
+  assignHue,
+  defaultHue,
+  hueConflict,
+  legacyHue,
+  type HueKind,
+} from '@musterd/protocol/hue';
 import { flagHue, flagStr, fmtDurationMs, parseDurationMs, type Parsed } from '../args.js';
 import { HttpClient } from '../client.js';
 import {
@@ -893,6 +900,19 @@ async function teamObserve(parsed: Parsed): Promise<number> {
  * kind) and walked clear only if it collides, so the colours people already know survive and only
  * the near-duplicates move. Seats that already have a hue are not touched. On a file-backed team
  * the result is a diff to read before it is pushed.
+ *
+ * `--spread` seeds the same pass from `defaultHue` — the name hashed over the WHOLE wheel — instead.
+ * The two seeds answer different questions and the default is right for the one it was written for:
+ * continuity. But continuity is only worth having if the colours being continued are any good, and
+ * `legacyHue`'s bands are 150°–280° for agents and 320°–70° for humans, so a team that is mostly
+ * agents comes out mostly green-blue-purple no matter how far apart this walks them. That is a range
+ * problem, not a collision problem, and no amount of separation fixes it — the seats are already
+ * separated, inside a third of the wheel (nick, 2026-09-03, looking at the rail on /live: "there are
+ * a lot of purples and blues; the roster needs to start out with more range of colors").
+ *
+ * It is deliberately a flag and not the new default. Seeding over the whole wheel recolours every
+ * seat it touches at once, which on a team people watch is a visible event and someone's call to
+ * make — not a side effect of running the repair.
  */
 async function teamHue(parsed: Parsed): Promise<number> {
   // The file-backed path never talks to the daemon, so it must not demand an identity — a person
@@ -902,6 +922,10 @@ async function teamHue(parsed: Parsed): Promise<number> {
   const home = loadConfig().rosterHome[team];
   const http = () => resolve(parsed.flags).http;
   const assignMissing = Boolean(parsed.flags['assign-missing']);
+  // The seed the pass starts each seat from: the banded legacy hash (continuity, the default) or
+  // the whole wheel (range). `assignHue` walks either one clear of the seats already placed.
+  const spread = Boolean(parsed.flags.spread);
+  const seedHue = (n: string, k: HueKind): number => (spread ? defaultHue(n) : legacyHue(n, k));
   const name = parsed.positionals[1];
   const degRaw = parsed.positionals[2];
 
@@ -918,7 +942,7 @@ async function teamHue(parsed: Parsed): Promise<number> {
       for (const [seatName, seat] of Object.entries(seats)) {
         if (seat.hue !== undefined) continue;
         const kind = seat.kind === 'human' ? 'human' : 'agent';
-        const hue = assignHue(legacyHue(seatName, kind), Object.values(taken));
+        const hue = assignHue(seedHue(seatName, kind), Object.values(taken));
         setSeatHue(home, seatName, hue);
         assigned.push({
           name: seatName,
@@ -935,7 +959,7 @@ async function teamHue(parsed: Parsed): Promise<number> {
       for (const m of members) {
         if (typeof m.hue === 'number') continue;
         const kind = m.kind === 'human' ? 'human' : 'agent';
-        const hue = assignHue(legacyHue(m.name, kind), Object.values(taken));
+        const hue = assignHue(seedHue(m.name, kind), Object.values(taken));
         await http().setHue(team, m.name, hue);
         assigned.push({ name: m.name, kind: m.kind, hue, sharedWith: sharedWithName(hue, taken) });
         taken[m.name] = hue;
@@ -964,7 +988,7 @@ async function teamHue(parsed: Parsed): Promise<number> {
 
   if (!name) {
     throw new CliError(
-      'usage: musterd team hue <name> [<0-359>] | musterd team hue --assign-missing',
+      'usage: musterd team hue <name> [<0-359>] | musterd team hue --assign-missing [--spread]',
       2,
     );
   }
