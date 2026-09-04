@@ -119,7 +119,9 @@ first.
 - **Cookoff D-res and cell E** — defined, spend not authorised. A/B/C2/C3/D already ran (finding
   006 flagship); the wiki line that listed them as unauthorised was stale as of 2026-07-20.
 - **ADR 250's weekly reads** (asks-to-founder per merged PR; repeat wakes with unchanged reason;
-  capability-miss count) — prose instructions, no instrument, no schedule.
+  capability-miss count) — all three instrumented (finding 009: `pnpm wakes:repeats`; finding 010:
+  `pnpm adr250:asks-per-pr`, `pnpm adr250:capability-miss`). No schedule by design: hand-run weekly
+  alongside the radar digest (shared M5-deferral decision, radar plan §8).
 - **Radar M4/M5** — ~~sweep and triage built, but `seen.json` is empty and no digest has ever been
   emitted~~ (2026-08-18). **Corrected 2026-09-03:** M4 IS built — `emitDigest` in
   `scripts/radar/digest.ts` writes the weekly digest and appends `seen.json`, landed with
