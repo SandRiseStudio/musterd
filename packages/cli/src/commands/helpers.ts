@@ -419,3 +419,32 @@ export function kindLookup(members: MemberSummary[]): (name: string) => MemberKi
 export function inherited(stored: Record<string, unknown> | undefined, key: string): string {
   return stored && key in stored ? '' : theme.meta('  ·  default');
 }
+
+/**
+ * Send an act, and if the send fails, hand the caller back what they composed.
+ *
+ * A failed send used to destroy the body. Measured 2026-09-04 in the first live huddle
+ * (01M1PSK8FY): `musterd huddle say` was refused on a stale session lease and the turn's text was
+ * simply gone — the thread held the root and nothing else, and the only recovery was retyping it
+ * from memory. The transport now retries once after re-claiming (`isSessionLeaseRefusal`), so this
+ * is the second line of defence rather than the first: when the retry cannot help either, the text
+ * goes to stderr where a human can still copy it and a log still keeps it.
+ *
+ * stderr, not stdout: `--json` callers parse stdout, and a rescue note is not part of that contract.
+ */
+export async function sendOrEcho<T>(
+  send: () => Promise<T>,
+  composed: { act: string; body: string },
+): Promise<T> {
+  try {
+    return await send();
+  } catch (err) {
+    if (composed.body.trim().length > 0) {
+      process.stderr.write(
+        `\nnot sent — your ${composed.act} is below, nothing was lost but the delivery:\n` +
+          `${composed.body}\n\n`,
+      );
+    }
+    throw err;
+  }
+}

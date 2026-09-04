@@ -13,7 +13,7 @@ import { CliError } from '../errors.js';
 import { renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { bindThread } from '../session/continuity.js';
-import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
+import { findWorkspaceDir, kindLookup, resolve, sendOrEcho } from './helpers.js';
 import { parseRecipients } from './send.js';
 
 /**
@@ -187,7 +187,7 @@ export async function huddleCommand(parsed: Parsed): Promise<number> {
     } catch (err) {
       throw new CliError(`invalid huddle: ${(err as Error).message}`, 3);
     }
-    await http.send(team, envelope);
+    await sendOrEcho(() => http.send(team, envelope), envelope);
     bindOwnThread(team, identity.name, envelope.id);
     const laidOut = await layoutRoom(board, identity.name, {
       anchor,
@@ -246,7 +246,7 @@ export async function huddleCommand(parsed: Parsed): Promise<number> {
     } catch (err) {
       throw new CliError(`invalid turn: ${(err as Error).message}`, 3);
     }
-    await http.send(team, envelope);
+    await sendOrEcho(() => http.send(team, envelope), envelope);
     bindOwnThread(team, identity.name, huddleId);
     const mirrored = await mirrorTurn(board, identity.name, body);
     if (json) {
@@ -277,7 +277,7 @@ export async function huddleCommand(parsed: Parsed): Promise<number> {
   } catch (err) {
     throw new CliError(`invalid close: ${(err as Error).message}`, 3);
   }
-  await http.send(team, envelope);
+  await sendOrEcho(() => http.send(team, envelope), envelope);
   if (json) {
     process.stdout.write(JSON.stringify(envelope) + '\n');
     return 0;

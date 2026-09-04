@@ -20,7 +20,7 @@ import { CliError } from '../errors.js';
 import { dischargedIds, openActionNeeded, renderMessageRow } from '../render/rows.js';
 import { theme } from '../render/theme.js';
 import { bindThread } from '../session/continuity.js';
-import { findWorkspaceDir, kindLookup, resolve } from './helpers.js';
+import { findWorkspaceDir, kindLookup, resolve, sendOrEcho } from './helpers.js';
 
 /**
  * The act `accept`/`decline` answers, when the caller didn't name one (ADR 067). Auto-targets the
@@ -189,7 +189,7 @@ export async function sendCommand(parsed: Parsed): Promise<number> {
     throw new CliError(`invalid message: ${(err as Error).message}`, 3);
   }
 
-  const ackBody = await http.send(team, envelope);
+  const ackBody = await sendOrEcho(() => http.send(team, envelope), envelope);
 
   // ADR 210: a successful threaded send means this session IS the dialogue on that thread, which is
   // exactly the causal fact a later wake needs and the daemon can never learn. Bind it locally.
