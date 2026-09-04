@@ -41,6 +41,7 @@
     "wakes:repeats": "node --disable-warning=ExperimentalWarning scripts/research/adr-250-repeat-wakes.ts",
     "corpus:snapshot": "node --disable-warning=ExperimentalWarning scripts/corpus/snapshot.ts",
     "dataset:export": "node --disable-warning=ExperimentalWarning scripts/dataset/export.ts",
+    "dataset:exn-snapshot": "node --disable-warning=ExperimentalWarning scripts/dataset/exn-snapshot.ts",
     "release": "node --disable-warning=ExperimentalWarning scripts/release.ts",
     "bump-brew-formula": "node --disable-warning=ExperimentalWarning scripts/bump-brew-formula.ts",
     "arch-trees:check": "node --disable-warning=ExperimentalWarning scripts/check-arch-trees.ts --check",
