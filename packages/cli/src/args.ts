@@ -42,6 +42,7 @@ const BOOLEAN_FLAGS = new Set([
   'history',
   'orient',
   'interrupt',
+  'detach',
 ]);
 
 export function parseArgs(argv: string[]): Parsed {

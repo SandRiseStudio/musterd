@@ -60,3 +60,19 @@ Two options, decided on this PR:
 - **Eval (increment 2b):** `team_join`'s description contains `musterd claim`; `claim`'s catalog summary contains `team_join`. Falsifier: a fresh seat that, reading only `musterd help` and the tool list, cannot describe `team_join` in `claim`'s words — that is the trigger for 2a.
 - **Experiment:** n/a — a naming decision; the 2b eval above is the only comparison, and 2a is its fallback.
 - **Retirement of the `join` alias:** one FEATURE_EPOCH after increment 1 lands, remove the dispatch case, the way #1253 removed `lane_ready`.
+
+## Amendment — 2026-09-04: `join` was not byte-for-byte `claim`; the difference is now `claim --detach`
+
+Increment 1's "byte-for-byte" line was false in one measurable way. `musterd join` ran the one-shot
+HTTP claim (`POST /teams/<slug>/claim`) and exited, leaving a Presence with **no session lease** —
+the seat stayed present, on the `--surface` given, after the process was gone. `musterd claim` runs
+the WS handshake and holds the Presence through a lease that dies with the process (ADR 337). The
+a11y fixture (`scripts/a11y/fixture-team.sh`, #1196) depends on the first behaviour and documented it
+as "the ONLY verb that can attach a presence on a chosen surface"; the moment `join` truly delegated
+to `claim` (#1268, answering gptbot's acceptance decline on #1263) the fixture room emptied and the
+contrast gate went red.
+
+Decided (nick, 2026-09-04): the behaviour moves onto the one verb as a flag, `musterd claim --detach`,
+rather than surviving as `join`'s hidden second act. The `join` alias translates to `claim … --detach`,
+so a pasted `join` line does exactly what it did. Falsifier for this amendment: a caller that needs a
+lease-less Presence and cannot get one from `claim`.

@@ -150,7 +150,7 @@ src/
     service.ts        // musterd service install/uninstall/start/stop/restart/refresh/status/logs (ADR 045); refresh = sync main + build + restart in one guarded verb (ADR 118)
     team.ts           // Team/member management, scoped bootstrap lifecycle + readiness-gated legacy cutover (ADR 344/350), policy, and roster export
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
-    join.ts           // hidden alias of `claim <name> --team <slug>` since 2026-09-03 (ADR 377): same handshake, prints the new spelling; removed one epoch on
+    join.ts           // hidden alias since 2026-09-03 (ADR 377): pure argv translation onto `claim <name> --team <slug> --detach`, prints the new spelling; removed one epoch on
     send.ts           // send
     inbox.ts          // inbox [--watch] [--wait] [--limit <n>] — bounded recent window + day-grouped smart dates, always-show-unread (ADR 054/117)
     nudge.ts          // `inbox --waiting`: the waiting-acts banner + the acts behind it, read-only — the approval-prompt hook target (ADR 053); `musterd nudge` is the hidden pre-2026-09-03 alias
@@ -162,7 +162,7 @@ src/
     insight.ts        // insight save/search — team-visible findings via the insight act + FTS search (ADR 327)
     surface.ts        // musterd surface list|decline|accept (ADR 332): the vocabulary for refusing a provisioned surface. `decline` removes it AND records the tombstone (one command, one outcome); `list` names what is refusable here plus any refusal this build no longer recognises; `accept` clears one. `init --refresh-hooks` overrides every tombstone in the folder and says which it resurrected
     wake-context.ts   // wake-context --act/--lane — recipient-scoped, body-free orientation index; names explicit reads without loading them (ADR 209)
-    claim.ts          // claim a seat by name or open role (ADR 032/034/036); the ONE occupancy verb since ADR 377 — `--team/--key/--grant` cover the fresh-folder bootstrap `join` used to; MCP twin `team_join`
+    claim.ts          // claim a seat by name or open role (ADR 032/034/036); the ONE occupancy verb since ADR 377 — `--team/--key/--grant` cover the fresh-folder bootstrap `join` used to, `--detach` is join's one-shot HTTP claim (Presence outlives the process); MCP twin `team_join`
     lane.ts           // lane open/claim/handoff/update/resolve + the lanes board; --goal on open and update (ADR 083/084/256); counterpart resolve ignores --pr/--sha (ADR 305)
     seed.ts           // shared Seed tray/read/claim/clarification/brief/conclude/promote Surface (ADR 319)
     next.ts           // the orientation brief: carrying / up-next / shipped / handoff why (ADR 049/084)

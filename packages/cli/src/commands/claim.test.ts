@@ -513,3 +513,54 @@ describe('musterd claim (v0.3 handshake, ADR 075)', () => {
     expect(resolved.seat).toBe('Ada'); // v0.3: the resolution carries the seat, not member+token
   });
 });
+
+describe('claim --detach (ADR 377 increment 1 — the one-shot HTTP path `join` always ran)', () => {
+  it('occupies on the named surface, binds the folder, and the Presence outlives the process (no lease held)', async () => {
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
+      out.push(String(c));
+      return true;
+    });
+    await declareSeat('bo');
+    const g = await grant('bo');
+    let code: number;
+    try {
+      code = await claimCommand(
+        parseArgs([
+          'bo',
+          '--team',
+          'dawn',
+          '--grant',
+          g,
+          '--surface',
+          'cursor',
+          '--detach',
+          '--json',
+        ]),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(code).toBe(0);
+    expect(JSON.parse(out.join('').trim().split('\n').pop()!)).toMatchObject({
+      team: 'dawn',
+      member: 'bo',
+      surface: 'cursor',
+      detached: true,
+    });
+    // The folder is bound to the resolved seat, as the WS path would have.
+    const binding = BindingSchema.parse(
+      JSON.parse(readFileSync(join(cwd, BINDING_DIR, BINDING_FILE), 'utf8')),
+    );
+    expect(binding.claim).toEqual({ mode: 'seat', name: 'bo' });
+    // claimCommand has RETURNED and holds no socket — yet the seat is still present, on `cursor`.
+    // This is the property scripts/a11y/fixture-team.sh depends on; the default WS path drops the
+    // Presence with its session lease when the process exits (ADR 337).
+    const { members } = await new HttpClient({ server: serverUrl, surface: 'cli' }).roster('dawn');
+    const live = members
+      .find((m: MemberSummary) => m.name === 'bo')!
+      .presences.filter((p) => p.status !== 'offline')
+      .map((p) => p.surface);
+    expect(live).toEqual(['cursor']);
+  });
+});
