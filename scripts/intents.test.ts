@@ -85,6 +85,31 @@ describe('parseDisposition — three legal answers, and silence with a prefix is
     expect(parseDisposition('none — the premise moved (2026-09-03)').kind).toBe('none');
   });
 
+  it('refuses a deferral or none that carries a DATE but no reason (gptbot, lane 01M1MNTTNC)', () => {
+    // The decline that sent increment 1 back: `REASONED_RE` used `.*` between the keyword and the
+    // date, and `.*` matches the empty string — so a deferral with no reopen trigger passed while
+    // the comment beside it claimed both were required. A deferral without a trigger is
+    // indistinguishable from forgetting, which is the condition ADR 373 exists to refuse, so the
+    // gate was stamping its own failure mode as compliant.
+    for (const bare of ['deferred (2026-09-03)', 'none (2026-09-03)', 'deferred  (2026-09-03)']) {
+      expect(parseDisposition(bare).kind, bare).toBe('malformed');
+    }
+  });
+
+  it('accepts a reason in any punctuation the corpus uses, so long as there are words in it', () => {
+    for (const ok of [
+      'deferred — a second seat relabels the noise set (2026-09-03)',
+      'deferred until the role-query trigger fires (2026-09-03)',
+      'none - the premise moved (2026-09-03)',
+    ]) {
+      expect(parseDisposition(ok).kind, ok).not.toBe('malformed');
+    }
+  });
+
+  it('refuses punctuation standing in for a reason — an em dash is not a trigger', () => {
+    expect(parseDisposition('deferred — (2026-09-03)').kind).toBe('malformed');
+  });
+
   it('refuses a deferral with no date — that is the shape it exists to prevent', () => {
     // A deferral without a trigger and a date is indistinguishable from forgetting, which is the
     // whole finding (ADR 272 §5 is the model: a NAMED, measurable trigger).
