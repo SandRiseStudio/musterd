@@ -211,6 +211,13 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - **Authenticated Team reads.** `GET /teams/:slug/seeds` returns every Team Seed and
   `GET /teams/:slug/seeds/:id` returns one. Both use `authTouch`; an unauthenticated caller learns
   nothing about Seed existence. Responses are parsed through `SeedListSchema` / `SeedResultSchema`.
+- **The stateless claim is workspace-scoped too (2026-09-04).** `POST /teams/:slug/claim` accepts
+  `workspace` + `workspace_key` and records the label on the Presence. Displacement applies the same
+  identity-first comparison as `ws.ts` (key when both sides carry one, label otherwise — ADR 368): a
+  LIVE same-workspace session is spared (ADR 092), socketless rows are cleared because this claim
+  succeeds them, and the `claim.superseded` audit reports the comparison it actually made. Until this
+  landed the route attached `workspace: null` and evicted unconditionally, so `claim --detach` in a
+  folder killed the session sitting in it.
 - **Recorded intentions in the brief (ADR 373 inc 4).** `GET /teams/:slug/next` carries
   `up_next_seeds` (open Seeds, oldest first, compact: id/source/ref/summary/submitted_by) and
   `up_next_seeds_total`, projected by `openSeedsForBrief` and rendered above `up_next` on both

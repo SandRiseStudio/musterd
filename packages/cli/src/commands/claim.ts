@@ -7,7 +7,7 @@ import {
   type Surface,
   TOKEN_PREFIXES,
 } from '@musterd/protocol';
-import { resolveWorkspace } from '@musterd/protocol/project';
+import { resolveWorkspace, resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
 import {
@@ -380,6 +380,11 @@ async function detachedClaim(input: {
     key,
     target,
     surface,
+    // The detached Presence names where it is, and is protected by that name (ADR 014/092/368):
+    // without these the server attached `workspace: null` and evicted this folder's own live
+    // session on every re-claim.
+    workspace: resolveWorkspace(),
+    workspace_key: resolveWorkspaceKey(),
     ...(grant !== undefined ? { grant } : {}),
   });
   if (outcome.state === 'refused') {

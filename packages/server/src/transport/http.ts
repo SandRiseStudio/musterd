@@ -2987,6 +2987,15 @@ export async function handleHttp(
           target: ClaimTargetSchema,
           grant: z.string().optional(),
           surface: SurfaceSchema,
+          // ADR 014 / ADR 368, mirroring the WS claim frame. SPEC A.7 calls this route a stateless
+          // MIRROR of that frame and its responses ARE the frame shapes — but until 2026-09-04 this
+          // schema omitted both workspace fields, so every claim through here attached with
+          // `workspace: null` and displaced unconditionally, because the comparison ADR 092 rests on
+          // had nothing to compare. `workspace` is the display label; `workspace_key` is the work
+          // tree identity displacement prefers (ADR 368). Both optional and additive: an older
+          // client that sends neither gets exactly the pre-2026-09-04 behaviour.
+          workspace: z.string().max(120).optional(),
+          workspace_key: z.string().max(200).optional(),
           // Model attestation (ADR 101), mirroring the WS claim frame — attested, never verified.
           model: z.string().max(120).optional(),
           // Build attestation (ADR 135), mirroring the WS claim frame. No requests-table carry: a
@@ -3206,6 +3215,26 @@ export async function handleHttp(
         // claim may invoke newest-wins (ADR 017). Keeping the transition behind the grant/self/re-seat
         // decision makes refused and pending claims side-effect-free for the live incumbent.
         let displacedModel: string | null = null;
+        /**
+         * Is `old` the same workspace as this claim? Identity first, label only as a fallback —
+         * byte-for-byte the rule `ws.ts` applies (lane 01M1JQYYAC / ADR 368): the label is
+         * branch-qualified and so changes under the very session it identifies, while the work tree
+         * root does not. When either side carries no key, label equality is the documented fallback.
+         * A claim that declares NEITHER field matches nothing, which is the old behaviour and the
+         * honest one — absence is not an assertion (ADR 236).
+         */
+        const sameWorkspaceAsClaim = (old: {
+          workspace?: string | null;
+          workspaceKey?: string | null;
+        }): boolean => {
+          if (body.workspace_key != null && old.workspaceKey != null) {
+            return old.workspaceKey === body.workspace_key;
+          }
+          return (
+            old.workspace != null && body.workspace != null && old.workspace === body.workspace
+          );
+        };
+        let sparedSameWorkspace = 0;
         const displaceAgentIncumbent = (): void => {
           const liveConns = ctx.hub.connsForMember(targetMember.id);
           if (targetMember.kind !== 'agent' || targetMember.observer === 1) return;
@@ -3222,7 +3251,15 @@ export async function handleHttp(
               { count: number }
             >('SELECT count(*) AS count FROM presence WHERE member_id = ? AND conn_id IS NULL')
             .get(targetMember.id)?.count;
+          let displaced = 0;
           for (const old of liveConns) {
+            // ADR 068/092: a same-workspace successor does not evict its predecessor — it is the
+            // same folder reconnecting, and evicting there points two sessions at one working tree
+            // (or, on `claim --detach`, kills the session that just asked to stay).
+            if (sameWorkspaceAsClaim(old)) {
+              sparedSameWorkspace++;
+              continue;
+            }
             old.send?.({
               type: 'error',
               code: 'superseded',
@@ -3230,18 +3267,26 @@ export async function handleHttp(
             });
             old.close?.();
             ctx.hub.remove(old.connId);
+            clearPresenceById(ctx.db, old.presenceId);
+            displaced++;
           }
-          clearMemberPresence(ctx.db, targetMember.id);
+          // Rows with no socket are cleared whatever their workspace, including this claim's own:
+          // a socketless row in THIS folder is the previous detached attach, and this claim is its
+          // successor, not its rival. (Sparing it instead would grow a row per re-claim — the a11y
+          // fixture re-claims every few seconds to hold a Presence, ADR 377.) Only a LIVE session is
+          // spared above, which is the case ADR 092 is about: someone is actually working there —
+          // so this must NOT be `clearMemberPresence`, which would take the row just spared.
+          clearOrphanPresence(ctx.db, targetMember.id);
           // ADR 237: every displacement writes a ledger row — this branch used to evict silently,
           // leaving only the winner's claim.occupied behind.
-          const evicted = liveConns.length + (orphaned ?? 0);
+          const evicted = displaced + (orphaned ?? 0);
           if (evicted > 0) {
             appendAudit(ctx.db, team.id, {
               actor: targetMember.name,
               action: 'claim.superseded',
               target: targetMember.name,
               result: 'allow',
-              detail: { same_workspace: false, evicted, via: 'http' },
+              detail: { same_workspace: sparedSameWorkspace > 0, evicted, via: 'http' },
             });
           }
         };
@@ -3333,7 +3378,7 @@ export async function handleHttp(
           // OCCUPY: stateless — attach presence with null connId (no persistent socket).
           const presence = attach(ctx.db, targetMember.id, body.surface, null, {
             provenance: null,
-            workspace: null,
+            workspace: body.workspace ?? null,
             driver: null,
             model: body.model ?? null,
             build: body.build ?? null,
