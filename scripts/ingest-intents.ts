@@ -18,8 +18,8 @@
  * Runs on Node's native TypeScript (no build step, no deps), like its sibling gates.
  */
 import { spawnSync } from 'node:child_process';
-import { ingestCandidates } from './intents.ts';
 import { collectForwardReferences, repoRoot } from './intents-corpus.ts';
+import { ingestCandidates } from './intents.ts';
 
 const dryRun = process.argv.includes('--dry-run');
 const candidates = ingestCandidates(collectForwardReferences());

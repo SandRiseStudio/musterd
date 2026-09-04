@@ -23,8 +23,8 @@
  *
  * Runs on Node's native TypeScript (no build step, no deps), like its sibling gates.
  */
-import { FORWARD_BASELINE, failures, measureCoverage } from './intents.ts';
 import { collectForwardReferences } from './intents-corpus.ts';
+import { FORWARD_BASELINE, failures, measureCoverage } from './intents.ts';
 
 const refs = collectForwardReferences();
 const bad = failures(refs, FORWARD_BASELINE);
