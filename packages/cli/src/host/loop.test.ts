@@ -1,6 +1,6 @@
 import type { MemberSummary, WakeOrder, WakeReportBody } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
-import type { ActuatorBackend, WakeSpec } from './backend.js';
+import type { ActuatorBackend, BackendContext, WakeSpec } from './backend.js';
 import { pollHostOnce, type HostPollDeps, type WakeClient } from './loop.js';
 import type { HostRegistryEntry } from './registry.js';
 
@@ -900,5 +900,116 @@ describe('pollHostOnce — wake-progress after spawn (ADR 262)', () => {
       }),
     );
     expect(calls.reports.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * ADR 379 — the actuator spares the child it can identify as its own. The evidence is on the row:
+ * `workspace` equal to the label the child attaches with from the spawn path, `attached_at` at or
+ * after the spawn, and no `wake_lease`. Every term is positive; a missing `attached_at` (older
+ * daemon) or a row created BEFORE the spawn (a human already in the worktree, ADR 068) stays foreign.
+ */
+describe('verifyOccupied — own child that could not attest its lease (ADR 379)', () => {
+  const offline: MemberSummary[] = [
+    {
+      id: 'm1',
+      name: 'scout',
+      kind: 'agent',
+      role: 'dev',
+      presence: 'offline',
+      presences: [],
+      created_at: 1,
+    } as unknown as MemberSummary,
+  ];
+  const row = (over: Record<string, unknown>) =>
+    [
+      {
+        ...offline[0]!,
+        presence: 'online',
+        presences: [
+          {
+            surface: 'codex',
+            status: 'online',
+            last_seen_at: Date.now() + 1_000,
+            provenance: 'session',
+            ...over,
+          },
+        ],
+      },
+    ] as unknown as MemberSummary[];
+  const probe = async (roster: MemberSummary[]) => {
+    const { client } = fakeClient([order()], [offline, roster]);
+    let verified: Awaited<ReturnType<BackendContext['verifyOccupied']>> | undefined;
+    const backend: ActuatorBackend = {
+      harness: 'codex',
+      wake: async (_spec, ctx) => {
+        verified = await ctx.verifyOccupied('scout', 300, Date.now());
+        return { outcome: { occupied: verified.occupied }, settled: Promise.resolve(undefined) };
+      },
+    };
+    await pollHostOnce(
+      deps({
+        backends: new Map([['codex', backend]]),
+        // `/ws/scout` is no git repo, so the label the child would attest is the bare folder name.
+        loadRegistry: () => ({ entries: [entryOf({ harness: 'codex' })] }),
+        clientFor: () => client,
+      }),
+    );
+    return verified!;
+  };
+
+  it("a lease-less row in the wake workspace, created after spawn, is the wake's own child", async () => {
+    const verified = await probe(row({ workspace: 'scout', attached_at: Date.now() + 500 }));
+    expect(verified).toEqual({
+      occupied: true,
+      provenance: 'session',
+      lease_matched: false,
+      own_unattested: true,
+    });
+  });
+
+  it('the same row created BEFORE the spawn is a prior occupant — foreign, defer as before', async () => {
+    const verified = await probe(row({ workspace: 'scout', attached_at: Date.now() - 60_000 }));
+    expect(verified).toEqual({ occupied: true, provenance: 'session', lease_matched: false });
+  });
+
+  it('a row created after spawn in ANOTHER workspace is foreign', async () => {
+    const verified = await probe(
+      row({ workspace: 'elsewhere@main', attached_at: Date.now() + 500 }),
+    );
+    expect(verified).toEqual({ occupied: true, provenance: 'session', lease_matched: false });
+  });
+
+  it('an older daemon that sends no attached_at cannot qualify — absence is not "created after"', async () => {
+    const verified = await probe(row({ workspace: 'scout' }));
+    expect(verified).toEqual({ occupied: true, provenance: 'session', lease_matched: false });
+  });
+
+  it('a lease-attesting row still wins over an own-unattested one — the token is the stronger evidence', async () => {
+    const both = [
+      {
+        ...offline[0]!,
+        presence: 'online',
+        presences: [
+          {
+            surface: 'codex',
+            status: 'online',
+            last_seen_at: Date.now() + 1_000,
+            provenance: 'session',
+            workspace: 'scout',
+            attached_at: Date.now() + 200,
+          },
+          {
+            surface: 'codex',
+            status: 'online',
+            last_seen_at: Date.now() + 1_000,
+            provenance: 'wake',
+            wake_lease: 'L1',
+          },
+        ],
+      },
+    ] as unknown as MemberSummary[];
+    const verified = await probe(both);
+    expect(verified).toEqual({ occupied: true, provenance: 'wake', lease_matched: true });
   });
 });

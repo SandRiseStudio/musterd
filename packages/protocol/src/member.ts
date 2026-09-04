@@ -96,6 +96,14 @@ export const PresenceSchema = z.object({
    * older clients. Absence must never be read as a match (ADR 236: absence is not an assertion).
    */
   wake_lease: z.string().nullish(),
+  /**
+   * When this attachment was created (ADR 379) — the server's `presence.created_at`, distinct from
+   * `last_seen_at`, which every heartbeat advances. A wake actuator that spawned into a workspace at
+   * time T and finds, at the verify deadline, a fresh row in that same workspace created after T
+   * and attesting no lease, is looking at its own child that failed to attest — not at a foreign
+   * occupant. Null/absent from older daemons; absence is never read as "created after" (ADR 236).
+   */
+  attached_at: z.number().int().nullish(),
   /** The machine this presence lives on (presence replication, 2026-09-02): a `nodes.id`, or
    *  null/absent for a row on this daemon. `node_label` is that node's human label. */
   node: z.string().nullish(),

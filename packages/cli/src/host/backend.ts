@@ -60,6 +60,14 @@ export interface WakeActuation {
   settled: Promise<WakeCompletion | undefined>;
 }
 
+/** The roster-derived verdict on one wake (see {@link BackendContext.verifyOccupied}). */
+export interface VerifyResult {
+  occupied: boolean;
+  provenance?: string | null;
+  lease_matched?: boolean;
+  own_unattested?: boolean;
+}
+
 /** Host-side context a backend actuates with. Verification is roster-derived on purpose — headless
  *  modes hang and lie; process stdout is NEVER a verification source (ADR 131 §1). */
 export interface BackendContext {
@@ -77,12 +85,15 @@ export interface BackendContext {
    *  when a fresh row attests this wake's own lease token. There is deliberately no parameter for
    *  it — the loop binds the lease it is actuating, so a backend cannot verify against any other.
    *  `occupied && !lease_matched` means the seat is held by a session this wake did not create,
-   *  which is a deferral, never a failure. */
-  verifyOccupied(
-    seat: string,
-    windowMs?: number,
-    sinceTs?: number,
-  ): Promise<{ occupied: boolean; provenance?: string | null; lease_matched?: boolean }>;
+   *  which is a deferral, never a failure.
+   *
+   *  `own_unattested` (ADR 379) is the one exception the loop is allowed to make to that reading:
+   *  set only when the window expired with no lease-attesting row AND the freshest unattested row
+   *  was created in THIS wake's workspace after THIS wake spawned (`attached_at`, `workspace`) —
+   *  evidence the actuator already held, which until 2026-09-04 it never consulted before killing
+   *  the child. A backend treats `lease_matched || own_unattested` as "mine" and does not kill;
+   *  `lease_matched` alone still means the token matched. */
+  verifyOccupied(seat: string, windowMs?: number, sinceTs?: number): Promise<VerifyResult>;
   /** One narrator line to the host's stdout (never per poll tick — telemetry carve-out). */
   log(line: string): void;
 }

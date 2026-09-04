@@ -287,7 +287,15 @@ async function attempt(
   // replaces `provenance === 'wake'`, which was a description every wake session in history
   // satisfies: a prior wake still inside its 30m work-order timeout kept a fresh `wake` row and was
   // credited to this lease instantly, reporting an act as delivered that no session ever received.
-  if (verified.occupied && verified.lease_matched && exact && processOk) {
+  // ADR 379: `own_unattested` is the loop's positive identification of this wake's own child that
+  // could not attest its lease — mine, not held-by-other, and not to be killed.
+  const mine = verified.lease_matched || verified.own_unattested;
+  if (verified.occupied && mine && exact && processOk) {
+    if (verified.own_unattested)
+      ctx.log(
+        `note: ${spec.order.seat}'s occupancy attests no lease — credited as this wake's own ` +
+          `(created in ${spec.workspace} after spawn, ADR 379)`,
+      );
     ctx.log(
       `⚡ woke ${spec.order.seat}: session=${label} lease=${spec.order.lease_id} ` +
         `provenance=${verified.provenance ?? 'none'}`,
@@ -305,7 +313,7 @@ async function attempt(
   // defers too. Under the old provenance test that case read as `provenance === 'wake'` ⇒ not
   // held-by-other ⇒ a charged failure, which is exactly backwards: the other session is alive and
   // working, and this act should wait for it rather than pay for it.
-  const heldByOther = verified.occupied && !verified.lease_matched;
+  const heldByOther = verified.occupied && !mine;
   return {
     occupied: false,
     ...(heldByOther ? { deferred: true } : {}),
