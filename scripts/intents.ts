@@ -45,7 +45,20 @@ export const DISPOSITION_RE =
 /** A ULID as musterd mints them — Crockford base32, 26 chars. */
 const LANE_ID_RE = /^`?[0-9A-HJKMNP-TV-Z]{26}`?$/;
 /** `deferred` / `none` must carry BOTH a reason and a date, or they are silence with a prefix. */
-const REASONED_RE = /^(?:deferred|none)\b.*\(\d{4}-\d{2}-\d{2}\)\s*$/i;
+/**
+ * `deferred` / `none` must carry BOTH a reason and a date. The reason group is deliberately captured
+ * rather than skipped over with `.*`, because `.*` matches the empty string: the previous shape
+ * accepted `deferred (2026-09-03)` — a date with no reopen trigger — while the comment beside it
+ * claimed both were required (gptbot's decline of lane 01M1MNTTNC, 2026-09-03).
+ *
+ * That gap mattered more than a normal regex slip. A deferral whose trigger is missing is
+ * indistinguishable from forgetting, which is the exact condition ADR 373 exists to refuse; the gate
+ * would have stamped the failure mode as compliant.
+ */
+const REASONED_RE = /^(?<kind>deferred|none)\b(?<reason>[^()]*)\(\d{4}-\d{2}-\d{2}\)\s*$/iu;
+
+/** A reason is text a reader can act on — at least one letter, not punctuation or an em dash. */
+const HAS_REASON = /\p{L}/u;
 
 export type Disposition =
   | { kind: 'lane'; lane: string }
@@ -56,8 +69,9 @@ export type Disposition =
 export function parseDisposition(body: string): Disposition {
   const trimmed = body.trim();
   if (LANE_ID_RE.test(trimmed)) return { kind: 'lane', lane: trimmed.replace(/`/g, '') };
-  if (REASONED_RE.test(trimmed)) {
-    return { kind: trimmed.toLowerCase().startsWith('deferred') ? 'deferred' : 'none' };
+  const reasoned = REASONED_RE.exec(trimmed);
+  if (reasoned?.groups && HAS_REASON.test(reasoned.groups['reason'] ?? '')) {
+    return { kind: reasoned.groups['kind']!.toLowerCase() === 'deferred' ? 'deferred' : 'none' };
   }
   if (/^(?:deferred|none)\b/i.test(trimmed)) {
     return {
