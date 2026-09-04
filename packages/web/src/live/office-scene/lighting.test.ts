@@ -39,7 +39,13 @@ describe('computeLightEnv', () => {
     const empty = computeLightEnv(23, false);
     // With nobody in, the overhead fill drops out → the room falls to the floor level → a heavier veil.
     expect(empty.veilAlpha).toBeGreaterThan(occupied.veilAlpha);
-    expect(empty.veilAlpha).toBeGreaterThan(0.6);
+    // An absolute floor as well as the comparison, so "darker than occupied" can't be satisfied by a
+    // room that is barely veiled at all. 0.45, not the 0.6 this asserted before 2026-09-03: the veil's
+    // ceiling came down (VEIL_MAX 0.82 → 0.62) when the flat wash was found to be flattening the room
+    // rather than dimming it, and light was moved into the fixed fills and the warm sources instead.
+    // The old number pinned the old ceiling, not the property — an empty office is still emphatically
+    // the darkest state the model has, which is what this test is for.
+    expect(empty.veilAlpha).toBeGreaterThan(0.45);
   });
 
   it('daytime keeps a bright empty office (natural light, no one needed)', () => {
