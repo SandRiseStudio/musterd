@@ -123,13 +123,18 @@ first.
 - **Radar M4/M5** — ~~sweep and triage built, but `seen.json` is empty and no digest has ever been
   emitted~~ (2026-08-18). **Corrected 2026-09-03:** M4 IS built — `emitDigest` in
   `scripts/radar/digest.ts` writes the weekly digest and appends `seen.json`, landed with
-  [#1049](https://github.com/SandRiseStudio/musterd/pull/1049). What is still true is the half that
+  [#1049](https://github.com/SandRiseStudio/musterd/pull/1049). ~~What is still true is the half that
   matters, and it is the half nobody can see from the code:
   **the instrument has never been run** (2026-09-03; falsify: a non-empty `seen.json`, or any digest
   file committed under `docs/research/radar/`). `seen.json` is verbatim `{"arxiv": [], "hf": []}`,
   there is no `radar:sweep` LaunchAgent, and `package.json` wires no `--emit` script. What remains is
-  M5 plus a first real run. That is the ingest side; see the goal `research-radar`, marked shipped.
+  M5 plus a first real run.~~
   Follows-up: 01M1MMJKBYJ4DDD4S9QCF02TD9
+  **Corrected 2026-09-04:** the first real run has happened —
+  `docs/research/radar/2026-W36.md` (12 candidates, 9 shortlisted, 4 surfaced; the `exn` source
+  fetched fine but yielded 0 — 26 items in the 7-day window, none past the keyword filter). What
+  remains is M5 — deferred 2026-08-24 by nick (radar plan §8: revisit a runner once the digest has
+  run for weeks). That is the ingest side; see the goal `research-radar`, marked shipped.
 
 ## The sibling corpus: Exploring Next
 
