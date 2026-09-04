@@ -53,7 +53,7 @@ import { STICKY_CAP, type WallBoard } from './wallboard';
 import { DAY_ENV, type LightEnv } from './lighting';
 import { CANVAS_EASE } from './motion';
 import { deskMoodFor, deskMoodStyle } from './moods';
-import type { Placement } from './seating';
+import { workingAtDesk, type Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, handsInLap, seedOf, solveSkeleton, typingBurst } from './skeleton';
 import type { Dir, OfficeNode, Pose } from './types';
 import { formatWorkingHours } from './workingHours';
@@ -3444,14 +3444,15 @@ const LAPTOP_LOGO = '#a3a9b1';
  * hinge down. It is deliberately the same silver, seam and logo dot as the slab `drawCarry` tucks
  * under an arm, so the object you watched walk through the door is the object that lands here.
  *
- * `docked` is `audiblyWorking(owner)` and nothing else — the same predicate that lights the monitor
- * two props away. That is the whole model (design §0): the dock is a second reading of the work cue,
- * not a new fact plumbed through the scene, so an empty dock and a dark screen cannot disagree. */
+ * `docked` is `workingAtDesk(owner, sit)` — the same boolean, on the same frame, that lights the
+ * monitor two props away. That is the whole model (design §0): the dock is a second reading of the
+ * work cue, not a new fact plumbed through the scene, so an empty dock and a dark screen cannot
+ * disagree — and the member sitting down is the single event that turns both on. */
 function deskDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, dir: Dir, up: number, docked: boolean): void {
   const sn = dir === 'S' || dir === 'N';
   box(ctx, fit, mx, my, sn ? 17 : 11, sn ? 11 : 17, 4, '#7c5230', up); // walnut cradle
   box(ctx, fit, mx, my, sn ? 13 : 3, sn ? 3 : 13, 1.5, '#54371f', up + 4); // the slot, dark down its length
-  if (!docked) return; // nobody is working at this desk — the slot is empty, and that is the point
+  if (!docked) return; // nobody has sat down here to work — the slot is empty, and that is the point
   const w = sn ? 20 : 5;
   const d = sn ? 5 : 20;
   box(ctx, fit, mx, my, w, d, 22, LAPTOP_SILVER, up + 3);
@@ -3670,17 +3671,16 @@ function drawWorkstation(
   /** Is it dark enough out for desk lamps to be on? (`LightEnv.lampsOn`, threaded from the scene.) */
   lampsLit = false,
   /**
-   * Is this desk's laptop in its dock right now — the owner working AND sitting here?
+   * `workingAtDesk(owner, pose.sit)` — the owner is working AND has sat down here.
    *
-   * Deliberately NOT the same boolean as `working`, and this is the one place the laptop model needs
-   * a body-position term. A dock is a statement about where a physical object IS, so it depends on
-   * whether the person who carries it has arrived; a lit screen is a statement about work happening,
-   * which does not. Collapsing the two is what made a member who came online already `working` walk
-   * in empty-handed past a dock that had somehow filled itself before they reached the desk (nick,
-   * 2026-09-04). The monitor is untouched — it still lights off `audiblyWorking` alone, which is the
-   * E2 one-predicate contract shared with the room's typing sound.
+   * ONE boolean for the screen and the dock, because they are one event: the member sits, the laptop
+   * goes in the dock, and the monitor wakes (nick, 2026-09-04). It is not `audiblyWorking` alone —
+   * that is true from the instant a posture flips, so a seat that came online already `working` lit
+   * its screen and filled its dock while its body was still crossing the floor. The room's typing
+   * sound and the loop's park check read the same predicate, so the E2 §2 contract holds: eyes, ears
+   * and loop cannot disagree.
    */
-  docked = false,
+  atWork = false,
 ): void {
   const { lx, ly, dir, id } = slot;
   const f = FWD[dir];
@@ -3693,10 +3693,11 @@ function drawWorkstation(
   const wx = sn ? W : Df;
   const dy = sn ? Df : W;
   const up = DESK_UP; // desk-surface height — where every prop sits (DH + ST)
-  // `posture`, not `activity` — a lit screen full of scrolling code is the strongest "this seat is working"
-  // signal in the room, so it must follow the same source of truth as placement. An idle member who spilled
-  // onto a desk, or a stale member still carrying `activity: working`, gets a dark screen like any empty desk.
-  const working = node?.posture === 'working';
+  // A lit screen full of scrolling code is the strongest "this seat is working" signal in the room, so
+  // it follows `workingAtDesk` — posture (never `activity`, which lags) AND a body in this chair. An
+  // idle member who spilled onto a desk, a stale member still carrying `activity: working`, and a
+  // working member still walking in from the door all get a dark screen, like any empty desk.
+  const working = atWork;
   const mood = node ? deskMoodStyle(deskMoodFor(teamName, node.name)) : null;
   // Owned empty desk (presence-honesty §4): the offline owner keeps the desk — chair in, monitor
   // dark, their name baked on a small plate. The lamp is off (nobody switched it on), a warm screen
@@ -3777,7 +3778,7 @@ function drawWorkstation(
   // is working AND sitting at it. An empty dock on a desk with a body at it is honest, not a gap —
   // that member is not working, and the room says so in three places at once (dark screen, empty
   // dock, laptop in their lap).
-  at(DOCK_ALONG, dockAcross(dir), (ix, iy) => deskDock(ctx, fit, ix, iy, dir, up, docked));
+  at(DOCK_ALONG, dockAcross(dir), (ix, iy) => deskDock(ctx, fit, ix, iy, dir, up, atWork));
   at(KEYBOARD_ALONG, 0, (ix, iy) => deskKeyboard(ctx, fit, ix, iy, sn, up, kbShoulder));
   at(KEYBOARD_ALONG + 2, 27, (ix, iy) => deskMouse(ctx, fit, ix, iy, sn, up, mouseColor));
   // The desk lamp is work gear, not a hashed personality prop: every OCCUPIED desk has one (the
@@ -3848,11 +3849,10 @@ function benchStation(
   node: OfficeNode | null,
   t: number,
   /** Owner working AND sitting here — see the note on `drawWorkstation`'s parameter of the same name. */
-  docked = false,
+  atWork = false,
 ): void {
-  const working = node?.posture === 'working';
   const kbShoulder = KEYBOARD_WIDTHS[Math.floor(deskRnd(slot.id, KB_SALT) * KEYBOARD_WIDTHS.length)]!;
-  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, working, DESK_UP, slot.id, t);
+  monitor(ctx, fit, slot.lx, slot.ly - (BENCH.deep / 2 - 12), slot.dir, atWork, DESK_UP, slot.id, t);
   // A bench seat is a workstation like any other, so it docks like one — same cradle, same rule. The
   // bench faces N, so the across term subtracts at −DOCK_ACROSS (see the note on the constant).
   {
@@ -3860,7 +3860,7 @@ function benchStation(
     const c = dockAcross(slot.dir);
     const dx = slot.lx + f[0] * DOCK_ALONG - f[1] * c;
     const dy = slot.ly + f[1] * DOCK_ALONG + f[0] * c;
-    deskDock(ctx, fit, dx, dy, slot.dir, DESK_UP, docked);
+    deskDock(ctx, fit, dx, dy, slot.dir, DESK_UP, atWork);
   }
   deskKeyboard(ctx, fit, slot.lx, slot.ly - KEYBOARD_ALONG, true, DESK_UP, kbShoulder);
 }
@@ -4136,10 +4136,11 @@ export function renderScene(
     if (sipping) hidden.push('coffee');
     if (name && fx?.bottleCarriers.has(name)) hidden.push('water');
     const hide = hidden.length ? new Set<PropKind>(hidden) : undefined;
-    // The laptop is in the dock only once its owner has actually walked over and sat down. Same
-    // `sit > 0.9` the chair pieces use two blocks below, so the laptop lands on the frame the body
-    // settles into the chair, not the frame the roster changed.
-    const seatedWorking = node?.posture === 'working' && !!ownerPose && ownerPose.sit > 0.9;
+    // The desk comes to life only once its owner has actually walked over and sat down — screen,
+    // dock and the room's typing all off this one fact (`workingAtDesk`). Same `sit > 0.9` the chair
+    // pieces use two blocks below, so it lands on the frame the body settles into the chair, not the
+    // frame the roster changed.
+    const seatedWorking = workingAtDesk(node ?? undefined, ownerPose?.sit);
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).

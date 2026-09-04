@@ -2,7 +2,7 @@ import type { MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { memberPosture } from '../format';
 import { DESK_SLOTS, LEISURE_SPOTS } from './layout';
-import { assignSeats, audiblyWorking, carriesLaptop, type Seatable } from './seating';
+import { assignSeats, audiblyWorking, carriesLaptop, workingAtDesk, type Seatable } from './seating';
 
 /** A working member by default — desks are for members with a task in hand. */
 function member(name: string, over: Partial<MemberSummary> = {}): Seatable {
@@ -235,5 +235,40 @@ describe('carriesLaptop — the biconditional (laptop/dock design §0)', () => {
     // The leaving body is drawn after the roster has dropped it. An empty dock is what their desk
     // should say at that moment, so the laptop must be on the person, not in the slot.
     expect(carriesLaptop(undefined)).toBe(true);
+  });
+});
+
+describe('workingAtDesk — one predicate for eyes, ears and the loop (E2 §2)', () => {
+  // The screen, the dock, the room's typing and the park check all read this. What the roster half
+  // could not say on its own is whether the body had arrived, and everything about work fired early
+  // because of it (nick, 2026-09-04): a seat that came online already `working` lit its screen and
+  // typed from a desk it was still walking toward.
+  const busy = member('busy');
+
+  it('is false while a working member is still crossing the floor', () => {
+    expect(audiblyWorking(busy)).toBe(true); // the roster already says working…
+    expect(workingAtDesk(busy, 0)).toBe(false); // …but nobody is in the chair yet
+  });
+
+  it('is still false part-way into the sit — the same 0.9 the typing hands use', () => {
+    expect(workingAtDesk(busy, 0.85)).toBe(false);
+    expect(workingAtDesk(busy, 0.9)).toBe(false); // strictly greater, as in skelFor
+    expect(workingAtDesk(busy, 0.95)).toBe(true);
+  });
+
+  it('is true only for a member the roster ALSO calls working', () => {
+    expect(workingAtDesk(member('resting', { activity: 'active' }), 1)).toBe(false);
+    expect(workingAtDesk(member('focused', { availability: { status: 'dnd' } }), 1)).toBe(false);
+    expect(workingAtDesk(busy, 1)).toBe(true);
+  });
+
+  it('a desk with no body at all is not at work — an offline owner keeps a dark screen', () => {
+    expect(workingAtDesk(undefined, 1)).toBe(false); // no node
+    expect(workingAtDesk(busy, undefined)).toBe(false); // node, but no pose on the floor
+  });
+
+  it('is exactly the negation of the laptop being on the person, for a member at their desk', () => {
+    // The dock fills as the screen wakes and the arm empties: one event, read three ways.
+    expect(workingAtDesk(busy, 1)).toBe(!carriesLaptop(busy));
   });
 });

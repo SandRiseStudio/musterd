@@ -168,9 +168,24 @@ pings"*) is likewise untouched, because nothing here needs to know what was true
 
 ### Rendering
 
-- **monitor lit ⟺ `audiblyWorking(owner)`** — the predicate it already uses. Unchanged.
-- **laptop drawn in the dock ⟺ the same condition.** The dock is a second reading of the work cue,
-  not a new fact plumbed through the scene.
+**Amended 2026-09-04, after the build.** The first cut kept the monitor on `audiblyWorking` alone so
+that the E2 §2 one-predicate contract would not move. That was the wrong reading of what E2 protects.
+`audiblyWorking` is true from the instant a seat's posture flips — including while that seat's body is
+still walking in from the door — so a member who came online already `working` lit a screen, filled a
+dock and made the room type at a desk they had not reached (nick: *"I want the monitor to only turn on
+once a member has sat down at desk and docked computer, same with typing sounds"*).
+
+The predicate itself was the thing that was wrong, not the contract. `workingAtDesk(node, pose.sit)`
+is posture **and** a body in that chair, at the same `sit > 0.9` the typing HANDS were already gated
+on. E2 §2 still demands exactly what it demanded — one predicate for eyes, ears and the loop, so none
+of the three can disagree — and all three now read this one.
+
+- **monitor lit ⟺ `workingAtDesk(owner, sit)`** — the member sitting down is what turns it on.
+- **laptop drawn in the dock ⟺ the same condition, the same frame.** The dock is a second reading of
+  the work cue, not a new fact plumbed through the scene.
+- **the room types from a desk ⟺ the same condition**, and the render loop's park check reads it too.
+- **the laptop on the body ⟺ its negation**, for a member at their own desk. Sit down: the arm
+  empties, the dock fills, the screen wakes. One event, read four ways.
 - **the dock is drawn always**, empty when nobody is working there.
 - **the laptop on the body** is a new `CarryKind: 'laptop'` in `drawCarry`, which positions off the
   skeleton's joints (`chest`, `wrist[]`) rather than off a pose name. That is why the seated and
@@ -195,8 +210,13 @@ Both of the previous draft's simplifications were bought out by §0. What remain
 ## Falsifiers
 
 - **the biconditional**, over a synthetic roster in all five states: `docked(m)` is true exactly when
-  `audiblyWorking(m)` is, and `onPerson(m)` is its negation for every member on the floor — never
+  `workingAtDesk(m)` is, and `onPerson(m)` is its negation for every member at their own desk — never
   both, never neither;
+- **nothing about work fires before the body arrives**: a member who comes online already `working`
+  carries their laptop across the floor, and their desk stays dark, empty and silent until `sit > 0.9`;
+- **the dock never covers a screen**: at every facing it sorts BEHIND the monitor and clears the
+  widest panel across the shoulders — the `at()` across term flips sign between the two camera-facing
+  rows, so one written constant is behind on one row and in front on the other;
 - **no laptop without an owner on the floor**: no desk draws a docked laptop for a member who is away,
   offline, or capped out of the render — the scenery-laptop regression, which is what
   `MONITOR_SETUPS_BY_ID` used to do on four desks by design;

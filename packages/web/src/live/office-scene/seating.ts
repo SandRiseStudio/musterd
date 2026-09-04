@@ -36,12 +36,39 @@ function hash(name: string): number {
  *
  * Keys on the composed posture, never `activity` (E2 spec §2): activity lags, and a stale
  * `activity: working` with posture folded to idle used to sit on the lounge couch drumming an
- * imaginary keyboard. This is the same predicate the renderer types and lights screens on
- * (`render.ts` `skelFor` / screen glow), and the render loop's park check shares it too — one
- * predicate for eyes, ears and the loop, so none of the three can disagree.
+ * imaginary keyboard.
+ *
+ * This is the ROSTER half of the fact. The whole one is `workingAtDesk` below, which adds the body —
+ * and that is what eyes, ears and the loop all read, so none of the three can disagree. Seating uses
+ * this half directly, because where to PUT a member cannot depend on where they already are.
  */
 export function audiblyWorking(m: Pick<Seatable, 'posture'>): boolean {
   return m.posture === 'working';
+}
+
+/**
+ * Is this member **at work at their desk** — the one predicate the room's eyes, ears and loop share?
+ *
+ * `audiblyWorking` on its own was never the whole fact: it is true from the instant a seat's posture
+ * flips, including while that seat's body is still walking in from the door. Everything the desk did
+ * about work therefore fired early — the screen lit itself, the room typed, and the loop counted the
+ * desk as alive — for a member who had not arrived (nick, 2026-09-04: "I want the monitor to only
+ * turn on once a member has sat down at desk and docked computer, same with typing sounds").
+ *
+ * So the body is part of the predicate, and `sit` is how the body says so: the same `> 0.9` the
+ * typing HANDS were already gated on in `render.ts` `skelFor`, and the same one the chair pieces and
+ * the dock use. E2 §2 is unchanged in what it demands — one predicate for eyes, ears and the loop —
+ * it is only that the predicate now tells the truth about arrival. Its three callers are the screen
+ * (`drawWorkstation`), the room tone's `working[]`, and the park check `living()`.
+ *
+ * `sit` comes off the member's live pose. A member with no pose at all — an offline owner's kept
+ * desk, or a body the render cap dropped — is not at work at it.
+ */
+export function workingAtDesk(
+  m: Pick<Seatable, 'posture'> | undefined,
+  sit: number | undefined,
+): boolean {
+  return !!m && audiblyWorking(m) && (sit ?? 0) > 0.9;
 }
 
 /**
