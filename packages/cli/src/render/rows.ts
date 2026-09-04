@@ -9,7 +9,6 @@ import {
   type MemberSummary,
   type PresenceStatus,
 } from '@musterd/protocol';
-
 import { clock, dayLabel, sinceLabel, theme } from './theme.js';
 import { heading, hint, padEndVisible, sym, termWidth, visibleLen, wrapText } from './ui.js';
 
