@@ -254,19 +254,20 @@ up() {
   # act→tone badges, a quote in the sender's own ink — has been measured against a room that had
   # nobody in it.
   #
-  # `join --surface <harness>` is the fix and it is the same documented override, one verb over: it
+  # `claim --detach --surface <harness>` is the fix (until 2026-09-04 this was `join --surface`, the
+  # one-shot HTTP claim; ADR 377 folded join into claim and `--detach` names that path): it
   # attaches a presence that OUTLIVES the process (no session lease to lose) and stores the surface
   # on the identity, so every `send` below also goes out on that harness rather than falling back to
   # `cli`. That second half is what makes the harness segment render: the plate reads `node.surface`
   # from the LIVE presence, so a claimed-but-absent seat is a plate with no harness seg no matter
   # what it claimed as.
-  # Backgrounded and approved underneath, exactly like the claims above: `join` opens its OWN claim
+  # Backgrounded and approved underneath, exactly like the claims above: it opens its OWN claim
   # request and blocks on an admin decision (ADR 077), so running these in the foreground deadlocks
   # the fixture against itself — there is nobody else to approve them.
   for e in $SEATS; do
     n="$(seat_name "$e")"
     (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
-       node "$BIN" join "$TEAM" --as "$n" --key "$KEY" --surface "$(seat_surface "$e")" \
+       node "$BIN" claim "$n" --team "$TEAM" --detach --key "$KEY" --surface "$(seat_surface "$e")" \
        --server "$SERVER" >"$SEATDIR/$n/join.log" 2>&1) &
   done
   joined=0
@@ -289,10 +290,10 @@ up() {
   # by t+70s. A room that empties partway through a run is the moving-page problem in its purest
   # form — the same commit measures differently depending on how long the fixture took to get there.
   #
-  # Re-joining is the heartbeat because it is the ONLY verb that can attach a presence on a chosen
-  # surface. A long-lived holder would be tidier, but every one of them forces `cli`: `inbox --watch`
+  # Re-claiming detached is the heartbeat because it is the ONLY path that attaches a presence on a
+  # chosen surface. A long-lived holder would be tidier, but every one of them forces `cli`: `inbox --watch`
   # takes its surface from the binding, and the binding path pins `cli` by construction (ADR 286,
-  # config.ts). Measured: `join --surface cursor` then `inbox --watch` leaves the seat present on
+  # config.ts). Measured: `join --surface cursor` (now `claim --detach`) then `inbox --watch` leaves the seat present on
   # `cli`, harness segment gone. So the fixture re-asserts instead of holding.
   #
   # Every heartbeat's PID is recorded, and `down` kills them BY PID for the same reason the daemon is
@@ -304,7 +305,7 @@ up() {
       while :; do
         sleep "$PRESENCE_HEARTBEAT_S"
         (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
-           node "$BIN" join "$TEAM" --as "$n" --key "$KEY" --surface "$sf" \
+           node "$BIN" claim "$n" --team "$TEAM" --detach --key "$KEY" --surface "$sf" \
            --server "$SERVER" >>"$SEATDIR/$n/join.log" 2>&1) || true
       done
     ) >/dev/null 2>&1 &
@@ -336,7 +337,7 @@ up() {
          echo "  '$want_surface' will not render, so --lc-hz-$want_surface-ink goes unmeasured." >&2
          # HEAD, not tail: a rejected surface is a ZodError whose last line is a bare `]`, and the
          # line that names the cause ("invalid_enum_value", "received": …) is at the top.
-         echo "  join said: $(tr -d '\n ' <"$SEATDIR/$n/join.log" 2>/dev/null | head -c 180 || echo 'no join log')" >&2
+         echo "  claim said: $(tr -d '\n ' <"$SEATDIR/$n/join.log" 2>/dev/null | head -c 180 || echo 'no join log')" >&2
          echo "  (a rejected surface here means the built CLI predates it — run \`pnpm -r build\`)" >&2
          exit 1 ;;
     esac

@@ -693,11 +693,14 @@ describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
       expect(ok.code).toBe(0);
       // Delegated to claim: claim's output, not a second handshake's.
       expect(ok.out).toContain('occupied on dawn');
+      expect(ok.out).toContain('online via cli (detached');
       expect(ok.out).not.toContain('joined');
     } finally {
       errSpy.mockRestore();
     }
-    expect(errChunks.join('')).toContain('musterd join is now: musterd claim nick --team dawn');
+    expect(errChunks.join('')).toContain(
+      'musterd join is now: musterd claim nick --team dawn --detach',
+    );
     // Same handshake, same result: the folder is bound to the seat claim resolved.
     const ok2 = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
     expect(JSON.parse(ok2.out.trim().split('\n').pop()!)).toMatchObject({

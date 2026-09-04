@@ -4,7 +4,7 @@ import { CliError } from '../errors.js';
 import { joinAliasNotice, joinArgvToClaim } from './join.js';
 
 describe('`musterd join` is an argv translation onto `claim` (ADR 377 increment 1)', () => {
-  it('maps `<slug> --as <name>` to `<name> --team <slug>` and passes every other flag through', () => {
+  it('maps `<slug> --as <name>` to `<name> --team <slug> --detach` and passes every other flag through', () => {
     const out = joinArgvToClaim(
       parseArgs([
         'revive',
@@ -22,6 +22,7 @@ describe('`musterd join` is an argv translation onto `claim` (ADR 377 increment 
     expect(out.positionals).toEqual(['ryder']);
     expect(out.flags).toEqual({
       team: 'revive',
+      detach: true,
       key: 'mskey_x',
       grant: 'msgr_y',
       surface: 'cli',
@@ -33,7 +34,7 @@ describe('`musterd join` is an argv translation onto `claim` (ADR 377 increment 
   it('the notice names the claim spelling for exactly these arguments', () => {
     const out = joinArgvToClaim(parseArgs(['revive', '--as', 'ryder']));
     expect(joinAliasNotice(out)).toBe(
-      'musterd join is now: musterd claim ryder --team revive (ADR 377) — this spelling stays one epoch',
+      'musterd join is now: musterd claim ryder --team revive --detach (ADR 377) — this spelling stays one epoch',
     );
   });
 

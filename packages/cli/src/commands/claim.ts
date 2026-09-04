@@ -6,10 +6,18 @@ import {
   resolveAttestation,
   resolveAttestedModel,
   type Surface,
+  TOKEN_PREFIXES,
 } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
 import { HttpClient, watchClaim } from '../client.js';
-import { loadConfig, requireUsableBinding, saveBinding, wsBase } from '../config.js';
+import {
+  loadConfig,
+  rememberIdentity,
+  requireUsableBinding,
+  saveBinding,
+  saveConfig,
+  wsBase,
+} from '../config.js';
 import { CliError } from '../errors.js';
 import { liveBindingClobber } from '../onboard/guard.js';
 import {
@@ -20,6 +28,7 @@ import {
 } from '../onboard/pending.js';
 import { setSeatGitIdentity } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
+import { success } from '../render/ui.js';
 import { WAIT_TIMEOUT_EXIT } from './inbox.js';
 import { renderMemoryLine } from './memory.js';
 
@@ -131,6 +140,27 @@ export async function claimCommand(parsed: Parsed): Promise<number> {
         `Re-run with --force to repoint this folder anyway.`,
       2,
     );
+  }
+
+  // `--detach` (ADR 377 increment 1): the one-shot HTTP claim `musterd join` always ran. It
+  // occupies the seat, binds the folder and EXITS, leaving a Presence with no session lease — so the
+  // seat stays present, on the surface named here, after the process is gone (until PRESENCE_TIMEOUT
+  // reaps it). The default WS handshake below holds the Presence through a session lease that dies
+  // with the process (ADR 337). The fold made a difference visible that the ADR's "byte-for-byte"
+  // line missed: fixtures and scripts that want a room to STAY occupied (scripts/a11y) need this
+  // path, and it is now a flag on the one verb rather than a second verb's hidden behaviour.
+  if (flags['detach']) {
+    return detachedClaim({
+      http,
+      config,
+      server,
+      team,
+      key: claimKey,
+      target,
+      surface,
+      grant,
+      json: Boolean(flags['json']),
+    });
   }
 
   // Disambiguate which pending session (if any) this claim is for. Informational + lets `--for`
@@ -327,4 +357,80 @@ function resolveTarget(parsed: Parsed, binding: Binding | null): ClaimSeatTarget
 
 function bindingPolicy(_parsed: Parsed, binding: Binding | null): ClaimPolicy {
   return binding?.claim ?? { mode: 'chat' };
+}
+
+/**
+ * The one-shot HTTP claim (`POST /teams/<slug>/claim`): resolve now, bind the folder, remember the
+ * identity in the ADR 059 vault, and return — no socket held, no lease. `pending` is reported and
+ * left for an admin; the caller re-runs once approved (it does not block the way the WS path does).
+ */
+async function detachedClaim(input: {
+  http: HttpClient;
+  config: ReturnType<typeof loadConfig>;
+  server: string;
+  team: string;
+  key: string;
+  target: ClaimSeatTarget;
+  surface: Surface;
+  grant: string | undefined;
+  json: boolean;
+}): Promise<number> {
+  const { http, config, server, team, key, target, surface, grant, json } = input;
+  const outcome = await http.claim(team, {
+    key,
+    target,
+    surface,
+    ...(grant !== undefined ? { grant } : {}),
+  });
+  if (outcome.state === 'refused') {
+    const tail = outcome.hint ? ` — ${outcome.hint}` : '';
+    throw new CliError(`claim refused (${outcome.code}): ${outcome.message}${tail}`, 4);
+  }
+  if (outcome.state === 'pending') {
+    if (json) {
+      process.stdout.write(
+        JSON.stringify({ team, pending: true, request: outcome.requestId }) + '\n',
+      );
+    } else {
+      process.stdout.write(
+        `${theme.meta('⧖')} ${outcome.message} ${theme.meta(`(request ${outcome.requestId}) — approve, then re-run musterd claim`)}\n`,
+      );
+    }
+    return 0;
+  }
+  const seat = outcome.seat.name;
+
+  config.server = server;
+  config.current = team;
+  // The identity carries the surface: every later act from this config goes out on it, which is what
+  // lets a detached seat render as its harness rather than falling back to `cli`.
+  config.identities[team] = { name: seat, key, surface };
+  rememberIdentity(config, { team, name: seat, key, surface }); // ADR 059 vault
+  saveConfig(config);
+  const binding: Binding = {
+    version: 2,
+    server,
+    team,
+    agent_key: key,
+    claim: { mode: 'seat', name: seat },
+    ...(grant !== undefined ? { grant } : {}),
+  };
+  saveBinding(process.cwd(), binding);
+  // ADR 197: agents get the seat git identity; humans keep their real email (same gate as doctor).
+  if (key.startsWith(TOKEN_PREFIXES.agent_key)) {
+    setSeatGitIdentity(seat, process.cwd(), team);
+  }
+
+  if (json) {
+    process.stdout.write(JSON.stringify({ team, member: seat, surface, detached: true }) + '\n');
+    return 0;
+  }
+  process.stdout.write(
+    success(`${theme.memberName(seat, 'agent')} — occupied on ${team}`, { next: 'musterd next' }) +
+      '\n',
+  );
+  process.stdout.write(
+    `${theme.presenceDot('online')} ${theme.meta(`${seat} online via ${surface} (detached — no session held)`)}\n`,
+  );
+  return 0;
 }
