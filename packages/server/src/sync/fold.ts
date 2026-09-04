@@ -649,6 +649,12 @@ export function foldBatch(
   teamId: string,
   events: SyncPullEvent[],
   now: number = Date.now(),
+  /**
+   * Where the log's lane history begins (`laneGenesis`), or `null` when the peer did not say. A
+   * transition for a lane older than this needs no birth to wait for — see the `lane_unborn`
+   * branch. `null` keeps the pre-2026-09-04 behaviour: block on every unborn lane.
+   */
+  laneGenesis: string | null = null,
 ): FoldResult {
   return db.transaction((): FoldResult => {
     const local = localNodeId(db, teamId);
@@ -936,7 +942,15 @@ export function foldBatch(
         // Project first: an unborn lane must stop BEFORE the audit row lands, or the row's presence
         // would advance heldHead past an event this daemon never applied.
         const outcome = projectLaneEvent(db, teamId, e);
-        if (outcome === 'unborn') {
+        // A lane older than the log's first `lane.opened` has no birth anywhere to wait for: the
+        // log contains none for anything older, by construction (ULIDs sort by birth time). Waiting
+        // is waiting forever — which is precisely how the first real joiner wedged, 9,393 events in.
+        // So it advances: no `lanes` row is invented (a row with no title would be worse than none),
+        // the audit row below still lands, and the transition stays findable in the trail. Every
+        // other unborn lane still blocks, because there the birth may yet arrive or a hole is real.
+        const preHistory =
+          outcome === 'unborn' && laneGenesis !== null && laneId !== '' && laneId < laneGenesis;
+        if (outcome === 'unborn' && !preHistory) {
           stop = { kind: 'lane_unborn', lane: laneId, action: e.action, hub_seq: event.hub_seq };
           return finish();
         }

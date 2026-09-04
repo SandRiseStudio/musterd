@@ -389,5 +389,13 @@ export const SyncPullResponseSchema = z.object({
       }),
     )
     .default([]),
+  /**
+   * The smallest lane id this log holds a `lane.opened` for — where its lane history begins. A
+   * puller uses it to tell a transition for a lane that predates replication (skippable: no birth
+   * exists anywhere) from one whose birth is merely missing (a hole, which must still block).
+   * Defaults to `null` so an older hub's page still parses; a puller then blocks on both, exactly
+   * as it did before this field existed.
+   */
+  lane_genesis: z.string().nullable().default(null),
 });
 export type SyncPullResponse = z.infer<typeof SyncPullResponseSchema>;

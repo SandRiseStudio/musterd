@@ -238,3 +238,101 @@ describe('lane replication (spec 2026-09-01) — the falsifier', () => {
     ).toEqual({ n: 1 });
   });
 });
+
+/**
+ * The genesis watermark (2026-09-04, lane 01M1NFHEKT): a team that had lanes BEFORE `lane.opened`
+ * began replicating hands every new machine an event it can never apply — a transition for a lane
+ * whose birth is not in the log and never will be. Block-don't-skip then retries forever and the
+ * joiner's fold stops dead, which is exactly what happened to the first real cloud seat: 9,393 of
+ * 22,496 events folded, then `sync_fold_lane_unborn` on lane 01M1HJTF0M, permanently.
+ *
+ * The discriminator is the log's own beginning. Lane ids are ULIDs, so they sort by birth time: the
+ * earliest lane the log holds a `lane.opened` for is the watermark, and anything older than it is
+ * provably pre-history — the hub's log contains no birth for it by construction. Older than the
+ * watermark skips (the audit row still lands, so the transition is not lost); anything else still
+ * blocks, because a missing birth there is a hole or an open still in flight.
+ */
+describe('genesis watermark — pre-history lanes skip, holes still block', () => {
+  /**
+   * A lane that exists here with no replicated birth — the shape of every lane born before
+   * `lane.opened` was carried on the wire. Inserted straight into `lanes`, deliberately: those
+   * lanes were never stamped by the allocator, so there is no audit row to push and no gap in the
+   * origin sequence. (Deleting a stamped birth instead would fabricate a gap, which the hub
+   * rightly refuses — a different failure entirely.)
+   */
+  function bornBeforeReplication(laneId: string, title: string) {
+    joiner.db
+      .prepare(
+        `INSERT INTO lanes (id, team_id, project, title, detail, kind, owner_seat, role,
+                            surface_globs, depends_on, branch, goal_id, risk, stakes,
+                            stakes_provenance, merged_json, state, created_by, created_at,
+                            claimed_at, resolved_at, updated_at)
+         VALUES (?, ?, 'default', ?, NULL, NULL, NULL, NULL, '[]', '[]', NULL, NULL, NULL, NULL,
+                 NULL, NULL, 'open', 'nick', 1, NULL, NULL, 1)`,
+      )
+      .run(laneId, joinerTeam().id, title);
+  }
+
+  const edit = (laneId: string, branch: string) =>
+    updateLane(joiner.db, joinerTeam().id, laneId, 'bravo', { branch }, 2, undefined, {
+      actor: 'nick',
+    });
+
+  it('a transition for a lane older than the log advances the fold instead of wedging it', async () => {
+    // The watermark: a normally-born lane, so the log holds one `lane.opened`. `ancient` sorts
+    // before it, which is what makes it provably older than the log itself.
+    const later = await post(
+      joinerBase,
+      '/teams/bravo/lanes',
+      { title: 'watermark' },
+      nickOnJoiner,
+    );
+    const laterId: string = later.json.lane.id;
+    const ancientId = '01M0000000000000000000000A';
+    expect(ancientId < laterId).toBe(true);
+    bornBeforeReplication(ancientId, 'pre-history');
+    edit(ancientId, 'nick/x');
+
+    await replicate();
+
+    // The fold got all the way through: the watermark lane landed, which it cannot do if the batch
+    // stopped on the older lane's transition.
+    expect(getLane(hub.db, hubTeam().id, laterId, 'bravo')).toMatchObject({ title: 'watermark' });
+    // The pre-history lane is NOT invented here — a row with no title would be worse than no row.
+    expect(getLane(hub.db, hubTeam().id, ancientId, 'bravo')).toBeNull();
+    // The transition is not lost either: the audit row carries it, which is what makes this a skip
+    // with evidence rather than a hole this daemon opened in its own trail.
+    expect(
+      hub.db
+        .prepare<
+          [string],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM audit WHERE action = 'lane.updated' AND target = ?")
+        .get(ancientId),
+    ).toEqual({ n: 1 });
+  });
+
+  it('a transition for a lane NEWER than the watermark still blocks — a hole is not pre-history', async () => {
+    const first = await post(
+      joinerBase,
+      '/teams/bravo/lanes',
+      { title: 'watermark' },
+      nickOnJoiner,
+    );
+    const holeId = '01ZZZZZZZZZZZZZZZZZZZZZZZZ';
+    expect(first.json.lane.id < holeId).toBe(true);
+    bornBeforeReplication(holeId, 'hole');
+    edit(holeId, 'nick/y');
+
+    await replicate();
+
+    expect(
+      hub.db
+        .prepare<
+          [string],
+          { n: number }
+        >("SELECT COUNT(*) AS n FROM audit WHERE action = 'lane.updated' AND target = ?")
+        .get(holeId),
+    ).toEqual({ n: 0 });
+  });
+});

@@ -9,7 +9,7 @@ import { readNodeState } from '../node/state.js';
 import { handleFoldedMessages } from '../protocol/route.js';
 import { listActiveTeams } from '../store/teams.js';
 import { foldBatch, foldNodeLiveness, readPullCursor, type FoldStop } from './fold.js';
-import { hasEnrolledJoiners, readStaged } from './log.js';
+import { hasEnrolledJoiners, laneGenesis, readStaged } from './log.js';
 
 /**
  * The pull half of the sync surface (ADR 325 increment 3b-ii): fetch the team's canonical order
@@ -222,15 +222,21 @@ export async function pullTeam(
   if (!enrollment && !isHub) return 0;
 
   const cursor = readPullCursor(ctx.db, team.id);
-  const page: Pick<SyncPullResponse, 'events' | 'nodes'> = enrollment
+  // The hub sends its watermark; folding our own staged log (the loopback arm) reads it from the
+  // same table the events came from — either way it describes the log being folded, not this daemon.
+  const page: Pick<SyncPullResponse, 'events' | 'nodes' | 'lane_genesis'> = enrollment
     ? await fetchPage(enrollment.hub_url, enrollment.credential, team.slug, cursor)
-    : { events: readStaged(ctx.db, team.id, cursor, SYNC_PULL_MAX_BATCH), nodes: [] };
+    : {
+        events: readStaged(ctx.db, team.id, cursor, SYNC_PULL_MAX_BATCH),
+        nodes: [],
+        lane_genesis: laneGenesis(ctx.db, team.id),
+      };
   // Node liveness lands even when the page is empty: a quiet team still needs to know its
   // machines are alive (presence replication §3). The hub reads its own table and folds none.
   if (page.nodes.length > 0) foldNodeLiveness(ctx.db, team.id, page.nodes);
   if (page.events.length === 0) return 0;
 
-  const result = foldBatch(ctx.db, team.id, page.events, now);
+  const result = foldBatch(ctx.db, team.id, page.events, now, page.lane_genesis);
   if (result.stop) {
     reportStop(ctx, team.slug, result.stop);
   } else {

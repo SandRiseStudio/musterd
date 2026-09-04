@@ -290,6 +290,32 @@ export function hasEnrolledJoiners(db: Database, teamId: string, localNodeId: st
  * `idx_sync_log_hub` was declared UNIQUE for (3b-i). `payload` was stored as the SyncEvent verbatim,
  * so it parses back without a second shape — the hub_seq rides beside it for the puller's cursor.
  */
+/**
+ * Where this log's lane history begins: the smallest lane id it holds a `lane.opened` for, or
+ * `null` when it holds none (a log with no lane births has no pre-history to speak of).
+ *
+ * Lane ids are ULIDs, so they sort by birth time. A transition naming a lane OLDER than this
+ * watermark is therefore provably pre-history — the log contains no birth for anything older, by
+ * construction, so waiting for one is waiting forever. That is the whole discriminator the fold
+ * needs to tell "born before `lane.opened` replicated" (skip) from "a hole, or an open still in
+ * flight" (block): see `foldBatch`. Found by the first real joiner, which stopped dead on a lane
+ * born minutes before lane replication began (2026-09-04).
+ */
+export function laneGenesis(db: Database, teamId: string): string | null {
+  return (
+    db
+      .prepare<[string], { id: string | null }>(
+        `SELECT MIN(COALESCE(json_extract(payload, '$.event.detail.lane'),
+                             json_extract(payload, '$.event.target'))) AS id
+           FROM sync_log
+          WHERE team_id = ?
+            AND json_extract(payload, '$.kind') = 'lane'
+            AND json_extract(payload, '$.event.action') = 'lane.opened'`,
+      )
+      .get(teamId)?.id ?? null
+  );
+}
+
 export function readStaged(
   db: Database,
   teamId: string,
