@@ -1147,7 +1147,14 @@ export class HttpClient {
    */
   async claim(
     slug: string,
-    input: { key: string; target: ClaimTarget; grant?: string; surface: Surface },
+    input: {
+      key: string;
+      target: ClaimTarget;
+      grant?: string;
+      surface: Surface;
+      workspace?: string;
+      workspace_key?: string;
+    },
   ): Promise<ClaimOutcome> {
     // Validate the frame shape against the protocol schema (ADR 078); send the HTTP body Cleo's
     // endpoint expects ({ key, target, grant?, surface } — no WS type/v).
@@ -1165,6 +1172,8 @@ export class HttpClient {
       key: input.key,
       target: input.target,
       surface: input.surface,
+      ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
+      ...(input.workspace_key !== undefined ? { workspace_key: input.workspace_key } : {}),
       ...(input.grant !== undefined ? { grant: input.grant } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
@@ -1174,6 +1183,11 @@ export class HttpClient {
       target: frame.target,
       ...(frame.grant !== undefined ? { grant: frame.grant } : {}),
       surface: frame.surface,
+      // ADR 014 / 368: the stateless mirror carries the workspace the same way the WS frame does.
+      // Omitted until 2026-09-04, which left every detached claim location-less on the roster and
+      // unprotected by ADR 092's same-workspace grace.
+      ...(frame.workspace !== undefined ? { workspace: frame.workspace } : {}),
+      ...(frame.workspace_key !== undefined ? { workspace_key: frame.workspace_key } : {}),
       ...(frame.model !== undefined ? { model: frame.model } : {}),
       ...(frame.build !== undefined ? { build: frame.build } : {}),
       ...(frame.epoch !== undefined ? { epoch: frame.epoch } : {}),
