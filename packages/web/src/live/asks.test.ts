@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   answerableCount,
   applyTierClock,
+  clockFraction,
   askAudience,
   askIsLoud,
   byAudienceThenUrgency,
@@ -159,6 +160,30 @@ describe('deriveAsks (ADR 149)', () => {
  * pure over the timeline and memoised on the envelopes, so a clock-dependent state computed inside
  * it would go stale the moment it mattered (the 1s tick re-renders but does not re-run the memo).
  */
+describe('clockFraction — the arc round the avatar', () => {
+  const NOW = 10_000_000;
+  const at = (id: string, tier: 'advisory' | 'standard' | 'blocking', ts: number) =>
+    deriveAsks([ask(id, ts, tier)])[0]!;
+  const total = ASK_TIER_DEFAULTS.standard.timeout_ms;
+
+  it('is the share of the tier still to run, off the caller\'s clock', () => {
+    expect(clockFraction(at('f1', 'standard', NOW), NOW)).toBe(1);
+    expect(clockFraction(at('f2', 'standard', NOW - total / 4), NOW)).toBeCloseTo(0.75);
+    expect(clockFraction(at('f3', 'standard', NOW - total), NOW)).toBe(0);
+  });
+  it('clamps past the deadline to 0 and reads a held ask as 0 — the ring is empty, not negative', () => {
+    expect(clockFraction(at('f4', 'standard', NOW - 2 * total), NOW)).toBe(0);
+    const held = applyTierClock([at('f5', 'blocking', 0)], NOW)[0]!;
+    expect(held.state).toBe('held');
+    expect(clockFraction(held, NOW)).toBe(0);
+  });
+  it('is null when there is no running clock to draw', () => {
+    const lapsed = applyTierClock([at('f6', 'standard', 0)], NOW)[0]!;
+    expect(lapsed.state).toBe('lapsed');
+    expect(clockFraction(lapsed, NOW)).toBeNull();
+  });
+});
+
 describe('applyTierClock — the clock has run out, but on which contract', () => {
   const NOW = 10_000_000;
   const at = (id: string, tier: 'advisory' | 'standard' | 'blocking', ts: number) =>

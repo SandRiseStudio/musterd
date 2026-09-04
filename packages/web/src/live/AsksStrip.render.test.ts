@@ -99,6 +99,19 @@ describe('the rail, rendered — a lapsed ask must not read as one waiting on yo
     expect(html).not.toContain('elapsed');
   });
 
+  /* The rail wears the lead asker's hue (rim + bell) and drains the tier clock as an arc round the
+     avatar — both inline variables the CSS reads. Pinned at the wiring: the pure fraction has its
+     own suite in asks.test.ts, and reverting the component to a bare avatar would leave it green. */
+  it('carries the asker\'s hue on the rail and the clock fraction on the avatar', () => {
+    const html = render([ask('a4', 'standard', 1000)]);
+    expect(html).toMatch(/class="lc-asks[^"]* has-lead"[^>]*style="--lc-asks-hue:hsl\(/);
+    expect(html).toMatch(/lc-asks__who is-timed"[^>]*--lc-ask-frac:0\.9\d+/);
+  });
+  it('draws a blocking ask past its clock as an empty ring in danger, never as time left', () => {
+    const html = render([ask('a5', 'blocking', DAYS_3)]);
+    expect(html).toMatch(/lc-asks__who is-over"[^>]*--lc-ask-frac:0[;"]/);
+  });
+
   it('leads the rail with the live blocking ask, not the days-old lapsed one', () => {
     // The regression that matters most to a viewer: the rail has ONE lead slot, and before this a
     // stale card could hold it.
