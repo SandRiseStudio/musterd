@@ -54,6 +54,48 @@
   font-size: 15px;
 }
 
+/* ─── the corner: a notice and where to find us ───────────────────────────
+   Stacked above the watermark (Live.css `.lc-office__corner`). The notice is a chip in the reel's
+   paper so it reads as the room's chrome rather than a caption burned into the video; the contact
+   line is bare mono ink at the watermark's size, because it is an address, not a message. Both are
+   sized for the 720p encode like the reel — a line that survives capture is the whole bar. */
+.bc__notice {
+  --lc-paper: #f3e2c3;
+  --lc-paper-2: #e9d3ab;
+  --lc-paper-ink: #2b1f13;
+  --lc-paper-rim: rgba(120, 78, 42, 0.42);
+  --lc-paper-drop: rgba(58, 34, 12, 0.38);
+  --lc-paper-sheen: rgba(255, 252, 245, 0.55);
+  display: inline-block;
+  padding: 4px 11px;
+  border-radius: 999px;
+  color: var(--lc-paper-ink);
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--lc-paper) 94%, var(--lc-accent)) 0%,
+    color-mix(in srgb, var(--lc-paper-2) 92%, transparent) 100%
+  );
+  border: 1px solid color-mix(in srgb, var(--lc-accent) 30%, var(--lc-paper-rim));
+  box-shadow:
+    inset 0 1px 0 var(--lc-paper-sheen),
+    0 2px 8px -2px var(--lc-paper-drop);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  animation: lc-fade var(--lc-dur-2) var(--lc-ease-out) both;
+}
+.bc__contact {
+  display: inline-flex;
+  gap: 12px;
+  color: var(--lc-paper-ink, #2b1f13);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
 /* ─── the asks reel (ADR 228) ─────────────────────────────────────────────
    The floor card's sibling, not a page banner. First version shipped as a full-bleed washed-out
    bar and nick called it on the live stream — the fix is structural: the reel inherits the

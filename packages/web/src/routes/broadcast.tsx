@@ -64,6 +64,41 @@ function captureFpsFromUrl(): number {
   return Number.isFinite(n) && n > 0 && n <= 60 ? n : 30;
 }
 
+/**
+ * Where a viewer of the stream can find the team — a fact asserted on a public surface, so it is
+ * written per team rather than derived (`<slug>@musterd.io` would claim a mailbox for every team
+ * that ever streams). musterd.io is shown for every team; the address only where one exists.
+ */
+/**
+ * The corner block: the notice the stream carries about itself, then where to find us.
+ *
+ * The people in this room are building and deploying musterd — the thing being watched — so a
+ * deploy can restart the feed for a moment; a viewer who sees the room blink should read "they
+ * shipped", not "the stream broke". Long form on the chip's title. Sloane was asked for the copy
+ * (01M1MM0E8Z) and the clock ran out — this is miley's draft, hers to revise.
+ *
+ * The address is a fact asserted on a public surface, so it is named per team rather than derived
+ * (`<slug>@musterd.io` would claim a mailbox for every team that ever streams). Pure, so the render
+ * test can hold both facts.
+ */
+export const WORKSHOP_NOTICE = {
+  chip: 'live from the workshop — the feed may blink while we ship',
+  full: 'The people in this room are building musterd while you watch, and every deploy can restart the stream for a moment. It comes back on its own.',
+};
+export function broadcastCorner(team: string | null) {
+  return (
+    <>
+      <span className="bc__notice" title={WORKSHOP_NOTICE.full}>
+        {WORKSHOP_NOTICE.chip}
+      </span>
+      <span className="bc__contact">
+        <span>musterd.io</span>
+        {team === 'revive' && <span>revive@musterd.io</span>}
+      </span>
+    </>
+  );
+}
+
 /** Hooks a capturer (or a headless check) probes — see ADR 157 "Observability & Evaluation". */
 interface BroadcastWindow {
   __office?: OfficeHandle | null;
@@ -194,6 +229,7 @@ function BroadcastPage() {
             captureFps={captureFps}
             workCues="stack"
             topSlot={<AsksReel envelopes={envelopes} roster={roster} board={board} />}
+            cornerSlot={broadcastCorner(team)}
             onReady={onSceneReady}
           />
         )}

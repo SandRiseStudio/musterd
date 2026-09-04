@@ -90,7 +90,7 @@ export function speechEventFor(env: Envelope): Extract<OfficeEvent, { kind: 'spe
   return {
     kind: 'speech',
     who: env.from,
-    text: env.body && env.body.trim() ? env.body : actLabel(env.act),
+    text: env.body && env.body.trim() ? stripSenderPrefix(env.from, env.body) : actLabel(env.act),
     tone: actTone(env.act),
     id: env.id,
     act: env.act,
@@ -105,6 +105,20 @@ export function speechEventFor(env: Envelope): Extract<OfficeEvent, { kind: 'spe
   };
 }
 
+/**
+ * A bubble does not name its own speaker. Seats open most of what they say with their own name —
+ * `miley: #1258 merged …` — because in the stream and the inbox the line stands apart from its
+ * author. Over the sender's head the name is the person under the bubble, so the prefix is the
+ * one thing on the floor that says twice what the room says once (nick, 2026-09-03). Only the
+ * SENDER's name is stripped, and only at the very start: `nick: ` on a bubble ada speaks is
+ * quoted text and stays. The recipient line above the text on a directed act is a different
+ * fact and is untouched — that one says who "you" is.
+ */
+export function stripSenderPrefix(from: string, body: string): string {
+  const n = from.length + 1;
+  if (body.slice(0, n).toLowerCase() !== `${from.toLowerCase()}:`) return body;
+  return body.slice(n).trimStart() || body;
+}
 
 /**
  * The walk requests a `walk-help` turns into — one per seat, in the order the sender named them.
