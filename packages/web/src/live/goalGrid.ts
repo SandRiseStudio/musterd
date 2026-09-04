@@ -1,5 +1,5 @@
 import type { FlowMetrics, Goal, GoalFlow, Lane, LaneWarning } from '@musterd/protocol';
-import { compareGoals, isAwaitingAcceptance } from '@musterd/protocol';
+import { compareGoals, isAwaitingAcceptance } from '@musterd/protocol/wire';
 
 /**
  * The goals-grid front door (goals-front-door design) — the pure model behind `GoalGrid.tsx`.

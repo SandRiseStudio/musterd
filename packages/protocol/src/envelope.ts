@@ -1,17 +1,34 @@
 import { z } from 'zod';
-import { ActSchema, type Act } from './acts.js';
+import { ActSchema } from './acts.js';
 import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
+import {
+  ELIGIBLE_ACTS,
+  MAX_ELIGIBLE,
+  buildEnvelope,
+  eligibleOf,
+  type EnvelopeInput,
+} from './envelope.wire.js';
 import { AnchorRefSchema, HuddleMetaSchema } from './huddle.js';
 import { BlockedBySchema } from './incident.js';
 import { PROTOCOL_VERSION } from './version.js';
 
-/** Recipient of an envelope: a specific member, the whole team, or broadcast. */
+/** The envelope's validator-free half lives in `envelope.wire.js`; this module is its zod face. */
+export {
+  ELIGIBLE_ACTS,
+  MAX_ELIGIBLE,
+  buildEnvelope,
+  eligibleOf,
+  type EnvelopeInput,
+  type Recipient,
+} from './envelope.wire.js';
+
+/** Recipient of an envelope: a specific member, the whole team, or broadcast. The type is in
+ *  `envelope.wire.js`; this is its validator. */
 export const RecipientSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('member'), name: z.string().min(1) }),
   z.object({ kind: z.literal('team') }),
   z.object({ kind: z.literal('broadcast') }),
 ]);
-export type Recipient = z.infer<typeof RecipientSchema>;
 
 const TEAM_SLUG = /^[a-z0-9-]{1,32}$/;
 
@@ -30,40 +47,7 @@ export const DeferUntilSchema = z.union([
 ]);
 export type DeferUntil = z.infer<typeof DeferUntilSchema>;
 
-/**
- * ADR 254: the eligible set — 2–`MAX_ELIGIBLE` named seats, **any one of whom discharges the act**.
- *
- * Four is the cap for two reasons, and the second is the load-bearing one. Above four, a named set
- * is `@team` with extra steps and the sender should be made to say so. But the cap also bounds the
- * escalation tail a later increment walks: at a 5-minute hold, four seats is ~20 minutes and at most
- * four `wake_cost` charges. Uncapped, both the latency and the spend of a serial walk are unbounded.
- */
-export const MAX_ELIGIBLE = 4;
-
-/**
- * Acts that may carry an eligible set. Deliberately narrow: a `handoff` to two seats is incoherent
- * (two owners is zero owners), and accept/decline/defer/steer are structurally single-target. That
- * restriction is what earns a single global "first answer wins" rule instead of a per-act table.
- */
-export const ELIGIBLE_ACTS: ReadonlySet<Act> = new Set<Act>([
-  'message',
-  'request_help',
-  'challenge',
-]);
-
-/**
- * The eligible set on an envelope's meta, or `null` when there isn't one (or it is malformed).
- *
- * The single reader of the shape — server, MCP, and CLI all come through here, so no package can
- * interpret `meta.eligible` differently from the schema that validated it. A mixed-type array
- * returns `null` rather than a filtered list: silently dropping a name would mean silently dropping
- * an obligation.
- */
-export function eligibleOf(meta: Record<string, unknown> | null | undefined): string[] | null {
-  const v = meta?.['eligible'];
-  if (!Array.isArray(v) || !v.every((n) => typeof n === 'string')) return null;
-  return v as string[];
-}
+// `MAX_ELIGIBLE`, `ELIGIBLE_ACTS` and `eligibleOf` live in `envelope.wire.js`; re-exported above.
 
 /**
  * The on-wire message. `actMetaRules` enforces per-act meta requirements
@@ -411,27 +395,6 @@ export function envelopePosition(env: Pick<Envelope, 'ts' | 'received_at'>): num
   return env.received_at ?? env.ts;
 }
 
-export function makeEnvelope(input: {
-  id: string;
-  team: string;
-  from: string;
-  to: Recipient;
-  act: z.infer<typeof ActSchema>;
-  body?: string;
-  thread?: string | null;
-  meta?: Record<string, unknown> | null;
-  ts?: number;
-}): Envelope {
-  return EnvelopeSchema.parse({
-    id: input.id,
-    v: PROTOCOL_VERSION,
-    team: input.team,
-    from: input.from,
-    to: input.to,
-    act: input.act,
-    body: input.body ?? '',
-    thread: input.thread ?? null,
-    meta: input.meta ?? null,
-    ts: input.ts ?? Date.now(),
-  });
+export function makeEnvelope(input: EnvelopeInput): Envelope {
+  return EnvelopeSchema.parse(buildEnvelope(input));
 }

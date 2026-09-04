@@ -1,4 +1,5 @@
-import { eligibleOf, type Envelope, type MemberSummary } from '@musterd/protocol';
+import type { Envelope, MemberSummary } from '@musterd/protocol';
+import { eligibleOf } from '@musterd/protocol/wire';
 import {
   Fragment,
   type ReactElement,

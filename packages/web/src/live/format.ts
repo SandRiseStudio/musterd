@@ -6,8 +6,7 @@ import type {
   OfflineReason,
   Posture,
 } from '@musterd/protocol';
-import { normalizeModelId, reviewGrade } from '@musterd/protocol/model';
-import { resolvePosture } from '@musterd/protocol/posture';
+import { normalizeModelId, resolvePosture, reviewGrade } from '@musterd/protocol/wire';
 
 export type ActTone =
   | 'accent'

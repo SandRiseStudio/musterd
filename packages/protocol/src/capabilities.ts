@@ -1,4 +1,12 @@
 import { z } from 'zod';
+import {
+  ACCOUNT_STATUSES,
+  ADMIN_ACCOUNT_STATUSES,
+  CAN_MESSAGE_SCOPES,
+  VISIBILITY_LEVELS,
+  type CanMessage,
+  type VisibilityLevel,
+} from './capabilities.wire.js';
 
 /**
  * The v0.3 seat capability model (ADR 070, P1 of ADR 069) — the **typed substrate** for governance.
@@ -9,33 +17,27 @@ import { z } from 'zod';
  * harness's job).
  */
 
-/** Account status — Axis 1 (SPEC A.6). `provisioned`/`active` are occupancy-derived; the rest are
- *  admin-set. Non-`active`/`provisioned` states gate claim/send in P2. */
-export const ACCOUNT_STATUSES = [
-  'provisioned',
-  'active',
-  'disabled',
-  'banned',
-  'archived',
-] as const;
-export const AccountStatusSchema = z.enum(ACCOUNT_STATUSES);
-export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
+export {
+  ACCOUNT_STATUSES,
+  ADMIN_ACCOUNT_STATUSES,
+  CAN_MESSAGE_SCOPES,
+  VISIBILITY_LEVELS,
+  type AccountStatus,
+  type AdminAccountStatus,
+  type CanMessage,
+  type VisibilityLevel,
+} from './capabilities.wire.js';
 
-/** The **admin-set** subset an admin may write to a seat-file; `provisioned`/`active` are derived from
- *  occupancy (never-occupied ⇒ `provisioned`), never stored. */
-export const ADMIN_ACCOUNT_STATUSES = ['disabled', 'banned', 'archived'] as const;
+export const AccountStatusSchema = z.enum(ACCOUNT_STATUSES);
 export const AdminAccountStatusSchema = z.enum(ADMIN_ACCOUNT_STATUSES);
-export type AdminAccountStatus = (typeof ADMIN_ACCOUNT_STATUSES)[number];
 
 /** `can_message` scope — whom a seat may message (`none` = muted). The "specific roles" scope the
  *  design mentions is a roadmap refinement; v0.3 ships `team | none`. */
-export const CanMessageSchema = z.enum(['team', 'none']);
-export type CanMessage = z.infer<typeof CanMessageSchema>;
+export const CanMessageSchema = z.enum(CAN_MESSAGE_SCOPES);
 
 /** What team state a seat may see. `admin` sees everything (credentials/grants/audit/policy/all
  *  charters); `team` is the need-to-know projection (teammate handles + presence + acts to it). */
-export const VisibilityLevelSchema = z.enum(['admin', 'team']);
-export type VisibilityLevel = z.infer<typeof VisibilityLevelSchema>;
+export const VisibilityLevelSchema = z.enum(VISIBILITY_LEVELS);
 
 /**
  * The full effective capability record a seat carries. Universe-1 (enforced in P2): `is_admin`,

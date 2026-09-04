@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import { GOAL_STATUSES } from './goals.wire.js';
+
+/** The Goal vocabulary itself is validator-free (`goals.wire.js`); this module is its zod face. */
+export {
+  GOAL_STATUSES,
+  compareGoals,
+  type GoalOrder,
+  type GoalStatus,
+  type GoalWave,
+} from './goals.wire.js';
 
 /**
  * Declared Goals for a **general** team (ADR 048's open seam, resolved by ADR 084's forward guidance):
@@ -13,8 +23,7 @@ import { z } from 'zod';
  * flap-tolerant: reopening work returns a Goal to `in-flight`. `shipped` is conjunctive over lanes
  * (all terminal, ≥1 `done`); a permanent milestone latch is a deferred, separate declared marker.
  */
-export const GoalStatusSchema = z.enum(['planned', 'in-flight', 'shipped']);
-export type GoalStatus = z.infer<typeof GoalStatusSchema>;
+export const GoalStatusSchema = z.enum(GOAL_STATUSES);
 
 /** plain-language one-liner for the stranger — what this goal means, not its title */
 export const GoalStorySchema = z.string().trim().min(1).max(140);
@@ -122,30 +131,6 @@ export const DeclareGoalSchema = z.object({
   depends_on: z.array(z.string()).optional(),
 });
 export type DeclareGoal = z.infer<typeof DeclareGoalSchema>;
-
-/**
- * The order Goals are offered in (ADR 257), shared by every consumer — `nextGoal`, the orientation
- * brief, the `no_goal` suggestion and the web grid — so the four cannot drift apart again (drifting
- * copies of a rank function are what let the retired numeric wave mis-steer the board unnoticed).
- *
- * Shelved last, then `in-flight` before `planned` before `shipped`, then **most recently declared
- * first**. Recency is the self-maintaining signal the numeric rank was not: re-declaring or amending a
- * Goal is itself the statement that the team cares about it now, so the order cannot go stale while
- * nobody is looking. `depends_on` remains a separate, harder filter — a blocked Goal is not a
- * candidate at all, which is correctness, where this is only preference.
- */
-const STATUS_RANK: Record<GoalStatus, number> = { 'in-flight': 0, planned: 1, shipped: 2 };
-
-export function compareGoals(
-  a: Pick<Goal, 'wave' | 'status' | 'declared_at'>,
-  b: Pick<Goal, 'wave' | 'status' | 'declared_at'>,
-): number {
-  return (
-    Number(a.wave === 'later') - Number(b.wave === 'later') ||
-    STATUS_RANK[a.status] - STATUS_RANK[b.status] ||
-    b.declared_at - a.declared_at
-  );
-}
 
 /** Body for `POST /teams/:slug/goals/outcome` — thin sugar over a `message` act to `@team`. */
 export const PostGoalOutcomeSchema = GoalOutcomeSchema;

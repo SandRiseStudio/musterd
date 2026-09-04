@@ -1,4 +1,5 @@
-import { seedInActiveTray, type Seed } from '@musterd/protocol';
+import type { Seed } from '@musterd/protocol';
+import { seedInActiveTray } from '@musterd/protocol/wire';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { LiveConfig } from './client';
 import { fetchSeeds } from './seedClient';

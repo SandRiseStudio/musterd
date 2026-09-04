@@ -6,26 +6,32 @@
 //      not just messages addressed to this seat;
 //   2. it backfills history over HTTP first (`GET /teams/:slug/messages`) so the view isn't empty,
 //      then live-tails — the canonical "GET history, then subscribe, dedupe by id" pattern.
-import {
-  AuditResponseSchema,
-  LaneBoardSchema,
-  LaneResultSchema,
-  MemberSummarySchema,
-  ReportSchema,
-  type Report,
-  makeEnvelope,
-  PROTOCOL_VERSION,
-  type AuditEntry,
-  type Envelope,
-  type LaneBoard,
-  type LaneResult,
-  type MemberSummary,
-  type OpenLane,
-  type Request,
-  type UpdateLane,
-  type WorkingHours,
-  WorkingHoursSchema,
+import type {
+  AuditEntry,
+  Envelope,
+  LaneBoard,
+  LaneResult,
+  MemberSummary,
+  OpenLane,
+  Report,
+  Request,
+  UpdateLane,
+  WorkingHours,
 } from '@musterd/protocol';
+// The read path takes the validator-free door (ADR 148; `protocol/guards.ts`): the browser reads
+// this daemon over its own origin and the daemon parses everything on ingest, so re-deriving the
+// schemas here bought a strict page-level reject and ~20 KB of zod. The guards keep the one check
+// that has a consumer — the per-row roster tolerance `unreadable` reports.
+import {
+  buildEnvelope,
+  readAuditResponse,
+  readLaneBoard,
+  readLaneResult,
+  readMemberSummary,
+  readReport,
+  readWorkingHours,
+  PROTOCOL_VERSION,
+} from '@musterd/protocol/wire';
 
 // Re-export so the audit view + route keep importing the entry type from this client module.
 export type { AuditEntry };
@@ -98,7 +104,7 @@ export interface TeamRoster {
  * Read the roster, tolerating rows from the daemon's future.
  *
  * This used to be `MemberSummarySchema.array().parse(...)`, and that one call made every enum in the
- * member shape a page-level single point of failure: the schemas are strict `z.enum`s, so ONE row with
+ * member shape a page-level single point of failure: the closed sets are strict, so ONE row with
  * a value the bundle predates threw the whole array, `useLiveStream` caught it into `setError`, and
  * /live rendered an error banner instead of a room. ADR 232's `kind: 'service'` fired it for real.
  *
@@ -119,16 +125,15 @@ export async function fetchRoster(cfg: LiveConfig): Promise<TeamRoster> {
   const members: MemberSummary[] = [];
   let unreadable = 0;
   for (const row of response.members) {
-    const parsed = MemberSummarySchema.safeParse(row);
-    if (parsed.success) members.push(parsed.data);
+    const parsed = readMemberSummary(row);
+    if (parsed) members.push(parsed);
     else unreadable += 1;
   }
   const team =
     response.team && typeof response.team === 'object'
       ? (response.team as { working_hours?: unknown })
       : undefined;
-  const working_hours = WorkingHoursSchema.nullish().parse(team?.working_hours);
-  return { members, working_hours: working_hours ?? null, unreadable };
+  return { members, working_hours: readWorkingHours(team?.working_hours), unreadable };
 }
 
 /** Whole-team history for backfill (`GET /teams/:slug/messages`, the firehose's history side). */
@@ -204,7 +209,7 @@ export async function fetchAudit(
     );
   }
   // Validate the wire against the shared schema at the boundary (same contract the CLI parses, ADR 074).
-  return AuditResponseSchema.parse(json).audit;
+  return readAuditResponse(json).audit;
 }
 
 /** Re-export for routes that import the Request type from this client module. */
@@ -229,7 +234,7 @@ export async function fetchLaneBoard(
     cfg,
     `/teams/${encodeURIComponent(cfg.team)}/lanes${qs ? `?${qs}` : ''}`,
   );
-  return LaneBoardSchema.parse(json);
+  return readLaneBoard(json);
 }
 
 /**
@@ -251,7 +256,7 @@ export async function sendAct(
     meta?: Record<string, unknown> | null;
   },
 ): Promise<Envelope> {
-  const envelope = makeEnvelope({
+  const envelope = buildEnvelope({
     id: crypto.randomUUID(),
     team: cfg.team,
     from: cfg.as,
@@ -317,7 +322,7 @@ async function laneMutation(
     );
   }
   // Validate the wire at the boundary (same contract the CLI parses), like fetchLaneBoard.
-  return LaneResultSchema.parse(json);
+  return readLaneResult(json);
 }
 
 /**
@@ -327,7 +332,7 @@ async function laneMutation(
  */
 export async function fetchReport(cfg: LiveConfig): Promise<Report> {
   const json = await apiGet<unknown>(cfg, `/teams/${encodeURIComponent(cfg.team)}/report`);
-  return ReportSchema.parse(json);
+  return readReport(json);
 }
 
 /** Open a lane as the signed-in member (`POST /teams/:slug/lanes`); `claim: true` self-owns it. */

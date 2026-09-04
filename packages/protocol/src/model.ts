@@ -1,4 +1,4 @@
-import { PROVENANCES, type Provenance } from './acts.js';
+import { PROVENANCES, type Provenance } from './acts.wire.js';
 import type { ModelObservation } from './binding.js';
 
 /**

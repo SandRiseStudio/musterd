@@ -1,111 +1,46 @@
 import { z } from 'zod';
+import {
+  ACTIVITIES_ON_WIRE,
+  ACTS,
+  LIFECYCLES,
+  MEMBER_KINDS,
+  PRESENCE_STATUSES,
+  PROVENANCES,
+  SURFACES,
+  normalizeActivity,
+} from './acts.wire.js';
 
 /**
- * The collaboration acts (Co-Gym-grounded). Order is stable; new acts append.
- * `resolve` (musterd/0.3, ADR 025) is the terminal act — it closes a thread (the proto-work-item),
- * supplying the open-vs-done axis the prior seven lacked (`accept` ≠ finished).
- *
- * The steering trio (musterd/0.3, ADR 103 — increment 2 of the interrupt line, ADR 088) gives a
- * "change of direction" first-class semantics on the existing interrupt line: `steer` (a directive —
- * always interrupt-class, and the newest steer supersedes prior direction per ADR 017), `challenge`
- * (epistemic — "justify this or reconsider", warn-never-block, interrupts only when flagged urgent),
- * and `defer` (plan mutation on the Goal spine — names `meta.goal_id`, optional `meta.wave` target).
- *
- * `ask` (musterd/0.3, ADR 147 — item 2 of the human-role re-founding, ADR 145 §3.1) is the to-human
- * stream act: directed-to-human traffic in three species (`meta.species`: consult/escalate/approve),
- * each carrying a tier (`meta.tier`) that derives a timeout + no-answer policy the *agent* runs (top
- * tier holds; below-top proceeds with a recorded risk-acceptance). The no-answer resolution rides
- * `status_update` (`meta.ask_outcome`) and the human "deciding — check back" reply rides `wait`
- * (`meta.until`), so `ask` is the only new verb — "surfaces before more acts" (ADR 145 §4).
- *
- * `insight` (ADR 327) is the team-memory act: a reusable finding saved so the whole team can find
- * it. Required `meta.headline` (≤120 chars); optional `meta.tags` / `meta.repo`; the text rides the
- * envelope body (server-enforced ≤2048 bytes). Team-visible by intent — there is no private variant,
- * so ADR 093's seat-memory privacy line stays untouched. Retrieved through a derived FTS index over
- * the log (a declared cache, rebuildable — never a source of truth); durable findings promote into
- * `docs/wiki/` per ADR 259.
+ * The zod face of the act/surface/presence vocabularies. Every closed set lives in
+ * `acts.wire.js` — plain tuples, no validator — and this module builds the enums from them and
+ * re-exports the names, so `@musterd/protocol` keeps its one-import surface while a browser can
+ * read the vocabulary without pulling zod into its bundle (ADR 148 read path; `guards.ts`).
  */
-export const ACTS = [
-  'message',
-  'status_update',
-  'request_help',
-  'handoff',
-  'accept',
-  'decline',
-  'wait',
-  'resolve',
-  'steer',
-  'challenge',
-  'defer',
-  'ask',
-  'insight',
-] as const;
-export type Act = (typeof ACTS)[number];
+export {
+  ACTIVITIES,
+  ACTIVITIES_ON_WIRE,
+  ACTS,
+  LIFECYCLES,
+  MEMBER_KINDS,
+  PRESENCE_STATUSES,
+  PROVENANCES,
+  SURFACES,
+  normalizeActivity,
+} from './acts.wire.js';
+export type {
+  Activity,
+  Act,
+  Lifecycle,
+  MemberKind,
+  PresenceStatus,
+  Provenance,
+  Surface,
+} from './acts.wire.js';
+
 export const ActSchema = z.enum(ACTS);
-
-/** Surfaces a Member can be present on. v0.1 implements cli/claude-code/codex; the rest are
- *  reserved. `musterd` (ADR 131 §7) is the native harness — the agent loop hosted in `musterd host`.
- *  `opencode` (ADR 321) and `grok` (ADR 352) are first-class CLI harnesses — enumeration, wake, and
- *  provisioning all speak their names. */
-export const SURFACES = [
-  'cli',
-  'claude-code',
-  'codex',
-  'opencode',
-  'grok',
-  'cursor',
-  'web',
-  'ios',
-  'slack',
-  'other',
-  'musterd',
-] as const;
-export type Surface = (typeof SURFACES)[number];
 export const SurfaceSchema = z.enum(SURFACES);
-
-/** Member lifecycle. `until` requires a timestamp. */
-export const LIFECYCLES = ['forever', 'session', 'until'] as const;
-export type Lifecycle = (typeof LIFECYCLES)[number];
 export const LifecycleSchema = z.enum(LIFECYCLES);
-
-/** Member kind. Humans are first-class members, not approvers. `service` is a *ledger seat*
- *  (ADR 232): an unattended actor — a cron, a LaunchAgent — with identity, roles, attribution and
- *  audit, but structurally excluded from the peer verbs: it never holds lanes, never accepts,
- *  never wakes, and is never an admin. An accountable actor, never a negotiator. */
-export const MEMBER_KINDS = ['agent', 'human', 'service'] as const;
-export type MemberKind = (typeof MEMBER_KINDS)[number];
 export const MemberKindSchema = z.enum(MEMBER_KINDS);
-
-/** Presence status. `away` is only ever set explicitly by a client. */
-export const PRESENCE_STATUSES = ['online', 'away', 'offline'] as const;
-export type PresenceStatus = (typeof PRESENCE_STATUSES)[number];
 export const PresenceStatusSchema = z.enum(PRESENCE_STATUSES);
-
-/**
- * Roster activity (musterd/0.2, renamed ADR 140). A coarser, demo-facing read of a member than raw
- * presence: `offline` (no live attachment), `idle` (present, no self-reported task), `working`
- * (present + a self-reported task). Resolved server-side from presence + the latest `status_update`
- * (two-clocks rule). Was `online` for the idle state — renamed to avoid colliding with presence
- * `online`.
- */
-// `active` renamed from `idle` (presence-honesty §2.1): connected, between claims. Legacy `idle`
-// from an old daemon is accepted on read and normalized.
-export const ACTIVITIES = ['offline', 'active', 'working'] as const;
-export type Activity = (typeof ACTIVITIES)[number];
-export const ActivitySchema = z
-  .enum([...ACTIVITIES, 'idle'])
-  .transform((a): Activity => (a === 'idle' ? 'active' : a));
-
-/**
- * Provenance (musterd/0.2): *why* a presence exists, captured as a fact at attach time — never
- * guessed (human-agent-dynamics §2). `session` = a human opened a harness session; `asked` = a
- * member was asked to do something; `hook` = a harness hook/function fired; `scheduled` = a timer
- * started it; `daemon` = an always-on process. It dissolves the driving-posture confusion without
- * modelling humans: `(session)` says "someone is behind this", `(scheduled)` says "nobody need be".
- * `wake` (ADR 131 §6) = musterd resurrected this session because a directed act was waiting —
- * machine-initiated, roster/stream/office-distinguishable, and the ping-pong bound's join key:
- * acts sent from a `wake` occupancy only qualify for other seats' *batched* wake lane.
- */
-export const PROVENANCES = ['session', 'asked', 'hook', 'scheduled', 'daemon', 'wake'] as const;
-export type Provenance = (typeof PROVENANCES)[number];
+export const ActivitySchema = z.enum(ACTIVITIES_ON_WIRE).transform(normalizeActivity);
 export const ProvenanceSchema = z.enum(PROVENANCES);

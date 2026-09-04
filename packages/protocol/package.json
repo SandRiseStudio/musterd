@@ -47,6 +47,10 @@
     "./hue": {
       "types": "./dist/hue.d.ts",
       "default": "./dist/hue.js"
+    },
+    "./wire": {
+      "types": "./dist/wire.d.ts",
+      "default": "./dist/wire.js"
     }
   },
   "files": [

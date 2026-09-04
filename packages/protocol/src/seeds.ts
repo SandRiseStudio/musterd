@@ -1,15 +1,15 @@
 import { z } from 'zod';
+import { SEED_STATES } from './seeds.wire.js';
 
-/** ADR 291: a captured Team idea before it becomes (or deliberately does not become) a Lane. */
-export const SeedStateSchema = z.enum([
-  'open',
-  'exploring',
-  'needs_clarification',
-  'clarified',
-  'completed',
-  'promoted',
-]);
-export type SeedState = z.infer<typeof SeedStateSchema>;
+/** The Seed vocabulary itself is validator-free (`seeds.wire.js`); this module is its zod face. */
+export {
+  COMPLETED_SEED_TRAY_MS,
+  SEED_STATES,
+  seedInActiveTray,
+  type SeedState,
+} from './seeds.wire.js';
+
+export const SeedStateSchema = z.enum(SEED_STATES);
 
 /**
  * Where a Seed was captured. `slack` arrives through the relay (ADR 248/311); `repo` is a
@@ -103,27 +103,7 @@ export const SeedSchema = z.object({
 });
 export type Seed = z.infer<typeof SeedSchema>;
 
-/** ADR 319: one shared rule for the default Seed tray on every Surface. */
-export const COMPLETED_SEED_TRAY_MS = 3 * 24 * 60 * 60 * 1_000;
-
-export function seedInActiveTray(
-  seed: Pick<Seed, 'state' | 'completed_at'>,
-  now = Date.now(),
-): boolean {
-  if (
-    seed.state === 'open' ||
-    seed.state === 'exploring' ||
-    seed.state === 'needs_clarification' ||
-    seed.state === 'clarified'
-  ) {
-    return true;
-  }
-  return (
-    seed.state === 'completed' &&
-    seed.completed_at !== null &&
-    seed.completed_at >= now - COMPLETED_SEED_TRAY_MS
-  );
-}
+// The tray rule and `COMPLETED_SEED_TRAY_MS` live in `seeds.wire.js`; re-exported above.
 
 export const ClaimSeedSchema = z.object({});
 export type ClaimSeed = z.infer<typeof ClaimSeedSchema>;

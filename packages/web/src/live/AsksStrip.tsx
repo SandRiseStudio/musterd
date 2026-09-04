@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
-import { askTierHolds } from '@musterd/protocol';
+import { askTierHolds } from '@musterd/protocol/wire';
 import {
   answerableCount,
   applyTierClock,
