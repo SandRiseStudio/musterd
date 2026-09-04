@@ -99,8 +99,10 @@ describe('the reel asks reelTicks whether it needs a clock', () => {
     // numbers: two lanes awaiting acceptance, and the only ask days past a standard deadline, so
     // `applyTierClock` has made it `lapsed` — nothing loud at all, two cards to turn.
     const html = render([ask('stale', 'standard', DAYS_3)], board('L1', 'L2'));
-    expect(html).toContain('1 elapsed');
-    expect(html).toContain('2 in review');
+    // The tally splits the digit from its label (the number leads — see `ReelCounts`), so the
+    // assertion is on the count element rather than a contiguous string.
+    expect(html).toMatch(/is-elapsed[^>]*>.*?<b>1<\/b><em>elapsed<\/em>/);
+    expect(html).toMatch(/is-review[^>]*>.*?<b>2<\/b><em>in review<\/em>/);
     expect(reelTicks).toHaveBeenCalledWith(0, 2);
     // And the reel is genuinely rotating — the dots only render above one card.
     expect(html).toContain('bc-reel__dots');

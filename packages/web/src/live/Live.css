@@ -875,6 +875,14 @@
   letter-spacing: -0.02em;
 }
 
+/* The address half of the lockup (`domain` on MusterdWord — /broadcast's mark only). A step quieter
+   than the name, because the brand is the word and the domain is how you reach it; at equal weight
+   the mark stops being a mark and becomes a URL. Quieter, not smaller: shrinking it would make the
+   half that has to survive the encode the half that survives it worst. */
+.lc-office__mark-lockup .brand__tld {
+  opacity: 0.72;
+}
+
 /* The chip's mustard block at full strength would be the loudest thing in the corner; the group
    opacity above mutes chip and word together so they fade as one object. */
 .lc-office__mark svg {
