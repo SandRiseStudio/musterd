@@ -69,7 +69,9 @@ export function isoWeek(ts: number): string {
   const d = new Date(ts);
   // ISO week date: week starts Monday; the week's year is the year of its Thursday.
   const day = (d.getUTCDay() + 6) % 7; // 0 = Monday
-  const thursday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 3 - day));
+  const thursday = new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 3 - day),
+  );
   const firstThursday = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 4));
   const firstDay = (firstThursday.getUTCDay() + 6) % 7;
   firstThursday.setUTCDate(firstThursday.getUTCDate() + 3 - firstDay);
@@ -176,7 +178,9 @@ export function render(dbPath: string, s: Summary): string {
   out.push('');
   out.push(
     `window: ${s.asks} asks to humans · ${s.prs} merged PRs · ` +
-      (s.ratio === null ? 'no merged PRs — the ratio is unbounded, not zero' : `ratio ${s.ratio.toFixed(2)} asks/PR`),
+      (s.ratio === null
+        ? 'no merged PRs — the ratio is unbounded, not zero'
+        : `ratio ${s.ratio.toFixed(2)} asks/PR`),
   );
   out.push('');
   out.push('per recipient:');

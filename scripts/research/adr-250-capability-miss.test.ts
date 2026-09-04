@@ -18,11 +18,7 @@ import {
  * moves reads 1 — and the rest guard the ways the count could flatter or invent.
  */
 const HOUR = 3_600_000;
-const lease = (
-  id: string,
-  createdAt: number,
-  overrides: Partial<LeaseRow> = {},
-): LeaseRow => ({
+const lease = (id: string, createdAt: number, overrides: Partial<LeaseRow> = {}): LeaseRow => ({
   id,
   member_id: 'M1',
   lane_id: 'L1',

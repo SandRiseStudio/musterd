@@ -204,7 +204,9 @@ export function render(dbPath: string, days: number | null, s: Summary): string 
   out.push(
     'A landing = a reported lane-scoped wake lease. Inert = no lane.* audit row for that lane',
   );
-  out.push(`within ${GRACE_MS / 3_600_000}h of the lease. Inert understates true capability misses —`);
+  out.push(
+    `within ${GRACE_MS / 3_600_000}h of the lease. Inert understates true capability misses —`,
+  );
   out.push('a lane moved by ANY seat clears the landing. That is the conservative direction.');
   out.push('');
   out.push(

@@ -98,7 +98,15 @@ describe('the recipient breakdown', () => {
       { ts: WED, to_member: 'H2' },
       { ts: WED, to_member: 'GONE' },
     ];
-    const s = summarize(asks, [], new Map([['H1', 'nick'], ['H2', 'driver']]), 7);
+    const s = summarize(
+      asks,
+      [],
+      new Map([
+        ['H1', 'nick'],
+        ['H2', 'driver'],
+      ]),
+      7,
+    );
     expect(s.byRecipient).toEqual([
       { name: 'nick', asks: 2 },
       { name: 'driver', asks: 1 },
