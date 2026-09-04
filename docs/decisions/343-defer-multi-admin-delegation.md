@@ -1,6 +1,8 @@
 # 343 — Defer multi-admin delegation
 
-- Status: proposed
+- Status: accepted — 2026-09-04 (ryder, lane `01M1MMKHX8WXASZT6CGWPNJ4ES`). The load-bearing code
+  claim below was re-verified against `origin/main` at `1a5ec5ee`, three days after it was written,
+  and still holds — see **Re-verification** below.
 - Date: 2026-09-01
 
 ## Context
@@ -49,3 +51,36 @@ new governance behavior, while retaining an honest path to multi-admin work.
   receives `409`, with one terminal request row.
 - Experiment: a two-human dogfood Team records concurrent approval behavior
   before a follow-on ADR selects routing or delegation semantics.
+
+## Re-verification — 2026-09-04
+
+This ADR withdraws another one on the strength of a claim about the code, so the claim was checked
+rather than taken. It holds, and it is narrower than it sounds.
+
+**The decide route contains exactly one `await`, and it is before the read.** In
+`packages/server/src/transport/http.ts`, the whole handler spans roughly lines 2046–2360 and the
+only `await` in it is `await readJson(req)` at **2046**. The request row is read at **2047**
+(`getRequest`), the pending check is at **2049**, and every settle — `decideRequest` at **2119**,
+**2271** and **2337** — is downstream of that with no yield in between. Node therefore runs
+read-to-settle as one synchronous block, a second concurrent admin decision observes the settled
+row, and `decideRequest`'s `WHERE status = 'pending'` compare-and-set returns `null` for it. Decision
+1 stands: no transactional refactor is warranted.
+
+**Why decision 3 is the load-bearing half, and why it is currently unenforced.** `issueGrant` is at
+**2094** — *before* both approve settles (2119, 2271). So the ordering ADR 342 worried about is real:
+the grant is minted before the request is settled. What prevents a duplicate grant is not the
+ordering, it is the absence of a yield. Introduce one `await` anywhere between 2047 and the settle —
+async persistence, a remote hub call, a metrics flush — and two admins can both pass the 2049 pending
+check and both mint a grant, which is precisely ADR 342's duplicate-side-effect claim, reachable.
+
+Decision 3 already says a future async boundary must re-evaluate settlement atomicity. Nothing
+enforces it: no test, lint rule or gate fails when an `await` is added between the read and the
+settle, so the safety this ADR rests on can be removed silently by a change that has nothing to do
+with governance. That gap is its own work, not a reason to reopen ADR 342 —
+lane `01M1QA28RDN2SEMAC17X99Y01X`.
+
+**The dogfood gate is still closed.** Decision 2 defers delegation until a two-human Team exists. The
+`members` table holds one human admin (`nick`); the other human rows are `driver`, `driver2` and
+`web-*` observers — bootstrap and web-visitor rows, not a second administrator (2026-09-04; falsify:
+`sqlite3 ~/.musterd/musterd.db "select name, role from members where kind='human'"`). No second human
+has ever administered a team here, so the evidence decision 2 waits on has not arrived.

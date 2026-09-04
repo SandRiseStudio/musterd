@@ -1,6 +1,9 @@
 # 342 — Multi-admin decision concurrency
 
-- Status: proposed
+- Status: superseded by [ADR 343](343-defer-multi-admin-delegation.md) (2026-09-04, recorded by
+  ryder on lane `01M1MMKHX8WXASZT6CGWPNJ4ES`) — ADR 343 withdrew this ADR's transaction requirement
+  in its own text on 2026-09-01 and only this line still said `proposed`. **Decisions 1 and 2 below
+  are not in force.** Decisions 3 and 4 were never contested — see **What survives** below.
 - Date: 2026-09-01
 
 ## Context
@@ -63,3 +66,19 @@ delegation model.
 - Experiment: two-human dogfood measures whether all-admin routing produces
   duplicate attention or slow decisions before any delegation policy is
   proposed.
+
+## What survives the withdrawal — 2026-09-04
+
+ADR 343 withdrew **decision 2** (the single-transaction requirement) and the duplicate-side-effect
+inference that motivated it, having found the race unreachable on the current daemon; that finding
+was re-verified on `1a5ec5ee` (see ADR 343 §Re-verification). **Decision 1** — first-valid-decision-
+wins with a conflict naming the recorded decision-maker — is the behaviour the existing conditional
+settlement already produces, so it is description, not a pending change.
+
+Decisions **3** (`is_admin` is the sole governance capability and stays human-only, with no implicit
+delegation via `ask_fallback_to_nonadmin`) and **4** (at least one active human admin must remain)
+were never contested by ADR 343 and are not withdrawn here. They are restated by ADR 343 decision 2
+as the standing posture until a two-human dogfood produces evidence.
+
+This ADR remains readable as the record of the concern. It does not authorize the unimplemented
+transactional behaviour, and a reader should not treat decision 2 as pending work.
