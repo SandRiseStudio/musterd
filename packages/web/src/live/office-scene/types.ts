@@ -72,6 +72,8 @@ export interface OfficeData {
   nodes: OfficeNode[];
   /** The lane board projected for the wall's agile board (wallboard.ts). Absent/null → empty board. */
   wallBoard?: WallBoard | null;
+  /** Members taking turns in an open huddle (ADR 378) — they gather at the meeting table. */
+  gathered?: string[];
 }
 
 /** A thought/urgency bubble over an actor's head while it's mid-choreography. */

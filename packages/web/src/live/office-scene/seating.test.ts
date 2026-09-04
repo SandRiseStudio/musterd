@@ -272,3 +272,46 @@ describe('workingAtDesk — one predicate for eyes, ears and the loop (E2 §2)',
     expect(workingAtDesk(busy, 1)).toBe(!carriesLaptop(busy));
   });
 });
+
+describe('assignSeats — the huddle gathers at the meeting table (ADR 378 inc 2)', () => {
+  const meetingSpots = LEISURE_SPOTS.map((s, i) => ({ s, i })).filter(
+    ({ s }) => s.zone === 'meeting',
+  );
+  const isMeeting = (p: ReturnType<typeof assignSeats> extends Map<string, infer P> ? P : never) =>
+    p.kind === 'leisure' && meetingSpots.some(({ i }) => i === p.spot);
+
+  it('seats a gathered member at the meeting table even though they are working', () => {
+    const seats = assignSeats([member('talker')], new Set(['talker']));
+    expect(isMeeting(seats.get('talker')!)).toBe(true);
+  });
+
+  it('leaves everyone else where they were — a huddle moves its own members only', () => {
+    const seats = assignSeats([member('talker'), member('typer')], new Set(['talker']));
+    expect(seats.get('typer')).toMatchObject({ kind: 'desk' });
+  });
+
+  it('gives the table four chairs and no more — the fifth talker stays at their desk', () => {
+    const names = ['a1', 'a2', 'a3', 'a4', 'a5'];
+    const seats = assignSeats(names.map((n) => member(n)), new Set(names));
+    const seated = names.filter((n) => isMeeting(seats.get(n)!));
+    expect(seated).toHaveLength(meetingSpots.length);
+    expect(names.filter((n) => !isMeeting(seats.get(n)!))).toHaveLength(
+      names.length - meetingSpots.length,
+    );
+  });
+
+  it('never drags an away member to the table — they are not in the room', () => {
+    const seats = assignSeats(
+      [member('stepped', { availability: { status: 'away' } })],
+      new Set(['stepped']),
+    );
+    expect(seats.get('stepped')).toMatchObject({ kind: 'desk', owned: true });
+  });
+
+  it('is deterministic — the same gathering seats the same way twice', () => {
+    const names = ['zoe', 'ada', 'bo'];
+    const first = assignSeats(names.map((n) => member(n)), new Set(names));
+    const second = assignSeats(shuffle(names, 7).map((n) => member(n)), new Set(names));
+    for (const n of names) expect(second.get(n)).toEqual(first.get(n));
+  });
+});

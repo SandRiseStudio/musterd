@@ -18,6 +18,9 @@ export * from './capabilities.wire.js';
 export * from './envelope.wire.js';
 export * from './goals.wire.js';
 export * from './guards.js';
+// The huddle fold (ADR 378): a pure read of the timeline, no schema — and the browser's only way to
+// read a room without pulling zod in behind it.
+export * from './huddleView.js';
 export * from './lanes.wire.js';
 export * from './model.js';
 export * from './offline.wire.js';
