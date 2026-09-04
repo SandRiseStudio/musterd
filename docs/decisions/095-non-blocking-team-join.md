@@ -147,9 +147,17 @@ poll-on-next-`team_join` — strictly better than a 120s hard park for an autono
 - Autonomous/headless agents stop losing up to 120s per fresh claim; interactive agents keep the
   one-call-and-seated spinner (default unchanged). The knob, not the default, moves.
 - **Increment 1 landed 2026-09-03** (lane 01M1MMKYMN): the `wait` control on `team_join`, and the
-  return-on-pending keep-parking `join()` mode it needs. `wait` omitted or `true` is byte-for-byte
-  the old 120s block; `0`/`false` returns the request id at once with the socket still parked, so a
-  later approval occupies in the background; `<seconds>` generalises the constant. Decisions 2 and 3
+  return-on-pending keep-parking `join()` mode it needs. `wait` omitted is byte-for-byte the old
+  120s block; `0` returns the request id at once with the socket still parked, so a later approval
+  occupies in the background; `<seconds>` generalises the constant. The `wait: true/false` boolean
+  sugar this ADR specced was **dropped**: a number alone expresses every case, and the union schema
+  cost bytes in the standing tools/list every seat carries for a spelling nobody needed.
+- It cost 91 B of standing context, which tipped `toolsListMutedBytes` over and forced a re-baseline
+  (`docs/perf/context-budgets.json`). Worth recording because the raise was mostly not this change:
+  that budget was set 2026-08-27 at 7232 B + 5%, and main had drifted to 7568 B by 2026-09-03 — 336
+  of its 362 B headroom spent by growth nobody attributed, so the next byte from any source was
+  going to fail the gate. The rent for the 91 B is the measurement above; falsify it by checking
+  whether any seat has used `wait: 0` at the next re-baseline. Decisions 2 and 3
   are not built, and each is named below rather than left implied.
 - Decision 2 (a `claim_wait` default in `binding.json`) is not built. An explicit argument covers
   every caller that wants it today, and a folder-level default is only worth its schema change once

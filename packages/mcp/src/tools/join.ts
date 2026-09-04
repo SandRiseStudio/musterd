@@ -8,7 +8,7 @@ import { repairHint, textResult } from './format.js';
 import { memoryLine } from './memory.js';
 
 const DESCRIPTION =
-  "Claim your seat and go online — the CLI spelling is `musterd claim` (ADR 075/377). Use as, role, or this Workspace's policy. May wait for approval; pass wait:0 to get the pending handle immediately and keep working.";
+  "Claim your seat and go online — the CLI spelling is `musterd claim` (ADR 075/377). Use as, role, or this Workspace's policy. May wait for approval; wait:0 returns at once.";
 
 /** Default block while waiting for an admin to approve a claim (ADR 087); `wait` overrides it per
  *  call (ADR 095). A later approval still occupies in the background either way — a follow-up
@@ -22,9 +22,8 @@ const DESCRIPTION =
 const JOIN_WAIT_MS = 120_000;
 
 /** Resolve the `wait` control to a block budget in ms (ADR 095 decision 1). */
-export function resolveWaitMs(wait: number | boolean | undefined): number {
-  if (wait === undefined || wait === true) return JOIN_WAIT_MS;
-  if (wait === false) return 0;
+export function resolveWaitMs(wait: number | undefined): number {
+  if (wait === undefined) return JOIN_WAIT_MS;
   if (!Number.isFinite(wait) || wait < 0) {
     throw new RangeError('wait must be a non-negative number of seconds (0 = do not block)');
   }
@@ -61,14 +60,7 @@ export function registerJoin(server: McpServer, client: MusterdClient, config: M
       inputSchema: {
         as: z.string().optional().describe('claim this named seat (auto-minted locally if new)'),
         role: z.string().optional().describe('claim the next open seat in this role pool'),
-        wait: z
-          .union([z.number(), z.boolean()])
-          .optional()
-          .describe(
-            'seconds to block for an admin approval: omitted/true = 120s (interactive default), ' +
-              '0/false = do not block — get the request id now, keep working, and occupy in the ' +
-              'background when the approval lands',
-          ),
+        wait: z.number().optional().describe('seconds to block for approval; 0 = return at once'),
       },
     },
     async (args) => {

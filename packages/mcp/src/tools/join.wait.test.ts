@@ -7,14 +7,12 @@ import { resolveWaitMs } from './join.js';
  * disturb — while an autonomous seat can ask for zero.
  */
 describe('resolveWaitMs (ADR 095)', () => {
-  it('defaults to the 120s budget when omitted or true — the interactive DX is unchanged', () => {
+  it('defaults to the 120s budget when omitted — the interactive DX is unchanged', () => {
     expect(resolveWaitMs(undefined)).toBe(120_000);
-    expect(resolveWaitMs(true)).toBe(120_000);
   });
 
-  it('is non-blocking on 0 and false', () => {
+  it('is non-blocking on 0', () => {
     expect(resolveWaitMs(0)).toBe(0);
-    expect(resolveWaitMs(false)).toBe(0);
   });
 
   it('takes an explicit budget in seconds', () => {
