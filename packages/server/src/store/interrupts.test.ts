@@ -355,3 +355,93 @@ describe('pendingInterrupts with an eligible set (ADR 254)', () => {
     expect(pendingInterrupts([mine], 'me')).toEqual([]);
   });
 });
+
+/**
+ * ADR 378, lane 01M1PWHGH6. A huddle turn is an ordinary `message` addressed to the room, so before
+ * this it failed BOTH halves of the predicate — not directed at me, and not urgent — and a live
+ * participant learned of it at its next inbox check rather than its next tool boundary. Delivery was
+ * never the gap (the ADR 061 firehose pushes in ms); the bell was.
+ */
+describe('a huddle turn rings the bell for its participants (ADR 378)', () => {
+  const env = (
+    over: Partial<Envelope> & Pick<Envelope, 'id' | 'from' | 'to' | 'act'>,
+  ): Envelope => ({
+    v: PROTOCOL_VERSION,
+    team: 'dawn',
+    body: 'x',
+    thread: null,
+    meta: null,
+    ts: 1,
+    ...over,
+  });
+  const huddle = {
+    huddle: {
+      topic: { kind: 'design', id: 'doorbells' },
+      room: 'http://127.0.0.1:4851/b/huddle-h1',
+      anchor: 'docs/wiki/huddles.md',
+    },
+  };
+  const team = { kind: 'team' as const };
+  /** A huddle opened to a NAMED set: me and jo are in it from the root act. */
+  const namedRoot = env({
+    id: 'h1',
+    from: 'nick',
+    to: team,
+    act: 'message',
+    meta: { ...huddle, eligible: ['me', 'jo'] },
+  });
+  const turn = (id: string, from: string, thread = 'h1') =>
+    env({ id, from, to: team, act: 'message', thread, ts: 2 });
+
+  it('raises a turn for a NAMED participant, and never my own turn', () => {
+    const msgs = [
+      namedRoot,
+      env({ id: 'mine', from: 'me', to: team, act: 'message', thread: 'h1', ts: 2 }),
+      env({ id: 'theirs', from: 'jo', to: team, act: 'message', thread: 'h1', ts: 3 }),
+    ];
+    expect(pendingInterrupts(msgs, 'me', { huddles: true }).map((m) => m.id)).toEqual(['theirs']);
+  });
+
+  it('a named participant who has not spoken yet hears everything since the root', () => {
+    const msgs = [namedRoot, turn('t1', 'jo'), turn('t2', 'nick')];
+    expect(
+      pendingInterrupts(msgs, 'me', { huddles: true })
+        .map((m) => m.id)
+        .sort(),
+    ).toEqual(['t1', 't2']);
+  });
+
+  it('stays silent for a seat that is not in the huddle', () => {
+    const msgs = [namedRoot, turn('t1', 'jo')];
+    expect(pendingInterrupts(msgs, 'ada', { huddles: true })).toEqual([]);
+  });
+
+  it('a @team huddle is an invitation, not a summons — until I take a turn', () => {
+    const openRoot = env({ id: 'h2', from: 'nick', to: team, act: 'message', meta: huddle });
+    const before = [openRoot, turn('t1', 'jo', 'h2')];
+    expect(pendingInterrupts(before, 'me', { huddles: true })).toEqual([]);
+    // ...and once I have spoken in it, I am in it — but only what came AFTER my turn rings. The
+    // turn I read on my way in is backlog, not something that needs me now.
+    const after = [
+      ...before,
+      env({ id: 't2', from: 'me', to: team, act: 'message', thread: 'h2', ts: 3 }),
+      env({ id: 't3', from: 'jo', to: team, act: 'message', thread: 'h2', ts: 4 }),
+    ];
+    expect(pendingInterrupts(after, 'me', { huddles: true }).map((m) => m.id)).toEqual(['t3']);
+  });
+
+  it('goes quiet once the huddle is closed', () => {
+    const msgs = [
+      namedRoot,
+      env({ id: 'close', from: 'nick', to: team, act: 'resolve', thread: 'h1', ts: 3 }),
+      turn('late', 'jo'),
+    ];
+    expect(pendingInterrupts(msgs, 'me', { huddles: true })).toEqual([]);
+  });
+
+  it('does NOT raise on the wake rail — a paid wake per turn is the storm ADR 378 avoids', () => {
+    const msgs = [namedRoot, turn('t1', 'jo')];
+    // `claimWakeLeases` calls this with no opts at all; that default is the safety property.
+    expect(pendingInterrupts(msgs, 'me')).toEqual([]);
+  });
+});

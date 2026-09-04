@@ -3745,6 +3745,62 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     expect(check.json.raised).toBe(false); // and so it never reached the interrupt line
   });
 
+  // ADR 378, lane 01M1PWHGH6. A huddle turn is an ordinary `message` addressed to the room, so it
+  // raised nothing at all before this — a participant learned of it at its next inbox check rather
+  // than its next tool boundary. And when it did raise it borrowed `urgent`, the scarce flag, which
+  // is false twice: the turn is not urgent, and the seat could not tell a huddle from any other act.
+  it('interrupt line: a huddle turn raises on its OWN class and the line names the room, not "urgent"', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    const bob = await post('/teams/dawn/members', { name: 'Bob', kind: 'human' }, nickTok);
+    const bobTok = bob.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'human' }, nickTok);
+
+    const root = {
+      id: 'h-root',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'why we are huddling',
+      meta: {
+        eligible: ['Bob', 'Ada'],
+        huddle: {
+          topic: { kind: 'design', id: 'doorbells' },
+          room: 'http://127.0.0.1:4851/b/huddle-h-root',
+          anchor: 'docs/wiki/huddles.md',
+        },
+      },
+      ts: Date.now(),
+    };
+    await post('/teams/dawn/messages', { envelope: root }, nickTok);
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          ...root,
+          id: 'h-turn',
+          body: 'a turn nobody should have to poll for',
+          thread: 'h-root',
+          meta: undefined,
+          ts: Date.now() + 1,
+        },
+      },
+      nickTok,
+    );
+
+    const raised = await get('/teams/dawn/inbox/interrupt-check', bobTok, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(raised.json.raised).toBe(true);
+    expect(raised.json.act).toMatchObject({ id: 'h-turn', from: 'nick' });
+    expect(raised.json.line).toContain('huddle design:doorbells');
+    expect(raised.json.line).toContain('h-root'); // how to answer, in the room it came from
+    expect(raised.json.line).not.toContain('urgent'); // it borrowed the scarce flag before
+    expect(raised.json.line).not.toContain('nobody should have to poll'); // never the body
+  });
+
   it('interrupt line (ADR 088): raises only for a waiting urgent directed act, composes without the body, audits once', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;
