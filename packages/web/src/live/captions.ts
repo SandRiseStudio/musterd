@@ -1,4 +1,5 @@
-import { eligibleOf, type Envelope } from '@musterd/protocol';
+import type { Envelope } from '@musterd/protocol';
+import { eligibleOf } from '@musterd/protocol/wire';
 import { laneEvent } from './format';
 
 /**

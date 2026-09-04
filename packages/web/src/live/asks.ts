@@ -1,14 +1,13 @@
+import type { Envelope, Lane } from '@musterd/protocol';
 import {
   ASK_TIER_DEFAULTS,
+  askSpeciesOf,
   askTierHolds,
-  AskSpeciesSchema,
-  AskTierSchema,
+  askTierOf,
   isAwaitingAcceptance,
   type AskSpecies,
   type AskTier,
-  type Envelope,
-  type Lane,
-} from '@musterd/protocol';
+} from '@musterd/protocol/wire';
 
 /**
  * The asks strip's pure derivation (ADR 149): fold the envelope timeline the /live page already holds
@@ -145,15 +144,15 @@ export function deriveAsks(envelopes: Envelope[]): AskView[] {
     if (seen.has(env.id)) continue;
     seen.add(env.id);
     if (env.act === 'ask') {
-      const species = AskSpeciesSchema.safeParse(env.meta?.['species']);
-      const tier = AskTierSchema.safeParse(env.meta?.['tier']);
-      if (!species.success || !tier.success) continue; // not a well-formed ask; the stream still shows it
+      const species = askSpeciesOf(env.meta?.['species']);
+      const tier = askTierOf(env.meta?.['tier']);
+      if (!species || !tier) continue; // not a well-formed ask; the stream still shows it
       asks.set(env.id, {
         env,
-        species: species.data,
-        tier: tier.data,
+        species,
+        tier,
         to: env.to.kind === 'member' ? env.to.name : null,
-        deadline: env.ts + ASK_TIER_DEFAULTS[tier.data].timeout_ms,
+        deadline: env.ts + ASK_TIER_DEFAULTS[tier].timeout_ms,
         state: 'open',
       });
       continue;

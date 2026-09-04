@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { GoalSchema } from './goals.js';
+import { LANE_STAKES, LANE_STAKES_PROVENANCE, LANE_STATES, type LaneState } from './lanes.wire.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × scope } unit that makes
@@ -25,6 +26,20 @@ import { GoalSchema } from './goals.js';
  */
 export const DEFAULT_PROJECT = 'default';
 
+/** The lane vocabulary itself is validator-free (`lanes.wire.js`); this module is its zod face. */
+export {
+  ACCEPTANCE_STALE_MS,
+  LANE_STAKES,
+  LANE_STAKES_PROVENANCE,
+  LANE_STATES,
+  MERGE_VERIFICATION_TIERS,
+  isAwaitingAcceptance,
+  type LaneStakes,
+  type LaneStakesProvenance,
+  type LaneState,
+  type MergeVerification,
+} from './lanes.wire.js';
+
 /**
  * Declared stakes for acceptance (ADR 234) — an ordered ladder, cheapest first.
  *
@@ -36,12 +51,10 @@ export const DEFAULT_PROJECT = 'default';
  * whether declared stakes predict the answer rate **before** anything is built on the assumption
  * that they do. If they do not, the routing flip is aimed at nothing and should not ship.
  */
-export const LaneStakesSchema = z.enum(['low', 'normal', 'high']);
-export type LaneStakes = z.infer<typeof LaneStakesSchema>;
+export const LaneStakesSchema = z.enum(LANE_STAKES);
 
 /** Who set a lane's stakes (ADR 244) — see {@link LaneSchema.shape.stakes_provenance}. */
-export const LaneStakesProvenanceSchema = z.enum(['declared', 'defaulted']);
-export type LaneStakesProvenance = z.infer<typeof LaneStakesProvenanceSchema>;
+export const LaneStakesProvenanceSchema = z.enum(LANE_STAKES_PROVENANCE);
 
 /**
  * One admin-set default-stakes rule (ADR 244): lanes whose declared surface lies entirely under
@@ -91,22 +104,7 @@ export function resolveStakesDefault(
   });
 }
 
-export const LaneStateSchema = z.enum([
-  'open',
-  'claimed',
-  'active',
-  'blocked',
-  /** Canonical post-merge outcome-acceptance stage (ADR 192). */
-  'awaiting_acceptance',
-  /**
-   * Legacy alias for `awaiting_acceptance` (ADR 169 name). Dual-accepted for fleet skew; new writes
-   * use `awaiting_acceptance`. Prefer {@link isAwaitingAcceptance} over raw equality.
-   */
-  'ready_for_review',
-  'done',
-  'abandoned',
-]);
-export type LaneState = z.infer<typeof LaneStateSchema>;
+export const LaneStateSchema = z.enum(LANE_STATES);
 
 /**
  * Why a lane's close landed the way it did (ADR 283) — the vocabulary the `lane.closed` audit row
@@ -181,12 +179,7 @@ export function closeReasonCopy(reason: CloseReason): string | null {
 }
 
 /** True when the lane is in the post-merge outcome-acceptance stage (ADR 192), either spelling. */
-export function isAwaitingAcceptance(state: string): boolean {
-  return state === 'awaiting_acceptance' || state === 'ready_for_review';
-}
-
-/** value-layer design: a lane in `awaiting_acceptance` longer than this warns `stale_acceptance`. */
-export const ACCEPTANCE_STALE_MS = 12 * 60 * 60 * 1000;
+// `isAwaitingAcceptance` and `ACCEPTANCE_STALE_MS` live in `lanes.wire.js`; re-exported below.
 
 /** Canonical state to write when entering outcome acceptance (ADR 192). */
 export const AWAITING_ACCEPTANCE: LaneState = 'awaiting_acceptance';
@@ -480,13 +473,7 @@ export type UpdateLane = z.infer<typeof UpdateLaneSchema>;
  * The verification tiers a submit can persist (merge-verified submit). `not_ancestor` is
  * deliberately not a member: it is a refusal outcome at `lane_submit`, never a stored state.
  */
-export const MERGE_VERIFICATION_TIERS = [
-  'ancestor',
-  'unknown_object',
-  'fetch_failed',
-  'unattested',
-] as const;
-export type MergeVerification = (typeof MERGE_VERIFICATION_TIERS)[number];
+// `MERGE_VERIFICATION_TIERS` lives in `lanes.wire.js`; re-exported below.
 
 /**
  * Every mutating lane verb returns the lane plus any contention warnings (ADR 083 §4). Under

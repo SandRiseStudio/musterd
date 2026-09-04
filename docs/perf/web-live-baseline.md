@@ -762,3 +762,65 @@ seventh entry here.
 
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit — total should
   read ≈248.9 KiB against 252.0 KiB (258,000 B), and main's CI gates stay green.
+
+## 2026-09-04 — zod leaves the browser: the repayment the six raises were owed
+
+Decision: [ADR 380](../decisions/380-the-protocol-has-a-validator-free-face.md).
+
+nick's steer, after the entry above named the trend and found no lever: **find and land the
+repayment, or write the decision that says why the ceiling moves — not a seventh raise.** This is the
+repayment.
+
+The 2026-09-02 entry got zod out of the **eager** graph by deep-importing three helpers from
+`@musterd/protocol/model` and `/posture`. It stayed in the **product**: both of those modules import
+their vocabularies from `acts.ts`, which builds `z.enum`s at module scope, so a lazy 13.5 KB
+`posture` chunk was still fetched with the roster and the protocol barrel chunk still carried its
+whole `z.object(...)` graph. An import tidy could not reach that — the reachability is structural.
+
+So the structure changed. Every closed set and pure derivation the browser reads now lives in a
+validator-free `*.wire.ts` module, and the zod module beside it **builds its enum from that tuple
+and re-exports the name** — `acts`, `ask`, `capabilities`, `envelope`, `goals`, `lanes`, `offline`,
+`posture`, `seeds`, `working-hours`. One list per vocabulary, so `@musterd/protocol` and the new
+`@musterd/protocol/wire` subpath cannot disagree about what the wire allows; nothing was copied.
+The eight web parse sites read through `packages/protocol/src/guards.ts`, and `/wire` is the
+browser's whole door into the contract.
+
+| | before (main @ 9ab435f0) | after | delta |
+|---|---|---|---|
+| total JS gzip | 249.1 KiB (38 chunks) | **228.6 KiB (36 chunks)** | **−20.5 KiB** |
+| `/live` eager JS gzip | 139.1 KiB (13 chunks) | **132.0 KiB (12 chunks)** | **−7.1 KiB** |
+| zod in `dist/client` | 13.5 KiB `posture` chunk | **absent** (no chunk matches `ZodError`) | — |
+
+Budgets **re-baselined, both tightening** (ADR 183 permits only that direction): `totalJsGzipBytes`
+258,000 → **237,000**, `initialJsGzipBytes` 144,000 → **137,000**, each measured + the known ~0.7 KB
+CI gzip delta + ~1.2% slack per the 2026-08-12 precedent. That repays five of the six raises since
+2026-08-24 and leaves ~2 KB of true headroom on each.
+
+**What the browser gave up, precisely — and what it did not.** Two different jobs, and the
+difference is deliberate:
+
+- `readMemberSummary` **validates for real**, field by field, because something acts on the result:
+  a row this build cannot read is counted into `unreadable` and the roster says so (ADR 148). A
+  guard that waved rows through would make that count a lie. `guards.test.ts` runs it and
+  `MemberSummarySchema` over one 44-row corpus and asserts they accept, reject and normalize
+  identically — including the legacy `idle` → `active` transforms and the `.default()` fills — so
+  it cannot drift from the schema unnoticed.
+- The response readers (lane board/result, audit, report, seed list) check the **envelope of the
+  response** and fill the older-daemon defaults, and stop there. In the browser the deeper check had
+  no consumer: nothing branches on it, the page renders typed fields it either has or doesn't, and a
+  strict parse of a response from a **newer** daemon is precisely the ADR 148 failure `fetchRoster`
+  was rewritten to stop — an unreadable page instead of a calm hint.
+
+The write path is untouched: the daemon still parses every envelope and every lane body with zod on
+ingest, which is the boundary that decides what becomes durable. `makeEnvelope` keeps its parse for
+every caller inside the daemon; the browser composes with `buildEnvelope` and posts to an endpoint
+that validates.
+
+**Trap, for the next person here.** The lever is *reachability*, not import style. Adding a value
+export to a `*.wire.ts` module that a zod module also imports is free; adding one that imports a
+zod module is not, and the cost is invisible in the diff — it appears as a chunk. `grep -l ZodError
+packages/web/dist/client/assets/*.js` after a build is the check, and it should print nothing.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit — total should
+  read ≈228.6 KiB against 231.4 KiB (237,000 B), initial ≈132.0 KiB against 133.8 KiB, and the grep
+  above should find no chunk.

@@ -2,7 +2,7 @@
  * Pure helpers for the ephemeral office speech bubbles — an act's body types out over the sender's head,
  * then fades. Kept separate from the DOM wiring in `index.ts` so the text-shaping logic is unit-testable.
  */
-import { AskSpeciesSchema, AskTierSchema, askTierHolds, type Recipient } from '@musterd/protocol';
+import { askSpeciesOf, askTierHolds, askTierOf, type Recipient } from '@musterd/protocol/wire';
 import { richTokens, type RichToken } from '../format';
 
 /** Glance budget: what a bubble shows unhovered. Wide enough to carry the actual point of a message
@@ -300,12 +300,12 @@ export function speechMark(
   laneKind?: string | null,
 ): SpeechMarking | null {
   if (act === 'ask') {
-    const species = AskSpeciesSchema.safeParse(meta?.['species']);
-    const tier = AskTierSchema.safeParse(meta?.['tier']);
+    const species = askSpeciesOf(meta?.['species']);
+    const tier = askTierOf(meta?.['tier']);
     // A malformed ask is still an ask — it just cannot claim a tier it did not send. `holds` false
     // is the honest default: the loud treatment is a claim about the sender's state, not decoration.
-    const holds = tier.success && askTierHolds(tier.data);
-    if (species.success && species.data === 'approve') return { mark: 'review', holds: false };
+    const holds = tier !== undefined && askTierHolds(tier);
+    if (species === 'approve') return { mark: 'review', holds: false };
     return { mark: 'needs-human', holds };
   }
   // The informal "come and look at this" — the review routing 28 of the 35 directed acts in the
