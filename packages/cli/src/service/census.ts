@@ -20,8 +20,17 @@ import {
 
 const LABEL_PREFIX = `${SERVICE_LABEL}-`;
 
-/** Platform services increment 3 will auto-provision. "Job gone" only applies to these —
- *  a project-service seat (deploybot) is not a missing LaunchAgent. */
+/**
+ * "Job gone" only applies to these — a project-service seat (deploybot) is not a missing LaunchAgent.
+ *
+ * THIS LIST IS KNOWN INCOMPLETE and that is the defect, not the design (measured 2026-09-04).
+ * `guardian` and `streamwatch` shipped after ADR 232 froze these four; both are `kind: service,
+ * role: platform` seats with live LaunchAgents, and both are absent here. Because the loop below
+ * iterates the literal rather than the roster, either can lose its job in total silence — and
+ * guardian is the daemon watchdog. Lane 01M1Q9D90XEP9FPCYPQNBFH73Q derives this set from the roster.
+ * Do not quietly append to the literal: an appended name fixes one seat and leaves the next one to
+ * be discovered the same way.
+ */
 const PLATFORM_SERVICE_LABELS = [AUTOREFRESH_LABEL, HOST_LABEL, LIVE_LABEL, SWEEP_LABEL] as const;
 
 function seatForLabel(label: string): string | null {
