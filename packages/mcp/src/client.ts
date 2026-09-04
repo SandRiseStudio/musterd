@@ -466,6 +466,19 @@ export class MusterdClient {
     });
   }
 
+  /**
+   * The whole-team timeline (ADR 061), recipient-scoped by the daemon like every other read.
+   *
+   * The inbox alone cannot answer "which room is this turn in": a turn carries no huddle meta of its
+   * own (ADR 378 §2), so the only row that names the topic is the ROOT — and a root the seat already
+   * read, or that was addressed to someone else, is not in an unread inbox slice at any limit. This
+   * is the same window the CLI's room view folds. Called only when a slice actually holds a threaded
+   * act, so an inbox with no huddle in it costs no extra request.
+   */
+  fetchMessages(limit: number): Promise<{ messages: Envelope[] }> {
+    return this.request('GET', `/teams/${this.config.team}/messages?limit=${limit}`);
+  }
+
   // ── Coordination lanes, Phase 1 (ADR 083). Every mutation returns { lane, warnings } — warn-only.
   openLane(body: unknown): Promise<{ lane: Lane; warnings: LaneWarning[] }> {
     return this.request('POST', `/teams/${this.config.team}/lanes`, body);

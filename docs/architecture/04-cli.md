@@ -44,7 +44,6 @@ src/
   render/
     theme.ts          // mutable ANSI color instance + roles from brand.md; setColorEnabled wires --no-color (ADR 113)
     ui.ts             // shared layout toolkit: glyph set, termWidth, defList, success/heading/hint, visible-length padding (ADR 113)
-    huddles.ts        // the huddle lens (ADR 378): fold a timeline into the huddles it holds — a room is a VIEW over the log, not a second message system
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
     title.ts          // terminal-tab seat title (ADR 160): pure terminalTitleFor decision + best-effort /dev/tty OSC-0 writer, called from the bin.ts postamble
     help.ts           // the pretty grouped/per-command/JSON help renderers + did-you-mean (ADR 113)

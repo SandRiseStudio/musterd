@@ -26,6 +26,18 @@ musterd huddle show <id>       # the transcript: who is in it, who has yet to sp
 
 In the inbox a turn now reads `in huddle <topic>` rather than as a loose message to the team: a turn carries no huddle meta of its own, so without the root a reader could not tell which conversation it belonged to.
 
+### And on the MCP surface (2026-09-04, increment 3)
+
+The participants are agents, so the surface that had none of this was the one that mattered. `team_inbox_check` now answers the same three questions the CLI's room does, in the call that delivers the turn:
+
+- the turn's own line says `↳ in huddle <topic>` (and `huddle_topic` in `structuredContent`);
+- a room block follows the messages — what the huddle is for, who is in it, who was named and has not spoken, the anchor, and the last 6 turns including ones this seat has already read;
+- the last line of an open room is the exact call that answers in it: `team_send {thread: "<id>", …}`.
+
+The timeline read that supplies the root is paid for **only when the slice actually holds a threaded act**, and a failed read degrades to the bare messages the surface always showed. Falsify: an agent that has never seen the CLI can, from the tool surface alone, name a turn's topic and answer in it — `packages/mcp/src/tools/huddleRooms.test.ts`, whose five behavioural cases were verified red with the fold disabled (three controls stay green either way).
+
+The fold itself moved to `packages/protocol/src/huddleView.ts` when this landed. It shipped CLI-local as "a rendering concern", which was half right: what a surface *draws* is its own, but *what a huddle is* — which rows belong to it, who is in it, whether it is closed — is a reading of the wire, and two copies of that fold would make the same room two different rooms.
+
 ### Why the log stays the transport (2026-09-04)
 
 The alternative considered was a dedicated room a participant enters and cannot leave until the huddle ends — a meeting. It was rejected on two grounds, and the reasoning is worth keeping because the metaphor is attractive.
@@ -45,7 +57,8 @@ So the log stays the transport — one cursor, recipient-scoped, replicated, alr
 - **No budget enforcement.** `budget` is a declaration; readers count the thread's rows against it. The daemon stores no clock (ADR 131 §7, 147, 179) and no sweeper closes a quiet huddle — it stays open, like a lapsed ask stays lapsed (#1158).
 - **No lock.** A participant is never held in a huddle; the mode is declared and honoured, not enforced. See the rejection above.
 - **No cross-host wake.** A joiner seat is reached the way every act reaches it: the root replicates on the sync push (60 s tick, `sync/push.ts`) and its own machine's hook loop wakes it. Wake leases never travel (ADR 241, 356).
-- **No `team_huddle_*` tools.** `team_send` with `meta.huddle` / `thread` / `meta.anchor_ref` is the MCP shape; the validator is the same `actMetaRules` both surfaces import.
+- **No `team_huddle_*` tools.** `team_send` with `meta.huddle` / `thread` / `meta.anchor_ref` is the MCP shape; the validator is the same `actMetaRules` both surfaces import. Re-argued and re-affirmed when the read surface landed (2026-09-04): a tool earns its place by being *selectable*, and reading a huddle is never a selection — a huddle reaches an agent exactly one way, as a turn in its inbox, so the read belongs at the arrival. The cost points the same way: a tool costs its name, description and schema in every seat's tool list on every turn forever, against 383 B of muted headroom measured that day; the field cost **0 B standing** (`pnpm context:check` identical before and after).
+- **No way to browse a room you have no unread in** (2026-09-04). `musterd huddle list` does that for a human and has no MCP counterpart, deliberately. Falsifier: if a seat is seen wanting the room it is *not* being spoken to in, that is the evidence for a tool.
 
 ## Where the rules live
 
@@ -53,7 +66,9 @@ So the log stays the transport — one cursor, recipient-scoped, replicated, alr
 | --- | --- |
 | `meta.huddle` shape; root-only; `message`/`request_help` only | `packages/protocol/src/huddle.ts`, `envelope.ts` (`actMetaRules`), `huddle.test.ts` |
 | `meta.anchor_ref` on `resolve` only, non-empty | same |
+| the fold both surfaces read a room with | `packages/protocol/src/huddleView.ts` |
 | the CLI and its room payload | `packages/cli/src/commands/huddle.ts`, `huddle.test.ts` |
+| the room an arriving turn came from, on MCP | `packages/mcp/src/tools/huddleRooms.ts`, `huddleRooms.test.ts` |
 | the whiteboard accepts that payload | `packages/whiteboard/src/service.test.ts` ("accepts a huddle layout") |
 
 Increment 2 (the office gathering on `/live` and the pop-out canvas) projects from the thread and presence on the firehose.
