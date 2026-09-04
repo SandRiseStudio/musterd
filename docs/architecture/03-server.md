@@ -218,6 +218,17 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
   succeeds them, and the `claim.superseded` audit reports the comparison it actually made. Until this
   landed the route attached `workspace: null` and evicted unconditionally, so `claim --detach` in a
   folder killed the session sitting in it.
+- **…and it records provenance, on every branch that occupies (2026-09-05).** The repair above edited
+  ONE of the route's three `attach` calls, so the credential self-authorize and dogfood re-seat
+  branches kept hardcoding `workspace: null` — and the re-seat branch is the ordinary path for an
+  agent re-claiming its own bound seat. The three literals are now one `claimAttachContext`, which
+  cannot drift branch to branch. It also carries `provenance` (ADR 131 §6), which the body schema
+  had never accepted at all: every row born here read `provenance: null` while every WS-claimed and
+  every ambient-touched row carried a value — the two paths were exact opposites, the HTTP claim
+  recording a workspace and no provenance, the ambient touch a provenance and no workspace. It costs
+  a wake: the actuators judge `verified.provenance !== 'wake'` to tell their own spawned child from a
+  stranger holding the seat. `provenance` is stamped on **agent** seats only, the same ADR 121 gate
+  `ambientTouch` applies — a human shell must not be able to label its own occupancy `wake`.
 - **Recorded intentions in the brief (ADR 373 inc 4).** `GET /teams/:slug/next` carries
   `up_next_seeds` (open Seeds, oldest first, compact: id/source/ref/summary/submitted_by) and
   `up_next_seeds_total`, projected by `openSeedsForBrief` and rendered above `up_next` on both

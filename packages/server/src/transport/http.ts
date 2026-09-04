@@ -3037,6 +3037,15 @@ export async function handleHttp(
           build: z.string().max(64).optional(),
           // Feature epoch (ADR 148), mirroring the WS claim frame — the roster's skew signal.
           epoch: z.number().int().nonnegative().optional(),
+          // ADR 131 §6, mirroring the WS claim frame — what ANIMATES this session, not who it is.
+          // The 2026-09-04 workspace repair left this field behind, so the mirror still was not one:
+          // every row born here read `provenance: null` while every WS-claimed and every
+          // ambient-touched row carried a value. The two paths were exact opposites — the HTTP claim
+          // recorded a workspace and no provenance, the ambient touch a provenance and no workspace.
+          // It matters most to a wake: the actuators judge `verified.provenance !== 'wake'` to tell
+          // their own woken child from a stranger holding the seat, and a null loses that every time.
+          // Optional and additive: a client that sends nothing still lands the `session` default.
+          provenance: ProvenanceSchema.optional(),
         });
         const body = parseOrBadRequest(ClaimBody, await readJson(req));
         const team = requireTeam(ctx.db, slug);
@@ -3244,6 +3253,23 @@ export async function handleHttp(
           });
         }
 
+        // What every occupy branch below records on its row. Written once, deliberately: the
+        // 2026-09-04 workspace repair edited ONE of the three `attach` calls and left the other two
+        // hardcoding `workspace: null`, so its own stated consequences survived on the credential
+        // and re-seat paths — and the re-seat path is the ordinary one for an agent re-claiming its
+        // own bound seat. A single object cannot drift branch to branch the way three literals did.
+        //
+        // `provenance` carries the ADR 121/131 gate the ambient-touch path already applies: agent
+        // seats only. A human shell must not be able to label its own occupancy `wake` — the wake
+        // actuators read that word to decide a seat is their child and not a stranger's session.
+        const claimAttachContext = {
+          provenance: targetMember.kind === 'agent' ? (body.provenance ?? null) : null,
+          workspace: body.workspace ?? null,
+          driver: null,
+          model: body.model ?? null,
+          build: body.build ?? null,
+          epoch: body.epoch ?? null,
+        };
         // Single-active is kind-scoped (ADR 042), matching the WS path. Only an AUTHORIZED agent
         // claim may invoke newest-wins (ADR 017). Keeping the transition behind the grant/self/re-seat
         // decision makes refused and pending claims side-effect-free for the live incumbent.
@@ -3409,14 +3435,7 @@ export async function handleHttp(
           refreshGrant(ctx.db, gv.grant.id, ctx.config.resumeTtlMs);
           displaceAgentIncumbent();
           // OCCUPY: stateless — attach presence with null connId (no persistent socket).
-          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
-            provenance: null,
-            workspace: body.workspace ?? null,
-            driver: null,
-            model: body.model ?? null,
-            build: body.build ?? null,
-            epoch: body.epoch ?? null,
-          });
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, claimAttachContext);
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
@@ -3448,14 +3467,7 @@ export async function handleHttp(
         // the credential matches the target seat for a seat-target claim).
         if (authenticatedMember && authenticatedMember.id === targetMember.id) {
           displaceAgentIncumbent();
-          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
-            provenance: null,
-            workspace: null,
-            driver: null,
-            model: body.model ?? null,
-            build: body.build ?? null,
-            epoch: body.epoch ?? null,
-          });
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, claimAttachContext);
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
@@ -3494,14 +3506,7 @@ export async function handleHttp(
           getPolicy(ctx.db, team.id).standing_reseat_known_agents
         ) {
           displaceAgentIncumbent();
-          const presence = attach(ctx.db, targetMember.id, body.surface, null, {
-            provenance: null,
-            workspace: null,
-            driver: null,
-            model: body.model ?? null,
-            build: body.build ?? null,
-            epoch: body.epoch ?? null,
-          });
+          const presence = attach(ctx.db, targetMember.id, body.surface, null, claimAttachContext);
           markBound(ctx.db, targetMember.id);
           appendAudit(ctx.db, team.id, {
             actor: targetMember.name,
