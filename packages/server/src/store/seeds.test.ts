@@ -2,7 +2,7 @@ import type { Database } from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { listLanes, openLane } from './lanes.js';
-import { addMember , getMemberByName } from './members.js';
+import { addMember, getMemberByName } from './members.js';
 import {
   answerSeedClarification,
   askSeedClarification,
