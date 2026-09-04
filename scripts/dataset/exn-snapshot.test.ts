@@ -11,6 +11,7 @@ import {
   buildManifest,
   episodeFileRef,
   parseExnSnapshotArgs,
+  rateLimitDelayMs,
   sha256Hex,
   snapshotCorpus,
   type ExnSnapshotOptions,
@@ -203,6 +204,49 @@ describe('snapshotCorpus', () => {
     });
     await expect(snapshotCorpus(bad, opts(), () => {})).rejects.toThrow(/refused the key/);
     await expect(snapshotCorpus(bad, opts(), () => {})).rejects.not.toThrow(/test-key/);
+  });
+});
+
+describe('rate limiting', () => {
+  it('honors Retry-After seconds when sane', () => {
+    expect(rateLimitDelayMs(0, { get: () => '2' })).toBe(3000);
+  });
+  it('clamps insane values and falls back to growing backoff', () => {
+    expect(rateLimitDelayMs(0, { get: () => '9999' })).toBe(5000);
+    expect(rateLimitDelayMs(0, { get: () => null })).toBe(5000);
+    expect(rateLimitDelayMs(3, { get: () => null })).toBe(20000);
+    expect(rateLimitDelayMs(99, { get: () => null })).toBe(30000);
+  });
+  it('a 429 retries and then succeeds', async () => {
+    let calls = 0;
+    const flaky = async (): Promise<{
+      ok: boolean;
+      status: number;
+      headers: { get: () => string | null };
+      json: () => Promise<unknown>;
+      text: () => Promise<string>;
+    }> => {
+      calls++;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 429,
+          headers: { get: () => '0' },
+          json: async () => ({}),
+          text: async () => '',
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({ episodes: [], pagination: { nextCursor: null } }),
+        text: async () => '',
+      };
+    };
+    const result = await snapshotCorpus(flaky, opts({ skipTranscripts: true }), () => {});
+    expect(calls).toBe(2);
+    expect(result.episodes.length).toBe(0);
   });
 });
 
