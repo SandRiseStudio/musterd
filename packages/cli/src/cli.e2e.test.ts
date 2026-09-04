@@ -681,11 +681,49 @@ describe('join honesty (2026-06-16 dogfood: relabeled token cascade)', () => {
     expect(cfg.identities.dawn.name).toBe('nick');
   });
 
-  it('re-joining as the same cached member occupies via its credential (v0.3)', async () => {
+  it('the legacy `join <slug> --as <name>` spelling runs the claim handshake and says so on stderr (ADR 377)', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
-    const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
-    expect(ok.code).toBe(0);
-    expect(ok.out).toContain('joined');
+    const errChunks: string[] = [];
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: any) => {
+      errChunks.push(String(c));
+      return true;
+    });
+    try {
+      const ok = await run(joinCommand, ['dawn', '--as', 'nick']);
+      expect(ok.code).toBe(0);
+      // Delegated to claim: claim's output, not a second handshake's.
+      expect(ok.out).toContain('occupied on dawn');
+      expect(ok.out).not.toContain('joined');
+    } finally {
+      errSpy.mockRestore();
+    }
+    expect(errChunks.join('')).toContain('musterd join is now: musterd claim nick --team dawn');
+    // Same handshake, same result: the folder is bound to the seat claim resolved.
+    const ok2 = await run(claimCommand, ['nick', '--team', 'dawn', '--json']);
+    expect(JSON.parse(ok2.out.trim().split('\n').pop()!)).toMatchObject({
+      team: 'dawn',
+      member: 'nick',
+    });
+  });
+
+  it("under --json the alias is silent on stderr and emits claim's JSON shape", async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    const errChunks: string[] = [];
+    const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((c: any) => {
+      errChunks.push(String(c));
+      return true;
+    });
+    try {
+      const ok = await run(joinCommand, ['dawn', '--as', 'nick', '--json']);
+      expect(ok.code).toBe(0);
+      expect(JSON.parse(ok.out.trim().split('\n').pop()!)).toMatchObject({
+        team: 'dawn',
+        member: 'nick',
+      });
+    } finally {
+      errSpy.mockRestore();
+    }
+    expect(errChunks.join('')).not.toContain('ADR 377');
   });
 
   it('`claim <name> --team <slug>` is the same handshake — the vault key is found without --key (ADR 377)', async () => {

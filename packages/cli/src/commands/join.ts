@@ -1,103 +1,50 @@
-import { TOKEN_PREFIXES, type Binding, type Surface } from '@musterd/protocol';
 import { flagStr, type Parsed } from '../args.js';
-import { HttpClient } from '../client.js';
-import { loadConfig, rememberIdentity, saveBinding, saveConfig } from '../config.js';
 import { CliError } from '../errors.js';
-import { setSeatGitIdentity } from '../onboard/workspace.js';
 import { theme } from '../render/theme.js';
-import { success, sym } from '../render/ui.js';
+import { claimCommand } from './claim.js';
 
 /**
- * `musterd join <slug> --as <name>` — HIDDEN ALIAS since 2026-09-03 (ADR 377): the same handshake is
- * `musterd claim <name> --team <slug> [--key …] [--grant …]`, which is the verb the help catalog and
- * every prescription now name. Kept dispatchable for one FEATURE_EPOCH so pasted lines keep working;
- * prints the new spelling on stderr. Original doc follows.
- *
- * Occupy the named seat via the v0.3 claim handshake (ADR 075),
- * authenticated by the team agent key (or a human credential). Stores the resolved identity in the
- * vault (ADR 059) and binds this folder so acts work here without `--as` (ADR 036). The v0.2
- * `--token` per-seat credential is gone; the authenticator is `--key` (`MUSTERD_AGENT_KEY` / a cached
- * key) and an optional `--grant` skips the approval lane.
+ * `musterd join <slug> --as <name>` — HIDDEN ALIAS since 2026-09-03 (ADR 377 increment 1). It is
+ * `musterd claim <name> --team <slug> [--key …] [--grant …] [--surface …]` spelled the old way, and
+ * that is all it is: this file translates argv and calls `claimCommand`. There is one handshake
+ * implementation, in `claim.ts`; the alias cannot drift from it because it has no behaviour of its own.
+ * Kept dispatchable for one FEATURE_EPOCH so pasted lines keep working; prints the new spelling on
+ * stderr. Retire per ADR 377 "Retirement of the `join` alias".
  */
 export async function joinCommand(parsed: Parsed): Promise<number> {
+  const translated = joinArgvToClaim(parsed);
+  if (!parsed.flags['json']) {
+    process.stderr.write(theme.meta(joinAliasNotice(translated)) + '\n');
+  }
+  return claimCommand(translated);
+}
+
+/** The one-line migration notice the alias prints on stderr (not under --json). */
+export function joinAliasNotice(claimArgs: Parsed): string {
+  const name = claimArgs.positionals[0];
+  const team = flagStr(claimArgs.flags, 'team');
+  return `musterd join is now: musterd claim ${name} --team ${team} (ADR 377) — this spelling stays one epoch`;
+}
+
+/**
+ * `join <slug> --as <name> [flags]` → `claim <name> --team <slug> [flags]`. Every other flag
+ * (`--key`, `--grant`, `--surface`, `--server`, `--json`, …) passes through untouched: claim already
+ * reads each of them. Pure, so the mapping is unit-testable without a server.
+ */
+export function joinArgvToClaim(parsed: Parsed): Parsed {
   const slug = parsed.positionals[0];
   const name = flagStr(parsed.flags, 'as');
   if (!slug || !name) {
     throw new CliError(
-      'usage: musterd join <slug> --as <name> [--key <mskey_|mscr_>] [--grant <msgr_>] [--surface cli]',
+      'usage: musterd join <slug> --as <name> [--key <mskey_|mscr_>] [--grant <msgr_>] [--surface cli]' +
+        ' — or the current spelling: musterd claim <name> --team <slug>',
       2,
     );
   }
-  if (!parsed.flags['json']) {
-    process.stderr.write(
-      theme.meta(
-        `musterd join is now: musterd claim ${name} --team ${slug} (ADR 377) — this spelling stays one epoch`,
-      ) + '\n',
-    );
-  }
-  const config = loadConfig();
-  const server = flagStr(parsed.flags, 'server') ?? config.server;
-  const surface = (flagStr(parsed.flags, 'surface') ?? 'cli') as Surface;
-
-  // v0.3: authenticate the claim with the team agent key (or a credential). Resolve it from --key /
-  // MUSTERD_AGENT_KEY / a previously-cached key for this member (ADR 059).
-  const cached = config.knownIdentities.find((i) => i.team === slug && i.name === name);
-  const key = flagStr(parsed.flags, 'key') ?? process.env['MUSTERD_AGENT_KEY'] ?? cached?.key;
-  if (!key) {
-    throw new CliError(
-      `no key for "${name}" on "${slug}" — pass --key <mskey_|mscr_> (the team agent key, or your credential)`,
-      4,
-    );
-  }
-  const grant = flagStr(parsed.flags, 'grant') ?? process.env['MUSTERD_GRANT'];
-
-  const http = new HttpClient({ server, surface });
-  const outcome = await http.claim(slug, {
-    key,
-    target: { seat: name },
-    surface,
-    ...(grant !== undefined ? { grant } : {}),
-  });
-  if (outcome.state === 'refused') {
-    const tail = outcome.hint ? ` — ${outcome.hint}` : '';
-    throw new CliError(`join refused (${outcome.code}): ${outcome.message}${tail}`, 4);
-  }
-  if (outcome.state === 'pending') {
-    process.stdout.write(
-      `${theme.meta(sym.pending)} ${outcome.message} ${theme.meta(`(request ${outcome.requestId}) — approve to go online`)}\n`,
-    );
-    return 0;
-  }
-  const seat = outcome.seat.name;
-
-  config.server = server;
-  config.current = slug;
-  config.identities[slug] = { name: seat, key, surface };
-  rememberIdentity(config, { team: slug, name: seat, key, surface }); // ADR 059 vault
-  saveConfig(config);
-  // Auto-bind the joining folder so it's immediately *active* here (ADR 036).
-  const binding: Binding = {
-    version: 2,
-    server,
-    team: slug,
-    agent_key: key,
-    claim: { mode: 'seat', name: seat },
-    ...(grant !== undefined ? { grant } : {}),
+  const { as: _as, ...rest } = parsed.flags;
+  return {
+    positionals: [name, ...parsed.positionals.slice(1)],
+    flags: { ...rest, team: slug },
+    metaPairs: parsed.metaPairs,
   };
-  saveBinding(process.cwd(), binding);
-  // ADR 197: agent re-bind refreshes worktree git identity. Humans keep their real email — a
-  // synthetic `nick@<team>.musterd` would break GitHub attribution (same gate as doctor).
-  if (key.startsWith(TOKEN_PREFIXES.agent_key)) {
-    setSeatGitIdentity(seat, process.cwd(), slug);
-  }
-
-  if (parsed.flags['json']) {
-    process.stdout.write(JSON.stringify({ team: slug, member: seat, surface }) + '\n');
-    return 0;
-  }
-  process.stdout.write(success(`${seat} joined ${slug}`, { next: 'musterd next' }) + '\n');
-  process.stdout.write(
-    `${theme.presenceDot('online')} ${theme.meta(`${seat} online via ${surface}`)}\n`,
-  );
-  return 0;
 }
