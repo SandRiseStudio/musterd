@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ActSchema, type Act } from './acts.js';
 import { AskSpeciesSchema, AskTierSchema, AskOutcomeSchema } from './ask.js';
 import { BlockedBySchema } from './incident.js';
+import { AnchorRefSchema, HuddleMetaSchema } from './huddle.js';
 import { PROTOCOL_VERSION } from './version.js';
 
 /** Recipient of an envelope: a specific member, the whole team, or broadcast. */
@@ -346,6 +347,50 @@ export function actMetaRules(
         code: z.ZodIssueCode.custom,
         path: ['thread'],
         message: 'act "resolve" requires thread (the id of the thread it closes)',
+      });
+    }
+  }
+  // A huddle is a thread (ADR 378): `meta.huddle` opens one and lives on the ROOT only — a turn
+  // that repeats it is malformed, and a root cannot already be in a thread. Optional, additive,
+  // refused when malformed; the daemon reads nothing out of it.
+  if (meta['huddle'] !== undefined) {
+    const parsed = HuddleMetaSchema.safeParse(meta['huddle']);
+    if (!parsed.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'huddle'],
+        message: `meta.huddle is malformed: ${parsed.error.issues.map((i) => i.path.join('.') + ' ' + i.message).join('; ')}`,
+      });
+    } else if (typeof env.thread === 'string' && env.thread.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'huddle'],
+        message:
+          'meta.huddle opens a huddle and belongs on the root act only — a turn in a thread must not carry it',
+      });
+    } else if (env.act !== 'message' && env.act !== 'request_help') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'huddle'],
+        message: 'meta.huddle opens a huddle on a "message" or "request_help" act',
+      });
+    }
+  }
+  // The closing `resolve` names where the anchor landed (ADR 378 §6): a ref, or `none` with the
+  // reason in the body. Optional — a resolve that is not a huddle's carries none.
+  if (meta['anchor_ref'] !== undefined) {
+    if (env.act !== 'resolve') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'anchor_ref'],
+        message: 'meta.anchor_ref rides the closing "resolve" only',
+      });
+    } else if (!AnchorRefSchema.safeParse(meta['anchor_ref']).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['meta', 'anchor_ref'],
+        message:
+          'meta.anchor_ref must be a non-empty string (a repo path, PR, lane ref, or "none")',
       });
     }
   }

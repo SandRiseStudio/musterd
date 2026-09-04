@@ -29,6 +29,7 @@ export * from './posture.js';
 export * from './offline.js';
 export * from './model.js';
 export * from './wakeLease.js';
+export * from './huddle.js';
 export * from './seatfile.js';
 export * from './errors.js';
 export * from './frames.js';

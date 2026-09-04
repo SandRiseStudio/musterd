@@ -82,6 +82,43 @@ describe('service', () => {
     ).toContain('flow');
   });
 
+  it('accepts a huddle layout — the shape `musterd huddle open` sends (ADR 378 §7)', async () => {
+    // The CLI talks to this port over raw HTTP and imports nothing from here; this pins the
+    // payload it sends so a port change on either side fails a test rather than a huddle.
+    const board = 'huddle-01huddle0000000000000000aa';
+    const open = await fetch(`${base}/api/boards/${board}/open`, { method: 'POST' });
+    expect(((await open.json()) as { created: boolean }).created).toBe(true);
+    const add = await fetch(`${base}/api/boards/${board}/add`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        actor: 'seat:izzo',
+        items: [
+          { kind: 'cluster', title: 'Anchor', x: 100, y: 100 },
+          {
+            kind: 'note',
+            text: 'docs/design/thing.md',
+            detail: 'anchor — docs/design/thing.md',
+            x: 120,
+            y: 160,
+          },
+          { kind: 'label', text: 'huddle · lane:01LANE', x: 100, y: 40 },
+          { kind: 'cluster', title: 'Turns', x: 600, y: 100 },
+          { kind: 'note', text: 'why we huddle', detail: 'why we huddle', x: 620, y: 160 },
+        ],
+      }),
+    });
+    expect(add.status).toBe(200);
+    expect(((await add.json()) as { ids: string[] }).ids).toHaveLength(5);
+    const outline = (await (await fetch(`${base}/api/boards/${board}/outline`)).json()) as Outline;
+    expect(
+      outline.items
+        .filter((i) => i.kind === 'cluster')
+        .map((i) => i.text)
+        .sort(),
+    ).toEqual(['Anchor', 'Turns']);
+  });
+
   it('rejects invalid board names', async () => {
     const res = await fetch(`${base}/api/boards/..%2Fescape/open`, { method: 'POST' });
     expect(res.status).toBe(400);

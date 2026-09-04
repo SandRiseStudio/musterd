@@ -22,6 +22,7 @@ import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { insightCommand } from './commands/insight.js';
 import { joinCommand } from './commands/join.js';
+import { huddleCommand } from './commands/huddle.js';
 import { laneCommand, lanesCommand } from './commands/lane.js';
 import { liveCommand } from './commands/live.js';
 import { memoryCommand } from './commands/memory.js';
@@ -223,6 +224,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return sendCommand(rest);
     case 'lane':
       return laneCommand(rest);
+    case 'huddle':
+      return huddleCommand(rest);
     case 'seed':
       return seedCommand(rest);
     case 'lanes':
