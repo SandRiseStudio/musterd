@@ -16,10 +16,16 @@
  * Everything is injected (`Exec`, `probeUpgrade`) so the whole ladder is unit-testable without a
  * tailnet, a daemon, or a Fly account.
  */
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { request } from 'node:http';
 import { dirname, join } from 'node:path';
+import { realExec, type Exec, type ExecResult } from '../process.js';
+import {
+  probeUpgradeHost,
+  type TailnetSelf,
+  type UpgradeVerdict,
+  parseTailscaleSelf,
+  serveForwardsPort,
+} from '../integrations/tailscale.js';
 
 /** The Fly app that hosts the stream. Overridable for a second environment. */
 export const DEFAULT_APP = 'musterd-broadcast';
@@ -28,69 +34,6 @@ export const REQUIRED_SECRETS = ['TS_AUTHKEY', 'MUSTERD_STREAM_KEY'] as const;
 /** The proven configuration (see the hosting spec + the 2026-07-27 run that passed). */
 export const VM_SIZE = 'performance-4x';
 export const REGION = 'sjc';
-
-export interface ExecResult {
-  code: number;
-  stdout: string;
-  stderr: string;
-}
-export type Exec = (cmd: string, args: string[], opts?: { cwd?: string }) => ExecResult;
-
-/** A missing binary is `code 127` rather than a thrown error, so a check can report it as a check. */
-export const realExec: Exec = (cmd, args, opts) => {
-  const r = spawnSync(cmd, args, { encoding: 'utf8', ...(opts?.cwd ? { cwd: opts.cwd } : {}) });
-  if (r.error) return { code: 127, stdout: '', stderr: r.error.message };
-  return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
-};
-
-// ── Parsers (pure — the JSON shapes of two third-party CLIs, pinned by tests) ────────────────────
-
-export interface TailnetSelf {
-  /** MagicDNS name with the trailing dot stripped — what goes in `Host` and `MUSTERD_AIR_ADDR`. */
-  dnsName: string;
-  ip4: string | null;
-  running: boolean;
-}
-
-/** `tailscale status --json`. */
-export function parseTailscaleSelf(json: string): TailnetSelf | null {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(json);
-  } catch {
-    return null;
-  }
-  if (typeof doc !== 'object' || doc === null) return null;
-  const d = doc as { BackendState?: unknown; Self?: unknown };
-  const self = (d.Self ?? {}) as { DNSName?: unknown; TailscaleIPs?: unknown };
-  const raw = typeof self.DNSName === 'string' ? self.DNSName : '';
-  if (!raw) return null;
-  const ips = Array.isArray(self.TailscaleIPs) ? self.TailscaleIPs : [];
-  const ip4 = ips.find((i): i is string => typeof i === 'string' && /^\d+\.\d+\.\d+\.\d+$/.test(i));
-  return {
-    dnsName: raw.replace(/\.$/, ''),
-    ip4: ip4 ?? null,
-    running: d.BackendState === 'Running',
-  };
-}
-
-/**
- * `tailscale serve status --json`. The daemon stays loopback-bound; `serve` is the only thing that
- * puts it on the tailnet, and its absence is invisible until a machine 3,000 miles away can't
- * connect. Keys under `TCP` are port numbers.
- */
-export function serveForwardsPort(json: string, port: number): boolean {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(json);
-  } catch {
-    return false;
-  }
-  const tcp = (doc as { TCP?: Record<string, unknown> } | null)?.TCP;
-  if (!tcp || typeof tcp !== 'object') return false;
-  const entry = tcp[String(port)];
-  return Boolean(entry);
-}
 
 export interface SecretRow {
   name: string;
@@ -159,59 +102,6 @@ export function parsePushedDigest(out: string): string | null {
 }
 
 // ── The daemon's upgrade gate, probed for real ───────────────────────────────────────────────────
-
-export type UpgradeVerdict = 'allowed' | 'rejected' | 'unreachable';
-
-/**
- * Ask the *running* daemon whether it would accept a WS upgrade whose `Host` is the tailnet name.
- *
- * The request goes to loopback and only the header is tailnet-shaped, so this works before any
- * overlay routing exists and costs nothing. ADR 040's gate answers 403 for a host it doesn't allow;
- * any other outcome (101, or a 400 from the WS layer for an incomplete handshake) means the gate let
- * it through, which is the thing being tested.
- */
-export function probeUpgradeHost(
-  origin: { hostname: string; port: number },
-  hostHeader: string,
-  timeoutMs = 3000,
-): Promise<UpgradeVerdict> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = (v: UpgradeVerdict) => {
-      if (!settled) {
-        settled = true;
-        resolve(v);
-      }
-    };
-    const req = request({
-      host: origin.hostname,
-      port: origin.port,
-      path: '/ws',
-      headers: {
-        Host: hostHeader,
-        Connection: 'Upgrade',
-        Upgrade: 'websocket',
-        'Sec-WebSocket-Version': '13',
-        'Sec-WebSocket-Key': 'AAAAAAAAAAAAAAAAAAAAAA==',
-      },
-      timeout: timeoutMs,
-    });
-    req.on('upgrade', (_res, socket) => {
-      socket.destroy();
-      done('allowed');
-    });
-    req.on('response', (res) => {
-      res.resume();
-      done(res.statusCode === 403 ? 'rejected' : 'allowed');
-    });
-    req.on('timeout', () => {
-      req.destroy();
-      done('unreachable');
-    });
-    req.on('error', () => done('unreachable'));
-    req.end();
-  });
-}
 
 // ── Checks ───────────────────────────────────────────────────────────────────────────────────────
 

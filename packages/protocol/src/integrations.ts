@@ -3,11 +3,12 @@ import { z } from 'zod';
 /** Vendor-owned Tailscale status JSON. The inspector reads only Self's identity and reachability facts. */
 export const TailscaleStatusSchema = z
   .object({
+    BackendState: z.string().optional(),
     Self: z
       .object({
         DNSName: z.string(),
-        TailscaleIPs: z.array(z.string()),
-        Online: z.boolean(),
+        TailscaleIPs: z.array(z.string()).optional(),
+        Online: z.boolean().optional(),
       })
       .passthrough(),
   })

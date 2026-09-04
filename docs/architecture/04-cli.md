@@ -36,7 +36,10 @@ src/
   workingTree.ts      // session-start marker + the advisory a stage-shaped `git add -A` earns for paths that PREDATE this session; local-only, warn-never-deny (ADR 239 verdict)
   version.ts          // cliVersion(): read @musterd/cli package.json version for `musterd --version` (ADR 067)
   runtime.ts          // Node ≥22 gate + packaged-vs-checkout detection for doctor / bin (ADR 156)
+  process.ts          // injected synchronous process runner: missing binary → code 127, shared by read-only inspectors
   errors.ts           // CliError(code) -> message + exit code
+  integrations/       // optional external integration inspectors (ADR 385)
+    tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
   help/               // the structured command catalog behind `musterd help` (ADR 113)
     catalog.ts        // pure, import-free command catalog (groups + entries) — the single source guidance:check reads
     plain.ts          // renderPlainHelp(): the uncolored HELP string derived from the catalog (guidance-safe)
@@ -48,7 +51,7 @@ src/
     help.ts           // the pretty grouped/per-command/JSON help renderers + did-you-mean (ADR 113)
     credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076; live post-P3 cutover)
   broadcast/          // the hosted half of `musterd broadcast` — run the capture on a rented machine
-    hosted.ts         // `musterd stream doctor`'s precondition ladder + the tailscale/fly JSON parsers, all injected: checks are EMPIRICAL (the allow-list one attempts a real WS upgrade against the RUNNING daemon with the tailnet Host, rather than reading the plist) because every precondition here fails as the same "page never reported ready"
+    hosted.ts         // `musterd stream doctor`'s hosted-stream precondition ladder + Fly parsers, all injected; its Tailscale primitives live in integrations/tailscale.ts
     streamState.ts    // ADR 293 desired-state file (start/stop provenance: who, when, why) + the pure ensure decision — a machine gone while this says live is a crash by definition; 3 restarts/30min then stand down
   guardian/           // the platform guardian's pure logic (ADR 263) — every effect injected, zero model tokens
     classify.ts       // recency-keyed signals → incident classes; shipped DEFAULT_TIERS + resolveGuardianTiers (policy over defaults, read-time)
