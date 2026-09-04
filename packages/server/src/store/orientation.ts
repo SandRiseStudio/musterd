@@ -6,6 +6,7 @@ import { incidentPolicy, openIncidents } from './incidents.js';
 import { acceptanceEnteredAt, listLanes, readyForReviewHadNoCandidate } from './lanes.js';
 import { getMemberByRole } from './members.js';
 import { annotateClose, closeVerdicts } from './review.js';
+import { openSeedsForBrief } from './seeds.js';
 
 /**
  * The orientation brief (ADR 049), computed server-side so CLI + MCP render one projection (ADR 084 —
@@ -87,7 +88,7 @@ export function deriveNext(
   member: string,
   shippedLimit = 3,
   upNextLimit = 5,
-  opts: { now?: number } = {},
+  opts: { now?: number; upNextSeedLimit?: number } = {},
 ): NextBrief {
   const now = opts.now ?? Date.now();
   const all = listLanes(db, teamId, teamSlug);
@@ -122,6 +123,16 @@ export function deriveNext(
     // goals-front-door design: goal-attached lanes served first (stable within each group).
     .sort((a, b) => Number(b.goal_id !== null) - Number(a.goal_id !== null))
     .slice(0, upNextLimit);
+
+  // ADR 373 increment 4: recorded intentions nobody started, above the open lanes. Fewer than the
+  // lanes on purpose — the tray held 31 open Seeds the day this shipped, and a brief that leads with
+  // 31 of anything is a brief nobody reads to the end. The total rides along so the window does not
+  // read as the whole tray.
+  const { seeds: up_next_seeds, total: up_next_seeds_total } = openSeedsForBrief(
+    db,
+    teamId,
+    opts.upNextSeedLimit ?? 3,
+  );
 
   // Owed reviews (ADR 233): lanes still in the acceptance stage whose review ask came to ME.
   //
@@ -281,6 +292,8 @@ export function deriveNext(
     in_flight,
     shipped,
     up_next,
+    up_next_seeds,
+    up_next_seeds_total,
     owed_reviews,
     review_debt_total,
     why,

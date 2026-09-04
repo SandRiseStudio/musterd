@@ -155,3 +155,43 @@ describe('fmtNext — review_debt unlanded badge (merge-verified submit)', () =>
     expect(lines.find((l) => l.includes('L2'))).not.toContain('NO MERGE ATTESTATION');
   });
 });
+
+describe('fmtNext — recorded intentions lead the up-next section (ADR 373 increment 4)', () => {
+  const seeds: NextBrief['up_next_seeds'] = [
+    {
+      id: '01SEED1',
+      source: 'repo',
+      ref: 'docs/decisions/354-x.md#left-for-a-sibling-lane',
+      summary: 'Left for a sibling lane; this ADR fixes the attestation.',
+      submitted_by: 'nick',
+      captured_at: 1_788_000_000_000,
+    },
+  ];
+
+  it('renders the ref as the source tag and says how to take it', () => {
+    const b = brief(null);
+    b.up_next_seeds = seeds;
+    b.up_next_seeds_total = 31;
+    const out = fmtNext(b);
+    expect(out).toContain('recorded intentions nobody has started (1 of 31)');
+    expect(out).toContain('docs/decisions/354-x.md#left-for-a-sibling-lane');
+    expect(out).toContain('team_seed_update {action:"claim", id:"01SEED1"}');
+  });
+
+  it('names the submitter when there is no document — a relay Seed came from a person', () => {
+    const b = brief(null);
+    b.up_next_seeds = [{ ...seeds[0]!, ref: null }];
+    b.up_next_seeds_total = 1;
+    const out = fmtNext(b);
+    expect(out).toContain('from nick');
+    expect(out).not.toContain('of 1)');
+  });
+
+  it('a brief with only Seeds is not "nothing in flight"', () => {
+    const b = brief(null);
+    b.up_next_seeds = seeds;
+    b.up_next_seeds_total = 1;
+    expect(fmtNext(b)).not.toContain('nothing in flight');
+    expect(fmtNext(brief(null))).toContain('nothing in flight');
+  });
+});

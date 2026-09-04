@@ -1,24 +1,20 @@
 import { z } from 'zod';
-import { SEED_STATES } from './seeds.wire.js';
+import { SEED_SOURCES, SEED_STATES } from './seeds.wire.js';
 
 /** The Seed vocabulary itself is validator-free (`seeds.wire.js`); this module is its zod face. */
 export {
   COMPLETED_SEED_TRAY_MS,
+  SEED_SOURCES,
   SEED_STATES,
   seedInActiveTray,
+  type SeedSource,
   type SeedState,
 } from './seeds.wire.js';
 
 export const SeedStateSchema = z.enum(SEED_STATES);
 
-/**
- * Where a Seed was captured. `slack` arrives through the relay (ADR 248/311); `repo` is a
- * document-recorded intention — a `Follows-up:` marker or an undisposed forward reference in this
- * repo's own documents — captured by `pnpm intents:ingest` (ADR 373 increment 2). The relay boundary
- * below stays Slack-only: widening THIS enum is the whole schema delta ADR 373 authorizes.
- */
-export const SeedSourceSchema = z.enum(['slack', 'repo']);
-export type SeedSource = z.infer<typeof SeedSourceSchema>;
+/** Built from {@link SEED_SOURCES}, which carries the vocabulary and the reason it has two members. */
+export const SeedSourceSchema = z.enum(SEED_SOURCES);
 
 /** ADR 311: the relay accepts Slack captures only. Unchanged by ADR 373. */
 export const RelaySeedSourceSchema = z.literal('slack');

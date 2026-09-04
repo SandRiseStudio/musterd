@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { GoalSchema } from './goals.js';
 import { LANE_STAKES, LANE_STAKES_PROVENANCE, LANE_STATES, type LaneState } from './lanes.wire.js';
+import { SEED_SOURCES } from './seeds.wire.js';
 
 /**
  * Coordination lanes, Phase 1 (ADR 083) — the { work-item × owner × scope } unit that makes
@@ -544,6 +545,41 @@ export const NextBriefSchema = z.object({
   shipped: z.array(LaneSchema),
   /** Unowned lanes you could pick up, oldest first — what to start next. */
   up_next: z.array(LaneSchema),
+  /**
+   * Recorded intentions nobody has started: open Seeds awaiting exploration, oldest first
+   * (ADR 373 increment 4).
+   *
+   * Here, above `up_next`, because `next` answers "what should I do" and an unowned recorded
+   * intention is that same question one step earlier — a Seed is what a Lane has not become yet.
+   * Deliberately NOT in `inbox --waiting`, which carries acts addressed to a seat: an intention is
+   * addressed to nobody, which is the condition ADR 373 exists to fix, so filing it where a reader
+   * looks for their own name would hide it a second time.
+   *
+   * Compact on purpose — the brief is read on every orientation, so this carries what decides
+   * "should I pick this up" and nothing else. `ref` is the source tag: a repo path plus anchor for
+   * a document-recorded intention, `null` for a relay capture, whose source is a person.
+   * `.default([])` keeps an older daemon's brief parseable.
+   */
+  up_next_seeds: z
+    .array(
+      z.object({
+        id: z.string(),
+        source: z.enum(SEED_SOURCES),
+        /** `docs/decisions/354-….md#left-for-a-sibling-lane` for a repo Seed; null for a relay one. */
+        ref: z.string().nullable(),
+        /** The intention as written — the Seed body's first line, bounded for a one-line render. */
+        summary: z.string(),
+        submitted_by: z.string(),
+        captured_at: z.number().int().nonnegative(),
+      }),
+    )
+    .default([]),
+  /**
+   * How many Seeds are open in total — `up_next_seeds` shows at most the oldest few. Same reason
+   * `review_debt_total` exists: a window with no total reads as the whole tray, so a reader clears
+   * what is on offer and never learns how much was behind it.
+   */
+  up_next_seeds_total: z.number().int().nonnegative().default(0),
   /**
    * Verdicts someone is waiting on from YOU (ADR 233): lanes still in the acceptance stage whose
    * review ask was routed to this seat. Oldest ask first — the longest wait is the one closest to

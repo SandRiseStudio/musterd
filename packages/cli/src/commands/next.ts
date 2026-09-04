@@ -61,6 +61,23 @@ function render(brief: NextBrief): void {
     w(`\n${theme.accent('carrying')} (${brief.in_flight.length}):\n`);
     for (const l of brief.in_flight) w(laneLine(l) + '\n');
   }
+  // ADR 373 increment 4: recorded intentions ABOVE the open lanes — a Seed is the same question one
+  // step earlier, and the whole point of ADR 373 is that these were legible to a reader and to no
+  // surface. The `ref` is what makes one actionable: it names the document that asked.
+  const seeds = brief.up_next_seeds ?? [];
+  if (seeds.length > 0) {
+    const total = brief.up_next_seeds_total ?? seeds.length;
+    const more = total > seeds.length ? theme.meta(` (${seeds.length} of ${total})`) : '';
+    w(`\n${theme.accent('up next')} — recorded intentions nobody has started${more}:\n`);
+    for (const s of seeds) {
+      w(`  ${theme.meta(s.id)} ${s.summary}\n`);
+      w(
+        theme.meta(
+          `    ${s.ref ?? `from ${s.submitted_by}`} · take it: \`musterd seed claim ${s.id}\``,
+        ) + '\n',
+      );
+    }
+  }
   if (brief.up_next.length > 0) {
     w(`\n${theme.accent('up next')} — open lanes you could pick up:\n`);
     for (const l of brief.up_next) w(laneLine(l) + '\n');
@@ -99,6 +116,7 @@ function render(brief: NextBrief): void {
     owed.length === 0 &&
     brief.in_flight.length === 0 &&
     brief.up_next.length === 0 &&
+    seeds.length === 0 &&
     brief.shipped.length === 0 &&
     !brief.next_goal &&
     !brief.why

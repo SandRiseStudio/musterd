@@ -156,4 +156,37 @@ describe('next / done commands', () => {
     expect(res.out).toContain('up next');
     expect(res.out).toContain('downstream');
   });
+
+  /**
+   * ADR 373 increment 4. The nine intentions the 2026-09-03 sweep found were all legible to a human
+   * reading the file and invisible to every surface; `next` is where a CLI session starts, so this
+   * is the surface that decides whether a captured intention is ever picked up.
+   */
+  it('leads the up-next section with recorded intentions, above the open lanes', async () => {
+    await capture(() => laneCommand(parseArgs(['open', 'a backlog item'])));
+    const team = server.db.prepare("SELECT id FROM teams WHERE slug = 'dawn'").get() as {
+      id: string;
+    };
+    const nick = server.db
+      .prepare("SELECT id FROM members WHERE team_id = ? AND name = 'nick'")
+      .get(team.id) as { id: string };
+    server.db
+      .prepare(
+        `INSERT INTO seeds
+           (id, team_id, relay_id, source, body, captured_at, slack_user_id, submitted_by, state, created_at, updated_at)
+         VALUES ('01SEEDNEXT0000000000000000', ?, 'repo:docs/decisions/354-x.md#left-for-a-sibling-lane',
+                 'repo', 'Left for a sibling lane; this ADR fixes the attestation.', 1, NULL, ?, 'open', 1, 1)`,
+      )
+      .run(team.id, nick.id);
+
+    const res = await capture(() => nextCommand(parseArgs([])));
+    expect(res.code).toBe(0);
+    expect(res.out).toContain('recorded intentions nobody has started');
+    expect(res.out).toContain('docs/decisions/354-x.md#left-for-a-sibling-lane');
+    expect(res.out).toContain('musterd seed claim 01SEEDNEXT0000000000000000');
+    // Above the open lanes: a Seed is the same question one step earlier.
+    expect(res.out.indexOf('recorded intentions')).toBeLessThan(
+      res.out.indexOf('open lanes you could pick up'),
+    );
+  });
 });
