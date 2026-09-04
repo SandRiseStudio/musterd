@@ -29,6 +29,12 @@ export const DEFAULT_API_BASE = 'https://ingest.sandrise.io';
 export const LIST_LIMIT = 50;
 export const FETCH_TIMEOUT_MS = 8000;
 export const MAX_RETRIES = 2;
+/**
+ * The v1 metadata surface allows 120 req/min per IP. Paced well under it, with 429s
+ * honored via Retry-After — a snapshot that trips the limiter aborts nothing, it waits.
+ */
+export const INTER_EPISODE_MS = 700;
+export const MAX_RATE_LIMIT_RETRIES = 10;
 
 export interface ExnSnapshotOptions {
   apiBase: string;
@@ -128,9 +134,25 @@ type FetchFn = (
 ) => Promise<{
   ok: boolean;
   status: number;
+  headers?: { get(name: string): string | null };
   json?: () => Promise<unknown>;
   text?: () => Promise<string>;
 }>;
+
+export function sleepMs(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Seconds to wait on a 429: Retry-After when present and sane, else growing backoff. */
+export function rateLimitDelayMs(
+  attempt: number,
+  headers?: { get(name: string): string | null },
+): number {
+  const raw = headers?.get('retry-after') ?? headers?.get('Retry-After') ?? null;
+  const secs = raw !== null ? Number.parseInt(raw, 10) : Number.NaN;
+  if (Number.isFinite(secs) && secs >= 0 && secs <= 300) return (secs + 1) * 1000;
+  return Math.min(5000 * (attempt + 1), 30000);
+}
 
 async function getJson(fetchFn: FetchFn, url: string, key: string): Promise<unknown> {
   let lastStatus = 0;
@@ -155,6 +177,10 @@ async function getJson(fetchFn: FetchFn, url: string, key: string): Promise<unkn
         `API refused the key (status ${res.status}); keys are issued free on request — see sandrise.io/exploring-next/api#auth`,
       );
     }
+    if (res.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+      await sleepMs(rateLimitDelayMs(attempt, res.headers));
+      continue;
+    }
     if (res.ok && res.json !== undefined) return await res.json();
     if (res.status >= 500 && attempt < MAX_RETRIES) {
       await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
@@ -166,16 +192,23 @@ async function getJson(fetchFn: FetchFn, url: string, key: string): Promise<unkn
 }
 
 async function getText(fetchFn: FetchFn, url: string, key: string): Promise<string | null> {
-  try {
-    const res = await fetchFn(url, {
-      headers: { Accept: '*/*', Authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!res.ok || res.text === undefined) return null;
-    return await res.text();
-  } catch {
-    return null;
+  for (let attempt = 0; attempt <= MAX_RATE_LIMIT_RETRIES; attempt++) {
+    try {
+      const res = await fetchFn(url, {
+        headers: { Accept: '*/*', Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (res.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
+        await sleepMs(rateLimitDelayMs(attempt, res.headers));
+        continue;
+      }
+      if (!res.ok || res.text === undefined) return null;
+      return await res.text();
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 export interface SnapshotResult {
@@ -255,6 +288,8 @@ export async function snapshotCorpus(
         });
         transcriptsFetched++;
       }
+      // Stay under the 120 req/min metadata budget even when the server never 429s.
+      if (!opts.dryRun) await sleepMs(INTER_EPISODE_MS);
     }
   }
 
