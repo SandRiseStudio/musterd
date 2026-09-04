@@ -1378,8 +1378,15 @@ const RAW: RawItem[] = [
     blurb:
       'The admin overlay for teams with more than one human: admins are human-only (≥1 always, creator default), a second human joins as non-admin, and a configurable fallback routes asks to non-admin humans on admin silence. Deliberately last — its open questions can’t be honestly designed with one human.',
     detail:
-      'musterd has never had two real humans on a team — every human-kind row in the store is nick or his own browser observer, so the entire multi-human story (the "muster your agents *and humans*" pitch) is speculation with zero dogfood. ADR 145 freezes the *defaults*: admins are human-only, at least one always exists (team creator), a second human joins as non-admin (all acts + lanes, sends into the ask stream like agents, but doesn’t receive approvals/escalations by default), and a configurable — never automatic — policy may fall back to non-admin humans on admin silence, on the same timeout/risk machinery. Non-admin humans direct the same three species at admins that agents do, and wield the steering vocab (challenge/stop/wake/rescope/redirect). Deliberately deferred are the questions that need a real second human: the multi-admin race (a decision-maker designation vs a single-admin cap), the exact non-admin steering scope, and whether two humans coordinate through musterd or around it in Slack. Gated on a second-human dogfood.',
-    refs: [adr(145, 'ADR 145'), adr(42, 'ADR 042'), adr(70, 'ADRs 069–070')],
+      'Still gated, re-measured 2026-09-04: the members table holds one human admin (nick); the other human rows are driver, driver2 and web-* observers, so no second human has ever administered a team. The three ADRs written for this item on 2026-09-01 were disposed 2026-09-04 rather than left proposed — 341 is a gate in force with its barrier deferred on the ADR 200 separate-OS-user prototype, 342 is withdrawn (superseded by 343), and 343 is accepted with its code premise re-verified. musterd has never had two real humans on a team — every human-kind row in the store is nick or his own browser observer, so the entire multi-human story (the "muster your agents *and humans*" pitch) is speculation with zero dogfood. ADR 145 freezes the *defaults*: admins are human-only, at least one always exists (team creator), a second human joins as non-admin (all acts + lanes, sends into the ask stream like agents, but doesn’t receive approvals/escalations by default), and a configurable — never automatic — policy may fall back to non-admin humans on admin silence, on the same timeout/risk machinery. Non-admin humans direct the same three species at admins that agents do, and wield the steering vocab (challenge/stop/wake/rescope/redirect). Deliberately deferred are the questions that need a real second human: the multi-admin race (a decision-maker designation vs a single-admin cap), the exact non-admin steering scope, and whether two humans coordinate through musterd or around it in Slack. Gated on a second-human dogfood.',
+    refs: [
+      adr(145, 'ADR 145'),
+      adr(42, 'ADR 042'),
+      adr(70, 'ADRs 069–070'),
+      adr(341, 'ADR 341'),
+      adr(342, 'ADR 342'),
+      adr(343, 'ADR 343'),
+    ],
     dependsOn: ['human-role-reevaluation', 'v03-p1-seats'],
   },
   {
