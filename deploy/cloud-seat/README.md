@@ -85,7 +85,9 @@ fly ssh console --app musterd-seat-$SEAT -C \
 
 1. **The seat is on the roster from the VM.** Hub: `musterd status` shows `<seat>` `offline ·
    wakeable`, bound to the VM's node (`musterd node list` names the residence).
-2. **A cold wake.** Hub: `musterd lane open … ; musterd send --act handoff --to <seat> …`. Within
+2. **A cold wake.** Hub: `musterd send --act steer --to <seat> '…'`. It must be an act that
+   wakes: `steer`, `resolve`, `accept`, `decline`, a `handoff`, or one carrying `meta.urgent`. A
+   plain `message` is deliberately not a doorbell and will sit unread (2026-09-04, cost an hour). Within
    one actuator tick (30 s) plus the tailnet sync tick, `fly logs` shows the wake, and the hub's
    roster flips the seat to `working`. Record the latency in `docs/perf/cloud-seat.md` against
    the local-seat baseline.

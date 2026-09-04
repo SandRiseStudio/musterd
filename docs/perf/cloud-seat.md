@@ -120,4 +120,82 @@ holds 52 rows stamped with the VM's origin, up from 2 before the roster reconcil
    ever becomes hours, the lever is a pull that starts near the head and backfills behind, which is
    a real design change and not something to reach for yet.
 
-Wake latency, cost, and the ADR 365/366/371 experiments: next entry.
+## 2026-09-04 the drain — three permanent wedges, in one replay of one team's history
+
+Finding 9 said a fresh joiner replays the whole log before it can see a new act, and put the cost
+at "minutes, not seconds". That was wrong in a way worth recording: it was not slow, it was
+**stopped**, three separate times, and each stop was permanent rather than slow. Every one was a
+`retrying each tick` line that would have retried until the machine was destroyed.
+
+| # | stopped at | on | why it could never clear | fixed by |
+| - | ---------- | -- | ------------------------ | -------- |
+| 10 | `hub_seq 9394` | `lane.updated` for a lane born 2026-09-02 17:31 | its `lane.opened` predates lane replication and is in no log | ADR 381, the genesis watermark |
+| 11 | `hub_seq 9657` | `presence.attached` for `web-u6mvaj` | a web sign-in seat, minted db-only, that git never carries | ADR 382 |
+| 12 | `hub_seq 9659` | `presence.reattested` for `ryder` | the attach WAS applied (9652); this daemon's own reaper then swept the row | ADR 384 |
+
+Finding 12 is the one that changes how to think about the other two. The seat was held, the attach
+was in the log, and the joiner had applied it seven events earlier — then reaped the row, as it is
+supposed to, and blocked forever waiting for it. A daemon replaying a backlog manufactures that
+condition once per session, and there were hundreds of sessions left. It also means ADR 382, which
+this seat wrote ninety minutes before, was right and too narrow: it unblocked one unprojectable
+presence shape and left the other.
+
+**The shape they share.** Block-don't-skip is the fold's best property and every one of these was
+it, working exactly as designed, on a fact that could never arrive. The discriminator that resolves
+all three is the same question asked three ways: *can this ever be satisfied?* A lane older than
+the log's first birth cannot. A seat git will never carry cannot. A row this daemon deleted itself
+cannot. Nothing else about the stops changed — a message from an unresolved seat still blocks, and
+so does an event a newer build wrote, because an upgrade clears that one.
+
+**Why a dogfood found them and 1,500 tests did not.** Each needs a daemon with *history* — a team
+whose lanes predate a schema change, whose web sign-ins have come and gone, whose sessions attached
+hours before they were replayed. Two daemons built fresh in one test process have no past. The
+first real second machine had 22,496 events of it.
+
+**The drain, measured.** After the three fixes the joiner moved at a full batch (500 events) per
+60 s tick — 9,658 → 14,658 in ten minutes — against 22,496 at the head.
+
+## 2026-09-04 19:41 UTC — the exit criterion: a seat woken on the second machine
+
+`nick` sent a `steer` from the laptop. It replicated over the tailnet; the **Fly machine's own
+daemon** derived the wake, leased it, and spawned the harness in delta's worktree; the seat occupied
+the roster and answered as itself.
+
+| measure | value |
+| ------- | ----- |
+| spawn → roster occupancy | **23.6 s** |
+| run wall time | 55.1 s, `exit=0` |
+| cost | **$0.2156**, recorded to the ledger against lease `01M1PZ2Y01` |
+| session | `resumed` (the seat continued its own transcript), provenance `wake` |
+| the seat's answer | `status_update`: "Woke on the Fly cloud seat (lane 01KZAAS15M); host 850e40a4499168." |
+
+**The wake economy replicated.** On the hub, stamped with the VM's `origin_node`:
+`residency.wake_leased` ×2, `residency.woke` ×1, `residency.session_captured` ×3,
+`residency.enrolled` ×5, `mcp.surface_rendered` ×2. This is ADR 365 half 1 — "the economy is whole"
+— witnessed between two machines for the first time. Until now it was proven only between two
+daemons in one test process, the limit ryder named when accepting ADR 371.
+
+### 13. A plain `message` never wakes a seat, and the runbook said "send it an act"
+
+Three wake attempts produced nothing before this one, and the cause was the test, not the system.
+`listInterruptCandidates` admits `steer`, `resolve`, `accept`, `decline`, or an act carrying
+`meta.urgent` / `lane_review` / `eligible` — a bare `message` is deliberately not a doorbell, which
+is right: an inbox that wakes a machine for every remark is an inbox nobody can use. The runbook's
+Verify step said "send it an act", which is exactly the imprecision that cost the time.
+**Disposition:** the runbook now names a `steer`, and this line stands as the reason.
+
+Worth keeping beside it: the first wake attempt of the day *did* fire, on a `handoff`. Both are in
+the admitted set; a message never was.
+
+### What is still open
+
+- **The three ADR 365/366/371 two-machine experiments** as written: the wake economy is now
+  witnessed (365 §1), but 366's cursor experiment and 371's tool-call/seed/incident counts are not
+  yet run as their own falsifiers.
+- **A lane end to end from the VM** — claimed, worked, submitted, accepted. The wake proves the
+  seat can be reached; it has not yet done work.
+- **Cost per day.** One wake cost $0.2156. The machine itself is shared-cpu-2x/2 GB with a 3 GB
+  volume, never auto-stopped — the Fly dashboard figure goes here after a full day.
+- **Residency enrollment still does not replicate** (finding 6): the hub shows delta plain
+  `offline` while the VM shows `offline · wakeable`. Wakes are unaffected — the decision is the
+  joiner's — but the hub's roster is not telling the truth about which seats are reachable.
