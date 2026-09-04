@@ -116,12 +116,18 @@ export function parseExnSnapshotArgs(argv: string[]): ExnSnapshotOptions & { jso
   return opts;
 }
 
-/** Stable on-disk ref: episode number when the API gives one, else the id prefix. */
+/**
+ * Stable, unique on-disk ref. Episode numbers are NOT unique in the source (2026-09-04 archive:
+ * ep317/ep320/ep553 each name 2–3 distinct UUIDs), so the number always rides with an id
+ * fragment; id-only episodes use a longer sanitized prefix.
+ */
 export function episodeFileRef(episode: { episodeNumber?: unknown; id?: unknown }): string {
+  const rawId = typeof episode.id === 'string' ? episode.id : 'unknown';
+  const clean = rawId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'unknown';
   const num = episode.episodeNumber;
-  if (typeof num === 'number' && Number.isFinite(num)) return `ep${num}`;
-  const id = typeof episode.id === 'string' ? episode.id : 'unknown';
-  return `id-${id.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 12) || 'unknown'}`;
+  if (typeof num === 'number' && Number.isFinite(num)) return `ep${num}-${clean}`;
+  const long = rawId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, 24) || 'unknown';
+  return `id-${long}`;
 }
 
 export function sha256Hex(data: string | Buffer): string {

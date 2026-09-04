@@ -111,8 +111,9 @@ function stubFetch() {
 }
 
 describe('episodeFileRef', () => {
-  it('prefers the episode number', () => {
-    expect(episodeFileRef({ episodeNumber: 42, id: 'x' })).toBe('ep42');
+  it('pairs the number with an id fragment (numbers are not unique)', () => {
+    expect(episodeFileRef({ episodeNumber: 42, id: '2f4d054d-614c' })).toBe('ep42-2f4d054d');
+    expect(episodeFileRef({ episodeNumber: 42, id: '8438679c-fafc' })).toBe('ep42-8438679c');
   });
   it('falls back to a sanitized id prefix', () => {
     expect(episodeFileRef({ id: 'uuid-3!!!' })).toBe('id-uuid-3');
