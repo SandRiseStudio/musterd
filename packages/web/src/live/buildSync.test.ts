@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { pollMs, shouldReload, startBuildSync } from './buildSync';
+import { pollMs, shouldReload, stampReload, startBuildSync } from './buildSync';
 
 /** The stale-page convergence rule: a page running build A while the daemon serves build B reloads
  * itself once onto B. Everything here is the safety envelope around that one reload — no loops, no
@@ -113,5 +113,74 @@ describe('startBuildSync', () => {
     stop();
     await vi.advanceTimersByTimeAsync(5000);
     expect(d.fetchServed).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The reload path writes TWO markers, and the beat only exists because they are written together.
+ * If a future edit drops one, the corner goes silent on a real deploy (missing beat marker) or the
+ * page loops (missing guard) — neither shows up in `shouldReload`, so it is pinned here.
+ */
+describe('stampReload', () => {
+  it('writes the durable loop guard and the single-use ship marker in one act', () => {
+    const written: Record<string, string> = {};
+    stampReload({ setItem: (k, v) => (written[k] = v) }, 'bbb');
+    expect(written).toEqual({
+      'musterd-build-sync-reloaded-for': 'bbb',
+      'musterd-build-sync-shipped': 'bbb',
+    });
+  });
+});
+
+/**
+ * The whole path over a real (fake-backed) sessionStorage, module evaluation included — the pure
+ * pieces above cannot see the one decision that makes the beat navigation-scoped rather than
+ * call-scoped, because that decision happens as the module loads. Each `resetModules` + import here
+ * IS a page load, so this reads as the sequence a viewer produces: build-sync reload, then ⌘R.
+ */
+describe('justShipped over the module lifecycle', () => {
+  const BUILD = 'build-2';
+
+  function fakeSession() {
+    const slots = new Map<string, string>();
+    return {
+      getItem: (k: string) => slots.get(k) ?? null,
+      setItem: (k: string, v: string) => void slots.set(k, v),
+      removeItem: (k: string) => void slots.delete(k),
+      size: () => slots.size,
+    };
+  }
+
+  const session = fakeSession();
+
+  beforeEach(() => {
+    vi.stubGlobal('sessionStorage', session);
+    vi.stubGlobal('__WEB_BUILD__', BUILD);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** One page load: evaluate the module fresh and ask it. The reset is what makes each call a
+   * separate load — within one load the answer is memoised, which is the point. */
+  const load = async () => {
+    vi.resetModules();
+    return (await import('./buildSync')).justShipped();
+  };
+
+  it('claims the beat on the load a build-sync reload produced, and never after', async () => {
+    stampReload(session, BUILD); // what the loop writes immediately before reloading
+    expect(await load()).toBe(true); // the reload lands: a build DID just ship
+    expect(await load()).toBe(false); // an ordinary ⌘R in the same tab: no blink to name
+    expect(await load()).toBe(false);
+  });
+
+  it('leaves the loop guard alone — spending the beat must not re-arm the reload', async () => {
+    stampReload(session, BUILD);
+    await load();
+    expect(session.getItem('musterd-build-sync-reloaded-for')).toBe(BUILD);
+    expect(session.getItem('musterd-build-sync-shipped')).toBe(null);
+  });
+
+  it('is silent on a pageview no build landed into', async () => {
+    expect(await load()).toBe(false);
   });
 });

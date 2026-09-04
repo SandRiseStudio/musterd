@@ -29,6 +29,21 @@ export function pollMs(search: string): number {
 
 const RELOADED_KEY = 'musterd-build-sync-reloaded-for';
 
+/**
+ * The "a build landed into THIS page load" marker — deliberately a second key, not a reading of
+ * `RELOADED_KEY`.
+ *
+ * The two facts have opposite lifetimes and one key cannot carry both. `RELOADED_KEY` is the
+ * loop guard: it must SURVIVE for the rest of the session, or a host serving a stale bundle against
+ * a fresh build.json reloads forever. The beat is the opposite — it is true of exactly one
+ * navigation, and any later load of the same tab (an ordinary ⌘R, a back/forward, a second
+ * `/broadcast` open) is not that navigation. Testing `reloadedFor === pageBuild`, as the first cut
+ * did, cannot tell them apart: after a build-sync reload the equality holds permanently, so the
+ * corner claimed "just shipped — that was the blink" on every manual reload after it, with no blink
+ * to point at. So the beat gets a marker that is CONSUMED on read, and the guard keeps its own.
+ */
+const SHIPPED_KEY = 'musterd-build-sync-shipped';
+
 /** The one rule: reload iff both ids are known, they differ, and this served build was never tried. */
 export function shouldReload(
   page: string | null,
@@ -80,26 +95,71 @@ export function startBuildSync(deps: BuildSyncDeps): () => void {
  * Did THIS page load happen because a build landed? — the honest signal behind the "just shipped"
  * beat in the broadcast corner.
  *
- * `setReloadedFor` stamps the served id immediately before the reload, and after that reload the
+ * The reload path stamps the served id immediately before reloading, and after that reload the
  * page's own baked id IS that served id (one build produced both — the invariant `shouldReload`
- * already rests on). So the two being equal means exactly one thing: the bundle running right now
- * arrived by build-sync, moments ago. Any other pageview has either no stamp at all or a stamp from
- * an older served id, and reads false.
+ * already rests on). So a PRESENT stamp equal to the page build means exactly one thing: the bundle
+ * running right now arrived by build-sync, moments ago.
+ *
+ * Presence is half the fact and the half that was missing: see `SHIPPED_KEY`. Equality alone is
+ * permanent after the reload; the marker's single use is what pins the claim to one navigation.
  *
  * Pure, and takes both halves, so the corner's test can state the four cases without a DOM.
  */
-export function reloadedForBuild(pageBuild: string | null, reloadedFor: string | null): boolean {
-  return pageBuild !== null && reloadedFor !== null && reloadedFor === pageBuild;
+export function reloadedForBuild(pageBuild: string | null, shipped: string | null): boolean {
+  return pageBuild !== null && shipped !== null && shipped === pageBuild;
 }
 
-/** `reloadedForBuild` against the real page. False everywhere there is no baked build id (dev,
- * tests), which is also where there is no publisher to have shipped anything. */
-export function justShipped(): boolean {
+/**
+ * Write both markers at the one moment they are both true: this reload is about to happen, and it is
+ * about to happen because `id` landed. They diverge immediately afterwards — the guard is kept for
+ * the session so the reload cannot repeat, the beat is spent by the load it produces — which is why
+ * the writer is worth naming: the pair must be written together or the beat has nothing to read.
+ */
+export function stampReload(store: Pick<Storage, 'setItem'>, id: string): void {
+  store.setItem(RELOADED_KEY, id);
+  store.setItem(SHIPPED_KEY, id);
+}
+
+/** Read-and-clear: the marker answers once, and the load that consumed it is the only one that can
+ * claim the beat. Clearing before the comparison means even a stamp we then REJECT (an id from some
+ * other build) is spent, so no stale marker can survive to mislead a later load. */
+export function consumeShipped(
+  pageBuild: string | null,
+  marker: { read: () => string | null; clear: () => void },
+): boolean {
+  const stamp = marker.read();
+  if (stamp === null) return false;
+  marker.clear();
+  return reloadedForBuild(pageBuild, stamp);
+}
+
+/**
+ * `consumeShipped` against the real page, run ONCE as this module is evaluated — that is what makes
+ * the answer navigation-scoped rather than call-scoped. A lazy first-call version would leave the
+ * marker sitting in storage on any page that never asks (`/live` reloads too, and has no corner),
+ * ready for a later `/broadcast` mount in the same tab to spend it and claim a blink that happened
+ * an hour ago. Evaluating here spends it in the pageview it describes, whoever ends up asking.
+ *
+ * False everywhere there is no baked build id (dev, tests, prerender) — which is also where there is
+ * no publisher to have shipped anything, so storage is never touched there.
+ */
+const SHIPPED_THIS_PAGEVIEW: boolean = (() => {
+  const pageBuild = bundleBuild();
+  if (pageBuild === null) return false;
   try {
-    return reloadedForBuild(bundleBuild(), sessionStorage.getItem(RELOADED_KEY));
+    return consumeShipped(pageBuild, {
+      read: () => sessionStorage.getItem(SHIPPED_KEY),
+      clear: () => sessionStorage.removeItem(SHIPPED_KEY),
+    });
   } catch {
-    return false; // private mode: no memory, so no claim
+    return false; // private mode / prerender: no memory, so no claim
   }
+})();
+
+/** Whether a build landed into this page load. Stable for the life of the pageview, so repeat
+ * callers (a remount, StrictMode's double effect) all see the same answer. */
+export function justShipped(): boolean {
+  return SHIPPED_THIS_PAGEVIEW;
 }
 
 /** The id Vite baked into this bundle at build time; absent in dev and under tests. */
@@ -129,7 +189,7 @@ export function ensureBuildSync(): void {
     },
     setReloadedFor: (id) => {
       try {
-        sessionStorage.setItem(RELOADED_KEY, id);
+        stampReload(sessionStorage, id);
       } catch {
         /* a page that can't remember still only reloads once per served id per pageview */
       }
