@@ -17,6 +17,7 @@ import { goalCommand } from './commands/goal.js';
 import { harnessCommand } from './commands/harness.js';
 import { reachabilityNudge } from './commands/helpers.js';
 import { hostCommand } from './commands/host.js';
+import { huddleCommand } from './commands/huddle.js';
 import { humanCommand } from './commands/human.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
@@ -223,6 +224,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return sendCommand(rest);
     case 'lane':
       return laneCommand(rest);
+    case 'huddle':
+      return huddleCommand(rest);
     case 'seed':
       return seedCommand(rest);
     case 'lanes':

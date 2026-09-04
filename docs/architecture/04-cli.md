@@ -152,6 +152,7 @@ src/
     fmt.ts            // musterd fmt [--check] — canonicalize .musterd roster files: team + seats + roles (ADR 058 guard 2)
     join.ts           // hidden alias since 2026-09-03 (ADR 377): pure argv translation onto `claim <name> --team <slug> --detach`, prints the new spelling; removed one epoch on
     send.ts           // send
+    huddle.ts         // huddle open/say/close — a huddle is a thread: meta.huddle on the root, turns in the thread, resolve names the anchor; lays the whiteboard room out best-effort, never spawns it (ADR 378)
     inbox.ts          // inbox [--watch] [--wait] [--limit <n>] — bounded recent window + day-grouped smart dates, always-show-unread (ADR 054/117)
     nudge.ts          // `inbox --waiting`: the waiting-acts banner + the acts behind it, read-only — the approval-prompt hook target (ADR 053); `musterd nudge` is the hidden pre-2026-09-03 alias
     reap.ts           // musterd reap [--yes] (ADR 242): list orphaned MCP sidecars from the daemon's footprint tick; --yes asks the daemon to kill them (re-verified server-side, audited)
