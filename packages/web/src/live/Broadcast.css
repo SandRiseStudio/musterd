@@ -182,6 +182,52 @@
   animation: lc-asks-ring 2.4s ease-in-out infinite;
   transform-origin: 50% 22%;
 }
+/* The reel wears the shown seat's hue on rim and bell, and drains the tier clock as an arc round
+   the avatar — /live's `.lc-asks.has-lead` / `.lc-asks__who.is-timed` at stage scale (a 27px
+   avatar, a 2.5px band). See the note in Live.css for why colour is WHO and weight is urgency. */
+.bc-reel.has-lead {
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 62%, var(--lc-paper-rim));
+}
+.bc-reel.has-lead .bc-reel__bell {
+  stroke: var(--lc-asks-hue);
+}
+.bc-reel--loud.has-lead {
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 84%, var(--lc-paper-rim));
+  animation:
+    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
+    bc-reel-breathe-hue 2.4s ease-in-out infinite;
+}
+@keyframes bc-reel-breathe-hue {
+  50% {
+    box-shadow:
+      inset 0 1px 0 var(--lc-paper-sheen),
+      inset 0 0 22px -10px color-mix(in srgb, var(--lc-asks-hue) 30%, transparent),
+      0 3px 12px -2px var(--lc-paper-drop),
+      0 0 30px -4px color-mix(in srgb, var(--lc-asks-hue) 60%, transparent);
+  }
+}
+.bc-reel__who {
+  position: relative;
+}
+.bc-reel__who.is-timed::after,
+.bc-reel__who.is-over::after {
+  content: '';
+  position: absolute;
+  inset: -4.5px;
+  border-radius: 50%;
+  pointer-events: none;
+  --lc-arc: color-mix(
+    in srgb,
+    var(--lc-accent) calc((1 - var(--lc-ask-frac)) * 100%),
+    var(--lc-asks-hue)
+  );
+  background: conic-gradient(var(--lc-arc) calc(var(--lc-ask-frac) * 360deg), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), var(--lc-paper-ink) 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), var(--lc-paper-ink) 0);
+}
+.bc-reel__who.is-over::after {
+  background: var(--lc-danger);
+}
 .bc-reel__meta {
   flex: none;
   font-family: var(--font-mono, monospace);

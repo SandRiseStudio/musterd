@@ -5132,6 +5132,64 @@
       0 6px 26px -10px color-mix(in srgb, var(--lc-accent) 70%, transparent);
   }
 }
+/* ─── who is asking, in colour ────────────────────────────────────────────
+   The rail wears the lead asker's identity hue (`--lc-asks-hue`, set inline from `memberColor`)
+   on its rim and its bell, the way a speech bubble's ring wears its speaker's — colour on the
+   floor means WHO, and the rail is the floor's chrome. Urgency stays on the weight axis: loud
+   thickens and breathes the same hue rather than swapping it for the house mustard, which had
+   been answering "who" with "how urgent". A ring and a stroke, never text (fill/ink split). */
+.lc-asks.has-lead {
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 62%, var(--lc-border));
+}
+.lc-asks.has-lead .lc-asks__bell {
+  stroke: var(--lc-asks-hue);
+}
+.lc-asks--loud.has-lead {
+  border-color: color-mix(in srgb, var(--lc-asks-hue) 84%, var(--lc-border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--lc-asks-hue) 30%, transparent),
+    0 6px 22px -12px color-mix(in srgb, var(--lc-asks-hue) 60%, transparent);
+  animation:
+    lc-fade var(--lc-dur-2) var(--lc-ease-out) both,
+    lc-asks-breathe-hue 2.4s ease-in-out infinite;
+}
+@keyframes lc-asks-breathe-hue {
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--lc-asks-hue) 50%, transparent),
+      0 6px 26px -10px color-mix(in srgb, var(--lc-asks-hue) 76%, transparent);
+  }
+}
+
+/* The tier clock as an arc. `--lc-ask-frac` (0..1, inline) is how much of the tier is left; the
+   ring round the avatar drains clockwise as it runs, and its colour walks from the asker's hue to
+   the house amber as the fraction falls — so a ring that has gone mustard is one about to run out.
+   Over (held, or open past its deadline) is a full ring in danger: the clock is not "nearly done",
+   it is done, and the text beside it says what that means for the agent. The mask cuts the disc to
+   a 2px band; the inner colour is any opaque value, it only decides what the mask keeps. */
+.lc-asks__who {
+  position: relative;
+}
+.lc-asks__who.is-timed::after,
+.lc-asks__who.is-over::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+  --lc-arc: color-mix(
+    in srgb,
+    var(--lc-accent) calc((1 - var(--lc-ask-frac)) * 100%),
+    var(--lc-asks-hue)
+  );
+  background: conic-gradient(var(--lc-arc) calc(var(--lc-ask-frac) * 360deg), transparent 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2px), var(--lc-accent) 0);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2px), var(--lc-accent) 0);
+}
+.lc-asks__who.is-over::after {
+  background: var(--lc-danger);
+}
+
 /* The one line. 30px of chrome, whatever is happening behind it. */
 .lc-asks__rail {
   display: flex;

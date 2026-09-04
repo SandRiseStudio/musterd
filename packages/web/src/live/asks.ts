@@ -108,6 +108,22 @@ export function applyTierClock(asks: AskView[], now: number = Date.now()): AskVi
   });
 }
 
+/**
+ * How much of the tier clock is left, 0..1 — the arc the rail draws round the asker's avatar. `null`
+ * when there is no running clock to draw: answered, deferred, lapsed. Held (blocking, past its
+ * deadline) and open-but-over both read 0: the ring is empty, and the surface says so in danger.
+ *
+ * Pure and here, beside `applyTierClock`, for the same reason that one is: the strip's memo does
+ * not see the tick, so the fraction is computed at read time from the `now` the caller holds.
+ */
+export function clockFraction(ask: AskView, now: number): number | null {
+  if (ask.state === 'held') return 0;
+  if (ask.state !== 'open') return null;
+  const total = ask.deadline - ask.env.ts;
+  if (total <= 0) return 0;
+  return Math.min(1, Math.max(0, (ask.deadline - now) / total));
+}
+
 /** Does this envelope reference the given ask (as answer, deferral, or outcome)? */
 function refs(env: Envelope, askId: string, askThread: string | null | undefined): boolean {
   const meta = env.meta ?? {};

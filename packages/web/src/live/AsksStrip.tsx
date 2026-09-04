@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol';
 import {
@@ -7,6 +7,7 @@ import {
   askAudience,
   askIsLoud,
   byAudienceThenUrgency,
+  clockFraction,
   deriveAsks,
   deriveReviewQueue,
   SPECIES_VERB,
@@ -16,7 +17,7 @@ import {
 } from './asks';
 import { sendAct, type LiveConfig } from './client';
 import { asksOpenMode, stillMode } from './stillMode';
-import { initial, memberAvatar, kindOf, hueOf} from './format';
+import { initial, memberAvatar, memberColor, kindOf, hueOf } from './format';
 import { scrollToMessage } from './Stream';
 
 /**
@@ -217,11 +218,25 @@ export function AsksStrip({
 
   const idx = new Map(roster.map((m) => [m.name, m]));
   const rest = cards.length - (lead ? 1 : 0);
+  /* The rail wears the lead asker's colour — rim and bell — the way a bubble's ring wears its
+     speaker's: "who is asking" is the same colour as their body on the floor. `memberColor` is the
+     FILL (a ring, a stroke; never text — the fill/ink split in format.ts). The clock is the arc
+     round their avatar: how much of the tier is left, read off the same `now` the text clock reads,
+     so the two can never disagree. Both are inline variables, so the cost is CSS. */
+  const frac = lead ? clockFraction(lead, now) : null;
+  const leadStyle = lead
+    ? ({
+        '--lc-asks-hue': memberColor(lead.env.from, kindOf(lead.env.from, idx), hueOf(lead.env.from, idx)),
+      } as CSSProperties)
+    : undefined;
 
   return (
     <section
       ref={rootRef}
-      className={`lc-asks${loud.length > 0 ? ' lc-asks--loud' : ''}${open ? ' is-open' : ''}`}
+      className={`lc-asks${loud.length > 0 ? ' lc-asks--loud' : ''}${open ? ' is-open' : ''}${
+        lead ? ' has-lead' : ''
+      }`}
+      style={leadStyle}
       aria-label="asks and approvals"
     >
       <div className="lc-asks__rail">
@@ -230,10 +245,15 @@ export function AsksStrip({
         {lead ? (
           <>
             <span
-              className="lc-chip__avatar lc-asks__who"
-              style={{
-                background: memberAvatar(lead.env.from, kindOf(lead.env.from, idx), hueOf(lead.env.from, idx)),
-              }}
+              className={`lc-chip__avatar lc-asks__who${
+                frac === null ? '' : frac > 0 ? ' is-timed' : ' is-over'
+              }`}
+              style={
+                {
+                  background: memberAvatar(lead.env.from, kindOf(lead.env.from, idx), hueOf(lead.env.from, idx)),
+                  '--lc-ask-frac': frac ?? 0,
+                } as CSSProperties
+              }
               aria-hidden="true"
             >
               {initial(lead.env.from)}

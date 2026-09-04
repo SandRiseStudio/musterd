@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { Envelope, LaneBoard, MemberSummary } from '@musterd/protocol';
 import { askTierHolds } from '@musterd/protocol';
 import {
   applyTierClock,
   askIsLoud,
   byUrgency,
+  clockFraction,
   deriveAsks,
   deriveReviewQueue,
   reelItems,
@@ -12,7 +13,7 @@ import {
   type AskView,
   type ReviewView,
 } from './asks';
-import { acceptanceCapacity, initial, kindOf, memberAvatar, hueOf} from './format';
+import { acceptanceCapacity, initial, kindOf, memberAvatar, memberColor, hueOf } from './format';
 import { reelIndex, reelTicks } from './reel';
 
 /**
@@ -96,10 +97,17 @@ export function AsksReel({
   // this the reel repeats one name until it looks like a preference; it is a capacity failure, and
   // a viewer should be able to see that from the picture alone.
   const capacity = acceptanceCapacity(roster);
+  // The reel wears the shown seat's colour, rim and bell, as /live's strip wears its lead's — see
+  // the note there. A review row colours by the lane's owner: the person whose work is waiting.
+  const who = shown ? (shown.ask?.env.from ?? shown.review!.lane.owner_seat ?? null) : null;
+  const whoStyle = who
+    ? ({ '--lc-asks-hue': memberColor(who, kindOf(who, idx), hueOf(who, idx)) } as CSSProperties)
+    : undefined;
 
   return (
     <section
-      className={`bc-reel${loud.length > 0 ? ' bc-reel--loud' : ''}`}
+      className={`bc-reel${loud.length > 0 ? ' bc-reel--loud' : ''}${who ? ' has-lead' : ''}`}
+      style={whoStyle}
       aria-label="asks and approvals"
     >
       {/* One line, /live's rail shape (nick, 2026-08-19: the eyebrow-header version spent two rows
@@ -154,15 +162,20 @@ function ShownAsk({
   idx: Map<string, MemberSummary>;
   now: number;
 }) {
+  // The tier clock as an arc round the avatar, off the same `now` the text clock reads.
+  const frac = clockFraction(shown, now);
   return (
     // Keyed on the envelope id so React remounts on rotation and the entry animation replays —
     // without it the text swaps in place and the change is easy to miss on a stream.
     <div className="bc-reel__row" key={shown.env.id}>
       <span
-        className="bc-reel__who"
-        style={{
-          background: memberAvatar(shown.env.from, kindOf(shown.env.from, idx), hueOf(shown.env.from, idx)),
-        }}
+        className={`bc-reel__who${frac === null ? '' : frac > 0 ? ' is-timed' : ' is-over'}`}
+        style={
+          {
+            background: memberAvatar(shown.env.from, kindOf(shown.env.from, idx), hueOf(shown.env.from, idx)),
+            '--lc-ask-frac': frac ?? 0,
+          } as CSSProperties
+        }
         aria-hidden="true"
       >
         {initial(shown.env.from)}

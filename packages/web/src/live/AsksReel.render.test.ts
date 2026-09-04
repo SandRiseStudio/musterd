@@ -58,7 +58,13 @@ const ask = (id: string, tier: string, agoMs: number, meta: Record<string, unkno
 
 /** A lane sitting in acceptance — the review half of the rotation. */
 const lane = (id: string) =>
-  ({ id, title: `lane ${id}`, state: 'awaiting_acceptance', updated_at: Date.now() }) as never;
+  ({
+    id,
+    title: `lane ${id}`,
+    state: 'awaiting_acceptance',
+    owner_seat: 'izzo',
+    updated_at: Date.now(),
+  }) as never;
 
 const board = (...ids: string[]) => ({ lanes: ids.map(lane) }) as unknown as LaneBoard;
 
@@ -66,6 +72,19 @@ const render = (envelopes: Envelope[], b: LaneBoard | null = null) =>
   renderToStaticMarkup(createElement(AsksReel, { envelopes, roster, board: b }));
 
 const DAYS_3 = 3 * 24 * 60 * 60 * 1000;
+
+describe('the reel wears the shown seat and drains its clock', () => {
+  it('carries the asker\'s hue on the reel and the clock fraction on the avatar', () => {
+    const html = render([ask('h1', 'blocking', 1000)]);
+    expect(html).toMatch(/class="bc-reel[^"]* has-lead"[^>]*style="--lc-asks-hue:hsl\(/);
+    expect(html).toMatch(/bc-reel__who is-timed"[^>]*--lc-ask-frac:0\.9\d+/);
+  });
+  it('colours a review row by the lane owner, with no clock to draw', () => {
+    const html = render([], board('L1'));
+    expect(html).toMatch(/class="bc-reel has-lead"/);
+    expect(html).not.toContain('--lc-ask-frac');
+  });
+});
 
 describe('the reel asks reelTicks whether it needs a clock', () => {
   beforeEach(() => reelTicks.mockClear());
