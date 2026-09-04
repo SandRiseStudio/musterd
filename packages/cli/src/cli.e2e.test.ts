@@ -1,7 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { makeEnvelope } from '@musterd/protocol';
 import { createServer, openDb, type RunningServer } from '@musterd/server';
+import { ulid } from 'ulid';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseArgs } from './args.js';
 import { HttpClient, watchClaim } from './client.js';
@@ -1258,6 +1260,62 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
     // Presence its socket released (ws.ts cleanup → held_until), so there is nothing to reuse.
     await captureSession('end', { session_id: 'late-hook', cwd: dir });
     expect(captured()).toEqual(['residency.session_captured', 'residency.session_ended']);
+  });
+
+  // Lane 01M1PSY0JX. Found in the first live huddle (01M1PSK8FY): `huddle say` was refused on a
+  // stale session lease and the turn's TEXT was gone — the thread held the root and nothing else.
+  // `claimAgentLease` swallows a failed per-request claim and degrades to the stored lease, so the
+  // request goes out doomed and the composed act dies with the refusal. ADR 337 §4 named this exact
+  // case ("a caller that has just had its stored lease REFUSED and wants exactly one claim in
+  // reply") and nothing called it.
+  // NOTE what this does and does not prove. Here the per-request claim SUCCEEDS, so the stale stored
+  // lease is replaced before the request goes out — this pins ADR 339's happy path for a write, and
+  // it passes with or without the retry. The refusal path, where the per-request claim itself fails
+  // and the request goes out doomed, cannot be reached against a healthy in-process daemon; it is
+  // pinned faithfully in `client.test.ts` with the claim socket failing (red without the retry).
+  it('an opted-in WRITE with a stale stored lease lands — the per-request claim replaces it', async () => {
+    await bindAvaWithStaleLease();
+    const { http } = resolveRead({}, { claimSeatPerRequest: true });
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'ava',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'the turn a stale stored lease must not eat',
+    });
+    await expect(http.send('dawn', envelope)).resolves.toBeDefined();
+    const landed = server.db
+      .prepare<[string], { body: string }>('SELECT body FROM messages WHERE id = ?')
+      .get(envelope.id);
+    expect(landed?.body).toBe('the turn a stale stored lease must not eat');
+  });
+
+  // The retry must not become the claim storm it was written next to. A caller that opted OUT of
+  // claiming still fails closed on the same refusal — it does not quietly seize the seat because a
+  // write happened to be the thing that failed.
+  it('a caller that opted out of claiming still fails closed on the refusal, write or not', async () => {
+    const live = await bindAvaWithStaleLease();
+    const { http } = resolveRead({}, { claimSeatPerRequest: false });
+    const envelope = makeEnvelope({
+      id: ulid(),
+      team: 'dawn',
+      from: 'ava',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'must not land',
+    });
+    await expect(http.send('dawn', envelope)).rejects.toThrow(/invalid, expired, or revoked/);
+    // and the live claimant's authority is untouched — the harm the storm actually did
+    const liveHttp = new HttpClient({
+      server: process.env['MUSTERD_SERVER']!,
+      team: 'dawn',
+      key: live.key,
+      seat: 'ava',
+      sessionLease: live.sessionLease,
+      surface: 'cli',
+    });
+    await expect(liveHttp.inbox('dawn', { unread: true, limit: 1 })).resolves.toBeDefined();
   });
 
   it('an interactive read still reclaims (ADR 339 / #1130 preserved)', async () => {

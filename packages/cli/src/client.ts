@@ -176,6 +176,16 @@ export interface BootstrapCutoverResponse {
   readiness: BootstrapCutoverReadiness;
 }
 
+/**
+ * Is this refusal specifically "the session lease you presented is no longer good"? Matched on the
+ * server's own two messages (`store/members.ts`) rather than on `unauthorized` alone, because a bad
+ * credential or a wrong acting seat is also `unauthorized` and re-claiming would not fix either —
+ * it would just claim, fail again, and double the noise.
+ */
+export function isSessionLeaseRefusal(error: { code: string; message: string }): boolean {
+  return error.code === 'unauthorized' && /agent session lease/i.test(error.message);
+}
+
 export class HttpClient {
   constructor(private opts: HttpClientOpts) {}
 
@@ -299,7 +309,13 @@ export class HttpClient {
 
   // reason: returns parsed JSON of varying shape; callers narrow at each call site.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async request(method: string, path: string, body?: unknown): Promise<any> {
+  private async request(
+    method: string,
+    path: string,
+    body?: unknown,
+    /** Internal: set on the single retry that follows a refused session lease (see below). */
+    afterLeaseRefusal = false,
+  ): Promise<any> {
     const claim = await this.claimAgentLease();
     let res: Response;
     try {
@@ -375,6 +391,32 @@ export class HttpClient {
     if (!res.ok) {
       const parsed = ErrorBodySchema.safeParse(json);
       if (parsed.success) {
+        // ADR 337 §4's stated case, which nothing was actually calling: "a caller that has just had
+        // its stored lease REFUSED and wants exactly one claim in reply". `claimAgentLease` above
+        // swallows a failed per-request claim and degrades to the stored lease, so a lease that died
+        // with its Presence (a daemon bounce, a reap) produces this refusal and the caller's act is
+        // thrown away with it. Measured 2026-09-04 in the first live huddle: `huddle say` refused,
+        // and the turn's text was simply gone from the thread.
+        //
+        // Deliberately narrow, because the opposite mistake is the 2026-09-01 claim storm
+        // (#1138/#1143): ONE retry, only on the lease refusal, and only for a caller that already
+        // opts into claiming. A hook read (`claimSeatPerRequest: false`) still fails closed and does
+        // NOT seize the seat — the behaviour `cli.e2e.test.ts` pins.
+        if (
+          !afterLeaseRefusal &&
+          this.opts.claimSeatPerRequest === true &&
+          isSessionLeaseRefusal(parsed.data.error)
+        ) {
+          const fresh = await this.claimSessionLease().catch(() => undefined);
+          if (fresh) {
+            this.opts.sessionLease = fresh.lease;
+            try {
+              return await this.request(method, path, body, true);
+            } finally {
+              fresh.close();
+            }
+          }
+        }
         throw new CliError(
           parsed.data.error.message,
           exitForCode(parsed.data.error.code),

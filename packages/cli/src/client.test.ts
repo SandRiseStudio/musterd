@@ -231,3 +231,126 @@ describe('HttpClient.request — reclaim degrades to stored lease (lane 01M1F7Y4
     expect(headers['x-musterd-session-lease']).toBe('fresh-lease-abc');
   });
 });
+
+describe('a refused session lease is re-claimed once, and the act is not lost (lane 01M1PSY0JX)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** The live shape, from the first huddle (01M1PSK8FY): the per-request claim FAILS (daemon
+   *  bounced, ws closes 1001), `claimAgentLease` swallows it and degrades to the stored lease, the
+   *  server refuses that lease, and the composed act dies with the refusal. */
+  function socketsThat(outcomes: Array<'fail' | 'ok'>): () => FakeSocket {
+    let n = 0;
+    return () => {
+      const sock = new FakeSocket();
+      const outcome = outcomes[n++] ?? 'ok';
+      queueMicrotask(() => {
+        sock.emit('open');
+        if (outcome === 'fail') {
+          sock.emit('close', 1001 as unknown as undefined);
+          return;
+        }
+        sock.emit(
+          'message',
+          JSON.stringify({
+            type: 'occupied',
+            seat: { id: 'm1', team: 'dawn', name: 'Ada', kind: 'agent', created_at: 1 },
+            presence_id: '01J',
+            server_time: 7,
+            memory: null,
+            session_lease: 'mssl_fresh',
+          }),
+        );
+      });
+      return sock;
+    };
+  }
+
+  const refusal = {
+    ok: false,
+    status: 401,
+    text: async () =>
+      JSON.stringify({
+        error: {
+          code: 'unauthorized',
+          message: 'invalid, expired, or revoked agent session lease',
+        },
+      }),
+  };
+  const accepted = { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+
+  it('re-claims and replays the request, carrying the FRESH lease', async () => {
+    const calls: Array<Record<string, string>> = [];
+    const fetchStub = vi.fn(async (_url: string, init: { headers: Record<string, string> }) => {
+      calls.push(init.headers);
+      return (calls.length === 1 ? refusal : accepted) as unknown as Response;
+    });
+    vi.stubGlobal('fetch', fetchStub);
+
+    const client = new HttpClient({
+      ...baseOpts,
+      claimSeatPerRequest: true,
+      sessionLease: 'mssl_stale',
+      createClaimSocket: socketsThat(['fail', 'ok']),
+    });
+
+    await expect(client.health()).resolves.toMatchObject({ ok: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]!['x-musterd-session-lease']).toBe('mssl_stale');
+    expect(calls[1]!['x-musterd-session-lease']).toBe('mssl_fresh');
+  });
+
+  it('retries at most once — a refusal that survives a fresh claim still throws', async () => {
+    const fetchStub = vi.fn(async () => refusal as unknown as Response);
+    vi.stubGlobal('fetch', fetchStub);
+
+    const client = new HttpClient({
+      ...baseOpts,
+      claimSeatPerRequest: true,
+      sessionLease: 'mssl_stale',
+      createClaimSocket: socketsThat(['fail', 'ok']),
+    });
+
+    await expect(client.health()).rejects.toThrow(/invalid, expired, or revoked/);
+    expect(fetchStub).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT re-claim for a caller that opted out — the #1130 claim storm stays closed', async () => {
+    const fetchStub = vi.fn(async () => refusal as unknown as Response);
+    vi.stubGlobal('fetch', fetchStub);
+    const makeSocket = vi.fn(socketsThat(['ok']));
+
+    const client = new HttpClient({
+      ...baseOpts,
+      claimSeatPerRequest: false,
+      sessionLease: 'mssl_stale',
+      createClaimSocket: makeSocket,
+    });
+
+    await expect(client.health()).rejects.toThrow(/invalid, expired, or revoked/);
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+    expect(makeSocket).not.toHaveBeenCalled();
+  });
+
+  it('does not re-claim a refusal that a fresh lease cannot fix (a bad credential)', async () => {
+    const fetchStub = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      text: async () =>
+        JSON.stringify({
+          error: { code: 'unauthorized', message: 'invalid agent-seat credential for team "dawn"' },
+        }),
+    }));
+    vi.stubGlobal('fetch', fetchStub);
+    const makeSocket = vi.fn(socketsThat(['ok']));
+
+    const client = new HttpClient({
+      ...baseOpts,
+      claimSeatPerRequest: true,
+      sessionLease: 'mssl_stale',
+      createClaimSocket: makeSocket,
+    });
+
+    await expect(client.health()).rejects.toThrow(/invalid agent-seat credential/);
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+});
