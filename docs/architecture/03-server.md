@@ -211,6 +211,10 @@ export function listInbox(db, memberId, opts:{ since?:number; unreadOnly?:boolea
 - **Authenticated Team reads.** `GET /teams/:slug/seeds` returns every Team Seed and
   `GET /teams/:slug/seeds/:id` returns one. Both use `authTouch`; an unauthenticated caller learns
   nothing about Seed existence. Responses are parsed through `SeedListSchema` / `SeedResultSchema`.
+- **Recorded intentions in the brief (ADR 373 inc 4).** `GET /teams/:slug/next` carries
+  `up_next_seeds` (open Seeds, oldest first, compact: id/source/ref/summary/submitted_by) and
+  `up_next_seeds_total`, projected by `openSeedsForBrief` and rendered above `up_next` on both
+  surfaces.
 - **Repo capture (ADR 373 inc 2).** `POST /teams/:slug/seeds/repo` `{ref, body, captured_at?,
   lane_id?}` — a document-recorded intention as a Seed with `source: 'repo'`, idempotent on `ref`
   (201 created / 200 already held); `lane_id` links + promotes. Any seated Member.

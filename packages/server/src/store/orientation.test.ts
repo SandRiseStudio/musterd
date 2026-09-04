@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
 import { recordBlockedReport } from './incidents.js';
 import { openLane, updateLane } from './lanes.js';
-import { addMember } from './members.js';
+import { addMember, getMemberByName } from './members.js';
 import { insertMessage } from './messages.js';
 import { WHY_BARE_MAX_AGE_MS, deriveNext } from './orientation.js';
+import { captureRepoSeed, createSeedFromRelay } from './seeds.js';
 import { createTeam } from './teams.js';
 
 function seed() {
@@ -680,5 +681,88 @@ describe('review_debt unlanded badge (merge-verified submit)', () => {
     const byId = new Map((brief.review_debt ?? []).map((r) => [r.id, r]));
     expect(byId.get(bare.id)?.unlanded).toBe(true);
     expect(byId.get(attested.id)?.unlanded).toBe(false);
+  });
+});
+
+describe('deriveNext — recorded intentions above the open lanes (ADR 373 increment 4)', () => {
+  function capture(
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    ref: string,
+    body: string,
+    at: number,
+  ) {
+    return captureRepoSeed(
+      db,
+      teamId,
+      getMemberByName(db, teamId, 'nick')!,
+      { ref, body, captured_at: at },
+      at,
+    );
+  }
+
+  it('lists open Seeds oldest first, source-tagged, with the total behind the window', () => {
+    const { db, team } = seed();
+    const first = capture(
+      db,
+      team.id,
+      'docs/decisions/354-x.md#left-for-a-sibling-lane',
+      'Left for a sibling lane; this ADR fixes the attestation.\n— docs/decisions/354-x.md:12',
+      100,
+    );
+    const second = capture(
+      db,
+      team.id,
+      'docs/wiki/wake-leases.md#still-true',
+      'still true, and not fixed here\n— docs/wiki/wake-leases.md:40',
+      200,
+    );
+    capture(db, team.id, 'content/roadmap.data.ts#building-a', "building: 'increments 3–5'", 300);
+    capture(db, team.id, 'content/roadmap.data.ts#building-b', "building: 'M4–M5'", 400);
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley', 3, 5, { upNextSeedLimit: 2 });
+    expect(brief.up_next_seeds.map((s) => s.id)).toEqual([first.id, second.id]);
+    expect(brief.up_next_seeds_total).toBe(4);
+    expect(brief.up_next_seeds[0]).toMatchObject({
+      source: 'repo',
+      ref: 'docs/decisions/354-x.md#left-for-a-sibling-lane',
+      summary: 'Left for a sibling lane; this ADR fixes the attestation.',
+      submitted_by: 'nick',
+      captured_at: 100,
+    });
+  });
+
+  it('drops a Seed once it is promoted — a started intention is a lane, not an intention', () => {
+    const { db, team } = seed();
+    const lane = openLane(db, team.id, 'revive', 'nick', { title: 'the sibling lane' });
+    capture(db, team.id, 'docs/wiki/a.md#b', 'not yet built', 100);
+    captureRepoSeed(db, team.id, getMemberByName(db, team.id, 'nick')!, {
+      ref: 'docs/decisions/354-x.md#c',
+      body: 'Left for a sibling lane',
+      lane_id: lane.id,
+    });
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.up_next_seeds.map((s) => s.ref)).toEqual(['docs/wiki/a.md#b']);
+    expect(brief.up_next_seeds_total).toBe(1);
+  });
+
+  it('carries a relay Seed with a null ref — its source is a person, not a document', () => {
+    const { db, team } = seed();
+    db.prepare("UPDATE members SET slack_user_id = 'U1' WHERE team_id = ? AND name = 'nick'").run(
+      team.id,
+    );
+    createSeedFromRelay(db, team.id, {
+      id: 'relay-1',
+      source: 'slack',
+      body: 'Which Surface should own this?',
+      ts: 50,
+      meta: { user: 'U1' },
+    });
+
+    const brief = deriveNext(db, team.id, 'revive', 'stanley');
+    expect(brief.up_next_seeds).toMatchObject([
+      { source: 'slack', ref: null, summary: 'Which Surface should own this?' },
+    ]);
   });
 });

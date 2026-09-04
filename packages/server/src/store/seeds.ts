@@ -1,5 +1,6 @@
 import {
   type CaptureRepoSeed,
+  type NextBrief,
   type PromoteSeed,
   type RelaySeed,
   type Seed,
@@ -214,6 +215,72 @@ export function listSeeds(db: Database, teamId: string): Seed[] {
     .prepare<[string], SeedRow>('SELECT * FROM seeds WHERE team_id = ? ORDER BY created_at, id')
     .all(teamId)
     .map((row) => toSeed(row, team.slug, db));
+}
+
+/**
+ * ADR 373 increment 4: the open Seeds the orientation brief leads its up-next section with, oldest
+ * capture first, plus how many are open in total.
+ *
+ * A lean projection, not `listSeeds` — that one hydrates the exploration thread and the final brief
+ * for every row, and this runs on every `next`. `summary` is the body's first non-blank line, which
+ * for a repo Seed is the promise as written (the `— path:line` provenance line beneath it is
+ * already carried by `ref`).
+ */
+export function openSeedsForBrief(
+  db: Database,
+  teamId: string,
+  limit: number,
+): { seeds: NextBrief['up_next_seeds']; total: number } {
+  const total = db
+    .prepare<
+      [string],
+      { n: number }
+    >("SELECT COUNT(*) AS n FROM seeds WHERE team_id = ? AND state = 'open'")
+    .get(teamId)!.n;
+  const rows = db
+    .prepare<
+      [string, number],
+      {
+        id: string;
+        source: 'slack' | 'repo';
+        relay_id: string;
+        body: string;
+        captured_at: number;
+        name: string;
+      }
+    >(
+      `SELECT s.id, s.source, s.relay_id, s.body, s.captured_at, m.name
+       FROM seeds s JOIN members m ON m.id = s.submitted_by
+       WHERE s.team_id = ? AND s.state = 'open'
+       ORDER BY s.captured_at, s.id
+       LIMIT ?`,
+    )
+    .all(teamId, limit);
+  return {
+    total,
+    seeds: rows.map((row) => ({
+      id: row.id,
+      source: row.source,
+      ref: row.source === 'repo' ? repoRefFromRelayId(row.relay_id) : null,
+      summary: firstLine(row.body),
+      submitted_by: row.name,
+      captured_at: row.captured_at,
+    })),
+  };
+}
+
+/** The repo path + anchor a `repo:` relay id carries, or null if it is not one. */
+function repoRefFromRelayId(relayId: string): string | null {
+  return relayId.startsWith('repo:') ? relayId.slice('repo:'.length) : null;
+}
+
+/** The first line with text in it, bounded — a brief renders this on one line. */
+function firstLine(body: string): string {
+  const first = body
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .find(Boolean);
+  return (first || 'Seed').slice(0, 120);
 }
 
 export function getSeed(db: Database, teamId: string, seedId: string): Seed | null {

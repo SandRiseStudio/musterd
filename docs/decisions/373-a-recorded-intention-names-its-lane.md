@@ -293,6 +293,20 @@ ingest and when**. It is a script a seat runs against its own daemon; wiring it 
 increment 4's neighbour, not this one's. Follows-up: deferred — decide the ingest trigger once
 increment 4 shows whether open repo Seeds in `next` get picked up or skimmed (2026-09-03)
 
+**Measured at merge (increment 4, 2026-09-03).** `next` now leads its up-next section with open
+Seeds, oldest capture first, above the open lanes — dolly's placement, built as she specified it.
+`NextBriefSchema` gains one compact array plus its total (`up_next_seeds`, `up_next_seeds_total`,
+both defaulted so an older daemon's brief still parses), and the CLI and MCP renderers project the
+same server-side derivation, per ADR 084. A repo Seed renders its `ref` — the document that asked —
+and a relay Seed renders its submitter, because its source is a person. Three shown by default
+against 31 open on the day it shipped, which is why the total rides along: a window with no total
+reads as the whole tray. The projection is a lean query rather than `listSeeds`, whose thread and
+brief hydration would run on every orientation.
+
+The arc's honest state at this point: increments 1, 2 and 4 are built, and **nothing yet measures
+whether the tray gets read**. The pre-registered experiment below is the check, and it needs the
+ninety days.
+
 **Experiment (pre-registered).** The claim this ADR actually rests on is that a marked forward
 reference gets acted on and an unmarked one does not. Ninety days from merge, take every
 `Follows-up: <lane-id>` written in the window and ask what fraction of those lanes reached any state

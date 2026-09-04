@@ -595,6 +595,20 @@ export function fmtNext(b: NextBrief): string {
             : ''),
       );
   }
+  // ADR 373 increment 4: recorded intentions above the open lanes (see the CLI renderer's note).
+  const seeds = b.up_next_seeds ?? [];
+  if (seeds.length) {
+    const total = b.up_next_seeds_total ?? seeds.length;
+    lines.push(
+      `\nup next — recorded intentions nobody has started${total > seeds.length ? ` (${seeds.length} of ${total})` : ''}:`,
+    );
+    for (const s of seeds) {
+      lines.push(`  ${s.id} ${s.summary}`);
+      lines.push(
+        `    ${s.ref ?? `from ${s.submitted_by}`} · take it: team_seed_update {action:"claim", id:"${s.id}"}`,
+      );
+    }
+  }
   if (b.up_next.length) {
     lines.push('\nup next — open lanes you could pick up:');
     for (const l of b.up_next) {
@@ -640,6 +654,7 @@ export function fmtNext(b: NextBrief): string {
     !owed.length &&
     !b.in_flight.length &&
     !b.up_next.length &&
+    !seeds.length &&
     !b.shipped.length &&
     !b.next_goal &&
     !b.why
