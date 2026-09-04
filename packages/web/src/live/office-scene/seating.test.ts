@@ -2,7 +2,7 @@ import type { MemberSummary } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { memberPosture } from '../format';
 import { DESK_SLOTS, LEISURE_SPOTS } from './layout';
-import { assignSeats, audiblyWorking, type Seatable } from './seating';
+import { assignSeats, audiblyWorking, carriesLaptop, type Seatable } from './seating';
 
 /** A working member by default — desks are for members with a task in hand. */
 function member(name: string, over: Partial<MemberSummary> = {}): Seatable {
@@ -198,5 +198,42 @@ describe('audiblyWorking (E2 spec §2 — one predicate for eyes, ears and the l
   it('stays quiet for idle and offline seats', () => {
     expect(audiblyWorking(member('idle', { activity: 'active' }))).toBe(false);
     expect(audiblyWorking(member('gone', { presence: 'offline', activity: 'offline' }))).toBe(false);
+  });
+});
+
+describe('carriesLaptop — the biconditional (laptop/dock design §0)', () => {
+  // "The laptop is docked ⟺ the member is working at their desk. Every other moment it is on their
+  // person." The falsifier the design asks for: over a roster in every floor state, `docked` is true
+  // exactly when `audiblyWorking` is, and on-person is its negation — never both, never neither.
+  const roster: Seatable[] = [
+    member('working'),
+    member('focused', { availability: { status: 'dnd' } }),
+    member('resting', { activity: 'active' }),
+    member('stepped', { availability: { status: 'away' } }),
+    member('gone', { presence: 'offline', activity: 'offline' }),
+  ];
+
+  it('on-person is exactly the negation of docked, for every member on the floor', () => {
+    for (const m of roster) {
+      const docked = audiblyWorking(m); // the dock and the monitor both read this one predicate
+      expect(carriesLaptop(m)).toBe(!docked);
+    }
+  });
+
+  it('there is no sixth state — the roster splits cleanly and both halves are non-empty', () => {
+    const docked = roster.filter((m) => audiblyWorking(m));
+    const onPerson = roster.filter((m) => carriesLaptop(m));
+    expect(docked.length + onPerson.length).toBe(roster.length);
+    expect(docked.map((m) => m.name)).toEqual(['working']);
+    // `focused` is dnd, which folds to posture `away` on the wire (ADR 044) while seating keeps them
+    // at their own desk. So they sit at a desk with an empty dock and the laptop in their lap — the
+    // design's one known simplification, pinned here so it stays a choice rather than a surprise.
+    expect(onPerson.map((m) => m.name)).toEqual(['focused', 'resting', 'stepped', 'gone']);
+  });
+
+  it('a member the floor has no node for carries it — a ghost walking out keeps their laptop', () => {
+    // The leaving body is drawn after the roster has dropped it. An empty dock is what their desk
+    // should say at that moment, so the laptop must be on the person, not in the slot.
+    expect(carriesLaptop(undefined)).toBe(true);
   });
 });

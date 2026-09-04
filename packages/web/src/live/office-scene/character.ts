@@ -558,8 +558,15 @@ function drawSipMug(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel,
   disc(ctx, { x: wr.p.x, y: wr.p.y - h * 0.7 }, w / 2, w / 4.2, '#3a2416'); // the coffee surface
 }
 
+/** The closed laptop's aluminium, its shut-lid seam, and the logo dot — the same silver the desk dock
+ * stands one in, so the object you watched walk in is the object that lands in the dock. */
+const LAPTOP_SILVER = '#c7ccd2';
+const LAPTOP_SEAM = '#8e959d';
+const LAPTOP_LOGO = '#a3a9b1';
+
 /** Whatever's being carried, at the hands that hold it: the handoff box at the chest, an errand's
- * plate of food flat between both hands, a water bottle or mug riding the right hand. */
+ * plate of food flat between both hands, a water bottle or mug riding the right hand, or the
+ * member's own closed laptop tucked at their side. */
 function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, u: number, kind: CarryKind): void {
   if (kind === 'box') {
     const c = px({ x: 0, y: k.chest.y - 1, z: k.chest.z + 13 });
@@ -575,6 +582,24 @@ function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, 
     const c = { x: (l.p.x + px(k.wrist[1]).p.x) / 2, y: (l.p.y + px(k.wrist[1]).p.y) / 2 };
     disc(ctx, { x: c.x, y: c.y - 1.5 * u }, 8.5 * u, 3.2 * u, '#f2e7d5'); // the plate
     disc(ctx, { x: c.x, y: c.y - 3 * u }, 4.5 * u, 2.4 * u, '#c9744a'); // the food
+    return;
+  }
+  if (kind === 'laptop') {
+    // The member's own laptop, closed, tucked at the side. It rides a point between the chest and the
+    // right wrist, which is the whole trick: standing, those joints put it under the arm; seated, they
+    // put it flat in the lap. One drawing, because the skeleton has already done the deciding — nothing
+    // here reads a pose name. Small and shut, so nineteen of them across the floor stay a shape at the
+    // elbow rather than nineteen held-out objects.
+    const wr = px(k.wrist[1]);
+    const ch = px(k.chest);
+    const c = { x: wr.p.x * 0.6 + ch.p.x * 0.4, y: wr.p.y * 0.6 + ch.p.y * 0.4 };
+    const w = 15 * u;
+    const h = 9 * u;
+    ctx.fillStyle = LAPTOP_SILVER;
+    ctx.fillRect(c.x - w / 2, c.y - h / 2, w, h);
+    ctx.fillStyle = LAPTOP_SEAM; // the shut lid's dark seam along the bottom edge — it reads as closed
+    ctx.fillRect(c.x - w / 2, c.y + h / 2 - u * 1.4, w, u * 1.4);
+    disc(ctx, { x: c.x, y: c.y - u * 0.4 }, 1.7 * u, 1.7 * u, LAPTOP_LOGO); // the quiet logo dot
     return;
   }
   const wr = px(k.wrist[1]);

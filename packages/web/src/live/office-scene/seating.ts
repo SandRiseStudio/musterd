@@ -44,6 +44,22 @@ export function audiblyWorking(m: Pick<Seatable, 'posture'>): boolean {
   return m.posture === 'working';
 }
 
+/**
+ * Does this member have their laptop **on their person** right now?
+ *
+ * The whole laptop model is one biconditional (2026-09-04 laptop/dock design §0): **the laptop is
+ * docked ⟺ the member is working at their desk; every other moment it is on their person.** So this
+ * is `audiblyWorking` negated and nothing else — deliberately not `&& docked`, not a second
+ * condition, not a body-position term. The dock, the monitor, and the object under the arm all read
+ * off the one predicate, which is why none of the three can end up saying different things.
+ *
+ * A member the floor has no node for (a ghost walking out of the door) carries it: they are leaving,
+ * and an empty dock is exactly what their desk should say.
+ */
+export function carriesLaptop(m: Pick<Seatable, 'posture'> | undefined): boolean {
+  return m ? !audiblyWorking(m) : true;
+}
+
 /** dnd means *working, don't interrupt* (presence-honesty §4) — they keep their desk and chair. */
 export function isDnd(m: Seatable): boolean {
   return m.availability?.status === 'dnd';
