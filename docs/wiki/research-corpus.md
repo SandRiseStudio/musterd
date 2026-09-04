@@ -44,7 +44,7 @@ instead of writing a retention policy — and it is a property of _this_ corpus,
 **still on the same disk as its source**. Off-machine destination is nick's decision and is not yet
 made, so the exposure today is "one disk, current" rather than "one disk, two months stale."
 
-The [sibling corpus](#the-sibling-corpus-exploring-next) has the same disease and no rail at all.
+The [sibling corpus](#the-sibling-corpus-exploring-next) has the same disease; the rail is `pnpm dataset:exn-snapshot` (lane 01M1MBV93, 2026-09-04).
 
 ## The findings register — what has actually been concluded
 
@@ -147,8 +147,10 @@ in that repo's config):
   markers, source URLs retained) — feedstock for [positioning](positioning.md) work, though it is
   framing rather than citable specifics: verify at the original source and cite that.
 
-Durability there is worse, not better: all of it plus 4.99 GB of audio sits in one Supabase project
-with no export script (folded into goal `research-corpus`). Its audio will not compress, so this page's
+Durability there is worse, not better: all of it plus 4.99 GB of audio sits in one Supabase project.
+The snapshot rail reads the versioned read-only API (`pnpm dataset:exn-snapshot` — metadata +
+scripts + transcripts, never audio; first live run pending an API key), so the export path exists
+even before the first archive lands. Its audio will not compress, so this page's
 5.7 MB economics do not transfer.
 
 [^v42]: Measured at v41 on 2026-08-18. Migration 42 (`presence.model_source`, 2026-08-21) lands with [#975](https://github.com/SandRiseStudio/musterd/pull/975) — the dated measurement above stands; the live schema moves past it. See [model attestation](model-attestation.md).
