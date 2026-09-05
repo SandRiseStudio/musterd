@@ -663,18 +663,34 @@ function composeWakeLine(seat: string, teamSlug: string, act: string, sender: st
   );
 }
 
-/** Work-order line (ADR 179 / 191 / 199): lane id only — never a title, never free text. */
+/**
+ * Work-order line (ADR 179 / 191 / 199): ids only — never a title, never free text.
+ *
+ * **The review line names the ACT, not just the lane.** `team_wake_context` has two paths and they
+ * are not interchangeable: `lane_id` authorizes the lane's OWNER and answers `work_order` /
+ * `continue_lane`, while `act_id` authorizes the act's RECIPIENT and answers `review` with the lane
+ * block already attached. A reviewer never owns the lane it reviews, so a line naming only the lane
+ * sent them at the one path that must refuse them — measured 2026-09-04: 38 of 47 review-edge wakes
+ * had a `residency.context_read` deny within ±5 minutes of the wake, 83 of 87 lane-target denials
+ * being a seat asking about a lane it does not own. Every one of those 47 wakes carried an act, and
+ * every one of those acts carried `meta.lane_review`, so the act path serves all of them. Widening
+ * the lane path instead would have handed reviewers a packet that calls their job `continue_lane`.
+ */
 function composeWorkOrderLine(
   seat: string,
   teamSlug: string,
   laneId: string,
   kind: 'review' | 'dispatch',
+  actId?: string,
 ): string {
   if (kind === 'review') {
-    return (
-      `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
-      `review. Orient via team_wake_context (then team_next) and begin.`
-    );
+    // `act_id` is present on every review work order the picker builds; the lane-only phrasing is
+    // kept as the honest fallback rather than inventing an id we were not given (ADR 236).
+    return actId !== undefined
+      ? `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
+          `review. Orient via team_wake_context {act_id: "${actId}"} (then team_next) and begin.`
+      : `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} needs your ` +
+          `review. Orient via team_next and begin.`;
   }
   return (
     `musterd wake — you are seat "${seat}" on team "${teamSlug}": lane ${laneId} is yours — ` +
@@ -1376,7 +1392,13 @@ export function claimWakeLeases(
           ...(candidate.sender !== undefined ? { sender: candidate.sender } : {}),
           lane: candidate.lane,
           composed_line: isWorkOrder
-            ? composeWorkOrderLine(member.name, teamSlug, candidate.lane_id!, kind)
+            ? composeWorkOrderLine(
+                member.name,
+                teamSlug,
+                candidate.lane_id!,
+                kind,
+                candidate.act_id,
+              )
             : composeWakeLine(
                 member.name,
                 teamSlug,
