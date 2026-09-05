@@ -588,6 +588,13 @@ describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', ()
     const again = await run(inboxCommand, ['--interrupt-check']);
     expect(again.out).toContain('⚡ musterd:');
     await run(inboxCommand, []); // Ada reads her inbox → cursor advances
+    // …and that interactive read RE-CLAIMED (ADR 339: interactive reads opt in), superseding the
+    // Presence Ada's stored lease was bound to. The env lease `actAs` pinned is now dead, so pick up
+    // the one the claim minted — otherwise this final probe measures a stale lease rather than the
+    // cleared cursor it means to measure. (That deafness is its own assertion, in the claim-storm
+    // suite below; lane 01M1QC6XST.)
+    const afterRead = await claimedAgent('dawn', 'Ada');
+    actAs('dawn', 'Ada', afterRead.key, afterRead.sessionLease);
     const cleared = await run(inboxCommand, ['--interrupt-check']);
     expect(cleared.out).toBe('');
   });
@@ -1348,7 +1355,12 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
 
     const probe = await run(inboxCommand, ['--interrupt-check']);
     expect(probe.code).toBe(0);
-    expect(probe.out).toBe('');
+    // It does not reclaim — and it no longer goes SILENTLY deaf about it (lane 01M1QC6XST). The
+    // probe is excluded from both lease heals by design, so a dead lease refuses this route forever;
+    // the one thing it owes the seat is to say so, on the channel it already owns. Not the daemon's
+    // 401 body — a locally composed line, because this rides into a model's context uninspected.
+    expect(probe.out).toMatch(/session lease/i);
+    expect(probe.out).toMatch(/musterd claim/);
 
     // Pre-fix, the probe's reclaim seized the seat and evicted the live adapter's presence row —
     // and a session lease is bound to that row (ADR 337), so this read failed with

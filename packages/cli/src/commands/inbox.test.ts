@@ -239,6 +239,42 @@ describe('inbox command', () => {
     expect(after.model_observed?.model).toBe('claude-opus-5');
     expect(after.model).toBe('claude-declared-1'); // observed over declared, never instead of
   });
+  /**
+   * Lane 01M1QC6XST. `GET /inbox/interrupt-check` is a REFUSABLE route (it authenticates through
+   * `authMember`, not `tryAuth`), and the probe deliberately takes `claimSeatPerRequest: false` — so
+   * it is excluded from both lease heals and keeps presenting a dead lease forever. The old `catch {}`
+   * then swallowed the 401, which made a seat with a stale lease PERMANENTLY AND SILENTLY DEAF on the
+   * interrupt line while every other command self-healed by reclaiming and looked fine.
+   *
+   * Measured cross-machine by stanley on 2026-09-04 (delta, build 16b6e3d8): 12 probes, silence every
+   * time, while `inbox --peek` from the same folder worked. The repair is not to reclaim — that
+   * reinstates the 2026-09-01 claim storm — it is to make the silence audible on the one channel the
+   * probe already owns.
+   */
+  it('--interrupt-check says so when its own session lease is stale, instead of going silently deaf', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+
+    const { code, out } = await capture(() => inboxCommand(parseArgs(['--interrupt-check'])));
+
+    // Still exit 0: a probe on every tool call must never fail the call it rides on.
+    expect(code).toBe(0);
+    expect(out).toMatch(/session lease/i);
+    expect(out).toMatch(/musterd claim/);
+    // Locally composed, never the server's body — this line rides into a model's context uninspected.
+    expect(out).not.toMatch(/revoked/);
+  });
+
   describe('defer (ADR 211)', () => {
     /** Ada asks nick something; returns the ask id nick will postpone. */
     async function askNick(): Promise<string> {

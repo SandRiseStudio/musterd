@@ -8,7 +8,7 @@ import {
 import { resolveWorkspace } from '@musterd/protocol/project';
 import { ulid } from 'ulid';
 import { flagStr, type Parsed } from '../args.js';
-import { watchClaim } from '../client.js';
+import { isSessionLeaseRefusal, watchClaim } from '../client.js';
 import { wsBase, type Identity } from '../config.js';
 import { CliError } from '../errors.js';
 import { isActionNeeded, renderInbox, renderMessageRow } from '../render/rows.js';
@@ -280,17 +280,49 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
   // One push per session, not per tool call: the slot's `attested_at` stamp is what bounds it.
   await attestSlotIfUnattested();
   if (process.env['MUSTERD_NO_NUDGE'] === '1') return 0;
+  let seat: string | undefined;
   try {
     // The interrupt probe is hook-installed and rides every tool call — it takes the default (no
     // reclaim) for the same reason `gate check` does.
     const { http, team, identity, explicit } = resolveRead(parsed.flags);
     if (!explicit || !identity) return 0;
+    seat = identity.name;
     const res = await http.interruptCheck(team);
     if (res.raised && res.line) process.stdout.write(res.line + '\n');
-  } catch {
-    // Best-effort: the interrupt probe must never fail the tool call it rides on.
+  } catch (err) {
+    // Best-effort: the interrupt probe must never fail the tool call it rides on — with ONE thing it
+    // owes the seat before it goes quiet. `GET /inbox/interrupt-check` authenticates as a member, and
+    // this probe alone is excluded from both lease heals (`claimSeatPerRequest: false`, so the
+    // transport's one-shot reclaim in `client.ts` deliberately skips it, and no reclaim happens
+    // here). A lease that died with its Presence therefore refuses this route FOREVER, and the bare
+    // `catch {}` this replaced swallowed that 401 — leaving a seat permanently and SILENTLY deaf on
+    // the interrupt line while every other command self-healed and looked fine. Measured
+    // cross-machine 2026-09-04: 12 probes, silence every time, `inbox --peek` working throughout.
+    //
+    // The repair is not to reclaim — that reinstates the 2026-09-01 claim storm (#1138/#1143) and is
+    // exactly what `cli.e2e.test.ts` pins against. It is to make the silence AUDIBLE on the one
+    // channel the probe already owns, so the human or the agent can run the claim themselves. Every
+    // other failure (no daemon, a refused credential, a wrong seat) stays silent: a claim fixes none
+    // of them, and a line on every tool call is worse than no line at all.
+    if (isStaleSessionLease(err)) {
+      // Composed HERE, never echoed from the server's body: this line rides into a model's context
+      // at a tool boundary uninspected, and the daemon's own text is not ours to inject.
+      process.stdout.write(
+        `musterd: your session lease is stale, so the interrupt line is deaf — run \`musterd claim ${seat ?? '<seat>'}\` to restore it.\n`,
+      );
+    }
   }
   return 0;
+}
+
+/** The transport's lease refusal, narrowed to what a {@link CliError} carries — as opposed to a
+ *  refused credential, a wrong acting seat, or an unreachable daemon, none of which a claim fixes. */
+function isStaleSessionLease(err: unknown): boolean {
+  return (
+    err instanceof CliError &&
+    err.code !== undefined &&
+    isSessionLeaseRefusal({ code: err.code, message: err.message })
+  );
 }
 
 function countUnread(messages: Envelope[], cursorTs: number, _self: string): number {
