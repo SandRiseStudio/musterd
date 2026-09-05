@@ -1,23 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { describeSample, normalizeFrame, parseSample, WEDGED_FRAME_SHARE } from './sample.js';
+import { LIVE_IDLE, LIVE_SPIN, LIVE_WEDGED } from './sample.fixtures.js';
+import {
+  describeSample,
+  LOOP_POLL_FRAMES,
+  normalizeFrame,
+  parseSample,
+  WEDGED_FRAME_SHARE,
+} from './sample.js';
 
 /**
- * Shaped after big-body's 2026-09-04 incident (2,406 of 2,407 samples in `sqlite3_step`), in the
- * `sample(1)` report layout: a header, a `Call graph:` section whose frames carry tree glyphs and
- * increasing indentation, then the trailing sections the parser must stop at.
- *
- * Synthetic, and named as such: `sample(1)` could not be executed in the session that wrote this
- * (the binary is behind a permission gate on this machine), so this fixture asserts the parser
- * against the documented layout rather than against a captured report. ADR 389's induced-wedge
- * falsifier is what proves the parser against a live one, and it must run before arming.
+ * The fixtures are CAPTURED reports (sample.fixtures.ts), not shaped ones. #1328's synthetic
+ * fixture guessed that a SQLite wedge bottoms out in `sqlite3_step`; the live one bottoms out in
+ * `__semwait_signal` six frames below it, inside the busy handler's sleep — and that difference is
+ * what this file exists to pin (ADR 389 falsifier, arm a, 2026-09-05).
  */
-const WEDGED = `Sampling process 11116 for 3 seconds with 1 millisecond of run time between samples
-Sampling completed, processing symbols...
-Analysis of sampling node (pid 11116) every 1 millisecond
-Process:         node [11116]
-Path:            /opt/homebrew/opt/node@22/bin/node
 
-Call graph:
+/** Big-body's shape as #1328 imagined it — kept because a wedge CAN look like this too. */
+const LEAF_IN_STEP = `Call graph:
     2407 Thread_9410215   DispatchQueue_1: com.apple.main-thread  (serial)
       2407 start  (in dyld) + 6000  [0x18f0b4274]
         2407 node::Start(int, char**)  (in node) + 728  [0x1013a55f8]
@@ -34,19 +33,6 @@ Binary Images:
        0x1013a0000 -   0x101ff7fff  node (0) <...>
 `;
 
-/** The same four circumstantial conditions, but the process is parked in the event loop. */
-const IDLE = `Analysis of sampling node (pid 11116) every 1 millisecond
-
-Call graph:
-    2400 Thread_9410215   DispatchQueue_1: com.apple.main-thread  (serial)
-      2400 node::Start(int, char**)  (in node) + 728  [0x1013a55f8]
-        2400 uv_run  (in node) + 412  [0x1017c2210]
-          2399 uv__io_poll  (in node) + 1204  [0x1017d4a10]
-            2399 kevent  (in libsystem_kernel.dylib) + 8  [0x18f2e1b30]
-
-Binary Images:
-`;
-
 /** Work spread across many frames — busy, not held by any one of them. */
 const BUSY = `Call graph:
     1000 Thread_1   DispatchQueue_1: com.apple.main-thread  (serial)
@@ -57,29 +43,75 @@ Binary Images:
 `;
 
 describe('parseSample (ADR 389 §1 — the classification boundary)', () => {
-  it('names the dominant synchronous frame and calls it wedged', () => {
-    const s = parseSample(WEDGED, 11116);
+  it('the live SQLite wedge is wedged, and its leaf is a SLEEP, not sqlite3_step', () => {
+    const s = parseSample(LIVE_WEDGED, 84843);
     expect(s.taken).toBe(true);
     expect(s.wedged).toBe(true);
-    expect(s.frame).toBe('sqlite3_step');
-    expect(s.pid).toBe(11116);
-    expect(s.total).toBe(2407);
-    expect(s.inFrame).toBe(2406);
+    expect(s.pid).toBe(84843);
+    expect(s.total).toBe(2636);
+    expect(s.inFrame).toBe(2635);
+    expect(s.frame).toBe('__semwait_signal');
     expect(s.share).toBeGreaterThan(0.99);
   });
 
-  it('takes the DEEPEST frame over the threshold, not the first ancestor over it', () => {
-    // Every ancestor of a held leaf trivially holds at least as much; reporting `node::Start`
-    // would be true and useless — the leaf is the sentence a human can act on.
-    expect(parseSample(WEDGED).frame).toBe('sqlite3_step');
+  it('the wedge is attributed to where control left the runtime — the sqlite image', () => {
+    // `__semwait_signal` alone is a bare kernel symbol; the sentence a human can act on is which
+    // native call the loop is asleep inside.
+    const s = parseSample(LIVE_WEDGED);
+    expect(s.entry).toEqual({ frame: 'Database::JS_exec', image: 'better_sqlite3.node' });
   });
 
-  it('an idle event loop concentrates just as hard and is NOT wedged', () => {
-    const s = parseSample(IDLE);
+  it('a wait primitive as the leaf does NOT read as parked — only the loop’s own poll does', () => {
+    // The 2026-09-05 finding: `nanosleep` was on #1328's idle list and `__semwait_signal` was not,
+    // so the verdict was right by one missing entry. Wedged-in-a-sleep is a wedge.
+    expect(LOOP_POLL_FRAMES.has('nanosleep')).toBe(false);
+    expect(LOOP_POLL_FRAMES.has('semwait_signal')).toBe(false);
+    expect(LOOP_POLL_FRAMES.has('psynch_cvwait')).toBe(false);
+    expect(LOOP_POLL_FRAMES.has('read')).toBe(false);
+    for (const f of LOOP_POLL_FRAMES) expect(f).not.toMatch(/sleep|cvwait|semwait|^read$|mach_msg/);
+  });
+
+  it('the live idle loop concentrates just as hard and is NOT wedged', () => {
+    const s = parseSample(LIVE_IDLE);
     expect(s.taken).toBe(true);
     expect(s.share).toBeGreaterThan(WEDGED_FRAME_SHARE);
+    expect(s.frame).toBe('kevent');
     expect(s.wedged).toBe(false);
-    expect(s.reason).toMatch(/wait primitive/);
+    expect(s.reason).toMatch(/event loop's own poll/);
+  });
+
+  it('a synchronous JS loop is wedged with no entry — nothing left the runtime', () => {
+    const s = parseSample(LIVE_SPIN);
+    expect(s.wedged).toBe(true);
+    expect(s.entry).toBeUndefined();
+    expect(s.frame).toMatch(/^Builtins_/);
+  });
+
+  it('measures the MAIN thread, not whichever thread sorts first', () => {
+    // Every thread is sampled on the same clock, so root counts tie across threads. A worker
+    // parked in kevent listed first must not turn a wedged main thread into "parked".
+    const workerFirst = LIVE_WEDGED.replace(
+      /(Call graph:\n)([\s\S]*?)(\n {4}\d+ Thread_\d+: DelayedTaskSchedulerWorker[\s\S]*?)(\n\nTotal number)/,
+      (_m, head: string, main: string, worker: string, tail: string) =>
+        `${head}${worker.trimStart()}\n${main}${tail}`,
+    );
+    expect(workerFirst.indexOf('DelayedTaskSchedulerWorker')).toBeLessThan(
+      workerFirst.indexOf('main-thread'),
+    );
+    const s = parseSample(workerFirst);
+    expect(s.wedged).toBe(true);
+    expect(s.frame).toBe('__semwait_signal');
+  });
+
+  it('a wedge whose leaf is sqlite3_step itself still reads wedged and still names it', () => {
+    const s = parseSample(LEAF_IN_STEP, 11116);
+    expect(s.wedged).toBe(true);
+    expect(s.frame).toBe('sqlite3_step');
+    expect(s.total).toBe(2407);
+    expect(s.entry).toEqual({
+      frame: 'Napi::ObjectWrap<Statement>::step',
+      image: 'better_sqlite3.node',
+    });
   });
 
   it('work spread below the threshold is not wedged', () => {
@@ -93,7 +125,7 @@ describe('parseSample (ADR 389 §1 — the classification boundary)', () => {
   it('stops at the trailing sections rather than reading Binary Images as frames', () => {
     // `Binary Images:` lines begin with hex addresses, not counts, but `Total number in stack`
     // repeats real counts — reading it would double-count the root.
-    expect(parseSample(WEDGED).total).toBe(2407);
+    expect(parseSample(LIVE_WEDGED).total).toBe(2636);
   });
 
   it('an unrecognised report is not taken — never a confident wrong answer', () => {
@@ -109,16 +141,22 @@ describe('parseSample (ADR 389 §1 — the classification boundary)', () => {
 });
 
 describe('describeSample', () => {
-  it('says what it saw, in one line, for the raise body', () => {
-    expect(describeSample(parseSample(WEDGED))).toMatch(
-      /2406\/2407 samples \(99\.9%\) in sqlite3_step — alive and blocked/,
+  it('says what it saw, in one line, for the raise body — leaf and entry both', () => {
+    expect(describeSample(parseSample(LIVE_WEDGED))).toBe(
+      'stack sample: 2635/2636 samples (99.9%) in __semwait_signal, entered via Database::JS_exec (better_sqlite3.node) — alive and blocked in synchronous work',
     );
   });
 
   it('floors the share so a not-quite-total hold never prints as 100%', () => {
-    // 2406/2407 is 99.958%, which ROUNDS to 100.0% — a reader would take that as "nothing else
+    // 2635/2636 is 99.96%, which ROUNDS to 100.0% — a reader would take that as "nothing else
     // ran", which is a stronger claim than the sample made.
-    expect(describeSample(parseSample(WEDGED))).not.toMatch(/100\.0%/);
+    expect(describeSample(parseSample(LIVE_WEDGED))).not.toMatch(/100\.0%/);
+  });
+
+  it('a parked loop says so, with the reason', () => {
+    expect(describeSample(parseSample(LIVE_IDLE))).toMatch(
+      /in kevent — not wedged \(dominant frame kevent is the event loop's own poll/,
+    );
   });
 
   it('never returns an empty line when no sample could be taken', () => {
