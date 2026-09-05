@@ -254,6 +254,22 @@ woken a session here, so there is nothing for `woken-by-<service>` to attribute.
 a service becomes a wake causer — the lease's `act_id` already names it, and this stays retracted.
 
 
+**2026-09-04 — increment 3 landed (lane 01M1Q9D90XEP9FPCYPQNBFH73Q).** The census now DERIVES its
+job-gone set from the roster — every `kind: service` seat holding the `platform` role — and the
+frozen four-label literal is gone. The falsifier the lane asked for is the unit test: a platform seat
+`census.ts` has never heard of, with no job, is named without anyone editing `census.ts`. `guardian`
+and `streamwatch` are covered by construction; so is the next one. `service install --wake | --live |
+--sweep` now provision their seats (`host`, `live`, `sweep`) through ONE `provisionServiceSeat`,
+which also replaced the three copy-pasted provisioners — the three services that shipped without a
+copy were exactly the three the census named. A dated one-shot (`StartCalendarInterval` with a Month
+and Day, no `StartInterval` — `adr260-rerun`) has no standing presence to attribute and is named as a
+task rather than an unattributed actor, and named again once it has fired and is still installed, so
+the census does not warn forever about a job that was never a service. `otel-sink` is a hand-authored
+plist with no install verb — hand-authored plists walk past `install`, which is why the check exists
+— so its seat is hand-provisioned, once, the same way. Increment 2's exit line ("zero unattributed
+jobs on the live machine") is met on this machine once the three installs are re-run and the one
+seat is added; the census is still warn-only and stays so.
+
 ## Observability & Evaluation
 
 **Traces.** All on existing rails, which is the point of the design: a service seat's actions are
