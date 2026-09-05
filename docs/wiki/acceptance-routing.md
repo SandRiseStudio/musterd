@@ -100,7 +100,7 @@ a daemon built before the ADR 351 PR — the rows would predate the exclusion).
 
 The near miss is the point: the value was proposed, reviewed, and approved without anyone noticing it changed a pre-registered denominator, and it surfaced only because the PR was routed to the seat that owns the instrument. It would not have survived a review by anyone else on the team — see [measuring a moving page](measuring-a-moving-page.md).
 
-## A named acceptor on an already-awaiting lane was validated and then dropped (2026-09-04; falsify: `sqlite3 ~/.musterd/musterd.db "select count(*) from audit where action='lane.review_rerouted'"` returns 0 on a daemon built after #1322 despite a `lane_submit --acceptor` on an awaiting lane — the arm did not fire)
+## A named acceptor on an already-awaiting lane was validated and then dropped (2026-09-04; falsify: `sqlite3 ~/.musterd/musterd.db "select count(*) from audit where action='lane.review_rerouted'"` returns 0 on a daemon built after #1326 despite a `lane_submit --acceptor` on an awaiting lane — the arm did not fire)
 
 ~~`lane_submit {acceptor}` on a lane already in `awaiting_acceptance` returned 200 with a lane that looked right, minted no ask, and hinted "no acceptor was ever routed — self-close sanctioned" (2026-09-04; falsify: the acts table after such a submit holds no `lane_review` ask to the named seat)~~ FIXED 2026-09-04 by [ADR 348 amendment](../decisions/348-an-acceptance-can-be-routed-by-hand.md), lane `01M1QYHJFY11HEXSX0QSEXYZNR`.
 
