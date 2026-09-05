@@ -61,6 +61,12 @@ The test, in order:
 
 Whatever the verdict, **write the evidence, not the conclusion** — a raise cleared without a recorded reason is indistinguishable from one cleared on sight, which is the habit this instrument's history is made of.
 
+## `daemon_wedged` — the class only a stack sample can make (ADR 389, 2026-09-05)
+
+The classifier's clean-exit-unreachable branch now takes a bounded `sample <pid> 3` of the pid launchd itself reports, and promotes to `daemon_wedged` only when ≥90% of the busiest thread sits in ONE non-idle frame (falsify: `classify()` with `stack: { taken: true, wedged: true }` and a persisted `firstUnreachableAt` yields `daemon_wedged`; the same signals with `stack: { taken: false }` yield `daemon_down`). A wait primitive as the dominant frame (`kevent`, `uv__io_poll`, `mach_msg_trap`…) reads as parked, not held — an idle event loop concentrates just as hard as a wedged one, and that is the one direction this class must never be wrong in. Ships at `alert`; the tier alone does not arm a restart and no restart is built.
+
+`guardian.sampled` is written to the **guardian log, not the audit** — on every tick that reached the sample, promoted or not. ADR 389 said "audit"; the audit is a POST to the daemon, which is unreachable at exactly the moment a sample is taken, so a row written there would exist only for the samples that did NOT matter. The eval that decides arming reads the log (falsify: `grep guardian.sampled ~/.musterd/guardian/*.log` after any clean-exit-unreachable tick).
+
 ## Traps
 
 - Recency is the hard rule: classification only trusts boot-gated reads (`/health.booted_at`). A probe that greps a raw log tail pages someone for an incident that ended a week ago (observed 2026-07-20 during the ADR 152 work; falsify: feed the tick an old err.log with a fresh mtime and watch `errLinesSinceBoot` — the mtime gate admits it, the boot gate in the daemon's own `booted_at` bounds it).

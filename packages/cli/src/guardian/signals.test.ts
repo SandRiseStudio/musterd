@@ -44,7 +44,9 @@ describe('collectSignals', () => {
       schemaOk: true,
       dbPathExpected: true,
     });
-    expect(s.launchd).toEqual({ lastExit: 0, runs: 1 });
+    expect(s.launchd).toEqual({ lastExit: 0, runs: 1, pid: null });
+    // A healthy machine never pays the three-second sample (ADR 389 Consequences).
+    expect(s.stack).toBeUndefined();
   });
 
   it('schema mismatch and unexpected db path surface as flags, not throws', async () => {
@@ -162,18 +164,35 @@ describe('parseLaunchctlPrint', () => {
     expect(parseLaunchctlPrint('\tstate = running\n\truns = 5\n\tlast exit code = 78\n')).toEqual({
       lastExit: 78,
       runs: 5,
+      pid: null,
     });
   });
 
   it('absent service (print fails / empty) is zeros, not a throw', () => {
-    expect(parseLaunchctlPrint('')).toEqual({ lastExit: 0, runs: 0 });
+    expect(parseLaunchctlPrint('')).toEqual({ lastExit: 0, runs: 0, pid: null });
   });
 
   it('"(never exited)" reads as exit 0', () => {
     expect(parseLaunchctlPrint('runs = 1\nlast exit code = (never exited)\n')).toEqual({
       lastExit: 0,
       runs: 1,
+      pid: null,
     });
+  });
+
+  it("reads the pid launchd itself reports — sampling anyone else's stack is worse than none", () => {
+    const out = '\tstate = running\n\tpid = 11116\n\truns = 1\n\tlast exit code = (never exited)\n';
+    expect(parseLaunchctlPrint(out).pid).toBe(11116);
+  });
+
+  it('a running-but-pidless print yields null rather than a coincidental number', () => {
+    expect(parseLaunchctlPrint('\truns = 3\n\tlast exit code = 0\n').pid).toBeNull();
+  });
+
+  it('a QUALIFIED pid field is not the live pid', () => {
+    // Sampling a pid launchd no longer owns puts a stranger's stack in a raise about ours — worse
+    // than no sample, because it reads as evidence.
+    expect(parseLaunchctlPrint('\toriginal pid = 9001\n\truns = 3\n').pid).toBeNull();
   });
 });
 

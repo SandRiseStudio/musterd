@@ -55,6 +55,7 @@ src/
   guardian/           // the platform guardian's pure logic (ADR 263) — every effect injected, zero model tokens
     classify.ts       // recency-keyed signals → incident classes; shipped DEFAULT_TIERS + resolveGuardianTiers (policy over defaults, read-time)
     signals.ts        // collectSignals: /health (booted_at-anchored), launchctl parse, boot-gated log reads — the collector owns staleness so classify never sees a stale line
+    sample.ts         // ADR 389 §1: parse `sample <pid>` into a wedged/not verdict — ≥90% of the busiest thread in ONE non-idle frame; wait primitives (kevent, uv__io_poll…) are parked not held; any unreadable sample is `taken: false` with a reason, never a confident wrong answer
     damp.ts           // one remediation attempt per class per hour then forced escalation; stamp file (never the DB — the DB may be what's down) + daily-heartbeat bookkeeping
     act.ts            // actOn: auto classes shell the guarded service verbs (refresh --live / refresh --pin <last-good> --force), alert classes notify + role-addressed ask; audit failure never breaks a tick
   notify/             // the `musterd notify` human-reachability nudge (ADR 024/035)

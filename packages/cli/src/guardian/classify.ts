@@ -8,6 +8,7 @@
  */
 
 import type { GuardianClass, GuardianTier, GuardianTiers } from '@musterd/protocol';
+import { describeSample, type StackSample } from './sample.js';
 
 export type { GuardianClass, GuardianTier };
 
@@ -57,6 +58,12 @@ export interface GuardianSignals {
    * the tick from its stamp, never by the collector. Absent/null = this tick is the first sighting.
    */
   firstUnreachableAt?: number | null;
+  /**
+   * The bounded stack sample of the live pid (ADR 389 §1), present only on a tick that reached the
+   * clean-exit-unreachable shape. Absent means no sample was attempted; `taken: false` means one
+   * was attempted and could not be read — and both degrade to `daemon_down`, never past it.
+   */
+  stack?: StackSample;
 }
 
 /** A crashloop is only attributed to a refresh that happened inside this window. */
@@ -71,6 +78,10 @@ export const DEFAULT_TIERS: Record<GuardianClass, GuardianTier> = {
   publisher_failed: 'auto',
   crashloop: 'auto',
   daemon_down: 'alert',
+  // Ships dark (ADR 389 §3): arming the first DESTRUCTIVE remediation must not be one line of
+  // policy away from a machine that has never watched it fire — and the tier alone still would not
+  // be enough, because §4's ladder is a second, independent condition.
+  daemon_wedged: 'alert',
   schema_drift: 'alert',
   wrong_db: 'alert',
   error_rate: 'alert',
@@ -141,6 +152,10 @@ export function classify(s: GuardianSignals): Incident[] {
         (s.healthProbe?.confirmMs !== undefined
           ? `Slow-but-alive within this tick was tested: it answered neither bound. `
           : `This build recorded no confirming probe. `);
+      // The sample rides the raise whether or not it promotes the class (ADR 389 §1): the top frame
+      // is the single most useful sentence a human can be handed about a wedge, and "no sample, and
+      // here is why" is what keeps a degraded host's raise honest rather than merely quieter.
+      const sample = s.stack !== undefined ? ` ${describeSample(s.stack)}.` : '';
       if (persisted === null) {
         alert.push({
           class: 'daemon_down',
@@ -148,7 +163,20 @@ export function classify(s: GuardianSignals): Incident[] {
           evidence:
             base +
             `First sighting — held one tick to separate a transient stall from an outage ` +
-            `(a stall recovers before the next tick; an outage does not).`,
+            `(a stall recovers before the next tick; an outage does not).` +
+            sample,
+        });
+      } else if (s.stack?.wedged === true) {
+        // All four circumstantial conditions AND a sample naming one synchronous frame. Those four
+        // alone are jointly satisfied by "went away without launchd noticing" — a different
+        // incident with a different owner — so only the sample can make this class.
+        alert.push({
+          class: 'daemon_wedged',
+          evidence:
+            base +
+            `Persisted across ticks: still unreachable ${Math.round(persisted / 1000)}s after the ` +
+            `first sighting, so a transient stall is ruled out. The process is ALIVE and blocked, ` +
+            `not gone:${sample}`,
         });
       } else {
         alert.push({
@@ -158,7 +186,8 @@ export function classify(s: GuardianSignals): Incident[] {
             `Persisted across ticks: still unreachable ${Math.round(persisted / 1000)}s after the ` +
             `first sighting, so a transient stall is ruled out. Either it is wedged with the ` +
             `socket still held, or it went away without launchd noticing — the probe errors ` +
-            `above tell which.`,
+            `above tell which.` +
+            sample,
         });
       }
     }

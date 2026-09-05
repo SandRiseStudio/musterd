@@ -68,6 +68,28 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
   const classified = handoverDeferred ? [] : classify(signals);
   if (handoverDeferred) d.log('guardian.handover_deferred');
 
+  /**
+   * ADR 389's Eval dataset, written on EVERY tick that reached the sample — armed or not, promoted
+   * or not. The arming decision is supposed to read 30 days of these rows rather than the ADR, and
+   * a row written only when the class was promoted would be a dataset of confirmations: the
+   * sample that said "parked, not held", and the sample that could not be taken at all, are
+   * exactly the rows that could talk anyone out of arming this.
+   */
+  if (signals.stack !== undefined) {
+    d.log(
+      `guardian.sampled ${JSON.stringify({
+        taken: signals.stack.taken,
+        wedged: signals.stack.wedged,
+        frame: signals.stack.frame ?? null,
+        share: signals.stack.share ?? null,
+        samples: signals.stack.total ?? null,
+        pid: signals.stack.pid ?? null,
+        reason: signals.stack.reason ?? null,
+        promoted: classified.some((i) => i.class === 'daemon_wedged'),
+      })}`,
+    );
+  }
+
   const deferred = classified.filter((i) => i.defer === true);
   const incidents = classified.filter((i) => i.defer !== true);
   if (deferred.length > 0) {
