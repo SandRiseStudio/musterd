@@ -2,7 +2,12 @@
 
 - Status: accepted — increments 1–2 built (`kind: service`, the mskd\_ service-token auth path, the
   kind-keyed exclusions, `service install --auto` token delivery, the tick's in-band bounce
-  announcement, and the warn-only census in `init --check`); increments 3–5 open
+  announcement, and the warn-only census in `init --check`). Increments 3–5 disposed 2026-09-04
+  (#1311, lane `01M1MMK3339B06Q328HYWXARJF`): **3 is open** on lane
+  `01M1Q9D90XEP9FPCYPQNBFH73Q` — a live defect, five unattributed LaunchAgents and a job-gone check
+  that cannot see guardian or streamwatch; **4 deferred** until a team wants a seat for automation
+  that is not musterd's own; **5 retracted** — superseded by ADR 241's `wake_lease`, and across 818
+  wakes no service has ever caused one. See the dated disposition below.
 - Date: 2026-08-05
 - Owner: izzo (design session with nick, 2026-08-04/05 — the lane-01KZ7KRG60 session)
 - Relates to: ADR 227 (roles — the system this completes and partly re-aims), ADR 230 (the re-eval
