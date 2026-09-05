@@ -1350,7 +1350,7 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
   // resolveRead default; this one drives the whole PostToolUse one-shot — `inbox --interrupt-check`,
   // the probe that fires on EVERY tool call — and asserts the harm the storm actually did: the live
   // claimant's lease is still valid afterwards. Fails on main @ fcb92af8 with the reclaim default on.
-  it("the interrupt-check one-shot stays silent AND leaves the live claimant's lease intact", async () => {
+  it("the interrupt-check one-shot says its lease is dead AND leaves the live claimant's lease intact", async () => {
     const live = await bindAvaWithStaleLease();
 
     const probe = await run(inboxCommand, ['--interrupt-check']);
