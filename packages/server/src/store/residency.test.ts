@@ -190,6 +190,40 @@ describe('buildWakeContext (ADR 209)', () => {
       objective: { action: 'begin_lane' },
     });
   });
+
+  /**
+   * The case the suite above never had: a reviewer is NOT the lane's owner. Every existing
+   * `buildWakeContext` lane assertion used one seat as both owner and recipient, so the owner-only
+   * rule on the lane path read as satisfied and the reviewer's actual experience went untested.
+   *
+   * Measured 2026-09-04: 83 of 87 `residency.context_read` denials were a seat asking about a lane
+   * it did not own, and 38 of 47 review-edge wakes carried one within ±5 minutes of the wake.
+   */
+  it('a REVIEWER is refused the lane path and served by the act path — which is why the wake line names the act', () => {
+    const { db, team, nick, ada, bob } = seed();
+    const lane = openLane(db, team.id, team.slug, ada.name, {
+      title: 'Owned by ada, reviewed by bob',
+      branch: 'feat/reviewed',
+      claim: true,
+    });
+    // The routed acceptance ask (ADR 225): directed at bob, carrying the daemon-set lane_review.
+    msg(db, team, nick, bob, 'ask', 'rev1', 1_000, {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: lane.id } },
+    });
+
+    // The lane path authorizes by OWNERSHIP, so it must refuse bob — this is correct, not the bug.
+    expect(() => buildWakeContext(db, team, bob, { lane_id: lane.id })).toThrow(/forbidden/i);
+
+    // The act path authorizes by RECIPIENCY and answers with the review packet, lane block attached.
+    // Steering the wake line here is the whole fix: it needs no widened boundary, and unlike the
+    // lane path it does not describe a reviewer's job as `continue_lane`.
+    expect(buildWakeContext(db, team, bob, { act_id: 'rev1' })).toMatchObject({
+      wake: { kind: 'review', act_id: 'rev1' },
+      objective: { action: 'review' },
+      state: { lane: { id: lane.id, owner_seat: ada.name, branch: 'feat/reviewed' } },
+      fetch: ['inbox_thread', 'lane_detail', 'git_artifact', 'seat_memory'],
+    });
+  });
 });
 
 describe('claimWakeLeases — the transactional wake derivation', () => {
@@ -1068,6 +1102,11 @@ describe('claimWakeLeases — work_order derivation (ADR 191 review loop)', () =
     expect(orders[0]!.composed_line).toContain(lane.id);
     expect(orders[0]!.composed_line).not.toContain(lane.title);
     expect(orders[0]!.composed_line).toContain('team_wake_context');
+    // The review line must steer to the ACT, not the lane. `buildWakeContext` authorizes the lane
+    // path by OWNERSHIP, and a reviewer never owns the lane it reviews — a line naming only the lane
+    // sends them at the one path that must refuse them (measured 2026-09-04: 38 of 47 review-edge
+    // wakes carried a `residency.context_read` deny within ±5 minutes).
+    expect(orders[0]!.composed_line).toContain('act_id: "ask1"');
     const leased = listAudit(db, team.id).filter((r) => r.action === 'residency.wake_leased');
     expect(JSON.parse(leased[0]!.detail as string)).toMatchObject({
       derivation: 'work_order',
