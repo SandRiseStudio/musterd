@@ -40,9 +40,17 @@ instead of writing a retention policy — and it is a property of _this_ corpus,
 `VACUUM INTO` for live SQLite so the daemon keeps running. Restore drilled the same day: integrity
 `ok`, every table's row count identical, schema v41 preserved, sweep series 4,714 lines intact.
 
-~~No backup newer than 2026-06-29 (2026-08-17)~~ FIXED 2026-08-18 by ADR 280 — but the snapshot is
+~~No backup newer than 2026-06-29 (2026-08-17)~~ FIXED 2026-08-18 by ADR 280 — ~~but the snapshot is
 **still on the same disk as its source**. Off-machine destination is nick's decision and is not yet
-made, so the exposure today is "one disk, current" rather than "one disk, two months stale."
+made, so the exposure today is "one disk, current" rather than "one disk, two months stale."~~
+SUPERSEDED 2026-09-05 (lane 01M1MMND6B): nick named the second Supabase project — the same
+destination as the ExN archive. First off-machine copy 2026-09-05: 34 artifacts, 184.5 MB → 20.3 MB,
+tarball + MANIFEST.json in private bucket `corpus-backups` under `research-corpus/`, both
+sha256-verified on re-download (falsify: list that prefix and compare hashes). Cadence is explicit
+manual: a fresh snapshot + upload before anything risky (daemon migrations, disk reclaims, OS
+upgrades), owner ghost. No schedule and no automation yet (2026-09-05): the upload reads the backup
+service key from `/Users/nick/agents/.env`, which no launchd job carries — automating that handoff is
+a follow-up, not this lane.
 
 The [sibling corpus](#the-sibling-corpus-exploring-next) has the same disease; the rail is `pnpm dataset:exn-snapshot` (lane 01M1MBV93, 2026-09-04).
 
