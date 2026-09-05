@@ -81,6 +81,7 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
         taken: signals.stack.taken,
         wedged: signals.stack.wedged,
         frame: signals.stack.frame ?? null,
+        entry: signals.stack.entry ?? null,
         share: signals.stack.share ?? null,
         samples: signals.stack.total ?? null,
         pid: signals.stack.pid ?? null,
