@@ -35,6 +35,19 @@ function world(nodes: OfficeNode[]) {
   return { placements, byName };
 }
 
+/**
+ * Step through the sit blend the way the real loop does. `actors.active()` counts walks and gestures
+ * only — it goes false the moment a trip ends, while the member is still lowering into the chair
+ * (`SIT_EASE`, 0.6s). The scene keeps drawing through exactly that gap on its `AFTERGLOW_MS` (2.6s)
+ * settling window, so a test that stops at `active()` is looking at a frame the eye never sees.
+ *
+ * It matters here because the laptop and the dock changed hands on that blend (gptbot, reviewing
+ * #1304): the hand lets go when `sit > 0.9`, which is when the dock takes it.
+ */
+function seated(actors: ReturnType<typeof createActors>, name: string): void {
+  for (let i = 0; i < 60 && (actors.poses().get(name)?.sit ?? 1) <= 0.9; i++) actors.step(0.05);
+}
+
 describe('travelDir', () => {
   it('faces the dominant axis of travel', () => {
     expect(travelDir(0, 0, 10, 0)).toBe('E');
@@ -174,6 +187,7 @@ describe('walk choreography', () => {
     let guard = 0;
     while (actors.active() && guard++ < 2000) actors.step(0.05);
     expect(actors.active()).toBe(false);
+    seated(actors, 'Ada'); // …and down into the chair, where the dock takes the laptop
 
     const back = actors.poses().get('Ada')!;
     expect(back.lx).toBeCloseTo(home.lx, 5);
@@ -599,6 +613,7 @@ describe('errands', () => {
 
     let guard = 0;
     while (actors.active() && guard++ < 2000) actors.step(0.05);
+    seated(actors, 'Ada');
     const done = actors.poses().get('Ada')!;
     expect(done.lx).toBeCloseTo(home.lx, 5);
     expect(done.carry).toBeNull();
@@ -624,6 +639,7 @@ describe('errands', () => {
     }
     expect(sawDoor).toBe(true);
     expect(sawSitWithPlate).toBe(true); // actually ate on the lounge furniture
+    seated(actors, 'Ada');
     const done = actors.poses().get('Ada')!;
     expect(done.lx).toBeCloseTo(home.lx, 5);
     expect(done.carry).toBeNull();
@@ -814,6 +830,7 @@ describe('the phone call', () => {
     expect(sawWalkingOnPhone).toBe(true);
     expect(farthest).toBeGreaterThan(120); // actually went wandering, not a lap of the desk
 
+    seated(actors, 'Ada');
     const done = actors.poses().get('Ada')!;
     expect(done.lx).toBeCloseTo(home.lx, 5);
     expect(done.ly).toBeCloseTo(home.ly, 5);
@@ -1089,7 +1106,43 @@ describe('the laptop on the person (laptop/dock design §0)', () => {
       if (actors.poses().get('Ada')!.carry === 'laptop') carried++;
     }
     expect(carried).toBeGreaterThan(5); // held for the crossing, not a single frame at the threshold
-    expect(actors.poses().get('Ada')!.carry).toBeNull(); // …and docked once they are home and working
+    seated(actors, 'Ada');
+    expect(actors.poses().get('Ada')!.carry).toBeNull(); // …and docked once they are home and SEATED
+  });
+
+  it('holds it through the sit blend — the laptop is never nowhere (gptbot, reviewing #1304)', () => {
+    // The dock fills on `workingAtDesk(node, sit)`, which needs `sit > 0.9`; the carry was read off
+    // `carriesLaptop(node)`, which goes false the moment the roster says `working`. Between those two
+    // thresholds a working member was neither carrying the laptop nor docking it — it existed
+    // NOWHERE for the length of the blend. Reproduced on the sit-down at the end of a water errand:
+    // at home, not walking, sit 0.083, carry null, dock empty.
+    //
+    // One predicate means one predicate, read off the same frame's pose: the hand lets go exactly
+    // when the dock takes it.
+    const { placements, byName } = world([node('Ada')]);
+    const actors = createActors();
+    actors.setHomes(placements, byName, true);
+    for (let i = 0; i < 60; i++) actors.step(0.05); // settle at the desk
+    expect(actors.errandWater('Ada')).toBe(true);
+
+    let sawRamp = false;
+    let guard = 0;
+    while (actors.active() && guard++ < 4000) {
+      actors.step(0.05);
+      const p = actors.poses().get('Ada')!;
+      // At home, mid-sit, and holding no errand prop — the frames where the laptop is the only thing
+      // the hands could have, and the dock does not have it yet.
+      if (!p.moving && p.sit <= 0.9 && p.carry !== 'bottle') {
+        sawRamp = true;
+        expect({ sit: Number(p.sit.toFixed(3)), carry: p.carry }).toEqual({
+          sit: Number(p.sit.toFixed(3)),
+          carry: 'laptop',
+        });
+      }
+    }
+    expect(sawRamp).toBe(true); // the ramp was actually observed, not skipped in one step
+    seated(actors, 'Ada');
+    expect(actors.poses().get('Ada')!.carry).toBeNull(); // seated past 0.9 again: the dock has it
   });
 
   it('an errand outranks the laptop for its duration, and the laptop is back when it ends', () => {
