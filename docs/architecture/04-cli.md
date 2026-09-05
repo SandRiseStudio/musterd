@@ -45,6 +45,7 @@ src/
     theme.ts          // mutable ANSI color instance + roles from brand.md; setColorEnabled wires --no-color (ADR 113)
     ui.ts             // shared layout toolkit: glyph set, termWidth, defList, success/heading/hint, visible-length padding (ADR 113)
     rows.ts           // renderMessageRow, renderStatusTable, renderBanner, renderPresence
+    huddles.ts        // the roster's huddle join (ADR 378): huddleMarks turns deriveHuddles' huddle-major answer into the seat-major one a roll-call row asks — open rooms only, spoken not merely named; owns TIMELINE_WINDOW so `status` and `huddle list` read the same window
     title.ts          // terminal-tab seat title (ADR 160): pure terminalTitleFor decision + best-effort /dev/tty OSC-0 writer, called from the bin.ts postamble
     help.ts           // the pretty grouped/per-command/JSON help renderers + did-you-mean (ADR 113)
     credentials.ts    // v0.3 mint/env renderers: credentialEnv (SPEC A.9) + shown-once agent key / human credential / grant / team-create blocks (ADR 075/076; live post-P3 cutover)

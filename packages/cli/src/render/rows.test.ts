@@ -152,6 +152,23 @@ describe('renderRoster', () => {
     created_at: 0,
   };
 
+  it('marks a seat that is in an open huddle, naming the topic', () => {
+    const ada: MemberSummary = {
+      ...base,
+      id: 'ada',
+      name: 'ada',
+      kind: 'agent',
+      role: '',
+      presence: 'online',
+      activity: 'active',
+      presences: [{ surface: 'claude-code', status: 'online', last_seen_at: 0 }],
+    };
+    const marks = new Map([['ada', 'lane:01KZ']]);
+
+    expect(renderRoster([ada], 0, 120, undefined, marks)).toContain('huddle lane:01KZ');
+    expect(renderRoster([ada], 0, 120)).not.toContain('huddle');
+  });
+
   it('a seat on another machine shows its node label after the surface (presence replication)', () => {
     const remote: MemberSummary = {
       ...base,

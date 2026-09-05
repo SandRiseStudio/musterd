@@ -1,5 +1,6 @@
-import { describeSyncWedge } from '@musterd/protocol';
+import { deriveHuddles, describeSyncWedge } from '@musterd/protocol';
 import type { Parsed } from '../args.js';
+import { huddleMarks, TIMELINE_WINDOW } from '../render/huddles.js';
 import {
   renderMachineLine,
   renderPendingSummary,
@@ -35,8 +36,22 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
   // failure all stay silent. Compact here — the header has five other things to say.
   const memory =
     explicit && identity ? await http.getMemoryEnvelope(team).catch(() => undefined) : undefined;
-  // Surface which daemon + db we're reading, so a wrong-db ("everyone offline") is obvious.
-  const health = await http.health().catch(() => undefined);
+  // Two reads that do not need each other, so they do not queue: `health` surfaces which daemon +
+  // db we are on (a wrong-db "everyone offline" is otherwise a mystery), and the timeline carries
+  // who is in a room (ADR 378) — a huddle is derived, never stored, so the mark
+  // costs the one thing the roster read does not already carry: the recent envelope window. Paid
+  // deliberately, and only when it can be spent — that route is seat-authed and recipient-scoped, so
+  // an ambient identity gets no huddles rather than a failed command, exactly like `pending` and
+  // `memory` above.
+  const [health, timeline] = await Promise.all([
+    http.health().catch(() => undefined),
+    explicit && identity
+      ? http.messages(team, { limit: TIMELINE_WINDOW }).catch(() => undefined)
+      : undefined,
+  ]);
+  const marks = timeline
+    ? huddleMarks(deriveHuddles(timeline.messages, identity?.name ?? ''))
+    : undefined;
 
   // `Identity` carries no kind — the roster is the authority on it, so read it back from there.
   const mine = identity ? res.members.find((m) => m.name === identity.name) : undefined;
@@ -54,7 +69,7 @@ export async function statusCommand(parsed: Parsed): Promise<number> {
     }) + '\n',
   );
   process.stdout.write(
-    '\n' + renderRoster(res.members, undefined, undefined, health?.build) + '\n',
+    '\n' + renderRoster(res.members, undefined, undefined, health?.build, marks) + '\n',
   );
   // ADR 360 follow-on: a wedged push says so here, on the surface a human on this machine reads.
   if (res.sync?.wedged)

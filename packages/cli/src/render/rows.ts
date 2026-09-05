@@ -277,6 +277,8 @@ export function renderRoster(
   now = Date.now(),
   width = termWidth(),
   daemonBuild?: string,
+  /** Seat name → the open huddle it is in (`huddleMarks`, ADR 378). Absent for an unauthed read. */
+  huddles: Map<string, string> = new Map(),
 ): string {
   if (members.length === 0) {
     return theme.meta("nobody's on the team yet") + '\n' + hint('musterd team add <name>');
@@ -288,7 +290,9 @@ export function renderRoster(
     const inGroup = members.filter((m) => groupOf(m) === key);
     if (inGroup.length === 0) continue; // an empty group is not a fact worth a heading
     out.push('', `${heading(label)}  ${theme.meta(String(inGroup.length))}`);
-    const entries = inGroup.map((m) => renderMember(m, key, nameCol, now, width, daemonBuild));
+    const entries = inGroup.map((m) =>
+      renderMember(m, key, nameCol, now, width, daemonBuild, huddles.get(m.name)),
+    );
     // Multi-line entries (a working member, with their status) need air between them or they read as
     // one wall of text; a group of one-liners stays tight. Spacing follows the content, not the group.
     const multiline = entries.some((e) => e.includes('\n'));
@@ -308,10 +312,11 @@ function renderMember(
   now: number,
   width: number,
   daemonBuild?: string,
+  huddle?: string,
 ): string {
   const dot = theme.presenceDot(group === 'out' ? 'offline' : group === 'away' ? 'away' : 'online');
   const head = `  ${dot} ${padEndVisible(theme.memberName(m.name, m.kind), nameCol)}`;
-  const facets = memberFacets(m, group, daemonBuild);
+  const facets = memberFacets(m, group, daemonBuild, huddle);
   const lines = [head + (facets ? theme.meta(facets) : '')];
 
   const indent = ' '.repeat(4);
@@ -334,7 +339,12 @@ const STATUS_MAX_LINES = 2;
  * color alone encodes, and color may be off); role, attested model (ADR 101), and surface when set;
  * lifecycle only when it is not the `forever` default. An absent facet is silence, not a `—`.
  */
-function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): string {
+function memberFacets(
+  m: MemberSummary,
+  group: Group,
+  daemonBuild?: string,
+  huddle?: string,
+): string {
   const parts: string[] = [m.kind];
   // Every held role (ADR 227 multi-role), joined; an older daemon serves only the single label.
   const roles = m.roles?.length ? m.roles.join('+') : m.role;
@@ -364,6 +374,11 @@ function memberFacets(m: MemberSummary, group: Group, daemonBuild?: string): str
     // local row is silent — the machine you are on is not news.
     parts.push(p.node_label ? `${p.surface} @ ${p.node_label}` : p.surface);
   }
+  // A huddle is the one thing on this roster that is a GATHERING rather than a seat, and until now
+  // it was the only thing `status` could not see: a seat in a room looked like any other busy seat.
+  // Accented rather than dim — where the work is happening is context, but who is in a room with
+  // whom is news, and it is rare enough that a bright facet stays rare (ADR 378).
+  if (huddle) parts.push(theme.accent(`huddle ${huddle}`));
   if (m.lifecycle === 'session') parts.push('session');
   // `!= null`, not truthiness: an epoch-0 timestamp is falsy and would silently drop the date.
   if (m.lifecycle === 'until' && m.lifecycle_until != null) {
