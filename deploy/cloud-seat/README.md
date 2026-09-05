@@ -17,11 +17,38 @@ Every step marked **hub** runs on the laptop, in a folder bound to `revive` as a
 | volume `/data/home` | `~/.musterd` (config, SQLite, `node.json`, bindings), team home          | yes               |
 | volume `/data`      | tailscale state, seat workspace (`agents-<seat>`), logs                  | yes               |
 
+The volume is encrypted at rest (Fly's default; `fly volumes list` shows `ENCRYPTED true`).
+
 Secrets arrive as Fly secrets and are never in the image, `fly.toml` or the repo. The machine
-receives only what the design allows: the tailnet key (single use), the seat name, one invite code,
-a GitHub token for the work repo, and one model credential. It does **not** receive the hub's team
-agent key: that key is daemon-private (the wake endpoints check the bearer against the local team
-row), so the joiner mints its own at first boot and binds the seat with it.
+receives only what the job needs — the trust boundary is written down in
+[ADR 390](../../docs/decisions/390-the-cloud-seat-holds-what-its-job-needs.md):
+
+| secret                    | who needs it                          | lifetime on the machine                                       |
+| ------------------------- | ------------------------------------- | ------------------------------------------------------------- |
+| `TAILSCALE_AUTHKEY`       | `tailscaled`, first boot              | spent on first boot; scrubbed from the env before root drops  |
+| `MUSTERD_INVITE`          | `musterd node join`, first boot       | spent on first boot; scrubbed before the wake actuator starts |
+| `MUSTERD_SEAT`            | every step                            | the whole run                                                 |
+| `ROSTER_REPO`, `GH_TOKEN` | `gh` (clone, push), the seat's work   | the whole run — the seat's work is git                         |
+| model credential          | the woken `claude -p`                 | the whole run                                                 |
+
+It does **not** receive the hub's team agent key: that key is daemon-private (the wake endpoints
+check the bearer against the local team row), so the joiner mints its own at first boot and binds
+the seat with it. **The entrypoint refuses to boot if `MUSTERD_AGENT_KEY` is set** — a stale
+`fly secrets set` is the way it would come back.
+
+### Who runs as what
+
+`entrypoint.sh` is the root phase: it brings the tailnet up (kernel networking needs `/dev/net/tun`
+and the `tailscaled` socket), resolves the hub, chowns the seat's part of the volume once, and
+`setpriv`s into `seat.sh` as the unprivileged `seat` user (uid 1000, no inheritable capabilities).
+The daemon, `git`, `gh`, the wake actuator and every `claude -p` it spawns run as `seat`.
+`tailscaled` is the one root process left. Check it on a live machine:
+
+```sh
+fly ssh console --app musterd-seat-$SEAT -C "ps -eo user,comm --no-headers" | sort | uniq -c
+#   1 root tailscaled        ← the only root line
+#   … seat musterd / node / claude / bash
+```
 
 ## Create **$**
 
@@ -35,10 +62,15 @@ Mint the three one-time credentials, each on its own machine:
 
 ```sh
 # tailnet — Tailscale admin console → Settings → Keys → generate: reusable OFF, ephemeral OFF,
-# tag it if the tailnet uses ACL tags. Copy once.
+# pre-authorized ON, tags: tag:musterd-seat (§Tailnet policy below — the tag is what scopes the
+# node's reach; an untagged node can reach the whole tailnet). Copy once.
 # hub: the invite (single use, 15 minutes — mint it right before `fly deploy`)
 musterd node invite --label "fly seat $SEAT"          # → msinv_…
-# a GitHub fine-grained token: contents read/write + pull requests on SandRiseStudio/musterd
+# GitHub — a FINE-GRAINED token (github.com → Settings → Developer settings → Fine-grained tokens),
+# resource owner SandRiseStudio, "only select repositories": the work repo AND the roster repo.
+# Permissions — musterd: Contents read/write, Pull requests read/write, Metadata read (implied);
+#               musterd-revive: Contents read (the joiner clones the roster; it never pushes it).
+# NOT a `gh auth login` token (gho_…): that is your whole account, every org, every repo.
 # model credential: ANTHROPIC_API_KEY (metered) or `claude setup-token` on a Max account
 ```
 
@@ -51,6 +83,47 @@ fly secrets set --app musterd-seat-$SEAT --stage \
   GH_TOKEN=github_pat_… \
   CLAUDE_CODE_OAUTH_TOKEN=…        # or ANTHROPIC_API_KEY=…
 ```
+
+Never `MUSTERD_AGENT_KEY` (the boot refuses it). After the first boot the two one-shots are spent —
+the tailnet identity and the enrollment both live on the volume — so take them off the machine;
+`unset` restarts it, so do this once, with the next redeploy:
+
+```sh
+fly secrets unset --app musterd-seat-$SEAT --stage TAILSCALE_AUTHKEY MUSTERD_INVITE
+```
+
+## Tailnet policy
+
+A seat machine is a **seat**, not an operator's laptop: it needs exactly one thing on the tailnet,
+the hub's daemon port, and nothing needs to reach it. Tailscale ACLs are the operator's (admin
+console → Access controls); the runbook records the policy the seat is built to. Tag the auth key
+`tag:musterd-seat` and the node inherits this on first boot:
+
+```jsonc
+{
+  "tagOwners": { "tag:musterd-seat": ["autogroup:admin"] },
+  "acls": [
+    // a seat reaches the hub's daemon port on the laptop, and nothing else on the tailnet
+    { "action": "accept", "src": ["tag:musterd-seat"], "dst": ["nicks-laptop:4849"] },
+    // operators keep full reach (your existing rule); nothing needs to reach a seat
+    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:member:*"] },
+  ],
+}
+```
+
+Check it from the VM — the hub answers, a neighbour does not:
+
+```sh
+fly ssh console --app musterd-seat-$SEAT -C "curl -s -m 2 -o /dev/null -w '%{http_code}\n' http://<hub ip>:4849/health"   # 200
+fly ssh console --app musterd-seat-$SEAT -C "curl -s -m 2 -o /dev/null -w '%{http_code}\n' http://<hub ip>:22/"          # 000 (refused/timed out)
+```
+
+Not ephemeral: an ephemeral node is removed from the tailnet when it goes offline, and a parked
+seat (`fly machine stop`) would lose its identity and need a fresh key every unpark. The state on
+the volume is what makes the key single-use.
+
+An existing node with no tag (delta, enrolled 2026-09-04) is re-tagged from the admin console
+(Machines → the node → Edit ACL tags); it does not need a new key.
 
 ## First boot **$**
 
@@ -145,6 +218,26 @@ The full record is `docs/perf/cloud-seat.md`. The four that changed the script o
   actuator polled its own daemon into `401` on every tick. The joiner now mints its own key.
 - **`musterd agent --path` makes a bare folder, not a worktree.** Run inside the checkout with no
   path flag and the seat gets a real worktree (`/data/musterd-<seat>`, branch `agent/<seat>`).
+
+## What the least-privilege pass changed (2026-09-05, ADR 390)
+
+The lane found the machine holding four things its job does not need: root for every process, the
+hub's team agent key as a live Fly secret, an untagged tailnet node, and a `gh auth login` token in
+place of the fine-grained one this runbook always described. The first two are fixed in the image
+and the entrypoint (§Who runs as what; the boot refusal); the other two are operator steps this
+runbook now spells out (§Create, §Tailnet policy). For a machine deployed before this pass:
+
+```sh
+fly secrets unset --app musterd-seat-$SEAT --stage MUSTERD_AGENT_KEY TAILSCALE_AUTHKEY MUSTERD_INVITE
+fly secrets set   --app musterd-seat-$SEAT --stage GH_TOKEN=github_pat_…     # the fine-grained one
+fly deploy --config deploy/cloud-seat/fly.toml --dockerfile deploy/cloud-seat/Dockerfile \
+  --app musterd-seat-$SEAT --ha=false                                        # applies the staged set
+fly logs --app musterd-seat-$SEAT | grep -E 'chown|dropping root|not root'   # the one-time migration
+```
+
+The volume from the root-era image is migrated on that boot (`chown … (one-time)` in the log), and
+then re-tag the node in the Tailscale admin console. What the machine still holds by design — the
+full team replica — is recorded in ADR 390 with the increment that would narrow it.
 
 Still open: residency enrollment does not replicate, so the hub roster shows the seat plain
 `offline` while the joiner shows `offline · wakeable`; the hub's `residency status` lists the
