@@ -40,7 +40,7 @@ the seat with it. **The entrypoint refuses to boot if `MUSTERD_AGENT_KEY` is set
 
 `entrypoint.sh` is the root phase: it brings the tailnet up (kernel networking needs `/dev/net/tun`
 and the `tailscaled` socket), resolves the hub, chowns the seat's part of the volume once, and
-`setpriv`s into `seat.sh` as the unprivileged `seat` user (uid 1000, no inheritable capabilities).
+`setpriv`s into `seat.sh` as the unprivileged `seat` user (uid 1001 — the base image already holds 1000 as `node` — no inheritable capabilities).
 The daemon, `git`, `gh`, the wake actuator and every `claude -p` it spawns run as `seat`.
 `tailscaled` is the one root process left. Check it on a live machine:
 
