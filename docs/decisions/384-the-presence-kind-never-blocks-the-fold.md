@@ -115,3 +115,17 @@ become the rule for everything.
    stop that would never clear.
 3. `sync/fold.test.ts`, the unit-level pair, likewise rewritten. Both predecessors asserted the old
    contract; the diff between them is the decision.
+
+## Record note — the commit subjects name the wrong numbers
+
+Two commit subjects from the session that landed this decision carry ADR numbers that a
+parallel-branch collision later moved. The files are right; the git record misdirects:
+
+- `2ffeeab2` says "ADR 382: a misreported model is not an observation" (#1292). That decision is
+  [ADR 383](383-a-misreported-model-is-not-an-observation.md).
+- `c73c5657` says "the presence kind never blocks the fold (ADR 383, superseding part of 382)"
+  (#1297). That decision is this one, ADR 384.
+
+A reader chasing "ADR 383" from the ADR 109 attribution trail lands on the model-attestation
+decision, not the fold. Noted here rather than rewritten, since the commits are already on `main`.
+Found by ryder at acceptance of `01M1NFHEKT`, 2026-09-04.
