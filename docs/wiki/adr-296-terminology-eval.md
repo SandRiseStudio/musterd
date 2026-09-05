@@ -123,7 +123,7 @@ exactly the distinction a regex cannot make. A Not word is wrong only when used 
 canonical term, and use-vs-mention masking does not reach that: it separates code from prose, not
 one sense from another.
 
-Resolution (#TBD, lane 01M1S60VA1): the claim narrowed rather than the gate widening. brand.md §5
+Resolution (#1332, lane 01M1S60VA1): the claim narrowed rather than the gate widening. brand.md §5
 now names the linted four outright and says the rest of the Not column is authorial guidance held
 in review; the Decision carries a dated marker and the substance is a Consequences note. Gate
 behaviour is unchanged — the same four words are banned as before. `lintedSetDrift`
