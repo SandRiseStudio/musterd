@@ -361,6 +361,19 @@ up() {
   # above, one layer in. A seat that must be MEASURED must be a seat that is SEATED.
   as_seat "$SEATDIR/$D" send --to @team --act status_update "at my desk, reading" >/dev/null 2>&1 || true
 
+  # An OPEN HUDDLE, so the huddle rail (ADR 378 increment 2) has ink to measure. Without it the rail
+  # renders nothing and the sweep goes green on a surface it never saw — the same "green by losing
+  # part of the subject" failure the room block above documents. Two turns and a named seat that has
+  # not spoken, because `.lc-huddle__silent` and `.lc-huddle__count` are their own (quietest) inks.
+  HUDDLE_ID="$(as_seat "$SEATDIR/$A" huddle open --topic lane:01FIXTURELANE     --anchor docs/design/asks-rail.md --to "$B,$C" --turns 6     "the asks rail arc — ring or bar?" --json 2>/dev/null     | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).huddle_id??'')}catch{}})")"
+  if [ -n "$HUDDLE_ID" ]; then
+    as_seat "$SEATDIR/$B" huddle say "$HUDDLE_ID" --act challenge       "why a ring at all when the strip already has the tier?" >/dev/null 2>&1 || true
+    as_seat "$SEATDIR/$A" huddle say "$HUDDLE_ID"       "because the tier is a colour and the clock is a shape" >/dev/null 2>&1 || true
+  else
+    echo "✗ a11y fixture: could not open the huddle the rail is measured on" >&2
+    exit 1
+  fi
+
   # The asks rail, loud. One per tier: the tier chips and their countdown clocks are separate inks,
   # and a rail with nothing in it renders exactly one quiet line.
   as_seat "$SEATDIR/$A" send --to evan --act ask --meta species=consult --meta tier=advisory \

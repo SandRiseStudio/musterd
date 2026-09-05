@@ -1,7 +1,9 @@
-import type { LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
+import type { Envelope, LaneBoard, MemberSummary, WorkingHours } from '@musterd/protocol';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { MusterdWord } from '../brand/MusterdWord';
 import { memberColor, memberPosture } from './format';
+import { gatheredFrom } from './huddles';
+import { HuddleRail } from './HuddleRail';
 import type { OfficeData, OfficeHandle } from './office-scene';
 import { actToEvent, speechEventFor } from './office-scene/mapping';
 import { CollapseButton, PanelRail } from './PanelChrome';
@@ -26,12 +28,16 @@ function computeData(
   roster: MemberSummary[],
   entries: RoomEntry[],
   board: LaneBoard | null,
+  envelopes: Envelope[],
 ): OfficeData {
   const byName = new Map(entries.map((e) => [e.name, e]));
   return {
     teamName,
     teamWorkingHours,
     wallBoard: projectWallBoard(board),
+    // Who is in an open huddle right now (ADR 378 increment 2) — folded from the timeline the page
+    // already holds, so both surfaces gather without either route wiring anything.
+    gathered: [...gatheredFrom(envelopes)],
     nodes: roster.map((m) => {
       const kind = m.kind === 'human' ? 'human' : 'agent';
       const live =
@@ -139,8 +145,8 @@ export function OfficeScene({
 
 
   const data = useMemo(
-    () => computeData(teamName, teamWorkingHours, roster, entries, board),
-    [teamName, teamWorkingHours, roster, entries, board],
+    () => computeData(teamName, teamWorkingHours, roster, entries, board, envelopes),
+    [teamName, teamWorkingHours, roster, entries, board, envelopes],
   );
   // Latest-value refs for the mount effect below, which subscribes ONCE and must not re-run when a
   // prop identity changes (re-running it would tear down and rebuild the whole canvas scene).
@@ -288,8 +294,18 @@ export function OfficeScene({
             <WorkStack entries={entries} caption={caption} captionColor={captionColor} />
           </div>
         )}
-        {/* The asks rail floats over the top of the room the way the reel floats over the bottom. */}
-        {!collapsed && topSlot && <div className="lc-office__asks">{topSlot}</div>}
+        {/* The asks rail floats over the top of the room the way the reel floats over the bottom —
+            and the huddle rail stacks directly beneath it in the same box, so the two never overlap
+            however tall either grows. The rail is mounted HERE, inside the room, rather than in a
+            route's slot: the office frames its own huddles, and one mount is what makes /live and
+            /broadcast show the same rooms without either route wiring anything (the officeRoom
+            parity argument). It renders nothing until a huddle is open. */}
+        {!collapsed && (
+          <div className="lc-office__asks">
+            {topSlot}
+            <HuddleRail envelopes={envelopes} roster={roster} roomLink={!broadcast} />
+          </div>
+        )}
         {/* The product's mark on the room itself — for every frame that leaves this app (a clip, a
             screenshot, the stream), quiet enough to live under everything. The overlay card carries
             the TEAM's name; this corner carries the product's. */}

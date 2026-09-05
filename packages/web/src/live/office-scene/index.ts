@@ -1645,7 +1645,7 @@ export function mountOffice(
     teamName = next.teamName ?? 'revive';
     teamWorkingHours = next.teamWorkingHours ?? null;
     wallBoard = next.wallBoard ?? null;
-    placements = assignSeats(next.nodes);
+    placements = assignSeats(next.nodes, new Set(next.gathered ?? []));
     const byName = new Map(next.nodes.map((n) => [n.name, n]));
     // The overhead lights follow occupancy: on while anyone's online on the floor, off once the room empties.
     occupied = next.nodes.some((n) => n.presence === 'online');

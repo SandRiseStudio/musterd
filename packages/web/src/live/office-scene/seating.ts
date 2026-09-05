@@ -133,6 +133,20 @@ function probe(name: string, taken: boolean[]): number {
   return -1;
 }
 
+/** Indexes into `LEISURE_SPOTS` for the meeting table's chairs — where a huddle gathers. */
+const MEETING_SPOTS: number[] = LEISURE_SPOTS.map((s, i) => (s.zone === 'meeting' ? i : -1)).filter(
+  (i) => i >= 0,
+);
+
+/** Hash → linear-probe within a SUBSET of the leisure spots (the meeting table). `-1` when full. */
+function probeSubset(name: string, indexes: number[], taken: boolean[]): number {
+  const free = indexes.filter((i) => !taken[i]);
+  if (free.length === 0) return -1;
+  const pick = free[hash(name) % free.length]!;
+  taken[pick] = true;
+  return pick;
+}
+
 /**
  * Deterministic, stable seat assignment — **independent of roster array order**. Posture decides the
  * zone (ADR 138/140): `working` members compete for a desk, `idle` members take the room's leisure
@@ -146,7 +160,10 @@ function probe(name: string, taken: boolean[]): number {
  * when the leisure furniture is full — so a desk is never occupied by someone idle while a couch sits
  * empty. That inversion is the whole contract: on this floor, an occupied desk means work in progress.
  */
-export function assignSeats(members: Seatable[]): Map<string, Placement> {
+export function assignSeats(
+  members: Seatable[],
+  gathered: ReadonlySet<string> = new Set(),
+): Map<string, Placement> {
   const out = new Map<string, Placement>();
   const desks = new Array<boolean>(DESK_SLOTS.length).fill(false);
   const spots = new Array<boolean>(LEISURE_SPOTS.length).fill(false);
@@ -156,10 +173,27 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
   const away = present.filter((m) => isAway(m));
   const rest = present.filter((m) => !isAway(m));
 
+  // The huddle gathers FIRST — before the lounge, before the desks. A seat taking turns in an open
+  // huddle is doing that, not sitting at its desk, so the table wins over both zones (ADR 378
+  // increment 2). Four chairs and no more: the fifth participant stays wherever they were, because
+  // the alternative is drawing a chair that does not exist to make a picture come out even.
+  //
+  // Present-and-not-away only. Being gathered is a reading of the THREAD, and a thread has no
+  // presence — an away or offline participant who spoke an hour ago is not in the room now, and
+  // seating them at the table would be the floor telling a nicer story than the roster's.
+  const gatheredHere = rest.filter((m) => gathered.has(m.name));
+  for (const m of gatheredHere) {
+    const spot = probeSubset(m.name, MEETING_SPOTS, spots);
+    if (spot >= 0) out.set(m.name, { kind: 'leisure', spot });
+  }
+  const seatedAtTable = new Set([...out.keys()]);
+
   // Active (between claims) first — they have first call on the leisure furniture, and the desks
   // they'd otherwise hold. dnd never lounges: away-posture from a dnd fold still means at-desk.
   const spilled: Seatable[] = [];
-  for (const m of rest.filter((m) => m.posture === 'active' && !isDnd(m))) {
+  for (const m of rest.filter(
+    (m) => m.posture === 'active' && !isDnd(m) && !seatedAtTable.has(m.name),
+  )) {
     const spot = probe(m.name, spots);
     if (spot >= 0) out.set(m.name, { kind: 'leisure', spot });
     else spilled.push(m); // lounge full — they wait it out at a desk, below
@@ -171,7 +205,8 @@ export function assignSeats(members: Seatable[]): Map<string, Placement> {
     if (slot >= 0) out.set(m.name, { kind: 'desk', slot });
     else out.set(m.name, { kind: 'strip', index: overflow++ });
   };
-  for (const m of rest) if (m.posture !== 'active' || isDnd(m)) toDesk(m);
+  for (const m of rest)
+    if ((m.posture !== 'active' || isDnd(m)) && !seatedAtTable.has(m.name)) toDesk(m);
   for (const m of spilled) toDesk(m);
 
   // Stepped-away members keep their desk without a body (jacket over the chair): the same

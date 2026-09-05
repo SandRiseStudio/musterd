@@ -1,6 +1,10 @@
 import type { Act } from './acts.wire.js';
-import { eligibleOf } from './envelope.js';
 import type { Envelope } from './envelope.js';
+// The one VALUE import here, and it comes from the wire module on purpose: this fold is what the
+// browser reads a room with, and a value pulled from `envelope.js` would pull zod in behind it
+// (~20 KB gzipped on /live, repaid in #1307). `eligibleOf` is defined in `envelope.wire.ts` and
+// merely re-exported by the schema module, so this costs nothing and cannot drift.
+import { eligibleOf } from './envelope.wire.js';
 
 /**
  * The huddle lens (ADR 378): fold an envelope timeline into the huddles it contains.

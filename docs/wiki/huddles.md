@@ -92,5 +92,19 @@ Falsify: `pnpm --filter @musterd/server exec vitest run src/store/interrupts.tes
 | the convene switch and its rail | `packages/protocol/src/residency.ts` (`convene_huddles`), `packages/server/src/store/residency.ts`, `residency.test.ts` |
 | the whiteboard accepts that payload | `packages/whiteboard/src/service.test.ts` ("accepts a huddle layout") |
 
-Increment 2 (the office gathering on `/live` and the pop-out canvas) projects from the thread and presence on the firehose.
+### And on `/live` and `/broadcast` (2026-09-04, increment 2)
+
+A huddle shows on both web surfaces at once, from the timeline the page already holds — the backfill plus the `team-all` firehose (ADR 061). No endpoint, no room state, no socket to the whiteboard.
+
+- **A rail under the asks rail**, one row per open huddle: the topic, the line it opened on, the turns taken against the turns declared, who is gathered, who was named and has not spoken, the anchor, and a link out to the room. It renders nothing until a huddle is open, and the link is dropped on `/broadcast` where nobody can click it.
+- **The floor gathers** (2026-09-04). Everyone taking turns in an open huddle is seated at the meeting table, ahead of both the lounge and their own desk — four chairs and no more, and the fifth participant stays where they were rather than have the room draw a chair that does not exist. Named-but-silent seats are NOT seated: being named is an invitation, and a thread has no presence, so an away or offline participant who spoke an hour ago is not in the room now. Falsify: `packages/web/src/live/office-scene/seating.test.ts` ("the huddle gathers at the meeting table") — five cases, verified red against the unmodified `assignSeats`.
+- **The budget is displayed and never enforced.** Going over changes the words (`9 of 6 turns — over`) and nothing else: nothing on the page closes a huddle, hides one, or greys it out. A surface that quietly dropped an over-budget huddle would be enforcing the rule the daemon deliberately refuses (§4 above).
+
+The rail is mounted inside `OfficeScene`, not in either route's slot — one mount is what makes the two surfaces agree without either route wiring anything, the same argument `officeRoom` settles for the rest of the room's facts.
+
+**Trap, measured the day this landed.** The huddle fold is a VALUE import, and `@musterd/protocol` builds its schemas at module scope: importing `deriveHuddles` from the barrel pulled zod back into the browser and blew both JS budgets at once (+20 KB gzipped, undoing #1307's repayment). The browser takes it from `@musterd/protocol/wire`, which now re-exports `huddleView.js`; `packages/web/src/live/huddles.test.ts` holds that as a source guard, because the budget gate only catches it after a build and only while the budget has headroom to lose. Measured cost of the whole increment: total JS gzip 228.6 → 230.7 KB, initial 132.0 → 133.3 KB, both inside budget — no raise.
+
+Falsify: `scripts/a11y/fixture-team.sh up` now opens a huddle, so the connected `/live` sweep measures the rail. It found two nodes below AA the first time it could see them (white initials on `memberColor`, 1.45:1 — the floor's fill is not the avatar's), which is the evidence for seeding the fixture rather than eyeballing the rail.
+
+
 Follows-up: deferred — opened against ADR 378 when increment 1 has had one real huddle (2026-09-03)

@@ -850,6 +850,116 @@
   background: var(--lc-ground-2);
 }
 
+/* The two rails share one box and stack — the asks rail above, the huddle rail beneath it. Column
+   flow rather than a second absolute box: an asks rail that grows a row must push the huddles down,
+   never sit on top of them, and nothing here should need a magic top offset to stay clear. */
+.lc-office__asks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-2);
+}
+
+/* ─── huddles: several seats on one topic (ADR 378) ───────────────────────
+   One row per open huddle, under the asks rail. Opaque paper for the same reason the asks rail's is
+   (see above): over the room the 12% bleed is a live WebGL floor, and quiet ink over a moving floor
+   is a contrast ratio that depends on where a character is standing. */
+.lc-huddles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lc-2);
+}
+
+.lc-huddle {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--lc-2) var(--lc-4);
+  border: 1px solid var(--lc-border);
+  border-radius: var(--lc-r-sm);
+  background: var(--lc-ground-2);
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.lc-huddle__head,
+.lc-huddle__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lc-4);
+  min-width: 0;
+}
+
+.lc-huddle__topic {
+  color: var(--lc-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The opening line takes whatever room is left and gives it up first. */
+.lc-huddle__line {
+  color: var(--lc-muted);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-huddle__seats {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lc-2);
+  white-space: nowrap;
+}
+
+/* The gathered seats as dots of their own colour — the same hue the floor and the roster draw them
+   in, so the three surfaces name one member one way. The FILL is `memberAvatar`, not `memberColor`:
+   a circle carrying a white letter is text on a fill, and the floor's lighter fill measured 1.45:1
+   here (the a11y gate, once the fixture opened a huddle for it to see). The initials are decoration
+   over the names beside them, which is what a reader gets the roll-call from. */
+.lc-huddle__seat {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--lc-huddle-hue, var(--lc-surface-2));
+  color: #fff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.lc-huddle__who {
+  color: var(--lc-dim);
+}
+
+.lc-huddle__silent,
+.lc-huddle__count {
+  color: var(--lc-faint);
+  white-space: nowrap;
+}
+
+/* Where the output lands (ADR 378) — the quietest thing on the row and the first to give up width,
+   because a huddle's anchor matters most when you are about to close it. */
+.lc-huddle__anchor {
+  color: var(--lc-faint);
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Over what it declared. It says so and stays — the surface never enforces a budget the daemon
+   refuses to keep (ADR 378 §4), so this is a colour, not a state change. */
+.lc-huddle.is-spent .lc-huddle__count {
+  color: var(--lc-warn-ink);
+  font-weight: 600;
+}
+
 /* ─── the room's watermark ────────────────────────────────────────────────
    The only place the brand appears inside the scene itself — bottom-right, opposite the reel card,
    quiet enough to live under everything. It exists for the frame that leaves this app: a clip or a
