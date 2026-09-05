@@ -1417,6 +1417,13 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
   // Model attestation (ADR 101): explicit opt wins, else the shared env resolution — resolved once
   // so a reconnecting frame attests the same value.
   const attestedModel = opts.model ?? resolveAttestedModel(process.env);
+  // ADR 131 §6: the live claim carries what animates this session, on the same gate the ambient
+  // header and the stateless mirror use — never from a human `mscr_` credential. Until now this
+  // path sent workspace, model and build but no provenance, so every CLI-claimed seat attached
+  // with none (measured 2026-09-05: 3582 cli `presence.attached` rows with a null provenance).
+  const attestedProvenance = opts.key.startsWith(TOKEN_PREFIXES.credential)
+    ? undefined
+    : resolveAttestedProvenance(process.env);
   let heartbeat: NodeJS.Timeout | undefined;
   let subscribed = false;
   let terminal = false;
@@ -1454,6 +1461,8 @@ export function watchClaim(opts: WatchClaimOpts): { close: () => void } {
           ...(attestedModel !== undefined ? { model: attestedModel } : {}),
           // Build attestation (ADR 135): this CLI dist's own stamp.
           ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),
+          // Provenance (ADR 131 §6) — the server applies the authoritative agent-only gate.
+          ...(attestedProvenance !== undefined ? { provenance: attestedProvenance } : {}),
         }),
       ),
     );
