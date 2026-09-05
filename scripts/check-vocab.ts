@@ -223,6 +223,37 @@ function glossaryDrift(root: string): string[] {
       );
     }
   }
+  errors.push(...lintedSetDrift(section));
+  return errors;
+}
+
+/**
+ * brand.md §5 claimed the whole Not column was "enforced on new docs, not merely published"; four
+ * of its 21 words were linted and the other 17 could not be — `adapter`, `connection`,
+ * `participant` and the rest carry a legitimate second sense in this repo (lane 01M1S60VA1,
+ * 2026-09-05). The claim is now the narrow true one, and this check keeps it true: brand.md §5
+ * must name exactly the words `terminologyBans()` returns, so adding or dropping a banned term
+ * without editing the sentence fails the gate rather than re-opening the same drift.
+ */
+function lintedSetDrift(section: string): string[] {
+  const line = section.split('\n').find((l) => l.includes('Linted outright'));
+  if (!line)
+    return [
+      '✗ docs/design/brand.md §5 — missing the "Linted outright" sentence naming the linted set (ADR 296, lane 01M1S60VA1)',
+    ];
+  const named = new Set([...line.matchAll(/\*\*([a-z]+)\*\*/g)].map((m) => m[1]!));
+  const linted = new Set(TERMINOLOGY_BANNED.map((b) => b.word));
+  const missing = [...linted].filter((w) => !named.has(w)).sort();
+  const extra = [...named].filter((w) => !linted.has(w)).sort();
+  const errors: string[] = [];
+  if (missing.length)
+    errors.push(
+      `✗ docs/design/brand.md §5 — "Linted outright" does not name banned term(s): ${missing.join(', ')} (source: docs/glossary/terms.ts)`,
+    );
+  if (extra.length)
+    errors.push(
+      `✗ docs/design/brand.md §5 — "Linted outright" names word(s) the gate does not ban: ${extra.join(', ')} (source: docs/glossary/terms.ts)`,
+    );
   return errors;
 }
 

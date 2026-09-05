@@ -32,7 +32,8 @@ A launch-day stranger meets all of this at once.
 ## Decision
 
 **One meaning per word, one word per meaning — with the Not column enforced, not merely
-published.**
+published.** _(Amended 2026-09-05: the second clause overstated the gate and always did — four
+Not-column words are linted, seventeen are not and cannot be; see the Consequences note.)_
 
 ### 1. The vocabulary
 
@@ -263,3 +264,25 @@ Old ADRs keep their words. Corrections invalidate-date rather than overwrite, pe
   on any workspace (ADR 324). `.musterd/roles/` now belongs solely to the roster-role TOML
   library. Kept, as different seams: the provisioned-manifest legacy `role` read and the MCP
   coercion input aliases.
+
+- **2026-09-05 (the "enforced" clause corrected, miley, lane 01M1S60VA1).** sloane read the
+  Decision's second clause — "the Not column enforced, not merely published" — against the gate
+  and found it false, and it was false the day it was written. `docs/glossary/terms.ts` has 19
+  entries; `terminologyBans()` returns only the `status: 'banned'` rows, which is **four** words
+  (kit, profile, template, worktree). The Not columns publish **21** distinct words, so seventeen
+  — adapter, agent, channel, client, connection, event, kind, participant, project, room, seat,
+  session, status, swarm, type, user, verb — are linted by nothing. The enforceable subset among
+  them is **empty**, which is the substantive finding rather than the count: every one of the
+  seventeen has a legitimate second sense in this repo's own gated prose (the MCP *adapter*, a
+  WebSocket *connection*, a huddle *participant* per ADR 378, an audited *verb*, a huddle *room*),
+  and *agent*, *seat* and *session* are canonical terms of this very glossary. Banning any of them
+  buys suppressions, not clarity — the indictment metric this ADR pre-registered, arrived at from
+  the other end. Resolution: the claim narrows to the true one rather than the gate widening.
+  brand.md §5 now names the linted four and says plainly that the rest of the Not column is
+  authorial guidance held in review, because "wrong only when used *as* the canonical term" is a
+  judgement no regex makes. `lintedSetDrift` in `scripts/check-vocab.ts` keeps the sentence and
+  `terminologyBans()` in step in both directions, so adding or dropping a banned term without
+  editing brand.md fails the gate instead of re-opening this drift. Nothing about the gate's
+  behaviour changes: the same four words are banned today as yesterday. Falsify the numbers with
+  `node -e` over `terminologyBans()` and a count of the distinct Not entries, or read
+  [the ADR 296 eval](../wiki/adr-296-terminology-eval.md).

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -30,7 +30,14 @@ function repo(files: Record<string, string>): string {
   const glossary = GLOSSARY.filter((g) => g.status === 'canonical')
     .map((t) => `**${t.term[0]!.toUpperCase()}${t.term.slice(1)}** — .`)
     .join('\n');
-  write(dir, 'docs/design/brand.md', `## 5. Glossary\n\n${glossary}\n`);
+  const linted = GLOSSARY.filter((g) => g.status === 'banned')
+    .map((t) => `**${t.term}**`)
+    .join(', ');
+  write(
+    dir,
+    'docs/design/brand.md',
+    `## 5. Glossary\n\nLinted outright: ${linted}.\n\n${glossary}\n`,
+  );
   for (const [rel, body] of Object.entries(files)) write(dir, rel, body);
   return dir;
 }
@@ -161,6 +168,36 @@ describe('glossary source (ADR 296)', () => {
   it('bans profile/kit/template/worktree', () => {
     const banned = GLOSSARY.filter((t) => t.status === 'banned').map((t) => t.term);
     expect(banned).toEqual(expect.arrayContaining(['profile', 'kit', 'template', 'worktree']));
+  });
+
+  it('fails when brand.md §5 does not name a linted word (lane 01M1S60VA1)', () => {
+    const root = repo({});
+    const brand = join(root, 'docs/design/brand.md');
+    writeFileSync(brand, readFileSync(brand, 'utf8').replace('**worktree**', 'and the rest'));
+    const r = checkVocab(root);
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e) => e.includes('Linted outright') && e.includes('worktree'))).toBe(
+      true,
+    );
+  });
+
+  it('fails when brand.md §5 names a word the gate does not ban', () => {
+    const root = repo({});
+    const brand = join(root, 'docs/design/brand.md');
+    writeFileSync(
+      brand,
+      readFileSync(brand, 'utf8').replace('Linted outright:', 'Linted outright: **swarm**,'),
+    );
+    const r = checkVocab(root);
+    expect(r.ok).toBe(false);
+    expect(r.errors.some((e) => e.includes('does not ban') && e.includes('swarm'))).toBe(true);
+  });
+
+  it('the real brand.md names exactly the linted set', () => {
+    // Not a fixture: the shipped brand.md against the shipped glossary, so the sentence and
+    // terminologyBans() cannot drift apart the way the "enforced" claim did.
+    const r = checkVocab(join(import.meta.dirname, '..'));
+    expect(r.errors.filter((e) => e.includes('Linted outright'))).toEqual([]);
   });
 
   it('fails when brand.md §5 drops a canonical term', () => {

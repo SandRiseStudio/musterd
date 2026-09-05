@@ -100,5 +100,56 @@ unbackticked "profile" in a new `help/` file → caught; **Toolkit** dropped fro
 glossary drift caught; dead path in `USER_FACING_BASELINE` → rot caught. Plus
 `scripts/check-vocab.test.ts` (15 tests) green.
 
+## The Not column was never enforced — 17 of its 21 words are linted by nothing (2026-09-05; falsify: `terminologyBans()` against the distinct Not entries in `docs/glossary/terms.ts`)
+
+The ADR's Decision says "with the Not column enforced, not merely published", and brand.md §5 said
+"the Not column is enforced on new docs, not merely published". Both were false on the day they
+were written, and the eval above did not catch it because it measured the *burn-down* — the files
+the gate scans — never the *table* the gate scans them against.
+
+Measured 2026-09-05 at 4a0f8b42: `docs/glossary/terms.ts` holds 19 entries; `terminologyBans()`
+filters `status === 'banned'`, which is **four** words — kit, profile, template, worktree. The Not
+columns publish **21** distinct words, so **seventeen** of them are linted by nothing (2026-09-05; falsify: collect `not[]` across `GLOSSARY` into a set and subtract `terminologyBans()`) — adapter, agent, channel, client, connection, event, kind, participant, project, room, seat, session, status, swarm, type, user, verb.
+
+The count is the small half. The finding is that **the enforceable subset among the seventeen is
+empty**, so "enforce what we can, then correct the sentence" has nothing to enforce (2026-09-05;
+falsify: pick any of the seventeen, add it to the banned rows, and run `pnpm vocab:check` — a green
+gate on a word with a live second sense disproves this). Each of them is correct English in this
+repo's own gated prose: the MCP *adapter*, a WebSocket *connection*, a huddle *participant* and
+*room* (ADR 378), an audited *verb*, ROADMAP's "the anti-*swarm* primitive" — the single occurrence
+of the one word that looked bannable. Three of them, *agent*, *seat* and *session*, are canonical
+terms of this very glossary; they sit in a Not column only as *someone else's* synonym, which is
+exactly the distinction a regex cannot make. A Not word is wrong only when used **as** the
+canonical term, and use-vs-mention masking does not reach that: it separates code from prose, not
+one sense from another.
+
+Resolution (#TBD, lane 01M1S60VA1): the claim narrowed rather than the gate widening. brand.md §5
+now names the linted four outright and says the rest of the Not column is authorial guidance held
+in review; the Decision carries a dated marker and the substance is a Consequences note. Gate
+behaviour is unchanged — the same four words are banned as before. `lintedSetDrift`
+(`scripts/check-vocab.ts`) now fails when brand.md's "Linted outright" sentence and
+`terminologyBans()` disagree in either direction, so the sentence cannot drift from the code again
+without CI saying so (2026-09-05; falsify: drop `**worktree**` from that sentence, or add a word
+the glossary does not ban, and run `pnpm vocab:check`).
+
+One artefact was honest the whole time: the control registry's `counterfactual` for
+`adr-296-terminology-gate` already read "No for the semantic half of the Not column
+(agent-as-generic-noun, surface-as-lane-paths): a regex cannot catch those, and claiming it would
+is the decoration this registry exists to refuse." The field whose whole job is to say what the
+control does *not* buy said it, in the same repo, while two documents claimed the opposite
+(2026-09-05; falsify: `git log -S'No for the semantic half' docs/controls/registry.ts` — it landed
+with the gate). The registry's discipline worked; nothing propagated it to the prose.
+
+Fourth exercise case, run live 2026-09-05 before this page was written: dropping `**worktree**`
+from the sentence fails with *does not name banned term(s): worktree*, and adding `**swarm**` to it
+fails with *names word(s) the gate does not ban: swarm*; gate green after restore (falsify: re-run
+those two edits).
+
+The generalisable trap: **an enforcement claim gets audited against the corpus it scans, never
+against the rule set it carries.** Three gates' worth of eval evidence above — burn-down,
+suppression census, control exercise — all measured files. The table was 4/21 the whole time, and
+the control exercise even ran a banned word through the gate successfully, which confirms the
+mechanism works and says nothing about how much of the published rule it covers.
+
 Related: [running the gates](running-the-gates.md), [ledger seats](ledger-seats.md) (the
 deliver-it-or-delete-it rule this vocabulary work keeps meeting).
