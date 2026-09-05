@@ -231,6 +231,7 @@ import {
   ACCEPTANCE_EXEMPT_SAMPLE_RATE,
   acceptanceExemption,
   namedAcceptor,
+  openAcceptanceAsk,
   pickHumanReviewer,
   pickWakeReviewer,
   REVIEW_LOOP_BREAKER_N,
@@ -1072,7 +1073,7 @@ function deliverLaneAskAct(
   to: string,
   body: string,
   meta: Record<string, unknown>,
-): void {
+): boolean {
   try {
     const env = makeEnvelope({
       id: ulid(),
@@ -1084,8 +1085,46 @@ function deliverLaneAskAct(
       meta,
     });
     routeEnvelope(ctx, team, from, env, undefined, true);
+    return true;
   } catch {
-    /* advisory only — the lane verb already succeeded */
+    /* advisory only — the lane verb already succeeded. The boolean is for the one caller that
+       must NOT treat it as advisory: a hand-named acceptor whose ask failed to mint is the silent
+       limbo lane 01M1QYHJFY closed, and the submit handler fails loudly on `false`. */
+    return false;
+  }
+}
+
+/**
+ * Close a standing acceptance ask on the seat that held it (lane 01M1QYHJFY): a daemon-composed
+ * `resolve` on the ask's own thread, so the ADR 088 interrupt line and the open-loops gauge both see
+ * it discharged, and the seat reads WHY in the body instead of finding the lane closed under them.
+ * The body is composed here from structured fields, never from a client string.
+ */
+function deliverLaneAskSuperseded(
+  ctx: Ctx,
+  team: TeamRow,
+  from: MemberRow,
+  to: string,
+  askId: string,
+  lane: Lane,
+  newAcceptor: string,
+): void {
+  try {
+    const env = makeEnvelope({
+      id: ulid(),
+      team: team.slug,
+      from: from.name,
+      to: { kind: 'member', name: to },
+      act: 'resolve',
+      thread: askId,
+      body:
+        `[lane] acceptance of "${lane.title}" re-routed to ${newAcceptor} by ${from.name} — ` +
+        `the ask you held is closed and nothing is owed on it. A verdict sent on it now binds to nothing.`,
+      meta: { lane_review_superseded: { lane: lane.id, ask: askId, reviewer: newAcceptor } },
+    });
+    routeEnvelope(ctx, team, from, env, undefined, true);
+  } catch {
+    /* advisory — the re-route itself is recorded in the audit and the new ask is what binds */
   }
 }
 
@@ -4669,6 +4708,18 @@ export async function handleHttp(
                   `an unverified close, so naming yourself is refused`,
           );
         }
+        // An acceptor is a routing request, and routing happens only on a lane that is (or is
+        // becoming) awaiting_acceptance. Naming one on any other patch would validate the name and
+        // then have nowhere to route it — the drop lane 01M1QYHJFY found, one door over. Refused
+        // BEFORE the write so the patch it rode on is not half-applied.
+        if (namedAcceptorPick && !isAwaitingAcceptance(body.state ?? before.state)) {
+          throw new MusterdError(
+            'bad_request',
+            `acceptor "${body.acceptor}" names who accepts this lane, so it rides a submit — ` +
+              `the lane must be entering or already in awaiting_acceptance (it is ${before.state}` +
+              `${body.state !== undefined ? `, patch sets ${body.state}` : ''})`,
+          );
+        }
         let lane: Lane;
         try {
           lane = arbitrated
@@ -4777,6 +4828,12 @@ export async function handleHttp(
         // picker chose. No acceptor ⇒ no ask, and the response says self-close is sanctioned (the
         // ADR 145 degradation — never a wedge). Audit action stays `lane.ready_for_review` (frozen).
         let review: Record<string, unknown> | undefined;
+        // Lane 01M1QYHJFY's invariant: a named acceptor that produces no ask is a contradiction.
+        // Every arm below that honours `namedAcceptorPick` sets this; the check after the arms
+        // turns "validated, then silently unread" into a loud failure instead of a 200.
+        const named =
+          namedAcceptorPick && !('refused' in namedAcceptorPick) ? namedAcceptorPick : undefined;
+        let namedAskMinted = false;
         if (isAwaitingAcceptance(lane.state) && !isAwaitingAcceptance(before.state)) {
           // ADR 188 two-stage: for a risky lane the picker returns the PEER (agents-only ladder);
           // when no peer exists the human ask is not gated behind a stage that cannot happen —
@@ -4792,8 +4849,6 @@ export async function handleHttp(
           // or dress it up as the picker's. Refusals are loud — see `namedAcceptor`. The named
           // routing also skips the exemption: naming an acceptor IS asking for one, so a
           // declared-low lane whose acceptance someone routed by hand gets the ask it asked for.
-          const named =
-            namedAcceptorPick && !('refused' in namedAcceptorPick) ? namedAcceptorPick : undefined;
           const peerSelection =
             named || exemption.exempt
               ? {
@@ -4998,7 +5053,7 @@ export async function handleHttp(
             // audit query and never narrows the candidate pool.
             const priorOwners = laneOwnerHistory(ctx.db, team.id, lane.id);
             const overlapNotice = priorOwnerNotice(pick.reviewer, priorOwners);
-            deliverLaneAskAct(
+            const minted = deliverLaneAskAct(
               ctx,
               team,
               member,
@@ -5025,6 +5080,7 @@ export async function handleHttp(
                 },
               },
             );
+            if (named) namedAskMinted = minted;
             review = {
               reviewer: pick.reviewer,
               route: pick.route,
@@ -5101,6 +5157,115 @@ export async function handleHttp(
         } else if (
           isAwaitingAcceptance(lane.state) &&
           isAwaitingAcceptance(before.state) &&
+          named
+        ) {
+          // A RE-ROUTE (lane 01M1QYHJFY): the lane was already awaiting acceptance and the caller
+          // named a different acceptor. The edge-triggered block above is right to skip this — it
+          // is the SUBMIT (audit row, picker, wake lease, breaker count) and this is not a second
+          // submit — but the explicit request must still be honoured: naming an acceptor IS asking
+          // for one. Measured 2026-09-04: two seats in one hour named a seat here, got a 200 with a
+          // lane that looked right and a hint sanctioning self-close, and no ask was ever minted.
+          //
+          // What a re-route does, decided here and recorded in its own audit verb:
+          //   · mints a fresh lane_review ask to the named seat (route 'named', like the submit);
+          //   · leases NO wake — the named path never did (the namer's judgement is the authority,
+          //     and the ask waits in the inbox as it does at submit);
+          //   · supersedes the STANDING ask, if one is open to a different seat: that seat gets a
+          //     daemon-composed `resolve` on the ask saying where the acceptance went, and a late
+          //     verdict on the old ask no longer moves the lane (route.ts). Leaving both asks open
+          //     would let two seats each believe they hold it — miley hand-wrote this courtesy
+          //     note on 2026-09-04, which is the tool's job.
+          //   · naming the seat that ALREADY holds the open ask mints nothing and reports the
+          //     standing state — a re-route to the same seat is a repeat submit, not a new ask.
+          const worker = lane.owner_seat ?? member.name;
+          const standingAsk = openAcceptanceAsk(ctx.db, team.id, lane.id);
+          if (standingAsk && standingAsk.to === named.reviewer) {
+            namedAskMinted = true;
+            const standing = standingAcceptance(ctx.db, team.id, lane.id);
+            review = {
+              standing: true,
+              ...(standing ?? { reviewer: named.reviewer, route: 'named' }),
+            };
+          } else {
+            const humanRequired = lane.risk.length > 0;
+            const acceptanceTier: AskTier =
+              humanRequired && named.grade === 'human' ? 'blocking' : 'standard';
+            appendLaneEventRequired(ctx.db, team.id, {
+              actor: member.name,
+              action: 'lane.review_rerouted',
+              target: lane.id,
+              result: 'allow',
+              detail: {
+                lane: lane.id,
+                owner: worker,
+                stakes: lane.stakes,
+                stakes_provenance: lane.stakes_provenance,
+                ...(lane.merged ? { merged: lane.merged } : {}),
+                reviewer: named.reviewer,
+                route: named.route,
+                review_grade: named.grade,
+                // Who held it before, and which ask is now void. `null` both ways when nothing was
+                // standing (the submit found no candidate) — absent would be ambiguous with legacy.
+                from_reviewer: standingAsk?.to ?? null,
+                superseded_ask: standingAsk?.id ?? null,
+                human_required: humanRequired,
+                ask_tier: acceptanceTier,
+                ask_timeout_ms: askContract(acceptanceTier).timeout_ms,
+              },
+            });
+            if (standingAsk) {
+              deliverLaneAskSuperseded(
+                ctx,
+                team,
+                member,
+                standingAsk.to,
+                standingAsk.id,
+                lane,
+                named.reviewer,
+              );
+            }
+            const priorOwners = laneOwnerHistory(ctx.db, team.id, lane.id);
+            namedAskMinted = deliverLaneAskAct(
+              ctx,
+              team,
+              member,
+              named.reviewer,
+              acceptanceAskBody(lane.title, {
+                overlapNotice: priorOwnerNotice(named.reviewer, priorOwners),
+                noGoalNotice: noGoalNotice(lane.goal_id),
+              }),
+              {
+                species: 'approve',
+                tier: acceptanceTier,
+                lane_review: {
+                  lane: lane.id,
+                  title: lane.title,
+                  branch: lane.branch,
+                  ...(lane.merged ? { merged: lane.merged } : {}),
+                  route: named.route,
+                  grade: named.grade,
+                },
+              },
+            );
+            review = {
+              reviewer: named.reviewer,
+              route: named.route,
+              grade: named.grade,
+              tier: acceptanceTier,
+              rerouted: true,
+              // The seat whose ask was closed, so the caller's hint can say it was told.
+              ...(standingAsk ? { superseded: standingAsk.to } : {}),
+              ...(humanRequired
+                ? {
+                    human_review_required: true,
+                    human_ask: named.grade === 'human' ? 'immediate' : 'gated',
+                  }
+                : {}),
+            };
+          }
+        } else if (
+          isAwaitingAcceptance(lane.state) &&
+          isAwaitingAcceptance(before.state) &&
           body.state !== undefined &&
           isAwaitingAcceptance(body.state)
         ) {
@@ -5117,6 +5282,20 @@ export async function handleHttp(
             : // Nothing standing to report — the original submit found no candidate (or predates
               // recording). The sanction was and remains honest here: nobody was ever asked.
               { standing: true, self_close_sanctioned: true };
+        }
+        // Lane 01M1QYHJFY, the durable half. `acceptor` was named, validated, and the lane is
+        // awaiting acceptance — so exactly one of the arms above must have minted (or found
+        // standing) an ask to that seat. If none did, the caller would get the success shape of a
+        // request that was not performed, and a hint that sanctions an unconfirmed close. That is
+        // a server bug by construction, and it fails here as one — loud, never 200. The lane's
+        // state write already happened; the message says so, and says what to do.
+        if (named && !namedAskMinted) {
+          throw new MusterdError(
+            'server_error',
+            `acceptor "${named.reviewer}" was named and validated but no acceptance ask was ` +
+              `minted — a daemon bug, not a routing outcome. The lane is ${lane.state} with no ` +
+              `ask to ${named.reviewer}: submit again naming them, and report this.`,
+          );
         }
         // ADR 192: an acceptor moving an awaiting_acceptance lane back to a live state is the
         // rejection — the counterpart said "not what we wanted". Audited; the lane_state broadcast above

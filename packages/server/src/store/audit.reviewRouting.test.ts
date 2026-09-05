@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../db/open.js';
-import { appendAudit, reviewRouting } from './audit.js';
+import { appendAudit, reviewRouting, standingAcceptance } from './audit.js';
 import { createTeam } from './teams.js';
 
 /**
@@ -146,5 +146,90 @@ describe('reviewRouting — human_required abstains rather than asserting a nega
     const { db, team } = seed();
     ready(db, team.id, { lane: 'nobody', no_candidate: true, human_required: false });
     expect(reviewRouting(db, team.id, 'nobody').promised_ms).toBeUndefined();
+  });
+});
+
+/**
+ * Lane 01M1QYHJFY. A hand re-route of a standing acceptance writes its own verb,
+ * `lane.review_rerouted`, and BOTH reads of "who holds this acceptance" must take the newer of the
+ * two rows — otherwise the close edge grades a re-routed lane against the seat whose ask was
+ * closed, and a re-route of a no-candidate submit is recorded as a self-close.
+ */
+describe('reviewRouting / standingAcceptance read the newest of submit and re-route', () => {
+  const seed = () => {
+    const db = openDb(':memory:');
+    const team = createTeam(db, { slug: 'revive' });
+    return { db, team };
+  };
+  const row = (
+    db: ReturnType<typeof seed>['db'],
+    teamId: string,
+    action: 'lane.ready_for_review' | 'lane.review_rerouted',
+    detail: Record<string, unknown> & { lane: string },
+  ) =>
+    appendAudit(db, teamId, { actor: 'ada', action, target: detail.lane, result: 'allow', detail });
+
+  // Both reads order by `ts DESC, id DESC`, and two rows appended inside one millisecond tie on
+  // `ts` — in production the submit and the re-route are seconds apart. Advance the clock between
+  // them so the test measures the read order, not the ulid tiebreak.
+  const nextMs = () => {
+    const t = Date.now();
+    while (Date.now() === t) {
+      /* spin — one millisecond at most */
+    }
+  };
+
+  it('a re-route after a no-candidate submit reads as routed, with the new promise', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'a',
+      no_candidate: true,
+      human_required: false,
+    });
+    nextMs();
+    row(db, team.id, 'lane.review_rerouted', {
+      lane: 'a',
+      reviewer: 'hal',
+      route: 'named',
+      review_grade: 'cross_family',
+      from_reviewer: null,
+      superseded_ask: null,
+      human_required: false,
+      ask_tier: 'standard',
+      ask_timeout_ms: 300_000,
+    });
+    expect(reviewRouting(db, team.id, 'a')).toEqual({
+      routed: true,
+      human_required: false,
+      promised_ms: 300_000,
+    });
+    expect(standingAcceptance(db, team.id, 'a')).toEqual({
+      reviewer: 'hal',
+      route: 'named',
+      grade: 'cross_family',
+    });
+  });
+
+  it('a re-route names the new seat as standing, not the one the submit picked', () => {
+    const { db, team } = seed();
+    row(db, team.id, 'lane.ready_for_review', {
+      lane: 'b',
+      reviewer: 'gee',
+      route: 'cross_family',
+      review_grade: 'cross_family',
+      human_required: false,
+    });
+    nextMs();
+    row(db, team.id, 'lane.review_rerouted', {
+      lane: 'b',
+      reviewer: 'hal',
+      route: 'named',
+      review_grade: 'same_model',
+      from_reviewer: 'gee',
+      superseded_ask: '01ASK',
+      human_required: false,
+    });
+    expect(standingAcceptance(db, team.id, 'b')?.reviewer).toBe('hal');
+    // Mutation control: with the re-route verb dropped from either query, this reads `gee`.
   });
 });

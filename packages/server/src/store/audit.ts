@@ -135,6 +135,14 @@ export type AuditAction =
   | 'lane.closed'
   | 'lane.review_sent_back'
   | 'lane.review_peer_confirmed'
+  // A hand re-route of a STANDING acceptance (lane 01M1QYHJFY): the lane was already
+  // awaiting_acceptance and the owner (or an admin) named a different acceptor. Its own verb, not a
+  // second `lane.ready_for_review` — that row is the submit, and the review-loop breaker and the
+  // ADR 348 `named` counter both read it as one. Carries no state (the lane stays awaiting); detail:
+  // { lane, owner, reviewer, route:'named', review_grade, from_reviewer, superseded_ask, ask_tier,
+  //   ask_timeout_ms }. `standingAcceptance` reads it as the newest routing, and the verdict edge
+  // refuses an accept/decline on the `superseded_ask`.
+  | 'lane.review_rerouted'
   // Letting go of a lane: an owned lane moved back to `open`, which the state machine's
   // open ⟺ unowned invariant turns into a release (detail: { lane, released_by, owner_before }).
   // Traceable for the same reason a claim is — "who stopped carrying this, and when".
@@ -673,8 +681,12 @@ export function reviewRouting(
   };
   const row = db
     .prepare<[string, string], { detail: string | null }>(
+      // A hand re-route (`lane.review_rerouted`, lane 01M1QYHJFY) is the newer routing decision
+      // on the same acceptance: it carries `reviewer`, `human_required` and the promised wait for
+      // the seat that now holds the ask. Reading only the submit row here would grade a re-routed
+      // lane against the wrong seat — and call a re-route of a no-candidate submit a self-close.
       `SELECT detail FROM audit
-         WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+         WHERE team_id = ? AND action IN ('lane.ready_for_review','lane.review_rerouted') AND target = ?
        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId);
@@ -733,8 +745,11 @@ export function standingAcceptance(
 ): { reviewer?: string; route?: string; grade?: string; acceptance_exempt?: boolean } | null {
   const row = db
     .prepare<[string, string], { detail: string | null }>(
+      // A re-route (`lane.review_rerouted`) is a later routing decision on the same standing
+      // acceptance, so the newest of EITHER verb is what stands — a reader that saw only the submit
+      // row would name the seat whose ask was superseded.
       `SELECT detail FROM audit
-         WHERE team_id = ? AND action = 'lane.ready_for_review' AND target = ?
+         WHERE team_id = ? AND action IN ('lane.ready_for_review','lane.review_rerouted') AND target = ?
        ORDER BY ts DESC, id DESC LIMIT 1`,
     )
     .get(teamId, laneId);

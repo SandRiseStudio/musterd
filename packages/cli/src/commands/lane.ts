@@ -317,7 +317,19 @@ export async function lanesCommand(parsed: Parsed): Promise<number> {
  */
 export function renderSubmitReport(res: Awaited<ReturnType<HttpClient['updateLane']>>): void {
   // ADR 192: report the acceptor routing — who was asked, or that self-close is sanctioned.
-  if (res.review?.standing) {
+  if (res.review?.rerouted && res.review.reviewer) {
+    // Lane 01M1QYHJFY: `--to` on a lane already awaiting acceptance moved the ask. Say so, and
+    // that the previous holder was told — this branch used to fall through to "no acceptor was
+    // ever routed", which was false and counselled an unconfirmed close.
+    process.stdout.write(
+      theme.meta(
+        `acceptance re-routed to ${theme.memberName(res.review.reviewer, 'agent')} ` +
+          `(${res.review.route ?? 'named'})` +
+          `${res.review.superseded ? ` — ${res.review.superseded}'s ask is closed and they were told` : ''}. ` +
+          `You are done; leave it with them.`,
+      ) + '\n',
+    );
+  } else if (res.review?.standing) {
     // A repeat submit (e.g. recording the merge SHA after the PR landed) re-routes nothing;
     // the daemon reports the STANDING state. Before it did, the else-branch below read the
     // silence as "no eligible acceptor is live" and sanctioned self-close against lanes whose

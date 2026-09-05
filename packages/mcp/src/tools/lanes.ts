@@ -340,44 +340,51 @@ export function registerLanes(
       // silent. Before it did, this client read the silence as "no eligible acceptor is live" and
       // sanctioned self-close against lanes whose acceptor had a pending ask — inviting exactly the
       // premature unverified close ADR 235 measured 20-for-20 and shipped to stop.
-      const hint = review?.standing
-        ? review.reviewer
-          ? `\n\nalready awaiting acceptance from ${review.reviewer}` +
-            `${review.route ? ` (${review.route})` : ''} — attestation recorded, nothing re-routed. ` +
-            `Leave it with them.`
-          : review.acceptance_exempt
-            ? `\n\nalready awaiting close — this submit was acceptance-exempt (declared low stakes, ` +
-              `ADR 234): lane_resolve when ready.`
-            : // Nothing was ever routed (the original submit found no candidate). The sanction was
-              // and remains honest here — nobody was asked, so no verdict is coming.
-              `\n\nno acceptor was ever routed — self-close sanctioned: ` +
-              `lane_resolve when ready (recorded unconfirmed).`
-        : !review
-          ? // No routing decision AND no standing report (a pre-fix daemon, or a patch that never
-            // touched acceptance). Absence of a decision is not absence of an acceptor (ADR 173):
-            // abstain rather than assert, and never sanction self-close on silence.
-            ''
-          : review.acceptance_exempt
-            ? // ADR 234 increment 2: no ask by DESIGN, on the lane's own declared stakes — not the
-              // "nobody was eligible" degradation, and the wording must not conflate them.
-              `\n\nacceptance-exempt (declared low stakes, ADR 234) — no ask was routed and none ` +
-              `is owed: lane_resolve when ready.`
-            : !review.reviewer
-              ? // A fresh submit that found nobody. Nobody was asked, so no verdict is coming and
-                // waiting out a grace would be pure delay. This branch keeps its sanction whether or
-                // not a sweep is armed.
-                `\n\nno eligible acceptor is live — self-close sanctioned: ` +
+      const hint = review?.rerouted
+        ? // Lane 01M1QYHJFY: a submit that named a different acceptor on a lane already awaiting
+          // acceptance. Say what moved and that the previous holder was told — the caller used to
+          // get "no acceptor was ever routed" here, which was false and counselled self-close.
+          `\n\nacceptance re-routed to ${review.reviewer} (${review.route})` +
+          `${review.superseded ? ` — ${review.superseded}'s ask is closed and they were told` : ''}. ` +
+          `You are done; leave it with ${review.reviewer}.`
+        : review?.standing
+          ? review.reviewer
+            ? `\n\nalready awaiting acceptance from ${review.reviewer}` +
+              `${review.route ? ` (${review.route})` : ''} — attestation recorded, nothing re-routed. ` +
+              `Leave it with them.`
+            : review.acceptance_exempt
+              ? `\n\nalready awaiting close — this submit was acceptance-exempt (declared low stakes, ` +
+                `ADR 234): lane_resolve when ready.`
+              : // Nothing was ever routed (the original submit found no candidate). The sanction was
+                // and remains honest here — nobody was asked, so no verdict is coming.
+                `\n\nno acceptor was ever routed — self-close sanctioned: ` +
                 `lane_resolve when ready (recorded unconfirmed).`
-              : review.backstop?.armed
-                ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — you are done; leave it ` +
-                  `with them. Do NOT self-close on silence: acceptors who were offline at submit came ` +
-                  `back 20 of 20 times, and the daemon sweeps an unanswered lane after ` +
-                  `${Math.round(review.backstop.grace_ms / 3_600_000)}h anyway. lane_resolve still works ` +
-                  `if you genuinely need it shut now, and records unconfirmed. Acceptor judges ` +
-                  `intent/principles/usable/feel — not the diff.`
-                : `\n\nacceptance asked of ${review.reviewer} (${review.route}) — wait ≤5m; ` +
-                  `accept closes the lane, reject resumes it; on silence, lane_resolve yourself ` +
-                  `(recorded unconfirmed). Acceptor judges intent/principles/usable/feel — not the diff.`;
+          : !review
+            ? // No routing decision AND no standing report (a pre-fix daemon, or a patch that never
+              // touched acceptance). Absence of a decision is not absence of an acceptor (ADR 173):
+              // abstain rather than assert, and never sanction self-close on silence.
+              ''
+            : review.acceptance_exempt
+              ? // ADR 234 increment 2: no ask by DESIGN, on the lane's own declared stakes — not the
+                // "nobody was eligible" degradation, and the wording must not conflate them.
+                `\n\nacceptance-exempt (declared low stakes, ADR 234) — no ask was routed and none ` +
+                `is owed: lane_resolve when ready.`
+              : !review.reviewer
+                ? // A fresh submit that found nobody. Nobody was asked, so no verdict is coming and
+                  // waiting out a grace would be pure delay. This branch keeps its sanction whether or
+                  // not a sweep is armed.
+                  `\n\nno eligible acceptor is live — self-close sanctioned: ` +
+                  `lane_resolve when ready (recorded unconfirmed).`
+                : review.backstop?.armed
+                  ? `\n\nacceptance asked of ${review.reviewer} (${review.route}) — you are done; leave it ` +
+                    `with them. Do NOT self-close on silence: acceptors who were offline at submit came ` +
+                    `back 20 of 20 times, and the daemon sweeps an unanswered lane after ` +
+                    `${Math.round(review.backstop.grace_ms / 3_600_000)}h anyway. lane_resolve still works ` +
+                    `if you genuinely need it shut now, and records unconfirmed. Acceptor judges ` +
+                    `intent/principles/usable/feel — not the diff.`
+                  : `\n\nacceptance asked of ${review.reviewer} (${review.route}) — wait ≤5m; ` +
+                    `accept closes the lane, reject resumes it; on silence, lane_resolve yourself ` +
+                    `(recorded unconfirmed). Acceptor judges intent/principles/usable/feel — not the diff.`;
       return laneResult('lane submitted for acceptance', lane, warnings, hint);
     } catch (err) {
       return errorResult(err);

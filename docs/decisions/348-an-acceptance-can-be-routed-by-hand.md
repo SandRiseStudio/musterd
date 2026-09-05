@@ -73,6 +73,65 @@ remediations.
    later reader is most likely to want to re-litigate, so it is stated here rather than only in a
    function comment.
 
+## Amendment — a named acceptor on a lane already awaiting acceptance (2026-09-04, lane `01M1QYHJFY11HEXSX0QSEXYZNR`)
+
+Decision 5 closed one door into the limbo it names and left the adjacent one open. The routing
+block that honours `acceptor` was gated on the *transition* into `awaiting_acceptance`, so a submit
+naming a seat on a lane **already** awaiting acceptance validated the name, wrote nothing, returned
+200, and hinted that self-close was sanctioned. Two seats hit it inside one hour on 2026-09-04
+(ryder on `01M1MMKHX8`, miley on `01M1PYA3JQ`) and both hand-minted the ask. Four decisions:
+
+7. **A named acceptor is honoured whenever an acceptance can be pending — entering the state or
+   already in it.** The condition is split, not widened: the automatic pick stays edge-triggered
+   (it is the submit — audit row, picker, wake lease, breaker count), and an explicit re-route is
+   its own arm with its own audit verb, `lane.review_rerouted` (detail: `reviewer`, `route: 'named'`,
+   `review_grade`, `from_reviewer`, `superseded_ask`, `human_required`, `ask_tier`,
+   `ask_timeout_ms`). It is **not** a second `lane.ready_for_review` row: that row is what the
+   review-loop breaker counts and what decision 4's `named` counter reads, and a re-route is
+   neither a bounce nor a second submit. `standingAcceptance` and `reviewRouting` read the newest of
+   the two verbs, so the close edge grades the seat that actually held the ask. A re-route leases no
+   wake — the named path never did (decision 6): the namer's judgement is the authority, and the
+   ask waits in the inbox as it does at submit.
+
+8. **The standing ask is superseded, and its holder is told.** If an open `lane_review` ask exists
+   to a different seat, the daemon composes a `resolve` on that ask's thread to that seat, naming
+   where the acceptance went. The `resolve` discharges it on the ADR 088 interrupt line and the
+   open-loops gauge, and a later verdict on the superseded ask **binds to nothing** — the verdict
+   lands as a message and `applyAcceptanceVerdict` returns without moving the lane. Both halves are
+   required: closing the ask without the guard would let a late `accept` still close the lane, and
+   two seats would each hold a binding verdict on one acceptance. The alternative — refusing a
+   re-route while an ask is open — was rejected because the open ask *is* the reason to re-route
+   (six asks queued on one seat at 21:46 on 2026-09-04 while three others sat idle).
+   Naming the seat that already holds the open ask mints nothing and reports the standing state.
+
+9. **A named acceptor that yields no ask is a server error, not a routing outcome.** After the
+   arms, `named && !askMinted` throws `server_error` (500). The lane's state write has already
+   happened; the message says so and says to submit again naming the seat. This is the durable
+   half: it turns the shape that survived — validated, then unread — into a failure that cannot be
+   returned as success, whichever arm forgets it next. The same reasoning refuses, **before the
+   write**, an `acceptor` on a patch that does not leave the lane awaiting acceptance: a name with
+   nowhere to route is the same contradiction one door over.
+
+10. **The response says what it did.** `review.rerouted: true` with `reviewer`, `route`, and
+    `superseded` (the seat whose ask was closed); the CLI and MCP hints read it back as "acceptance
+    re-routed to X — Y's ask is closed and they were told". The no-acceptor hint can no longer be
+    reached by a request that named one (decision 9), so it can no longer counsel `lane_resolve`
+    against an explicit routing request.
+
+Consequence for the ADR 260 eval: it scans `lane.ready_for_review` only, so re-routes do not join
+the picker population (decision 4 holds by construction). Its "jumped route" rule
+(`closer != asked reviewer AND closer != owner`) will, however, classify a re-routed-then-accepted
+lane as jumped, because it reads the submit row's reviewer. That is a pre-registered definition and
+is not edited here; a reader of that metric after 2026-09-04 subtracts lanes with a
+`lane.review_rerouted` row, or amends the pre-registration dated.
+
+Falsifiers for the amendment: a `lane_submit` naming a seat returns 200 with no `lane_review` ask
+to that seat in the acts log (decision 9 failed to fire); a seat whose ask was superseded closes
+the lane with its late `accept` (decision 8's guard failed); a `lane.review_rerouted` row appears
+in any picker metric's denominator (decision 4 was not applied to the new verb). Mutation control
+run before landing: with the re-route arm removed, the integration test
+`re-routes an already-awaiting lane to a named seat` fails at its first ask assertion.
+
 ## Falsifiers
 
 - A `named` row appears inside a picker metric's denominator — decision 4 was written and not

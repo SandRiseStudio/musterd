@@ -682,6 +682,74 @@ export function pickWakeReviewer(
   };
 }
 
+/**
+ * The acceptance ask a lane's acceptor currently holds: the newest daemon-composed `ask` carrying
+ * `meta.lane_review.lane === laneId` that no accept/decline has answered, no `resolve` has closed,
+ * and no re-route has superseded. `null` when nothing is standing (no candidate at submit, or the
+ * ask was answered). Read by the re-route arm so the seat being replaced can be told, and so naming
+ * the seat that already holds the ask mints no duplicate.
+ */
+export function openAcceptanceAsk(
+  db: Database,
+  teamId: string,
+  laneId: string,
+): { id: string; to: string } | null {
+  const row = db
+    .prepare<[string, string], { id: string; to: string | null }>(
+      `SELECT m.id AS id, mem.name AS "to" FROM messages m
+         LEFT JOIN members mem ON mem.id = m.to_member
+        WHERE m.team_id = ? AND m.act = 'ask'
+          AND json_extract(m.meta, '$.lane_review.lane') = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM messages r
+             WHERE r.team_id = m.team_id
+               AND r.act IN ('accept','decline')
+               AND json_extract(r.meta, '$.in_reply_to') = m.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM messages v
+             WHERE v.team_id = m.team_id
+               AND v.act = 'resolve'
+               AND v.thread_id = m.id)
+        ORDER BY m.ts DESC, m.id DESC LIMIT 1`,
+    )
+    .get(teamId, laneId);
+  if (!row || !row.to) return null;
+  const superseded = supersededAcceptanceAsks(db, teamId, laneId);
+  return superseded.has(row.id) ? null : { id: row.id, to: row.to };
+}
+
+/**
+ * The acceptance asks a re-route has superseded on this lane (`lane.review_rerouted` rows'
+ * `superseded_ask`). A verdict on one of these must NOT move the lane: the seat that held it was
+ * told the acceptance moved on, and letting its late accept close the lane would make two seats'
+ * verdicts bind to one acceptance — the "both believe they hold it" state the re-route exists to
+ * end. Read at the verdict edge (route.ts) and by {@link openAcceptanceAsk}.
+ */
+export function supersededAcceptanceAsks(
+  db: Database,
+  teamId: string,
+  laneId: string,
+): Set<string> {
+  const rows = db
+    .prepare<[string, string], { detail: string | null }>(
+      `SELECT detail FROM audit
+        WHERE team_id = ? AND action = 'lane.review_rerouted' AND target = ?`,
+    )
+    .all(teamId, laneId);
+  const out = new Set<string>();
+  for (const r of rows) {
+    if (!r.detail) continue;
+    try {
+      const d = JSON.parse(r.detail) as { superseded_ask?: unknown };
+      if (typeof d.superseded_ask === 'string' && d.superseded_ask.length > 0)
+        out.add(d.superseded_ask);
+    } catch {
+      /* an unparseable row supersedes nothing */
+    }
+  }
+  return out;
+}
+
 /** Circuit-breaker trip threshold (ADR 191 §5) — after this many ready entries, wake no more. */
 export const REVIEW_LOOP_BREAKER_N = 3;
 

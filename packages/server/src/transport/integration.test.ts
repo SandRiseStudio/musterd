@@ -5107,7 +5107,7 @@ describe('two-stage close (ADR 169)', () => {
     await reattestAgentModel('dawn', ada, 'claude-opus-5');
     await reattestAgentModel('dawn', gee, 'gpt-5.2-codex');
     await get('/teams/dawn/inbox', nickTok); // nick present too (ADR 057 ambient touch)
-    return { nickTok, ada, gee };
+    return { nickTok, ada, gee, agentKey: team.json.agent_key as string };
   }
 
   async function patchLane(id: string, body: unknown, auth: Auth) {
@@ -6210,6 +6210,138 @@ describe('two-stage close (ADR 169)', () => {
         (l) => l.id === laneId,
       );
       expect(still!.state).toBe('claimed');
+    });
+
+    // Lane 01M1QYHJFY. Two seats in one hour named an acceptor on a lane ALREADY awaiting
+    // acceptance and got a 200 with no ask: the routing block is edge-triggered on entering
+    // awaiting_acceptance, so a re-route fell through it, and the hint then sanctioned self-close.
+    // Mutation control, run by hand before this landed: with the re-route arm removed from
+    // http.ts this test fails at the first `expect(ask).toBeDefined()` — the old edge guard alone
+    // mints nothing here.
+    it('re-routes an already-awaiting lane to a named seat: new ask, old ask closed, old verdict inert', async () => {
+      const { nickTok, ada, gee, agentKey } = await setup();
+      // A third agent to re-route to, attested on a third model so the pairing grades honestly.
+      await post('/teams/dawn/members', { name: 'hal', kind: 'agent' }, nickTok);
+      const hal = (await resolveAuth('/teams/dawn/inbox', { key: agentKey, seat: 'hal' }))!;
+      await reattestAgentModel('dawn', hal, 'gemini-3-pro');
+
+      const lane = await post(
+        '/teams/dawn/lanes',
+        { title: 'reroute me', branch: 'ada/reroute', claim: true },
+        ada,
+      );
+      const laneId = lane.json.lane.id as string;
+      const first = await patchLane(
+        laneId,
+        {
+          state: 'ready_for_review',
+          acceptor: 'gee',
+          merged: { pr: 12, sha: 'cafe12', authorized_by: 'nick' },
+        },
+        ada,
+      );
+      expect(first.status).toBe(200);
+      expect(first.json.review.reviewer).toBe('gee');
+      const geeInbox = await get('/teams/dawn/inbox?unread=1', gee);
+      const oldAsk = geeInbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(oldAsk).toBeDefined();
+
+      // The re-route: same state, a different name. Before the fix this was the silent no-op.
+      const again = await patchLane(laneId, { state: 'awaiting_acceptance', acceptor: 'hal' }, ada);
+      expect(again.status).toBe(200);
+      expect(again.json.review.rerouted).toBe(true);
+      expect(again.json.review.reviewer).toBe('hal');
+      expect(again.json.review.route).toBe('named');
+      expect(again.json.review.superseded).toBe('gee');
+      expect(again.json.review.standing).toBeUndefined();
+
+      // hal holds a real, server-composed ask — the only thing an accept can bind to.
+      const halInbox = await get('/teams/dawn/inbox?unread=1', hal);
+      const ask = halInbox.json.messages.find(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(ask).toBeDefined();
+      expect(ask.meta.lane_review.route).toBe('named');
+
+      // gee was TOLD: a daemon-composed resolve on the old ask's thread, naming where it went.
+      const geeAfter = await get('/teams/dawn/inbox?unread=1', gee);
+      const closed = geeAfter.json.messages.find(
+        (m: { act: string; thread?: string | null }) =>
+          m.act === 'resolve' && m.thread === oldAsk.id,
+      );
+      expect(closed).toBeDefined();
+      expect(closed.body).toContain('re-routed to hal');
+      // …and the old ask is off gee's interrupt line — an obligation nobody holds must not ring.
+      const probe = await get('/teams/dawn/inbox/interrupt-check', gee);
+      expect(probe.status).toBe(200);
+      expect(JSON.stringify(probe.json)).not.toContain(laneId);
+
+      // The audit says what happened, in its own verb — NOT a second submit row.
+      const rerouted = await auditRows(nickTok, 'lane.review_rerouted');
+      expect(rerouted).toHaveLength(1);
+      expect(rerouted[0].detail.reviewer).toBe('hal');
+      expect(rerouted[0].detail.from_reviewer).toBe('gee');
+      expect(rerouted[0].detail.superseded_ask).toBe(oldAsk.id);
+      expect(await auditRows(nickTok, 'lane.ready_for_review')).toHaveLength(1);
+
+      // A late verdict from gee on the superseded ask binds to nothing: the lane stays awaiting.
+      expect((await verdict(gee, 'gee', oldAsk.id as string, 'accept')).status).toBe(201);
+      const lanesMid = await get('/teams/dawn/lanes', nickTok);
+      expect(
+        (lanesMid.json.lanes as { id: string; state: string }[]).find((l) => l.id === laneId)!
+          .state,
+      ).toBe('awaiting_acceptance');
+      expect(await auditRows(nickTok, 'lane.closed')).toHaveLength(0);
+
+      // hal's accept is the one that closes it — verified, counterpart_confirm, closed_by hal.
+      expect((await verdict(hal, 'hal', ask.id as string, 'accept')).status).toBe(201);
+      const lanesEnd = await get('/teams/dawn/lanes', nickTok);
+      expect(
+        (lanesEnd.json.lanes as { id: string; state: string }[]).find((l) => l.id === laneId)!
+          .state,
+      ).toBe('done');
+      const rows = await auditRows(nickTok, 'lane.closed');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].detail.closed_by).toBe('hal');
+      expect(rows[0].detail.verified).toBe(true);
+      expect(rows[0].detail.reason).toBe('counterpart_confirm');
+    });
+
+    it('re-routing to the seat that already holds the ask mints nothing and reports it standing', async () => {
+      const { nickTok, ada, gee } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'same seat', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      await patchLane(laneId, { state: 'ready_for_review', acceptor: 'gee' }, ada);
+      const again = await patchLane(laneId, { state: 'awaiting_acceptance', acceptor: 'gee' }, ada);
+      expect(again.status).toBe(200);
+      expect(again.json.review.standing).toBe(true);
+      expect(again.json.review.reviewer).toBe('gee');
+      const inbox = await get('/teams/dawn/inbox?unread=1', gee);
+      const asks = inbox.json.messages.filter(
+        (m: { act: string; meta?: { lane_review?: { lane?: string } } }) =>
+          m.act === 'ask' && m.meta?.lane_review?.lane === laneId,
+      );
+      expect(asks).toHaveLength(1);
+      expect(await auditRows(nickTok, 'lane.review_rerouted')).toHaveLength(0);
+    });
+
+    // The other door into the same limbo: `acceptor` on a patch that does not leave the lane
+    // awaiting acceptance validates the name and has nowhere to route it. Refused before the write.
+    it('refuses an acceptor on a patch that is not a submit, and applies none of the patch', async () => {
+      const { nickTok, ada } = await setup();
+      const lane = await post('/teams/dawn/lanes', { title: 'not a submit', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      const bad = await patchLane(laneId, { state: 'active', acceptor: 'gee' }, ada);
+      expect(bad.status).toBe(400);
+      expect(JSON.stringify(bad.json)).toContain('rides a submit');
+      const lanes = await get('/teams/dawn/lanes', nickTok);
+      expect(
+        (lanes.json.lanes as { id: string; state: string }[]).find((l) => l.id === laneId)!.state,
+      ).toBe('claimed');
     });
 
     it('refuses an owner who names themselves — that close could only ever be unverified', async () => {
