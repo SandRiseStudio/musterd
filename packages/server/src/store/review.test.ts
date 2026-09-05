@@ -679,6 +679,203 @@ describe('pickWakeReviewer (ADR 191)', () => {
   });
 });
 
+/**
+ * Lane 01M1S6GZ96. Both pickers sorted by grade and took [0], so an equal-grade tie fell to
+ * listMembers order — measured 32 of 32 ties in the 30 days to 2026-09-05 resolved to the earlier
+ * roster seat, while the seat that kept winning held up to 14 open acceptance asks. The ladder
+ * still decides first; these cases are all about what happens AMONG equal grades.
+ */
+describe('tie-break among equal grades: load, then recency, then roster (lane 01M1S6GZ96)', () => {
+  // Raw rows, each with its own replication stamp: (origin_node, origin_seq) is UNIQUE, and two
+  // hand-inserted rows on the default stamp collide. A fixture counter keeps them apart.
+  let seq = 1_000;
+  const ask = (
+    db: ReturnType<typeof seed>['db'],
+    team: { id: string },
+    fromId: string,
+    toId: string,
+    laneId: string,
+    id: string,
+    ts = Date.now() - 60_000,
+  ) =>
+    db
+      .prepare(
+        `INSERT INTO messages (id, team_id, from_member, to_kind, to_member, act, body, meta, ts, created_at, origin_node, origin_seq)
+         VALUES (?, ?, ?, 'member', ?, 'ask', 'accept?', ?, ?, ?, 'fixture', ?)`,
+      )
+      .run(
+        id,
+        team.id,
+        fromId,
+        toId,
+        JSON.stringify({ lane_review: { lane: laneId } }),
+        ts,
+        ts,
+        seq++,
+      );
+  const verdict = (
+    db: ReturnType<typeof seed>['db'],
+    team: { id: string },
+    fromId: string,
+    askId: string,
+    id: string,
+  ) =>
+    db
+      .prepare(
+        `INSERT INTO messages (id, team_id, from_member, to_kind, act, body, meta, ts, created_at, origin_node, origin_seq)
+         VALUES (?, ?, ?, 'team', 'accept', 'ok', ?, ?, ?, 'fixture', ?)`,
+      )
+      .run(
+        id,
+        team.id,
+        fromId,
+        JSON.stringify({ in_reply_to: askId }),
+        Date.now(),
+        Date.now(),
+        seq++,
+      );
+  const picked = (
+    db: ReturnType<typeof seed>['db'],
+    team: { id: string },
+    reviewer: string,
+    laneId: string,
+    at: number,
+  ) =>
+    db
+      .prepare(
+        `INSERT INTO audit (id, team_id, actor, action, target, result, detail, ts, created_at)
+         VALUES (?, ?, 'x', 'lane.ready_for_review', ?, 'allow', ?, ?, ?)`,
+      )
+      .run(
+        `r-${reviewer}-${String(at)}`,
+        team.id,
+        laneId,
+        JSON.stringify({ lane: laneId, reviewer }),
+        at,
+        at,
+      );
+
+  async function room() {
+    const { openLane } = await import('./lanes.js');
+    const { db, team } = seed();
+    const worker = addMember(db, team, { kind: 'agent', name: 'worker', role: '' }).row;
+    attach(db, worker.id, 'claude-code', 'conn-worker', { model: 'claude-opus-5' });
+    // `first` is created before `second`, so roster order alone would always pick `first`.
+    const first = addMember(db, team, { kind: 'agent', name: 'first', role: '' }).row;
+    attach(db, first.id, 'codex', 'conn-first', { model: 'gpt-5.6-sol' });
+    const second = addMember(db, team, { kind: 'agent', name: 'second', role: '' }).row;
+    attach(db, second.id, 'codex', 'conn-second', { model: 'gpt-5.6-sol' });
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'judge me', claim: true });
+    const other = openLane(db, team.id, 'dawn', 'worker', { title: 'held elsewhere', claim: true });
+    db.prepare(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?`).run(other.id);
+    return { db, team, worker, first, second, lane, other };
+  }
+
+  it('picks the equal-grade seat holding fewer open acceptance asks, and says so', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team, worker, first, lane, other } = await room();
+    ask(db, team, worker.id, first.id, other.id, 'ask-1');
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick).toMatchObject({ reviewer: 'second', grade: 'cross_family' });
+    expect(sel.snapshot.selected).toEqual({
+      reviewer: 'second',
+      grade: 'cross_family',
+      tie_decided_by: 'load',
+    });
+    expect(sel.snapshot.candidates).toContainEqual({
+      member: 'first',
+      family: 'gpt',
+      eligible: false,
+      exclusion: 'tie_break',
+    });
+  });
+
+  it('an answered ask and an ask on a closed lane are not load', async () => {
+    const { selectReviewCounterpart, openAcceptanceLoad } = await import('./review.js');
+    const { db, team, worker, second, lane, other } = await room();
+    ask(db, team, worker.id, second.id, other.id, 'ask-answered');
+    verdict(db, team, second.id, 'ask-answered', 'v-1');
+    const done = db.prepare(`SELECT id FROM lanes WHERE id = ?`).get(other.id) as { id: string };
+    db.prepare(`UPDATE lanes SET state = 'done' WHERE id = ?`).run(done.id);
+    ask(db, team, worker.id, second.id, done.id, 'ask-on-done-lane');
+    // `first` holds nothing at all; with `second`'s two asks discounted the pair ties on load.
+    expect(openAcceptanceLoad(db, team.id)).toEqual(new Map());
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('roster');
+    expect(sel.pick?.reviewer).toBe('first');
+  });
+
+  it('on equal load, the least recently picked seat wins', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team, lane, other } = await room();
+    picked(db, team, 'first', other.id, Date.now() - 1_000);
+    picked(db, team, 'second', other.id, Date.now() - 3_600_000);
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick?.reviewer).toBe('second');
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('recency');
+  });
+
+  it('a full tie still falls to roster order — the last resort, and named as such', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team, lane } = await room();
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick?.reviewer).toBe('first');
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('roster');
+  });
+
+  it('no equal-grade rival: decided by grade, and load never reorders across rungs', async () => {
+    const { selectReviewCounterpart } = await import('./review.js');
+    const { db, team, worker, lane, other } = await room();
+    // Demote `second` to cross_model; load `first` heavily. Grade must still win.
+    const second = db.prepare(`SELECT id FROM members WHERE name = 'second'`).get() as {
+      id: string;
+    };
+    attach(db, second.id, 'claude-code', 'conn-second-b', { model: 'claude-opus-4-8' });
+    const first = db.prepare(`SELECT id FROM members WHERE name = 'first'`).get() as { id: string };
+    for (let i = 0; i < 5; i++) ask(db, team, worker.id, first.id, other.id, `ask-heavy-${i}`);
+    const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
+    expect(sel.pick).toMatchObject({ reviewer: 'first', grade: 'cross_family' });
+    expect(sel.snapshot.selected?.tie_decided_by).toBe('grade');
+  });
+
+  it('the wake picker breaks an equal-grade tie by load too', async () => {
+    const { pickWakeReviewer } = await import('./review.js');
+    const { openLane } = await import('./lanes.js');
+    const { db, team } = seed();
+    const worker = addMember(db, team, { kind: 'agent', name: 'worker', role: '' }).row;
+    attach(db, worker.id, 'claude-code', 'conn-worker', { model: 'claude-opus-5' });
+    const offline = (name: string) => {
+      const { row } = addMember(db, team, { kind: 'agent', name, role: '' });
+      db.prepare(
+        `INSERT INTO audit (id, team_id, ts, actor, action, target, result, detail, created_at)
+         VALUES (?, ?, ?, NULL, 'occupancy.model_attested', ?, 'allow', ?, ?)`,
+      ).run(
+        `a-${name}`,
+        team.id,
+        Date.now() - 3_600_000,
+        name,
+        JSON.stringify({ old: null, new: 'gpt-5.6-sol', source: 'claim' }),
+        Date.now() - 3_600_000,
+      );
+      enrollResidency(db, team.id, {
+        member_id: row.id,
+        harness: 'claude-code',
+        host: 'h',
+        grant_id: 'g',
+        authorized_by: 'nick',
+      });
+      return row;
+    };
+    const first = offline('first');
+    offline('second');
+    const held = openLane(db, team.id, 'dawn', 'worker', { title: 'held', claim: true });
+    db.prepare(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?`).run(held.id);
+    ask(db, team, worker.id, first.id, held.id, 'ask-wake');
+    const posture = teamFamilyPosture(db, team.id, TIMEOUT);
+    expect(pickWakeReviewer(db, team.id, 'worker', posture)).toMatchObject({ reviewer: 'second' });
+  });
+});
+
 describe('reviewLoopBounceCount (ADR 191)', () => {
   it('counts prior ready_for_review audit rows for the lane', async () => {
     const { reviewLoopBounceCount, REVIEW_LOOP_BREAKER_N } = await import('./review.js');

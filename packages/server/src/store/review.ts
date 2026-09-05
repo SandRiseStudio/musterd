@@ -127,9 +127,17 @@ export interface ReviewSelectionCandidate {
   exclusion?: ReviewSelectionExclusion;
 }
 
+/**
+ * What separated the winner from an equal-grade rival (lane 01M1S6GZ96). `grade` when nothing
+ * tied. Otherwise the first rung of the tie-break that differed: `load` (fewest open acceptance
+ * asks held), `recency` (least recently picked), or `roster` — the listMembers order that used to
+ * decide EVERY tie, measured 32 of 32 in the 30 days to 2026-09-05, always to the earlier seat.
+ */
+export type TieDecidedBy = 'grade' | 'load' | 'recency' | 'roster';
+
 /** Decision-time evidence persisted with `lane.ready_for_review` (ADR 303). */
 export interface ReviewSelectionSnapshot {
-  selected: { reviewer: string; grade: SnapshotGrade } | null;
+  selected: { reviewer: string; grade: SnapshotGrade; tie_decided_by?: TieDecidedBy } | null;
   /** The asker's live family at decision time (`unknown` when its occupancy attests nothing). The
    *  close row carries the same value later; here so the ready row is readable on its own. */
   worker_family: string;
@@ -451,6 +459,106 @@ export function pickReviewCounterpart(
 }
 
 /**
+ * Open acceptance asks per holder (lane 01M1S6GZ96): daemon-composed `lane_review` asks with no
+ * accept/decline naming them, no `resolve` on their thread, and a lane still awaiting acceptance.
+ * The picker's load rung — measured 2026-09-05, gptbot held 14 of these at once while the picker
+ * kept adding, because nothing here ever looked. Bounded to `act='ask'` rows carrying the marker
+ * (576 asks in an 11.5k-row table on the live daemon), joined to `lanes` so a closed lane's stale
+ * ask counts for nothing.
+ */
+export function openAcceptanceLoad(db: Database, teamId: string): Map<string, number> {
+  // Three single-pass scans joined here rather than one query with correlated NOT EXISTS: the
+  // correlated form re-ran json_extract over the whole messages table per candidate ask and
+  // measured 3.2s on a copy of the live daemon (2026-09-05, 11.5k rows) — a cost paid on EVERY
+  // submit. This shape measured well under 100ms on the same copy.
+  const awaiting = new Set(
+    db
+      .prepare<[string], { id: string }>(
+        `SELECT id FROM lanes WHERE team_id = ? AND state IN ('awaiting_acceptance','ready_for_review')`,
+      )
+      .all(teamId)
+      .map((r) => r.id),
+  );
+  if (awaiting.size === 0) return new Map();
+  const answered = new Set(
+    db
+      .prepare<[string], { ref: string | null }>(
+        `SELECT json_extract(meta, '$.in_reply_to') AS ref FROM messages
+          WHERE team_id = ? AND act IN ('accept','decline') AND meta IS NOT NULL`,
+      )
+      .all(teamId)
+      .map((r) => r.ref)
+      .filter((r): r is string => typeof r === 'string'),
+  );
+  const resolved = new Set(
+    db
+      .prepare<[string], { thread_id: string | null }>(
+        `SELECT thread_id FROM messages WHERE team_id = ? AND act = 'resolve' AND thread_id IS NOT NULL`,
+      )
+      .all(teamId)
+      .map((r) => r.thread_id)
+      .filter((r): r is string => typeof r === 'string'),
+  );
+  const asks = db
+    .prepare<[string], { id: string; holder: string | null; lane: string | null }>(
+      `SELECT m.id AS id, mem.name AS holder, json_extract(m.meta, '$.lane_review.lane') AS lane
+         FROM messages m
+         LEFT JOIN members mem ON mem.id = m.to_member
+        WHERE m.team_id = ? AND m.act = 'ask' AND m.meta LIKE '%lane_review%'`,
+    )
+    .all(teamId);
+  const load = new Map<string, number>();
+  for (const a of asks) {
+    if (!a.holder || !a.lane || !awaiting.has(a.lane)) continue;
+    if (answered.has(a.id) || resolved.has(a.id)) continue;
+    load.set(a.holder, (load.get(a.holder) ?? 0) + 1);
+  }
+  return load;
+}
+
+/** When each seat was last handed an acceptance (newest ready/re-route row naming it as reviewer). */
+export function lastPickedAt(db: Database, teamId: string): Map<string, number> {
+  const rows = db
+    .prepare<[string], { reviewer: string; at: number }>(
+      `SELECT json_extract(detail, '$.reviewer') AS reviewer, MAX(ts) AS at
+         FROM audit
+        WHERE team_id = ? AND action IN ('lane.ready_for_review','lane.review_rerouted')
+          AND json_extract(detail, '$.reviewer') IS NOT NULL
+        GROUP BY 1`,
+    )
+    .all(teamId);
+  return new Map(rows.map((r) => [r.reviewer, r.at]));
+}
+
+/**
+ * The tie-break behind both pickers, applied only AMONG EQUAL GRADES — the ADR 188 ladder still
+ * decides first and this never reorders across rungs. Fewest open acceptance asks, then least
+ * recently picked, then whatever order the caller already had (roster). Returns the comparator and
+ * a way to name which rung separated two seats, so the snapshot can say it.
+ */
+function tieBreaker(
+  load: Map<string, number>,
+  last: Map<string, number>,
+): {
+  compare: (a: string, b: string) => number;
+  decidedBy: (winner: string, runnerUp: string | undefined) => TieDecidedBy;
+} {
+  const l = (n: string) => load.get(n) ?? 0;
+  const t = (n: string) => last.get(n) ?? 0;
+  return {
+    compare: (a, b) => l(a) - l(b) || t(a) - t(b),
+    decidedBy: (winner, runnerUp) =>
+      runnerUp === undefined
+        ? 'grade'
+        : l(winner) !== l(runnerUp)
+          ? 'load'
+          : t(winner) !== t(runnerUp)
+            ? 'recency'
+            : 'roster',
+  };
+}
+
+/**
  * Select a live agent counterpart and retain the full decision-time evidence for the ready audit.
  * This is intentionally a peer-picker only: risky human escalation and wake routing remain distinct
  * paths in the transport, whose explicit outcome is recorded alongside this snapshot.
@@ -543,10 +651,22 @@ export function selectReviewCounterpart(
   // all-ungraded — the worker is attested or it is not — but the order is stated so the ladder
   // reads as one list, not as a rule plus an exception.
   const LADDER: SnapshotGrade[] = ['cross_family', 'cross_model', UNGRADED];
-  // Stable sort preserves roster order for an equal-grade tie, which is the pre-ADR-303 policy.
-  selectable.sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
+  // Grade first (ADR 188), and among equal grades the load rung (lane 01M1S6GZ96). Array.sort is
+  // stable, so a full tie still falls to roster order — the pre-ADR-303 policy — but now it is the
+  // LAST resort, not the only one, and the snapshot says which rung decided.
+  const tie = tieBreaker(openAcceptanceLoad(db, teamId), lastPickedAt(db, teamId));
+  selectable.sort(
+    (a, b) =>
+      LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade) ||
+      tie.compare(a.member.name, b.member.name),
+  );
   const best = selectable[0];
   if (!best) return { pick: null, snapshot: { selected: null, worker_family, candidates } };
+  const runnerUp = selectable[1];
+  const tie_decided_by = tie.decidedBy(
+    best.member.name,
+    runnerUp && runnerUp.grade === best.grade ? runnerUp.member.name : undefined,
+  );
 
   for (const option of selectable) {
     const candidate = candidates[option.index]!;
@@ -570,7 +690,7 @@ export function selectReviewCounterpart(
   return {
     pick,
     snapshot: {
-      selected: { reviewer: pick.reviewer, grade: best.grade },
+      selected: { reviewer: pick.reviewer, grade: best.grade, tie_decided_by },
       worker_family,
       candidates,
     },
@@ -661,6 +781,7 @@ export function pickWakeReviewer(
   const workerModel = workerSeat ? latestAttestedModel(db, workerSeat.id) : null;
   const durable = durableAttestations(db, teamId);
   const LADDER = ['cross_family', 'cross_model'] as const;
+  const tie = tieBreaker(openAcceptanceLoad(db, teamId), lastPickedAt(db, teamId));
   const graded = posture.wake_pool
     .filter((c) => c.wakeability === 'wakeable' && c.seat !== worker)
     .map((c) => ({
@@ -671,7 +792,14 @@ export function pickWakeReviewer(
       (x): x is { c: WakeCandidate; grade: (typeof LADDER)[number] } =>
         x.grade === 'cross_family' || x.grade === 'cross_model',
     )
-    .sort((a, b) => LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade));
+    // Same tie-break as the live picker (lane 01M1S6GZ96): grade, then load, then recency, then
+    // the pool's own order. With one spendable seat in the pool this changes nothing — which is the
+    // measured state on 2026-09-05 (only gptbot enrolled flow:auto), and why the remedy for THAT
+    // concentration is enrollment, not this sort.
+    .sort(
+      (a, b) =>
+        LADDER.indexOf(a.grade) - LADDER.indexOf(b.grade) || tie.compare(a.c.seat, b.c.seat),
+    );
   const best = graded[0];
   if (!best) return null;
   return {

@@ -60,6 +60,10 @@ interface Submit {
   ts: number;
   d: ReadyDetail;
   close?: { ts: number; d: ClosedDetail };
+  /** The lane's acceptance was later re-routed by hand (`lane.review_rerouted`, ADR 348
+   *  amendment 2026-09-04). The submit row's `reviewer` is then no longer the seat that holds
+   *  the ask, so `jumped` would misread the re-routed seat's honest accept as a route jump. */
+  rerouted?: true;
 }
 
 function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 'musterd.db')) {
@@ -84,10 +88,22 @@ function load(dbPath = process.env['MUSTERD_DB'] ?? join(homedir(), '.musterd', 
     const j = JSON.parse(r.detail) as { new?: string };
     if (r.actor && j.new) seatFamily.set(r.actor, familyOf(j.new));
   }
+  // Dated amendment, 2026-09-05, written at count 0 of its own rows (falsify: `select count(*)
+  // from audit where action='lane.review_rerouted'` on a daemon built before cd138abd is 0 by
+  // construction; on one built after, the exclusion below predates every row). A lane re-routed
+  // by hand leaves the population the same way a `named` submit does and for the same reason:
+  // the seat that answered was chosen by a person, not the ladder, and the submit row names the
+  // seat the person replaced. Without this, `jumped` counts the re-routed seat's accept as a
+  // route jump (closer ≠ asked reviewer, closer ≠ owner) — a miss charged to a ladder that was
+  // overruled. Excluded on arrival, before the first row, per the rule beside CONCENTRATION_PREDICTION.
+  const rerouted = new Set(
+    rows('lane.review_rerouted').map((r) => (JSON.parse(r.detail) as { lane: string }).lane),
+  );
   const submits: Submit[] = rows('lane.ready_for_review').map((r) => {
     const d = JSON.parse(r.detail) as ReadyDetail;
     const close = (closes.get(d.lane) ?? []).find((c) => c.ts >= r.ts);
-    return close ? { ts: r.ts, d, close } : { ts: r.ts, d };
+    const base: Submit = close ? { ts: r.ts, d, close } : { ts: r.ts, d };
+    return rerouted.has(d.lane) ? { ...base, rerouted: true } : base;
   });
   return { db, submits, seatFamily };
 }
@@ -121,6 +137,9 @@ const liveRouted = (rs: Submit[]) =>
       // it chose among pairings it could not grade, so the row is no evidence about decorrelation
       // in either direction — out of the population on arrival, before its first row landed.
       r.d.route !== 'ungraded' &&
+      // 2026-09-05: a lane whose acceptance was later re-routed by hand — see the amendment in
+      // `load()`. Out before its first row, like `named` and `ungraded`.
+      !r.rerouted &&
       r.d.reviewer,
   );
 
@@ -139,6 +158,9 @@ export interface WindowResult {
   /** Submits routed at the `ungraded` rung (ADR 351): out of `liveRouted`, counted for the same
    *  reason `named` is — a bucket that leaves the mix silently makes the mix stop summing. */
   ungraded: number;
+  /** Lanes re-routed by hand after submit (ADR 348 amendment, 2026-09-04): out of `liveRouted`,
+   *  counted so the mix keeps summing. */
+  rerouted: number;
   good: number;
   confirms: number;
   jumped: number;
@@ -196,6 +218,7 @@ export function evaluate(name: string, rs: Submit[]): WindowResult {
     exempt: rs.filter((r) => r.d.acceptance_exempt).length,
     named: rs.filter((r) => r.d.route === 'named' && !r.d.acceptance_exempt).length,
     ungraded: rs.filter((r) => r.d.route === 'ungraded').length,
+    rerouted: rs.filter((r) => r.rerouted === true).length,
     good,
     confirms,
     jumped,
@@ -603,7 +626,7 @@ function main() {
   for (const r of results) {
     console.log(`\n=== ${r.name} — ${r.submits} submits ===`);
     console.log(
-      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt} | hand-routed ${r.named} | ungraded ${r.ungraded}`,
+      `  mix: live-routed ${r.liveRouted} | wake ${r.wakeQueued} | no_candidate ${r.noCandidate} | exempt ${r.exempt} | hand-routed ${r.named} | ungraded ${r.ungraded} | re-routed ${r.rerouted}`,
     );
     console.log(
       `  [1] good <=10m ${r.good}/${r.liveRouted} = ${pct(r.goodRate)}   (any confirm ${r.confirms}/${r.liveRouted})`,
