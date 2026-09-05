@@ -199,3 +199,17 @@ is decisive.
 - Building the restart is gated on the falsifier above passing and on the eval's first read; the
   classification, the sample, and the instrumentation land first and alert-only.
   Follows-up: deferred — arm `daemon_wedged` only after 30 days of `guardian.sampled` data (2026-09-04)
+
+**2026-09-05 — increment 1 landed, alert-only (lane 01M1Q9WQP66MZNH5BDH0VD4RZ0).** `daemon_wedged`
+joins `GUARDIAN_CLASSES` at `alert`; `packages/cli/src/guardian/sample.ts` parses `sample <pid> 3` into
+a verdict; the collector takes the sample only on the clean-exit-unreachable shape, against the pid
+launchd itself reports. Nothing is armed and no restart exists. Two things the build found that §1
+did not spell out, both kept: **wait primitives read as parked, not held** — an idle Node event loop
+concentrates ~100% in `kevent`/`uv__io_poll` exactly as a wedged one does in `sqlite3_step`, so a
+bare share threshold would hand a quiet daemon whose HTTP server died the destructive tier; the
+dominant frame is checked by name, and an unknown frame fails toward a human rather than toward
+silence. And **`guardian.sampled` is written to the guardian log, not the audit** — the Observability
+section above says audit, but the audit is a POST to the daemon, and the daemon is unreachable at
+exactly the moment a sample is taken; a row written there would exist only for the samples that did
+not matter. The eval reads the log. Rows accumulate from the first clean-exit-unreachable tick on
+this host, where `/usr/bin/sample` is present.

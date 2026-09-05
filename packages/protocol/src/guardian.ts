@@ -10,6 +10,14 @@ export const GUARDIAN_CLASSES = [
   'publisher_failed',
   'crashloop',
   'daemon_down',
+  /**
+   * Alive but unreachable, PROVEN by a bounded stack sample (ADR 389 §1) — not merely inferred
+   * from an unanswered /health. Its own class rather than a policy footnote on `daemon_down`
+   * because the tier attaches to the class: the destructive tier cannot be pointed at an incident
+   * whose evidence does not support it, and that standard is then enforced by the type rather
+   * than by a reviewer remembering it. Ships at `alert`, like `daemon_down`.
+   */
+  'daemon_wedged',
   'schema_drift',
   'wrong_db',
   'error_rate',

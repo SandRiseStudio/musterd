@@ -8,6 +8,7 @@
  * (the 8-day-old-log ghost paged a human for an incident that ended a week ago).
  */
 import type { GuardianSignals } from './classify.js';
+import { parseSample } from './sample.js';
 
 export interface HealthPayload {
   ok: boolean;
@@ -64,13 +65,43 @@ export interface SignalDeps {
   lastRefreshAt: () => Promise<number | null>;
   /** ADR 274's explicit, bounded daemon-restart state. Read only after a confirmed health miss. */
   readHandover?: () => Promise<Exclude<GuardianSignals['handover'], undefined>>;
+  /**
+   * Raw `sample <pid> <seconds>` output for the live daemon pid (ADR 389 §1).
+   *
+   * OPTIONAL, and its absence is a first-class answer rather than an oversight: the tool is macOS
+   * only, and on a host without it the class is simply unreachable and the posture stays exactly
+   * today's. A build that cannot sample must degrade toward `daemon_down` at `alert` — never past
+   * it — so every failure path here resolves to "not taken, and here is why".
+   */
+  sampleStack?: (pid: number, seconds: number) => Promise<string>;
 }
 
+/**
+ * The bound on the stack sample, in seconds. Read-only, no signal sent, nothing written — and it
+ * is only ever paid on a tick that has ALREADY spent four failed /health probes, never on a
+ * healthy machine (ADR 389 Consequences).
+ */
+export const SAMPLE_SECONDS = 3;
+
 /** Tolerant parse of `launchctl print` — absent fields are zeros, never a throw. */
-export function parseLaunchctlPrint(out: string): { lastExit: number; runs: number } {
+export function parseLaunchctlPrint(out: string): {
+  lastExit: number;
+  runs: number;
+  pid: number | null;
+} {
   const runs = /runs\s*=\s*(\d+)/.exec(out);
   const exit = /last exit code\s*=\s*(\d+)/.exec(out);
-  return { lastExit: exit ? Number(exit[1]) : 0, runs: runs ? Number(runs[1]) : 0 };
+  // The pid launchd itself reports, not one we look up by name: sampling the wrong process would
+  // put a stranger's stack in a raise about ours. Absent when launchd has no running instance —
+  // which is itself the answer (nothing alive to be wedged).
+  // Anchored to its own line so a qualified field ("original pid = ...") cannot be read as the
+  // live one: sampling a pid launchd no longer owns is worse than not sampling at all.
+  const pid = /^\s*pid\s*=\s*(\d+)\s*$/m.exec(out);
+  return {
+    lastExit: exit ? Number(exit[1]) : 0,
+    runs: runs ? Number(runs[1]) : 0,
+    pid: pid ? Number(pid[1]) : null,
+  };
 }
 
 export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
@@ -154,6 +185,46 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
 
   const launchd = parseLaunchctlPrint(await d.launchctlPrint().catch(() => ''));
 
+  /**
+   * The stack sample (ADR 389 §1), taken only on the shape that could become `daemon_wedged`:
+   * /health unreachable on both bounds, launchd reporting a clean exit, and a pid launchd itself
+   * still names. A healthy machine never reaches this line, and a machine whose daemon genuinely
+   * exited has no pid to sample.
+   *
+   * Persistence across ticks — the fourth condition — is the classifier's to check, not the
+   * collector's: `firstUnreachableAt` is injected by the tick from its stamp, after this runs. So
+   * a first sighting pays the sample too, and that is deliberate: the evidence is most useful at
+   * the moment it is fresh, and it rides even a deferred raise.
+   *
+   * Every failure is an answer, never a throw: no sampler wired, no pid, the tool absent, the pid
+   * gone between probe and sample — each yields `taken: false` with a reason, and the classifier
+   * degrades to exactly today's `daemon_down` posture.
+   */
+  let stack: GuardianSignals['stack'];
+  if (health === null && launchd.lastExit === 0) {
+    if (d.sampleStack === undefined) {
+      stack = { taken: false, reason: 'this build wires no stack sampler', wedged: false };
+    } else if (launchd.pid === null) {
+      stack = {
+        taken: false,
+        reason: 'launchd reports no running pid — nothing alive to be wedged',
+        wedged: false,
+      };
+    } else {
+      const pid = launchd.pid;
+      stack = await d
+        .sampleStack(pid, SAMPLE_SECONDS)
+        .then((out) => parseSample(out, pid))
+        .catch((err) => ({
+          taken: false,
+          reason: `sample(1) failed: ${(err instanceof Error ? err.message : String(err))
+            .replace(/\s+/g, ' ')
+            .slice(0, 200)}`,
+          wedged: false,
+        }));
+    }
+  }
+
   const errLines = await d.readSince(d.daemonErrLogPath, bootedAt).catch(() => []);
 
   // A publisher failure is fresh only while the failure log is newer than the last success stamp.
@@ -177,6 +248,7 @@ export async function collectSignals(d: SignalDeps): Promise<GuardianSignals> {
     health,
     ...(probe !== undefined ? { healthProbe: probe } : {}),
     handover,
+    ...(stack !== undefined ? { stack } : {}),
     launchd,
     publisherLog: { freshFailure },
     errLinesSinceBoot: errLines.length,

@@ -100,6 +100,9 @@ describe('DEFAULT_TIERS (spec §4 shipped defaults)', () => {
       publisher_failed: 'auto',
       crashloop: 'auto',
       daemon_down: 'alert',
+      // ADR 389 §3: ships dark. The only class whose remediation is destructive, and the tier is
+      // deliberately not sufficient to arm it on its own.
+      daemon_wedged: 'alert',
       schema_drift: 'alert',
       wrong_db: 'alert',
       error_rate: 'alert',
@@ -216,5 +219,103 @@ describe('the raise reports the confirming probe rather than prescribing it', ()
     })[0]!.evidence!;
     expect(e).toContain('3 attempts');
     expect(e).not.toContain('10000ms');
+  });
+});
+
+/**
+ * ADR 389 §1. The four circumstantial conditions above are jointly satisfied by BOTH "wedged with
+ * the socket still held" and "went away without launchd noticing" — different incidents with
+ * different owners. Only the stack sample separates them, so only the sample may make this class.
+ *
+ * The direction that matters is asymmetric: failing to promote costs a slightly vaguer raise at
+ * the same tier, while promoting wrongly points a destructive remediation at an incident whose
+ * evidence never supported it. Every degradation path below therefore lands on `daemon_down`.
+ */
+describe('daemon_wedged is made by the sample, never by the circumstances', () => {
+  const persisted = {
+    ...healthy,
+    health: null,
+    launchd: { lastExit: 0, runs: 15 },
+    healthProbe: {
+      attempts: 3,
+      lastError: 'The operation was aborted due to timeout',
+      confirmMs: 10_000,
+      confirmError: 'The operation was aborted due to timeout',
+    },
+    firstUnreachableAt: healthy.now - 120_000,
+  };
+
+  const heldSample = {
+    taken: true,
+    pid: 11116,
+    total: 2407,
+    inFrame: 2406,
+    share: 2406 / 2407,
+    frame: 'sqlite3_step',
+    wedged: true,
+  };
+
+  it('promotes only with a sample naming one synchronous frame, and names it in the raise', () => {
+    const out = classify({ ...persisted, stack: heldSample });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.class).toBe('daemon_wedged');
+    expect(out[0]!.defer).toBeUndefined();
+    expect(out[0]!.evidence).toContain('sqlite3_step');
+    expect(out[0]!.evidence).toMatch(/ALIVE and blocked/);
+  });
+
+  it('ships dark: the promoted class still carries the alert tier, not auto', () => {
+    // The whole safety of increment 1 is that nothing new can act. If this ever reads 'auto' by
+    // default, ADR 389 §3 has been violated by one line of policy.
+    expect(DEFAULT_TIERS.daemon_wedged).toBe('alert');
+  });
+
+  it('the identical circumstances WITHOUT a sample stay daemon_down', () => {
+    const out = classify(persisted);
+    expect(out[0]!.class).toBe('daemon_down');
+  });
+
+  it('a sample that could not be taken degrades to daemon_down and says why', () => {
+    const out = classify({
+      ...persisted,
+      stack: { taken: false, reason: 'sample(1) not on PATH', wedged: false },
+    });
+    expect(out[0]!.class).toBe('daemon_down');
+    expect(out[0]!.evidence).toContain('sample(1) not on PATH');
+  });
+
+  it('a parked process is NOT wedged — an idle loop concentrates just as hard', () => {
+    // The one direction this class must never be wrong in: a daemon whose HTTP server died on an
+    // otherwise quiet event loop looks identical in every circumstantial signal.
+    const out = classify({
+      ...persisted,
+      stack: {
+        taken: true,
+        total: 2400,
+        inFrame: 2399,
+        share: 2399 / 2400,
+        frame: 'kevent',
+        wedged: false,
+        reason: 'dominant frame kevent is a wait primitive — parked, not held',
+      },
+    });
+    expect(out[0]!.class).toBe('daemon_down');
+    expect(out[0]!.evidence).toMatch(/parked, not held/);
+  });
+
+  it('a first sighting still defers even with a held sample — persistence is not optional', () => {
+    // The sample proves ALIVE-and-blocked; only the next tick proves it did not recover. A 77 s
+    // event-loop stall is alive and blocked too, and it ends by itself.
+    const out = classify({ ...persisted, firstUnreachableAt: null, stack: heldSample });
+    expect(out[0]!.class).toBe('daemon_down');
+    expect(out[0]!.defer).toBe(true);
+    // The evidence rides the deferred raise anyway — it is most useful while it is fresh.
+    expect(out[0]!.evidence).toContain('sqlite3_step');
+  });
+
+  it('a witnessed nonzero exit is never wedged, whatever the sample says', () => {
+    // launchd saw the process leave; a stack sample of a pid it no longer owns cannot outrank that.
+    const out = classify({ ...persisted, launchd: { lastExit: 1, runs: 15 }, stack: heldSample });
+    expect(out[0]!.class).toBe('daemon_down');
   });
 });
