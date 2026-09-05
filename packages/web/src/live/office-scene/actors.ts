@@ -19,7 +19,7 @@ import {
 import { FLOOR } from './iso';
 import { CANVAS_EASE } from './motion';
 import { findPath, walkable, type P } from './nav';
-import { carriesLaptop, type Placement } from './seating';
+import { carriesLaptop, workingAtDesk, type Placement } from './seating';
 import { chairShift, chairYaw, GESTURE, STRIDE } from './skeleton';
 import type { Bubble, CarryKind, Dir, OfficeNode, Pose } from './types';
 
@@ -120,9 +120,12 @@ export function homePoses(
     .map(([n]) => n)
     .sort();
   // The laptop is docked ⟺ the member is working at their desk; every other moment it is on their
-  // person (laptop/dock design §0). One predicate, evaluated here and again live in `posesNow`, so a
-  // member whose posture flips between placement passes is never drawn holding a laptop their dock
-  // also holds.
+  // person (laptop/dock design §0). This is the home pose's SETTLED end state — a home is where the
+  // member ends up, sat down (`sit: 1` for a desk), so the roster half is the whole answer here and
+  // there is no pose to ask yet. `posesNow` re-reads it every frame against the live `sit`, which is
+  // what keeps the hand and the dock on the same threshold while a member is still lowering into the
+  // chair; a member whose posture flips between placement passes is never drawn holding a laptop
+  // their dock also holds.
   const laptop = (name: string): CarryKind | null => (carriesLaptop(byName.get(name)) ? 'laptop' : null);
   for (const [name, pl] of placements) {
     if (!byName.has(name)) continue;
@@ -533,12 +536,21 @@ export function createActors(): Actors {
     return home ? DIR_ANGLE[home.dir] : null;
   }
 
-  /** The laptop AT HOME — docked only for a member who is working at the desk they are sitting at.
+  /**
+   * The laptop AT HOME — docked only for a member who is working at the desk they are sitting at.
    * Read off `live` every frame rather than off the baked home pose, so the object in the hand and
    * the object in the dock swap on the same roster update; `homes` only rebuilds when placements
-   * change, and posture can move without them. */
-  function laptopAtHome(name: string): CarryKind | null {
-    return carriesLaptop(live.get(name)) ? 'laptop' : null;
+   * change, and posture can move without them.
+   *
+   * It takes `sit` and asks `workingAtDesk` — the SAME predicate, on the SAME frame's pose, that
+   * fills the dock in `render.ts`. Asking the roster half alone (`carriesLaptop`) put the two on
+   * different thresholds: the hand emptied the moment posture said `working`, while the dock waits
+   * for `sit > 0.9`, so through the whole sit-down blend the laptop was in neither place (gptbot,
+   * reviewing #1304; reproduced at sit 0.083 on the return from a water errand). A biconditional
+   * evaluated at two different times is not a biconditional.
+   */
+  function laptopAtHome(name: string, sit: number): CarryKind | null {
+    return workingAtDesk(live.get(name), sit) ? null : 'laptop';
   }
 
   function posesNow(): Map<string, Pose> {
@@ -558,7 +570,7 @@ export function createActors(): Actors {
         ...p,
         lx: p.lx - f[0] * shift,
         ly: p.ly - f[1] * shift,
-        carry: laptopAtHome(n), // a member at home carries only their laptop — errands are walks
+        carry: laptopAtHome(n, a.sit), // a member at home carries only their laptop — errands are walks
 
         gesture: g?.kind ?? p.gesture,
         gestureT: gT,
