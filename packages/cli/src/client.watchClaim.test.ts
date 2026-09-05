@@ -65,6 +65,35 @@ describe('watchClaim (SPEC A.3, ADR 075/078) — handshake state machine', () =>
     expect(JSON.parse(sock.sent[0]).grant).toBe('msgr_y');
   });
 
+  // ADR 131 §6. This path sent workspace, model and build but never provenance, so every
+  // CLI-claimed seat attached with none (measured 2026-09-05: 3582 cli `presence.attached` rows).
+  it('carries the inherited provenance on the claim frame', () => {
+    vi.stubEnv('MUSTERD_PROVENANCE', 'wake');
+    const sock = new FakeSocket();
+    watchClaim({ ...base, createSocket: () => sock });
+    sock.emit('open');
+    expect(JSON.parse(sock.sent[0]).provenance).toBe('wake');
+    vi.unstubAllEnvs();
+  });
+
+  it("never carries it from a HUMAN credential — a person's shell must not say `wake`", () => {
+    vi.stubEnv('MUSTERD_PROVENANCE', 'wake');
+    const sock = new FakeSocket();
+    watchClaim({ ...base, key: 'mscr_nick', createSocket: () => sock });
+    sock.emit('open');
+    expect(JSON.parse(sock.sent[0]).provenance).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+
+  it('omits it when the session inherited none', () => {
+    vi.stubEnv('MUSTERD_PROVENANCE', '');
+    const sock = new FakeSocket();
+    watchClaim({ ...base, createSocket: () => sock });
+    sock.emit('open');
+    expect(JSON.parse(sock.sent[0]).provenance).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+
   it('occupied → onOccupied + subscribe + heartbeat', () => {
     const { sock, opts } = harness();
     sock.emit('open');

@@ -1878,6 +1878,58 @@ describe('WebSocket', () => {
     a.close();
   });
 
+  // ADR 121/131 §6. `ambientTouch` and (since #1309) the stateless claim both stamp provenance on
+  // AGENT seats only; the WS claim was the last path without that gate, so a human frame could
+  // declare itself `wake` — the word the wake actuators read to decide a seat is their own child.
+  it('a HUMAN seat cannot stamp its own WS occupancy `wake`, while an agent seat records it', async () => {
+    const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+    const nickTok = team.json.human_credential;
+    await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+
+    // The human claims their own seat over WS and declares `wake`.
+    const h = new TestWs();
+    await h.open();
+    h.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: nickTok,
+      target: { seat: 'nick' },
+      surface: 'cli',
+      provenance: 'wake',
+      workspace: 'repo@main',
+    });
+    await h.waitFor('occupied');
+
+    // The agent seat declares the same thing, and it IS recorded — the gate is on kind, not on the
+    // word, so this test fails if someone "fixes" it by blanket-dropping provenance.
+    const a = new TestWs();
+    await a.open();
+    a.send({
+      type: 'claim',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      key: team.json.agent_key,
+      target: { seat: 'Ada' },
+      grant: await standingGrant(nickTok, 'Ada'),
+      surface: 'cli',
+      provenance: 'wake',
+      workspace: 'repo@main',
+    });
+    await a.waitFor('occupied');
+
+    const roster = await get('/teams/dawn/members', nickTok);
+    const human = roster.json.members.find((m: any) => m.name === 'nick');
+    const agent = roster.json.members.find((m: any) => m.name === 'Ada');
+    expect(human.presences[0].provenance).toBeNull();
+    // The workspace is not gated — it is a location, not an assertion about what animates it.
+    expect(human.presences[0].workspace).toBe('repo@main');
+    expect(agent.presences[0].provenance).toBe('wake');
+
+    h.close();
+    a.close();
+  });
+
   it('records the driver from the claim and surfaces it on the roster (ADR 021)', async () => {
     const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
     const nickTok = team.json.human_credential;

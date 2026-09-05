@@ -721,7 +721,13 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
             return;
           }
           const presence = attach(ctx.db, targetMember.id, frame.surface, state.connId, {
-            provenance: frame.provenance ?? null,
+            // ADR 121/131 §6: provenance is stamped on AGENT seats only — the same gate
+            // `ambientTouch` applies in http.ts and the stateless claim mirror applies since #1309.
+            // This was the last claim path without it: a human frame could declare itself `wake`,
+            // which is the word the wake actuators read to conclude a seat is their own spawned
+            // child (`verified.provenance !== 'wake'` in backends/claudeCode.ts, codex.ts, grok.ts,
+            // opencode.ts). A person's shell must not be able to say it.
+            provenance: targetMember.kind === 'agent' ? (frame.provenance ?? null) : null,
             workspace: frame.workspace ?? null,
             driver: frame.driver ?? null,
             model: frame.model ?? null,
