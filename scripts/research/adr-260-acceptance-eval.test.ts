@@ -195,6 +195,32 @@ describe('evaluate — the named route stays out of the denominator', () => {
     expect(r.liveRouted + r.wakeQueued + r.noCandidate + r.exempt + r.named).toBe(r.submits);
   });
 
+  it('a lane re-routed by hand leaves liveRouted and is not a jump (ADR 348 amendment, 2026-09-05)', () => {
+    // The submit row names gptbot; the acceptance was later re-routed to ghost, who accepted.
+    // Read naively, closer ≠ asked reviewer and closer ≠ owner — a "jumped route" charged to a
+    // ladder that a person overruled. The `rerouted` mark (set in `load()` from the
+    // lane.review_rerouted rows) takes it out of the population on arrival, counted in the mix.
+    const rerouted = {
+      ...picked(1000, 'gptbot', 'cross_family'),
+      rerouted: true as const,
+      close: { ts: 5000, d: { lane: 'l1000', closed_by: 'ghost', reason: 'counterpart_confirm' } },
+    };
+    const plain = {
+      ...picked(2000, 'wanderer', 'cross_family'),
+      close: {
+        ts: 6000,
+        d: { lane: 'l2000', closed_by: 'wanderer', reason: 'counterpart_confirm' },
+      },
+    };
+    const r = evaluate('rerouted', [rerouted, plain] as never);
+    expect(r.liveRouted).toBe(1);
+    expect(r.rerouted).toBe(1);
+    expect(r.jumped).toBe(0);
+    expect(r.liveRouted + r.wakeQueued + r.noCandidate + r.exempt + r.named + r.rerouted).toBe(
+      r.submits,
+    );
+  });
+
   it('does not let a hand-routed acceptor become the top reviewer', () => {
     const rows = [
       picked(1000, 'wanderer', 'cross_family'),
