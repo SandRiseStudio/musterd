@@ -349,7 +349,11 @@ export function touchAmbientPresence(
   // A live resident session (real socket) already owns liveness — don't add a competing row.
   if (hasActivePresence(db, memberId)) return false;
   const wasLive = hasLivePresence(db, memberId, timeoutMs);
-  const provenance: Provenance = ctx.provenance ?? 'session';
+  // SPEC.md §"Attach context": provenance is a fact known only to the attaching client, and the
+  // server MUST NOT guess it. This used to default to `session`, which made an unstated provenance
+  // indistinguishable from a declared one — and it landed on humans every time, since `ambientTouch`
+  // reads the header for agent seats only (ADR 121). Absence is not an assertion (ADR 236).
+  const provenance: Provenance | null = ctx.provenance ?? null;
   const existing = db
     .prepare<
       [string],
