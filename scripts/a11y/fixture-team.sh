@@ -74,11 +74,44 @@ SEATS="${A11Y_FIXTURE_SEATS-bo:cursor cy:codex della:grok hana:opencode}"
 seat_name() { printf '%s' "${1%%:*}"; }
 seat_surface() { case "$1" in *:*) printf '%s' "${1#*:}" ;; *) printf 'cli' ;; esac; }
 
+# The model each harness attests. These are not decoration: the nameplate paints a PROVIDER CHIP and
+# a version crumb from this string (modelProvider.ts / presenceLabel.ts), and with the field null
+# neither element exists, so the sweep measures neither. One model per family so the four inks that
+# can appear together do appear together — and `muse-spark` specifically, because its chip and crumb
+# were BOTH wrong on the live stream (#1306) and nothing here could have caught it.
+seat_model() {
+  case "$(seat_surface "$1")" in
+    cursor) printf 'claude-opus-5' ;;
+    codex) printf 'gpt-5.6-sol' ;;
+    grok) printf 'grok-4.5' ;;
+    opencode) printf 'muse-spark-1.3-contributor-free' ;;
+    *) printf 'claude-haiku-4-5-20251001' ;;
+  esac
+}
+
+# Exactly ONE seat is here because something woke it (ADR 131). The woken chip and the nameplate's
+# woken tag paint only on `provenance: wake`, so with every row `session` the sweep cannot reach
+# them — and one is the honest number: a room where every seat was woken is not a room anyone has.
+seat_provenance() { case "$(seat_name "$1")" in della) printf 'wake' ;; *) printf 'session' ;; esac; }
+
 as_seat() {
   local dir="$1"; shift
   (cd "$dir" && MUSTERD_CONFIG="$dir/config.json" node "$BIN" "$@" --server "$SERVER")
 }
 as_admin() { as_seat "$ADMIN" "$@"; }
+
+# Re-claim every seat detached, WITHOUT `--key`, carrying its attested model and provenance. Called
+# twice on purpose: once when the room is first filled, and once at the very end of `up`. See the
+# attestation block below for why the key must be absent, and the hand-off block for why twice.
+reattest_all() {
+  for e in $SEATS; do
+    local n; n="$(seat_name "$e")"
+    (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
+       MUSTERD_MODEL="$(seat_model "$e")" MUSTERD_PROVENANCE="$(seat_provenance "$e")" \
+       node "$BIN" claim "$n" --team "$TEAM" --detach --surface "$(seat_surface "$e")" \
+       --server "$SERVER" >>"$SEATDIR/$n/join.log" 2>&1) || true
+  done
+}
 
 approve_pending() {
   for id in $(as_admin requests --pending --json | node -e \
@@ -298,14 +331,36 @@ up() {
   #
   # Every heartbeat's PID is recorded, and `down` kills them BY PID for the same reason the daemon is
   # killed by PID: a `pkill -f` here would take out other seats' sessions on this machine.
+  # ── and now, ATTESTED — the half this fixture could not reach until 2026-09-04 ────────────────
+  #
+  # The claims above pass `--key $KEY`, the TEAM BOOTSTRAP key, because that is what gets a seat in
+  # the door the first time. But `client.ts` gates the three attestation headers — x-musterd-model
+  # (ADR 101/121), x-musterd-provenance (ADR 131 §6) and x-musterd-wake-lease (ADR 241) — on the
+  # AGENT-SEAT credential prefix `msac_`, and it is right to: a model is a harness fact, and a team
+  # key in a human's shell must not be able to stamp one. So every presence this fixture made
+  # carried model null and provenance null, and every element the UI paints from an attested fact —
+  # the provider chip, the model crumb, the woken chip and its nameplate tag — was not merely
+  # unmeasured but NEVER RENDERED. A green sweep over a page missing the elements it was built to
+  # check is worse than a red one (lane 01M1JEDQTP; measured again 2026-09-04: provenance null on
+  # all four seats while ada, joined another way, carried `session`).
+  #
+  # The fix needs no new minting: approving the claim above ALREADY mints an `msac_` credential and
+  # the CLI stores it (http.ts request.approve → mintAgentSeatCredential). Dropping `--key` is the
+  # whole change — the client then resolves the stored seat credential and the headers pass their
+  # own gate. Falsify: `curl $SERVER/teams/$TEAM/members` and read presences[].model — non-null on
+  # every seat, and `provenance: wake` on exactly one.
+  reattest_all
+
   : >"$FIX/heartbeat.pids"
   for e in $SEATS; do
     n="$(seat_name "$e")"; sf="$(seat_surface "$e")"
+    md="$(seat_model "$e")"; pv="$(seat_provenance "$e")"
     (
       while :; do
         sleep "$PRESENCE_HEARTBEAT_S"
         (cd "$SEATDIR/$n" && MUSTERD_CONFIG="$SEATDIR/$n/config.json" \
-           node "$BIN" claim "$n" --team "$TEAM" --detach --key "$KEY" --surface "$sf" \
+           MUSTERD_MODEL="$md" MUSTERD_PROVENANCE="$pv" \
+           node "$BIN" claim "$n" --team "$TEAM" --detach --surface "$sf" \
            --server "$SERVER" >>"$SEATDIR/$n/join.log" 2>&1) || true
       done
     ) >/dev/null 2>&1 &
@@ -342,6 +397,35 @@ up() {
          exit 1 ;;
     esac
   done
+
+  # …and every seat ATTESTS. Same idiom as the surface check above and for the same reason: intent is
+  # not evidence. A re-attest that silently lost its `msac_` credential still exits 0 and leaves the
+  # provider chip, the model crumb and the woken chip unrendered — which is exactly the shape this
+  # fixture spent three months in, green the whole time. Read the roster the page reads.
+  ROSTER="$(curl -sf "$SERVER/teams/$TEAM/members" || true)"
+  woken=0
+  for e in $SEATS; do
+    n="$(seat_name "$e")"
+    got="$(printf '%s' "$ROSTER" | MUSTERD_SEAT="$n" node -e '
+      let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+        const m=(JSON.parse(s||"{}").members??[]).find(x=>x.name===process.env.MUSTERD_SEAT);
+        const p=(m?.presences??[]).find(p=>p.status!=="offline");
+        process.stdout.write(`${p?.model ?? ""}|${p?.provenance ?? ""}`);
+      })')"
+    [ "${got#*|}" = "wake" ] && woken=$((woken + 1))
+    case "$got" in
+      "|"*|"") echo "✗ $n is present but attests NO MODEL — the provider chip and the version crumb" >&2
+         echo "  do not render, so modelProvider/presenceLabel ink goes unmeasured. The claim above" >&2
+         echo "  must NOT pass --key: client.ts gates x-musterd-model on the msac_ seat credential" >&2
+         echo "  (ADR 101/121), and a team key silently attests nothing." >&2
+         exit 1 ;;
+    esac
+  done
+  if [ "$woken" -eq 0 ] && [ -n "$SEATS" ]; then
+    echo "✗ no seat carries provenance 'wake' — the woken chip and its nameplate tag never render," >&2
+    echo "  so ADR 131's one visible claim goes unmeasured. See seat_provenance()." >&2
+    exit 1
+  fi
 
   # Acts across the tone map. `format.ts` paints each act a different colour and the stream is the
   # largest DOM surface on the page, so this is the bulk of what phase 2 actually measures.
@@ -405,6 +489,19 @@ up() {
     ).run("ask", "small one — going ahead%").changes;
     if (n !== 1) { console.error(`✗ fixture: backdated ${n} asks, expected 1`); process.exit(1); }
   ' || { echo "✗ a11y fixture: could not seed a lapsed ask" >&2; exit 1; }
+
+  # ── the room must be FULL at hand-off, not twenty seconds later ───────────────────────────────
+  #
+  # PRESENCE_TIMEOUT_MS is 45s and everything above this line — claims, approvals, acts, asks, the
+  # backdated lapsed ask, the huddle — takes longer than that, so the seats filled at the top of this
+  # function are reaped before `up` returns. Measured 2026-09-04: at the moment `up` printed ready,
+  # the roster held ONE online member, the admin; the seats came back only on the next heartbeat, up
+  # to 20s later. The gate starts sweeping immediately, so its first sweep read a thinner room than
+  # its last — the moving-page problem this fixture's own header warns about, inside the fixture.
+  #
+  # One more re-attest costs four claims and makes the hand-off state the state the caller was
+  # promised. Falsify: `up`, then immediately curl /teams/$TEAM/members — every seat online.
+  reattest_all
 
   echo "▸ a11y fixture up — team '$TEAM' at $SERVER ($bound seats: $SEATS)"
   echo "  $SERVER/board?team=$TEAM"
