@@ -23,7 +23,7 @@ import { getMemberByName, getMemberById } from '../store/members.js';
 import { getMessageTs, insertMessage, rowToEnvelope } from '../store/messages.js';
 import { currentAttestation } from '../store/presence.js';
 import { adminHumanPresent } from '../store/reachability.js';
-import { pickHumanReviewer } from '../store/review.js';
+import { pickHumanReviewer, supersededAcceptanceAsks } from '../store/review.js';
 import type { MemberRow, MessageRow, TeamRow } from '../store/rows.js';
 import { resolveAccountStatus, resolveCapabilities } from '../store/rows.js';
 import { getPolicy, getTeamBySlug } from '../store/teams.js';
@@ -849,6 +849,19 @@ function applyAcceptanceVerdict(
   if (!laneId) return;
   const before = getLane(ctx.db, team.id, laneId, team.slug);
   if (!before || !isAwaitingAcceptance(before.state)) return;
+  // A re-route (lane 01M1QYHJFY) told this seat the acceptance moved to someone else and closed
+  // its ask. Its verdict still lands as a message — it is not refused as an act — but it binds to
+  // nothing: the lane's acceptance is the NEW seat's to give, and honouring both would let two
+  // seats close one lane.
+  if (supersededAcceptanceAsks(ctx.db, team.id, laneId).has(repliedToId)) {
+    log.info({
+      msg: 'acceptance_verdict_on_superseded_ask',
+      lane: laneId,
+      ask: repliedToId,
+      decider: decider.name,
+    });
+    return;
+  }
 
   const lane = updateLane(
     ctx.db,

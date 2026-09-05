@@ -500,6 +500,14 @@ export const LaneResultSchema = z.object({
        * premature unverified close ADR 235 measured 20-for-20.
        */
       standing: z.boolean().optional(),
+      /**
+       * Lane 01M1QYHJFY: the lane was already awaiting acceptance and this submit named a DIFFERENT
+       * acceptor — a fresh ask was minted to `reviewer` (route `named`) and the standing ask, if
+       * any, was closed on the seat named in `superseded`, who was told. Never set beside
+       * `standing`: a re-route is a new routing decision, not a report of the old one.
+       */
+      rerouted: z.boolean().optional(),
+      superseded: z.string().optional(),
       /** ADR 234 increment 2: the submit was acceptance-exempt (declared low stakes) — no ask
        *  exists and none is owed; self-close is the designed path, not a degradation. */
       acceptance_exempt: z.boolean().optional(),

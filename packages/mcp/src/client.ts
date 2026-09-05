@@ -507,6 +507,10 @@ export class MusterdClient {
        *  recording a merge SHA after the PR lands. A standing report must never be read as "nobody
        *  was asked": that misread sanctioned self-close against lanes with a pending acceptor. */
       standing?: boolean;
+      /** Lane 01M1QYHJFY: an already-awaiting lane re-routed by name — a fresh ask went to
+       *  `reviewer`, and the seat in `superseded` (if any) had its ask closed and was told. */
+      rerouted?: boolean;
+      superseded?: string;
       /** ADR 234 increment 2: the submit was acceptance-exempt (declared low stakes) — no ask
        *  exists and none is coming; self-close is the designed path, not a degradation. */
       acceptance_exempt?: boolean;
