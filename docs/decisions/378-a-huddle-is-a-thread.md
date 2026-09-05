@@ -121,7 +121,10 @@ A huddle reaches a seat on another machine the way every act does: the thread ac
 the next push tick, the receiving daemon's own hook loop sees a directed act for a resident seat
 and wakes it with a lane id, verified against a lease that machine minted (ADR 241). **No room
 opens a socket to a seat, and no huddle mints a wake.** The consequence is stated rather than
-hidden: cross-host liveness is bounded below by the sync tick, today sixty seconds. On one host
+hidden: cross-host liveness is bounded below by the sync tick, today sixty seconds. _(Amended
+2026-09-04: measured false for the live bell — the sync tick is a floor on the DATA, not on the
+notification, and a cross-host turn can be buried permanently rather than merely delayed. The
+convene wake survives; see "The bell does not ring across machines" in Consequences.)_ On one host
 the directed-act rail is the same one `request_help` already rides and needs no new doorbell
 integration.
 
@@ -201,6 +204,52 @@ envelopes).
 - Cross-host huddles are honest about their latency: bounded by the sync tick. A faster push on a
   directed act is a federation change, not a huddle change.
   Follows-up: deferred — the first cross-host huddle whose participants call the tick too slow (2026-09-03)
+- **The bell does not ring across machines (2026-09-04, measured; amends §3's latency sentence).**
+  stanley ran the two-daemon falsifier for real — the hub on this laptop and the `delta` seat on a
+  Fly VM in sjc, build `16b6e3d8`, huddle `01M1Q1NR8B`. The DATA half held exactly as §3 says: the
+  root and three turns folded onto delta at 48.4s / 53.0s / 83.2s / 91.8s against a sixty-second
+  poll, with `meta.huddle` and `thread_id` verbatim and the root's `to_member` resolved to delta's
+  own local id. The NOTIFICATION half did not: twenty `inbox --interrupt-check` probes across two
+  runs, silence every time. So "bounded below by the sync tick" is a floor on when a turn ARRIVES,
+  and §3 read it as a floor on when a seat is TOLD. Those are different claims and only the first
+  was true.
+
+  Two independent causes, and the ADR is only answerable for the second.
+
+  The first was not a huddle defect or a cross-machine one. `GET /inbox/interrupt-check`
+  authenticates as a member, and the probe alone is excluded from both lease heals by design, so a
+  session lease that died with its Presence refused the route forever while a bare `catch {}`
+  swallowed the 401 — every seat, every harness, permanently and silently deaf on the interrupt
+  line while looking healthy in every other respect. Repaired in #1317 (lane 01M1QC6XST): the probe
+  now says so, on the channel it already owns, and still never reclaims.
+
+  The second is this ADR's, and no repair above touches it. A huddle turn is **the only
+  interrupt class whose admission depends on a second row** — `interruptCandidates.ts` demands the
+  huddle ROOT exist locally (`:50-57`) while bounding the window on `created_at > cursorTs`
+  (`:43`) exactly as it does for self-describing acts. Cross-host the two rows arrive out of order:
+  a turn can fold before its root, and the daemon stamps the folded row with its own receipt clock
+  (`fold.ts` rule 4). If any unrelated inbox read falls in that gap, the cursor advances past the
+  turn's `created_at`, and when the root finally lands the turn no longer clears the window. It is
+  not late — it is invisible, forever. stanley demonstrated it by accident inside the falsifier
+  run: reading delta's inbox advanced its cursor to 1788562249698, past turn 1 at 1788561769690,
+  and that turn can never ring under any fix.
+
+  **Bounded on purpose:** this costs the live bell and nothing else. The wake rail never listened
+  for turns — `residency.ts` passes only `huddleOpens: lanes.conveneHuddles`, never `huddles: true`,
+  because ADR 386 made the OPEN act a wake reason and turns deliberately not one. And the root is
+  the one row the window cannot swallow, for the same reason it swallows the turn: it folds LAST,
+  so its `created_at` is above the cursor, and it is admitted on its own `meta.huddle`. A
+  cross-machine convene therefore fires on the tick after the root arrives. Claiming both rails die
+  would be an overstatement, and was made and withdrawn inside the huddle.
+
+  So the correct statement of the defect is narrower than "cross-host huddles are slow" and worse
+  than it: a huddle turn is cursor-bounded as if it were self-describing, and it is not. The repair
+  is not this ADR's to specify — it belongs with whoever owns `interruptCandidates` — but the
+  sentence that said the failure was a delay is withdrawn.
+
+  Evidence: `docs/wiki/cross-machine-huddle-bell.md` (stanley, PR #1315). Falsifier for the
+  amendment itself: fold a turn onto a second daemon with its root held back, read that seat's
+  inbox, then release the root, and check whether the bell ever rings. It does not.
 - Falsifier for the whole shape: a two-daemon test where a joiner seat's turn appears on the hub's
   `/live` after one sync tick, with `@musterd/server` holding no room state and no new route.
 - Increment 1 (schema + CLI/tool surface + whiteboard layout) and increment 2 (visual surfaces)
