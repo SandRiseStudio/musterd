@@ -1360,7 +1360,7 @@ describe('hook-path reads must not reclaim the seat (the #1130 claim storm)', ()
     // the one thing it owes the seat is to say so, on the channel it already owns. Not the daemon's
     // 401 body — a locally composed line, because this rides into a model's context uninspected.
     expect(probe.out).toMatch(/session lease/i);
-    expect(probe.out).toMatch(/musterd claim/);
+    expect(probe.out).toMatch(/team_join/);
 
     // Pre-fix, the probe's reclaim seized the seat and evicted the live adapter's presence row —
     // and a session lease is bound to that row (ADR 337), so this read failed with

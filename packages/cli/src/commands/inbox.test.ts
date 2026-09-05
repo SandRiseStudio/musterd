@@ -270,7 +270,14 @@ describe('inbox command', () => {
     // Still exit 0: a probe on every tool call must never fail the call it rides on.
     expect(code).toBe(0);
     expect(out).toMatch(/session lease/i);
-    expect(out).toMatch(/musterd claim/);
+    // It names the STATE and points at the only thing that holds a Presence. It must NOT prescribe
+    // `musterd claim` as the repair: stanley measured that claim does not restore this lease
+    // (delta, 2026-09-04 — "✓ occupied" and the identical request still 401'd), and both paths say
+    // why in the source: `--detach` is documented "no socket held, no lease" and rewrites the
+    // binding without `session_lease`, while the attached path returns, ending the Presence its
+    // lease is bound to. A line naming a repair that does not work costs a turn and changes nothing.
+    expect(out).toMatch(/team_join/);
+    expect(out).toMatch(/dies with the command/);
     // Locally composed, never the server's body — this line rides into a model's context uninspected.
     expect(out).not.toMatch(/revoked/);
   });
