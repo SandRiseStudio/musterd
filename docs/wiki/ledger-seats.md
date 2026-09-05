@@ -22,7 +22,7 @@ For how the refresher actually works — the log, the debounce stamp, and the th
 
 Both are `kind = "service"` with `role = "platform"` and nothing else (2026-08-24; falsify: `cat .musterd/seats/guardian.toml`). The guardian's operating knowledge is on [platform guardian](platform-guardian.md) instead — which is where autorefresh's now is too. **A ledger seat's charter belongs on its wiki page, not in its roster file**, and the reason is the next section.
 
-## The census cannot see guardian or streamwatch
+## The census cannot see guardian or streamwatch (~~2026-09-04~~ FIXED 2026-09-04, lane 01M1Q9D90X)
 
 The ADR 232 census (`musterd init --check`) runs two checks, and the second one is blind to two of
 the three ledger seats on this roster.
@@ -38,9 +38,17 @@ because `census.ts` iterates a frozen literal rather than the roster:
 const PLATFORM_SERVICE_LABELS = [AUTOREFRESH_LABEL, HOST_LABEL, LIVE_LABEL, SWEEP_LABEL]
 ```
 
-`GUARDIAN_LABEL` and `STREAMWATCH_LABEL` shipped afterwards (`launchd.ts:58` and `:61`) and are not
+~~`GUARDIAN_LABEL` and `STREAMWATCH_LABEL` shipped afterwards (`launchd.ts:58` and `:61`) and are not
 in it, so **guardian and streamwatch can lose their jobs in silence** (2026-09-04; falsify: add
-either constant to that array and a seat-with-no-job note appears for it). Guardian is the daemon
+either constant to that array and a seat-with-no-job note appears for it).~~ **FIXED 2026-09-04,
+lane 01M1Q9D90X**: `PLATFORM_SERVICE_LABELS` is deleted and the job-gone set is derived from the
+roster — every `kind: service` seat whose `roles` include `platform` (falsify: `censusNotes({ jobs:
+[], seats: [{ name: 'never-seen-before', roles: ['platform'] }] })` must return one job-gone note;
+that exact case is pinned in `census.test.ts`). The five unattributed actors were disposed by kind,
+not appended to a list: `host`/`live`/`sweep` are seated by their own `service install` verbs through
+one `provisionServiceSeat`; `otel-sink` is hand-authored and hand-seated; `adr260-rerun` is a dated
+one-shot the census now recognises by its plist shape (`StartCalendarInterval` with Month+Day, no
+`StartInterval`) and reports as a task, and as an expired task once it has fired. Guardian is the daemon
 watchdog — the thing that notices when the daemon dies — so nothing on this machine notices when the
 noticer stops. That is the "a wedged cron goes visibly quiet, monitoring nobody built" hole ADR 232
 was written to close, reopened by a list that could not grow with the roster.

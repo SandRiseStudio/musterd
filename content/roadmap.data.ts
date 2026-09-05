@@ -1518,7 +1518,7 @@ const RAW: RawItem[] = [
     frozenBy: 232,
     // Follows-up: 01M1Q9D90XEP9FPCYPQNBFH73Q
     building:
-      'increment 3 — remaining platform services + install auto-provisioning; the census sees five unattributed LaunchAgents and cannot see guardian or streamwatch at all. Increments 1–2 landed: kind service + the auto-refresher’s seat, and the warn-only census in doctor/init --check. Increment 4 (project services, the deploybot registration UX) is deferred until a team wants a seat for automation that is not musterd’s own; increment 5 (wake provenance) is retracted — ADR 241’s wake lease closed it better, and across 818 wakes no service has ever caused one (2026-09-04).',
+      'increment 3 landed 2026-09-04 (lane 01M1Q9D90X): the census derives its job-gone set from the roster (every kind:service seat with the platform role) instead of a frozen four-label literal, so guardian and streamwatch — and the next platform service — are covered by construction; service install --wake/--live/--sweep now seat host/live/sweep through one provisionServiceSeat; a dated one-shot is named as a task, not an unattributed actor. Increments 1–2 landed earlier: kind service + the auto-refresher’s seat, and the warn-only census in doctor/init --check. Increment 4 (project services, the deploybot registration UX) is deferred until a team wants a seat for automation that is not musterd’s own; increment 5 (wake provenance) is retracted — ADR 241’s wake lease closed it better, and across 818 wakes no service has ever caused one (2026-09-04).',
     wave: 8,
     title: 'Ledger seats — every actor on the roster (services as members)',
     plan: 'reserved',
