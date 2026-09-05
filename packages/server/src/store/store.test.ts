@@ -1076,9 +1076,9 @@ describe('presence', () => {
     touchAmbientPresence(db, cy.row.id, 'cli', 45_000, { provenance: 'wake', wake_lease: 'L-2' });
     expect(leaseOf('Cy')).toBe('L-2');
 
-    // …and a later touch from a human-driven session takes the row over completely: provenance
-    // `session` AND no lease. Keeping the token here would leave the row claiming a wake it is no
-    // longer part of — a row that lies is worse than a row that says nothing.
+    // …and a later touch that declares nothing takes the row over completely: no provenance AND no
+    // lease. Keeping the token here would leave the row claiming a wake it is no longer part of —
+    // a row that lies is worse than a row that says nothing.
     touchAmbientPresence(db, cy.row.id, 'cli', 45_000, {});
     expect(leaseOf('Cy')).toBeNull();
 
@@ -1399,9 +1399,49 @@ describe('ambient presence (ADR 057)', () => {
     );
     const rows = presenceRows(db, ada.row.id);
     expect(rows).toHaveLength(1);
-    // ambient rows are connectionless and stamped with session provenance
+    // Ambient rows are connectionless, and they record provenance only when the client declared
+    // one. SPEC.md §"Attach context" — the server MUST NOT guess it.
     expect(rows[0]?.conn_id).toBeNull();
-    expect(rows[0]?.provenance).toBe('session');
+    expect(rows[0]?.provenance).toBeNull();
+  });
+
+  /**
+   * SPEC.md §"Attach context — provenance & workspace" (ADR 014): provenance is a fact known only
+   * to the attaching client, and the server "MUST NOT guess" it. `touchAmbientPresence` guessed it
+   * anyway — `ctx.provenance ?? 'session'` — and the guess landed on humans hardest, because
+   * `ambientTouch` reads `x-musterd-provenance` only for agent seats (ADR 121). Measured on the
+   * live daemon 2026-09-05: 1174 of nick's `presence.attached` rows in 24h recorded `session`, a
+   * word his client never sent, and 0 recorded anything else.
+   *
+   * The cost is epistemic rather than operational — nothing reads a human's provenance to decide
+   * anything, and the actuators test `!== 'wake'`, so the default failed safe. What it destroyed
+   * was the difference between "the client said session" and "the client said nothing", which is
+   * the only question the column exists to answer. `wokenSeat.ts` already states the rule this
+   * restores: absence is not an assertion (ADR 236).
+   */
+  it('records no provenance when the client declared none — the server must not guess (SPEC, ADR 014)', () => {
+    const { db, team } = freshTeam();
+
+    // A human seat: `ambientTouch` gates the header off entirely, so ctx never carries provenance.
+    const nick = addMember(db, team, { name: 'Nick', kind: 'human' });
+    touchAmbientPresence(db, nick.row.id, 'cli', 45_000, {});
+    expect(presenceRows(db, nick.row.id)[0]?.provenance).toBeNull();
+
+    // An agent that declares one still records it — the fix drops the default, not the field.
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    touchAmbientPresence(db, ada.row.id, 'cli', 45_000, { provenance: 'hook' });
+    expect(presenceRows(db, ada.row.id)[0]?.provenance).toBe('hook');
+
+    // And an agent that declares none is in exactly the same position as the human: silent, not
+    // `session`. The gate is on what the client said, never on who the client is.
+    const bo = addMember(db, team, { name: 'Bo', kind: 'agent' });
+    touchAmbientPresence(db, bo.row.id, 'cli', 45_000, {});
+    expect(presenceRows(db, bo.row.id)[0]?.provenance).toBeNull();
+
+    // The re-write arm too (an existing ambient row is UPDATEd rather than attached): a declared
+    // provenance must not stick once the next touch stops declaring it.
+    touchAmbientPresence(db, ada.row.id, 'cli', 45_000, {});
+    expect(presenceRows(db, ada.row.id)[0]?.provenance).toBeNull();
   });
 
   it('upserts a single row — many commands never accumulate rows', () => {

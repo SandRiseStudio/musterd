@@ -450,17 +450,25 @@ describe('x-musterd-provenance — the ambient touch attests the animation sourc
     let ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
     expect(ada.presences[0].provenance).toBe('wake');
 
-    // Newest-wins (owner call 2026-07-14): a later human-driven touch flips it back to session…
+    // Newest-wins (owner call 2026-07-14): a later touch that declares nothing clears it. It used
+    // to read back `session` — the server's own word, not the client's — which is the guess SPEC.md
+    // §"Attach context" forbids; a touch that says nothing now leaves the row saying nothing.
     await read();
     status = await get('/teams/dawn/members', nickCred);
     ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
-    expect(ada.presences[0].provenance).toBe('session');
+    expect(ada.presences[0].provenance).toBeNull();
 
-    // …and an unknown value never lands (enum-validated, silently dropped).
+    // …and an unknown value never lands (enum-validated, silently dropped). Declared again first,
+    // so the null below is the junk being dropped rather than the header-less touch above.
+    await read('wake');
+    status = await get('/teams/dawn/members', nickCred);
+    ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
+    expect(ada.presences[0].provenance).toBe('wake');
+
     await read('root');
     status = await get('/teams/dawn/members', nickCred);
     ada = status.json.members.find((m: { name: string }) => m.name === 'Ada');
-    expect(ada.presences[0].provenance).toBe('session');
+    expect(ada.presences[0].provenance).toBeNull();
   });
 });
 
