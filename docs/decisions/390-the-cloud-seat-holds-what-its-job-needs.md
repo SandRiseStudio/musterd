@@ -59,7 +59,7 @@ a check; the replica stays, named, with the increment that would narrow it.**
    networking wants `/dev/net/tun` and the daemon socket), the hub resolved, the seat's part of the
    volume chowned once, then `setpriv --reuid=seat --regid=seat --init-groups --inh-caps=-all`
    into `seat.sh`. The daemon, `git`, `gh`, the actuator and every `claude -p` run as `seat`
-   (uid 1000). `tailscaled` is the one root process on the machine. A woken model gets an
+   (uid 1001; the node base image already owns 1000). `tailscaled` is the one root process on the machine. A woken model gets an
    unprivileged shell, which is the least a machine can offer an actor it attests.
 2. **The hub's key never boots.** If `MUSTERD_AGENT_KEY` is set, the entrypoint logs the fix and
    exits 1 before the tailnet comes up. Loud, not silent: a stale `fly secrets set` is the only way
@@ -126,11 +126,20 @@ a check; the replica stays, named, with the increment that would narrow it.**
 ## Observability & Evaluation
 
 - **Traces.** `fly logs` on boot: `dropping root → seat (tailscaled stays root; nothing else does)`
-  and `wake actuator starting for seat <name> (uid 1000, not root)`. On a migrated volume, the
+  and `wake actuator starting for seat <name> (uid 1001, not root)`. On a migrated volume, the
   `chown … (one-time)` lines, once.
 - **Eval.** The claim is "one root process, and it is tailscaled". Dataset: the live machine's
   process table. Baseline 2026-09-05 (before): every process uid 0. Expected after the first boot
   of this image: `ps -eo user,comm` shows exactly one `root` line, `tailscaled`.
+  **Measured after, 2026-09-05 16:42Z, delta on image `deployment-01M1S72G6W9JD04C26RC6FGNWP`:**
+  the four `chown … (one-time)` lines, then `dropping root → seat`, then `wake actuator starting for
+  seat delta (uid 1001, not root)`. `ps -eo user,comm` on the machine: userland root is exactly
+  `tailscaled` (the rest of the root lines are kernel threads); `node` ×2 as `seat`. The actuator's
+  `/proc/<pid>/environ` carries no `TAILSCALE_AUTHKEY`, `MUSTERD_INVITE` or `MUSTERD_AGENT_KEY`.
+  `/data/home`, the repo, the workspace, the logs and the SQLite file are owned by `seat`;
+  `/data/tailscale` stays root's. The hub answers `200` from the VM. `fly secrets list` holds four
+  names: the model credential, `GH_TOKEN`, `MUSTERD_SEAT`, `ROSTER_REPO`. First deploy attempt
+  failed at build: the node base image already owns uid 1000 (`node`), so the seat is uid 1001.
 - **Experiment.** None — no flag, no rollout. One machine, one deploy, on nick's word.
 
 ## Falsifiers
