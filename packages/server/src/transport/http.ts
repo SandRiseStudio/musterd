@@ -2083,6 +2083,18 @@ export async function handleHttp(
             throw new MusterdError('forbidden', `seat "${targetMember.name}" is ${status}`);
           }
 
+          // Settle FIRST, then mint (ADR 343 decision 3, enforced). `decideRequest` is a compare-and-set
+          // on `status = 'pending'`; the admin whose settle loses gets a conflict and mints nothing. The
+          // safety lives in this order, not in the absence of a yield between the read above and here —
+          // an `await` introduced anywhere in between makes both admins pass the pending check, and this
+          // is the line that keeps the second one from minting a duplicate grant.
+          if (!decideRequest(ctx.db, team.id, requestId, 'approved', admin.name)) {
+            throw new MusterdError(
+              'conflict',
+              `request "${requestId}" was settled by another decision`,
+            );
+          }
+
           // Issue a grant so the approved session can occupy the seat. A `ttl` grant is the ADR 087
           // resume token: reusable (single_use:false) and refreshed on each occupy — when no explicit
           // `ttl_hours` is given, fall back to the server's resume window so the token is always bounded
@@ -2116,7 +2128,6 @@ export async function handleHttp(
             !existing.from_session.startsWith('http:') &&
             (!pendingConn?._claimApproved || !pendingConn.isOpen?.())
           ) {
-            decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
             appendAudit(ctx.db, team.id, {
               actor: admin.name,
               action: 'request.decide',
@@ -2267,8 +2278,7 @@ export async function handleHttp(
             recordClaimAttestation(ctx.db, team.id, targetMember, presence.id, existing.model);
           }
 
-          // Settle the request.
-          decideRequest(ctx.db, team.id, requestId, 'approved', admin.name);
+          // (The request was settled above, before the mint.)
 
           // Flip the waiting WS: find the pending connection and call _claimApproved.
           if (pendingConn?._claimApproved) {
@@ -2333,8 +2343,14 @@ export async function handleHttp(
             ...(resumeToken ? { grant: resumeToken } : {}),
           });
         } else {
-          // Deny: settle the request and push a refused frame to the waiting WS.
-          decideRequest(ctx.db, team.id, requestId, 'denied', admin.name);
+          // Deny: settle the request and push a refused frame to the waiting WS. Same compare-and-set;
+          // a deny that loses to a concurrent decision must not push a refusal over an approval.
+          if (!decideRequest(ctx.db, team.id, requestId, 'denied', admin.name)) {
+            throw new MusterdError(
+              'conflict',
+              `request "${requestId}" was settled by another decision`,
+            );
+          }
           const delivered = ctx.hub.deliverClaimDecision(existing.from_session, {
             type: 'refused',
             code: 'forbidden',

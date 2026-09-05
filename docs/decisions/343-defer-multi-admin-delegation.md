@@ -84,3 +84,26 @@ lane `01M1QA28RDN2SEMAC17X99Y01X`.
 `web-*` observers — bootstrap and web-visitor rows, not a second administrator (2026-09-04; falsify:
 `sqlite3 ~/.musterd/musterd.db "select name, role from members where kind='human'"`). No second human
 has ever administered a team here, so the evidence decision 2 waits on has not arrived.
+
+## Enforcement — 2026-09-04
+
+Decision 3 no longer rests on prose (lane `01M1QA28RDN2SEMAC17X99Y01X`, split from the
+re-verification above). The decide route now **settles before it mints**: `decideRequest`'s
+`WHERE status = 'pending'` compare-and-set runs after the target and account checks and before
+`issueGrant`, on both the approve and deny branches, and a decision whose settle returns no row
+throws `conflict` (HTTP 409) and mints nothing. The ordering ADR 342 worried about — grant minted,
+request still pending — is gone from the code rather than made harmless by accident.
+
+What this changes about decision 3: an `await` or remote boundary introduced between the read and
+the settle is no longer a silent duplicate-grant hazard. Both admins may pass the pending check; one
+settle wins; the loser mints no grant and gets the same 409 it gets today. The rule that a future
+async or federated path must re-evaluate settlement atomicity stands for the *rest* of the handler
+(presence attach, delivery, audit) — those still run after the settle without a transaction — but
+the credential-minting half is now guarded by order, not by the absence of a yield.
+
+Pinned by `packages/server/src/transport/decide-settle-order.test.ts`: two concurrent approvals of one
+request produce one grant, one settled row and one `request.decide` audit row; a late approval after
+a deny gets 409 and no grant; and, structurally, every `decideRequest(` in the handler's source
+precedes `issueGrant(`. The lane's honest finding on option 1 stands: a yield-injected interleaving
+is not reachable on a handler that is synchronous after `readJson` without adding a test seam, so the
+order is pinned at the source instead.
