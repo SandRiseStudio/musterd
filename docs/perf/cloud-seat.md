@@ -373,3 +373,62 @@ the run outlives 302 s, `flow` was the gate; if it still reads `[batched]`, it w
 3. **A watchdog kill should record its spend.** `$—` on the most expensive outcome makes the cost
    ledger silently under-count exactly the runs worth counting.
 4. **The actuator banner should print the effective bound**, or say that policy overrides it.
+
+### 15a. Correction (2026-09-06 02:00Z) — finding 15's gate was wrong, and its falsifier could not have failed
+
+Two errors in finding 15, kept visible rather than overwritten (rule 4 of `docs/wiki/README.md`).
+
+**The falsifier was a ritual.** It said: "if the next wake's host line reads `[work_order]` rather
+than `[batched]`, `flow` was the gate." That line can never read `[work_order]`. `host.log` prints
+`order.lane` — the *delivery* lane, interrupt vs batched (`packages/cli/src/host/loop.ts:253`) — and
+`dueDispatchHandoffWorkOrders` itself sets `lane: 'batched'` alongside `derivation: 'work_order'`
+(`packages/server/src/store/residency.ts:958-960`). A work order and a reply doorbell print the same
+word. The check would have "confirmed" the diagnosis whichever way the truth fell, which is exactly
+what rule 3 forbids. **The observable that does discriminate** is the ledger:
+`residency.wake_leased`'s detail carries `derivation` outright.
+
+**~~`flow` was the gate~~ (2026-09-06 01:46Z) — INCOMPLETE.** The gate is a conjunction:
+
+```ts
+if (dispatchLoopOn && policy.flow === 'auto' && cooled) {   // residency.ts:1249
+const dispatchLoopOn = teamPolicy.loops?.dispatch === true; //           :1221
+```
+
+`flow` is a *seat* override; `loops.dispatch` is a **team** switch, dark until an admin arms it
+(ADR 191/199). Setting delta to `flow: auto` was therefore inert, and the re-run proved it: the
+second wake leased at 01:57:03Z recorded `"derivation":"batched"` with flow already auto.
+
+### 16. Team policy does not replicate to a joiner, so a cloud seat can never receive a work order
+
+The measurement that corrects 15 is the real finding, and it is finding 6's family:
+
+| daemon | `teams.policy.loops` |
+| ------ | -------------------- |
+| hub (laptop) | `{"review":true,"dispatch":true,"sweep":true}` |
+| joiner (delta's VM) | **`null`** |
+
+The hub has armed the dispatch loop team-wide. The joiner has no `loops` at all — and **the joiner is
+the daemon that derives the wake** (finding 6: the wake decision is the joiner's). So
+`dispatchLoopOn` is false on the only machine whose opinion counts, `dueDispatchHandoffWorkOrders`
+and `dueDispatchContinuationWorkOrders` never run there, and **every wake a cloud seat can ever
+receive is a reply doorbell under the 5-minute reply timeout.** No seat override can lift it; the
+seat is structurally incapable of being handed lane work.
+
+That is why exit criterion 3 has never been met, and it is not a property of this lane's handoff:
+any handoff, from any seat, to any seat living on a joiner, lands the same way.
+
+Worth noting against fold: `fold.ts:252` does `UPDATE teams SET policy = ?`, so team policy *is* a
+projected shape — the joiner's is null anyway (2026-09-06; falsify: read
+`json_extract(policy,'$.loops')` on both daemons — hub non-null, joiner null, as tabulated above).
+Whether the hub never emitted the policy event, or the joiner folded it before the loops were armed
+and nothing re-emits, is the first question for the lane.
+
+**Disposition (2026-09-06 02:00Z):** armed the joiner's own team policy to agree with the hub —
+`musterd team policy --dispatch-loop on --as nick`, run on the VM. Blast radius is delta alone: that
+daemon has exactly one enrolled seat. With `loops.dispatch` on *and* `flow: auto` *and* the 30 m
+cooldown elapsed, the next poll should lease the handoff with `derivation: work_order` and the 30 m
+`work_timeout_ms`.
+
+**Falsifier, restated so it can fail:** read `detail.derivation` on the next `residency.wake_leased`
+row in the VM's audit. `work_order` and a run outliving 302 s means the conjunction was the whole
+gate. `batched` again means something else still refuses, and the two knobs were not it.
