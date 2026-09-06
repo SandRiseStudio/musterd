@@ -25,6 +25,8 @@ With a real event channel available, is heartbeat-side reconciliation still the 
 
 ## Decision
 
+_(Amended 2026-09-06: Decision 2 is scoped to **capture**. The interrupt line ships as a managed plugin under [ADR 392](392-opencode-doorbell-plugin.md), which meets findings 1–3 on their own terms rather than waiving them; capture stays heartbeat-primary and Decision 3's falsifiers are unchanged.)_
+
 1. **Correct the premise, keep the conclusion.** ADR 321 §8's "no hook table" is struck as a factual claim (a dated amendment note is appended to that ADR's Consequences with a marker where the reader meets §8); its conclusion — heartbeat-side reconciliation is the primary capture for opencode seats — is reaffirmed on grounds 1–3 above instead of inherited.
 2. **No musterd capture plugin is shipped in this lane.** Shipping one now would add an executable-code managed surface that is blind on resume, against a moving upstream API, for coverage heartbeat reconciliation already provides (enumeration + `observeModel`, both verified live on 1.18.27 during this lane).
 3. **Revisit is falsifier-gated, not calendar-gated.** Reopen capture-via-plugin if and only if: (a) upstream lands a resume/session-start event (#5409 or equivalent) that fires on `--continue`/`--session`, eliminating finding 1; or (b) heartbeat-side reconciliation proves too coarse in practice (ADR 321's original revisit clause, unchanged). Either reopens the decision; neither re-argues it.

@@ -119,6 +119,32 @@ joint design must carry.
 4. Cost note: the wake probe above ran a real ~11k-token turn against this machine's
    configured provider. Future evals use `noReply` or isolated keys.
 
+## 7. Built (2026-09-06, ADR 392, lane `01M1T42J95QH6FB5BTKM3323JR`)
+
+~~Nothing probes — no musterd plugin existed in any OpenCode worktree (2026-09-05 bell check)~~
+BUILT 2026-09-06: `musterd init` / `musterd init --refresh-hooks` writes a marker-owned
+`.opencode/plugins/musterd.js` (node built-ins only, no `package.json`, so no `bun install`):
+
+- `tool.execute.after` → `musterd inbox --interrupt-check` in the seat folder → a raised line is
+  appended to the tool `output` inside a `<musterd-interrupt>` fence (recommendation shape 2, the
+  in-process complement — the plugin's `client` already knows the server, so the §5 port gap does
+  not apply to it).
+- `event: session.idle` → same probe → one reply-mode `client.session.promptAsync`
+  (`synthetic: true`), capped at 4 per session.
+- Doctor: `detect().hookDrift` names the plugin missing ("nothing probes the interrupt line") or
+  STALE (ADR 168); surface `opencode:plugin` is refusable (ADR 332).
+
+**Unmeasured on 1.18.29 (falsify each by running it — the eval owner is the OpenCode seat):**
+
+- §2's MCP-path caveat: does the appended fence reach the model at an **MCP** tool boundary, or
+  only at native ones? Falsify: one directed interrupt-class act mid-turn; an `interrupt.raised`
+  row with no fence in the transcript at the next native boundary breaks the rail outright; a fence
+  at native boundaries only confirms the caveat and narrows ADR 392 Decision 2.
+- Whether `opencode run` (the wake child) delivers `session.idle` to the plugin before exiting on
+  idle. Falsify: a raised line during a wake with zero `promptAsync` calls.
+- Whether the TUI renders the synthetic idle prompt (#8564). Human-facing only.
+
+
 ## Related
 
 - ADR 362 (plugin capture deferred; premise corrected) — the *outbound* half; this page

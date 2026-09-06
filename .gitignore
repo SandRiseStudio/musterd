@@ -73,6 +73,8 @@ coverage/
 .codex/hooks.json
 # OpenCode's MCP config carries absolute machine paths (node binary + checkout dir).
 .opencode/opencode.json
+# ADR 392: the OpenCode doorbell plugin — marker-owned, rewritten by `musterd init --refresh-hooks`.
+.opencode/plugins/musterd.js
 
 # Qoder editor workspace state — local tooling, never committed
 .qoder/

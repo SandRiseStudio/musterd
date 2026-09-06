@@ -62,10 +62,10 @@ headless live measurement (scratch port, isolated `XDG_DATA_HOME`).
 | Feature | OpenCode (TUI, musterd-spawned on a known `--port`) | OpenCode (TUI, human-launched, random port) | OpenCode (headless `serve`) |
 | --- | --- | --- | --- |
 | Peer inject (doorbell in) | **yes** — `POST /session/:id/prompt_async` (measured: noReply persist + reply-mode wake both worked once); `abort` for the interrupt half (measured harmless on idle) | **unreachable** — no discovery API for the random port; a parallel `serve` starts a new server (docs) | same as spawned-TUI (measured here) |
-| Tool-boundary → model | `tool.execute.after` output mutation, in place (community-measured); MCP-path mutation unconfirmed on 1.18.x — re-verify before building | same | same |
-| Turn continuation | `session.idle` event + in-process `client.session.prompt` (shipped precedent: code-review plugin); `noReply`/`synthetic` transcript-only mode | same, if a plugin is installed | same |
+| Tool-boundary → model | ~~nothing probes (2026-09-05; no plugin installed)~~ BUILT 2026-09-06 ADR 392: managed `.opencode/plugins/musterd.js` appends the raised line to `tool.execute.after` output in a `<musterd-interrupt>` fence; MCP-path mutation still unconfirmed on 1.18.x (falsify: ghost's mid-turn measurement, ADR 392 Eval) | same, if the folder is musterd-provisioned | same |
+| Turn continuation | BUILT 2026-09-06 ADR 392: `session.idle` → probe → one reply-mode `promptAsync` (`synthetic: true`), capped at 4 per session (falsify: >4 prompts for one session with the act unread) | same, if the folder is musterd-provisioned | same |
 | Idle-at-prompt | covered — `prompt_async` needs no turn-end (measured); TUI may not render injected messages (#8564) | n/a (unreachable) | covered |
-| Hook drift detection | not populated | not populated | not populated |
+| Hook drift detection | ~~not populated (2026-09-03)~~ ADR 392: `detect().hookDrift` names the plugin missing ("nothing probes") or STALE (ADR 168) | same | same |
 
 ## The wire is not this page
 
