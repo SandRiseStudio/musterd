@@ -6488,6 +6488,62 @@ describe('two-stage close (ADR 169)', () => {
       expect(await auditRows(nickTok, 'lane.review_rerouted')).toHaveLength(0);
     });
 
+    // Lane 01M1VF8166 (2026-09-06). A re-route by name is a routing request, not a second
+    // attestation — but the MCP tool sends `merged: { verification }` on every submit, and with no
+    // SHA that verification is `unattested`. Measured on the live daemon: five ancestor-verified
+    // lanes re-routed by name each lost {pr, sha, authorized_by} to {verification:"unattested"}
+    // in one lane.updated row. The guard lives in decideLanePatch so the hub arbitration and the
+    // local path agree: a patch that carries no attestation cannot downgrade one that stands.
+    it('a re-route that carries no attestation keeps the standing merge attestation', async () => {
+      const { nickTok, ada, agentKey } = await setup();
+      await post('/teams/dawn/members', { name: 'hal', kind: 'agent' }, nickTok);
+      const hal = (await resolveAuth('/teams/dawn/inbox', { key: agentKey, seat: 'hal' }))!;
+      await reattestAgentModel('dawn', hal, 'gemini-3-pro');
+      const lane = await post('/teams/dawn/lanes', { title: 'keep my sha', claim: true }, ada);
+      const laneId = lane.json.lane.id as string;
+      const attested = { pr: 77, sha: 'facade77', authorized_by: 'nick', verification: 'ancestor' };
+      const first = await patchLane(
+        laneId,
+        { state: 'ready_for_review', acceptor: 'gee', merged: attested },
+        ada,
+      );
+      expect(first.status).toBe(200);
+      expect(first.json.lane.merged).toEqual(attested);
+
+      // Exactly what the MCP tool sends for `lane_submit {id, acceptor}` with no pr/sha.
+      const again = await patchLane(
+        laneId,
+        { state: 'awaiting_acceptance', acceptor: 'hal', merged: { verification: 'unattested' } },
+        ada,
+      );
+      expect(again.status).toBe(200);
+      expect(again.json.review.rerouted).toBe(true);
+      expect(again.json.lane.merged).toEqual(attested);
+      const rerouted = await auditRows(nickTok, 'lane.review_rerouted');
+      expect(rerouted).toHaveLength(1);
+      expect(rerouted[0].detail.merged).toEqual(attested);
+      // The ledger never saw a downgrade: the only lane.updated row touching `merged` is the first
+      // submit's (null → attested); the re-route wrote no merged change at all.
+      const updated = await auditRows(nickTok, 'lane.updated');
+      const mergedRows = updated.filter((r) =>
+        (r.detail.fields as string[] | undefined)?.includes('merged'),
+      );
+      expect(mergedRows).toHaveLength(1);
+      expect((mergedRows[0].detail.changes as { merged: { to: unknown } }).merged.to).toEqual(
+        attested,
+      );
+
+      // A patch that DOES carry a SHA still replaces the block — re-attesting is allowed.
+      const reattest = { pr: 78, sha: 'facade78', authorized_by: 'nick', verification: 'ancestor' };
+      const third = await patchLane(
+        laneId,
+        { state: 'awaiting_acceptance', acceptor: 'gee', merged: reattest },
+        ada,
+      );
+      expect(third.status).toBe(200);
+      expect(third.json.lane.merged).toEqual(reattest);
+    });
+
     // The other door into the same limbo: `acceptor` on a patch that does not leave the lane
     // awaiting acceptance validates the name and has nowhere to route it. Refused before the write.
     it('refuses an acceptor on a patch that is not a submit, and applies none of the patch', async () => {
