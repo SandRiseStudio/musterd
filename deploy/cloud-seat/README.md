@@ -97,16 +97,21 @@ fly secrets unset --app musterd-seat-$SEAT --stage TAILSCALE_AUTHKEY MUSTERD_INV
 A seat machine is a **seat**, not an operator's laptop: it needs exactly one thing on the tailnet,
 the hub's daemon port, and nothing needs to reach it. Tailscale ACLs are the operator's (admin
 console → Access controls); the runbook records the policy the seat is built to. Tag the auth key
-`tag:musterd-seat` and the node inherits this on first boot:
+`tag:musterd-seat` and the node inherits this on first boot. The default policy's `"src": ["*"]`
+grant must go, or the seat keeps whole-tailnet reach through the wildcard:
 
 ```jsonc
 {
+  "hosts": { "nicks-laptop": "100.100.246.14" }, // the hub, by its tailnet IP
   "tagOwners": { "tag:musterd-seat": ["autogroup:admin"] },
-  "acls": [
-    // a seat reaches the hub's daemon port on the laptop, and nothing else on the tailnet
-    { "action": "accept", "src": ["tag:musterd-seat"], "dst": ["nicks-laptop:4849"] },
-    // operators keep full reach (your existing rule); nothing needs to reach a seat
-    { "action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:member:*"] },
+  // `grants` is the current policy syntax (a tailnet still on `acls` writes the same two rules
+  // with "action": "accept" and "dst": ["nicks-laptop:4849"]).
+  "grants": [
+    // people keep full reach; tagged devices are not members, so a seat gets nothing from this
+    { "src": ["autogroup:member"], "dst": ["*"], "ip": ["*"] },
+    // a seat reaches the hub's daemon port on the laptop, and nothing else on the tailnet;
+    // nothing reaches a seat — no rule names the tag as a dst
+    { "src": ["tag:musterd-seat"], "dst": ["nicks-laptop"], "ip": ["tcp:4849"] },
   ],
 }
 ```
