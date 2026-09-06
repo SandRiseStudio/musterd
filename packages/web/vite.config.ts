@@ -5,7 +5,7 @@ import viteReact from '@vitejs/plugin-react';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { defineConfig, type Plugin } from 'vite';
 
-import { siteFiles } from './scripts/site-files.ts';
+import { blogEntries, siteFiles } from './scripts/site-files.ts';
 
 // In dev, the /live dashboard talks to the daemon same-origin and Vite proxies the daemon paths
 // (/teams, /ws, /health) to it — set MUSTERD_DAEMON to point at a daemon (default :4849). We strip
@@ -115,8 +115,15 @@ export default defineConfig(({ command }) => {
       // bug and still fails the build (failOnError stays default-true).
       prerender: { enabled: true, crawlLinks: true, retryCount: 3, retryDelay: 1000 },
       // The ADR 302 public set's static roots; the slug pages (/docs/<slug>, /blog/<slug>) are
-      // discovered by crawlLinks from exactly the index pages' <a> lists.
-      pages: [{ path: '/' }, { path: '/roadmap' }, { path: '/docs' }, { path: '/blog' }],
+      // discovered by crawlLinks from exactly the index pages' <a> lists. /blog is a root only
+      // while a post exists — with none, the section is not prerendered at all, so it 404s rather
+      // than serving an empty index that the nav and sitemap have already stopped pointing at.
+      pages: [
+        { path: '/' },
+        { path: '/roadmap' },
+        { path: '/docs' },
+        ...(blogEntries().length > 0 ? [{ path: '/blog' }] : []),
+      ],
     }),
     viteReact(),
     ...(id ? [buildStamp(id)] : []),

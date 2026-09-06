@@ -1,8 +1,11 @@
+import { hasBlog } from '../../content/generated/site-content';
 import './Teasers.css';
 
 /**
- * Section links only — deliberately no import of the generated blog/docs lists: the landing chunk
- * stays free of content data, and the teasers never go stale against it.
+ * Section links only — deliberately no import of the generated blog/docs LISTS: the landing chunk
+ * stays free of content data, and the teasers never go stale against it. `hasBlog` is the one
+ * exception and is a boolean by design, so the card for a section with no posts can be withheld
+ * without pulling every post's HTML into this chunk to discover that.
  */
 const TEASERS = [
   {
@@ -11,12 +14,16 @@ const TEASERS = [
     href: '/docs',
     cta: 'Read the docs',
   },
-  {
-    title: 'Blog',
-    body: 'Launch notes and what the team learns building musterd — with musterd.',
-    href: '/blog',
-    cta: 'Read the blog',
-  },
+  ...(hasBlog
+    ? [
+        {
+          title: 'Blog',
+          body: 'Launch notes and what the team learns building musterd — with musterd.',
+          href: '/blog',
+          cta: 'Read the blog',
+        },
+      ]
+    : []),
 ];
 
 export function Teasers() {

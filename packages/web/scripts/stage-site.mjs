@@ -52,7 +52,10 @@ const withheld = built.filter((n) => !ALLOW.includes(n));
 const bytes = await du(STAGE);
 console.log(`stage-site: staged ${staged.join(', ')} → dist/site (${(bytes / 1024 / 1024).toFixed(1)} MB)`);
 if (withheld.length > 0) {
-  console.log(`stage-site: withheld ${withheld.length} daemon-only route(s): ${withheld.join(', ')}`);
+  // "not staged", not "daemon-only": most of these are daemon routes, but a section can also be
+  // withheld for having nothing in it yet (blog, with no posts). Calling all of them daemon-only
+  // taught the reader something false about the ones that are not.
+  console.log(`stage-site: withheld ${withheld.length} unstaged path(s): ${withheld.join(', ')}`);
 }
 
 async function du(dir) {

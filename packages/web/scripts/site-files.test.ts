@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs data module
 import { PUBLIC_ALLOW } from './stage-allowlist.mjs';
@@ -279,6 +282,34 @@ describe('llms-full.txt', () => {
   });
 });
 
+/** Two posts' worth of mirror, for the feed's shape when content/blog is empty. */
+const FIXTURE_MIRRORS = [
+  { path: '/blog/newer', title: 'Newer', description: 'n', markdown: '', date: '2026-08-21' },
+  { path: '/blog/older', title: 'Older', description: 'o', markdown: '', date: '2026-01-02' },
+];
+
+/*
+ * The case CI caught and no local run could: git does not track an empty directory, so the moment
+ * the last post moves out of content/blog the directory stops existing on a fresh clone — while
+ * every machine that once had a post in it still has the (now empty) directory and passes. Every
+ * reader of that directory must treat missing and empty as the same state.
+ */
+describe('a content directory that does not exist', () => {
+  const missing = join(tmpdir(), 'musterd-no-such-blog-dir');
+
+  it('reads as no posts rather than throwing', () => {
+    expect(existsSync(missing)).toBe(false);
+    expect(blogEntries(missing)).toEqual([]);
+    expect(postMirrors(missing)).toEqual([]);
+  });
+
+  it('withholds the whole section, exactly as an empty directory does', () => {
+    const urls = siteUrls(docs, blogEntries(missing)).map((u) => u.path);
+    expect(urls).not.toContain('/blog');
+    expect(llmsTxt(docs, blogEntries(missing))).not.toContain(`${SITE_ORIGIN}/blog`);
+  });
+});
+
 describe('blog rss', () => {
   it('is RSS 2.0 with an absolute self link', () => {
     const xml = rssXml();
@@ -291,7 +322,11 @@ describe('blog rss', () => {
 
   it('has one item per post, newest first, with a permalink guid', () => {
     const posts = postMirrors();
-    const xml = rssXml();
+    // rssXml() defaults to the real content directory. With no posts published there is no feed at
+    // all (see the siteFiles case below), so this exercises the shape on a fixture rather than
+    // skipping the guarantee whenever the blog is empty.
+    const xml = posts.length > 0 ? rssXml() : rssXml(FIXTURE_MIRRORS);
+    if (posts.length === 0) return expect(xml.match(/<item>/g)).toHaveLength(FIXTURE_MIRRORS.length);
     expect(xml.match(/<item>/g)).toHaveLength(posts.length);
     for (const p of posts) {
       expect(xml).toContain(`<link>${SITE_ORIGIN}${p.path}</link>`);
@@ -303,9 +338,10 @@ describe('blog rss', () => {
 
   /** RSS 2.0 requires RFC 822; a reader silently ignores an ISO date and the post loses its order. */
   it('dates every item in RFC 822, from the same filename the sitemap dates it with', () => {
-    const xml = rssXml();
+    const mirrors = postMirrors().length > 0 ? postMirrors() : FIXTURE_MIRRORS;
+    const xml = rssXml(mirrors);
     const dates = [...xml.matchAll(/<pubDate>([^<]+)<\/pubDate>/g)].map((m) => m[1]!);
-    expect(dates).toHaveLength(postMirrors().length);
+    expect(dates).toHaveLength(mirrors.length);
     for (const d of dates) {
       expect(d).toMatch(/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/);
     }
@@ -325,7 +361,17 @@ describe('siteFiles', () => {
     const files = siteFiles();
     const mirrors = allMirrors().map((m) => `${m.path.slice(1)}.md`);
     expect(Object.keys(files).sort()).toEqual(
-      ['_headers', 'blog/rss.xml', 'llms-full.txt', 'llms.txt', 'robots.txt', 'sitemap.xml', ...mirrors].sort(),
+      [
+        '_headers',
+        // The feed ships only while there is something to put in it — an empty channel is a
+        // subscription that never arrives, so the blog section is withheld whole instead.
+        ...(postMirrors().length > 0 ? ['blog/rss.xml'] : []),
+        'llms-full.txt',
+        'llms.txt',
+        'robots.txt',
+        'sitemap.xml',
+        ...mirrors,
+      ].sort(),
     );
     for (const [name, body] of Object.entries(files)) {
       // A file inside an allowed directory is staged by that directory; a root file needs its own

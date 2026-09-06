@@ -107,7 +107,9 @@ function main() {
   });
 
   const blogDir = join(pkgRoot, 'content', 'blog');
-  const blogPosts = readdirSync(blogDir)
+  // Missing is empty — see blogEntries() in site-files.ts: git does not track an empty directory,
+  // so a tree with no published posts has no content/blog on a fresh clone.
+  const blogPosts = (existsSync(blogDir) ? readdirSync(blogDir) : [])
     .filter((n) => n.endsWith('.md'))
     .map((name) => {
       const parsed = parsePostFilename(name);
@@ -133,6 +135,9 @@ function main() {
       'export interface BlogPost extends SitePage { date: string }',
       `export const docsPages: (SitePage & { source: string })[] = ${JSON.stringify(docsPages, null, 2)};`,
       `export const blogPosts: BlogPost[] = ${JSON.stringify(blogPosts, null, 2)};`,
+      // A scalar, not the content data: the landing chunk and the nav need to know whether the blog
+      // section exists without importing every post's HTML to find out.
+      `export const hasBlog = ${blogPosts.length > 0};`,
       '',
     ].join('\n'),
   );
