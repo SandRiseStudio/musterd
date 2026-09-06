@@ -50,6 +50,11 @@ describe('the standard floor (ADR 261 decision 2)', () => {
   });
 
   it('covers what the ryder incident was missing: file edits and the repo gates', () => {
+    // ADR 261 decision 2 names "the musterd MCP tools" first in what a working seat needs; until
+    // 2026-09-06 the list carried only the CLI form, so a seat-policy wake (handed no
+    // --allowedTools) had the MCP server refused and could not occupy (finding 18).
+    expect(STANDARD_FLOOR.allow).toContain('mcp__musterd');
+    expect(STANDARD_FLOOR.allow).toContain('Bash(musterd *)');
     expect(STANDARD_FLOOR.allow).toContain('Edit');
     expect(STANDARD_FLOOR.allow).toContain('Write');
     expect(STANDARD_FLOOR.allow.some((e) => e.startsWith('Bash(pnpm '))).toBe(true);

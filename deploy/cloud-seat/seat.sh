@@ -140,21 +140,11 @@ node -e '
 # if the claim path rewrites the field again — that is lane 01M1T6D80Q's, and this is the floor.
 ( cd "$WORKSPACE" && musterd wire ) \
   || log "musterd wire refused — the actuator may poll with a credential the wake endpoint rejects (finding 14)"
-# A work order runs under `tool_policy: seat-policy`, which hands the session NO --allowedTools and
-# falls back to the workspace's own permission list — and the ADR 261 floor `musterd agent` wrote
-# allows `Bash(musterd *)`, not the MCP tools (finding 18). So the more authority the wake grants,
-# the less it can do: team_wake_context and team_inbox_check are refused, the session cannot occupy
-# the roster, and the actuator reports "exited without occupying". Allow the wake's own control
-# plane. Additive merge; leaves every other entry alone. Remove once seat-policy grants it itself.
-node -e '
-  const fs = require("fs"); const p = process.env.WORKSPACE + "/.claude/settings.local.json";
-  const c = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
-  c.permissions = c.permissions || {}; c.permissions.allow = c.permissions.allow || [];
-  if (!c.permissions.allow.includes("mcp__musterd")) {
-    c.permissions.allow.push("mcp__musterd");
-    fs.mkdirSync(require("path").dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n"); console.log("mcp__musterd allowed for work orders");
-  }' WORKSPACE="$WORKSPACE"
+# (Removed 2026-09-06: the boot-time `mcp__musterd` allow-list merge. It papered over finding 18 —
+# a work_order ran under seat-policy with no --allowedTools and the ADR 261 floor allowed the CLI,
+# not the MCP server. Both are fixed at the source: the wake path hands `mcp__musterd` on BOTH
+# policies, and the floor `musterd agent` writes carries it. A workspace provisioned before that
+# build keeps whatever list it has; `musterd init --refresh-permissions` re-lands the floor.)
 
 # ── 6. residency (ADR 131): what makes the seat wakeable HERE ─────────────────────────────────────
 # `residency on` lands the standing resume grant in the workspace binding and registers the

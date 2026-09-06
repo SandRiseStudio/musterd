@@ -88,9 +88,15 @@ export const RESUME_TRANSCRIPT_MAX_BYTES = 256 * 1024;
 /** Per-run argv options (increment 5) — delivered on the wake order by the daemon's effective
  *  policy, applied identically to the fresh and resume paths (one permission posture per run). */
 export interface WakeArgOpts {
-  /** `reply-only` (default) scopes the run to the musterd tools via `--allowedTools`; `seat-policy`
-   *  omits the flag so the workspace's own settings govern. NEITHER ever passes a skip-permissions
-   *  flag — the explicit ADR 131 §6 invariant, enforced by the argv tests for both policies. */
+  /** `reply-only` (default) and `seat-policy` BOTH hand the run the musterd MCP tools via
+   *  `--allowedTools mcp__musterd`; under seat-policy the workspace's own settings govern everything
+   *  else. Until 2026-09-06 seat-policy omitted the flag, on the reading that "the workspace's
+   *  settings govern" — and the ADR 261 floor those settings came from allowed the CLI, not the MCP
+   *  server, so a work_order (always seat-policy) had the wake's own control plane refused and could
+   *  not occupy, submit or report: the broader policy was strictly narrower for the one server every
+   *  wake needs (finding 18, docs/perf/cloud-seat.md; ADR 131 §6 amendment). The musterd tools are
+   *  how the wake is *delivered*, not part of the task's permissions. NEITHER policy ever passes a
+   *  skip-permissions flag — the explicit ADR 131 §6 invariant, enforced by the argv tests for both. */
   toolPolicy?: 'reply-only' | 'seat-policy';
   /** `--max-turns` where set (the claude CLI supports it; other backends may not). */
   maxTurns?: number;
@@ -98,7 +104,8 @@ export interface WakeArgOpts {
 
 function argTail(opts: WakeArgOpts): string[] {
   return [
-    ...(opts.toolPolicy === 'seat-policy' ? [] : ['--allowedTools', 'mcp__musterd']),
+    '--allowedTools',
+    'mcp__musterd',
     ...(opts.maxTurns !== undefined ? ['--max-turns', String(opts.maxTurns)] : []),
     '--output-format',
     'json',
@@ -229,22 +236,49 @@ function killTree(child: ChildProcess, graceMs: number): void {
   hardKill.unref();
 }
 
-/** Best-effort cost/duration out of `--output-format json` stdout — telemetry, never verification. */
+/** Best-effort cost/duration out of `--output-format json` stdout — telemetry, never verification.
+ *  `error_text` is the harness's own last word when the result is an error (`is_error`): it is the
+ *  only place a run that never reached the roster says why — four delta wakes on 2026-09-06 died in
+ *  ~10 s at $0.0000 on `Credit balance is too low`, and host.log said "exited without occupying". */
 export function parseRunSummary(
   stdout: string,
-): { cost_usd?: number; duration_ms?: number; is_error?: boolean } | null {
+): { cost_usd?: number; duration_ms?: number; is_error?: boolean; error_text?: string } | null {
   try {
     const parsed = JSON.parse(stdout.trim()) as Record<string, unknown>;
+    const isError = typeof parsed['is_error'] === 'boolean' ? parsed['is_error'] : undefined;
+    const result = typeof parsed['result'] === 'string' ? parsed['result'].trim() : '';
     return {
       ...(typeof parsed['total_cost_usd'] === 'number'
         ? { cost_usd: parsed['total_cost_usd'] }
         : {}),
       ...(typeof parsed['duration_ms'] === 'number' ? { duration_ms: parsed['duration_ms'] } : {}),
-      ...(typeof parsed['is_error'] === 'boolean' ? { is_error: parsed['is_error'] } : {}),
+      ...(isError !== undefined ? { is_error: isError } : {}),
+      ...(isError === true && result.length > 0 ? { error_text: result } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/** The wire bound on a failure reason (`WakeReportSchema.reason`, protocol). */
+const REASON_MAX = 200;
+
+/** The one line an operator reads when a wake never occupied: the host's verdict, then — when the
+ *  harness said anything — the harness's own words, so "exited (code 1)" names its cause. Prefers
+ *  the JSON result's error text; falls back to the last non-empty stderr line. Bounded to the wire. */
+export function composeFailureReason(
+  verdict: string,
+  summary: { error_text?: string } | null,
+  stderr: string,
+): string {
+  const lastStderr = stderr
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .at(-1);
+  const said = summary?.error_text ?? lastStderr;
+  if (!said) return verdict.slice(0, REASON_MAX);
+  return `${verdict} — harness: ${said}`.slice(0, REASON_MAX);
 }
 
 /** One spawn attempt (fresh or resume): spawn, watchdog, roster-verify, kill-on-fail. */
@@ -308,6 +342,13 @@ function runAttempt(
   child.stdout?.on('data', (d: Buffer) => {
     stdout += d.toString();
     if (stdout.length > 262_144) stdout = stdout.slice(-262_144);
+  });
+  // stderr is kept only for the failure reason (a harness that dies before printing its JSON
+  // result — a missing binary, an MCP server that will not start — says so here and nowhere else).
+  let stderr = '';
+  child.stderr?.on('data', (d: Buffer) => {
+    stderr += d.toString();
+    if (stderr.length > 8_192) stderr = stderr.slice(-8_192);
   });
   let spawnError: Error | null = null;
   const exited = new Promise<number | null>((res) => {
@@ -426,7 +467,7 @@ function runAttempt(
 
     // Not on the roster: a session that never joined must not keep burning — kill what's left.
     killTree(child, deps.killGraceMs ?? KILL_GRACE_MS);
-    const reason = spawnError
+    const verdict = spawnError
       ? `spawn failed: ${(spawnError as Error).message}`
       : timedOut
         ? `watchdog timeout (${opts.timeoutMs}ms) before roster occupancy`
@@ -437,9 +478,17 @@ function runAttempt(
     // on the primary report so no supplement is needed. A watchdogged/live child stays deferred to
     // `settled` (awaiting the kill grace here would delay the report for no gain).
     const completion = child.exitCode !== null || spawnError ? await settled : undefined;
+    // A run that exited says why (finding 18 fix 3): the harness's error text or its last stderr
+    // line rides the reason, so the actuator's line and the `residency.wake_failed` row name the
+    // cause instead of the costume ("exited without occupying" wore billing, a refused MCP server,
+    // and a missing binary on one machine in one day). Timeouts and live children carry no words.
+    const reason =
+      child.exitCode !== null && !spawnError
+        ? composeFailureReason(verdict, parseRunSummary(stdout), stderr)
+        : verdict.slice(0, REASON_MAX);
     return {
       occupied: false,
-      reason: reason.slice(0, 200),
+      reason,
       settled,
       ...(completion ? { completion } : {}),
     };

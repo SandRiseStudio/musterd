@@ -530,7 +530,12 @@ while sharing one cause is the reason to read the transcript rather than the log
 
 **Disposition (2026-09-06 03:10Z):** added `mcp__musterd` to delta's workspace allow list — exactly
 what the reply-only path already grants, so this widens nothing the doorbell wakes did not already
-have.
+have. **Fixed at the source 2026-09-06 (lane `01M1VDY8PY`):** the wake path hands
+`--allowedTools mcp__musterd` under both policies (ADR 131 §6 amendment), the ADR 261 floor carries
+`mcp__musterd`, a run that exits without occupying appends the harness's own error text to its
+reason (`… — harness: Credit balance is too low`), and the `seat.sh` allow-list merge from #1357 is
+removed. Unmeasured on the VM until the image is rebuilt from that commit — the falsifier is a
+work-order wake on a workspace whose list has no `mcp__musterd` entry reaching `residency.woke`.
 
 **Candidate product fixes:**
 
