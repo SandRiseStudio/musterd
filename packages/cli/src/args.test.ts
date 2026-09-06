@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { fmtBytes } from './args.js';
+import { fmtBytes, parseArgs } from './args.js';
+
+it('parses --tailscale as a boolean without consuming --aperture', () => {
+  expect(parseArgs(['doctor', '--tailscale', '--aperture', 'https://aperture.ts.net'])).toEqual({
+    positionals: ['doctor'],
+    flags: { tailscale: true, aperture: 'https://aperture.ts.net' },
+    metaPairs: [],
+  });
+});
 
 /**
  * `fmtBytes` exists because the resume hygiene bound went sub-MiB in the 2026-07-29 recalibration
