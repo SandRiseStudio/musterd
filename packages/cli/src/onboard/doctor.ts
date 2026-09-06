@@ -455,6 +455,18 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     provisioning.kind === 'valid'
       ? provisioning.value.desired.find((id) => id !== 'musterd')
       : readProvisionManifest(cwd)?.harness;
+  // The WHOLE desired set, not just the first of it. `declaredSurface` above answers "which entry
+  // does wire rewrite here", which is a narrower question than "does this workspace want this
+  // harness at all" — and conflating them is what shipped a no-op prescription in #1363. A baked
+  // key on a harness NOBODY selected is an ORPHAN: reconciliation only touches fragments of desired
+  // harnesses, and a pre-ADR-281 entry was never in the ownership ledger either, so there is
+  // nothing to repair and nothing to release. Measured 2026-09-06 (lane 01M1VFV8EK): `harness
+  // configure --select claude-code --yes` left an unselected Cursor entry byte-identical.
+  const desiredHarnesses =
+    provisioning.kind === 'valid'
+      ? provisioning.value.desired
+      : ((m) => (m?.harness ? [m.harness] : []))(readProvisionManifest(cwd));
+  const harnessIsDesired = (id: string) => desiredHarnesses.includes(id);
   // Entry drift: the shared harness entry disagrees with this folder's binding.json. Tracked
   // separately from `drift` so `--fix` can route it to `musterd wire` (headless, whole-family)
   // instead of `musterd init` (mints a member, trips the bound guard, steals the shared slot).
@@ -478,17 +490,35 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // and reports success with the drift untouched.
     const wireRepairs =
       wireConfigures(h.id, declaredSurface) && d.registeredElsewhere === undefined;
+    // ORPHAN first: a harness nobody selected here owns no fragment, so every repair that works by
+    // reconciling one is a no-op. Ordered ahead of the `registeredElsewhere` and declared-surface
+    // branches because it is the more fundamental fact — those two answer "which file / which
+    // harness does a repair reach", and this one answers "is there anything here to repair at all".
+    // Requires POSITIVE knowledge of the desired set. An unreadable or absent manifest yields an
+    // empty list, and "not in an empty set" is not evidence of anything — saying "X is NOT in this
+    // workspace's desired set" there would state as fact something the doctor cannot see, and send
+    // the reader to delete an entry that may be the only thing wiring them up. Absence of the
+    // record is not absence of the desire.
+    const orphanEntry = desiredHarnesses.length > 0 && !harnessIsDesired(h.id);
     const repairWith = wireRepairs
       ? 'Run `musterd wire` here to rewrite the entry without it'
-      : d.registeredElsewhere !== undefined
-        ? `this entry lives in ${d.registeredElsewhere}, which musterd does not write — it writes ` +
-          `the project file, so no command run in this folder rewrites it. Edit that file directly, ` +
-          `and check what else depends on it first: a machine-global entry is how other seats on ` +
-          `this machine may be launching`
-        : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
-          `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
-          `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
-          `${h.label}'s own entry file by hand`;
+      : orphanEntry
+        ? `${h.label} is NOT in this workspace's desired harness set (check with \`musterd harness ` +
+          `status\`), so nothing here manages that entry: \`musterd harness configure\` and ` +
+          `\`musterd wire\` both skip it, and a repair that reconciles fragments has none to ` +
+          `reconcile. Remove musterd's entry from ${d.registeredElsewhere ?? `the config ${h.label} reads for this workspace (a PROJECT-LOCAL file — not the machine-global one, which may have no musterd server at all)`} ` +
+          `— the whole entry, not one line, since musterd is not meant to launch through ` +
+          `${h.label} here. Or add ${h.label} with \`musterd harness configure\` if it SHOULD launch ` +
+          `this workspace, which converts the entry instead of deleting it`
+        : d.registeredElsewhere !== undefined
+          ? `this entry lives in ${d.registeredElsewhere}, which musterd does not write — it writes ` +
+            `the project file, so no command run in this folder rewrites it. Edit that file directly, ` +
+            `and check what else depends on it first: a machine-global entry is how other seats on ` +
+            `this machine may be launching`
+          : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
+            `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
+            `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
+            `${h.label}'s own entry file by hand`;
     // Record entry drift AND whether `wire` could repair this particular one, so the `repair`
     // classification below never routes `--fix` at a command that cannot touch the drift it found.
     const noteEntryDrift = (text: string) => {
@@ -563,14 +593,23 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // (`commands/harness.ts`), driving the `repair-launch-marker` mutation that swaps the retired
     // key for MUSTERD_LAUNCH_SURFACE and preserves the rest of the entry. So it is named directly.
     if (d.registeredSurface !== undefined) {
+      // The ADR 286 consequence is the same either way; the REPAIR is not. When the harness is
+      // desired, the marker must be REPLACED (deleting it just moves the refusal to the no-marker
+      // branch) and only `harness configure` does that. When it is an orphan, there is no marker to
+      // get right at all and deleting the entry is correct — so the "deleting does NOT fix it"
+      // sentence, true in the first case, is actively misleading in the second. #1363 shipped it
+      // unconditionally; this is that correction (lane 01M1VFV8EK).
       noteEntryDriftWireCannotFix(
         `${h.label}'s musterd server bakes the retired MUSTERD_SURFACE=${d.registeredSurface} ` +
           `(pre-ADR-286). The adapter does not read it — it REFUSES to attach Presence while it is ` +
-          `there, so this session has no seat presence at all rather than a wrong one. Run ` +
-          `\`musterd harness configure\` in this worktree to convert the registration, then reload ` +
-          `the session. Deleting the line by hand does NOT fix it: with no launch marker the adapter ` +
-          `refuses for the other reason, and neither \`musterd wire\` nor \`musterd init\` repairs a ` +
-          `retired marker${d.registeredElsewhere !== undefined ? ` (this entry lives in ${d.registeredElsewhere})` : ''}.`,
+          `there, so a session launched through ${h.label} here has no seat presence at all rather ` +
+          `than a wrong one. ` +
+          (orphanEntry
+            ? `${repairWith}.`
+            : `Run \`musterd harness configure\` in this worktree to convert the registration, then ` +
+              `reload the session. Deleting the line by hand does NOT fix it: with no launch marker ` +
+              `the adapter refuses for the other reason, and neither \`musterd wire\` nor ` +
+              `\`musterd init\` repairs a retired marker${d.registeredElsewhere !== undefined ? ` (this entry lives in ${d.registeredElsewhere})` : ''}.`),
       );
     }
     if (d.registeredModel !== undefined) {
