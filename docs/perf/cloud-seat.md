@@ -493,3 +493,52 @@ the work order the seat fetches. That is a patch on the symptom and is recorded 
    proxy for "the session started"; the process being alive and writing is a better one.
 3. **`host.log` should print the derivation**, not only the delivery lane (see 16a) — three runs
    today logged `[batched]` and one of them was a work order.
+
+### 18. A work order is not given the musterd tools, so it can never occupy the roster — and this is finding 17's cause
+
+Wake 4 (02:58Z, `work_order`, 30 m budget) exited **cleanly** — `exit=0 cost=$0.1073 wall=23.8s` —
+and the actuator reported `run exited (code 0) without occupying the seat`. The session's own
+transcript on the VM says why, and it is not ambiguous: it called
+`mcp__musterd__team_wake_context` and `mcp__musterd__team_inbox_check`, **both were refused
+("permission not granted")**, and it then deliberately declined to fall back to the `musterd` CLI —
+correctly, because the seat guidance says a session holding the `team_*` tools must not also drive
+the CLI (it resolves to a different identity and its sends fail). The seat was caught between two
+correct rules with no third option, and stopped.
+
+**The cause is one line** (`packages/cli/src/host/backends/claudeCode.ts:101`):
+
+```ts
+...(opts.toolPolicy === 'seat-policy' ? [] : ['--allowedTools', 'mcp__musterd']),
+```
+
+A `reply-only` doorbell is **handed** the musterd tools explicitly. A `work_order` runs under
+`tool_policy: 'seat-policy'` (`packages/server/src/store/residency.ts:1408`) and is handed nothing,
+falling back to the workspace's own permissions. Delta's `.claude/settings.local.json` allowed
+`Bash(musterd *)` — the CLI — and **no `mcp__musterd` entry at all**.
+
+So `seat-policy`, whose whole purpose is to be *broader* than reply-only, is **strictly narrower for
+the one MCP server every wake requires**. A work order cannot occupy the roster, cannot
+`lane_submit`, and cannot report; the more authority the wake grants, the less it can do.
+
+**This supersedes finding 17's causal claim** (~~"the session's natural first move is to open the
+files, so it never says hello"~~ — 2026-09-06 02:47Z). Wake 3 was not busy-and-late; it was
+**unable** to occupy for this same reason, and the 90-second window merely decided how it died. The
+window's own defect stands as written (a hard-coded 90 s that does not scale with a 30 m bound, and
+a run that produced a commit is not a failed wake) — but it is the symptom, and finding 18 is the
+cause. That the two failure modes look different in `host.log` (killed at 91.4 s vs exited at 23.8 s)
+while sharing one cause is the reason to read the transcript rather than the log.
+
+**Disposition (2026-09-06 03:10Z):** added `mcp__musterd` to delta's workspace allow list — exactly
+what the reply-only path already grants, so this widens nothing the doorbell wakes did not already
+have.
+
+**Candidate product fixes:**
+
+1. **`seat-policy` must be a superset of `reply-only`.** The musterd tools are the wake's own
+   control plane, not part of the task's permissions — pass `--allowedTools mcp__musterd` on *both*
+   paths and let the seat's settings add to it.
+2. **`musterd agent`'s permissions floor (ADR 261) should include `mcp__musterd`.** It writes
+   `Bash(musterd *)` today, which is the surface the seat is told not to use when it has tools.
+3. **A wake that cannot call the wake's own tools should fail loudly, not quietly.** "exited without
+   occupying" and "no roster occupancy within the verify window" are the same defect wearing two
+   costumes; neither names the permission refusal that a transcript shows in one line.
