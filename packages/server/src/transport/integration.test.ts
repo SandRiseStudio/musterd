@@ -6495,7 +6495,7 @@ describe('two-stage close (ADR 169)', () => {
     // in one lane.updated row. The guard lives in decideLanePatch so the hub arbitration and the
     // local path agree: a patch that carries no attestation cannot downgrade one that stands.
     it('a re-route that carries no attestation keeps the standing merge attestation', async () => {
-      const { nickTok, ada, gee, agentKey } = await setup();
+      const { nickTok, ada, agentKey } = await setup();
       await post('/teams/dawn/members', { name: 'hal', kind: 'agent' }, nickTok);
       const hal = (await resolveAuth('/teams/dawn/inbox', { key: agentKey, seat: 'hal' }))!;
       await reattestAgentModel('dawn', hal, 'gemini-3-pro');
