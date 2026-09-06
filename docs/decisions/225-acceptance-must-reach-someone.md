@@ -2,6 +2,10 @@
 
 - Status: proposed
 - Date: 2026-08-04
+- Snapshot-debt: none — the one frequency word in §Decision ("acceptance wakes exist and fire
+  occasionally", the 2026-08-04 amendment) reads a fixed count already on the page, 3 of 38 in the
+  ledger that day, not a rate this ADR asserts going forward; the going-forward read is the
+  delivery/acceptor decomposition under Observability, which has its own instrument.
 - Deciders: nick (directed), stanley, ryder (residency-split amendment, bimodality finding, the
   falsifier correction, and raising the shared-predicate trap — from an acceptance review of this
   ADR), dolly (the `derivation` re-measurement that forced the wake-count correction, and the call
