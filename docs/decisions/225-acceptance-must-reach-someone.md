@@ -287,6 +287,30 @@ today both collapse into an unverified close.
   currently `review_timeout`, so the three-way split will shift. The historical strings are not
   rewritten (ADR 173 posture); the new reason applies going forward only.
 
+**2026-09-06 — the notice headlines by class, not by recency (lane 01M1T42SBS, izzo).** Decision 1
+put a routed acceptance on the live rail; this ADR never said where on the line it sits when it is
+not alone. The route took the newest pending act as the headline, so during the 2026-09-05 bell
+check stanley's probe raised as "6 acts waiting (latest: acceptance from …)" while a huddle turn
+addressed to him sat in the "+5". The room could not tell him he was being spoken to. A count is
+not a sentence.
+
+The headline is now chosen by class, and recency only breaks ties inside a class:
+
+| rank | class        | why it outranks the next                                                      |
+| ---- | ------------ | ----------------------------------------------------------------------------- |
+| 1    | `steer`      | changes what the seat is doing; newest-wins within the class (ADR 103)       |
+| 2    | `urgent`     | the scarce, capability-gated flag (ADR 071) a sender spent on purpose        |
+| 3    | `huddle`     | people are waiting in the room now (ADR 378); minutes matter                 |
+| 4    | `acceptance` | an obligation owed on the hour — this ADR's own promise, set from data above |
+
+The plural tail names the rest of the queue by class — `+5 more waiting (1 steer, 4 acceptance)` —
+so the seat reads the shape of what waits, not a number. Class nouns are daemon-derived, so the
+line stays inside ADR 088 §4: sender, act, class, topic; never a body. The wake queue is untouched:
+`pendingInterrupts` still returns newest-first, because a wake has no headline. Falsify: a huddle
+turn older than a routed acceptance addressed to the same seat, and the probe's `act.id` is the
+acceptance, or the audit's `tier` is `acceptance` — the integration test for this lane sets up
+exactly that pair.
+
 ## The shared-predicate trap
 
 Raised by ryder here, in an acceptance review of this ADR; identified as a pattern rather than three

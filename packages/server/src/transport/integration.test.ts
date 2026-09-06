@@ -5332,6 +5332,85 @@ describe('two-stage close (ADR 169)', () => {
     expect(ask.body).not.toContain('you previously owned this lane');
   });
 
+  // Lane 01M1T42SBS (ADR 225 amendment, 2026-09-06). The line headlined by RECENCY: with six
+  // pending and a routed acceptance the newest, stanley's huddle turn was "+5 more waiting" — a
+  // count, not a sentence, and the room could not tell he was being spoken to. The headline is
+  // chosen by CLASS (steer > urgent > huddle > acceptance) and recency only breaks ties inside a
+  // class; the plural tail names the mix so the rest of the queue is legible too.
+  it('interrupt line headlines by class, not recency: a huddle turn outranks a newer routed acceptance', async () => {
+    const { nickTok, ada, gee } = await setup();
+
+    // gee is a named participant of an open huddle, and nick takes a turn in it.
+    const root = {
+      id: 'h-root',
+      v: PROTOCOL_VERSION,
+      team: 'dawn',
+      from: 'nick',
+      to: { kind: 'team' },
+      act: 'message',
+      body: 'why we are huddling',
+      meta: {
+        eligible: ['gee', 'ada'],
+        huddle: {
+          topic: { kind: 'design', id: 'doorbells' },
+          room: 'http://127.0.0.1:4851/b/huddle-h-root',
+          anchor: 'docs/wiki/huddles.md',
+        },
+      },
+      ts: Date.now() - 1000,
+    };
+    await post('/teams/dawn/messages', { envelope: root }, nickTok);
+    await post(
+      '/teams/dawn/messages',
+      {
+        envelope: {
+          ...root,
+          id: 'h-turn',
+          body: 'gee, are you there',
+          thread: 'h-root',
+          meta: undefined,
+          ts: Date.now() - 500,
+        },
+      },
+      nickTok,
+    );
+
+    // Then ada submits a lane, and the cross-family acceptance routes to gee — NEWER than the turn.
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'fix the store', branch: 'ada/fix', claim: true },
+      ada,
+    );
+    const ready = await patchLane(
+      lane.json.lane.id,
+      { state: 'ready_for_review', merged: { pr: 42, sha: 'abc123', authorized_by: 'nick' } },
+      ada,
+    );
+    expect(ready.json.review.reviewer).toBe('gee');
+
+    const probe = await get('/teams/dawn/inbox/interrupt-check', gee, {
+      'x-musterd-no-touch': '1',
+    });
+    expect(probe.status).toBe(200);
+    expect(probe.json.raised).toBe(true);
+    expect(probe.json.count).toBe(2);
+    // The headline is the huddle turn, though the acceptance is the more recent act.
+    expect(probe.json.act).toMatchObject({ id: 'h-turn', from: 'nick' });
+    expect(probe.json.line).toContain('huddle design:doorbells');
+    expect(probe.json.line).toContain('h-root');
+    // The tail is a sentence: it names what else is waiting, by class, not just how many.
+    expect(probe.json.line).toContain('+1 more waiting (1 acceptance)');
+    expect(probe.json.line).not.toContain('gee, are you there'); // §4: never the body
+
+    // The audit names the headlined act and its class, so "who grabbed the mic" stays legible.
+    const raised = listAudit(server.db, getTeamBySlug(server.db, 'dawn')!.id).filter(
+      (r) => r.action === 'interrupt.raised',
+    );
+    expect(raised).toHaveLength(1);
+    expect(raised[0]).toMatchObject({ actor: 'nick', target: 'gee' });
+    expect(raised[0]!.detail).toContain('"tier":"huddle"');
+  });
+
   // ADR 234 increment 1 — the LABEL phase. The entire deliverable is that a declared tier reaches
   // the ledger at ready_for_review, so the Eval can later ask whether declared stakes predict the
   // answer rate. Nothing routes on it yet, and this test pins that too: the label must NOT move the
