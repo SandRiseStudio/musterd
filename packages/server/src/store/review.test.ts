@@ -825,13 +825,21 @@ describe('tie-break among equal grades: load, then recency, then roster (lane 01
 
   it('no equal-grade rival: decided by grade, and load never reorders across rungs', async () => {
     const { selectReviewCounterpart } = await import('./review.js');
-    const { db, team, worker, lane, other } = await room();
-    // Demote `second` to cross_model; load `first` heavily. Grade must still win.
-    const second = db.prepare(`SELECT id FROM members WHERE name = 'second'`).get() as {
-      id: string;
-    };
-    attach(db, second.id, 'claude-code', 'conn-second-b', { model: 'claude-opus-4-8' });
-    const first = db.prepare(`SELECT id FROM members WHERE name = 'first'`).get() as { id: string };
+    // Built here rather than from room(): `second` must be cross_model from its FIRST attestation.
+    // Re-attaching it under a second model in the same millisecond made "latest attestation" a
+    // coin flip between the two rows, and the test flaked 2 in 3 runs.
+    const { openLane } = await import('./lanes.js');
+    const { db, team } = seed();
+    const worker = addMember(db, team, { kind: 'agent', name: 'worker', role: '' }).row;
+    attach(db, worker.id, 'claude-code', 'conn-worker', { model: 'claude-opus-5' });
+    const first = addMember(db, team, { kind: 'agent', name: 'first', role: '' }).row;
+    attach(db, first.id, 'codex', 'conn-first', { model: 'gpt-5.6-sol' });
+    const second = addMember(db, team, { kind: 'agent', name: 'second', role: '' }).row;
+    attach(db, second.id, 'claude-code', 'conn-second', { model: 'claude-opus-4-8' });
+    const lane = openLane(db, team.id, 'dawn', 'worker', { title: 'judge me', claim: true });
+    const other = openLane(db, team.id, 'dawn', 'worker', { title: 'held', claim: true });
+    db.prepare(`UPDATE lanes SET state = 'awaiting_acceptance' WHERE id = ?`).run(other.id);
+    // Load `first` (cross_family) heavily. Grade must still win over the lighter cross_model seat.
     for (let i = 0; i < 5; i++) ask(db, team, worker.id, first.id, other.id, `ask-heavy-${i}`);
     const sel = selectReviewCounterpart(db, team.id, lane, 'worker', TIMEOUT);
     expect(sel.pick).toMatchObject({ reviewer: 'first', grade: 'cross_family' });
