@@ -204,6 +204,11 @@ envelopes).
 - Cross-host huddles are honest about their latency: bounded by the sync tick. A faster push on a
   directed act is a federation change, not a huddle change.
   Follows-up: deferred — the first cross-host huddle whose participants call the tick too slow (2026-09-03)
+- **A turn no longer hides behind a newer acceptance on the one-line notice (2026-09-06, lane
+  01M1T42SBS).** The headline is chosen by class (steer > urgent > huddle > acceptance) with
+  recency inside a class, and the tail names the rest by class; the decision and its table live in
+  ADR 225's 2026-09-06 amendment, since the collision was between that ADR's obligation class and
+  this one's turn.
 - **The bell does not ring across machines (2026-09-04, measured; amends §3's latency sentence).**
   stanley ran the two-daemon falsifier for real — the hub on this laptop and the `delta` seat on a
   Fly VM in sjc, build `16b6e3d8`, huddle `01M1Q1NR8B`. The DATA half held exactly as §3 says: the

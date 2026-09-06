@@ -736,21 +736,72 @@ function raiseClass(
  * the content. The class noun (`steer` vs `urgent`, ADR 103) describes only `latest`, so a mixed queue
  * isn't mislabeled: the plural line uses the neutral "acts" and names the latest's class inline.
  */
-function composeInterruptLine(latest: Envelope, count: number, huddleTopic?: string): string {
+function composeInterruptLine(
+  latest: Envelope,
+  count: number,
+  huddleTopic?: string,
+  rest?: RaiseMix,
+): string {
   const head = `${latest.from} (${latest.act})`;
   const noun = raiseClass(latest, huddleTopic);
+  // The tail names the rest of the queue by class (ADR 225 amendment, 2026-09-06): "+5 more
+  // waiting" told stanley nothing about the huddle turn behind an acceptance — a count, not a
+  // sentence. Class nouns are daemon-derived, so this stays inside the ADR 088 §4 discipline.
+  const mix = rest && count > 1 ? ` (${describeMix(rest)})` : '';
   // A huddle turn names the room it came from and how to answer in it. `topic` is a structured
   // field, so this keeps the ADR 128 discipline — sender, act and topic, never `env.body`.
   if (huddleTopic !== undefined && latest.thread) {
-    const more = count > 1 ? ` (+${count - 1} more waiting)` : '';
+    const more = count > 1 ? ` (+${count - 1} more waiting${mix})` : '';
     return (
       `⚡ musterd: huddle ${huddleTopic} — ${latest.from} took a turn${more} — ` +
       `read it with 'musterd inbox', answer with 'musterd huddle say ${latest.thread}'.`
     );
   }
   return count > 1
-    ? `⚡ musterd: ${count} acts waiting (latest: ${noun} from ${head}) — run 'musterd inbox' to read them.`
+    ? `⚡ musterd: ${count} acts waiting (${noun} from ${head}, +${count - 1} more${mix}) — run 'musterd inbox' to read them.`
     : `⚡ musterd: ${noun} from ${head} — run 'musterd inbox' to read it.`;
+}
+
+type RaiseClass = ReturnType<typeof raiseClass>;
+/** How many of each class wait behind the headline — structured, so it can be said on the line. */
+type RaiseMix = Partial<Record<RaiseClass, number>>;
+
+/**
+ * The headline's precedence (ADR 225 amendment, 2026-09-06). `pendingInterrupts` sorts newest-first,
+ * which is the right order for a wake queue and the wrong one for a one-line notice: recency let a
+ * routed acceptance — an hour-scale obligation — headline over a huddle turn whose participants
+ * were waiting in the room. Rank is by what the class MEANS to a busy seat: a steer changes what
+ * it is doing; `urgent` is the scarce, capability-gated flag a sender spent on purpose; a huddle
+ * turn has people waiting on it now; an acceptance is owed on the hour. Recency breaks ties only
+ * inside a class, so the newest steer still wins among steers (ADR 103) and the newest turn among
+ * turns.
+ */
+const RAISE_RANK: Record<RaiseClass, number> = { steer: 0, urgent: 1, huddle: 2, acceptance: 3 };
+
+function describeMix(mix: RaiseMix): string {
+  return (Object.keys(RAISE_RANK) as RaiseClass[])
+    .filter((k) => (mix[k] ?? 0) > 0)
+    .map((k) => `${mix[k]} ${k}`)
+    .join(', ');
+}
+
+/**
+ * Pick the act the line headlines and tally the rest by class. Pure over the already-filtered
+ * `pending` list (newest-first): the sort is stable, so a class tie keeps the newer act.
+ */
+function headlineInterrupt(
+  pending: Envelope[],
+  messages: Envelope[],
+): { latest: Envelope; huddleTopic: string | undefined; rest: RaiseMix } {
+  const classed = pending.map((m) => {
+    const huddleTopic = huddleTopicOf(messages, m);
+    return { m, huddleTopic, cls: raiseClass(m, huddleTopic) };
+  });
+  classed.sort((a, b) => RAISE_RANK[a.cls] - RAISE_RANK[b.cls]);
+  const [top, ...others] = classed;
+  const rest: RaiseMix = {};
+  for (const o of others) rest[o.cls] = (rest[o.cls] ?? 0) + 1;
+  return { latest: top!.m, huddleTopic: top!.huddleTopic, rest };
 }
 
 /**
@@ -5436,8 +5487,9 @@ export async function handleHttp(
         });
         recordInterruptCheck(pending.length > 0 ? 'raised' : 'silent');
         if (pending.length === 0) return sendJson(res, 200, { raised: false });
-        const latest = pending[0]!;
-        const huddleTopic = huddleTopicOf(messages, latest);
+        // Headline by class, not recency (ADR 225 amendment): the wake queue's newest-first order
+        // is not the notice's — see `headlineInterrupt`.
+        const { latest, huddleTopic, rest } = headlineInterrupt(pending, messages);
         // Audit the delivery once per (recipient, act) — who grabbed the mic, when, at whom (§Obs).
         if (!hasInterruptRaised(ctx.db, team.id, member.name, latest.id)) {
           appendAudit(ctx.db, team.id, {
@@ -5455,7 +5507,7 @@ export async function handleHttp(
         }
         return sendJson(res, 200, {
           raised: true,
-          line: composeInterruptLine(latest, pending.length, huddleTopic),
+          line: composeInterruptLine(latest, pending.length, huddleTopic, rest),
           count: pending.length,
           act: { id: latest.id, from: latest.from, act: latest.act },
         });
