@@ -60,6 +60,8 @@ The CLI will add `json5@2.2.3` because Aperture's configuration response is HuJS
 - Increment 1 can honestly say Tailscale transport is verified or Aperture configuration is ready, but cannot claim device management, sandbox enforcement, unrelated-harness coverage, or Aperture enforcement.
 - The protocol package gains dependency-free Zod schemas; the CLI gains the direct `json5` runtime dependency. Later activation, generated configuration, API application, or enforcement needs a new ADR and its own authorization boundary.
 
+**2026-09-06 — MagicDNS fallback.** A selected Tailscale inspection first probes the device's MagicDNS name. If name-based HTTP or WebSocket reachability is unavailable, it retries only the exact device IPv4 address parsed from `tailscale status --json`; success stays qualified as IPv4 reachability with MagicDNS unavailable. Both identities must still pass the daemon's local Host gate. This distinguishes a disabled resolver from a broken Serve route or tailnet policy without widening the probe to user-provided hosts.
+
 ## Observability & Evaluation
 
 - **Traces.** The report has a non-secret `observed_at`, stable check keys, selected state, posture, and redacted details only. Failures identify the manual repair without retaining an upstream body.

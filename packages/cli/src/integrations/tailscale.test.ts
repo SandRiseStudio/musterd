@@ -225,7 +225,43 @@ describe('Tailscale Team transport inspector (ADR 385)', () => {
     });
     const checks = byKey(await inspectTailscaleTransport(deps));
     expect(checks['daemon-http']?.state).toBe('fail');
+    expect(checks['daemon-http']?.fix).toMatch(/MagicDNS/);
     expect(checks['daemon-websocket']?.state).toBe('skip');
+  });
+
+  it('falls back to the exact Tailscale IPv4 path when MagicDNS is unavailable', async () => {
+    const urls: string[] = [];
+    const { deps, upgrades } = doctorDeps({
+      fetch: async (input) => {
+        const url = String(input);
+        urls.push(url);
+        if (url.includes('daemon.tailnet.ts.net')) throw new Error('getaddrinfo ENOTFOUND');
+        return new Response('{}', { status: 200 });
+      },
+      probeUpgrade: async (origin, host) => {
+        upgrades.push([origin, host]);
+        return origin.hostname === 'daemon.tailnet.ts.net' ? 'unreachable' : 'allowed';
+      },
+    });
+
+    const checks = byKey(await inspectTailscaleTransport(deps));
+
+    expect(checks['daemon-http']).toMatchObject({
+      state: 'ok',
+      detail: '/health reachable over Tailscale IPv4; MagicDNS unavailable',
+    });
+    expect(checks['daemon-websocket']).toMatchObject({
+      state: 'ok',
+      detail: '/ws upgrade reachable over Tailscale IPv4; MagicDNS unavailable',
+    });
+    expect(urls).toEqual([
+      'http://daemon.tailnet.ts.net:4849/health',
+      'http://100.64.0.10:4849/health',
+    ]);
+    expect(upgrades.slice(-2)).toEqual([
+      [{ hostname: 'daemon.tailnet.ts.net', port: 4849 }, 'daemon.tailnet.ts.net'],
+      [{ hostname: '100.64.0.10', port: 4849 }, '100.64.0.10'],
+    ]);
   });
 
   it('fails a non-success HTTP response and a separately unreachable tailnet WebSocket', async () => {
@@ -236,8 +272,7 @@ describe('Tailscale Team transport inspector (ADR 385)', () => {
     ).toBe('fail');
 
     const badWs = doctorDeps({
-      probeUpgrade: async (origin) =>
-        origin.hostname === 'daemon.tailnet.ts.net' ? 'unreachable' : 'allowed',
+      probeUpgrade: async (origin) => (origin.hostname === '127.0.0.1' ? 'allowed' : 'unreachable'),
     });
     expect(
       (await inspectTailscaleTransport(badWs.deps)).find(
