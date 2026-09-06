@@ -115,4 +115,25 @@ describe('planInboxCheck — no unread is consumed unseen (ADR 287)', () => {
     expect(plan.elided).toBe(100);
     expect(plan.drainLimit).toBe(150);
   });
+
+  it('pins an old unread ask so newest-N broadcasts cannot bury it', () => {
+    const asked = env('ask-old', 1, {
+      act: 'ask',
+      to: { kind: 'member', name: 'Ada' },
+    });
+    const plan = planInboxCheck([asked, ...ordered(100)], 50);
+    expect(plan.shown.map((e) => e.id)).toContain('ask-old');
+    expect(plan.advanceTo).toBeNull();
+  });
+
+  it('does not pin an ask this seat already answered — answered is not waiting', () => {
+    const asked = env('ask-old', 1, {
+      act: 'ask',
+      to: { kind: 'member', name: 'Ada' },
+    });
+    const plan = planInboxCheck([asked, ...ordered(100)], 50, 0, ['ask-old']);
+    expect(plan.shown.map((e) => e.id)).not.toContain('ask-old');
+    // The 100 broadcasts still overflow the limit, so the watermark still holds (ADR 287).
+    expect(plan.advanceTo).toBeNull();
+  });
 });

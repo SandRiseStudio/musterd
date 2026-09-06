@@ -217,6 +217,21 @@ describe('pendingInterrupts (ADR 088)', () => {
       expect(pendingInterrupts(msgs, 'me', { obligations: true })).toEqual([]);
     });
 
+    it('stops raising once this seat accepted it, even with no thread (in_reply_to discharge)', () => {
+      const msgs = [
+        env({ id: 'ask', from: 'miley', to: toMe, act: 'ask', meta: review, ts: 10 }),
+        env({
+          id: 'acc',
+          from: 'me',
+          to: { kind: 'member', name: 'miley' },
+          act: 'accept',
+          meta: { in_reply_to: 'ask' },
+          ts: 20,
+        }),
+      ];
+      expect(pendingInterrupts(msgs, 'me', { obligations: true })).toEqual([]);
+    });
+
     it('does not supersede: two open acceptances are two obligations, unlike steers', () => {
       // A steer is a *direction* (newest wins, ADR 103). An acceptance is an *obligation* against a
       // specific lane — a second one does not discharge the first, so both must stay on the line.

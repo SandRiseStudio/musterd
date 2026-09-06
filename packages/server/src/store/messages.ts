@@ -547,6 +547,11 @@ export function pendingInterrupts(
           isHuddleTurn(m) ||
           isHuddleOpen(m)) &&
         !resolved.has(m.thread ?? m.id) &&
+        // Directed obligations (no eligible set) were missing this: `discharged` only ran inside
+        // the eligible-set branch of `actionNeeded`, so a self-answered `lane_review` ask kept
+        // ringing. A huddle OPEN is the opposite — one named seat accepting must not stand the
+        // rest down (ADR 378 inc 4).
+        !(isObligation(m) && discharged.has(m.id)) &&
         // Newest steer wins: any steer that isn't the single winner is superseded — it neither
         // interrupts nor counts (a ts tie is broken by id, so no two steers survive together).
         (m.act !== 'steer' || m.id === winningSteerId),
