@@ -33,6 +33,25 @@ Confirming the pattern is not a one-evening artifact — these predate tonight b
 
 Further leads surfaced by the same sweep but **not** verified past the finder's report — take one rather than trusting this list: the dependabot-alerts wiki page's triage model predates #937 turning the dependency graph back on; the hosted-broadcast guide predates the ADR 293 supervisor entirely; `docs/architecture/06-testing.md` justifies a still-correct instruction with a defect #754 fixed; a block comment in `archaeology.test.ts` prescribes to the next timeout-victim the exact diagnosis the team paid a week to falsify (see [running the gates](running-the-gates.md)); [web performance](web-performance.md) still describes one JS budget at +10% after ADR 183 split it and re-baselined at +15%.
 
+## The recurrence: `guidance.ts` again, four surfaces at once (2026-09-06)
+
+The first bullet above fixed one stale procedure in `packages/protocol/src/guidance.ts`. Three days after a surface-survey arc landed six command/tool fixes, the same file was stale in **four** new places — and the routing failure was textbook: [the surface map](command-and-tool-surface-map.md) had every one of them struck through as DONE 2026-09-03, which is exactly what let everyone stop worrying (lane `01M1VD1CQV`, fixed at `GUIDANCE_CONTENT_VERSION` 21→22).
+
+What the record said was fixed, and what the loaded skill still taught:
+
+| Skill still said | Surface had become |
+| --- | --- |
+| "`musterd done` closes your live lane" | attested submit **or** an unconfirmed self-close — two records |
+| only `inbox --wait` | `--wait` (blocks) and `--waiting` (returns), one letter apart |
+| `musterd availability`, CLI-only | `team_availability` shipped |
+| `team_wake_context` in the name list | still no prose in the body, since v17 |
+
+**Why no gate caught it, and why that is deliberate.** `pnpm guidance:check` asserts every name the skill *claims* still resolves — one-directional on purpose, since the skill is a playbook, not an index. So a **rename** breaks the build and a **semantic change under a stable name** does not: `done` kept its name and grew a second meaning, and nothing failed (falsify: `scripts/check-guidance.ts` imports only `CATALOG` and `TOOL_NAMES` and compares names to names). The v22 fix added a test per *distinction* rather than a reverse-index gate, so the next semantic change breaks a named test.
+
+**The sweep, done properly this time** (the lesson of the roadmap instance above): every instruction-bearing surface an agent loads was grepped, not just `docs/`. `primer.ts`, `onboard/doctor.ts`, the MCP tool descriptions and the provisioned hook strings were all already correct — the Notification hooks run `inbox --waiting`, and `lanes.ts` carries the ADR 235 advice. `guidance.ts` was the only stale surface, which is worth recording as a *negative* result: the routing failure was narrow, and knowing that took one grep.
+
+Distribution is the second half and is not this page's: see [guidance distribution](guidance-distribution.md). A version bump moves nothing until each worktree runs `musterd init --refresh-guidance` — this seat was on v18 against a v21 build when the audit started.
+
 ## The check that finds these
 
 After landing any correction, grep for the old instruction's key phrase before calling it done — **across the whole repo, not just `docs/`**. The roadmap instance above was reported as four surfaces and was six: the two the finder missed were in `scripts/`, and they were the two an automated reader consumes. A sweep scoped to the documentation tree finds the surfaces humans read and misses the ones agents are fed — `grep -rn "pnpm format"` on 2026-08-19 would have surfaced CONTRIBUTING.md in the same minute #890 merged. The write path that avoids the problem entirely: state a fact once in its governed home and make every instruction-bearing surface *point* rather than restate. Every instance above is a restatement that outlived its source.
