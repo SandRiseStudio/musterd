@@ -11,6 +11,26 @@
 A new frontier model release (any family). The research radar's sibling for new _models_: a release
 is a trigger to run this manifest once.
 
+## Deferred 2026-09-05 — the first result costs TWO runs, and that was never priced
+
+**Status: deferred, with a restart condition.** The trigger has fired at least five times (Opus 5,
+Fable 5.1, Grok 4.6, GPT-5.6-sol, Gemini 3.8-flash) and the manifest has never run. Finding
+[011](011-frontier-cadence-observational-floor.md) establishes why, and it is structural rather than
+neglect: `baseline` below is *"the prior model's run — the diff IS the result"*, so with zero runs on
+record the FIRST run emits a row that cannot be read as anything. The first readable result costs two
+runs, each a fresh team, two agent seats plus a human, hands-off to Goal completion or a 2h cap, on a
+laptop that lives in swap and must stagger seat launches (`docs/wiki/nicks-laptop.md`).
+
+**What restarts it:** a human decision to spend two runs back-to-back (not one), or a second machine
+with capacity to hold a pinned team so the runs do not contend with the working laptop — the cloud
+seat makes that newly plausible. Either is a research-budget call under ADR 056.
+
+**What exists meanwhile, and what it is not:**
+`scripts/research/frontier-cadence-observational.ts` reads per-model answered-ask latency off the
+live corpus (380 pairs, 9 models, 2026-09-05). It is an observational floor with four large stated
+confounds, **not** a leaderboard row and not a substitute for a run — every term this manifest pins
+is free there.
+
 ## The manifest (pin these per run)
 
 | Term              | Pin                                                                                                                                                                                  |
