@@ -826,6 +826,77 @@ describe('MCP adapter', () => {
     });
   });
 
+  // ADR 164 amendment 2 (2026-09-05, lane 01M1T41YRA). "The next tool call re-joins" was true and
+  // not enough: the interrupt probe (ADR 088) is a PostToolUse hook that runs at EVERY tool boundary
+  // and authenticates with the lease in binding.json — a lease the ladder's release just killed. So
+  // a session that resumes after a dormant stretch makes N ordinary tool calls, each probe is
+  // refused, and the seat is deaf until the model happens to call a team_* tool. Measured in the
+  // 2026-09-05 bell check: 26 of 102 probes 401; every adapter-HELD binding was valid, the deaf
+  // seats were dormant adapters (dolly evicted at 09:40, schmidt released ~18:52 and still down at
+  // 19:40). The way back must not wait for a tool that reaches this process — activity in the
+  // transcript is the same first-hand evidence, and the adapter can read it on its own clock.
+  describe('a dormant-by-liveness adapter re-joins on transcript activity, not only on a team_* call', () => {
+    const toolCb = (mcp: ReturnType<typeof buildMcpServer>, name: string) =>
+      (
+        mcp as unknown as {
+          _registeredTools: Record<string, { handler: (...a: unknown[]) => unknown }>;
+        }
+      )._registeredTools[name]!.handler;
+    async function demoted() {
+      const cfg = adaConfig();
+      const client = new MusterdClient(cfg);
+      const mcp = buildMcpServer(client, cfg, { onFirstToolCall: () => autojoin(client, cfg) });
+      await Promise.resolve(toolCb(mcp, 'team_members')({})).catch(() => {});
+      await delay(150);
+      expect(client.joined).toBe(true);
+      const fake = { verdict: 'dormant' as string, rung: 'stale' as string | undefined };
+      (client as unknown as { session: { check: () => unknown } }).session = {
+        check: () => ({ verdict: fake.verdict, rung: fake.rung }),
+      };
+      (client as unknown as { lastActivityAt: number }).lastActivityAt = Date.now() - 60_000;
+      expect((client as unknown as { attestSession: () => boolean }).attestSession()).toBe(true);
+      expect(client.joined).toBe(false);
+      expect(client.releasedByLiveness).toBe(true);
+      return { client, fake };
+    }
+
+    it('re-occupies when the ladder reads live again — no tool call involved', async () => {
+      const { client, fake } = await demoted();
+      // Still quiet: the tick must NOT re-join on a stale verdict (that would undo the ladder).
+      expect(await client.rejoinIfSessionResumed()).toBe(false);
+      expect(client.joined).toBe(false);
+      // The transcript moves — the model is back. One tick, and the seat is held again, so the
+      // very next hook probe presents a live lease.
+      fake.verdict = 'live';
+      fake.rung = undefined;
+      expect(await client.rejoinIfSessionResumed()).toBe(true);
+      await delay(100);
+      expect(client.joined).toBe(true);
+      expect(client.releasedByLiveness).toBe(false);
+      client.close();
+    });
+
+    it('a deliberate team_leave is NOT re-armed by activity — that seat was meant to stay left', async () => {
+      const { client, fake } = await demoted();
+      client.leave(); // the agent said so; the ladder's flag is cleared by design
+      fake.verdict = 'live';
+      expect(await client.rejoinIfSessionResumed()).toBe(false);
+      expect(client.joined).toBe(false);
+      client.close();
+    });
+
+    it('the watch is armed by the release itself and disarmed by the re-join', async () => {
+      const { client, fake } = await demoted();
+      const priv = client as unknown as { dormantWatch: NodeJS.Timeout | null };
+      expect(priv.dormantWatch).not.toBeNull();
+      fake.verdict = 'live';
+      await client.rejoinIfSessionResumed();
+      await delay(100);
+      expect(priv.dormantWatch).toBeNull();
+      client.close();
+    });
+  });
+
   it('serves the primer as MCP instructions — file-free onboarding (ADR 012 follow-up)', () => {
     // A provisioned session names its seat.
     const named = primerInstructions(adaConfig());
