@@ -282,6 +282,53 @@ describe('inbox command', () => {
     expect(out).not.toMatch(/revoked/);
   });
 
+  // ADR 088 amendment (2026-09-05, lane 01M1T4339Y). Claude Code's hook contract: PostToolUse plain
+  // stdout at exit 0 is written to the debug log and never shown to the model; only
+  // `hookSpecificOutput.additionalContext` reaches it. ADR 088 shipped the line bare, so the daemon
+  // audited `interrupt.raised` for weeks while no Claude Code model ever read a line — measured in
+  // one seat's transcript on 2026-09-05: 67 hook runs carried a musterd line in `hook_success.stdout`,
+  // zero reached context. The bell check's "(c), no bell" from every Claude Code seat was that fact.
+  it('--interrupt-check --hook claude-code wraps the deaf line in the PostToolUse JSON seam', async () => {
+    mkdirSync(join(dir, '.musterd'), { recursive: true });
+    writeFileSync(
+      join(dir, '.musterd', 'binding.json'),
+      JSON.stringify({
+        version: 2,
+        server: serverUrl,
+        team: 'dawn',
+        claim: { mode: 'seat', name: 'Ada' },
+        seat_credential: (ada as unknown as { opts: { key: string } }).opts.key,
+        session_lease: 'lease-that-died-with-its-presence',
+      }) + '\n',
+    );
+    const { code, out } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'claude-code'])),
+    );
+    expect(code).toBe(0);
+    // Exactly one JSON object, the shape Claude Code reads — nothing bare around it.
+    const parsed = JSON.parse(out.trim()) as {
+      hookSpecificOutput: { hookEventName: string; additionalContext: string };
+    };
+    expect(parsed.hookSpecificOutput.hookEventName).toBe('PostToolUse');
+    expect(parsed.hookSpecificOutput.additionalContext).toMatch(/interrupt line is deaf/);
+    expect(parsed.hookSpecificOutput.additionalContext).toMatch(/team_join/);
+  });
+
+  it('--hook claude-code stays silent when nothing is raised — the common path is still free', async () => {
+    const { code, out } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'claude-code'])),
+    );
+    expect(code).toBe(0);
+    expect(out).toBe('');
+  });
+
+  it('an unknown --hook value falls back to bare stdout rather than failing the tool call', async () => {
+    const { code } = await capture(() =>
+      inboxCommand(parseArgs(['--interrupt-check', '--hook', 'not-a-harness'])),
+    );
+    expect(code).toBe(0);
+  });
+
   describe('defer (ADR 211)', () => {
     /** Ada asks nick something; returns the ask id nick will postpone. */
     async function askNick(): Promise<string> {

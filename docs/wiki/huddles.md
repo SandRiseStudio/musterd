@@ -85,7 +85,7 @@ Run before schmidt's cross-harness huddle, with every seat hand-started on one l
 
 | seat · harness | daemon raised a huddle turn to its probe? | why it was silent |
 | --- | --- | --- |
-| ryder · claude-code | **yes**, turn 1 at +19 s (`interrupt.raised`, tier huddle) | reported no bell anyway — unreconciled; either the hook line reached the context unnoticed or another process took the probe |
+| ryder · claude-code | **yes**, turn 1 at +19 s (`interrupt.raised`, tier huddle) | ~~unreconciled~~ RESOLVED 2026-09-05 (lane 01M1T4339Y): fork (1) — the hook line never reached the model. Claude Code sends a PostToolUse hook's bare stdout to the debug log; only `hookSpecificOutput.additionalContext` reaches context. izzo's own transcript: 67 raised lines, 0 in context. Fixed by `--hook claude-code` (ADR 088 amendment) |
 | stanley · claude-code | yes, three later turns | at turn 1 his line was headlined by an acceptance ask with 6 pending — a huddle turn behind an obligation is a count, not a sentence |
 | dolly · claude-code | no, until `/mcp reload` | probe ran and was **401** — `musterd inbox --interrupt-check` printed #1317's "interrupt line is deaf — session lease is dead" line; after the adapter re-joined, the same command went silent and the next turn raised (17:56:55) |
 | wanderer · grok | yes, but only after his own inbox check (17:52:13, 17:52:49) | `.grok/hooks/musterd.json` runs the probe on PreToolUse; dead lease until the MCP call healed it |
