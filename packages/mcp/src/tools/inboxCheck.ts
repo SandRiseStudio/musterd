@@ -82,9 +82,16 @@ export function planInboxCheck(
    * advance the watermark past every one of them. Same rule as below, one layer further out.
    */
   unreachable = 0,
+  /**
+   * Ids this seat no longer owes (`answered` ∪ `discharged` from GET /inbox). They stay in the
+   * unread pile until a drain that actually renders them (ADR 287) — they must not be pinned into
+   * every bounded check, or a closed acceptance occupies the view forever while the cursor holds.
+   */
+  closed: readonly string[] = [],
 ): InboxCheckPlan {
-  const pinned = ordered.filter(isPinnedNeed);
-  const rest = ordered.filter((e) => !isPinnedNeed(e));
+  const closedSet = new Set(closed);
+  const pinned = ordered.filter((e) => isPinnedNeed(e) && !closedSet.has(e.id));
+  const rest = ordered.filter((e) => !isPinnedNeed(e) || closedSet.has(e.id));
   // Newest fill of the non-pinned tail, union the waiting acts. If the server already pinned, this
   // keeps the handoff when a second slice would otherwise drop it as the oldest of 51.
   const newest = rest.slice(Math.max(0, rest.length - limit));
@@ -129,7 +136,16 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const ordered = [...byId.values()].sort(
           (a, b) => envelopePosition(a) - envelopePosition(b) || a.id.localeCompare(b.id),
         );
-        const plan = planInboxCheck(ordered, args.limit ?? 50, fetched.unread_remaining ?? 0);
+        const closed = [
+          ...(fetched.answered ?? []),
+          ...(fetched.discharged ?? []).map((d) => d.id),
+        ];
+        const plan = planInboxCheck(
+          ordered,
+          args.limit ?? 50,
+          fetched.unread_remaining ?? 0,
+          closed,
+        );
         const messages = plan.shown;
 
         if (messages.length === 0 && plan.elided === 0) {

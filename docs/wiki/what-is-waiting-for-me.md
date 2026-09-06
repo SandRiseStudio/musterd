@@ -24,6 +24,10 @@ Evidence: `~/.musterd/musterd.db` read with `sqlite3 -readonly`; nick's cursor w
 
 And one drift restored: ADR 053 §1 decided the approval-prompt hook "prints any unread directed acts"; the implementation had drifted to the banner alone, while the help text still said "print directed acts waiting for this seat". `nudge` now prints the acts under the banner (oldest first, five lines, then `+N more`).
 
+## Interrupt-check rang closed acceptances while the unread pile blocked the cursor (2026-09-06; falsify: accept a directed `lane_review` ask, then `musterd inbox --interrupt-check` — it must be silent)
+
+The ⚡ line reads only unread interrupt-class rows (`listInterruptCandidates` + `pendingInterrupts`). A watermark cursor (ADR 287) cannot mark the three shown asks without skipping the ~1900 older unread behind them, so those asks stayed unread — and the acceptor's own `accept` is a DM to the asker, dropped by `from_member != me`. The fold never saw the discharge. Fixed by fetching this seat's own `accept`/`decline`/`resolve` into the candidate window (same pattern as huddle "mine" turns) and by not pinning `answered`/`discharged` ids in `team_inbox_check`. The cursor still holds on an incomplete view; the line just stops lying about closed obligations.
+
 ## Still open (2026-09-03)
 
 - **`inbox --waiting` (was `nudge`) is silent on a stale session lease.** It resolves with `reclaimAgentLease: false` by design (a hook one-shot must never reclaim the seat), so when the seat's lease has lapsed the inbox read fails and the catch swallows it: zero output while acts wait. Observed on dolly's seat 2026-09-03 after a daemon bounce; `inbox --peek` on the same binding worked. Falsifier: run `musterd nudge` and `musterd inbox --peek --unread` back to back on a seat whose lease is stale — nudge prints nothing, inbox prints the acts. Not fixed here; the fix is a read that survives a lapsed lease without reclaiming it, and belongs with the lease design (ADR 337).

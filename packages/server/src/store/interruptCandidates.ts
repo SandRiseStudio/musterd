@@ -21,6 +21,10 @@ import type { MessageRow } from './rows.js';
  * leaves the answer identical — which is what `interruptCandidates.test.ts` asserts against the
  * unnarrowed read, over a corpus built to contain every one of them.
  *
+ * Own suppress acts are a second query: the inbox window is `from_member != me`, and an
+ * accept/decline is a DM to the asker, so neither filter would keep the row that discharges a
+ * self-answered obligation. The huddle path already fetches "mine" for the same reason.
+ *
  * The `meta` predicates are `json_extract` and therefore unindexed: this still SCANS the window, it
  * just stops carrying it back. That is the whole win, and it is why the cost is now a function of the
  * window's size in SQLite rather than of its size in V8.
@@ -60,6 +64,21 @@ export function listInterruptCandidates(
     )
     .all(member.team_id, member.id, member.id, opts.cursorTs ?? 0);
 
+  // Own suppress acts never survive the filters above: `from_member != me` drops them, and an
+  // accept/decline is a DM to the asker so `to_member = me` would not have kept it either.
+  // pendingInterrupts can only discharge what it is handed (meta.in_reply_to / resolve.thread),
+  // so without this fetch a self-answered obligation keeps ringing the live rail. Same shape as
+  // the huddle "mine" fetch below — the fold needs the author's own rows, which the inbox omits.
+  const mineSuppress = db
+    .prepare<unknown[], MessageRow>(
+      `SELECT * FROM messages
+        WHERE team_id = ?
+          AND from_member = ?
+          AND created_at > ?
+          AND act IN ('resolve','accept','decline')`,
+    )
+    .all(member.team_id, member.id, opts.cursorTs ?? 0);
+
   // ADR 378 — the context a huddle turn cannot carry. A turn is an ordinary `message` in a thread:
   // whether I am IN that huddle lives on the ROOT act, and where I last spoke lives in MY OWN turns.
   // Both are normally older than the cursor window (a huddle is opened once and then talked in) and
@@ -67,7 +86,14 @@ export function listInterruptCandidates(
   // them by id, bounded by the distinct huddle threads actually present in the window — the common
   // case is zero threads and zero extra queries.
   const threads = [...new Set(rows.map((r) => r.thread_id).filter((t): t is string => !!t))];
-  if (threads.length === 0) return rows;
+  if (threads.length === 0) {
+    if (mineSuppress.length === 0) return rows;
+    const byId = new Map<string, MessageRow>();
+    for (const r of [...mineSuppress, ...rows]) byId.set(r.id, r);
+    return [...byId.values()].sort((a, b) =>
+      a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
+    );
+  }
   const marks = threads.map(() => '?').join(',');
   const roots = db
     .prepare<unknown[], MessageRow>(
@@ -75,7 +101,14 @@ export function listInterruptCandidates(
         WHERE team_id = ? AND id IN (${marks}) AND json_extract(meta, '$.huddle') IS NOT NULL`,
     )
     .all(member.team_id, ...threads);
-  if (roots.length === 0) return rows;
+  if (roots.length === 0) {
+    if (mineSuppress.length === 0) return rows;
+    const byId = new Map<string, MessageRow>();
+    for (const r of [...mineSuppress, ...rows]) byId.set(r.id, r);
+    return [...byId.values()].sort((a, b) =>
+      a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
+    );
+  }
   const rootMarks = roots.map(() => '?').join(',');
   const mine = db
     .prepare<unknown[], MessageRow>(
@@ -85,7 +118,7 @@ export function listInterruptCandidates(
     .all(member.team_id, ...roots.map((r) => r.id), member.id);
 
   const byId = new Map<string, MessageRow>();
-  for (const r of [...roots, ...mine, ...rows]) byId.set(r.id, r);
+  for (const r of [...mineSuppress, ...roots, ...mine, ...rows]) byId.set(r.id, r);
   return [...byId.values()].sort((a, b) =>
     a.created_at === b.created_at ? (a.id < b.id ? -1 : 1) : a.created_at - b.created_at,
   );

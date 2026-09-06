@@ -169,4 +169,38 @@ describe('listInterruptCandidates', () => {
     // The handful of acts above, not the 250 inert rows they are buried in.
     expect(candidates.length).toBeLessThan(20);
   });
+
+  /**
+   * The acceptor's own accept is a DM to the asker. `from_member != me` drops it, and
+   * `to_member = me` would not have kept it either. The fold can only discharge what it is
+   * handed, so a self-answered obligation kept ringing the live rail (wanderer, 2026-09-06:
+   * three accepted lane_review asks, lanes done, interrupt-check still raised them).
+   */
+  it("silences a routed acceptance this seat already accepted — the fold sees the seat's own suppress act", () => {
+    const { db, team, nick, ada } = seed();
+    say(db, team, nick, ada, 'ask', 'oblig-mine', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L1' } },
+    });
+    say(db, team, ada, nick, 'accept', 'acc-mine', { meta: { in_reply_to: 'oblig-mine' } });
+    expect(viaCandidates(db, team, ada, true)).not.toContain('oblig-mine');
+    // The unnarrowed inbox cannot see the accept either (listInbox excludes own sends), so this
+    // is a case where the candidate path must be *strictly better* than the whole-window path.
+    expect(viaWholeWindow(db, team, ada, true)).toContain('oblig-mine');
+  });
+
+  it('silences a routed acceptance this seat declined, and a thread this seat resolved', () => {
+    const { db, team, nick, ada } = seed();
+    say(db, team, nick, ada, 'ask', 'oblig-no', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L2' } },
+    });
+    say(db, team, ada, nick, 'decline', 'dec-mine', { meta: { in_reply_to: 'oblig-no' } });
+    say(db, team, nick, ada, 'ask', 'oblig-thread', {
+      meta: { species: 'approve', tier: 'standard', lane_review: { lane: 'L3' } },
+      thread: 'T-self',
+    });
+    say(db, team, ada, null, 'resolve', 'res-mine', { thread: 'T-self' });
+    const raised = viaCandidates(db, team, ada, true);
+    expect(raised).not.toContain('oblig-no');
+    expect(raised).not.toContain('oblig-thread');
+  });
 });

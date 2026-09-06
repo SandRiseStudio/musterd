@@ -1,4 +1,5 @@
 {
+  "## Interrupt-check rang closed acceptances while the unread pile blocked the cursor (2026-09-06; falsify: accept a directed `lane_review` ask, then `musterd inbox --interrupt-check` — it must be silent)": "defect",
   "## The grade ladder funnels every ask to the one cross-family seat (2026-08-14; falsify: re-run `scripts/research/adr-260-acceptance-eval.ts` and read the per-day `cross_family` share)": "other",
   "## An acceptance ask is usually answered by the seat it was sent to — slowly (2026-08-14; falsify: the ON window rows printed by the eval script)": "other",
   "## The attention finding, observed rather than inferred — a seat held for numbers already in its inbox (2026-08-14; falsify: messages `01M0124WS2JAFCZDRRP14WR4TW` and `01M0124A7753EES3VHWJGPBBEF` in the acts log, 8 minutes apart)": "other",
