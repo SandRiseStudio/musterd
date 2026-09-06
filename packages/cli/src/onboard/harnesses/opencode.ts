@@ -16,6 +16,13 @@ import {
   folderResourceKey,
   type HarnessAdapter,
 } from '../reconcile/fragments.js';
+import {
+  OPENCODE_PLUGIN_SURFACE,
+  inspectOpencodePluginDrift,
+  installMusterdOpencodePlugin,
+  opencodePluginPresent,
+  removeMusterdOpencodePlugin,
+} from './opencodePlugin.js';
 
 /**
  * OpenCode. OpenCode reads MCP servers from the `mcp` map of a JSON config that can be
@@ -32,8 +39,10 @@ import {
  *
  * Guidance needs nothing new (ADR 321 §4): OpenCode reads AGENTS.md natively, so the primer's
  * managed block is already its guidance shell, pointing at the harness-neutral canonical skill.
- * It also has no hook table — capture rides heartbeat-side reconciliation (ADR 270), which is
- * why this adapter declares no `refreshHooks` slot and its `observeModel` honestly degrades.
+ * It has no hook table — capture rides heartbeat-side reconciliation (ADR 270/362), which is
+ * why its `observeModel` honestly degrades. The one executable surface it does carry is the
+ * ADR 392 doorbell plugin (`.opencode/plugins/musterd.js`, see opencodePlugin.ts): `refreshHooks`
+ * owns it, `detect` reports its drift, and `unprovision` removes it.
  */
 
 /**
@@ -166,6 +175,9 @@ export const opencode: Harness = {
             : 'opencode install not found',
       ...(entry ? registeredFromEnv(entry.environment) : {}),
       ...(inGlobal ? { registeredElsewhere: globalConfigPath() } : {}),
+      // ADR 392 / ADR 168: the doctor reads the plugin back and names it missing or STALE. Only
+      // where this folder carries the MCP entry — a global-only registration is not ours to probe.
+      ...(inProject ? { hookDrift: inspectOpencodePluginDrift(process.cwd()) } : {}),
     };
   },
 
@@ -181,12 +193,25 @@ export const opencode: Harness = {
     cfg.mcp = cfg.mcp ?? {};
     cfg.mcp['musterd'] = toOpencodeServer(entry);
     writeConfig(path, cfg);
+    // ADR 392: the doorbell plugin rides with the MCP entry — a seat with the tools but no probe is
+    // the deaf state this was built to end.
+    const warnings = installMusterdOpencodePlugin();
     return {
       target: path,
       activation: '(re)start opencode in this folder so it starts the musterd MCP server',
       scope: `wired into this folder only (${path}) — another project needs its own \`musterd init\`, and a second agent needs its own folder`,
       secretPath: path,
+      ...(warnings.length > 0 ? { warnings } : {}),
     };
+  },
+
+  refreshHooks: {
+    applies: (dir) => existsSync(projectConfigPath(dir)) || opencodePluginPresent(dir),
+    run: (dir) => {
+      const warnings = installMusterdOpencodePlugin(dir);
+      return { files: [join(dir, '.opencode', 'plugins', 'musterd.js')], warnings };
+    },
+    surfaces: () => [OPENCODE_PLUGIN_SURFACE],
   },
 
   // Provision a role's MCP servers into the project-local `.opencode/opencode.json`, additively
@@ -226,6 +251,7 @@ export const opencode: Harness = {
     if (!changed) return;
     if (Object.keys(cfg.mcp).length === 0) delete cfg.mcp;
     writeConfig(path, cfg);
+    if (plan.servers.includes('musterd')) removeMusterdOpencodePlugin();
   },
 };
 

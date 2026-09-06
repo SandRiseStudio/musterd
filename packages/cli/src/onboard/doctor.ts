@@ -695,7 +695,7 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
   }
   // ADR 088: the interrupt hook is reachability-critical and lives in machine-local settings (never
   // committed), so a provisioned folder can silently lose it. Check it only when Claude Code has the
-  // server wired here — the only harness with a PostToolUse hook today.
+  // server wired here; Cursor, Grok and OpenCode (ADR 392) report theirs through `detect().hookDrift`.
   if (claudeConfigured) drift.push(...inspectClaudeHookDrift(cwd));
   // ADR 261 increment 2: the harness permission layer, same machine-local settings file and the
   // same silent-loss shape — except its failure is worse, because a missing hook fails open and a

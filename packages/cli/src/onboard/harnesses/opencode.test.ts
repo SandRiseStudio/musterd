@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildEntry } from '../mcpEntry.js';
 import { jsoncConflict, opencode } from './opencode.js';
+import { opencodePluginPath } from './opencodePlugin.js';
 
 const binding = {
   server: 'http://localhost:4849',
@@ -144,5 +145,34 @@ describe('opencode detect reads its own entry back', () => {
   it('reports not configured when the folder has no opencode entry at all', async () => {
     const d = await opencode.detect();
     expect(d.configured).toBe(false);
+  });
+});
+
+describe('opencode doorbell plugin rides configure / refresh / unprovision (ADR 392)', () => {
+  it('configure installs the plugin and detect reports no drift; unprovision of musterd removes it', async () => {
+    await opencode.configure(buildEntry(binding));
+    expect(existsSync(opencodePluginPath(cwd))).toBe(true);
+    const d = await opencode.detect();
+    expect(d.configured).toBe(true);
+    expect(d.hookDrift).toEqual([]);
+    await opencode.unprovision({ servers: ['musterd'] } as never);
+    expect(existsSync(opencodePluginPath(cwd))).toBe(false);
+  });
+
+  it('detect names a missing plugin as drift, and refreshHooks applies here and rewrites it', async () => {
+    await opencode.configure(buildEntry(binding));
+    rmSync(opencodePluginPath(cwd));
+    const d = await opencode.detect();
+    expect(d.hookDrift?.[0]).toContain('nothing probes the interrupt line');
+    expect(opencode.refreshHooks?.applies(cwd)).toBe(true);
+    const res = opencode.refreshHooks!.run(cwd);
+    expect(res.warnings).toEqual([]);
+    expect(res.files).toEqual([opencodePluginPath(cwd)]);
+    expect((await opencode.detect()).hookDrift).toEqual([]);
+    expect(opencode.refreshHooks!.surfaces!()).toEqual(['opencode:plugin']);
+  });
+
+  it('refreshHooks does not apply to a folder with no opencode provisioning', () => {
+    expect(opencode.refreshHooks?.applies(cwd)).toBe(false);
   });
 });

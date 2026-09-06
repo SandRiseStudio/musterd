@@ -223,8 +223,9 @@ export function runRefreshHooks(dir: string = process.cwd()): number {
     // With a refusal above, part of this refresh did not land, and per-surface attribution of which
     // part is the harness's business — so the line vouches only for what this driver did (clear the
     // record), not for an install it cannot confirm. `refused > 0` hedges every line run-globally,
-    // which is exact while Claude Code is the only refreshHooks implementer; a second implementer
-    // would want the hedge scoped to the harness that refused.
+    // which was exact while Claude Code was the only refreshHooks implementer; with Cursor, Grok and
+    // OpenCode (ADR 392) also implementing it, the hedge is wider than the refusal — scoping it to the
+    // harness that refused is the next improvement here.
     process.stdout.write(
       refused > 0
         ? `${theme.warn('↑')} cleared the refusal of ${t.surface}, ${declined}` +
