@@ -495,6 +495,13 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       entryDrift.push(text);
       if (wireRepairs) anyWireRepairable = true;
     };
+    // A retired MUSTERD_SURFACE is drift that `wire` provably CANNOT repair (it passes
+    // `legacyRepair: false`), so it must never contribute to `anyWireRepairable` — otherwise `--fix`
+    // runs wire, wire reports success on everything it does own, and the marker is still there.
+    // Same list, different repair owner: `musterd harness configure`.
+    const noteEntryDriftWireCannotFix = (text: string) => {
+      entryDrift.push(text);
+    };
     if (h.id === 'claude-code' && d.configured) claudeConfigured = true;
     harnesses.push({
       label: h.label,
@@ -537,17 +544,33 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // A legacy baked MUSTERD_MODEL. Provisioning stopped emitting it, but entries written before that
     // still carry one at the TOP of the adapter's ladder, where no observation can correct it — the
     // exact shape that had a seat attesting `grok-4.5` for weeks while running `claude-opus-4-8`.
-    // MUSTERD_SURFACE, the one this set was missing. Same legacy-snapshot argument as the model above,
-    // and measured biting on 2026-08-03: a pre-ADR-165 `.cursor/mcp.json` still baked
-    // `MUSTERD_SURFACE=cursor`, which outranks binding.json and — unlike model — has no observation
-    // path that could ever correct it, so the seat reported `cursor` while a claude-code hook was
-    // demonstrably capturing its sessions (PR #607 made the contradiction visible; this names the
-    // entry that causes it).
+    // MUSTERD_SURFACE is the ONE entry key that does not take the shared `repairWith` prescription,
+    // because it is the only one whose repair is a REPLACEMENT rather than a deletion. ADR 286
+    // (2026-08-19) retired the marker: `resolveLaunchSurface` throws on its mere presence and
+    // refuses Presence attachment — so the pre-286 story this line used to tell ("outranks
+    // binding.json … the roster reports whatever it says", measured 2026-08-03, PR #607) has been
+    // impossible since. Nothing attests the wrong surface any more; the adapter does not attach.
+    //
+    // And every branch of `repairWith` is wrong HERE, which is why this is spelled out rather than
+    // shared (falsify each in one grep):
+    //   - `musterd wire` — `commands/wire.ts` passes `legacyRepair: false` ("Never legacyRepair from
+    //     here"), so the engine classifies the fragment `repair-needed` and plans `none`;
+    //   - `musterd init` / re-provisioning — `onboard/init.ts` likewise passes `legacyRepair: false`;
+    //   - "drop the line by hand" — leaves NO marker, so `resolveLaunchSurface` falls past
+    //     MUSTERD_TEST_SURFACE and MUSTERD_LAUNCH_SURFACE to its second throw. One refusal becomes
+    //     a different refusal, and the reader is back where they started.
+    // `musterd harness configure` is the sole caller that passes `legacyRepair: true`
+    // (`commands/harness.ts`), driving the `repair-launch-marker` mutation that swaps the retired
+    // key for MUSTERD_LAUNCH_SURFACE and preserves the rest of the entry. So it is named directly.
     if (d.registeredSurface !== undefined) {
-      noteEntryDrift(
-        `${h.label}'s musterd server bakes MUSTERD_SURFACE=${d.registeredSurface} — a wire-time ` +
-          `snapshot that outranks .musterd/binding.json and that no observation can correct, so the ` +
-          `roster, presence and audit report whatever it says. ${repairWith}.`,
+      noteEntryDriftWireCannotFix(
+        `${h.label}'s musterd server bakes the retired MUSTERD_SURFACE=${d.registeredSurface} ` +
+          `(pre-ADR-286). The adapter does not read it — it REFUSES to attach Presence while it is ` +
+          `there, so this session has no seat presence at all rather than a wrong one. Run ` +
+          `\`musterd harness configure\` in this worktree to convert the registration, then reload ` +
+          `the session. Deleting the line by hand does NOT fix it: with no launch marker the adapter ` +
+          `refuses for the other reason, and neither \`musterd wire\` nor \`musterd init\` repairs a ` +
+          `retired marker${d.registeredElsewhere !== undefined ? ` (this entry lives in ${d.registeredElsewhere})` : ''}.`,
       );
     }
     if (d.registeredModel !== undefined) {

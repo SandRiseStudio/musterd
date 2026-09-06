@@ -52,6 +52,28 @@ What the record said was fixed, and what the loaded skill still taught:
 
 Distribution is the second half and is not this page's: see [guidance distribution](guidance-distribution.md). A version bump moves nothing until each worktree runs `musterd init --refresh-guidance` — this seat was on v18 against a v21 build when the audit started.
 
+## When the stale surface is the REPAIR instruction (2026-09-06, same day, different layer)
+
+Found an hour after the entry above, in the doctor rather than the skill — worth its own section because the failure mode is one step worse. Here the stale surface is the thing a human reads *at repair time*, so following it faithfully does not just teach the wrong model, it **fails to fix the problem and says nothing about that** (lane `01M1VEMBH7`).
+
+`musterd init --check` said a baked `MUSTERD_SURFACE=cursor` "outranks .musterd/binding.json and no observation can correct, so the roster, presence and audit report whatever it says", and prescribed re-provisioning or "drop the line from Cursor's own entry file by hand". Every clause was pre-[ADR 286](../decisions/286-launcher-surface-convergence.md) (accepted 2026-08-19); the doctor's own comment is dated 2026-08-03 and was never revisited.
+
+What the code actually does (falsify: `packages/mcp/src/config.ts`, `resolveLaunchSurface`): the marker is **retired**, and its mere presence *throws* — the adapter refuses to attach Presence at all. So nothing attests the wrong surface any more, and the failure is loud rather than silent.
+
+**All three prescriptions were wrong, each falsifiable in one grep:**
+
+| Prescribed | Why it cannot work |
+| --- | --- |
+| `musterd wire` | `commands/wire.ts` passes `legacyRepair: false` — "Never legacyRepair from here" |
+| `musterd init` / re-provision | `onboard/init.ts` passes `legacyRepair: false` too |
+| delete the line by hand | leaves **no** marker, so `resolveLaunchSurface` throws at its no-marker branch instead — one refusal becomes another |
+
+The only repair is `musterd harness configure` (`commands/harness.ts`, "the ONE caller allowed to" pass `legacyRepair: true`), which drives the `repair-launch-marker` mutation that swaps the key and preserves the rest of the entry. The doctor never named it.
+
+**The generalisable bit — a deletion prescription cannot repair a replacement defect.** The doctor shares one `repairWith` string across every baked key, and for `MUSTERD_MODEL`, `MUSTERD_AUTOJOIN`, `MUSTERD_AGENT_KEY` and friends that is right: the fix genuinely is *remove the line and let the ladder fall through*. `MUSTERD_SURFACE` is the one key whose fix is *substitute a different key*, and it inherited a prescription built for the others. Checked while here, and **not** a defect: the `MUSTERD_AUTOJOIN` line beside it is still accurate — `config.ts` reads that env ahead of the binding, and deletion really is its repair.
+
+Second-order, fixed in the same lane: the surface line also fed `anyWireRepairable`, so `--fix` would run `wire`, wire would report success on everything it *does* own, and the marker would still be there.
+
 ## The check that finds these
 
 After landing any correction, grep for the old instruction's key phrase before calling it done — **across the whole repo, not just `docs/`**. The roadmap instance above was reported as four surfaces and was six: the two the finder missed were in `scripts/`, and they were the two an automated reader consumes. A sweep scoped to the documentation tree finds the surfaces humans read and misses the ones agents are fed — `grep -rn "pnpm format"` on 2026-08-19 would have surfaced CONTRIBUTING.md in the same minute #890 merged. The write path that avoids the problem entirely: state a fact once in its governed home and make every instruction-bearing surface *point* rather than restate. Every instance above is a restatement that outlived its source.

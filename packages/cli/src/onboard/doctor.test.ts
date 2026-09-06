@@ -258,8 +258,14 @@ describe('inspectProvisioning', () => {
 
   // MUSTERD_SURFACE was the one missing from the inspected set, and it is what pinned a seat's
   // reported surface to `cursor` while a claude-code hook was demonstrably capturing its sessions
-  // (measured 2026-08-03, PR #607). Same legacy-snapshot argument as MUSTERD_MODEL.
-  it('flags a registered MUSTERD_SURFACE as a legacy baked snapshot', async () => {
+  // (measured 2026-08-03, PR #607).
+  //
+  // ADR 286 (2026-08-19) then RETIRED the marker, and this line kept telling the pre-286 story for
+  // three weeks (found 2026-09-06, lane 01M1VEMBH7). `resolveLaunchSurface` throws on the marker's
+  // mere presence, so nothing attests the wrong surface any more — the adapter refuses to attach
+  // at all. Unlike every other baked key, the repair here is a REPLACEMENT, not a deletion, which
+  // is why this one does not take the shared `repairWith` prescription.
+  it('flags a retired MUSTERD_SURFACE as a refusal, not a wrong attestation', async () => {
     h.primer = 'managed';
     h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'claude-code' };
     h.harnesses = [harnessWithEntry('Cursor', { registeredSurface: 'cursor' })];
@@ -267,7 +273,45 @@ describe('inspectProvisioning', () => {
     const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'));
     expect(line).toBeDefined();
     expect(line).toContain('cursor');
-    expect(line).toContain('musterd wire');
+    // The ADR 286 consequence, not the pre-286 one.
+    expect(line).toMatch(/REFUSES to attach Presence/);
+    expect(line).not.toContain('outranks .musterd/binding.json');
+    expect(line).not.toMatch(/roster, presence and audit report whatever it says/);
+  });
+
+  // The three prescriptions that do NOT repair a retired marker. Each is falsifiable in one grep,
+  // and each was being handed to readers before 2026-09-06:
+  //   wire  → commands/wire.ts   passes `legacyRepair: false` ("Never legacyRepair from here")
+  //   init  → onboard/init.ts    passes `legacyRepair: false`
+  //   hand-delete → leaves no marker, so resolveLaunchSurface throws at its no-marker branch instead
+  // Only `musterd harness configure` passes `legacyRepair: true` (commands/harness.ts), driving the
+  // `repair-launch-marker` mutation that swaps the key and preserves the rest of the entry.
+  it('prescribes `harness configure` for a retired marker, and disclaims the repairs that cannot work', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'claude-code' };
+    h.harnesses = [harnessWithEntry('Cursor', { registeredSurface: 'cursor' })];
+    const r = await inspectProvisioning('/x');
+    const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'))!;
+    expect(line).toContain('musterd harness configure');
+    // Says the hand-edit is not enough, rather than prescribing it.
+    expect(line).toMatch(/Deleting the line by hand does NOT fix it/);
+    expect(line).not.toMatch(/drop the line from .* by hand/);
+    // Names wire and init only to rule them OUT.
+    expect(line).toMatch(/neither `musterd wire` nor `musterd init` repairs a retired marker/);
+    expect(line).not.toMatch(/[Rr]un `musterd wire`/);
+  });
+
+  // Second-order: `--fix` runs wire. Wire cannot repair a retired marker, so a folder whose ONLY
+  // entry drift is the marker must not be classified wire-repairable — otherwise --fix reports
+  // success on everything wire does own and the marker is still sitting there.
+  it('does not count a retired marker as wire-repairable, even where wire owns the entry', async () => {
+    h.primer = 'managed';
+    h.binding = { claim: { mode: 'seat', name: 'Miley' }, surface: 'cursor' };
+    // 'folder' + matching id ⇒ this is the entry `wire` rewrites, i.e. wireRepairs would be true.
+    h.harnesses = [harnessWithEntry('Cursor', { registeredSurface: 'cursor' }, 'folder', 'cursor')];
+    const r = await inspectProvisioning('/x');
+    expect(r.drift.find((d) => d.includes('MUSTERD_SURFACE'))).toBeDefined();
+    expect(r.repair).not.toBe('wire');
   });
 
   // INVERTED by ADR 165. This used to fire only on a MISMATCH, which missed the common case: the
@@ -344,8 +388,11 @@ describe('inspectProvisioning', () => {
       return inspectProvisioning('/x');
     };
 
+    // MUSTERD_SURFACE is deliberately absent from this table: since ADR 286 it carries its own
+    // prescription (`musterd harness configure`) rather than the shared `repairWith`, so the
+    // "names musterd init as the repair that exists" assertion below does not apply to it. Its
+    // cases live in the retired-marker tests above.
     it.each([
-      ['MUSTERD_SURFACE', { registeredSurface: 'cursor' }],
       ['MUSTERD_AGENT_KEY', { registeredAgentKey: 'mskey_x' }],
       ['MUSTERD_AUTOJOIN', { registeredAutojoin: '1' }],
       ['MUSTERD_DRIVER', { registeredDriver: 'nick' }],
@@ -405,17 +452,22 @@ describe('inspectProvisioning', () => {
       return dir;
     };
 
-    // The lane this block was reopened for: a Codex seat whose `.codex/config.toml` baked
-    // MUSTERD_SURFACE — a snapshot that outranks binding.json and that no observation can correct —
-    // could only be told to hand-edit the file, because the prescription came off a hard-coded
+    // The lane this block was reopened for: a Codex seat whose `.codex/config.toml` baked a legacy
+    // key could only be told to hand-edit the file, because the prescription came off a hard-coded
     // ['claude-code']. In a folder provisioned FOR Codex, wire rewrites Codex's entry, so the
     // detector finally has a repair with a safe form (ADR 168).
+    //
+    // The example key was MUSTERD_SURFACE until 2026-09-06 (lane 01M1VEMBH7), which made this test
+    // assert something false: `commands/wire.ts` passes `legacyRepair: false`, so wire has never
+    // been able to repair a retired marker, and ADR 286 is what made that matter. MUSTERD_MODEL is
+    // a key wire genuinely does rewrite, so the ADR 168 point this test exists to make survives
+    // intact — it just no longer rides on the one key that is a counter-example to it.
     it('prescribes wire for the Codex entry in a folder provisioned for Codex', async () => {
       h.primer = 'managed';
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
-      h.harnesses = [harnessWithEntry('Codex', { registeredSurface: 'codex' }, 'folder', 'codex')];
+      h.harnesses = [harnessWithEntry('Codex', { registeredModel: 'grok-4.5' }, 'folder', 'codex')];
       const r = await inspectProvisioning(codexFolder());
-      const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'));
+      const line = r.drift.find((d) => d.includes('MUSTERD_MODEL'));
       expect(line).toMatch(/Run `musterd wire`/);
       expect(line).not.toContain('by hand');
       // ...and the machine-readable half agrees, so --fix routes at a command that can act.
