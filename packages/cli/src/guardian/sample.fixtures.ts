@@ -1,0 +1,293 @@
+/**
+ * Captured `sample(1)` reports — ADR 389's falsifier, arm (a), run live on 2026-09-05 (macOS 26.6,
+ * node v22.23.1). Each is the real report trimmed to the main thread, the first worker thread and
+ * the section trailers; frame text is verbatim. They replace the synthetic fixture #1328 shipped,
+ * which guessed that a SQLite wedge bottoms out in `sqlite3_step` — it does not (see LIVE_WEDGED).
+ */
+
+/** A process blocked on a held write lock: node:sqlite / better-sqlite3 in its busy handler. */
+export const LIVE_WEDGED = `Analysis of sampling node (pid 84843) every 1 millisecond
+Process:         node [84843]
+Path:            /opt/homebrew/*/node
+
+OS Version:      macOS 26.6 (25G5065a)
+Analysis Tool:   /usr/bin/sample
+
+Call graph:
+    2636 Thread_8486674   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 2636 start  (in dyld) + 6992  [0x18bdb04e4]
+    +   2636 node::Start(int, char**)  (in libnode.127.dylib) + 604  [0x107ba0158]
+    +     2636 node::NodeMainInstance::Run()  (in libnode.127.dylib) + 112  [0x107c2388c]
+    +       2636 node::NodeMainInstance::Run(node::ExitCode*, node::Environment*)  (in libnode.127.dylib) + 92  [0x107c23ae4]
+    +         2636 node::LoadEnvironment(node::Environment*, std::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>, std::function<void (node::Environment*, v8::Local<v8::Value>, v8::Local<v8::Value>)>)  (in libnode.127.dylib) + 352  [0x107b14ae0]
+    +           2636 node::StartExecution(node::Environment*, std::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>)  (in libnode.127.dylib) + 1556  [0x107b9bbfc]
+    +             2636 node::StartExecution(node::Environment*, char const*)  (in libnode.127.dylib) + 52  [0x107b9bc74]
+    +               2636 node::Realm::ExecuteBootstrapper(char const*)  (in libnode.127.dylib) + 76  [0x107c5361c]
+    +                 2636 node::builtins::BuiltinLoader::CompileAndCall(v8::Local<v8::Context>, char const*, node::Realm*)  (in libnode.127.dylib) + 252  [0x107bbbd1c]
+    +                   2636 v8::Function::Call(v8::Local<v8::Context>, v8::Local<v8::Value>, int, v8::Local<v8::Value>*)  (in libnode.127.dylib) + 204  [0x107dde19c]
+    +                     2636 v8::internal::Execution::Call(v8::internal::Isolate*, v8::internal::Handle<v8::internal::Object>, v8::internal::Handle<v8::internal::Object>, int, v8::internal::Handle<v8::internal::Object>*)  (in libnode.127.dylib) + 92  [0x107edfe60]
+    +                       2636 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&)  (in libnode.127.dylib) + 1572  [0x107ee0500]
+    +                         2636 Builtins_JSEntry  (in libnode.127.dylib) + 148  [0x1079528f4]
+    +                           2636 Builtins_JSEntryTrampoline  (in libnode.127.dylib) + 172  [0x107952c0c]
+    +                             2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                               2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                 2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                   2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                     2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                       2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                         2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                           2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                             2636 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+    +                                               2636 Builtins_CallApiCallbackGeneric  (in libnode.127.dylib) + 184  [0x107956f98]
+    +                                                 2636 Database::JS_exec(v8::FunctionCallbackInfo<v8::Value> const&)  (in better_sqlite3.node) + 424  [0x106d82124]
+    +                                                   2636 sqlite3_step  (in better_sqlite3.node) + 608  [0x106d96fd0]
+    +                                                     2636 sqlite3VdbeExec  (in better_sqlite3.node) + 4088  [0x106dd102c]
+    +                                                       2635 btreeBeginTrans  (in better_sqlite3.node) + 344  [0x106dc41e0]
+    +                                                       ! 2635 sqliteDefaultBusyCallback  (in better_sqlite3.node) + 120  [0x106da96cc]
+    +                                                       !   2635 unixSleep  (in better_sqlite3.node) + 88  [0x106d95b58]
+    +                                                       !     2635 nanosleep  (in libsystem_c.dylib) + 220  [0x18c016cc0]
+    +                                                       !       2635 __semwait_signal  (in libsystem_kernel.dylib) + 8  [0x18c13b308]
+    +                                                       1 btreeBeginTrans  (in better_sqlite3.node) + 612  [0x106dc42ec]
+    +                                                         1 sqlite3PagerSharedLock  (in better_sqlite3.node) + 192  [0x106dc4bb0]
+    +                                                           1 walTryBeginRead  (in better_sqlite3.node) + 2072  [0x106dbd020]
+    +                                                             1 unixShmLock  (in better_sqlite3.node) + 692  [0x106db24c8]
+    +                                                               1 fcntl  (in libsystem_kernel.dylib) + 88  [0x18c13876c]
+    +                                                                 1 __fcntl  (in libsystem_kernel.dylib) + 8  [0x18c1388c4]
+    2636 Thread_8486677: DelayedTaskSchedulerWorker
+    + 2636 thread_start  (in libsystem_pthread.dylib) + 8  [0x18c176c1c]
+    +   2636 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c17bc58]
+    +     2636 node::WorkerThreadsTaskRunner::DelayedTaskScheduler::Start()::'lambda'(void*)::__invoke(void*)  (in libnode.127.dylib) + 320  [0x107c4a744]
+    +       2636 uv_run  (in libuv.1.0.0.dylib) + 276  [0x105026b64]
+    +         2636 uv__io_poll  (in libuv.1.0.0.dylib) + 712  [0x105034f94]
+    +           2636 kevent  (in libsystem_kernel.dylib) + 8  [0x18c13dfc4]
+
+Total number in stack (recursive counted multiple, when >=5):
+        9       Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x107954ef0]
+        6       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c17bc58]
+        6       thread_start  (in libsystem_pthread.dylib) + 8  [0x18c176c1c]
+
+Binary Images:
+       0x1000 -   0x1fff  node (0) <...>
+`;
+
+/** A process held by a synchronous JS loop — no native call, no single leaf. */
+export const LIVE_SPIN = `Analysis of sampling node (pid 85874) every 1 millisecond
+Process:         node [85874]
+Path:            /opt/homebrew/*/node
+
+OS Version:      macOS 26.6 (25G5065a)
+Analysis Tool:   /usr/bin/sample
+
+Call graph:
+    2437 Thread_8487873   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 2437 start  (in dyld) + 6992  [0x18bdb04e4]
+    +   2437 node::Start(int, char**)  (in libnode.127.dylib) + 604  [0x106e14158]
+    +     2437 node::NodeMainInstance::Run()  (in libnode.127.dylib) + 112  [0x106e9788c]
+    +       2437 node::NodeMainInstance::Run(node::ExitCode*, node::Environment*)  (in libnode.127.dylib) + 92  [0x106e97ae4]
+    +         2437 node::LoadEnvironment(node::Environment*, std::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>, std::function<void (node::Environment*, v8::Local<v8::Value>, v8::Local<v8::Value>)>)  (in libnode.127.dylib) + 352  [0x106d88ae0]
+    +           2437 node::StartExecution(node::Environment*, std::function<v8::MaybeLocal<v8::Value> (node::StartExecutionCallbackInfo const&)>)  (in libnode.127.dylib) + 1556  [0x106e0fbfc]
+    +             2437 node::StartExecution(node::Environment*, char const*)  (in libnode.127.dylib) + 52  [0x106e0fc74]
+    +               2437 node::Realm::ExecuteBootstrapper(char const*)  (in libnode.127.dylib) + 76  [0x106ec761c]
+    +                 2437 node::builtins::BuiltinLoader::CompileAndCall(v8::Local<v8::Context>, char const*, node::Realm*)  (in libnode.127.dylib) + 252  [0x106e2fd1c]
+    +                   2437 v8::Function::Call(v8::Local<v8::Context>, v8::Local<v8::Value>, int, v8::Local<v8::Value>*)  (in libnode.127.dylib) + 204  [0x10705219c]
+    +                     2437 v8::internal::Execution::Call(v8::internal::Isolate*, v8::internal::Handle<v8::internal::Object>, v8::internal::Handle<v8::internal::Object>, int, v8::internal::Handle<v8::internal::Object>*)  (in libnode.127.dylib) + 92  [0x107153e60]
+    +                       2437 v8::internal::(anonymous namespace)::Invoke(v8::internal::Isolate*, v8::internal::(anonymous namespace)::InvokeParams const&)  (in libnode.127.dylib) + 1572  [0x107154500]
+    +                         2437 Builtins_JSEntry  (in libnode.127.dylib) + 148  [0x106bc68f4]
+    +                           2437 Builtins_JSEntryTrampoline  (in libnode.127.dylib) + 172  [0x106bc6c0c]
+    +                             2437 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+    +                               2437 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+    +                                 2437 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+    +                                   2437 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+    +                                     2437 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+    +                                       2437 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+    +                                         2437 Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+    +                                           2287 ???  (in <unknown binary>)  [0x11131487c]
+    +                                           ! 2250 Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit  (in libnode.127.dylib) + 84  [0x106c5ddf4]
+    +                                           ! : 1940 v8::internal::Runtime_DateCurrentTime(int, unsigned long*, v8::internal::Isolate*)  (in libnode.127.dylib) + 52  [0x107446b98]
+    +                                           ! : | 1882 v8::Platform::CurrentClockTimeMilliseconds()  (in libnode.127.dylib) + 20  [0x106ebb744]
+    +                                           ! : | + 1861 v8::base::OS::TimeCurrentMillis()  (in libnode.127.dylib) + 12  [0x1076d4f88]
+    +                                           ! : | + ! 1831 v8::base::Time::Now()  (in libnode.127.dylib) + 24  [0x1076d1c74]
+    +                                           ! : | + ! : 1754 gettimeofday  (in libsystem_c.dylib) + 56  [0x18c00fdc0]
+    +                                           ! : | + ! : | 1710 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 44  [0x18c139c24]
+    +                                           ! : | + ! : | + 1710 mach_absolute_time  (in libsystem_kernel.dylib) + 108,112,...  [0x18c13810c,0x18c138110,...]
+    +                                           ! : | + ! : | 43 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 72,80,...  [0x18c139c40,0x18c139c48,...]
+    +                                           ! : | + ! : | 1 DYLD-STUB$$__commpage_gettimeofday  (in libsystem_c.dylib) + 8  [0x18c0822b8]
+    +                                           ! : | + ! : 57 gettimeofday  (in libsystem_c.dylib) + 56,16,...  [0x18c00fdc0,0x18c00fd98,...]
+    +                                           ! : | + ! : 16 __commpage_gettimeofday_internal  (in libsystem_kernel.dylib) + 164,168  [0x18c139c9c,0x18c139ca0]
+    +                                           ! : | + ! : 4 DYLD-STUB$$gettimeofday  (in libnode.127.dylib) + 4  [0x107afa374]
+    +                                           ! : | + ! 30 v8::base::Time::Now()  (in libnode.127.dylib) + 44,68,...  [0x1076d1c88,0x1076d1ca0,...]
+    +                                           ! : | + 13 node::NodePlatform::CurrentClockTimeMillis()  (in libnode.127.dylib) + 0  [0x106ebb750]
+    +                                           ! : | + 8 v8::base::OS::TimeCurrentMillis()  (in libnode.127.dylib) + 0,12  [0x1076d4f7c,0x1076d4f88]
+    +                                           ! : | 31 v8::internal::JSDate::CurrentTimeValue(v8::internal::Isolate*)  (in libnode.127.dylib) + 192,196,...  [0x10735d59c,0x10735d5a0,...]
+    +                                           ! : | 27 v8::Platform::CurrentClockTimeMilliseconds()  (in libnode.127.dylib) + 24,0,...  [0x106ebb748,0x106ebb730,...]
+    +                                           ! : 202 v8::internal::Runtime_DateCurrentTime(int, unsigned long*, v8::internal::Isolate*)  (in libnode.127.dylib) + 72  [0x107446bac]
+    +                                           ! : | 160 v8::internal::FactoryBase<v8::internal::Factory>::NewHeapNumber<(v8::internal::AllocationType)0>()  (in libnode.127.dylib) + 36  [0x1071b8964]
+    +                                           ! : | + 79 v8::internal::HeapAllocator::AllocateRawWithRetryOrFailSlowPath(int, v8::internal::AllocationType, v8::internal::AllocationOrigin, v8::internal::AllocationAlignment)  (in libnode.127.dylib) + 1892  [0x1071cd57c]
+    +                                           ! : | + ! 78 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)  (in libnode.127.dylib) + 596  [0x1071d45f8]
+    +                                           ! : | + ! : 78 PushAllRegistersAndIterateStack  (in libnode.127.dylib) + 40  [0x106d7c028]
+    +                                           ! : | + ! :   78 heap::base::Stack::SetMarkerAndCallbackImpl<v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1>(heap::base::Stack*, void*, void const*)  (in libnode.127.dylib) + 28  [0x1071d6e60]
+    +                                           ! : | + ! :     72 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 12116  [0x1071d9dc4]
+    +                                           ! : | + ! :     | 52 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 3628  [0x1071e34ec]
+    +                                           ! : | + ! :     | + 52 v8::platform::DefaultJobHandle::Join()  (in libnode.127.dylib) + 700  [0x107012270]
+    +                                           ! : | + ! :     | +   51 <deduplicated_symbol>  (in libnode.127.dylib) + 68  [0x106db4588]
+    +                                           ! : | + ! :     | +   ! 47 v8::platform::DefaultJobState::~DefaultJobState()  (in libnode.127.dylib) + 32  [0x107011f10]
+    +                                           ! : | + ! :     | +   ! : 44 v8::base::ConditionVariable::~ConditionVariable()  (in libnode.127.dylib) + 84  [0x1076d1558]
+    +                                           ! : | + ! :     | +   ! : | 40 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1024  [0x18c17c154]
+    +                                           ! : | + ! :     | +   ! : | + 39 __psynch_cvwait  (in libsystem_kernel.dylib) + 8  [0x18c13b50c]
+    +                                           ! : | + ! :     | +   ! : | + 1 __psynch_cvwait  (in libsystem_kernel.dylib) + 28  [0x18c13b520]
+    +                                           ! : | + ! :     | +   ! : | +   1 cerror_nocancel  (in libsystem_kernel.dylib) + 4  [0x18c1385f8]
+    +                                           ! : | + ! :     | +   ! : | 2 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1088  [0x18c17c194]
+    +                                           ! : | + ! :     | +   ! : | + 2 _pthread_cond_updateval  (in libsystem_pthread.dylib) + 0,176  [0x18c178c3c,0x18c178cec]
+    +                                           ! : | + ! :     | +   ! : | 1 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1120  [0x18c17c1b4]
+    +                                           ! : | + ! :     | +   ! : | + 1 pthread_mutex_lock  (in libsystem_pthread.dylib) + 0  [0x18c1763fc]
+    +                                           ! : | + ! :     | +   ! : | 1 _pthread_cond_wait  (in libsystem_pthread.dylib) + 1024  [0x18c17c154]
+    +                                           ! : | + ! :     | +   ! : 2 v8::base::ConditionVariable::~ConditionVariable()  (in libnode.127.dylib) + 92  [0x1076d1560]
+    +                                           ! : | + ! :     | +   ! : | 1 DYLD-STUB$$pthread_mutex_unlock  (in libnode.127.dylib) + 0  [0x107afaad8]
+    +                                           ! : | + ! :     | +   ! : | 1 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 0  [0x18c176944]
+    +                                           ! : | + ! :     | +   ! : 1 v8::base::ConditionVariable::~ConditionVariable()  (in libnode.127.dylib) + 100  [0x1076d1568]
+    +                                           ! : | + ! :     | +   ! :   1 DYLD-STUB$$pthread_mutex_destroy  (in libnode.127.dylib) + 4  [0x107afaaac]
+    +                                           ! : | + ! :     | +   ! 3 v8::platform::DefaultJobState::~DefaultJobState()  (in libnode.127.dylib) + 64  [0x107011f30]
+    +                                           ! : | + ! :     | +   ! : 1 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18bf98278]
+    +                                           ! : | + ! :     | +   ! : | 1 _platform_memset  (in libsystem_platform.dylib) + 140  [0x18c18511c]
+    +                                           ! : | + ! :     | +   ! : 1 operator delete(void*)  (in libc++abi.dylib) + 0  [0x18c11d4b4]
+    +                                           ! : | + ! :     | +   ! : 1 v8::internal::ScavengerCollector::JobTask::~JobTask()  (in libnode.127.dylib) + 0  [0x10722a360]
+    +                                           ! : | + ! :     | +   ! 1 v8::platform::DefaultJobState::~DefaultJobState()  (in libnode.127.dylib) + 52  [0x107011f24]
+    +                                           ! : | + ! :     | +   1 <deduplicated_symbol>  (in libnode.127.dylib) + 76  [0x106db4590]
+    +                                           ! : | + ! :     | +     1 std::__shared_weak_count::__release_weak()  (in libc++.1.dylib) + 8  [0x18c08f574]
+    +                                           ! : | + ! :     | 3 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 1232  [0x1071e2b90]
+    +                                           ! : | + ! :     | + 3 <deduplicated_symbol>  (in libnode.127.dylib) + 0,108,...  [0x106d8701c,0x106d87088,...]
+    +                                           ! : | + ! :     | 3 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 1756  [0x1071e2d9c]
+    +                                           ! : | + ! :     | + 3 v8::internal::OldGenerationMemoryChunkIterator::next()  (in libnode.127.dylib) + 144,20  [0x1071ceec4,0x1071cee48]
+    +                                           ! : | + ! :     | 3 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 3652  [0x1071e3504]
+    +                                           ! : | + ! :     | + 2 v8::platform::DefaultJobHandle::~DefaultJobHandle()  (in libnode.127.dylib) + 32  [0x107011f9c]
+    +                                           ! : | + ! :     | + ! 2 <deduplicated_symbol>  (in libnode.127.dylib) + 0  [0x106d8a1e0]
+    +                                           ! : | + ! :     | + 1 v8::platform::DefaultJobHandle::~DefaultJobHandle()  (in libnode.127.dylib) + 0  [0x107011f7c]
+    +                                           ! : | + ! :     | 2 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 736  [0x1071e29a0]
+    +                                           ! : | + ! :     | + 1 v8::internal::SemiSpaceNewSpace::EvacuatePrologue()  (in libnode.127.dylib) + 148  [0x10721d5f4]
+    +                                           ! : | + ! :     | + ! 1 v8::internal::SemiSpace::FixPagesFlags(v8::base::Flags<v8::internal::MemoryChunk::Flag, unsigned long, unsigned long>, v8::base::Flags<v8::internal::MemoryChunk::Flag, unsigned long, unsigned long>)  (in libnode.127.dylib) + 92  [0x10721d404]
+    +                                           ! : | + ! :     | + 1 v8::internal::SemiSpaceNewSpace::ResetCurrentSpace()  (in libnode.127.dylib) + 44  [0x10721d52c]
+    +                                           ! : | + ! :     | +   1 _platform_memset  (in libsystem_platform.dylib) + 140  [0x18c18511c]
+    +                                           ! : | + ! :     | 2 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 2572  [0x1071e30cc]
+    +                                           ! : | + ! :     | + 1 v8::internal::Heap::IterateRoots(v8::internal::RootVisitor*, v8::base::EnumSet<v8::internal::SkipRoot, int>, v8::internal::Heap::IterateRootsMode)  (in libnode.127.dylib) + 964  [0x1071eb1a4]
+    +                                           ! : | + ! :     | + ! 1 v8::internal::Isolate::Iterate(v8::internal::RootVisitor*, v8::internal::ThreadLocalTop*)  (in libnode.127.dylib) + 420  [0x10715e018]
+    +                                           ! : | + ! :     | + !   1 v8::internal::StackFrameIterator::Advance()  (in libnode.127.dylib) + 56  [0x10715a030]
+    +                                           ! : | + ! :     | + !     1 v8::internal::StackFrameIterator::ComputeStackFrameType(v8::internal::StackFrame::State*) const  (in libnode.127.dylib) + 8  [0x107154cf8]
+    +                                           ! : | + ! :     | + 1 v8::internal::Heap::IterateRoots(v8::internal::RootVisitor*, v8::base::EnumSet<v8::internal::SkipRoot, int>, v8::internal::Heap::IterateRootsMode)  (in libnode.127.dylib) + 984  [0x1071eb1b8]
+    +                                           ! : | + ! :     | +   1 v8::internal::RootVisitor::Synchronize(v8::internal::VisitorSynchronization::SyncTag)  (in libnode.127.dylib) + 0  [0x1071e9964]
+    +                                           ! : | + ! :     | 2 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 5056  [0x1071e3a80]
+    +                                           ! : | + ! :     | + 1 std::unique_ptr<v8::internal::Scavenger>::reset[abi:nqn210106](v8::internal::Scavenger*)  (in libnode.127.dylib) + 76  [0x107233334]
+    +                                           ! : | + ! :     | + ! 1 std::__optional_destruct_base<v8::internal::MainAllocator, false>::~__optional_destruct_base[abi:nqn210106]()  (in libnode.127.dylib) + 52  [0x1071f361c]
+    +                                           ! : | + ! :     | + !   1 _xzm_free  (in libsystem_malloc.dylib) + 352  [0x18bf98278]
+    +                                           ! : | + ! :     | + !     1 _platform_memset  (in libsystem_platform.dylib) + 208  [0x18c185160]
+    +                                           ! : | + ! :     | + 1 std::unique_ptr<v8::internal::Scavenger>::reset[abi:nqn210106](v8::internal::Scavenger*)  (in libnode.127.dylib) + 108  [0x107233354]
+    +                                           ! : | + ! :     | +   1 v8::internal::CompactionSpaceCollection::~CompactionSpaceCollection()  (in libnode.127.dylib) + 40  [0x107204d64]
+    +                                           ! : | + ! :     | +     1 v8::internal::PagedSpaceBase::~PagedSpaceBase()  (in libnode.127.dylib) + 40  [0x1071ed7fc]
+    +                                           ! : | + ! :     | +       1 pthread_mutex_destroy  (in libsystem_pthread.dylib) + 44  [0x18c1771a8]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 824  [0x1071e29f8]
+    +                                           ! : | + ! :     | + 1 std::basic_string<char>::basic_string[abi:nqn210106]<0>(char const*)  (in libnode.127.dylib) + 136  [0x106d84f90]
+    +                                           ! : | + ! :     | +   1 _platform_memmove  (in libsystem_platform.dylib) + 0  [0x18c185360]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 1252  [0x1071e2ba4]
+    +                                           ! : | + ! :     | + 1 v8::internal::EvacuationAllocator::EvacuationAllocator(v8::internal::Heap*, v8::internal::CompactionSpaceKind)  (in libnode.127.dylib) + 72  [0x1071b85a8]
+    +                                           ! : | + ! :     | +   1 v8::internal::CompactionSpace::CompactionSpace(v8::internal::Heap*, v8::internal::AllocationSpace, v8::internal::Executability, v8::internal::CompactionSpaceKind)  (in libnode.127.dylib) + 52  [0x107226734]
+    +                                           ! : | + ! :     | +     1 operator new(unsigned long)  (in libc++abi.dylib) + 52  [0x18c1327e8]
+    +                                           ! : | + ! :     | +       1 <deduplicated_symbol>  (in libsystem_malloc.dylib) + 96  [0x18bf971bc]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 3704  [0x1071e3538]
+    +                                           ! : | + ! :     | + 1 v8::base::TimeTicks::Now()  (in libnode.127.dylib) + 36  [0x1076d1ed4]
+    +                                           ! : | + ! :     | +   1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x18c13810c]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 4020  [0x1071e3674]
+    +                                           ! : | + ! :     | + 1 v8::base::TimeTicks::Now()  (in libnode.127.dylib) + 36  [0x1076d1ed4]
+    +                                           ! : | + ! :     | +   1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x18c13810c]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::Scavenge()  (in libnode.127.dylib) + 4048  [0x1071e3690]
+    +                                           ! : | + ! :     |   1 v8::base::TimeTicks::Now()  (in libnode.127.dylib) + 36  [0x1076d1ed4]
+    +                                           ! : | + ! :     |     1 mach_absolute_time  (in libsystem_kernel.dylib) + 108  [0x18c13810c]
+    +                                           ! : | + ! :     1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 180  [0x1071d6f24]
+    +                                           ! : | + ! :     | 1 v8::internal::ToString(v8::internal::GarbageCollectionReason)  (in libnode.127.dylib) + 224  [0x1071cc054]
+    +                                           ! : | + ! :     1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 828  [0x1071d71ac]
+    +                                           ! : | + ! :     | 1 v8::internal::CancelableTaskManager::TryAbort(unsigned long long)  (in libnode.127.dylib) + 88  [0x107495008]
+    +                                           ! : | + ! :     |   1 <deduplicated_symbol>  (in libnode.127.dylib) + 204  [0x107494ae4]
+    +                                           ! : | + ! :     1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 876  [0x1071d71dc]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::CommittedMemory()  (in libnode.127.dylib) + 96  [0x1071d1864]
+    +                                           ! : | + ! :     |   1 v8::internal::Heap::CommittedOldGenerationMemory()  (in libnode.127.dylib) + 96  [0x1071d1750]
+    +                                           ! : | + ! :     |     1 v8::internal::BaseSpace::CommittedMemory() const  (in libnode.127.dylib) + 0  [0x1071ed734]
+    +                                           ! : | + ! :     1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 3056  [0x1071d7a60]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 3340  [0x1071d7b7c]
+    +                                           ! : | + ! :     1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 27524  [0x1071dd9f4]
+    +                                           ! : | + ! :     | 1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 27540  [0x1071dda04]
+    +                                           ! : | + ! :     1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)::$_1::operator()() const  (in libnode.127.dylib) + 33704  [0x1071df218]
+    +                                           ! : | + ! :       1 v8::internal::GCTracer::Output(char const*, ...) const  (in libnode.127.dylib) + 120  [0x1071cc174]
+    +                                           ! : | + ! :         1 _vsnprintf  (in libsystem_c.dylib) + 212  [0x18c0361b8]
+    +                                           ! : | + ! :           1 __vfprintf  (in libsystem_c.dylib) + 6752  [0x18c00c4a8]
+    +                                           ! : | + ! 1 v8::internal::Heap::CollectGarbage(v8::internal::AllocationSpace, v8::internal::GarbageCollectionReason, v8::GCCallbackFlags)  (in libnode.127.dylib) + 1344  [0x1071d48e4]
+    +                                           ! : | + !   1 v8::internal::Heap::CanExpandOldGeneration(unsigned long) const  (in libnode.127.dylib) + 52  [0x1071d1944]
+    +                                           ! : | + !     1 v8::internal::Heap::OldGenerationCapacity() const  (in libnode.127.dylib) + 212  [0x1071d16c4]
+    +                                           ! : | + !       1 v8::internal::LargeObjectSpace::SizeOfObjects() const  (in libnode.127.dylib) + 0  [0x1071f2774]
+    +                                           ! : | + 77 v8::internal::Factory::AllocateRaw(int, v8::internal::AllocationType, v8::internal::AllocationAlignment)  (in libnode.127.dylib) + 0,68,...  [0x1071c07b4,0x1071c07f8,...]
+    +                                           ! : | + 4 v8::internal::Factory::AllocateRaw(int, v8::internal::AllocationType, v8::internal::AllocationAlignment)  (in libnode.127.dylib) + 140  [0x1071c0840]
+    +                                           ! : | +   4 v8::internal::MainAllocator::AllocateRawSlow(int, v8::internal::AllocationAlignment, v8::internal::AllocationOrigin)  (in libnode.127.dylib) + 172  [0x1071f5ec8]
+    +                                           ! : | +     3 v8::internal::SemiSpaceNewSpaceAllocatorPolicy::EnsureAllocation(int, v8::internal::AllocationAlignment, v8::internal::AllocationOrigin)  (in libnode.127.dylib) + 392,652,...  [0x1071f5870,0x1071f5974,...]
+    +                                           ! : | +     1 v8::internal::SemiSpaceNewSpaceAllocatorPolicy::EnsureAllocation(int, v8::internal::AllocationAlignment, v8::internal::AllocationOrigin)  (in libnode.127.dylib) + 832  [0x1071f5a28]
+    +                                           ! : | +       1 v8::internal::MainAllocator::ResetLab(unsigned long, unsigned long, unsigned long)  (in libnode.127.dylib) + 140  [0x1071f4b48]
+    +                                           ! : | +         1 std::__shared_mutex_base::lock()  (in libc++.1.dylib) + 120  [0x18c0921fc]
+    +                                           ! : | +           1 std::mutex::unlock()  (in libc++.1.dylib) + 16  [0x18c08e038]
+    +                                           ! : | +             1 pthread_mutex_unlock  (in libsystem_pthread.dylib) + 12  [0x18c176950]
+    +                                           ! : | 42 v8::internal::FactoryBase<v8::internal::Factory>::NewHeapNumber<(v8::internal::AllocationType)0>()  (in libnode.127.dylib) + 44,40,...  [0x1071b896c,0x1071b8968,...]
+    +                                           ! : 108 v8::internal::Runtime_DateCurrentTime(int, unsigned long*, v8::internal::Isolate*)  (in libnode.127.dylib) + 112,32,...  [0x107446bd4,0x107446b84,...]
+    +                                           ! 27 v8::internal::Runtime_DateCurrentTime(int, unsigned long*, v8::internal::Isolate*)  (in libnode.127.dylib) + 148,152,...  [0x107446bf8,0x107446bfc,...]
+    +                                           ! 10 Builtins_CEntry_Return1_ArgvOnStack_NoBuiltinExit  (in libnode.127.dylib) + 76,24,...  [0x106c5ddec,0x106c5ddb8,...]
+    +                                           70 ???  (in <unknown binary>)  [0x111314888]
+    +                                           32 ???  (in <unknown binary>)  [0x11131491c]
+    +                                           15 ???  (in <unknown binary>)  [0x11131487c]
+    +                                           13 ???  (in <unknown binary>)  [0x11131485c]
+    +                                           11 ???  (in <unknown binary>)  [0x1113149a4]
+    +                                           8 ???  (in <unknown binary>)  [0x111314874]
+    +                                           1 ???  (in <unknown binary>)  [0x1113148b0]
+    2437 Thread_8487884: DelayedTaskSchedulerWorker
+    + 2437 thread_start  (in libsystem_pthread.dylib) + 8  [0x18c176c1c]
+    +   2437 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c17bc58]
+    +     2437 node::WorkerThreadsTaskRunner::DelayedTaskScheduler::Start()::'lambda'(void*)::__invoke(void*)  (in libnode.127.dylib) + 320  [0x106ebe744]
+    +       2437 uv_run  (in libuv.1.0.0.dylib) + 276  [0x10407eb64]
+    +         2437 uv__io_poll  (in libuv.1.0.0.dylib) + 712  [0x10408cf94]
+    +           2437 kevent  (in libsystem_kernel.dylib) + 8  [0x18c13dfc4]
+
+Total number in stack (recursive counted multiple, when >=5):
+        7       Builtins_InterpreterEntryTrampoline  (in libnode.127.dylib) + 272  [0x106bc8ef0]
+        6       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c17bc58]
+        6       thread_start  (in libsystem_pthread.dylib) + 8  [0x18c176c1c]
+
+Binary Images:
+       0x1000 -   0x1fff  node (0) <...>
+`;
+
+/** An idle HTTP server: the event loop parked in its own poll. */
+export const LIVE_IDLE = `Analysis of sampling node (pid 86124) every 1 millisecond
+Process:         node [86124]
+Path:            /opt/homebrew/*/node
+
+OS Version:      macOS 26.6 (25G5065a)
+Analysis Tool:   /usr/bin/sample
+
+Call graph:
+    2602 Thread_8488330   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 2602 start  (in dyld) + 6992  [0x18bdb04e4]
+    +   2602 node::Start(int, char**)  (in libnode.127.dylib) + 604  [0x107a7c158]
+    +     2602 node::NodeMainInstance::Run()  (in libnode.127.dylib) + 112  [0x107aff88c]
+    +       2602 node::NodeMainInstance::Run(node::ExitCode*, node::Environment*)  (in libnode.127.dylib) + 140  [0x107affb14]
+    +         2602 node::SpinEventLoopInternal(node::Environment*)  (in libnode.127.dylib) + 256  [0x1079ec6cc]
+    +           2602 uv_run  (in libuv.1.0.0.dylib) + 276  [0x104e36b64]
+    +             2602 uv__io_poll  (in libuv.1.0.0.dylib) + 712  [0x104e44f94]
+    +               2602 kevent  (in libsystem_kernel.dylib) + 8  [0x18c13dfc4]
+    2602 Thread_8488343: DelayedTaskSchedulerWorker
+    + 2602 thread_start  (in libsystem_pthread.dylib) + 8  [0x18c176c1c]
+    +   2602 _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c17bc58]
+    +     2602 node::WorkerThreadsTaskRunner::DelayedTaskScheduler::Start()::'lambda'(void*)::__invoke(void*)  (in libnode.127.dylib) + 320  [0x107b26744]
+    +       2602 uv_run  (in libuv.1.0.0.dylib) + 276  [0x104e36b64]
+    +         2602 uv__io_poll  (in libuv.1.0.0.dylib) + 712  [0x104e44f94]
+    +           2602 kevent  (in libsystem_kernel.dylib) + 8  [0x18c13dfc4]
+
+Total number in stack (recursive counted multiple, when >=5):
+        6       _pthread_start  (in libsystem_pthread.dylib) + 136  [0x18c17bc58]
+        6       thread_start  (in libsystem_pthread.dylib) + 8  [0x18c176c1c]
+
+Binary Images:
+       0x1000 -   0x1fff  node (0) <...>
+`;

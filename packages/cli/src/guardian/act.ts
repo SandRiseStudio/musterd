@@ -145,12 +145,17 @@ export async function actOn(incidents: Incident[], d: ActDeps): Promise<Guardian
       continue;
     }
 
-    // Alert tier, or an auto class with no usable remedy (crashloop without a known-good build).
-    const reached = await raise(
-      cls,
-      tier === 'auto' ? 'auto tier but no rollback target known' : 'needs a human',
-      inc.evidence,
-    );
+    // Alert tier, or an auto class with no usable remedy: crashloop without a known-good build, or
+    // a class whose remediation is not built at all. `daemon_wedged` is the second kind by design
+    // (ADR 389 §3 ships dark) — its raise must say THAT, because "no rollback target known" would
+    // send a reader looking for a build pin that was never the question.
+    const why =
+      tier !== 'auto'
+        ? 'needs a human'
+        : cls in REMEDIATIONS
+          ? 'auto tier but no rollback target known'
+          : 'auto tier set but no remediation is built (ADR 389 ships dark) — alerting instead';
+    const reached = await raise(cls, why, inc.evidence);
     if (reached) {
       await audit('guardian.alerted', { class: cls });
       acted.push({ class: cls, action: 'alerted' });

@@ -17,6 +17,7 @@ import { configPath, loadConfig, serverProvenance } from '../config.js';
 import { CliError } from '../errors.js';
 import { actOn } from '../guardian/act.js';
 import { resolveGuardianTiers, DEFAULT_TIERS } from '../guardian/classify.js';
+import { runSampleTool } from '../guardian/sample.js';
 import { collectSignals, type HealthPayload } from '../guardian/signals.js';
 import { loadHostRegistry } from '../host/registry.js';
 import { infraTouchWarning } from '../infra-gate.js';
@@ -2070,28 +2071,12 @@ async function runGuardianTick(ctx: ServiceCtx, parsed: Parsed): Promise<number>
           readSince,
           statMtime,
           /**
-           * `sample <pid> <seconds>` — read-only, bounded, no signal sent (ADR 389 §1). Given a
-           * hard timeout of its own beyond the sampler's own bound: the tool is the guardian's
-           * evidence, and evidence that can hang is a second way for the probe to go quiet.
-           *
-           * macOS only, and its absence is a first-class answer: on any other host `sample` is not
-           * on PATH, the run fails, and the collector records "not taken" with the reason. The
-           * class is simply unreachable there and the posture stays exactly today's.
-           *
-           * Spawned here rather than through `ctx.run` for the timeout alone — `Runner` takes no
-           * options, and widening the shared type for this one call would touch every fake that
-           * implements it. Every other shell-out in this tick is a launchctl read that returns.
+           * `sample <pid> <seconds>` — read-only, bounded, no signal sent (ADR 389 §1). The spawn
+           * lives in sample.ts (`runSampleTool`) so the falsifier test runs the SAME command the
+           * tick does, rather than a copy of it. Spawned there rather than through `ctx.run` for the
+           * timeout alone — `Runner` takes no options.
            */
-          sampleStack: async (pid, seconds) => {
-            const r = spawnSync('sample', [String(pid), String(seconds)], {
-              encoding: 'utf8',
-              timeout: (seconds + 5) * 1000,
-            });
-            if (r.error) throw r.error;
-            if (r.status !== 0)
-              throw new Error(`exit ${r.status}: ${(r.stderr || r.stdout || '').slice(0, 200)}`);
-            return r.stdout;
-          },
+          sampleStack: async (pid, seconds) => runSampleTool(pid, seconds),
           expected: { dbPath: join(home, 'musterd.db'), schema: null },
           daemonErrLogPath: join(home, 'daemon.err.log'),
           publisherBuildLogPath: join(home, 'live', 'build.log'),

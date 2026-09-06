@@ -213,3 +213,25 @@ section above says audit, but the audit is a POST to the daemon, and the daemon 
 exactly the moment a sample is taken; a row written there would exist only for the samples that did
 not matter. The eval reads the log. Rows accumulate from the first clean-exit-unreachable tick on
 this host, where `/usr/bin/sample` is present.
+
+**2026-09-05 — the falsifier ran, and corrected the parser before anything was armed (lane
+01M1S6VJFTG6QQ37C1N4MRJKET).** Arm (a) ran live on this Mac: a node process blocked behind a held
+SQLite write lock samples 2,635 of 2,636 in `sqlite3_step → sqlite3VdbeExec → btreeBeginTrans →
+sqliteDefaultBusyCallback → unixSleep → nanosleep → __semwait_signal`. The leaf of the wedge the ADR
+was written for is a **sleep**, not `sqlite3_step` — #1328's synthetic fixture guessed the shape and
+guessed wrong, and its parser called the live report wedged only because `__semwait_signal` was
+absent from an idle list that contained its parent `nanosleep`. So the boundary in §1 is restated
+one notch more precisely: a process is *parked* only when the main thread's dominant frame is the
+**event loop's own poll** (`uv__io_poll`, `kevent`, `epoll_wait`, `poll`, `select`); any other frame
+holding ≥ 90% of the main thread — a sleep, a lock wait, a blocking read, a JS loop — is *held*,
+because the loop is not polling and `/health` cannot be answered. The parser now measures the thread
+`sample` labels `main-thread` rather than whichever thread sorts first (all threads tie on count),
+reports both the leaf and the frame where the dominant chain left the runtime (`Database::JS_exec
+(better_sqlite3.node)`), and runs `sample` with `-file /dev/stdout`, because without it the tool also
+writes a report to `/tmp` on every run. Its post-sample grace grew from 5 s to 15 s after the first
+in-suite sample timed out at 7 s on a loaded machine (standalone: 2.1–2.35 s). Arms (b), (c) and (d)
+are pinned in `packages/cli/src/guardian/falsifier.test.ts`; arm (a) runs there too wherever
+`/usr/bin/sample` exists, against the real tool through the tick's own runner, and is skipped — not
+faked — elsewhere. All four hold. **Nothing is armed**: the tier is still `alert`, no restart exists,
+and the 30-day `guardian.sampled` read has not begun — the log carries zero rows as of this date,
+because no clean-exit-unreachable tick has occurred since #1328 deployed.
