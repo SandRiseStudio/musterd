@@ -49,6 +49,7 @@
     "@musterd/server": "workspace:*",
     "@musterd/telemetry": "workspace:*",
     "@opentelemetry/api": "^1.9.1",
+    "json5": "2.2.3",
     "picocolors": "^1.1.1",
     "ulid": "^2.3.0",
     "ws": "^8.18.0",
