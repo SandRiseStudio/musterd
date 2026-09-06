@@ -548,6 +548,43 @@ describe('agent-side reachability nudge (ADR 046)', () => {
 });
 
 describe('inbox --interrupt-check — the mid-loop interrupt line (ADR 088)', () => {
+  // ADR 088 amendment (2026-09-05): the Claude Code hook must emit the PostToolUse JSON seam —
+  // bare stdout from that event is debug-log only and never reached a model. Same daemon, same line,
+  // one wrapper; the common path stays byte-for-byte empty.
+  it('--hook claude-code emits the raised line as hookSpecificOutput.additionalContext, and nothing when quiet', async () => {
+    await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
+    await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);
+    const ada = await claimedAgent('dawn', 'Ada');
+
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
+    const quiet = await run(inboxCommand, ['--interrupt-check', '--hook', 'claude-code']);
+    expect(quiet.code).toBe(0);
+    expect(quiet.out).toBe('');
+
+    actAsNobody();
+    await run(sendCommand, [
+      '--to',
+      'Ada',
+      '--act',
+      'request_help',
+      '--urgent',
+      '--urgent-reason',
+      'prod is down',
+      'drop everything and look at deploy',
+    ]);
+
+    actAs('dawn', 'Ada', ada.key, ada.sessionLease);
+    const raised = await run(inboxCommand, ['--interrupt-check', '--hook', 'claude-code']);
+    expect(raised.code).toBe(0);
+    const json = JSON.parse(raised.out.trim()) as {
+      hookSpecificOutput: { hookEventName: string; additionalContext: string };
+    };
+    expect(json.hookSpecificOutput.hookEventName).toBe('PostToolUse');
+    expect(json.hookSpecificOutput.additionalContext).toContain('\u26a1 musterd:');
+    expect(json.hookSpecificOutput.additionalContext).toContain('request_help');
+    expect(json.hookSpecificOutput.additionalContext).not.toContain('drop everything'); // §4 still holds
+  });
+
   it('raises one daemon-composed line for a waiting urgent directed act, silent for a plain one', async () => {
     await run(teamCommand, ['create', 'dawn', '--as', 'nick']);
     await run(teamCommand, ['add', 'Ada', '--kind', 'agent']);

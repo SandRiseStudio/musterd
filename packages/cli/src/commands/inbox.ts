@@ -267,7 +267,44 @@ async function deferAct(parsed: Parsed): Promise<number> {
  * (an ambient folder has no inbox to interrupt), and it honours `MUSTERD_NO_NUDGE=1`. The daemon owns
  * the predicate, the capability gate, the composed line, and the audit/telemetry — the CLI just prints.
  */
+/**
+ * ADR 088 amendment (2026-09-05): the line must ride the harness's JSON seam, not bare stdout.
+ *
+ * Claude Code's hook contract: for PostToolUse, plain-text stdout at exit 0 goes to the DEBUG LOG and
+ * is never shown to the model — only `UserPromptSubmit`, `SessionStart` and two others promote bare
+ * stdout to context. What reaches the model from a PostToolUse hook is the JSON field
+ * `hookSpecificOutput.additionalContext` (or `systemMessage`, or stderr on exit 2). ADR 088 shipped
+ * the line as bare stdout, so it never reached a Claude Code model. Measured 2026-09-05 in one seat's
+ * own transcript: 67 PostToolUse hook runs produced a musterd line (`hook_success.stdout`, e.g.
+ * "ryder took a turn" at 00:48:26Z) and not one appeared in the model's context; the daemon audited
+ * every one as `interrupt.raised`. The bell check's Claude Code seats all reporting "no bell" was the
+ * same fact from the other side.
+ *
+ * Mirrors `formatCursorInterrupt` (session.ts, ADR 369), which already knew Cursor's seam. Null in →
+ * null out: the common path stays silent and free, exactly as §1 requires. Exported for the unit that
+ * pins the shape, because the shape IS the delivery.
+ */
+export function formatClaudeCodeInterrupt(line: string | null): string | null {
+  return line
+    ? JSON.stringify({
+        hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: line },
+      })
+    : null;
+}
+
+/** The harness JSON seams `--interrupt-check --hook <harness>` can emit into. Bare stdout otherwise. */
+const HOOK_SEAMS: Record<string, (line: string) => string | null> = {
+  'claude-code': formatClaudeCodeInterrupt,
+};
+
 async function interruptCheck(parsed: Parsed): Promise<number> {
+  // Which harness's hook is running us, if any: decides whether a raised line (or the deaf line) is
+  // printed bare or wrapped in that harness's injection JSON. Unknown value → bare, never a throw.
+  const hookSeam = HOOK_SEAMS[flagStr(parsed.flags, 'hook') ?? ''];
+  const emit = (line: string): void => {
+    const out = hookSeam ? hookSeam(line) : line;
+    if (out !== null) process.stdout.write(out + '\n');
+  };
   // The tool boundary is also the first moment the running model is *knowable* — the transcript now
   // carries an assistant turn, which it did not when SessionStart observed (ADR 158 follow-up). Runs
   // before the env/identity gates below: the observation is local and is owed even to a seat whose
@@ -288,7 +325,7 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
     if (!explicit || !identity) return 0;
     seat = identity.name;
     const res = await http.interruptCheck(team);
-    if (res.raised && res.line) process.stdout.write(res.line + '\n');
+    if (res.raised && res.line) emit(res.line);
   } catch (err) {
     // Best-effort: the interrupt probe must never fail the tool call it rides on — with ONE thing it
     // owes the seat before it goes quiet. `GET /inbox/interrupt-check` authenticates as a member, and
@@ -317,12 +354,14 @@ async function interruptCheck(parsed: Parsed): Promise<number> {
       // dies with the command. A lease outlives its command only where something holds the
       // Presence, which is the harness adapter. Naming a repair that does not work is worse than
       // naming none: it spends a turn and returns the seat to the same silence.
-      process.stdout.write(
+      // Through the same seam as a raised line: on Claude Code a bare deaf line went to the debug log
+      // too, so the one sentence #1317 bought was never read by the model it was written for.
+      emit(
         `musterd: the interrupt line is deaf — this seat's session lease is dead, so every ` +
-          `interrupt check is being refused.\n` +
+          `interrupt check is being refused. ` +
           `it needs a live Presence: re-join from your harness adapter (team_join). ` +
           `\`musterd claim${seat !== undefined ? ' ' + seat : ''}\` mints a lease that dies with ` +
-          `the command, and \`--detach\` writes none.\n`,
+          `the command, and \`--detach\` writes none.`,
       );
     }
   }

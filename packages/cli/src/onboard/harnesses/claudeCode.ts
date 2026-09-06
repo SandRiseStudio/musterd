@@ -179,9 +179,15 @@ function postToolUseHookCommand(): string {
   // (no output) unless an interrupt-class act is waiting, so the common path adds zero context and
   // zero tokens. Best-effort + never-failing: swallow all noise on error so a probe can't break a tool
   // call. No matcher, so it runs on every tool. Mirrors the Notification hook's shape.
+  //
+  // `--hook claude-code` (ADR 088 amendment, 2026-09-05): the line is emitted as Claude Code's
+  // PostToolUse JSON seam — `{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":…}}`
+  // — because bare stdout from a PostToolUse hook goes to the debug log and is never shown to the
+  // model. Without this flag the hook ran for weeks, the daemon audited every raise, and no Claude Code
+  // model ever saw a line (measured: 67/67 in one session's transcript, 2026-09-05).
   return (
     'd="${CLAUDE_PROJECT_DIR:-.}"; cd "$d" 2>/dev/null; ' +
-    'command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check 2>/dev/null || true ' +
+    'command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check --hook claude-code 2>/dev/null || true ' +
     `# ${POSTTOOLUSE_HOOK_MARKER}`
   );
 }

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Binding } from '../config.js';
+import { formatClaudeCodeInterrupt } from './inbox.js';
 import {
   ORIENT_NUDGE_TEXT,
   formatCursorInterrupt,
@@ -93,6 +94,20 @@ describe('session orient stamp/nudge', () => {
     expect(json).not.toBeNull();
     expect(JSON.parse(json!)).toEqual({
       additional_context: '⚑ 1 urgent request waiting for you since 11:30',
+    });
+  });
+
+  // ADR 088 amendment (2026-09-05): Claude Code's PostToolUse seam is `hookSpecificOutput`, not bare
+  // stdout — bare stdout from that event never reaches the model. The Cursor twin above knew its
+  // seam from day one (ADR 369); this one arrived after 67 silent raises in a single transcript.
+  it('formatClaudeCodeInterrupt wraps the line as Claude Code PostToolUse additionalContext JSON (ADR 088 am.)', () => {
+    expect(formatClaudeCodeInterrupt(null)).toBeNull();
+    const json = formatClaudeCodeInterrupt('⚡ musterd: huddle — ryder took a turn');
+    expect(JSON.parse(json!)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: '⚡ musterd: huddle — ryder took a turn',
+      },
     });
   });
 });

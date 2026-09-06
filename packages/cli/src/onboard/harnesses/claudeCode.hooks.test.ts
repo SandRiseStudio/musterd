@@ -88,6 +88,10 @@ describe('musterd Claude Code hooks (local Notification + global SessionStart)',
     const pt = cmdFor(local, 'PostToolUse');
     expect(pt).toContain(POSTTOOLUSE_HOOK_MARKER);
     expect(pt).toContain('musterd inbox --interrupt-check');
+    // ADR 088 amendment (2026-09-05): the line must ride Claude Code's PostToolUse JSON seam. Bare
+    // stdout from this event goes to the debug log, never to the model — for weeks every raise was
+    // audited and no Claude Code model saw one. The flag is what makes the hook a doorbell at all.
+    expect(pt).toContain('--interrupt-check --hook claude-code');
     expect(local.hooks?.['PostToolUse']?.[0]?.matcher).toBeUndefined(); // fires on every tool
     expect(global.hooks?.['PostToolUse']).toBeUndefined(); // PostToolUse is NOT global
 
