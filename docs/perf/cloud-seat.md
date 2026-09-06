@@ -309,3 +309,67 @@ remaining half — `id -u` from inside the *woken* session — is delta's own to
 3. **`musterd agent` and the wake endpoint should not disagree in silence.** Either the endpoint
    accepts a `claim_seat` credential for the seat it targets, or provisioning refuses to write a
    credential the wake path cannot use.
+
+### 15. A lane handoff wakes a manual-flow seat under the *reply* budget, and the work dies at 5 minutes
+
+With the credential repaired, the wake fired and delta did the right things: read the work order
+(01:27:13Z), checked its inbox, ran `team_next`, moved lane `01M1T3YXVD` to active (01:28:13Z), and
+created branch `delta/cloud-seat-from-inside`. Then it was killed.
+
+```
+run for delta (fresh) settled: exit=143 (watchdog) wall=302.1s
+wake cost recorded for delta: $— (lease 01M1T56M9313EZMYPVSNCXPFGK)
+```
+
+**Nothing survived.** The VM's worktree was on the new branch with a clean tree and no page — the
+run died before the first write. The cost is `$—` because a SIGTERM'd harness never emits its
+summary line, so the most expensive shape a wake can take is also the one that records no spend.
+
+**The bound was 5 minutes, and the policy grants 30.** `revive`'s residency policy reads
+`timeout 5m · work-timeout 30m`. A work order uses `work_timeout_ms` un-clamped
+(`packages/cli/src/host/loop.ts:353`, `packages/server/src/store/residency.ts:1411`) precisely so
+that, in the loop's own words, "a coding session under a 5m host flag must not silently die at 5m".
+Delta's run died at 5m anyway, because **it was never a work order**.
+
+A lane handoff becomes a `work_order` only through `dueDispatchHandoffWorkOrders`
+(`packages/server/src/store/residency.ts:913`, ADR 199's dispatch handoff edge), and that edge is
+gated on the seat's `flow` — `manual` by default, and the protocol's own comment says `flow` is what
+"gate[s] board-triggered WORK-ORDER wakes" (`packages/protocol/src/residency.ts:72-79`). Delta was
+`flow: manual`. So the handoff derived as `batched` and took `policy.timeout_ms`, the **reply**
+budget. The host log says so plainly, and this line is the whole finding:
+
+```
+wake due: delta [batched] — handoff from stanley (lease 01M1T56M9313EZMYPVSNCXPFGK)
+```
+
+**The shape.** A handoff is the act that says *do this lane's work*. On a manual-flow seat it still
+wakes the seat — as a reply doorbell — and the session it starts is handed a lane, a branch, and an
+acceptance contract it cannot possibly discharge in five minutes. The two halves disagree about what
+the wake is for, and the seat pays for the disagreement by being killed mid-write. Nothing in the
+handoff path warns the sender: `lane_handoff` reported "wake-eligible" and it was, under the wrong
+budget.
+
+**The banner is not the bound either.** `host.log`'s standing line reads
+`1 seat(s) registered · every 30s · watchdog 600s` — that is the operator's `--timeout` ceiling
+(`deps.bounds.timeout_ms`), not the effective per-run timeout, which comes from policy. An operator
+reading the actuator's own banner would predict 600 s and observe 302 s.
+
+**Disposition (2026-09-06):** delta set to `flow: auto`
+(`musterd residency on --seat delta --harness claude-code --as nick --flow auto`), which is the
+designed path — ADR 199's dispatch edge exists for exactly "a seat that does lane work". The
+handoff still qualifies (unanswered, lane owned by delta, state `active`), so the next poll after
+the 30 m cooldown derives it as a `work_order` with the 30 m budget and seat-policy tool access.
+Falsify the diagnosis: if the next wake's host line reads `[work_order]` rather than `[batched]` and
+the run outlives 302 s, `flow` was the gate; if it still reads `[batched]`, it was not.
+
+**Candidate product fixes:**
+
+1. **A handoff that cannot be worked in the budget should not be delivered as a reply.** Either the
+   dispatch edge ignores `flow` for an explicit, directed `lane_handoff` (a human or a seat named
+   this seat and this lane — that is not "board-triggered" in the sense `flow` exists to gate), or
+   the handoff is refused/deferred with a reason the sender can read.
+2. **`lane_handoff` should tell the sender which budget the recipient will get.** It already knows
+   the seat is wake-eligible; the derivation and the timeout are knowable at send time.
+3. **A watchdog kill should record its spend.** `$—` on the most expensive outcome makes the cost
+   ledger silently under-count exactly the runs worth counting.
+4. **The actuator banner should print the effective bound**, or say that policy overrides it.
