@@ -235,3 +235,16 @@ are pinned in `packages/cli/src/guardian/falsifier.test.ts`; arm (a) runs there 
 faked — elsewhere. All four hold. **Nothing is armed**: the tier is still `alert`, no restart exists,
 and the 30-day `guardian.sampled` read has not begun — the log carries zero rows as of this date,
 because no clean-exit-unreachable tick has occurred since #1328 deployed.
+
+**2026-09-05 — the sampled read is a week, not thirty days, and it is pre-registered (lane
+01M1T0ZN4R8Q5VM3ZB64C938QF).** The follow-up above says "arm only after 30 days of `guardian.sampled`
+data"; nothing was scheduled to read it, which is the shape ADR 373's watch refused. nick cut the
+window on 2026-09-05 — *"30 days is way too long, how about a week"* — and the read now lives in
+[`docs/watches/2026-09-05-adr-389-sampled-read.md`](../watches/2026-09-05-adr-389-sampled-read.md),
+`revisit_by` 2026-09-12, so `pnpm watch:check` fails the day it goes unread. A week is enough because
+the Experiment's disarm number is **one** row — a `wedged: true` sample on a stall health recovered from
+on its own — and more days do not make that row likelier, only later. What a week cannot promise is
+that any rows exist: #1308 removed the known SQLite trigger, and the watch carries a `void_if` floor of
+5 rows so that "nothing happened to sample" is never read as "the sample is trustworthy". The 30-day
+figure in the Eval paragraph is unchanged in meaning: it is the *armed* read, which begins only if
+this week's read and a human say so.
