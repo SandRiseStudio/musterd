@@ -4,7 +4,7 @@
 
 **Seed:** `01M0ZXBSKGMADATTQJ13PWZ6SA` — “Paved roads - aperture (tailscale)”
 
-**Status:** approved exploration design; Increment 1 is governed by [ADR 385](../../decisions/385-optional-tailscale-aperture-doctor.md) and its implementation plan; later increments require their own ADRs and plans
+**Status:** approved exploration design; Increment 1 is implemented as `musterd integration doctor` under [ADR 385](../../decisions/385-optional-tailscale-aperture-doctor.md); later increments require their own ADRs and plans
 
 **Security boundary:** product architecture only; no active scanning, production access, or
 infrastructure mutation was performed
@@ -307,7 +307,7 @@ Figma terminal contract; this spec defines behavior, not an unreviewed terminal 
 
 ## 11. Delivery increments
 
-### Increment 1 — reference architecture and read-only doctor
+### Increment 1 — reference architecture and read-only doctor (implemented)
 
 - Publish the four optional combinations and the honest security claim.
 - Inspect daemon/Tailscale reachability, secured-bind and Host posture, Aperture reachability,

@@ -72,9 +72,14 @@ describe('Aperture response parsing (ADR 385)', () => {
     for (const body of [
       secret,
       { hash: 'abc', config: `{ broken: ${secret}` },
-      { hash: 'abc', config: JSON.stringify({ providers: { anthropic: { baseurl: 7, models: [] } } }) },
+      {
+        hash: 'abc',
+        config: JSON.stringify({ providers: { anthropic: { baseurl: 7, models: [] } } }),
+      },
     ]) {
-      expect(() => parseApertureResponse('aperture.tailnet.ts.net', body)).toThrow('Aperture configuration response is invalid');
+      expect(() => parseApertureResponse('aperture.tailnet.ts.net', body)).toThrow(
+        'Aperture configuration response is invalid',
+      );
       try {
         parseApertureResponse('aperture.tailnet.ts.net', body);
       } catch (error) {
@@ -119,12 +124,17 @@ describe('Aperture posture analysis (ADR 385)', () => {
     ['tools purge', { duration: '0', purge: ['captures'], require_export: false }],
     ['export requirement', { duration: '0', purge: ['captures', 'tools'], require_export: true }],
   ])('fails retention when %s drifts', (_name, retention) => {
-    expect(states(observation(config({ database: { retention } })))['aperture-retention']).toBe('fail');
+    expect(states(observation(config({ database: { retention } })))['aperture-retention']).toBe(
+      'fail',
+    );
   });
 
   it.each([
     ['no providers', {}],
-    ['plaintext provider', { anthropic: { baseurl: 'http://api.anthropic.com', models: ['claude'] } }],
+    [
+      'plaintext provider',
+      { anthropic: { baseurl: 'http://api.anthropic.com', models: ['claude'] } },
+    ],
     ['empty base URL', { anthropic: { baseurl: '', models: ['claude'] } }],
     ['no models', { anthropic: { baseurl: 'https://api.anthropic.com', models: [] } }],
   ])('fails provider posture for %s', (_name, providers) => {
@@ -146,34 +156,68 @@ describe('Aperture posture analysis (ADR 385)', () => {
   });
 
   it('rejects an admin agent identity', () => {
-    const grants = [{
-      src: exactSource,
-      app: { 'tailscale.com/cap/aperture': [{ role: 'admin', models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] }] },
-    }];
+    const grants = [
+      {
+        src: exactSource,
+        app: {
+          'tailscale.com/cap/aperture': [
+            { role: 'admin', models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] },
+          ],
+        },
+      },
+    ];
     expect(states(observation(config({ grants })))['aperture-identities']).toBe('fail');
   });
 
   it('requires at least one model capability but ignores connector-only capabilities', () => {
-    const grants = [{
-      src: exactSource,
-      app: { 'tailscale.com/cap/aperture': [{ role: 'agent', quotas: [{ bucket: 'daily:<user>' }] }] },
-    }];
+    const grants = [
+      {
+        src: exactSource,
+        app: {
+          'tailscale.com/cap/aperture': [{ role: 'agent', quotas: [{ bucket: 'daily:<user>' }] }],
+        },
+      },
+    ];
     expect(states(observation(config({ grants })))['aperture-grants']).toBe('fail');
   });
 
   it.each([
     ['no quota reference', { quotas: [] }, config().quotas],
     ['unknown bucket', { quotas: [{ bucket: 'missing' }] }, config().quotas],
-    ['zero capacity', { quotas: [{ bucket: 'daily:<user>' }] }, { 'daily:<user>': { capacity: '$0', rate: '$5/day', on_exceed: 'reject' } }],
-    ['non-dollar capacity', { quotas: [{ bucket: 'daily:<user>' }] }, { 'daily:<user>': { capacity: '10', rate: '$5/day', on_exceed: 'reject' } }],
-    ['zero rate', { quotas: [{ bucket: 'daily:<user>' }] }, { 'daily:<user>': { capacity: '$10', rate: '$0/day', on_exceed: 'reject' } }],
-    ['non-dollar rate', { quotas: [{ bucket: 'daily:<user>' }] }, { 'daily:<user>': { capacity: '$10', rate: '5/day', on_exceed: 'reject' } }],
-    ['non-rejecting bucket', { quotas: [{ bucket: 'daily:<user>' }] }, { 'daily:<user>': { capacity: '$10', rate: '$5/day', on_exceed: 'allow' } }],
+    [
+      'zero capacity',
+      { quotas: [{ bucket: 'daily:<user>' }] },
+      { 'daily:<user>': { capacity: '$0', rate: '$5/day', on_exceed: 'reject' } },
+    ],
+    [
+      'non-dollar capacity',
+      { quotas: [{ bucket: 'daily:<user>' }] },
+      { 'daily:<user>': { capacity: '10', rate: '$5/day', on_exceed: 'reject' } },
+    ],
+    [
+      'zero rate',
+      { quotas: [{ bucket: 'daily:<user>' }] },
+      { 'daily:<user>': { capacity: '$10', rate: '$0/day', on_exceed: 'reject' } },
+    ],
+    [
+      'non-dollar rate',
+      { quotas: [{ bucket: 'daily:<user>' }] },
+      { 'daily:<user>': { capacity: '$10', rate: '5/day', on_exceed: 'reject' } },
+    ],
+    [
+      'non-rejecting bucket',
+      { quotas: [{ bucket: 'daily:<user>' }] },
+      { 'daily:<user>': { capacity: '$10', rate: '$5/day', on_exceed: 'allow' } },
+    ],
   ])('fails model quota posture for %s', (_name, capability, quotas) => {
-    const grants = [{
-      src: exactSource,
-      app: { 'tailscale.com/cap/aperture': [{ role: 'agent', models: ['claude'], ...capability }] },
-    }];
+    const grants = [
+      {
+        src: exactSource,
+        app: {
+          'tailscale.com/cap/aperture': [{ role: 'agent', models: ['claude'], ...capability }],
+        },
+      },
+    ];
     expect(states(observation(config({ grants, quotas })))['aperture-quotas']).toBe('fail');
   });
 });

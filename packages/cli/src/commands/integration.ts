@@ -3,10 +3,7 @@ import { flagStr, type Parsed } from '../args.js';
 import { loadConfig } from '../config.js';
 import { CliError } from '../errors.js';
 import { inspectApertureConfig, parseApertureResponse } from '../integrations/aperture.js';
-import {
-  composeIntegrationReport,
-  renderIntegrationReport,
-} from '../integrations/report.js';
+import { composeIntegrationReport, renderIntegrationReport } from '../integrations/report.js';
 import {
   inspectTailscaleTransport,
   probeUpgradeHost,
@@ -88,7 +85,10 @@ export async function integrationCommand(
   deps: IntegrationCommandDeps = {},
 ): Promise<number> {
   if (parsed.positionals.length !== 1 || parsed.positionals[0] !== 'doctor') {
-    throw new CliError('musterd integration doctor [--tailscale] [--aperture <https-url>] [--json]', 2);
+    throw new CliError(
+      'musterd integration doctor [--tailscale] [--aperture <https-url>] [--json]',
+      2,
+    );
   }
 
   const tailscaleSelected = parsed.flags['tailscale'] === true;
@@ -110,9 +110,7 @@ export async function integrationCommand(
           probeUpgrade: deps.probeUpgrade ?? probeUpgradeHost,
         })
       : Promise.resolve([]),
-    selectedApertureUrl
-      ? inspectAperture(selectedApertureUrl, fetchImpl)
-      : Promise.resolve([]),
+    selectedApertureUrl ? inspectAperture(selectedApertureUrl, fetchImpl) : Promise.resolve([]),
   ]);
 
   const report = composeIntegrationReport({
@@ -122,7 +120,8 @@ export async function integrationCommand(
     apertureSelected,
     apertureChecks,
   });
-  const rendered = parsed.flags['json'] === true ? JSON.stringify(report) : renderIntegrationReport(report);
+  const rendered =
+    parsed.flags['json'] === true ? JSON.stringify(report) : renderIntegrationReport(report);
   (deps.out ?? ((text) => process.stdout.write(text)))(`${rendered}\n`);
   return report.ok ? 0 : 1;
 }

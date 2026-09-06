@@ -8,7 +8,11 @@ import {
   startedMachines,
   type Check,
 } from './hosted.js';
-import { parseTailscaleSelf, probeUpgradeHost, serveForwardsPort } from '../integrations/tailscale.js';
+import {
+  parseTailscaleSelf,
+  probeUpgradeHost,
+  serveForwardsPort,
+} from '../integrations/tailscale.js';
 import type { Exec, ExecResult } from '../process.js';
 
 const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });

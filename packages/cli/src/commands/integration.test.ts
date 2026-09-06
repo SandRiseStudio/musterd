@@ -11,10 +11,16 @@ const status = JSON.stringify({
 });
 const apertureConfig = {
   providers: { anthropic: { baseurl: 'https://api.anthropic.com', models: ['claude'] } },
-  grants: [{
-    src: ['tag:musterd-agent', 'tag:musterd-member-a7f3c2'],
-    app: { 'tailscale.com/cap/aperture': [{ role: 'agent', models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] }] },
-  }],
+  grants: [
+    {
+      src: ['tag:musterd-agent', 'tag:musterd-member-a7f3c2'],
+      app: {
+        'tailscale.com/cap/aperture': [
+          { role: 'agent', models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] },
+        ],
+      },
+    },
+  ],
   quotas: { 'daily:<user>': { capacity: '$10', rate: '$5/day', on_exceed: 'reject' } },
   database: { retention: { duration: '0', purge: ['captures', 'tools'], require_export: false } },
 };
@@ -27,16 +33,23 @@ function harness(overrides: Partial<IntegrationCommandDeps> = {}) {
     commands.push([cmd, ...args].join(' '));
     if (args[0] === 'version') return { code: 0, stdout: '1.80.0', stderr: '' };
     if (args[0] === 'status') return { code: 0, stdout: status, stderr: '' };
-    return { code: 0, stdout: JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:4849' } } }), stderr: '' };
+    return {
+      code: 0,
+      stdout: JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:4849' } } }),
+      stderr: '',
+    };
   };
   const deps: IntegrationCommandDeps = {
     exec,
     fetch: async (input, init) => {
       requests.push({ url: String(input), init });
-      return new Response(JSON.stringify({ config: JSON.stringify(apertureConfig), hash: '8d14c921aabbccdd' }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
+      return new Response(
+        JSON.stringify({ config: JSON.stringify(apertureConfig), hash: '8d14c921aabbccdd' }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
     },
     probeUpgrade: async () => 'allowed',
     server: 'http://127.0.0.1:4849',
@@ -56,7 +69,9 @@ async function run(argv: string[], overrides: Partial<IntegrationCommandDeps> = 
 describe('musterd integration doctor (ADR 385)', () => {
   it('rejects missing and unknown subcommands as usage errors', async () => {
     for (const argv of [[], ['unknown']]) {
-      await expect(integrationCommand(parseArgs(argv), harness().deps)).rejects.toMatchObject({ exitCode: 2 });
+      await expect(integrationCommand(parseArgs(argv), harness().deps)).rejects.toMatchObject({
+        exitCode: 2,
+      });
     }
   });
 
@@ -73,13 +88,20 @@ describe('musterd integration doctor (ADR 385)', () => {
     ['Tailscale only', ['doctor', '--tailscale'], 3, 1, 0],
     ['Aperture only', ['doctor', '--aperture', 'https://aperture.tailnet.ts.net'], 0, 0, 1],
     ['both', ['doctor', '--tailscale', '--aperture', 'https://aperture.tailnet.ts.net'], 3, 1, 1],
-  ] as const)('runs %s independently', async (_name, argv, commandCount, healthCount, apertureCount) => {
-    const result = await run([...argv]);
-    expect(result.code).toBe(0);
-    expect(result.commands).toHaveLength(commandCount);
-    expect(result.requests.filter((request) => request.url.endsWith('/health'))).toHaveLength(healthCount);
-    expect(result.requests.filter((request) => request.url.endsWith('/api/config'))).toHaveLength(apertureCount);
-  });
+  ] as const)(
+    'runs %s independently',
+    async (_name, argv, commandCount, healthCount, apertureCount) => {
+      const result = await run([...argv]);
+      expect(result.code).toBe(0);
+      expect(result.commands).toHaveLength(commandCount);
+      expect(result.requests.filter((request) => request.url.endsWith('/health'))).toHaveLength(
+        healthCount,
+      );
+      expect(result.requests.filter((request) => request.url.endsWith('/api/config'))).toHaveLength(
+        apertureCount,
+      );
+    },
+  );
 
   it('returns 1 when a selected inspector fails', async () => {
     const result = await run(['doctor', '--tailscale'], {
@@ -97,13 +119,14 @@ describe('musterd integration doctor (ADR 385)', () => {
     expect(result.text.trimEnd()).toBe(JSON.stringify(parsed));
   });
 
-  it.each([
-    'http://aperture.tailnet.ts.net',
-    'ftp://aperture.tailnet.ts.net',
-    'not-a-url',
-  ])('requires HTTPS for a non-loopback Aperture URL: %s', async (url) => {
-    await expect(integrationCommand(parseArgs(['doctor', '--aperture', url]), harness().deps)).rejects.toBeInstanceOf(CliError);
-  });
+  it.each(['http://aperture.tailnet.ts.net', 'ftp://aperture.tailnet.ts.net', 'not-a-url'])(
+    'requires HTTPS for a non-loopback Aperture URL: %s',
+    async (url) => {
+      await expect(
+        integrationCommand(parseArgs(['doctor', '--aperture', url]), harness().deps),
+      ).rejects.toBeInstanceOf(CliError);
+    },
+  );
 
   it.each([
     'http://localhost:8080',
@@ -115,7 +138,9 @@ describe('musterd integration doctor (ADR 385)', () => {
   });
 
   it('rejects a valueless --aperture flag', async () => {
-    await expect(integrationCommand(parseArgs(['doctor', '--aperture']), harness().deps)).rejects.toMatchObject({ exitCode: 2 });
+    await expect(
+      integrationCommand(parseArgs(['doctor', '--aperture']), harness().deps),
+    ).rejects.toMatchObject({ exitCode: 2 });
   });
 
   it('makes exactly one bounded GET to /api/config', async () => {
@@ -129,16 +154,29 @@ describe('musterd integration doctor (ADR 385)', () => {
   it.each([
     ['non-2xx', async () => new Response('provider_key=do-not-echo', { status: 503 })],
     ['malformed JSON', async () => new Response('provider_key=do-not-echo', { status: 200 })],
-    ['wrong wrapper', async () => new Response(JSON.stringify({ config: 7, hash: 'x', secret: 'provider_key=do-not-echo' }), { status: 200 })],
+    [
+      'wrong wrapper',
+      async () =>
+        new Response(JSON.stringify({ config: 7, hash: 'x', secret: 'provider_key=do-not-echo' }), {
+          status: 200,
+        }),
+    ],
   ] as const)('redacts response text for %s failures', async (_name, fetch) => {
-    const result = await run(['doctor', '--aperture', 'https://aperture.tailnet.ts.net'], { fetch });
+    const result = await run(['doctor', '--aperture', 'https://aperture.tailnet.ts.net'], {
+      fetch,
+    });
     expect(result.code).toBe(1);
     expect(result.text).not.toContain('do-not-echo');
     expect(result.text).toContain('Aperture config API');
   });
 
   it('permits only the three Tailscale reads and GET network requests', async () => {
-    const result = await run(['doctor', '--tailscale', '--aperture', 'https://aperture.tailnet.ts.net']);
+    const result = await run([
+      'doctor',
+      '--tailscale',
+      '--aperture',
+      'https://aperture.tailnet.ts.net',
+    ]);
     expect(result.commands).toEqual([
       'tailscale version',
       'tailscale status --json',

@@ -69,10 +69,7 @@ function hasExactMemberIdentity(src: string[]): boolean {
 export function inspectApertureConfig(observation: ApertureObservation): IntegrationCheck[] {
   const { config } = observation;
   const checks: IntegrationCheck[] = [
-    ok(
-      'aperture-config-api',
-      `${observation.host} · hash ${safeConfigHash(observation.hash)}`,
-    ),
+    ok('aperture-config-api', `${observation.host} · hash ${safeConfigHash(observation.hash)}`),
   ];
 
   const retention = config.database?.retention;

@@ -75,7 +75,11 @@ export function serveForwardsPort(json: string, port: number): boolean {
   const result = TailscaleServeStatusSchema.safeParse(parsed);
   if (!result.success) return false;
   const forward = result.data.TCP?.[String(port)]?.TCPForward;
-  return forward === `127.0.0.1:${port}` || forward === `localhost:${port}` || forward === `[::1]:${port}`;
+  return (
+    forward === `127.0.0.1:${port}` ||
+    forward === `localhost:${port}` ||
+    forward === `[::1]:${port}`
+  );
 }
 
 export function probeUpgradeHost(
@@ -149,7 +153,9 @@ export async function inspectTailscaleTransport(
     checks.push(
       fail(
         'tailnet-up',
-        self?.running ? 'tailnet is up but no Tailscale IPv4 address is available' : 'tailnet status is unavailable or down',
+        self?.running
+          ? 'tailnet is up but no Tailscale IPv4 address is available'
+          : 'tailnet status is unavailable or down',
         self?.running
           ? 'Enable an IPv4 Tailscale address; Increment 1 cannot verify an IPv6-only path.'
           : 'Run tailscale status on the daemon host and restore its tailnet connection.',
@@ -208,7 +214,10 @@ export async function inspectTailscaleTransport(
     deps.probeUpgrade(localOrigin, self.ip4),
   ]);
   if (dnsGate !== 'allowed' || ipGate !== 'allowed') {
-    const refused = [dnsGate !== 'allowed' ? self.dnsName : '', ipGate !== 'allowed' ? self.ip4 : '']
+    const refused = [
+      dnsGate !== 'allowed' ? self.dnsName : '',
+      ipGate !== 'allowed' ? self.ip4 : '',
+    ]
       .filter(Boolean)
       .join(' and ');
     checks.push(
@@ -242,10 +251,7 @@ export async function inspectTailscaleTransport(
   }
   checks.push(ok('daemon-http', '/health reachable over the tailnet'));
 
-  const websocket = await deps.probeUpgrade(
-    { hostname: self.dnsName, port },
-    self.dnsName,
-  );
+  const websocket = await deps.probeUpgrade({ hostname: self.dnsName, port }, self.dnsName);
   checks.push(
     websocket === 'allowed'
       ? ok('daemon-websocket', '/ws upgrade reachable over the tailnet')

@@ -119,16 +119,28 @@ export const IntegrationDoctorReportSchema = z
   .strict()
   .superRefine((report, ctx) => {
     if (report.tailscale.integration !== 'tailscale') {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'tailscale section must be tagged tailscale', path: ['tailscale', 'integration'] });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'tailscale section must be tagged tailscale',
+        path: ['tailscale', 'integration'],
+      });
     }
     if (report.aperture.integration !== 'aperture') {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'aperture section must be tagged aperture', path: ['aperture', 'integration'] });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'aperture section must be tagged aperture',
+        path: ['aperture', 'integration'],
+      });
     }
     const hasSelectedFailure = [report.tailscale, report.aperture].some(
       (section) => section.selected && section.checks.some((check) => check.state === 'fail'),
     );
     if (report.ok === hasSelectedFailure) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'ok must equal the absence of selected failures', path: ['ok'] });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'ok must equal the absence of selected failures',
+        path: ['ok'],
+      });
     }
   });
 export type IntegrationDoctorReport = z.infer<typeof IntegrationDoctorReportSchema>;

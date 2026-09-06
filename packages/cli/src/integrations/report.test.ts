@@ -1,32 +1,83 @@
 import type { IntegrationCheck } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { setColorEnabled } from '../render/theme.js';
-import {
-  composeIntegrationReport,
-  INTEGRATION_LIMITS,
-  renderIntegrationReport,
-} from './report.js';
+import { composeIntegrationReport, INTEGRATION_LIMITS, renderIntegrationReport } from './report.js';
 import { IntegrationDoctorReportSchema } from '@musterd/protocol';
 
 setColorEnabled(false);
 
 const tailscaleChecks: IntegrationCheck[] = [
   { key: 'tailscale-installed', label: 'tailscale installed', state: 'ok', detail: '1.80.0' },
-  { key: 'tailnet-up', label: 'tailnet up', state: 'ok', detail: 'daemon.tailnet.ts.net · 100.64.0.10' },
-  { key: 'daemon-secured-bind', label: 'daemon secured bind', state: 'ok', detail: 'loopback behind tailscale serve' },
-  { key: 'tailscale-serve', label: 'tailscale serve', state: 'ok', detail: 'tcp/4849 → 127.0.0.1:4849' },
-  { key: 'daemon-host-gate', label: 'daemon Host gate', state: 'ok', detail: 'daemon.tailnet.ts.net and 100.64.0.10 accepted' },
-  { key: 'daemon-http', label: 'daemon HTTP', state: 'ok', detail: '/health reachable over the tailnet' },
-  { key: 'daemon-websocket', label: 'daemon WebSocket', state: 'ok', detail: '/ws upgrade reachable over the tailnet' },
+  {
+    key: 'tailnet-up',
+    label: 'tailnet up',
+    state: 'ok',
+    detail: 'daemon.tailnet.ts.net · 100.64.0.10',
+  },
+  {
+    key: 'daemon-secured-bind',
+    label: 'daemon secured bind',
+    state: 'ok',
+    detail: 'loopback behind tailscale serve',
+  },
+  {
+    key: 'tailscale-serve',
+    label: 'tailscale serve',
+    state: 'ok',
+    detail: 'tcp/4849 → 127.0.0.1:4849',
+  },
+  {
+    key: 'daemon-host-gate',
+    label: 'daemon Host gate',
+    state: 'ok',
+    detail: 'daemon.tailnet.ts.net and 100.64.0.10 accepted',
+  },
+  {
+    key: 'daemon-http',
+    label: 'daemon HTTP',
+    state: 'ok',
+    detail: '/health reachable over the tailnet',
+  },
+  {
+    key: 'daemon-websocket',
+    label: 'daemon WebSocket',
+    state: 'ok',
+    detail: '/ws upgrade reachable over the tailnet',
+  },
 ];
 
 const apertureChecks: IntegrationCheck[] = [
-  { key: 'aperture-config-api', label: 'Aperture config API', state: 'ok', detail: 'aperture.tailnet.ts.net · hash 8d14c921' },
-  { key: 'aperture-retention', label: 'body retention', state: 'ok', detail: 'zero; captures and tools purged' },
+  {
+    key: 'aperture-config-api',
+    label: 'Aperture config API',
+    state: 'ok',
+    detail: 'aperture.tailnet.ts.net · hash 8d14c921',
+  },
+  {
+    key: 'aperture-retention',
+    label: 'body retention',
+    state: 'ok',
+    detail: 'zero; captures and tools purged',
+  },
   { key: 'aperture-providers', label: 'providers', state: 'ok', detail: 'anthropic (2 models)' },
-  { key: 'aperture-grants', label: 'default grants', state: 'ok', detail: 'exact Member workload identities; no wildcard source' },
-  { key: 'aperture-quotas', label: 'quotas', state: 'ok', detail: 'every model grant has a rejecting, defined bucket' },
-  { key: 'aperture-identities', label: 'identity prerequisites', state: 'ok', detail: 'persistent Member tags are exact and non-admin' },
+  {
+    key: 'aperture-grants',
+    label: 'default grants',
+    state: 'ok',
+    detail: 'exact Member workload identities; no wildcard source',
+  },
+  {
+    key: 'aperture-quotas',
+    label: 'quotas',
+    state: 'ok',
+    detail: 'every model grant has a rejecting, defined bucket',
+  },
+  {
+    key: 'aperture-identities',
+    label: 'identity prerequisites',
+    state: 'ok',
+    detail: 'persistent Member tags are exact and non-admin',
+  },
 ];
 
 function compose(input: Partial<Parameters<typeof composeIntegrationReport>[0]> = {}) {
@@ -46,20 +97,23 @@ describe('integration doctor report composition (ADR 385)', () => {
     ['Tailscale only', true, false, 'verified', 'off'],
     ['Aperture only', false, true, 'off', 'ready'],
     ['both', true, true, 'verified', 'ready'],
-  ] as const)('composes %s selection independently', (_name, tailscaleSelected, apertureSelected, tailscalePosture, aperturePosture) => {
-    const report = compose({
-      tailscaleSelected,
-      tailscaleChecks,
-      apertureSelected,
-      apertureChecks,
-    });
-    expect(report.tailscale.posture).toBe(tailscalePosture);
-    expect(report.aperture.posture).toBe(aperturePosture);
-    expect(report.tailscale.checks).toEqual(tailscaleSelected ? tailscaleChecks : []);
-    expect(report.aperture.checks).toEqual(apertureSelected ? apertureChecks : []);
-    expect(report.ok).toBe(true);
-    expect(IntegrationDoctorReportSchema.parse(report)).toEqual(report);
-  });
+  ] as const)(
+    'composes %s selection independently',
+    (_name, tailscaleSelected, apertureSelected, tailscalePosture, aperturePosture) => {
+      const report = compose({
+        tailscaleSelected,
+        tailscaleChecks,
+        apertureSelected,
+        apertureChecks,
+      });
+      expect(report.tailscale.posture).toBe(tailscalePosture);
+      expect(report.aperture.posture).toBe(aperturePosture);
+      expect(report.tailscale.checks).toEqual(tailscaleSelected ? tailscaleChecks : []);
+      expect(report.aperture.checks).toEqual(apertureSelected ? apertureChecks : []);
+      expect(report.ok).toBe(true);
+      expect(IntegrationDoctorReportSchema.parse(report)).toEqual(report);
+    },
+  );
 
   it('blocks only a selected section with a failed check while preserving skipped dependants', () => {
     const failed = [
@@ -117,7 +171,13 @@ LIMITS
     const report = compose({
       tailscaleSelected: true,
       tailscaleChecks: [
-        { key: 'tailscale-installed', label: 'tailscale installed', state: 'fail', detail: 'unavailable', fix: 'Install Tailscale.' },
+        {
+          key: 'tailscale-installed',
+          label: 'tailscale installed',
+          state: 'fail',
+          detail: 'unavailable',
+          fix: 'Install Tailscale.',
+        },
         { key: 'tailnet-up', label: 'tailnet up', state: 'skip', detail: 'tailscale unavailable' },
       ],
     });

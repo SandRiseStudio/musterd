@@ -29,12 +29,26 @@ describe('Tailscale inspection primitives (ADR 385)', () => {
 
   it('rejects malformed JSON and JSON that is valid but misses the typed vendor fields', () => {
     expect(parseTailscaleSelf('not json')).toBeNull();
-    expect(parseTailscaleSelf(JSON.stringify({ Self: { DNSName: 'x', TailscaleIPs: '100.64.0.1', Online: true } }))).toBeNull();
+    expect(
+      parseTailscaleSelf(
+        JSON.stringify({ Self: { DNSName: 'x', TailscaleIPs: '100.64.0.1', Online: true } }),
+      ),
+    ).toBeNull();
   });
 
   it('recognizes only a serve entry that forwards the requested TCP port', () => {
-    expect(serveForwardsPort(JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:4849' } } }), 4849)).toBe(true);
-    expect(serveForwardsPort(JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:9999' } } }), 4849)).toBe(false);
+    expect(
+      serveForwardsPort(
+        JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:4849' } } }),
+        4849,
+      ),
+    ).toBe(true);
+    expect(
+      serveForwardsPort(
+        JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:9999' } } }),
+        4849,
+      ),
+    ).toBe(false);
     expect(serveForwardsPort(JSON.stringify({ TCP: { '4849': {} } }), 4849)).toBe(false);
     expect(serveForwardsPort('{}', 4849)).toBe(false);
   });
@@ -53,14 +67,20 @@ describe('Tailscale inspection primitives (ADR 385)', () => {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
     });
-    await expect(probeUpgradeHost({ hostname: '127.0.0.1', port: denied.port }, 'daemon.tailnet.ts.net')).resolves.toBe('rejected');
+    await expect(
+      probeUpgradeHost({ hostname: '127.0.0.1', port: denied.port }, 'daemon.tailnet.ts.net'),
+    ).resolves.toBe('rejected');
     await new Promise<void>((resolve) => denied.server.close(() => resolve()));
 
     const allowed = await listen((socket) => {
-      socket.write('HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n');
+      socket.write(
+        'HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n',
+      );
       socket.destroy();
     });
-    await expect(probeUpgradeHost({ hostname: '127.0.0.1', port: allowed.port }, 'daemon.tailnet.ts.net')).resolves.toBe('allowed');
+    await expect(
+      probeUpgradeHost({ hostname: '127.0.0.1', port: allowed.port }, 'daemon.tailnet.ts.net'),
+    ).resolves.toBe('allowed');
     await new Promise<void>((resolve) => allowed.server.close(() => resolve()));
   });
 });
@@ -130,12 +150,22 @@ describe('Tailscale Team transport inspector (ADR 385)', () => {
     });
     const checks = byKey(await inspectTailscaleTransport(deps));
     expect(checks['tailscale-installed']?.state).toBe('fail');
-    expect(Object.values(checks).slice(1).every((check) => check.state === 'skip')).toBe(true);
+    expect(
+      Object.values(checks)
+        .slice(1)
+        .every((check) => check.state === 'skip'),
+    ).toBe(true);
     expect(calls).toEqual([['tailscale', ['version']]]);
   });
 
   it.each([
-    ['tailnet down', JSON.stringify({ BackendState: 'Stopped', Self: { DNSName: 'daemon.ts.net.', TailscaleIPs: ['100.64.0.10'], Online: false } })],
+    [
+      'tailnet down',
+      JSON.stringify({
+        BackendState: 'Stopped',
+        Self: { DNSName: 'daemon.ts.net.', TailscaleIPs: ['100.64.0.10'], Online: false },
+      }),
+    ],
     ['malformed status', '{"Self":{"DNSName":7}}'],
   ])('fails %s and skips its dependants', async (_name, statusBody) => {
     const base = doctorDeps();
@@ -163,7 +193,11 @@ describe('Tailscale Team transport inspector (ADR 385)', () => {
     const exec = base.deps.exec;
     base.deps.exec = (cmd, args, opts) =>
       args[0] === 'serve'
-        ? { code: 0, stdout: JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:4849' } } }), stderr: '' }
+        ? {
+            code: 0,
+            stdout: JSON.stringify({ TCP: { '4849': { TCPForward: '127.0.0.1:4849' } } }),
+            stderr: '',
+          }
         : exec(cmd, args, opts);
     const checks = byKey(await inspectTailscaleTransport(base.deps));
     expect(checks['tailscale-serve']?.state).toBe('fail');
@@ -184,7 +218,11 @@ describe('Tailscale Team transport inspector (ADR 385)', () => {
   });
 
   it('fails an unreachable tailnet HTTP path and skips the WebSocket path', async () => {
-    const { deps } = doctorDeps({ fetch: async () => { throw new Error('unreachable'); } });
+    const { deps } = doctorDeps({
+      fetch: async () => {
+        throw new Error('unreachable');
+      },
+    });
     const checks = byKey(await inspectTailscaleTransport(deps));
     expect(checks['daemon-http']?.state).toBe('fail');
     expect(checks['daemon-websocket']?.state).toBe('skip');
@@ -192,12 +230,20 @@ describe('Tailscale Team transport inspector (ADR 385)', () => {
 
   it('fails a non-success HTTP response and a separately unreachable tailnet WebSocket', async () => {
     const badHttp = doctorDeps({ fetch: async () => new Response('', { status: 503 }) });
-    expect((await inspectTailscaleTransport(badHttp.deps)).find((check) => check.key === 'daemon-http')?.state).toBe('fail');
+    expect(
+      (await inspectTailscaleTransport(badHttp.deps)).find((check) => check.key === 'daemon-http')
+        ?.state,
+    ).toBe('fail');
 
     const badWs = doctorDeps({
-      probeUpgrade: async (origin) => origin.hostname === 'daemon.tailnet.ts.net' ? 'unreachable' : 'allowed',
+      probeUpgrade: async (origin) =>
+        origin.hostname === 'daemon.tailnet.ts.net' ? 'unreachable' : 'allowed',
     });
-    expect((await inspectTailscaleTransport(badWs.deps)).find((check) => check.key === 'daemon-websocket')?.state).toBe('fail');
+    expect(
+      (await inspectTailscaleTransport(badWs.deps)).find(
+        (check) => check.key === 'daemon-websocket',
+      )?.state,
+    ).toBe('fail');
   });
 
   it('fails IPv6-only self state with explicit guidance', async () => {
@@ -205,7 +251,18 @@ describe('Tailscale Team transport inspector (ADR 385)', () => {
     const exec = base.deps.exec;
     base.deps.exec = (cmd, args, opts) =>
       args[0] === 'status'
-        ? { code: 0, stdout: JSON.stringify({ BackendState: 'Running', Self: { DNSName: 'daemon.ts.net.', TailscaleIPs: ['fd7a:115c:a1e0::1'], Online: true } }), stderr: '' }
+        ? {
+            code: 0,
+            stdout: JSON.stringify({
+              BackendState: 'Running',
+              Self: {
+                DNSName: 'daemon.ts.net.',
+                TailscaleIPs: ['fd7a:115c:a1e0::1'],
+                Online: true,
+              },
+            }),
+            stderr: '',
+          }
         : exec(cmd, args, opts);
     const checks = byKey(await inspectTailscaleTransport(base.deps));
     expect(checks['tailnet-up']?.state).toBe('fail');

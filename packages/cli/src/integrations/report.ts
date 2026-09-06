@@ -65,7 +65,8 @@ function tailscaleHeading(section: IntegrationSection): string {
 
 function apertureHeading(section: IntegrationSection): string {
   if (section.posture === 'ready') return 'APERTURE MODEL ENFORCEMENT — off (configuration ready)';
-  if (section.posture === 'blocked') return 'APERTURE MODEL ENFORCEMENT — blocked (configuration not ready)';
+  if (section.posture === 'blocked')
+    return 'APERTURE MODEL ENFORCEMENT — blocked (configuration not ready)';
   return 'APERTURE MODEL ENFORCEMENT — off';
 }
 
@@ -78,6 +79,9 @@ export function renderIntegrationReport(report: IntegrationDoctorReport): string
     theme.accent(apertureHeading(report.aperture)),
     ...report.aperture.checks.map(renderCheck),
   ];
-  const limits = [theme.accent('LIMITS'), ...report.limits.map((limit) => `${theme.meta(sym.dot)} ${limit}`)];
+  const limits = [
+    theme.accent('LIMITS'),
+    ...report.limits.map((limit) => `${theme.meta(sym.dot)} ${limit}`),
+  ];
   return ['integration doctor', '', ...tailscale, '', ...aperture, '', ...limits].join('\n');
 }

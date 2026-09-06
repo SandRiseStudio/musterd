@@ -44,19 +44,55 @@ describe('integration vendor schemas (ADR 385)', () => {
   });
 
   it('rejects wrong types at every vendor field the inspectors read', () => {
-    expect(TailscaleStatusSchema.safeParse({ Self: { DNSName: 1, TailscaleIPs: [], Online: true } }).success).toBe(false);
-    expect(TailscaleStatusSchema.safeParse({ Self: { DNSName: 'x', TailscaleIPs: '100.64.0.1', Online: true } }).success).toBe(false);
-    expect(TailscaleStatusSchema.safeParse({ Self: { DNSName: 'x', TailscaleIPs: [], Online: 'yes' } }).success).toBe(false);
-    expect(TailscaleServeStatusSchema.safeParse({ TCP: { '4849': { TCPForward: 4849 } } }).success).toBe(false);
+    expect(
+      TailscaleStatusSchema.safeParse({ Self: { DNSName: 1, TailscaleIPs: [], Online: true } })
+        .success,
+    ).toBe(false);
+    expect(
+      TailscaleStatusSchema.safeParse({
+        Self: { DNSName: 'x', TailscaleIPs: '100.64.0.1', Online: true },
+      }).success,
+    ).toBe(false);
+    expect(
+      TailscaleStatusSchema.safeParse({ Self: { DNSName: 'x', TailscaleIPs: [], Online: 'yes' } })
+        .success,
+    ).toBe(false);
+    expect(
+      TailscaleServeStatusSchema.safeParse({ TCP: { '4849': { TCPForward: 4849 } } }).success,
+    ).toBe(false);
     expect(ApertureConfigResponseSchema.safeParse({ config: 1, hash: 'abc' }).success).toBe(false);
-    expect(ApertureConfigSchema.safeParse({ ...apertureConfig, providers: { anthropic: { baseurl: 1, models: [] } } }).success).toBe(false);
-    expect(ApertureConfigSchema.safeParse({ ...apertureConfig, grants: [{ src: '*', app: {} }] }).success).toBe(false);
-    expect(ApertureConfigSchema.safeParse({ ...apertureConfig, quotas: { budget: { capacity: 1, rate: '$1/day', on_exceed: 'reject' } } }).success).toBe(false);
-    expect(ApertureConfigSchema.safeParse({ ...apertureConfig, database: { retention: { duration: 0, purge: [], require_export: false } } }).success).toBe(false);
+    expect(
+      ApertureConfigSchema.safeParse({
+        ...apertureConfig,
+        providers: { anthropic: { baseurl: 1, models: [] } },
+      }).success,
+    ).toBe(false);
+    expect(
+      ApertureConfigSchema.safeParse({ ...apertureConfig, grants: [{ src: '*', app: {} }] })
+        .success,
+    ).toBe(false);
+    expect(
+      ApertureConfigSchema.safeParse({
+        ...apertureConfig,
+        quotas: { budget: { capacity: 1, rate: '$1/day', on_exceed: 'reject' } },
+      }).success,
+    ).toBe(false);
+    expect(
+      ApertureConfigSchema.safeParse({
+        ...apertureConfig,
+        database: { retention: { duration: 0, purge: [], require_export: false } },
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts an Aperture API wrapper and its parsed HuJSON configuration without modeling secrets', () => {
-    expect(ApertureConfigResponseSchema.parse({ config: JSON.stringify(apertureConfig), hash: '8d14c921aabbccdd', ignored: true })).toMatchObject({
+    expect(
+      ApertureConfigResponseSchema.parse({
+        config: JSON.stringify(apertureConfig),
+        hash: '8d14c921aabbccdd',
+        ignored: true,
+      }),
+    ).toMatchObject({
       config: JSON.stringify(apertureConfig),
       hash: '8d14c921aabbccdd',
     });
@@ -72,7 +108,14 @@ describe('IntegrationDoctorReportSchema', () => {
     version: 1,
     ok: true,
     observed_at: 1,
-    tailscale: { integration: 'tailscale', selected: true, posture: 'verified', checks: [{ key: 'tailscale-installed', label: 'tailscale installed', state: 'ok', detail: '1.80.0' }] },
+    tailscale: {
+      integration: 'tailscale',
+      selected: true,
+      posture: 'verified',
+      checks: [
+        { key: 'tailscale-installed', label: 'tailscale installed', state: 'ok', detail: '1.80.0' },
+      ],
+    },
     aperture: { integration: 'aperture', selected: false, posture: 'off', checks: [] },
     limits: [
       'configuration and reachability evidence only; Aperture enforcement remains off',
@@ -81,8 +124,18 @@ describe('IntegrationDoctorReportSchema', () => {
   };
 
   it('rejects extra report keys and a success claim that hides a selected failure', () => {
-    expect(IntegrationDoctorReportSchema.safeParse({ ...report, secret: 'nope' }).success).toBe(false);
-    expect(IntegrationDoctorReportSchema.safeParse({ ...report, tailscale: { ...report.tailscale, checks: [{ key: 'tailnet-up', label: 'tailnet up', state: 'fail' }] } }).success).toBe(false);
+    expect(IntegrationDoctorReportSchema.safeParse({ ...report, secret: 'nope' }).success).toBe(
+      false,
+    );
+    expect(
+      IntegrationDoctorReportSchema.safeParse({
+        ...report,
+        tailscale: {
+          ...report.tailscale,
+          checks: [{ key: 'tailnet-up', label: 'tailnet up', state: 'fail' }],
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it('round-trips a report containing no credential-like or body fields', () => {
