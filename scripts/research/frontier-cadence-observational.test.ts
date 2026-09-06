@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  median,
-  quantile,
-  summarise,
-  type Pair,
-} from './frontier-cadence-observational.ts';
+import { median, quantile, summarise, type Pair } from './frontier-cadence-observational.ts';
 
 const p = (model: string, seconds: number, answerer = 's1'): Pair => ({ model, seconds, answerer });
 
