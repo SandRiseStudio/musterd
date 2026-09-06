@@ -123,7 +123,7 @@ first.
   see [model attestation](model-attestation.md), which also records that nick switches models
   mid-session, so a seat's model is not constant even within one session. Read before computing any
   per-model aggregate over this corpus.
-- **Frontier cadence manifest** — protocol written, zero runs recorded.
+- **Frontier cadence manifest** — ~~protocol written, zero runs recorded.~~ DEFERRED 2026-09-05 with a restart condition (finding 011): the first *readable* result costs TWO runs, because the manifest's own output is a diff against a prior run and there is none. An observational floor exists meanwhile — `scripts/research/frontier-cadence-observational.ts`, 380 answered-ask pairs over 9 models — which is **not** the leaderboard and carries four stated confounds.
 - **Cookoff D-res and cell E** — defined, spend not authorised. A/B/C2/C3/D already ran (finding
   006 flagship); the wiki line that listed them as unauthorised was stale as of 2026-07-20.
 - **ADR 250's weekly reads** (asks-to-founder per merged PR; repeat wakes with unchanged reason;
