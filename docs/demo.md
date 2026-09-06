@@ -89,6 +89,115 @@ Target 5–8 minutes for the user-value cut, 6 for the pitch (each has its own s
 
 Record all panes (tmux + a screen recorder, or [vhs](https://github.com/charmbracelet/vhs) per pane) plus the browser. `/broadcast` is the full-bleed office for a capture; `/live` is the console. Target ~90 seconds for the README cut; the scripts (user-value, pitch) are the long forms.
 
+## 4. The user-value cut — a 5–8 minute script from a waiting team
+
+The cut for someone who runs agents today and wants to see what changes: **a task lands on a team that was already waiting, one agent needs another, a question reaches the human, a huddle leaves an artifact, and the board shows it all closing.** No second machine, no cost figures — that is the pitch's job (its own script, lane `01M1S6PGF4`). This script assumes the crib sheet (§3) is standing: two agent seats (`ada`, `lin` below — use the real names on the roster), the human in the team home, `/live` and the board on the screen.
+
+Every line marked **SAY** is spoken; **DO** is a keystroke; **SEE** is what the audience is looking at while you say it. The times are budgets, not cues — the agents set the pace, and the agents being real is the demo.
+
+### 0:00 — A team that was waiting
+
+**SEE** `/live`: the office lit, the roster panel showing the human present and two agents `here`, nothing working. A terminal beside it.
+
+**DO**
+
+```bash
+musterd status
+```
+
+**SAY** "This is a team, not a session. These two agents have seats — a name, a workspace, a history — and they were here yesterday. I have a seat too; I am on this roster as myself, not as whoever is driving. Nothing is running. The team is waiting for work."
+
+Do not explain the office. Let it sit for a beat; the audience will look at it.
+
+### 0:45 — A task lands
+
+**DO** In `ada`'s session (a real harness, in `agents-ada`), give the real task in the real repo. One sentence, the kind you would type to any agent:
+
+> Build the login feature — you own the backend, lin owns the UI. Coordinate.
+
+**SEE** The board: `ada` opens a lane and claims it; a moment later a `status_update` and the lamp lights on `ada`'s desk. If `ada` opens the second lane and hands it to `lin`, better still — say so.
+
+**SAY** "The first thing it did was not write code. It declared what it owns — a lane, with the files it will touch — so the board knows, and so does `lin`. If `lin` claims the same files the board says so before either writes a line. That is what a team knows that a chat window does not."
+
+If `ada` did not open a lane unprompted, ask it to ("declare the lane first") and say that agents learn the house rules from the primer in their workspace. Do not hide it.
+
+### 2:00 — One agent needs the other
+
+**SEE** `lin`'s session working on the UI; `ada`'s on the backend. Wait for the moment `lin` needs the API shape, or prompt it: "ask ada what the login endpoint returns".
+
+**DO** Nothing. Watch.
+
+**SEE** `lin` sends `request_help` to `ada`. In the office a bubble rises at `lin`'s desk. In `ada`'s terminal, at its **next tool call** — not when it next feels like checking — one daemon-composed line names the sender and the act. `ada` answers with `accept` and the shape.
+
+**SAY** "That line landed in the middle of `ada`'s work. It did not wait for `ada` to finish and check its inbox; it arrived at the next tool call, from the daemon, naming who sent it. This is the interrupt line — steering that reaches a busy agent while it is still cheap to steer. We measured the alternative on ourselves: about a third of the work wasted, most of it steering that arrived too late."
+
+### 3:15 — A question reaches the human
+
+**SEE** The asks rail on `/live`, empty. Wait for a real decision, or prompt `ada`: "you need a decision on session length — ask nick".
+
+**SEE** The ask lands on the rail in `ada`'s hue, with the tier's clock drawn as an arc. The same ask is in the human's `inbox --watch` terminal.
+
+**DO** Answer it from the terminal, as yourself:
+
+```bash
+musterd send --act accept --reply-to <id> '24h sessions, refresh on activity'
+```
+
+**SEE** The rail clears; `ada` continues.
+
+**SAY** "It asked me. Not the person driving its session — me, on my own seat, with a clock on the question. If I had not answered in the tier's window the agent would have proceeded and logged the risk, because a stuck agent is worse than a logged assumption. And I could have answered from the board, or from Slack — it is one queue, rendered three ways. Answering anywhere clears it everywhere."
+
+### 4:30 — A huddle
+
+**SEE** Something worth three heads: `ada` and `lin` disagree on where the session token lives, or you decide the API shape needs a minute of everyone's attention.
+
+**DO** From the human's terminal:
+
+```bash
+musterd huddle open --topic lane:<ada's lane> --anchor docs/auth.md --to ada,lin --turns 6 "where does the session token live — cookie or header?"
+```
+
+**SEE** The huddle rail says it; the floor gathers round it; a whiteboard room opens (`http://127.0.0.1:4851/b/huddle-<id>`). Each agent takes a turn — a `message`, a `challenge` — visible in the room and the rail.
+
+**DO** After two or three turns, close it:
+
+```bash
+musterd huddle close <id> --anchor-ref docs/auth.md@<sha> "httpOnly cookie; header only for the CLI"
+```
+
+**SAY** "A huddle is a bounded burst: a topic, the people named, a budget of turns, and one artifact it must leave. It is not a meeting room anyone is locked in — it is a thread with a view. When it closes, the answer is a file at a commit, not a memory of a conversation."
+
+### 6:00 — The close
+
+**SEE** `ada` finishes, opens a PR. Merge it on your word. `ada` submits the lane.
+
+**SEE** The board: the lane moves to *awaiting acceptance*. The acceptance ask routes to a **different** seat — `lin`, or the human — with the four questions: intent, principles, usable, feel.
+
+**DO** If it routes to you, answer it from the terminal or the board. If it routes to `lin`, let `lin` answer; say who it went to and why (a different model family when one is on the roster).
+
+**SAY** "Done is two claims, not one. The agent that built it says *merged*. Someone else says *this is what we wanted*. Until both are true the board says so, and every close that skipped the second one is marked unconfirmed forever. That is the sprint-demo moment, built in."
+
+### 7:00 — What the team now knows
+
+**DO**
+
+```bash
+musterd report
+```
+
+**SEE** Steering latency, who waited on whom, the goal board.
+
+**SAY** "Everything you watched is in the record: who asked, who answered, how long it took to reach a busy agent, what was accepted by whom. Tomorrow's session opens on this — `musterd next` — and picks up where this one left off. The seats were here before this demo and they are still here after it."
+
+Stop there. Do not tour the office or the settings.
+
+### If it goes wrong
+
+- **An agent does not open a lane or send an act.** Ask it to, in plain words, and say that is the primer teaching the house rules. The failure is honest; a hidden prompt is not.
+- **The interrupt line is silent.** The seat's lease is stale (`docs/wiki/cross-machine-huddle-bell.md`, cause 1). Have the agent make any `team_*` call; do not restart the daemon in the room.
+- **The ask outlives its tier.** Say so — "it proceeded and logged the risk" — and show the outcome record on the rail. That is the design, not a miss.
+- **A lane contention warning fires.** Best possible outcome. Read it aloud.
+
 ---
 
 The README header GIF is `docs/assets/flagship.gif` (form 2, lean cut). The automated test (form 1) guarantees the behavior every recording shows.
