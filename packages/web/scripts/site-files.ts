@@ -16,7 +16,7 @@
  * These builders are pure so `site-files.test.ts` can pin them; `vite.config.ts` emits the results
  * into the build, and `stage-allowlist.mjs` decides they may ship.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DOCS_MANIFEST, type DocEntry } from '../content/docs.manifest';
@@ -35,7 +35,11 @@ export interface SiteUrl {
 
 /** The blog's post slugs and dates, from the filenames that are also the pages' sort key. */
 export function blogEntries(dir = join(pkgRoot, 'content', 'blog')): { slug: string; date: string }[] {
-  return readdirSync(dir)
+  // withFileTypes:false, and MISSING IS EMPTY: git does not track an empty directory, so a clone of
+  // a tree with no published posts has no content/blog at all. Throwing there would make "the blog
+  // is empty" a build failure on a fresh checkout while passing on any machine that once had a post
+  // in it — which is exactly how CI caught this and no local run did.
+  return (existsSync(dir) ? readdirSync(dir) : [])
     .filter((n) => n.endsWith('.md'))
     .map((name) => {
       const m = /^(\d{4}-\d{2}-\d{2})-(.+)\.md$/.exec(name);

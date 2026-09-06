@@ -107,7 +107,9 @@ function main() {
   });
 
   const blogDir = join(pkgRoot, 'content', 'blog');
-  const blogPosts = readdirSync(blogDir)
+  // Missing is empty — see blogEntries() in site-files.ts: git does not track an empty directory,
+  // so a tree with no published posts has no content/blog on a fresh clone.
+  const blogPosts = (existsSync(blogDir) ? readdirSync(blogDir) : [])
     .filter((n) => n.endsWith('.md'))
     .map((name) => {
       const parsed = parsePostFilename(name);

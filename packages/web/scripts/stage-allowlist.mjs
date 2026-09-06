@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 
 /**
  * The musterd.io deploy allowlist (ADR 302). Everything the public site needs, and nothing else —
@@ -13,9 +13,11 @@ import { readdirSync } from 'node:fs';
  * the moment `content/blog` has a file in it. Deciding it here rather than in the build keeps the
  * rule where the other deploy decisions live.
  */
+const BLOG_DIR = new URL('../content/blog', import.meta.url);
+// Missing is empty: git does not track an empty directory, so a clone of a tree with no published
+// posts has no content/blog at all.
 const BLOG_HAS_POSTS =
-  readdirSync(new URL('../content/blog', import.meta.url)).filter((n) => n.endsWith('.md')).length >
-  0;
+  existsSync(BLOG_DIR) && readdirSync(BLOG_DIR).some((n) => n.endsWith('.md'));
 
 export const PUBLIC_ALLOW = [
   'index.html',

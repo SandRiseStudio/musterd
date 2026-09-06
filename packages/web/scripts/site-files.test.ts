@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error plain .mjs data module
 import { PUBLIC_ALLOW } from './stage-allowlist.mjs';
@@ -284,6 +287,28 @@ const FIXTURE_MIRRORS = [
   { path: '/blog/newer', title: 'Newer', description: 'n', markdown: '', date: '2026-08-21' },
   { path: '/blog/older', title: 'Older', description: 'o', markdown: '', date: '2026-01-02' },
 ];
+
+/*
+ * The case CI caught and no local run could: git does not track an empty directory, so the moment
+ * the last post moves out of content/blog the directory stops existing on a fresh clone — while
+ * every machine that once had a post in it still has the (now empty) directory and passes. Every
+ * reader of that directory must treat missing and empty as the same state.
+ */
+describe('a content directory that does not exist', () => {
+  const missing = join(tmpdir(), 'musterd-no-such-blog-dir');
+
+  it('reads as no posts rather than throwing', () => {
+    expect(existsSync(missing)).toBe(false);
+    expect(blogEntries(missing)).toEqual([]);
+    expect(postMirrors(missing)).toEqual([]);
+  });
+
+  it('withholds the whole section, exactly as an empty directory does', () => {
+    const urls = siteUrls(docs, blogEntries(missing)).map((u) => u.path);
+    expect(urls).not.toContain('/blog');
+    expect(llmsTxt(docs, blogEntries(missing))).not.toContain(`${SITE_ORIGIN}/blog`);
+  });
+});
 
 describe('blog rss', () => {
   it('is RSS 2.0 with an absolute self link', () => {
