@@ -79,6 +79,30 @@ The argument for shipping it on is sound and was not refuted: a huddle open is a
 
 Falsify: `pnpm --filter @musterd/server exec vitest run src/store/interrupts.test.ts src/store/residency.test.ts` — the wake-rail cases were verified red with the rail wiring disabled.
 
+## Bell check, 2026-09-05 — the daemon rings, the seats are deaf for three separate reasons
+
+Run before schmidt's cross-harness huddle, with every seat hand-started on one laptop (no wakes, convene off). Two probe huddles: one naming schmidt (cursor), wanderer (grok), ghost (opencode), gptbot (codex); a control naming dolly, miley, ryder, stanley (claude-code). Each was asked how it learned of turn 1: (a) injected at a tool boundary, (b) its own inbox check, (c) a human nudge. Every seat that answered said **(c)**. The audit and the daemon log say why, and it is not one reason.
+
+| seat · harness | daemon raised a huddle turn to its probe? | why it was silent |
+| --- | --- | --- |
+| ryder · claude-code | **yes**, turn 1 at +19 s (`interrupt.raised`, tier huddle) | reported no bell anyway — unreconciled; either the hook line reached the context unnoticed or another process took the probe |
+| stanley · claude-code | yes, three later turns | at turn 1 his line was headlined by an acceptance ask with 6 pending — a huddle turn behind an obligation is a count, not a sentence |
+| dolly · claude-code | no, until `/mcp reload` | probe ran and was **401** — `musterd inbox --interrupt-check` printed #1317's "interrupt line is deaf — session lease is dead" line; after the adapter re-joined, the same command went silent and the next turn raised (17:56:55) |
+| wanderer · grok | yes, but only after his own inbox check (17:52:13, 17:52:49) | `.grok/hooks/musterd.json` runs the probe on PreToolUse; dead lease until the MCP call healed it |
+| schmidt · cursor | never | `.cursor/hooks.json` runs `session observe --stdin` with **no `--interrupt`** — ADR 369's probe exists in the CLI and is not wired in the worktree |
+| gptbot · codex | never | `codex-hook post-tool-use` does not call the probe at all; also idle at the prompt (no boundaries) |
+| ghost · opencode | never | no musterd plugin under `.opencode/` — nothing runs a probe |
+
+Daemon log, 17:45–17:57: **102 probes, 76 × 200, 26 × 401.** The log does not name the seat on a 401 (the refusal happens before the member resolves), so a deaf seat is identifiable only from its own side — which is exactly what #1317's audible line is for (falsify: `grep interrupt-check ~/.musterd/daemon.log | grep 401` and find a member name; there is none).
+
+**What this means for running a huddle today.** The transport is fine — every turn landed in every named inbox instantly. The bell is a per-seat property with three independent failure modes, and each has a check a human can run in the seat before the huddle opens:
+
+1. **Lease dead** (any harness): `musterd inbox --interrupt-check` in the worktree prints the deaf line → make one `team_*` MCP call (or `/mcp reload`); a CLI `musterd claim` does not heal it. Every autorefresh bounce re-creates this.
+2. **Probe not wired** (cursor: hook without `--interrupt`; codex: hook without a probe; opencode: no plugin): the seat cannot hear anything at a boundary until that harness's adapter writes it. Nudge by hand between turns; the MCP room read then delivers the whole room.
+3. **Idle at the prompt** (any harness): no tool boundaries, no probe. Nudge, or the seat runs a blocking `musterd inbox --wait`.
+
+And one for the daemon: the line names one act. When an acceptance ask is pending, a huddle turn is only a count. Whether the huddle deserves the headline over an obligation is an ADR 225 question, not a bug.
+
 ## Where the rules live
 
 | Rule | Where |
