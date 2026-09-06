@@ -1195,7 +1195,13 @@ export class HttpClient {
       grant?: string;
       surface: Surface;
       workspace?: string;
-      workspace_key?: string;
+      /** The workspace's stable identity (work tree root), in the CLI's camelCase — `buildClaimFrame`
+       *  is the one place it becomes the wire's `workspace_key`. Named to match that builder on
+       *  purpose: this input used to be `workspace_key`, and the rename it needed on the way through
+       *  was made by hand inside a conditional spread, where TypeScript's excess-property check
+       *  cannot see it. The field was silently dropped and typecheck stayed green. One name until
+       *  the wire, so a typo is a type error. */
+      workspaceKey?: string;
     },
   ): Promise<ClaimOutcome> {
     // Validate the frame shape against the protocol schema (ADR 078); send the HTTP body Cleo's
@@ -1222,7 +1228,7 @@ export class HttpClient {
       target: input.target,
       surface: input.surface,
       ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
-      ...(input.workspace_key !== undefined ? { workspace_key: input.workspace_key } : {}),
+      ...(input.workspaceKey !== undefined ? { workspaceKey: input.workspaceKey } : {}),
       ...(input.grant !== undefined ? { grant: input.grant } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(cliBuild() !== undefined ? { build: cliBuild()! } : {}),

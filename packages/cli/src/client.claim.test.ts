@@ -22,6 +22,57 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+/**
+ * Lane 01M1JQYYAC gave displacement an identity to compare — `workspace_key`, the work-tree root —
+ * precisely because the `workspace` LABEL is branch-qualified and is renamed by a branch switch or
+ * a detached HEAD under the very session it identifies. `claim --detach` passes it
+ * (`commands/claim.ts`, whose comment says the seat would otherwise "evict this folder's own live
+ * session on every re-claim") — and it never reached the wire.
+ *
+ * `HttpClient.claim` forwarded it into `buildClaimFrame` as `workspace_key`, but that builder's
+ * input field is `workspaceKey`; it is the thing that converts camelCase to the wire's snake_case.
+ * The wrong-named property sits inside a conditional spread, which is exactly the shape TypeScript's
+ * excess-property check cannot see, so the mistake typechecked and the field was dropped in silence.
+ * The server then falls back to label equality (`ws.ts` sameWorkspace / `http.ts`) — the pre-ADR-368
+ * behaviour the key existed to replace.
+ */
+describe('HttpClient.claim — the workspace identity reaches the wire (ADR 368, lane 01M1JQYYAC)', () => {
+  it('sends workspace_key in the body, beside the label', async () => {
+    const fetchFn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', {
+      ...input,
+      workspace: 'repo@feature-branch',
+      workspaceKey: '/Users/x/repo',
+    });
+    const body = JSON.parse(fetchFn.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body['workspace']).toBe('repo@feature-branch');
+    expect(body['workspace_key']).toBe('/Users/x/repo');
+  });
+
+  it('omits it when the caller has none — an unbound folder keeps label-only comparison', async () => {
+    const fetchFn = stubFetch(200, {
+      type: 'occupied',
+      seat,
+      presence_id: '01J',
+      server_time: 7,
+      memory: null,
+    });
+    await new HttpClient({ server: 'http://x' }).claim('dawn', {
+      ...input,
+      workspace: 'repo@main',
+    });
+    const body = JSON.parse(fetchFn.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body['workspace']).toBe('repo@main');
+    expect('workspace_key' in body).toBe(false);
+  });
+});
+
 describe('HttpClient.claim (SPEC A.7, ADR 075/077) — status dispatch', () => {
   it('200 → occupied outcome', async () => {
     stubFetch(200, { type: 'occupied', seat, presence_id: '01J', server_time: 7, memory: null });
