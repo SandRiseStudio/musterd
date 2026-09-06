@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { siteUrls } from '../../scripts/site-files';
+import { blogEntries, siteUrls } from '../../scripts/site-files';
 
 const read = (f: string) => readFileSync(fileURLToPath(new URL(f, import.meta.url)), 'utf8');
 
@@ -66,14 +66,17 @@ describe('structured data and canonical coverage', () => {
   const files = [...new Set(siteUrls().map((u) => routeFileFor(u.path)))];
 
   it('covers every url the sitemap advertises', () => {
-    // Guards the map itself: a new public section with no route file must fail loudly here.
-    expect(files.sort()).toEqual([
-      'blog.$slug.tsx',
-      'blog.index.tsx',
-      'docs.$slug.tsx',
-      'docs.index.tsx',
-      'index.tsx',
-    ]);
+    // Guards the map itself: a new public section with no route file must fail loudly here. The
+    // blog's two route files are present only while a post is — the section leaves the sitemap
+    // whole when content/blog is empty, rather than advertising an index with nothing in it.
+    expect(files.sort()).toEqual(
+      [
+        ...(blogEntries().length > 0 ? ['blog.$slug.tsx', 'blog.index.tsx'] : []),
+        'docs.$slug.tsx',
+        'docs.index.tsx',
+        'index.tsx',
+      ].sort(),
+    );
   });
 
   for (const f of ['index.tsx', ...CONTENT_ROUTES]) {

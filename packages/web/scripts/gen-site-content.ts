@@ -133,6 +133,9 @@ function main() {
       'export interface BlogPost extends SitePage { date: string }',
       `export const docsPages: (SitePage & { source: string })[] = ${JSON.stringify(docsPages, null, 2)};`,
       `export const blogPosts: BlogPost[] = ${JSON.stringify(blogPosts, null, 2)};`,
+      // A scalar, not the content data: the landing chunk and the nav need to know whether the blog
+      // section exists without importing every post's HTML to find out.
+      `export const hasBlog = ${blogPosts.length > 0};`,
       '',
     ].join('\n'),
   );

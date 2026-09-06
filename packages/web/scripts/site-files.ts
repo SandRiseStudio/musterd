@@ -58,7 +58,11 @@ export function siteUrls(
     { path: '/' },
     { path: '/docs' },
     ...docs.map((d) => ({ path: `/docs/${d.slug}` })),
-    { path: '/blog' },
+    // The blog section exists only while it has something in it. An index advertising nothing is
+    // worse than no index: it is a public promise of content, indexed as an empty page and unfurled
+    // as one. With no posts, /blog and the feed leave the sitemap, the nav and llms.txt together —
+    // and all of it comes back the moment a post is added, with no second decision to remember.
+    ...(posts.length > 0 ? [{ path: '/blog' } as SiteUrl] : []),
     // A post's publication date is the one freshness fact we can state truthfully; the other pages
     // change with the build, and a lastmod that is really "whenever we last deployed" teaches a
     // crawler to ignore the field. Omitted is better than invented.
@@ -186,9 +190,7 @@ Local-first, and no account.
 
 ## Pages
 
-${docLines.join('\n')}
-- ${SITE_ORIGIN}/blog
-${postLines.join('\n')}
+${[...docLines, ...(posts.length > 0 ? [`- ${SITE_ORIGIN}/blog`, ...postLines] : [])].join('\n')}
 
 ## For agents
 
@@ -196,8 +198,9 @@ Every page above is also served as markdown at the same URL with \`.md\` appende
 the HTML was rendered from, with no nav, no styling and no script. Prefer it.
 
 - ${SITE_ORIGIN}/docs/spec.md — one page, clean.
-- ${SITE_ORIGIN}/llms-full.txt — every document above, whole, in one fetch.
-- ${SITE_ORIGIN}/blog/rss.xml — the blog as a feed.
+- ${SITE_ORIGIN}/llms-full.txt — every document above, whole, in one fetch.${
+    posts.length > 0 ? `\n- ${SITE_ORIGIN}/blog/rss.xml — the blog as a feed.` : ''
+  }
 
 To describe or cite musterd accurately:
 
@@ -409,7 +412,8 @@ export function siteFiles(): Record<string, string> {
     'sitemap.xml': sitemapXml(siteUrls(), mirrors),
     'llms.txt': llmsTxt(),
     'llms-full.txt': llmsFullTxt(),
-    'blog/rss.xml': rssXml(),
+    // No feed while there are no posts — an empty channel is a subscription that never arrives.
+    ...(blogEntries().length > 0 ? { 'blog/rss.xml': rssXml() } : {}),
     // `/docs/spec` is a directory of prerendered HTML, so `/docs/spec.md` sits beside it rather
     // than inside it. stage-site.mjs copies the `docs` and `blog` directories whole, so both
     // mirrors ship with the pages they mirror and need no new allowlist entry.

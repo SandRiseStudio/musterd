@@ -1,10 +1,15 @@
 import { MusterdChip } from '../../brand/MusterdWord';
+import { hasBlog } from '../../content/generated/site-content';
 import './site.css';
 
-/** The public-site nav. Daemon-connected surfaces never appear here (ADR 302). */
+/**
+ * The public-site nav. Daemon-connected surfaces never appear here (ADR 302), and neither does a
+ * section with nothing in it — the Blog link appears only once a post exists, so the nav never
+ * sends a stranger to an empty page.
+ */
 export const NAV_LINKS = [
   { label: 'Docs', href: '/docs' },
-  { label: 'Blog', href: '/blog' },
+  ...(hasBlog ? [{ label: 'Blog', href: '/blog' }] : []),
   { label: 'GitHub', href: 'https://github.com/SandRiseStudio/musterd' },
 ];
 

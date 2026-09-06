@@ -1,14 +1,27 @@
+import { readdirSync } from 'node:fs';
+
 /**
  * The musterd.io deploy allowlist (ADR 302). Everything the public site needs, and nothing else —
  * adding an entry here is a deploy decision, not a build side effect. `stage-site.mjs` stages
  * exactly this set and refuses anything unexpected; `stage-site.test.ts` pins the two lists
  * disjoint.
  */
+/**
+ * `blog` is the one conditional entry. The route tree prerenders /blog whether or not a post
+ * exists, so withholding the directory at STAGE time is what actually keeps an empty section off
+ * the public origin — the index, the feed and every post path 404 together, and all of it returns
+ * the moment `content/blog` has a file in it. Deciding it here rather than in the build keeps the
+ * rule where the other deploy decisions live.
+ */
+const BLOG_HAS_POSTS =
+  readdirSync(new URL('../content/blog', import.meta.url)).filter((n) => n.endsWith('.md')).length >
+  0;
+
 export const PUBLIC_ALLOW = [
   'index.html',
   'assets',
   'docs',
-  'blog',
+  ...(BLOG_HAS_POSTS ? ['blog'] : []),
   // Crawler- and agent-facing text, generated into the build by the `musterd-site-files` plugin in
   // vite.config.ts (see scripts/site-files.ts). These are safe where the daemon routes are not, for
   // the same reason the rest of this list is: static text with no client to boot. `_headers` is read
