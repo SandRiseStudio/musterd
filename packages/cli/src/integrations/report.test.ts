@@ -1,8 +1,8 @@
 import type { IntegrationCheck } from '@musterd/protocol';
+import { IntegrationDoctorReportSchema } from '@musterd/protocol';
 import { describe, expect, it } from 'vitest';
 import { setColorEnabled } from '../render/theme.js';
 import { composeIntegrationReport, INTEGRATION_LIMITS, renderIntegrationReport } from './report.js';
-import { IntegrationDoctorReportSchema } from '@musterd/protocol';
 
 setColorEnabled(false);
 

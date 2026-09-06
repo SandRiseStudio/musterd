@@ -115,7 +115,7 @@ describe('musterd integration doctor (ADR 385)', () => {
     const result = await run(['doctor', '--tailscale', '--json']);
     const parsed = JSON.parse(result.text);
     expect(IntegrationDoctorReportSchema.parse(parsed)).toEqual(parsed);
-    expect(result.text).not.toMatch(/\x1b\[/);
+    expect(result.text).not.toContain('\u001b[');
     expect(result.text.trimEnd()).toBe(JSON.stringify(parsed));
   });
 

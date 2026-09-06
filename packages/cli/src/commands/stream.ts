@@ -35,8 +35,6 @@ import {
   VM_SIZE,
   type Check,
 } from '../broadcast/hosted.js';
-import { probeUpgradeHost, parseTailscaleSelf } from '../integrations/tailscale.js';
-import { realExec, type Exec } from '../process.js';
 import {
   FLAP_MAX,
   FLAP_WINDOW_MS,
@@ -47,6 +45,8 @@ import {
 import { HttpClient } from '../client.js';
 import { configPath, loadConfig, serverProvenance, type ServerProvenance } from '../config.js';
 import { CliError } from '../errors.js';
+import { probeUpgradeHost, parseTailscaleSelf } from '../integrations/tailscale.js';
+import { realExec, type Exec } from '../process.js';
 import { theme } from '../render/theme.js';
 
 const USAGE =

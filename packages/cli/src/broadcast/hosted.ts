@@ -18,14 +18,13 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { realExec, type Exec, type ExecResult } from '../process.js';
 import {
-  probeUpgradeHost,
   type TailnetSelf,
   type UpgradeVerdict,
   parseTailscaleSelf,
   serveForwardsPort,
 } from '../integrations/tailscale.js';
+import type { Exec } from '../process.js';
 
 /** The Fly app that hosts the stream. Overridable for a second environment. */
 export const DEFAULT_APP = 'musterd-broadcast';

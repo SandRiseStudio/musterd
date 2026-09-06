@@ -1,6 +1,12 @@
 import { createServer, type Server } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import {
+  parseTailscaleSelf,
+  probeUpgradeHost,
+  serveForwardsPort,
+} from '../integrations/tailscale.js';
+import type { Exec, ExecResult } from '../process.js';
+import {
   parsePushedDigest,
   parseSecrets,
   runChecks,
@@ -8,12 +14,6 @@ import {
   startedMachines,
   type Check,
 } from './hosted.js';
-import {
-  parseTailscaleSelf,
-  probeUpgradeHost,
-  serveForwardsPort,
-} from '../integrations/tailscale.js';
-import type { Exec, ExecResult } from '../process.js';
 
 const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
 const fail = (stderr = ''): ExecResult => ({ code: 1, stdout: '', stderr });
