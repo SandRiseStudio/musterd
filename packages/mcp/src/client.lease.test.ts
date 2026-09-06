@@ -42,16 +42,20 @@ const occupied = (session_lease: string) => ({
 async function serverThatRenews(): Promise<{
   client: MusterdClient;
   sendLease: (l: string) => void;
+  dropSocket: () => void;
 }> {
   const server = new WebSocketServer({ port: 0 });
   wss = server;
   await new Promise<void>((r) => server.on('listening', () => r()));
   let sock: import('ws').WebSocket | undefined;
+  let claims = 0;
   server.on('connection', (ws) => {
     sock = ws;
     ws.on('message', (raw) => {
       const f = JSON.parse(raw.toString()) as { type: string };
-      if (f.type === 'claim') ws.send(JSON.stringify(occupied('msls_first')));
+      // A re-claim on a fresh socket is a new Presence, so the daemon mints a NEW lease for it.
+      if (f.type === 'claim')
+        ws.send(JSON.stringify(occupied(++claims === 1 ? 'msls_first' : 'msls_after_bounce')));
     });
   });
   const { port } = server.address() as { port: number };
@@ -83,6 +87,7 @@ async function serverThatRenews(): Promise<{
       sock!.send(
         JSON.stringify({ type: 'lease', session_lease, expires_at: Date.now() + 300_000 }),
       ),
+    dropSocket: () => sock!.terminate(),
   };
 }
 
@@ -122,6 +127,26 @@ describe('the adapter adopts a renewed lease (ADR 347)', () => {
     expect((client as unknown as { config: { sessionLease?: string } }).config.sessionLease).toBe(
       'msls_renewed',
     );
+    client.close();
+  });
+
+  it('writes the lease a reconnect is occupied with — a bounce must not leave the CLI probe deaf', async () => {
+    // Measured 2026-09-06 (lane 01M1VGJWME): the autorefresh bounce reconnected every adapter
+    // within a second and the daemon minted each a fresh lease, but only the `lease` (renewal) frame
+    // reached binding.json. For the ~3 minutes until the first renewal every `musterd inbox
+    // --interrupt-check` hook presented the pre-boot lease and was refused as dead.
+    const { client, sendLease, dropSocket } = await serverThatRenews();
+    await client.join(3000);
+    sendLease('msls_before_bounce');
+    await new Promise((r) => setTimeout(r, 100));
+    expect(binding().session_lease).toBe('msls_before_bounce');
+
+    dropSocket(); // the daemon went away; the adapter reconnects and re-claims on its own
+    await new Promise((r) => setTimeout(r, 1800));
+    expect((client as unknown as { config: { sessionLease?: string } }).config.sessionLease).toBe(
+      'msls_after_bounce',
+    );
+    expect(binding().session_lease).toBe('msls_after_bounce');
     client.close();
   });
 });

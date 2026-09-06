@@ -1017,7 +1017,17 @@ export class MusterdClient {
         this.returnOnPending = false;
         this.config.member = frame.seat.name;
         if (frame.seat_credential) this.config.seatCredential = frame.seat_credential;
-        if (frame.session_lease) this.config.sessionLease = frame.session_lease;
+        if (frame.session_lease) {
+          this.config.sessionLease = frame.session_lease;
+          // A reconnect's occupancy is a NEW Presence with a NEW lease (the daemon bounced, or the
+          // socket flapped), and the CLI hook in this workspace reads its lease from binding.json.
+          // Only the `lease` renewal frame used to write it, so for the ~3 minutes until the first
+          // renewal every `musterd inbox --interrupt-check` presented the pre-bounce lease and was
+          // refused as dead — every seat on the machine deaf after each autorefresh bounce, measured
+          // 2026-09-06 (lane 01M1VGJWME). Same seat-on-disk guard as the renewal; a first claim has
+          // no binding yet and is persisted by `claimAndJoin` right after this resolves.
+          persistRenewedLease(this.config);
+        }
         this.charterText = frame.charter?.trim() || null;
         // The continuity envelope (ADR 093): headline + age, never the body — team_join renders it
         // as the one-line pointer; the body is fetched only by an explicit team_memory_read.
