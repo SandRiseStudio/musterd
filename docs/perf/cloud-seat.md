@@ -607,10 +607,30 @@ refusal or inventing a value. That is the right shape for a measurement page.
   merged into the workspace allow list), plus `musterd init --refresh-hooks` for the doorbell seam.
   Verified by `bash -n` and `shellcheck` only — the falsifier is a redeploy of the image from that
   commit followed by a handoff that leases `derivation: work_order` and an interrupt line that lands
-  in the woken session's context with no hand step after boot. Unmeasured until nick redeploys. The
+  in the woken session's context with no hand step after boot. **Measured 2026-09-06 13:18Z** on
+  the first redeploy from #1357 (image `deployment-01M1VDSN5A`, one boot, read from `fly logs` and
+  the VM): `team policy --dispatch-loop on` took (the joiner's policy reads `dispatch loop: on`);
+  `residency on` recorded `seat overrides: {"flow":"auto"}`; `mcp__musterd` was already in the allow
+  list (the merge is silent when nothing changes); the hook now reads `--interrupt-check --hook
+  claude-code`; the actuator started as uid 1001 and its first polls were 200. **Two steps failed
+  on that boot and the order was the cause**: `harness configure` printed `claude-code ✗ conflict`
+  and `musterd wire` refused, because both ran *before* `init --refresh-hooks` and the workspace
+  still held the pre-#1349 hook, which they read as a foreign edit. Refresh-hooks then rewrote it,
+  and by hand afterwards both commands pass `✓ unchanged`. So on an image upgrade that changes a
+  hook, the first boot's rebind does not happen — fixed by running `--refresh-hooks` first (#1360).
+  The handoff half of the falsifier could not run: since 04:00Z every wake on delta has exited 1 in
+  ~10 s at `$0.0000` because the model credential returns `billing_error: Credit balance is too
+  low` (four identical 21,818-byte transcripts, 04:00/04:32/05:04/05:35Z), and `host.log` reports
+  only `run exited (code 1) without occupying the seat` — the reason is visible nowhere but the
+  transcript. That is lane `01M1VDY8PY`'s third fix. Unmeasured until the credit is topped up. The
   three defects stay open (`01M1T6D80Q`, `01M1T6DJ7J`, finding 18); the boot script is the floor
   under them, not the fix — in particular a boot-time rebind cannot outlive the next wake if the
-  claim path still rewrites `binding.agent_key` (finding 14's falsifier, still unrun).
+  claim path still rewrites `binding.agent_key` — **and it does not (2026-09-06 13:15Z)**: after
+  the 01:24Z rebind delta was woken five times, each session claimed, and the actuator's polls
+  stayed 200 throughout (`host.log`'s last 401 is before those leases; `daemon.log` shows
+  `POST /residency/wake-leases 200` every ~31 s at 13:1xZ). Finding 14's "the wake rewrites the
+  credential" is falsified; the 09-04 22:36Z writer ran once, on a first-boot workspace, and is
+  still unnamed — recorded on lane `01M1T6D80Q`. A boot-time rebind is therefore a sufficient floor.
 - ~~**The doorbell on the VM is deaf** — its `PostToolUse` hook still prints bare stdout, the form
   izzo's #1349 identified as never reaching a model. `musterd init --refresh-hooks` on the machine,
   once #1349's dist is deployed there.~~ Folded into the `seat.sh` line above (2026-09-06).
