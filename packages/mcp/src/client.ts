@@ -59,6 +59,13 @@ function wsBase(server: string): string {
 export const HEARTBEAT_MS = 15_000;
 
 /**
+ * How many proactive re-joins the dormant watch may fail before it stops (ADR 164 amendment 2). A
+ * seat refused on re-join is usually held by someone else or refused by policy — neither changes
+ * with a fourth try — and the tool-call re-arm still stands behind it.
+ */
+export const DORMANT_REJOIN_MAX_FAILURES = 3;
+
+/**
  * Whether a non-live ladder verdict should actually release the seat — **activity outranks
  * inference** (ADR 164, seat-drop fault B2).
  *
@@ -183,6 +190,14 @@ export class MusterdClient {
   private lastJoinErrorMsg: string | null = null;
   private releasedByLivenessFlag = false;
   private lastActivityAt = 0;
+  /**
+   * ADR 164 amendment 2: while the ladder has this seat released, watch the transcript on the
+   * heartbeat cadence and re-join the moment it moves. Armed by the liveness release only, never by
+   * `leave()`/`close()`; cleared by the next occupy, by a deliberate leave, or by giving up.
+   */
+  private dormantWatch: NodeJS.Timeout | null = null;
+  /** Proactive re-joins that failed since the last release — the watch stops after a few. */
+  private dormantRejoinFailures = 0;
   /** One drop-and-bare-retry per join attempt when a grant is refused as stale (ADR 193). */
   private staleGrantRetried = false;
   /** Invoked when this session is superseded by a successor **in its own workspace** (ADR 092): the
@@ -837,7 +852,75 @@ export class MusterdClient {
       `seat presence was released because this session looked inactive ` +
       `(${verdict.rung ?? 'unknown'} check); a tool call is evidence otherwise, so the next one re-joins`;
     if (verdict.verdict === 'exit') this.onReplaced?.();
+    else this.armDormantWatch();
     return true;
+  }
+
+  /**
+   * ADR 164 amendment 2 (2026-09-05, lane 01M1T41YRA): the way back must not wait for a `team_*`
+   * call. The interrupt probe (ADR 088) is a PostToolUse hook that fires at EVERY tool boundary and
+   * presents the lease in binding.json — the lease the release above just killed. A session that
+   * resumes after a dormant stretch therefore makes N ordinary tool calls whose probes are all
+   * refused, and the seat is deaf until the model happens to reach for a team tool. Measured in the
+   * 2026-09-05 bell check: 26 of 102 probes 401, every adapter-HELD binding valid, the deaf seats all
+   * dormant adapters. So: while released, re-read the ladder on the heartbeat cadence, and the first
+   * `live` verdict — the transcript moving again — re-occupies. Same first-hand evidence a tool call
+   * is; this process just reads it from disk instead of waiting to be called.
+   *
+   * Bounded three ways: armed only by a liveness release (never `leave`/`close`); re-joins only the
+   * seat this process already held; and gives up after {@link DORMANT_REJOIN_MAX_FAILURES} failed
+   * attempts, leaving the tool-call path as it was. A `superseded` seat never gets here — that clears
+   * `wantPresence` on purpose and stays down.
+   */
+  private armDormantWatch(): void {
+    if (this.closed || this.dormantWatch !== null) return;
+    this.dormantRejoinFailures = 0;
+    const t = setInterval(() => {
+      void this.rejoinIfSessionResumed();
+    }, HEARTBEAT_MS);
+    t.unref?.();
+    this.dormantWatch = t;
+  }
+
+  private disarmDormantWatch(): void {
+    if (this.dormantWatch) clearInterval(this.dormantWatch);
+    this.dormantWatch = null;
+  }
+
+  /**
+   * One tick of the dormant watch: re-join iff the ladder released this seat and now reads `live`.
+   * Public so a test can drive it without the 15 s clock. Returns whether a re-join was attempted
+   * and succeeded.
+   */
+  async rejoinIfSessionResumed(now = Date.now()): Promise<boolean> {
+    if (this.closed || !this.releasedByLivenessFlag || this.wantPresence) {
+      this.disarmDormantWatch();
+      return false;
+    }
+    let verdict;
+    try {
+      verdict = this.session?.check(now);
+    } catch {
+      return false; // unjudgeable is not evidence of a resumed session either
+    }
+    if (verdict === undefined || verdict.verdict !== 'live') return false;
+    process.stderr.write(
+      `musterd: session shows activity again — re-occupying the seat so the interrupt line is live ` +
+        `before the first team_* call\n`,
+    );
+    try {
+      await this.join();
+      this.disarmDormantWatch();
+      return true;
+    } catch (err) {
+      this.dormantRejoinFailures += 1;
+      // Reaches the dormant guard's message, so a refused proactive re-join is not a silent one.
+      this.lastJoinErrorMsg =
+        `re-join on resumed activity failed (${this.dormantRejoinFailures}/${DORMANT_REJOIN_MAX_FAILURES}): ` +
+        (err instanceof Error ? err.message : String(err));
+      if (this.dormantRejoinFailures >= DORMANT_REJOIN_MAX_FAILURES) this.disarmDormantWatch();
+      return false;
+    }
   }
 
   /**
@@ -859,6 +942,7 @@ export class MusterdClient {
   /** Release the seat (back to dormant). The server keeps a 45s reclaim grace; tools stay registered. */
   leave(): void {
     this.releasedByLivenessFlag = false; // a deliberate release; attestSession re-sets it after
+    this.disarmDormantWatch(); // …and re-arms the watch after, for the same reason
     this.wantPresence = false;
     this.joinedFlag = false;
     this.memoryEnvelope = null; // occupy-scoped: stale once the seat is released
@@ -924,6 +1008,7 @@ export class MusterdClient {
         // Claim succeeded — the server resolved + assigned the seat (a role pool's `<role>-<n>` too).
         this.joinedFlag = true;
         this.releasedByLivenessFlag = false;
+        this.disarmDormantWatch(); // occupied again — by a tool call or by the watch, either way done
         this.staleGrantRetried = false;
         this.lastJoinErrorMsg = null;
         this.pendingRequestId = null;
@@ -1092,6 +1177,13 @@ export class MusterdClient {
       }
     });
     ws.on('close', () => {
+      // A socket that is no longer `this.ws` was replaced — by `leave()` + a fresh `join()`, or by a
+      // reconnect — and its late `close` says nothing about the socket that replaced it. Acting on it
+      // rejected a brand-new join with "connection closed before join completed" and cleared
+      // `wantPresence`, so the re-join lost and the seat stayed down (found by the ADR 164
+      // amendment-2 test, which re-joins within milliseconds of the release; the tool-call re-arm
+      // was slower and only ever won the race by accident).
+      if (this.ws !== null && this.ws !== ws) return;
       this.joinedFlag = false;
       this.pendingRequestId = null;
       this.waitOnPending = false;
@@ -1138,6 +1230,7 @@ export class MusterdClient {
 
   close(): void {
     this.closed = true;
+    this.disarmDormantWatch();
     this.wantPresence = false;
     this.joinedFlag = false;
     this.memoryEnvelope = null;
