@@ -13,7 +13,7 @@ import {
 } from '@musterd/protocol';
 import { gitOutput, gitToplevel, resolveWorkspaceKey } from '@musterd/protocol/project';
 import { flagStr, type Parsed } from '../args.js';
-import { HttpClient } from '../client.js';
+import { HttpClient, type HttpClientOpts } from '../client.js';
 import {
   findBinding,
   identityFromEnv,
@@ -86,6 +86,43 @@ export interface ResolvedRead {
   identity?: Identity;
   identitySource?: IdentitySource;
   explicit: boolean;
+}
+
+/**
+ * The one shape of `HttpClientOpts` an identity-bearing CLI command uses. `resolve()` and
+ * `resolveRead()` built this literal twice by hand, which is how a field that `gather()` resolves
+ * can go missing from one or both without any signal — see lane 01M1T29EV9, where `workspaceKey`
+ * was resolved at every call and passed at none, disarming ADR 365/368 on the per-request claim.
+ * One builder, so a resolved field cannot be dropped by a call site.
+ */
+export function identityClientOpts(
+  input: {
+    server: string;
+    team: string;
+    workspace: string;
+    workspaceKey: string;
+    identity: Identity;
+    model?: string | undefined;
+  },
+  claimSeatPerRequest: boolean,
+): HttpClientOpts {
+  return {
+    server: input.server,
+    team: input.team,
+    workspace: input.workspace,
+    // The IDENTITY behind that label (ADR 365/368): the label carries a git branch, so it is renamed
+    // by a branch switch under the very session it identifies, and the server can only compare keys
+    // when BOTH sides send one. Omit it and displacement silently falls back to label equality.
+    workspaceKey: input.workspaceKey,
+    key: input.identity.key,
+    seat: input.identity.name,
+    ...(input.identity.sessionLease !== undefined
+      ? { sessionLease: input.identity.sessionLease }
+      : {}),
+    surface: input.identity.surface,
+    claimSeatPerRequest,
+    ...(input.model !== undefined ? { model: input.model } : {}),
+  };
 }
 
 /**
@@ -196,7 +233,7 @@ export function attestedModel(
  * from silently acting as a real teammate.
  */
 export function resolve(flags: Record<string, string | boolean>): Resolved {
-  const { config, server, sources, team, workspace, asName, model } = gather(flags);
+  const { config, server, sources, team, workspace, workspaceKey, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -225,19 +262,12 @@ export function resolve(flags: Record<string, string | boolean>): Resolved {
     identity: match.identity,
     identitySource,
     explicit: true,
-    http: new HttpClient({
-      server,
-      team,
-      workspace,
-      key: match.identity.key,
-      seat: match.identity.name,
-      ...(match.identity.sessionLease !== undefined
-        ? { sessionLease: match.identity.sessionLease }
-        : {}),
-      surface: match.identity.surface,
-      claimSeatPerRequest: true,
-      ...(model !== undefined ? { model } : {}),
-    }),
+    http: new HttpClient(
+      identityClientOpts(
+        { server, team, workspace, workspaceKey, identity: match.identity, model },
+        true,
+      ),
+    ),
   };
 }
 
@@ -280,7 +310,7 @@ export function resolveRead(
   opts: ResolveReadOptions = {},
 ): ResolvedRead {
   const claimSeatPerRequest = opts.claimSeatPerRequest ?? false;
-  const { config, server, sources, team, workspace, asName, model } = gather(flags);
+  const { config, server, sources, team, workspace, workspaceKey, asName, model } = gather(flags);
   if (!team) {
     throw new CliError('no team — run: musterd team create <name>', 2);
   }
@@ -302,17 +332,10 @@ export function resolveRead(
     server,
     http: new HttpClient(
       identity
-        ? {
-            server,
-            team,
-            workspace,
-            key: identity.key,
-            seat: identity.name,
-            ...(identity.sessionLease !== undefined ? { sessionLease: identity.sessionLease } : {}),
-            surface: identity.surface,
+        ? identityClientOpts(
+            { server, team, workspace, workspaceKey, identity, model },
             claimSeatPerRequest,
-            ...(model !== undefined ? { model } : {}),
-          }
+          )
         : { server },
     ),
     explicit,

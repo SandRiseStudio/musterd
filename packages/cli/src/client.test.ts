@@ -29,6 +29,56 @@ const baseOpts = {
   surface: 'cli',
 } as const;
 
+/**
+ * Lane 01M1T29EV9. ADR 365/368 gave displacement an identity to compare — `workspace_key`, the work
+ * tree root — because the `workspace` LABEL is branch-qualified and is renamed by a branch switch or
+ * a detached HEAD under the very session it identifies. The server compares the key only when BOTH
+ * sides sent one (`ws.ts` sameWorkspace), so a claim that omits it silently reinstates the label
+ * comparison the key exists to replace.
+ *
+ * `claimSessionLease` is the per-request claim every ordinary CLI command makes
+ * (`resolve()` sets `claimSeatPerRequest: true` unconditionally), so this frame is the one that
+ * decides whether a seat evicts its own live session. Measured 2026-09-05: it did — six
+ * `claim.superseded` rows, `same_workspace: false`, a CLI successor displacing the seat's own MCP
+ * session after a branch switch in one work tree.
+ */
+describe('claimSessionLease — the claim frame carries the workspace identity (ADR 365/368)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const frameOf = (sock: FakeSocket) => JSON.parse(sock.sent[0]!) as Record<string, unknown>;
+
+  it('sends workspace_key when the client was built with one', () => {
+    const sock = new FakeSocket();
+    void new HttpClient({
+      ...baseOpts,
+      workspace: 'agents-dolly@some-branch',
+      workspaceKey: '/Users/x/agents-dolly',
+      claimSeatPerRequest: true,
+      createClaimSocket: () => sock,
+    }).claimSessionLease();
+    sock.emit('open');
+
+    const frame = frameOf(sock);
+    expect(frame['workspace']).toBe('agents-dolly@some-branch');
+    expect(frame['workspace_key']).toBe('/Users/x/agents-dolly');
+  });
+
+  it('omits it when there genuinely is none — an unbound folder keeps label-only comparison', () => {
+    const sock = new FakeSocket();
+    void new HttpClient({
+      ...baseOpts,
+      workspace: 'agents-dolly@some-branch',
+      claimSeatPerRequest: true,
+      createClaimSocket: () => sock,
+    }).claimSessionLease();
+    sock.emit('open');
+
+    const frame = frameOf(sock);
+    expect(frame['workspace']).toBe('agents-dolly@some-branch');
+    expect('workspace_key' in frame).toBe(false);
+  });
+});
+
 describe('claimSessionLease — settlement (lane 01M1F7Y4N)', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
