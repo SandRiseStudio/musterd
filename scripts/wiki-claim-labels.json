@@ -225,5 +225,8 @@
   "## The Not column was never enforced — 17 of its 21 words are linted by nothing (2026-09-05; falsify: `terminologyBans()` against the distinct Not entries in `docs/glossary/terms.ts`)": "defect",
   "columns publish **21** distinct words, so **seventeen** of them are linted by nothing (2026-09-05; falsify: collect `not[]` across `GLOSSARY` into a set and subtract `terminologyBans()`) — adapter, agent, channel, client, connection, event, kind, participant, project, room, seat, session, status, swarm, type, user, verb.": "defect",
   "without CI saying so (2026-09-05; falsify: drop `**worktree**` from that sentence, or add a word": "other",
-  "(2026-09-05; falsify: `git log -S'No for the semantic half' docs/controls/registry.ts` — it landed": "other"
+  "(2026-09-05; falsify: `git log -S'No for the semantic half' docs/controls/registry.ts` — it landed": "other",
+  "## Acceptance concentrates on one seat for two measured reasons, and neither is \"the picker prefers it\" (2026-09-05; falsify: `sqlite3 ~/.musterd/musterd.db \"select policy from residency\"` shows more than one row carrying `\"flow\":\"auto\"`, or a `lane.ready_for_review` row after cd138abd whose `selected.tie_decided_by` is `roster` while the losing `tie_break` candidate held fewer open asks)": "defect",
+  "- **The peak was 14, not six.** gptbot held 14 open acceptance asks at once at 22:04 on 2026-09-04; the next-highest holder in the same week peaked at 6 (2026-09-05; falsify: replay the open-ask depth query in lane `01M1S6GZ96`'s detail against the acts table for that hour).": "defect",
+  "- **46 of gptbot's 60 picks that week were `wake_queued`** — the ADR 191 offline-wake path, taken only when nobody live was eligible. On those picks ghost, kimi and schmidt were `no_live_presence` 39, 43 and 29 times and `busy` the rest. They were offline, not idle (2026-09-05; falsify: the `review_selection.candidates` snapshots on those rows).": "defect"
 }
