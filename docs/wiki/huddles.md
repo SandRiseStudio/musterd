@@ -97,7 +97,7 @@ Daemon log, 17:45–17:57: **102 probes, 76 × 200, 26 × 401.** The log does no
 
 **What this means for running a huddle today.** The transport is fine — every turn landed in every named inbox instantly. The bell is a per-seat property with three independent failure modes, and each has a check a human can run in the seat before the huddle opens:
 
-1. **Lease dead** (any harness): `musterd inbox --interrupt-check` in the worktree prints the deaf line → make one `team_*` MCP call (or `/mcp reload`); a CLI `musterd claim` does not heal it. Every autorefresh bounce re-creates this.
+1. **Lease dead** (any harness): `musterd inbox --interrupt-check` in the worktree prints the deaf line → make one `team_*` MCP call (or `/mcp reload`); a CLI `musterd claim` does not heal it. Every autorefresh bounce re-creates this. Since ADR 391 (2026-09-05) the daemon names the deaf seat itself: `grep interrupt_probe_refused ~/.musterd/daemon.log`, or the `interrupt.refused` audit row (one per seat per ten minutes) — so the operator no longer has to ask every session to run the probe by hand (falsify: revoke one seat's lease, let its hook fire, and the grep is empty).
 2. **Probe not wired** (cursor: hook without `--interrupt`; codex: hook without a probe; opencode: no plugin): the seat cannot hear anything at a boundary until that harness's adapter writes it. Nudge by hand between turns; the MCP room read then delivers the whole room.
 3. **Idle at the prompt** (any harness): no tool boundaries, no probe. Nudge, or the seat runs a blocking `musterd inbox --wait`.
 

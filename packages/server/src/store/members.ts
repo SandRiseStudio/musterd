@@ -10,7 +10,7 @@ import {
 import { HUE_MIN_SEPARATION, assignHue, defaultHue, hueConflict } from '@musterd/protocol/hue';
 import type { Database } from 'better-sqlite3';
 import { ulid } from 'ulid';
-import { MusterdError } from '../errors.js';
+import { MusterdError, SessionLeaseRefused } from '../errors.js';
 import { releaseInFlightClaimsForSeat } from './lanes.js';
 import type { MemberRow, TeamRow } from './rows.js';
 import { parseRoles, resolveAccountStatus, resolveCapabilities } from './rows.js';
@@ -436,10 +436,13 @@ function authByAgentSeatCredential(
       'forbidden',
       `agent-seat credential identifies "${member.name}", not "${actingSeat}"`,
     );
+  // ADR 391: from here down the seat IS proven — the credential matched a live agent row. A lease
+  // failure is still a refusal, but it must not throw the proof away with it: the interrupt line
+  // needs to say which seat went deaf, and only this function ever knew.
   if (!sessionLease?.startsWith(TOKEN_PREFIXES.session_lease))
-    throw new MusterdError('unauthorized', 'missing agent session lease');
+    throw new SessionLeaseRefused(member.name, 'missing');
   if (!hasValidSessionLease(db, { teamId: team.id, memberId: member.id, token: sessionLease }))
-    throw new MusterdError('unauthorized', 'invalid, expired, or revoked agent session lease');
+    throw new SessionLeaseRefused(member.name, 'dead');
   return member;
 }
 
