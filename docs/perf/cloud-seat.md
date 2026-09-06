@@ -542,3 +542,72 @@ have.
 3. **A wake that cannot call the wake's own tools should fail loudly, not quietly.** "exited without
    occupying" and "no roster occupancy within the verify window" are the same defect wearing two
    costumes; neither names the permission refusal that a transcript shows in one line.
+
+## 2026-09-06 03:36 UTC — exit criterion 3 met: a lane taken end to end from the VM
+
+`delta` claimed lane `01M1T3YXVD`, wrote `docs/wiki/cloud-seat-from-inside.md`, committed, pushed,
+and opened **PR #1353** — every step in a woken session on the Fly machine as uid 1001. Merged
+`c272e2be` (nick), ancestor-verified on `origin/main`, `pnpm wiki:check` green. Both commits are
+authored **and** committed by `delta (musterd seat) <delta@revive.musterd>` at 02:28:23Z and
+03:38:14Z, so ADR 109/197 attribution holds on the second machine. ADR 390's falsifier 5 is closed
+from inside: `id -u` → `1001`, user `seat`.
+
+**The lane's own falsifier resolved negative, and that is worth stating.** It predicted that push or
+`lane_submit` would be refused from the VM — by the two-repo token, by the joiner's lease, or by
+ancestor verification on the joiner's clone. None of that happened: push and `gh pr create` both
+work. Every real obstacle was somewhere the lane had not thought to look, and each was a different
+defect in the wake path rather than in the git path.
+
+### The five wakes it took, and what each one proved
+
+| # | leased | derivation | budget | outcome | blocker it exposed |
+| - | ------ | ---------- | ------ | ------- | ------------------ |
+| — | — | — | — | never fired | **14** credential: 401 for 50 h 50 m |
+| 1 | 01:26:52Z | batched | 5 m | killed 302.1 s | **16** joiner has no team policy |
+| 2 | 01:57:03Z | batched | 5 m | killed 301.4 s, page written | (same) |
+| 3 | 02:27:23Z | work_order | 30 m | killed 91.4 s, page committed | **17/18** cannot occupy |
+| 4 | 02:58Z | work_order | 30 m | exited 23.8 s, `$0.1073` | **18** musterd tools not permitted |
+| 5 | 03:30Z | work_order | 30 m | **push + PR #1353** | — |
+
+Four wakes recorded `$—` for spend; only the two that ended cleanly recorded anything. The ledger
+under-counts this arc by four runs.
+
+### What delta found that this seat could not
+
+The page's own findings are better evidence than anything measured from the laptop, because they are
+about the boundary a woken session sits inside:
+
+1. **The command allow list matches a literal prefix.** `Bash(git status *)` is allowed; `git -C .
+   status -sb` is refused. The *robust* form — the one a wake-time script writes to be
+   directory-safe — is the one that hangs a headless session, and with no human at the keyboard
+   `requires approval` is not a pause but a refusal that never resolves. (Conversely `git remote -v`
+   ran with no rule matching it, so the workspace list is the editable part of the boundary, not the
+   boundary.)
+2. **A woken seat cannot read its own daemon's files.** The session is scoped to its workspace, so
+   `rg`, `ls` and `cat` are all refused on `~/.musterd` — `musterd.db`, `host.log`, `daemon.log`,
+   `binding.json`. Those four files are what every finding in this log turned on. **A seat session
+   can be the subject of a wake diagnosis; it cannot be the instrument.** That is why findings 14-18
+   all came from an out-of-band shell, and why delta correctly reported that it could not read its
+   own `residency.wake_leased.detail.derivation` rather than guessing it.
+
+Delta also recorded three commissioned readings as *unverified from inside*, with the reason — the
+`MUSTERD_INVITE` scrub, the process list, the `gh` token type — rather than working around the
+refusal or inventing a value. That is the right shape for a measurement page.
+
+### What is still open (supersedes the 2026-09-04 list)
+
+- **The three wake-path defects have lanes, none fixed**: `01M1T6D80Q` (high — the actuator's
+  credential is a field three code paths own), `01M1T6DJ7J` (high — team policy does not replicate
+  to a joiner), and finding 18's `seat-policy` narrowing, which belongs with them.
+- **Every disposition here is hand-applied on the VM and will not survive a rebuild**: the
+  credential rebind, `loops.dispatch` on the joiner, `flow: auto`, and `mcp__musterd` in the
+  workspace allow list. `seat.sh` should do all four, or the defects should be fixed so it need not.
+- **The doorbell on the VM is deaf** — its `PostToolUse` hook still prints bare stdout, the form
+  izzo's #1349 identified as never reaching a model. `musterd init --refresh-hooks` on the machine,
+  once #1349's dist is deployed there.
+- **The two-machine experiments** (ADR 366 cursor, ADR 371 counts) — lane `01M1T3H3RB`, unblocked
+  now that the seat can work.
+- **Cost per day** — lane `01M1T3HA9T`. Today's arc: two clean runs at `$0.2476` and `$0.1073`, four
+  killed runs at `$—`.
+- **Residency enrollment still does not replicate** (finding 6), now with a sibling: team policy does
+  not either (finding 16). Same family, one lane each.
