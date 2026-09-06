@@ -199,3 +199,415 @@ the admitted set; a message never was.
 - **Residency enrollment still does not replicate** (finding 6): the hub shows delta plain
   `offline` while the VM shows `offline · wakeable`. Wakes are unaffected — the decision is the
   joiner's — but the hub's roster is not telling the truth about which seats are reachable.
+
+## 2026-09-06 01:26 UTC — the seat could be woken exactly once, and nothing said so for 51 hours
+
+Exit criterion 3 (a lane end to end from the VM, lane `01M1T3GMDD`) opened with a handoff to delta
+at 01:05:28Z. No wake came. The cause was not the handoff and not the ADR 390 image: **delta had
+been unwakeable since its own first wake, and the roster showed it `offline · wakeable` throughout.**
+
+### 14. The woken session disarms the actuator that spawned it
+
+Every `POST /teams/revive/residency/wake-leases` from the VM's actuator returned **401** from
+2026-09-04T22:36:32Z to the repair below — 50 h 50 m, across a reboot, roughly 6,100 polls. The
+last success was 22:36:02Z, thirty seconds earlier, and the minute in between is the minute delta's
+first (and only) wake ran: `⚡ woke delta: spawn→roster 17.4s`, `exit=0 cost=$0.2476`.
+
+Measured on the VM, 2026-09-06:
+
+| question | answer |
+| -------- | ------ |
+| `teams.agent_key_hash` for `revive` | non-null; `bootstrap_cutover_at` null |
+| `key.rotate` rows in the VM's audit | **exactly one**, 2026-09-04T04:59:25Z (first boot) |
+| `sha256(binding.agent_key) === teams.agent_key_hash` | **false** |
+| `sha256(binding.seat_credential) === teams.agent_key_hash` | false |
+| `sha256(config.agentKeys.revive) === teams.agent_key_hash` | **true** |
+
+The server side never moved: one rotation ever, and the hash it wrote is still the one in the team
+row — the machine's own `config.agentKeys` still matches it. What moved is the **workspace
+binding**, and the binding is the only thing the actuator reads: `defaultReadAgentKey` is
+`findBinding(workspace, {})?.agent_key` (`packages/cli/src/host/loop.ts:72`), handed straight to
+`HttpClient({ key })` for every lease poll. On the server, `/residency/wake-leases` accepts exactly
+two bearers (`packages/server/src/transport/http.ts` ~1330-1340): a bootstrap credential whose
+`use_kind` is **`host`** and whose `target` equals the host label, or a token hashing to the team
+agent key. Anything else is 401, and the message names the team key — which is why the log line
+reads as a configuration mistake rather than a credential that was swapped underneath it.
+
+**The contract mismatch.** `musterd agent` — the command that provisions a seat workspace —
+deliberately writes a **`claim_seat`**-scoped credential into that same `binding.agent_key` field
+(`packages/cli/src/commands/agent.ts:133-139`, ADR 344), with the comment "Never fall back to the
+ambient legacy Team-wide key: that would silently preserve its blast radius." That is the right call
+for ADR 344 and it is invisible to ADR 131: the field one ADR narrowed is the field the other
+authenticates wakes with, and no third thing reconciles them. A `claim_seat` credential is neither
+of the two bearers the endpoint takes.
+
+**Why it fires on the first wake specifically** (2026-09-06; falsify: wake a repaired seat and read
+`sha256(binding.agent_key)` before and after — if it still matches the team row, the claim path is
+innocent and the writer is elsewhere): the binding's current field set
+(`agent_key, claim, grant, model, model_observed, seat_credential, server, session, session_lease,
+team, version`) is the shape written by the claim/occupy path at
+`packages/cli/src/commands/claim.ts:264`, which preserves siblings rather than the flat five-field
+shape at `:435`. A woken session claims its own seat as its first act, so the wake rewrites the
+credential the next wake depends on.
+
+**Why nothing said so.** The 401 is a warn line in the VM's own `daemon.log` and a `!` line in
+`host.log`; neither reaches the hub, and residency enrollment does not replicate (finding 6), so the
+hub's roster kept rendering `offline · wakeable` — a claim about reachability that had been false
+for two days. The seat looked healthy from every surface a human uses.
+
+### The repair — a rebind, not a rotation
+
+The correct key was still on the machine (`config.agentKeys.revive`, matching), so nothing had to be
+rotated and no credential was invalidated. `musterd wire` resolves `agent_key` in exactly that
+precedence — `--key` → `MUSTERD_AGENT_KEY` → `config.agentKeys[team]`
+(`packages/cli/src/commands/wire.ts:146`) — so the boot log's own claim, "worktree configured —
+`musterd wire` repairs it any time", turned out to be literally true of this failure.
+
+Run as the seat user with the daemon's `HOME` (the account's passwd home is `/home/seat`; the
+daemon's state is `/data/home`, exported by the entrypoint — `su seat -c` without it reads the wrong
+config and would write a **keyless** binding, which is worse than the break):
+
+```sh
+su seat -c 'export HOME=/data/home; cd /data/musterd-delta && musterd wire'
+su seat -c 'export HOME=/data/home; cd /data/musterd-delta && musterd residency on \
+  --seat delta --harness claude-code --as nick'
+```
+
+`wire` writes the spec's fields and the resolved key; it does **not** carry `grant`, `session_lease`
+or `model_observed` across, so `residency on` follows to re-land the standing grant and the host
+registry entry — the same two steps, in the same order, that `seat.sh` runs at boot. `residency on`
+reported "delta has a live session — it occupies via the grant this enroll just rotated", which is
+the expected note for a seat whose stale presence is still on the roster.
+
+| moment | time (UTC) | note |
+| ------ | ---------- | ---- |
+| `musterd wire` | 01:24 | `agent_key` match flips false → **true** |
+| `musterd residency on` | 01:27:26 | `residency.enrolled delta` |
+| `residency.wake_leased` | 01:26:52 | **the first poll after the rebind** |
+| `residency.session_captured` | 01:26:55 | |
+| `residency.woke` | 01:26:59 | `spawn→roster 7.3s, session=fresh, provenance=wake` |
+| `residency.context_read` | 01:27:13 | lane `01M1T3YXVD`, read by delta itself |
+
+Spawn to roster occupancy was **7.3 s**, against 17.4 s on 2026-09-04; the actuator chose "portable
+delivery for delta: fresh spawn (resume bypassed)" rather than resuming the stale transcript. The
+wake fired on the poll immediately following the key repair, which is the falsifier for the whole
+diagnosis: had the binding not been the broken side, the rebind would have changed nothing.
+
+**ADR 390 falsifier 5, partially closed.** The boot log carries
+`wake actuator starting for seat delta (uid 1001, not root)` on both boots of the new image. The
+remaining half — `id -u` from inside the *woken* session — is delta's own to report.
+
+**Candidate product fixes**, in the order they would have helped:
+
+1. **The actuator's credential should be minted for the actuator.** `musterd residency on` knows the
+   host label; it could mint the `host`-scoped bootstrap credential the endpoint already accepts and
+   store it under a field no claim path touches, instead of sharing `binding.agent_key` with
+   `musterd agent` and every claim.
+2. **A 401 on the wake lease should reach the hub.** The one surface that showed the truth was on the
+   machine nobody was looking at. A seat whose actuator cannot authenticate is not `wakeable`, and
+   the roster is where that belongs — this is finding 6 with teeth.
+3. **`musterd agent` and the wake endpoint should not disagree in silence.** Either the endpoint
+   accepts a `claim_seat` credential for the seat it targets, or provisioning refuses to write a
+   credential the wake path cannot use.
+
+### 15. A lane handoff wakes a manual-flow seat under the *reply* budget, and the work dies at 5 minutes
+
+With the credential repaired, the wake fired and delta did the right things: read the work order
+(01:27:13Z), checked its inbox, ran `team_next`, moved lane `01M1T3YXVD` to active (01:28:13Z), and
+created branch `delta/cloud-seat-from-inside`. Then it was killed.
+
+```
+run for delta (fresh) settled: exit=143 (watchdog) wall=302.1s
+wake cost recorded for delta: $— (lease 01M1T56M9313EZMYPVSNCXPFGK)
+```
+
+**Nothing survived.** The VM's worktree was on the new branch with a clean tree and no page — the
+run died before the first write. The cost is `$—` because a SIGTERM'd harness never emits its
+summary line, so the most expensive shape a wake can take is also the one that records no spend.
+
+**The bound was 5 minutes, and the policy grants 30.** `revive`'s residency policy reads
+`timeout 5m · work-timeout 30m`. A work order uses `work_timeout_ms` un-clamped
+(`packages/cli/src/host/loop.ts:353`, `packages/server/src/store/residency.ts:1411`) precisely so
+that, in the loop's own words, "a coding session under a 5m host flag must not silently die at 5m".
+Delta's run died at 5m anyway, because **it was never a work order**.
+
+A lane handoff becomes a `work_order` only through `dueDispatchHandoffWorkOrders`
+(`packages/server/src/store/residency.ts:913`, ADR 199's dispatch handoff edge), and that edge is
+gated on the seat's `flow` — `manual` by default, and the protocol's own comment says `flow` is what
+"gate[s] board-triggered WORK-ORDER wakes" (`packages/protocol/src/residency.ts:72-79`). Delta was
+`flow: manual`. So the handoff derived as `batched` and took `policy.timeout_ms`, the **reply**
+budget. The host log says so plainly, and this line is the whole finding:
+
+```
+wake due: delta [batched] — handoff from stanley (lease 01M1T56M9313EZMYPVSNCXPFGK)
+```
+
+**The shape.** A handoff is the act that says *do this lane's work*. On a manual-flow seat it still
+wakes the seat — as a reply doorbell — and the session it starts is handed a lane, a branch, and an
+acceptance contract it cannot possibly discharge in five minutes. The two halves disagree about what
+the wake is for, and the seat pays for the disagreement by being killed mid-write. Nothing in the
+handoff path warns the sender: `lane_handoff` reported "wake-eligible" and it was, under the wrong
+budget.
+
+**The banner is not the bound either.** `host.log`'s standing line reads
+`1 seat(s) registered · every 30s · watchdog 600s` — that is the operator's `--timeout` ceiling
+(`deps.bounds.timeout_ms`), not the effective per-run timeout, which comes from policy. An operator
+reading the actuator's own banner would predict 600 s and observe 302 s.
+
+**Disposition (2026-09-06):** delta set to `flow: auto`
+(`musterd residency on --seat delta --harness claude-code --as nick --flow auto`), which is the
+designed path — ADR 199's dispatch edge exists for exactly "a seat that does lane work". The
+handoff still qualifies (unanswered, lane owned by delta, state `active`), so the next poll after
+the 30 m cooldown derives it as a `work_order` with the 30 m budget and seat-policy tool access.
+Falsify the diagnosis: if the next wake's host line reads `[work_order]` rather than `[batched]` and
+the run outlives 302 s, `flow` was the gate; if it still reads `[batched]`, it was not.
+
+**Candidate product fixes:**
+
+1. **A handoff that cannot be worked in the budget should not be delivered as a reply.** Either the
+   dispatch edge ignores `flow` for an explicit, directed `lane_handoff` (a human or a seat named
+   this seat and this lane — that is not "board-triggered" in the sense `flow` exists to gate), or
+   the handoff is refused/deferred with a reason the sender can read.
+2. **`lane_handoff` should tell the sender which budget the recipient will get.** It already knows
+   the seat is wake-eligible; the derivation and the timeout are knowable at send time.
+3. **A watchdog kill should record its spend.** `$—` on the most expensive outcome makes the cost
+   ledger silently under-count exactly the runs worth counting.
+4. **The actuator banner should print the effective bound**, or say that policy overrides it.
+
+### 15a. Correction (2026-09-06 02:00Z) — finding 15's gate was wrong, and its falsifier could not have failed
+
+Two errors in finding 15, kept visible rather than overwritten (rule 4 of `docs/wiki/README.md`).
+
+**The falsifier was a ritual.** It said: "if the next wake's host line reads `[work_order]` rather
+than `[batched]`, `flow` was the gate." That line can never read `[work_order]`. `host.log` prints
+`order.lane` — the *delivery* lane, interrupt vs batched (`packages/cli/src/host/loop.ts:253`) — and
+`dueDispatchHandoffWorkOrders` itself sets `lane: 'batched'` alongside `derivation: 'work_order'`
+(`packages/server/src/store/residency.ts:958-960`). A work order and a reply doorbell print the same
+word. The check would have "confirmed" the diagnosis whichever way the truth fell, which is exactly
+what rule 3 forbids. **The observable that does discriminate** is the ledger:
+`residency.wake_leased`'s detail carries `derivation` outright.
+
+**~~`flow` was the gate~~ (2026-09-06 01:46Z) — INCOMPLETE.** The gate is a conjunction:
+
+```ts
+if (dispatchLoopOn && policy.flow === 'auto' && cooled) {   // residency.ts:1249
+const dispatchLoopOn = teamPolicy.loops?.dispatch === true; //           :1221
+```
+
+`flow` is a *seat* override; `loops.dispatch` is a **team** switch, dark until an admin arms it
+(ADR 191/199). Setting delta to `flow: auto` was therefore inert, and the re-run proved it: the
+second wake leased at 01:57:03Z recorded `"derivation":"batched"` with flow already auto.
+
+### 16. Team policy does not replicate to a joiner, so a cloud seat can never receive a work order
+
+The measurement that corrects 15 is the real finding, and it is finding 6's family:
+
+| daemon | `teams.policy.loops` |
+| ------ | -------------------- |
+| hub (laptop) | `{"review":true,"dispatch":true,"sweep":true}` |
+| joiner (delta's VM) | **`null`** |
+
+The hub has armed the dispatch loop team-wide. The joiner has no `loops` at all — and **the joiner is
+the daemon that derives the wake** (finding 6: the wake decision is the joiner's). So
+`dispatchLoopOn` is false on the only machine whose opinion counts, `dueDispatchHandoffWorkOrders`
+and `dueDispatchContinuationWorkOrders` never run there, and **every wake a cloud seat can ever
+receive is a reply doorbell under the 5-minute reply timeout.** No seat override can lift it; the
+seat is structurally incapable of being handed lane work.
+
+That is why exit criterion 3 has never been met, and it is not a property of this lane's handoff:
+any handoff, from any seat, to any seat living on a joiner, lands the same way.
+
+Worth noting against fold: `fold.ts:252` does `UPDATE teams SET policy = ?`, so team policy *is* a
+projected shape — the joiner's is null anyway (2026-09-06; falsify: read
+`json_extract(policy,'$.loops')` on both daemons — hub non-null, joiner null, as tabulated above).
+Whether the hub never emitted the policy event, or the joiner folded it before the loops were armed
+and nothing re-emits, is the first question for the lane.
+
+**Disposition (2026-09-06 02:00Z):** armed the joiner's own team policy to agree with the hub —
+`musterd team policy --dispatch-loop on --as nick`, run on the VM. Blast radius is delta alone: that
+daemon has exactly one enrolled seat. With `loops.dispatch` on *and* `flow: auto` *and* the 30 m
+cooldown elapsed, the next poll should lease the handoff with `derivation: work_order` and the 30 m
+`work_timeout_ms`.
+
+**Falsifier, restated so it can fail:** read `detail.derivation` on the next `residency.wake_leased`
+row in the VM's audit. `work_order` and a run outliving 302 s means the conjunction was the whole
+gate. `batched` again means something else still refuses, and the two knobs were not it.
+
+### 16a. Confirmed (2026-09-06 02:27Z) — the conjunction was the gate, and the actuator says so
+
+With the joiner's `loops.dispatch` armed and delta on `flow: auto`, the third wake leased at
+02:27:23Z recorded `"derivation":"work_order"`, and the actuator printed the bound it took:
+
+```
+wake bounds: delta work_order using policy timeout 1800000ms
+             (host --timeout 600000ms is not a ceiling for work_orders)
+```
+
+Finding 16 stands as diagnosed. Note the same log line still says `wake due: delta [batched]` for
+this run — the delivery lane, not the derivation, exactly as 15a describes. **An operator watching
+`host.log` cannot tell a 30-minute work order from a 5-minute doorbell**, which is worth fixing on
+its own.
+
+| wake | leased | derivation | budget | outcome |
+| ---- | ------ | ---------- | ------ | ------- |
+| 1 | 01:26:52Z | batched | 5 m | killed 302.1 s, nothing written |
+| 2 | 01:57:03Z | batched (flow already auto) | 5 m | killed 301.4 s, **page written**, uncommitted |
+| 3 | 02:27:23Z | **work_order** | 30 m | killed **91.4 s** on verify, **page committed** `ca079afe` |
+
+### 17. The 90-second roster-verify window kills a work order for doing the work
+
+The third wake had thirty minutes and used ninety-one seconds of it:
+
+```
+! wake FAILED for delta (batched): no roster occupancy within the verify window
+run for delta (fresh) settled: exit=143 wall=91.4s
+```
+
+`VERIFY_WINDOW_MS = 90_000` is a **hard-coded constant** (`packages/cli/src/host/loop.ts:35`) with
+no CLI flag — `musterd host` exposes only `--once` and `--host`; `verifyWindowMs` is a test
+injectable. It does not scale with the wake's budget, so a run granted 1,800,000 ms is verified
+against 90,000 ms regardless.
+
+**The shape.** Verification asks "did the seat occupy the roster?", which a session answers by
+calling any `team_*` tool. The first two runs answered it in 7.3 s and 17.5 s because a doorbell
+wake's natural first move is to read the inbox. A *work order* hands the session a lane and a
+branch, and its natural first move is to open the files. Delta did exactly that — it finished the
+page and committed `ca079afe` — and was killed at 91.4 s for not having said hello. **The
+verification is anti-correlated with the behaviour the work order asks for**, and the better the
+seat is at getting to work, the more reliably it dies.
+
+Two second-order costs, both already visible: the lease records failure for a run that *succeeded*
+at its actual task (the commit is on the branch), and the spend is `$—` again, so the ledger
+under-counts the run for the third time today.
+
+**Disposition (2026-09-06 02:47Z):** the lane's own brief now carries the workaround — "FIRST
+ACTION, before any git or file work: call `team_inbox_check`" — so the instruction travels inside
+the work order the seat fetches. That is a patch on the symptom and is recorded as such.
+
+**Candidate product fixes:**
+
+1. **Scale the verify window with the bound**, or verify a work order differently — a run that is
+   still alive and has produced a commit is not a failed wake. `min(bounds.timeout_ms, …)` with a
+   work-order floor would do; so would treating any harness output as liveness.
+2. **Verification should not require an MCP round-trip the task does not need.** Occupancy is a
+   proxy for "the session started"; the process being alive and writing is a better one.
+3. **`host.log` should print the derivation**, not only the delivery lane (see 16a) — three runs
+   today logged `[batched]` and one of them was a work order.
+
+### 18. A work order is not given the musterd tools, so it can never occupy the roster — and this is finding 17's cause
+
+Wake 4 (02:58Z, `work_order`, 30 m budget) exited **cleanly** — `exit=0 cost=$0.1073 wall=23.8s` —
+and the actuator reported `run exited (code 0) without occupying the seat`. The session's own
+transcript on the VM says why, and it is not ambiguous: it called
+`mcp__musterd__team_wake_context` and `mcp__musterd__team_inbox_check`, **both were refused
+("permission not granted")**, and it then deliberately declined to fall back to the `musterd` CLI —
+correctly, because the seat guidance says a session holding the `team_*` tools must not also drive
+the CLI (it resolves to a different identity and its sends fail). The seat was caught between two
+correct rules with no third option, and stopped.
+
+**The cause is one line** (`packages/cli/src/host/backends/claudeCode.ts:101`):
+
+```ts
+...(opts.toolPolicy === 'seat-policy' ? [] : ['--allowedTools', 'mcp__musterd']),
+```
+
+A `reply-only` doorbell is **handed** the musterd tools explicitly. A `work_order` runs under
+`tool_policy: 'seat-policy'` (`packages/server/src/store/residency.ts:1408`) and is handed nothing,
+falling back to the workspace's own permissions. Delta's `.claude/settings.local.json` allowed
+`Bash(musterd *)` — the CLI — and **no `mcp__musterd` entry at all**.
+
+So `seat-policy`, whose whole purpose is to be *broader* than reply-only, is **strictly narrower for
+the one MCP server every wake requires**. A work order cannot occupy the roster, cannot
+`lane_submit`, and cannot report; the more authority the wake grants, the less it can do.
+
+**This supersedes finding 17's causal claim** (~~"the session's natural first move is to open the
+files, so it never says hello"~~ — 2026-09-06 02:47Z). Wake 3 was not busy-and-late; it was
+**unable** to occupy for this same reason, and the 90-second window merely decided how it died. The
+window's own defect stands as written (a hard-coded 90 s that does not scale with a 30 m bound, and
+a run that produced a commit is not a failed wake) — but it is the symptom, and finding 18 is the
+cause. That the two failure modes look different in `host.log` (killed at 91.4 s vs exited at 23.8 s)
+while sharing one cause is the reason to read the transcript rather than the log.
+
+**Disposition (2026-09-06 03:10Z):** added `mcp__musterd` to delta's workspace allow list — exactly
+what the reply-only path already grants, so this widens nothing the doorbell wakes did not already
+have.
+
+**Candidate product fixes:**
+
+1. **`seat-policy` must be a superset of `reply-only`.** The musterd tools are the wake's own
+   control plane, not part of the task's permissions — pass `--allowedTools mcp__musterd` on *both*
+   paths and let the seat's settings add to it.
+2. **`musterd agent`'s permissions floor (ADR 261) should include `mcp__musterd`.** It writes
+   `Bash(musterd *)` today, which is the surface the seat is told not to use when it has tools.
+3. **A wake that cannot call the wake's own tools should fail loudly, not quietly.** "exited without
+   occupying" and "no roster occupancy within the verify window" are the same defect wearing two
+   costumes; neither names the permission refusal that a transcript shows in one line.
+
+## 2026-09-06 03:36 UTC — exit criterion 3 met: a lane taken end to end from the VM
+
+`delta` claimed lane `01M1T3YXVD`, wrote `docs/wiki/cloud-seat-from-inside.md`, committed, pushed,
+and opened **PR #1353** — every step in a woken session on the Fly machine as uid 1001. Merged
+`c272e2be` (nick), ancestor-verified on `origin/main`, `pnpm wiki:check` green. Both commits are
+authored **and** committed by `delta (musterd seat) <delta@revive.musterd>` at 02:28:23Z and
+03:38:14Z, so ADR 109/197 attribution holds on the second machine. ADR 390's falsifier 5 is closed
+from inside: `id -u` → `1001`, user `seat`.
+
+**The lane's own falsifier resolved negative, and that is worth stating.** It predicted that push or
+`lane_submit` would be refused from the VM — by the two-repo token, by the joiner's lease, or by
+ancestor verification on the joiner's clone. None of that happened: push and `gh pr create` both
+work. Every real obstacle was somewhere the lane had not thought to look, and each was a different
+defect in the wake path rather than in the git path.
+
+### The five wakes it took, and what each one proved
+
+| # | leased | derivation | budget | outcome | blocker it exposed |
+| - | ------ | ---------- | ------ | ------- | ------------------ |
+| — | — | — | — | never fired | **14** credential: 401 for 50 h 50 m |
+| 1 | 01:26:52Z | batched | 5 m | killed 302.1 s | **16** joiner has no team policy |
+| 2 | 01:57:03Z | batched | 5 m | killed 301.4 s, page written | (same) |
+| 3 | 02:27:23Z | work_order | 30 m | killed 91.4 s, page committed | **17/18** cannot occupy |
+| 4 | 02:58Z | work_order | 30 m | exited 23.8 s, `$0.1073` | **18** musterd tools not permitted |
+| 5 | 03:30Z | work_order | 30 m | **push + PR #1353** | — |
+
+Four wakes recorded `$—` for spend; only the two that ended cleanly recorded anything. The ledger
+under-counts this arc by four runs.
+
+### What delta found that this seat could not
+
+The page's own findings are better evidence than anything measured from the laptop, because they are
+about the boundary a woken session sits inside:
+
+1. **The command allow list matches a literal prefix.** `Bash(git status *)` is allowed; `git -C .
+   status -sb` is refused. The *robust* form — the one a wake-time script writes to be
+   directory-safe — is the one that hangs a headless session, and with no human at the keyboard
+   `requires approval` is not a pause but a refusal that never resolves. (Conversely `git remote -v`
+   ran with no rule matching it, so the workspace list is the editable part of the boundary, not the
+   boundary.)
+2. **A woken seat cannot read its own daemon's files.** The session is scoped to its workspace, so
+   `rg`, `ls` and `cat` are all refused on `~/.musterd` — `musterd.db`, `host.log`, `daemon.log`,
+   `binding.json`. Those four files are what every finding in this log turned on. **A seat session
+   can be the subject of a wake diagnosis; it cannot be the instrument.** That is why findings 14-18
+   all came from an out-of-band shell, and why delta correctly reported that it could not read its
+   own `residency.wake_leased.detail.derivation` rather than guessing it.
+
+Delta also recorded three commissioned readings as *unverified from inside*, with the reason — the
+`MUSTERD_INVITE` scrub, the process list, the `gh` token type — rather than working around the
+refusal or inventing a value. That is the right shape for a measurement page.
+
+### What is still open (supersedes the 2026-09-04 list)
+
+- **The three wake-path defects have lanes, none fixed**: `01M1T6D80Q` (high — the actuator's
+  credential is a field three code paths own), `01M1T6DJ7J` (high — team policy does not replicate
+  to a joiner), and finding 18's `seat-policy` narrowing, which belongs with them.
+- **Every disposition here is hand-applied on the VM and will not survive a rebuild**: the
+  credential rebind, `loops.dispatch` on the joiner, `flow: auto`, and `mcp__musterd` in the
+  workspace allow list. `seat.sh` should do all four, or the defects should be fixed so it need not.
+- **The doorbell on the VM is deaf** — its `PostToolUse` hook still prints bare stdout, the form
+  izzo's #1349 identified as never reaching a model. `musterd init --refresh-hooks` on the machine,
+  once #1349's dist is deployed there.
+- **The two-machine experiments** (ADR 366 cursor, ADR 371 counts) — lane `01M1T3H3RB`, unblocked
+  now that the seat can work.
+- **Cost per day** — lane `01M1T3HA9T`. Today's arc: two clean runs at `$0.2476` and `$0.1073`, four
+  killed runs at `$—`.
+- **Residency enrollment still does not replicate** (finding 6), now with a sibling: team policy does
+  not either (finding 16). Same family, one lane each.

@@ -202,6 +202,43 @@ VM keeps its coordination layer and hub-authoritative acts (claims) refuse with 
 4. Memory, lanes, inbox, attestation history **never move** — they replicate (ADRs 365–371).
    Only the workspace is rebuilt, from git.
 
+## When the seat stops waking **$**
+
+**Symptom.** The hub roster says `offline · wakeable`, acts that should wake the seat sit unread,
+and nothing at all appears on the hub. The evidence is only on the machine:
+
+```sh
+fly ssh console -a musterd-seat-$SEAT -C "sh -c 'tail -n 5 /data/log/host.log'"
+# ! wake-lease poll failed for <team>: the residency wake endpoints authenticate with
+#   the team agent key (mskey_) for "<team>"
+```
+
+**Cause (2026-09-06, measured on delta).** The actuator authenticates every lease poll with
+`binding.agent_key` from the seat's workspace, and `/residency/wake-leases` accepts only the team
+agent key or a `host`-scoped bootstrap credential. A woken session claims its own seat, and the
+claim path rewrites that field — so the seat wakes **once** and then cannot be woken again. The
+roster keeps saying `wakeable` because residency enrollment does not replicate. Full write-up and
+falsifier: `docs/perf/cloud-seat.md`, finding 14.
+
+**Repair — a rebind, not a rotation.** The machine still holds the right key in
+`config.agentKeys.<team>`; `musterd wire` resolves it from there. Run both, in this order, as the
+seat user **with the daemon's HOME** — the account's passwd home is `/home/seat`, the daemon's state
+is `/data/home`, and getting this wrong writes a keyless binding, which is worse than the break:
+
+```sh
+fly ssh console -a musterd-seat-$SEAT -C \
+  "su seat -c 'export HOME=/data/home; cd /data/musterd-$SEAT && musterd wire'"
+fly ssh console -a musterd-seat-$SEAT -C \
+  "su seat -c 'export HOME=/data/home; cd /data/musterd-$SEAT && musterd residency on \
+     --seat $SEAT --harness claude-code --as nick'"
+```
+
+`wire` does not carry the standing grant across, which is why `residency on` follows — the same two
+steps `seat.sh` runs at boot. The next actuator poll (≤30 s) leases any wake already due; on delta
+the repair went from wire to `residency.woke` in under three minutes. **Do not rotate the team agent
+key to fix this** — rotation is the first-boot ceremony, it invalidates the key the machine still
+holds, and it repairs nothing that the rebind does not.
+
 ## Teardown **$**
 
 ```sh
