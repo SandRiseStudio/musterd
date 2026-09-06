@@ -199,3 +199,113 @@ the admitted set; a message never was.
 - **Residency enrollment still does not replicate** (finding 6): the hub shows delta plain
   `offline` while the VM shows `offline · wakeable`. Wakes are unaffected — the decision is the
   joiner's — but the hub's roster is not telling the truth about which seats are reachable.
+
+## 2026-09-06 01:26 UTC — the seat could be woken exactly once, and nothing said so for 51 hours
+
+Exit criterion 3 (a lane end to end from the VM, lane `01M1T3GMDD`) opened with a handoff to delta
+at 01:05:28Z. No wake came. The cause was not the handoff and not the ADR 390 image: **delta had
+been unwakeable since its own first wake, and the roster showed it `offline · wakeable` throughout.**
+
+### 14. The woken session disarms the actuator that spawned it
+
+Every `POST /teams/revive/residency/wake-leases` from the VM's actuator returned **401** from
+2026-09-04T22:36:32Z to the repair below — 50 h 50 m, across a reboot, roughly 6,100 polls. The
+last success was 22:36:02Z, thirty seconds earlier, and the minute in between is the minute delta's
+first (and only) wake ran: `⚡ woke delta: spawn→roster 17.4s`, `exit=0 cost=$0.2476`.
+
+Measured on the VM, 2026-09-06:
+
+| question | answer |
+| -------- | ------ |
+| `teams.agent_key_hash` for `revive` | non-null; `bootstrap_cutover_at` null |
+| `key.rotate` rows in the VM's audit | **exactly one**, 2026-09-04T04:59:25Z (first boot) |
+| `sha256(binding.agent_key) === teams.agent_key_hash` | **false** |
+| `sha256(binding.seat_credential) === teams.agent_key_hash` | false |
+| `sha256(config.agentKeys.revive) === teams.agent_key_hash` | **true** |
+
+The server side never moved: one rotation ever, and the hash it wrote is still the one in the team
+row — the machine's own `config.agentKeys` still matches it. What moved is the **workspace
+binding**, and the binding is the only thing the actuator reads: `defaultReadAgentKey` is
+`findBinding(workspace, {})?.agent_key` (`packages/cli/src/host/loop.ts:72`), handed straight to
+`HttpClient({ key })` for every lease poll. On the server, `/residency/wake-leases` accepts exactly
+two bearers (`packages/server/src/transport/http.ts` ~1330-1340): a bootstrap credential whose
+`use_kind` is **`host`** and whose `target` equals the host label, or a token hashing to the team
+agent key. Anything else is 401, and the message names the team key — which is why the log line
+reads as a configuration mistake rather than a credential that was swapped underneath it.
+
+**The contract mismatch.** `musterd agent` — the command that provisions a seat workspace —
+deliberately writes a **`claim_seat`**-scoped credential into that same `binding.agent_key` field
+(`packages/cli/src/commands/agent.ts:133-139`, ADR 344), with the comment "Never fall back to the
+ambient legacy Team-wide key: that would silently preserve its blast radius." That is the right call
+for ADR 344 and it is invisible to ADR 131: the field one ADR narrowed is the field the other
+authenticates wakes with, and no third thing reconciles them. A `claim_seat` credential is neither
+of the two bearers the endpoint takes.
+
+**Why it fires on the first wake specifically** (2026-09-06; falsify: wake a repaired seat and read
+`sha256(binding.agent_key)` before and after — if it still matches the team row, the claim path is
+innocent and the writer is elsewhere): the binding's current field set
+(`agent_key, claim, grant, model, model_observed, seat_credential, server, session, session_lease,
+team, version`) is the shape written by the claim/occupy path at
+`packages/cli/src/commands/claim.ts:264`, which preserves siblings rather than the flat five-field
+shape at `:435`. A woken session claims its own seat as its first act, so the wake rewrites the
+credential the next wake depends on.
+
+**Why nothing said so.** The 401 is a warn line in the VM's own `daemon.log` and a `!` line in
+`host.log`; neither reaches the hub, and residency enrollment does not replicate (finding 6), so the
+hub's roster kept rendering `offline · wakeable` — a claim about reachability that had been false
+for two days. The seat looked healthy from every surface a human uses.
+
+### The repair — a rebind, not a rotation
+
+The correct key was still on the machine (`config.agentKeys.revive`, matching), so nothing had to be
+rotated and no credential was invalidated. `musterd wire` resolves `agent_key` in exactly that
+precedence — `--key` → `MUSTERD_AGENT_KEY` → `config.agentKeys[team]`
+(`packages/cli/src/commands/wire.ts:146`) — so the boot log's own claim, "worktree configured —
+`musterd wire` repairs it any time", turned out to be literally true of this failure.
+
+Run as the seat user with the daemon's `HOME` (the account's passwd home is `/home/seat`; the
+daemon's state is `/data/home`, exported by the entrypoint — `su seat -c` without it reads the wrong
+config and would write a **keyless** binding, which is worse than the break):
+
+```sh
+su seat -c 'export HOME=/data/home; cd /data/musterd-delta && musterd wire'
+su seat -c 'export HOME=/data/home; cd /data/musterd-delta && musterd residency on \
+  --seat delta --harness claude-code --as nick'
+```
+
+`wire` writes the spec's fields and the resolved key; it does **not** carry `grant`, `session_lease`
+or `model_observed` across, so `residency on` follows to re-land the standing grant and the host
+registry entry — the same two steps, in the same order, that `seat.sh` runs at boot. `residency on`
+reported "delta has a live session — it occupies via the grant this enroll just rotated", which is
+the expected note for a seat whose stale presence is still on the roster.
+
+| moment | time (UTC) | note |
+| ------ | ---------- | ---- |
+| `musterd wire` | 01:24 | `agent_key` match flips false → **true** |
+| `musterd residency on` | 01:27:26 | `residency.enrolled delta` |
+| `residency.wake_leased` | 01:26:52 | **the first poll after the rebind** |
+| `residency.session_captured` | 01:26:55 | |
+| `residency.woke` | 01:26:59 | `spawn→roster 7.3s, session=fresh, provenance=wake` |
+| `residency.context_read` | 01:27:13 | lane `01M1T3YXVD`, read by delta itself |
+
+Spawn to roster occupancy was **7.3 s**, against 17.4 s on 2026-09-04; the actuator chose "portable
+delivery for delta: fresh spawn (resume bypassed)" rather than resuming the stale transcript. The
+wake fired on the poll immediately following the key repair, which is the falsifier for the whole
+diagnosis: had the binding not been the broken side, the rebind would have changed nothing.
+
+**ADR 390 falsifier 5, partially closed.** The boot log carries
+`wake actuator starting for seat delta (uid 1001, not root)` on both boots of the new image. The
+remaining half — `id -u` from inside the *woken* session — is delta's own to report.
+
+**Candidate product fixes**, in the order they would have helped:
+
+1. **The actuator's credential should be minted for the actuator.** `musterd residency on` knows the
+   host label; it could mint the `host`-scoped bootstrap credential the endpoint already accepts and
+   store it under a field no claim path touches, instead of sharing `binding.agent_key` with
+   `musterd agent` and every claim.
+2. **A 401 on the wake lease should reach the hub.** The one surface that showed the truth was on the
+   machine nobody was looking at. A seat whose actuator cannot authenticate is not `wakeable`, and
+   the roster is where that belongs — this is finding 6 with teeth.
+3. **`musterd agent` and the wake endpoint should not disagree in silence.** Either the endpoint
+   accepts a `claim_seat` credential for the seat it targets, or provisioning refuses to write a
+   credential the wake path cannot use.
