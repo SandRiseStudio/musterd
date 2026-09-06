@@ -49,7 +49,7 @@ ENV COREPACK_HOME=/opt/corepack
 # on 4849, git/gh/claude are ordinary user tools — and a woken model running as root is the one
 # thing the image must not offer (ADR 390). tailscaled is the sole root process; the entrypoint
 # drops to this user before anything of the seat's starts.
-RUN useradd --uid 1000 --no-create-home --shell /bin/bash seat
+RUN useradd --uid 1001 --no-create-home --shell /bin/bash seat
 
 # The harness the wake actuator spawns (claudeCode backend: `claude -p …`, reply-only, default
 # permission mode). Pinned by the build arg so a redeploy is a deliberate upgrade.

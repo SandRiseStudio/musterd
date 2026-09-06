@@ -61,6 +61,7 @@ a check; the replica stays, named, with the increment that would narrow it.**
    into `seat.sh`. The daemon, `git`, `gh`, the actuator and every `claude -p` run as `seat`
    (uid 1000). `tailscaled` is the one root process on the machine. A woken model gets an
    unprivileged shell, which is the least a machine can offer an actor it attests.
+   _(Amended 2026-09-05: the uid is 1001. See the amendment below.)_
 2. **The hub's key never boots.** If `MUSTERD_AGENT_KEY` is set, the entrypoint logs the fix and
    exits 1 before the tailnet comes up. Loud, not silent: a stale `fly secrets set` is the only way
    the key comes back, and a stopped machine with one log line is how it is found. The laptop's
@@ -74,6 +75,7 @@ a check; the replica stays, named, with the increment that would narrow it.**
    joiner clones the roster and never pushes it). The runbook names the exact scopes and says in
    words that a `gho_` login token is the wrong shape. This is the operator's to mint; the image
    cannot check what a token can do without spending it.
+   _(Amended 2026-09-05: one permission set across both repos. See the amendment below.)_
 5. **The tailnet node is tagged and the ACL admits one destination.** The auth key is generated
    with `tag:musterd-seat`, pre-authorized, reusable off, **ephemeral off** (a parked seat would
    lose an ephemeral identity every stop). The policy: `tag:musterd-seat` → `<hub>:4849`, and no
@@ -123,6 +125,20 @@ a check; the replica stays, named, with the increment that would narrow it.**
   secrets, replace the token, re-tag the node in the admin console. Each is a `$` step in the
   runbook; the merge does not touch the live machine.
 
+> **Amended 2026-09-05 — decision 1, the uid.** The first real build failed: `node:22-bookworm-slim`
+> ships a `node` user at uid 1000, so `useradd --uid 1000 seat` errors. The seat user is **1001**.
+> Nothing else in decision 1 changes; the runbook and the actuator's log line say 1001.
+
+> **Amended 2026-09-05 — decision 4, the token's shape.** A GitHub fine-grained token carries one
+> permission set across every repository it selects; the per-repo split decision 4 described
+> (write on `musterd`, read on `musterd-revive`) does not exist on the form. The token carries
+> contents read/write and pull requests read/write on **both** repos. The roster repo's unused
+> write is the one over-grant this shape leaves, accepted over routing two tokens through one
+> `GH_TOKEN`. The runbook says so in the same words.
+
+- All three operator steps were done on 2026-09-05/06 and measured from the VM — see
+  §Observability & Evaluation.
+
 ## Observability & Evaluation
 
 - **Traces.** `fly logs` on boot: `dropping root → seat (tailscaled stays root; nothing else does)`
@@ -131,6 +147,22 @@ a check; the replica stays, named, with the increment that would narrow it.**
 - **Eval.** The claim is "one root process, and it is tailscaled". Dataset: the live machine's
   process table. Baseline 2026-09-05 (before): every process uid 0. Expected after the first boot
   of this image: `ps -eo user,comm` shows exactly one `root` line, `tailscaled`.
+  **Measured after, 2026-09-05 16:42Z, delta on image `deployment-01M1S72G6W9JD04C26RC6FGNWP`:**
+  the four `chown … (one-time)` lines, then `dropping root → seat`, then `wake actuator starting for
+  seat delta (uid 1001, not root)`. `ps -eo user,comm` on the machine: userland root is exactly
+  `tailscaled` (the rest of the root lines are kernel threads); `node` ×2 as `seat`. The actuator's
+  `/proc/<pid>/environ` carries no `TAILSCALE_AUTHKEY`, `MUSTERD_INVITE` or `MUSTERD_AGENT_KEY`.
+  `/data/home`, the repo, the workspace, the logs and the SQLite file are owned by `seat`;
+  `/data/tailscale` stays root's. The hub answers `200` from the VM. `fly secrets list` holds four
+  names: the model credential, `GH_TOKEN`, `MUSTERD_SEAT`, `ROSTER_REPO`.
+  **The operator's two steps, measured 2026-09-06 00:20Z.** `GH_TOKEN` on the machine is
+  `github_pat_…`; from the VM `gh auth status` reads it, `gh api` reports `push: true` on
+  `musterd` and `musterd-revive` and `404` on any other repo. The node carries
+  `tag:musterd-seat`; with the grants policy saved (seat → `nicks-laptop` `tcp:4849` only), from the
+  VM the hub's `/health` answers `200` and the laptop's port 22 now **times out** (curl exit 28)
+  where before the policy it was refused (exit 7) — the ACL is dropping, not the laptop declining.
+  Falsifiers 1–4 all pass on the live machine; 5 (a woken session's `id -u`) waits for the next
+  real wake.
 - **Experiment.** None — no flag, no rollout. One machine, one deploy, on nick's word.
 
 ## Falsifiers
