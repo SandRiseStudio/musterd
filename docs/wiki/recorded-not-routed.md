@@ -74,6 +74,23 @@ The only repair is `musterd harness configure` (`commands/harness.ts`, "the ONE 
 
 Second-order, fixed in the same lane: the surface line also fed `anyWireRepairable`, so `--fix` would run `wire`, wire would report success on everything it *does* own, and the marker would still be there.
 
+## The sharpest instance: the fix for stale instructions shipped a stale instruction (2026-09-06, one hour later)
+
+The section above landed in #1363 at ~13:52Z. At ~13:58Z I ran its own prescription — `musterd harness configure` — on the workspace whose broken state produced the finding. It repaired nothing. The Cursor entry came back byte-identical and both drift lines survived (lane `01M1VFV8EK`, fixed in the follow-up).
+
+**Why.** Reconciliation acts on fragments of *desired* harnesses. Cursor was not in that workspace's desired set, so it owned no fragment to reconcile; being pre-ADR-281, it was in no ownership ledger either, so there was nothing to release. The entry was an **orphan** — owned by no harness and no ledger — and `harness configure` correctly ignored it. `repair-launch-marker` only ever fires for a selected harness.
+
+So the corrected message was right for one of two states and wrong for the other, and worse than wrong in the second: *"deleting the line by hand does NOT fix it"* is true when the marker must be **replaced**, and it argues the reader out of the only thing that works when there is no marker to get right at all. For an orphan the repair is removing the whole entry.
+
+| Harness in the desired set? | `harness configure` | Correct repair |
+| --- | --- | --- |
+| yes | repairs the marker | `musterd harness configure` (what #1363 fixed) |
+| no | **no-op** | remove the entry entirely — or adopt the harness, which converts it |
+
+**The generalisable lesson, and the reason this is on this page rather than in a commit message.** Every earlier instance here is *someone forgot to update a second surface*. This one is different and worse: the surface was updated, deliberately, by a lane whose entire purpose was updating stale repair instructions — and it still shipped one, because I enumerated the state I was **reading** (a selected harness, from the code path) and not the state I was **standing in** (an unselected one, in the workspace that surfaced the bug). The check "did I fix the message?" passed. The check that would have caught it is: **a prescription is a function of state, so fix it by enumerating every state it is handed out in.** The instance that surfaces a bad prescription is rarely the only state that prescription reaches.
+
+A second defect fell out of writing the fix, worth its own line because it is the same error one level down: my first orphan predicate was `!harnessIsDesired(id)`, which fires when the desired set is merely *unreadable*. That would tell a reader with a corrupt manifest that a harness is unwanted and send them to delete the entry wiring them up. Absence of the record is not absence of the desire; the predicate now requires positive knowledge (`desiredHarnesses.length > 0 && …`) and a test pins it.
+
 ## The check that finds these
 
 After landing any correction, grep for the old instruction's key phrase before calling it done — **across the whole repo, not just `docs/`**. The roadmap instance above was reported as four surfaces and was six: the two the finder missed were in `scripts/`, and they were the two an automated reader consumes. A sweep scoped to the documentation tree finds the surfaces humans read and misses the ones agents are fed — `grep -rn "pnpm format"` on 2026-08-19 would have surfaced CONTRIBUTING.md in the same minute #890 merged. The write path that avoids the problem entirely: state a fact once in its governed home and make every instruction-bearing surface *point* rather than restate. Every instance above is a restatement that outlived its source.

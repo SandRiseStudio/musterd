@@ -474,20 +474,70 @@ describe('inspectProvisioning', () => {
       expect(r.repair).toBe('wire');
     });
 
-    it('names the harness the folder is provisioned for when it cannot prescribe wire', async () => {
+    it('treats a stray entry for an unselected harness as an orphan, with a next step', async () => {
       h.primer = 'managed';
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
-      // A stray Claude Code entry in a folder that declares Codex: wire will not touch it here, and
-      // the correction has to say which entry wire *does* rewrite, or the reader has no next step.
+      // A stray Claude Code entry in a folder that declares Codex. This used to be described as
+      // "wire does not rewrite this — re-provision and pick Claude Code", which answers the narrower
+      // question (which entry does wire own) and leaves the reader running repairs that no-op:
+      // Claude Code is not in the desired set at all, so it owns no fragment and BOTH `wire` and
+      // `harness configure` skip it (measured 2026-09-06, lane 01M1VFV8EK). The requirement this
+      // test has always encoded — the reader must be left with a next step — is now met by a
+      // correct one rather than a reachable-sounding one.
       h.harnesses = [
         harnessWithEntry('Codex', {}, 'folder', 'codex'),
         harnessWithEntry('Claude Code', { registeredAgentKey: 'mskey_x' }, 'repo-shared'),
       ];
       const r = await inspectProvisioning(codexFolder());
       const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
-      expect(line).toContain('does not rewrite');
-      expect(line).toContain('provisioned for Codex');
+      expect(line).toContain('NOT in this workspace');
+      expect(line).toMatch(/harness configure` and `musterd wire` both skip it/);
+      // Two real next steps, not one dead one: delete the entry, or adopt the harness.
+      expect(line).toMatch(/Remove musterd's entry/);
+      expect(line).toMatch(/if it SHOULD launch this workspace/);
       expect(line).not.toMatch(/Run `musterd wire`/);
+    });
+
+    // The case #1363 shipped wrong (lane 01M1VFV8EK, measured on the workspace that produced the
+    // original finding): a retired marker on a harness NOBODY selected. `harness configure` was
+    // prescribed unconditionally and is a no-op here — reconciliation only touches fragments of
+    // desired harnesses, and a pre-ADR-281 entry is in no ownership ledger either, so there is
+    // nothing to repair and nothing to release. Worse, the "deleting by hand does NOT fix it"
+    // sentence — true when the marker must be REPLACED — argues the reader out of the one thing that
+    // does work here, because for an orphan there is no marker to get right at all.
+    it('prescribes removing the entry when a retired marker sits on an unselected harness', async () => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      // Folder provisioned for Codex; the stale marker is on Cursor, which nobody selected.
+      h.harnesses = [
+        harnessWithEntry('Codex', {}, 'folder', 'codex'),
+        harnessWithEntry('Cursor', { registeredSurface: 'cursor' }),
+      ];
+      const r = await inspectProvisioning(codexFolder());
+      const line = r.drift.find((d) => d.includes('MUSTERD_SURFACE'))!;
+      // The ADR 286 consequence still stated — that part does not depend on the branch.
+      expect(line).toMatch(/REFUSES to attach Presence/);
+      // ...but the repair is deletion, and the misleading sentence is gone.
+      expect(line).toMatch(/Remove musterd's entry/);
+      expect(line).toMatch(/the whole entry, not one line/);
+      expect(line).not.toMatch(/Deleting the line by hand does NOT fix it/);
+      expect(line).not.toMatch(/Run `musterd harness configure` in this worktree/);
+      // The other door stays open: adopt the harness and configure converts instead of deleting.
+      expect(line).toMatch(/if it SHOULD launch this workspace/);
+    });
+
+    // The orphan branch must never fire on ignorance. With no readable provisioning the desired set
+    // is empty, and "not in an empty set" is not evidence — claiming the harness is unwanted would
+    // send a reader to delete the entry that may be the only thing wiring them up.
+    it('does not call an entry an orphan when the desired set is unknown', async () => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [harnessWithEntry('Cursor', { registeredAgentKey: 'mskey_x' })];
+      const r = await inspectProvisioning('/x'); // no provisioning manifest at this path
+      const line = r.drift.find((d) => d.includes('MUSTERD_AGENT_KEY'));
+      expect(line).toBeDefined();
+      expect(line).not.toContain('NOT in this workspace');
+      expect(line).not.toMatch(/Remove musterd's entry/);
     });
 
     // Even the harness the folder IS provisioned for can be reporting drift from a file `configure`
