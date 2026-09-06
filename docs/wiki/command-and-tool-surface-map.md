@@ -106,4 +106,21 @@ Checked and NOT a defect: every catalogued command renders a summary and a detai
 6. ~~Parity: `availability` tool; CLI `goal outcome|retract`, `leave`, `status --role`. One lane, after 5.~~ DONE 2026-09-03: `team_availability` added; the three CLI "gaps" were survey errors and are corrected above.
 7. ~~`reclaimAgentLease` → `renewAgentLease` (collision 5). Fold into whichever lane next touches `resolveRead`.~~ DONE 2026-09-03 as `claimSeatPerRequest` — "renew" was the wrong word too: the option claims the seat afresh before every request (ADR 339), which is neither a renewal nor the admin `reclaim`.
 
-Related: [what-is-waiting-for-me.md](what-is-waiting-for-me.md) (the four "waiting" surfaces are two), [musterd-cli-messaging.md](musterd-cli-messaging.md).
+## Every fix above was recorded here before it reached the skill (2026-09-06)
+
+The seven recommendations shipped 2026-09-03 and are struck through above. Three days later the skill
+agents actually load — rendered from `packages/protocol/src/guidance.ts` — still taught the pre-fix
+shape for four of them: `done`, `--wait`/`--waiting`, `availability`, and `team_wake_context`. Fixed
+at `GUIDANCE_CONTENT_VERSION` 21→22 (lane `01M1VD1CQV`).
+
+That is [recorded, not routed](recorded-not-routed.md) — the instance and the reason no gate caught
+it are catalogued there, with [guidance distribution](guidance-distribution.md) for the second half
+(a version bump reaches a seat only when that worktree runs `musterd init --refresh-guidance`).
+
+**The standing implication for this page:** striking an item through here records a *surface* fix. It
+does not update the prose that teaches the surface. A lane that changes what a command **means** —
+rather than what it is called — should edit `guidance.ts` in the same lane, because `guidance:check`
+verifies names and cannot see a meaning move under a stable one (2026-09-06; falsify:
+`scripts/check-guidance.ts` imports only `CATALOG` and `TOOL_NAMES`).
+
+Related: [what-is-waiting-for-me.md](what-is-waiting-for-me.md) (the four "waiting" surfaces are two), [musterd-cli-messaging.md](musterd-cli-messaging.md), [correct-by-coincidence.md](correct-by-coincidence.md) (the assertion that passes on the reference footer).

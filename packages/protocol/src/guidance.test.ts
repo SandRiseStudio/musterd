@@ -128,6 +128,7 @@ describe('version-bump discipline (ADR 085)', () => {
     19: '3b7db362a4f5eeb9', // + rename team_memory_search → team_insight_search, alias retained one epoch (ADR 327 amendment, ADR 296)
     21: 'f3ee0a5d2a4808b7', // − the `lane_ready` / `musterd lane ready` alias line: both deprecated aliases (and team_memory_search) removed after their one-epoch retention (surface survey #1245, item 2)
     20: '199e0096a14dec89', // orient tier 1 = everything ADDRESSED to the seat: a routed acceptance/review request is done, not asked about, and announced with accept+reply_to so it discharges for co-addressees (ADR 326 amendment 2026-08-27 UTC)
+    22: '70084e92e29476ed', // the skill catches up with four surfaces that moved under it (lane 01M1VD1CQV): `done` records submit-vs-unconfirmed and says which; `--wait` (blocks) vs `--waiting` (returns) named as the twins they are; team_availability + the goal tools get their tool form; and a "when you were woken" playbook for team_wake_context, which had a name in the reference and no prose in the body
   };
 
   it('the rendered content matches the snapshot for the current version (bump on change)', () => {
@@ -190,5 +191,56 @@ describe('lane-close step 3 follows ADR 235, not the retired self-resolve-on-sil
     expect(body).toMatch(/no eligible\s+acceptor/i);
     expect(body).toMatch(/acceptance-exempt/i);
     expect(body).toMatch(/\*\*unconfirmed\*\*, never a wedge/);
+  });
+});
+
+/*
+ * The four surfaces that moved under the skill while it kept teaching the old shape (lane
+ * 01M1VD1CQV). Each assertion below is the *distinction* the skill got wrong, not its wording —
+ * these exist so the next surface change breaks a named test instead of quietly rotting one line
+ * of prose in every member workspace at once. `guidance:check` cannot catch any of them: it
+ * verifies that names resolve, never that the prose around a name is still true.
+ */
+describe('the skill teaches the surface as it is (lane 01M1VD1CQV)', () => {
+  const body = renderSkillBody({ team: 'dawn' });
+
+  it('`done` is taught as two records, not one — attested submit vs unconfirmed self-close', () => {
+    // The defect: "closes your live lane and shows what is next" pointed at the path ADR 192 exists
+    // to avoid. Both branches must be named wherever `done` is.
+    expect(body).toMatch(/`musterd done`[\s\S]{0,200}records two different things/i);
+    expect(body).toMatch(/with a merge attestation[\s\S]{0,120}awaiting_acceptance/i);
+    expect(body).toMatch(/without one it is an \*\*unconfirmed\*\*/i);
+    // …and the closing section must name `done` as the one-step form, not send readers elsewhere.
+    expect(body).toMatch(/musterd done\s+--pr <n> --sha <sha>` is the same path in one step/i);
+  });
+
+  it('names `--wait` and `--waiting` as distinct, and says which answers which question', () => {
+    // One letter apart, opposite blocking behaviour: the exact two-meanings class the surface
+    // survey (01M1MKSMBP) catalogued. Teaching only `--wait` was the gap.
+    expect(body).toMatch(/`--wait` and `--waiting` are one letter apart/i);
+    expect(body).toMatch(/`--wait` \*blocks\*/);
+    expect(body).toMatch(/`--waiting` \*returns immediately\*/);
+  });
+
+  it('gives availability and goals their tool form, per the channel note', () => {
+    // CHANNEL_NOTE promises tool-form / CLI-form throughout; availability shipped as a tool and the
+    // skill kept teaching only the CLI, invisible to guidance:check.
+    expect(body).toMatch(/`team_availability` \/ `musterd availability/);
+    expect(SKILL_MCP_TOOLS).toContain('team_availability');
+    // Assert the PROSE pairs them, not merely that the name appears: the reference footer prints
+    // every SKILL_MCP_TOOLS entry, so a bare `toContain` here would pass on the footer alone and
+    // tell us nothing about whether the body teaches the tool (docs/wiki/correct-by-coincidence.md).
+    expect(body).toMatch(/`team_goal_declare` \/\s+`musterd goal declare`/);
+  });
+
+  it('teaches team_wake_context in prose, not only in the name reference', () => {
+    // It sat in SKILL_MCP_TOOLS since v17 with no body text: a woken session got a name and no
+    // playbook. The packet's defining property — no bodies, only pointers — is the load-bearing bit.
+    expect(body).toMatch(/## When you were woken/);
+    expect(body).toMatch(/team_wake_context[\s\S]{0,300}no message or memory bodies/i);
+  });
+
+  it('dates the acceptors-came-back measurement instead of asserting it timelessly', () => {
+    expect(body).toMatch(/as of 2026-08 acceptors had\s+come back 20 of 20 times/i);
   });
 });
