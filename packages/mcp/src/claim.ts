@@ -151,8 +151,9 @@ export async function adoptIdentity(
 
 /** Persist the resolved seat as this folder's standing claim policy (so a re-launch re-occupies it). */
 /**
- * Write a lease the daemon renewed over the socket (ADR 347) into the binding of the seat that holds
- * it — so a CLI hook in this worktree presents a live lease too — and nowhere else. Same seat on
+ * Write the lease this socket currently holds — renewed over it (ADR 347), or minted with the
+ * occupancy a reconnect re-claimed — into the binding of the seat that holds it, so a CLI hook in
+ * this workspace presents a live lease too, and nowhere else. Same seat on
  * disk, or nothing is written: an adapter whose binding was re-provisioned to another seat must not
  * hand that seat its authority.
  */
