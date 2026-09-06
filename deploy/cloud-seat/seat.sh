@@ -114,6 +114,16 @@ node -e '
   };
   fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
 ' WORKSPACE="$WORKSPACE"
+# The doorbell seam — and it runs FIRST, before `harness configure` and `wire`. Claude Code hands a
+# PostToolUse hook's bare stdout to its debug log, never to the model; only
+# hookSpecificOutput.additionalContext reaches context (#1349, ADR 088 amendment). The hook in the
+# workspace is whatever build wrote it last; a workspace carried across an image upgrade holds the
+# OLD form, and both `harness configure` and `wire` read that as `✗ conflict` and refuse (2026-09-06
+# 13:18Z redeploy: configure failed, wire refused, and this line — which ran after them — was what
+# repaired it, so the second boot passed and the first did not). `--refresh-hooks` is the one verb
+# that rewrites a stale hook; declines to downgrade a hook a newer musterd wrote, so safe every boot.
+( cd "$WORKSPACE" && musterd init --refresh-hooks >/dev/null ) \
+  || log "init --refresh-hooks failed — the doorbell in this workspace may print bare stdout and reach no model (#1349)"
 # `musterd agent --harness` writes a registration with no launch-surface marker; the MCP adapter
 # refuses to attach Presence without one (ADR 286) and dies at startup with CONNECTION_CLOSED, so
 # the woken session has no team_* tools. `harness configure --select … --yes` is the headless
@@ -128,15 +138,8 @@ node -e '
 # it is not a rotation and invalidates nothing. `residency on` follows to re-land the standing
 # grant `wire` does not carry. A rebind here survives a rebuild; it does not survive the NEXT wake
 # if the claim path rewrites the field again — that is lane 01M1T6D80Q's, and this is the floor.
-( cd "$WORKSPACE" && musterd wire >/dev/null ) \
+( cd "$WORKSPACE" && musterd wire ) \
   || log "musterd wire refused — the actuator may poll with a credential the wake endpoint rejects (finding 14)"
-# The doorbell seam. Claude Code hands a PostToolUse hook's bare stdout to its debug log, never to
-# the model; only hookSpecificOutput.additionalContext reaches context (#1349, ADR 088 amendment).
-# The hook `musterd agent` wrote is whatever THAT build wrote; refresh it to this build's form so
-# an interrupt raised at a woken session is read by the session and not by nobody. Declines to
-# downgrade a hook a newer musterd wrote, so it is safe every boot.
-( cd "$WORKSPACE" && musterd init --refresh-hooks >/dev/null ) \
-  || log "init --refresh-hooks failed — the doorbell in this workspace may print bare stdout and reach no model (#1349)"
 # A work order runs under `tool_policy: seat-policy`, which hands the session NO --allowedTools and
 # falls back to the workspace's own permission list — and the ADR 261 floor `musterd agent` wrote
 # allows `Bash(musterd *)`, not the MCP tools (finding 18). So the more authority the wake grants,
