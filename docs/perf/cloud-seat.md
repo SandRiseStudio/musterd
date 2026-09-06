@@ -432,3 +432,64 @@ cooldown elapsed, the next poll should lease the handoff with `derivation: work_
 **Falsifier, restated so it can fail:** read `detail.derivation` on the next `residency.wake_leased`
 row in the VM's audit. `work_order` and a run outliving 302 s means the conjunction was the whole
 gate. `batched` again means something else still refuses, and the two knobs were not it.
+
+### 16a. Confirmed (2026-09-06 02:27Z) — the conjunction was the gate, and the actuator says so
+
+With the joiner's `loops.dispatch` armed and delta on `flow: auto`, the third wake leased at
+02:27:23Z recorded `"derivation":"work_order"`, and the actuator printed the bound it took:
+
+```
+wake bounds: delta work_order using policy timeout 1800000ms
+             (host --timeout 600000ms is not a ceiling for work_orders)
+```
+
+Finding 16 stands as diagnosed. Note the same log line still says `wake due: delta [batched]` for
+this run — the delivery lane, not the derivation, exactly as 15a describes. **An operator watching
+`host.log` cannot tell a 30-minute work order from a 5-minute doorbell**, which is worth fixing on
+its own.
+
+| wake | leased | derivation | budget | outcome |
+| ---- | ------ | ---------- | ------ | ------- |
+| 1 | 01:26:52Z | batched | 5 m | killed 302.1 s, nothing written |
+| 2 | 01:57:03Z | batched (flow already auto) | 5 m | killed 301.4 s, **page written**, uncommitted |
+| 3 | 02:27:23Z | **work_order** | 30 m | killed **91.4 s** on verify, **page committed** `ca079afe` |
+
+### 17. The 90-second roster-verify window kills a work order for doing the work
+
+The third wake had thirty minutes and used ninety-one seconds of it:
+
+```
+! wake FAILED for delta (batched): no roster occupancy within the verify window
+run for delta (fresh) settled: exit=143 wall=91.4s
+```
+
+`VERIFY_WINDOW_MS = 90_000` is a **hard-coded constant** (`packages/cli/src/host/loop.ts:35`) with
+no CLI flag — `musterd host` exposes only `--once` and `--host`; `verifyWindowMs` is a test
+injectable. It does not scale with the wake's budget, so a run granted 1,800,000 ms is verified
+against 90,000 ms regardless.
+
+**The shape.** Verification asks "did the seat occupy the roster?", which a session answers by
+calling any `team_*` tool. The first two runs answered it in 7.3 s and 17.5 s because a doorbell
+wake's natural first move is to read the inbox. A *work order* hands the session a lane and a
+branch, and its natural first move is to open the files. Delta did exactly that — it finished the
+page and committed `ca079afe` — and was killed at 91.4 s for not having said hello. **The
+verification is anti-correlated with the behaviour the work order asks for**, and the better the
+seat is at getting to work, the more reliably it dies.
+
+Two second-order costs, both already visible: the lease records failure for a run that *succeeded*
+at its actual task (the commit is on the branch), and the spend is `$—` again, so the ledger
+under-counts the run for the third time today.
+
+**Disposition (2026-09-06 02:47Z):** the lane's own brief now carries the workaround — "FIRST
+ACTION, before any git or file work: call `team_inbox_check`" — so the instruction travels inside
+the work order the seat fetches. That is a patch on the symptom and is recorded as such.
+
+**Candidate product fixes:**
+
+1. **Scale the verify window with the bound**, or verify a work order differently — a run that is
+   still alive and has produced a commit is not a failed wake. `min(bounds.timeout_ms, …)` with a
+   work-order floor would do; so would treating any harness output as liveness.
+2. **Verification should not require an MCP round-trip the task does not need.** Occupancy is a
+   proxy for "the session started"; the process being alive and writing is a better one.
+3. **`host.log` should print the derivation**, not only the delivery lane (see 16a) — three runs
+   today logged `[batched]` and one of them was a work order.
