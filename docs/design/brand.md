@@ -120,7 +120,9 @@ Single mono size at `14 / 22`; bold for emphasis; never italic in terminal frame
 
 ## 5. Terminology glossary (canonical — used identically in SPEC, CLI, docs, UI)
 
-The original five stay. The load-bearing set grew in [ADR 296](../decisions/296-terminology-architecture.md). Source of truth: `docs/glossary/terms.ts` — `pnpm vocab:check` fails if this table loses a canonical term. Do not introduce synonyms; the Not column is enforced on new docs, not merely published.
+The original five stay. The load-bearing set grew in [ADR 296](../decisions/296-terminology-architecture.md). Source of truth: `docs/glossary/terms.ts` — `pnpm vocab:check` fails if this table loses a canonical term. Do not introduce synonyms.
+
+What the gate enforces is narrower than what this table publishes, and the difference is deliberate. Linted outright (no legitimate second sense): **kit**, **profile**, **template**, **worktree**. Every other word in a Not column is authorial guidance, held in review rather than by a regex: those words are wrong only when used *as* the canonical term, and `adapter` the MCP adapter, `connection` the WebSocket, `participant` in a huddle and `verb` in the audit log are all correct English in this repo. A gate that banned them outright would buy suppressions, not clarity ([ADR 296](../decisions/296-terminology-architecture.md), amended 2026-09-05).
 
 | Term | Definition | Not |
 | --- | --- | --- |
