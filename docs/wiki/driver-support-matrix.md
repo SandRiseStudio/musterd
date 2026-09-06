@@ -31,7 +31,7 @@ it behave otherwise, then invalidate-date the cell (wiki rule 4).
 | Model attestation source (ADR 158/246) | `transcript_path` — highest-fidelity of the three | same | same | `model_id`/`model` from hook payload; transcripts ignored | same, but CLI model ids are a separate namespace (`cursor-grok-4.6-high` ≠ `grok-4.6`, 2026-08-13; no mapping invented) | only if PostToolUse carries `model` |
 | Session capture / transcripts | per-session `.jsonl` (ADR 131 §5) | same | same | `.jsonl` in per-session subdir; attribution via `.workspace-trusted.workspacePath` — only 2 of ~35 projects carried it on the measured machine (2026-08-21), so enumeration returns "cannot tell", not `[]` | sibling `.txt` at the top of `agent-transcripts` — a different format than the IDE (2026-08-13) | append-only JSONL |
 | Config entry scope | repo-shared (keys by repo root) | same | same | per-folder, secret inside the tree | same | per-folder; plus machine-global `~/.codex/config.toml` that no repair reaches (`registeredElsewhere`, measured 2026-08-05) |
-| Hook drift detection (doctor) | markers checked, missing hooks named | same | same | not populated | not populated | the only harness that populates `hookDrift` today (2026-08-24; falsify: grep `hookDrift` in `harnesses/*`) |
+| Hook drift detection (doctor) | markers checked, missing hooks named | same | same | ~~not populated~~ populated since 2026-09-05 (`inspectCursorHookDrift`, ADR 369 note): missing and STALE hooks named, refresh prescribed | same as IDE (same file) | the only harness that populates `hookDrift` today (2026-08-24; falsify: grep `hookDrift` in `harnesses/*`) |
 
 ### Grok CLI (added 2026-09-02, ADR 352)
 

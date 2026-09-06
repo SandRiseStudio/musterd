@@ -179,40 +179,115 @@ function dropCursorHook(path: string, event: string, marker: string): void {
  * interrupt + afterShellExecution + afterMCPExecution observe the live `model_id`; sessionEnd stamps
  * ended_at. Project-local `.cursor/hooks.json` only.
  */
+/**
+ * The one list of hooks musterd owns in a Cursor project: what `install` writes, what `remove` drops,
+ * and what `inspectCursorHookDrift` compares against. One list so the three cannot disagree.
+ *
+ * ADR 265: cursor-agent's event surface is a subset of the IDE's. Older CLIs (measured: 2026.01.23)
+ * never dispatch sessionStart/postToolUse/sessionEnd; they do dispatch afterShellExecution.
+ * afterMCPExecution covers a CLI session that is almost entirely MCP.
+ */
+interface CursorHookSpec {
+  event: string;
+  marker: string;
+  command: () => string;
+  matcher?: string;
+  /** What the hook is FOR, for the drift line a human reads. */
+  purpose: string;
+}
+const CURSOR_HOOK_SPECS: readonly CursorHookSpec[] = [
+  {
+    event: 'preToolUse',
+    marker: CURSOR_GATE_HOOK_MARKER,
+    command: preToolUseHookCommand,
+    matcher: 'Shell|Write|Delete|Edit|Task',
+    purpose: 'enforcement gate (ADR 150/369)',
+  },
+  {
+    event: 'sessionStart',
+    marker: CURSOR_OBSERVE_HOOK_MARKER,
+    command: sessionStartHookCommand,
+    purpose: 'orientation + capture (ADR 333)',
+  },
+  {
+    event: 'postToolUse',
+    marker: CURSOR_OBSERVE_HOOK_MARKER,
+    command: postToolUseHookCommand,
+    purpose: 'interrupt line (ADR 088/369)',
+  },
+  {
+    event: 'afterShellExecution',
+    marker: CURSOR_OBSERVE_HOOK_MARKER,
+    command: observeHookCommand,
+    purpose: 'model observation (ADR 265)',
+  },
+  {
+    event: 'afterMCPExecution',
+    marker: CURSOR_OBSERVE_HOOK_MARKER,
+    command: observeHookCommand,
+    purpose: 'model observation (ADR 265)',
+  },
+  {
+    event: 'sessionEnd',
+    marker: CURSOR_END_HOOK_MARKER,
+    command: sessionEndHookCommand,
+    purpose: 'session end stamp (ADR 131 §5)',
+  },
+];
+
 export function installMusterdCursorHooks(dir: string = process.cwd()): string[] {
   const path = projectHooksPath(dir);
   const warnings: string[] = [];
-  for (const [event, marker, command, matcher] of [
-    [
-      'preToolUse',
-      CURSOR_GATE_HOOK_MARKER,
-      preToolUseHookCommand(),
-      'Shell|Write|Delete|Edit|Task',
-    ] as const,
-    ['sessionStart', CURSOR_OBSERVE_HOOK_MARKER, sessionStartHookCommand(), undefined] as const,
-    ['postToolUse', CURSOR_OBSERVE_HOOK_MARKER, postToolUseHookCommand(), undefined] as const,
-    // ADR 265: cursor-agent's event surface is a subset of the IDE's. Older CLIs (measured:
-    // 2026.01.23) never dispatch sessionStart/postToolUse/sessionEnd; they do dispatch
-    // afterShellExecution. afterMCPExecution covers a CLI session that is almost entirely MCP.
-    ['afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand(), undefined] as const,
-    ['afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER, observeHookCommand(), undefined] as const,
-    ['sessionEnd', CURSOR_END_HOOK_MARKER, sessionEndHookCommand(), undefined] as const,
-  ]) {
-    const w = upsertCursorHook(path, event, marker, command, matcher);
+  for (const spec of CURSOR_HOOK_SPECS) {
+    const w = upsertCursorHook(path, spec.event, spec.marker, spec.command(), spec.matcher);
     if (w) warnings.push(w);
   }
   return warnings;
 }
 
+/**
+ * Doctor evidence for `.cursor/hooks.json` (ADR 168, applied to Cursor for the first time).
+ *
+ * Presence was never the question. Measured 2026-09-05 in schmidt's worktree: every musterd marker
+ * present, the `postToolUse` command a build older than ADR 369 — `session observe --stdin` with
+ * stdout discarded and no `--interrupt` — so the interrupt probe existed in the CLI and nothing ever
+ * ran it; the seat heard no bell at any boundary and the doctor had nothing to say, because Cursor
+ * populated no `hookDrift` at all (driver-support-matrix). Same rule as Claude Code's inspector: a
+ * hook's value is entirely in its text, so compare against what THIS build would write, and name the
+ * repair that rewrites the marker-owned entry.
+ */
+export function inspectCursorHookDrift(dir: string = process.cwd()): string[] {
+  const path = projectHooksPath(dir);
+  if (!existsSync(path)) return []; // no hooks file yet — the bare-folder drift already covers it
+  const file = readHooksSafe(path);
+  if (!file) return []; // present but unparseable — never invent drift from a file we cannot read
+  const drift: string[] = [];
+  for (const spec of CURSOR_HOOK_SPECS) {
+    const installed = (file.hooks?.[spec.event] ?? []).find((h) =>
+      isMusterdCursorHook(h, spec.marker),
+    );
+    if (installed === undefined) {
+      drift.push(
+        `the Cursor ${spec.event} hook (${spec.purpose}) is missing from .cursor/hooks.json — ` +
+          'run `musterd init --refresh-hooks` here to install it.',
+      );
+      continue;
+    }
+    if (installed.command !== spec.command()) {
+      drift.push(
+        `the Cursor ${spec.event} hook (${spec.purpose}) in .cursor/hooks.json was written by a ` +
+          'different musterd build and no longer matches this one — it is present but STALE, which ' +
+          'no presence check can see (ADR 168). Run `musterd init --refresh-hooks` here to rewrite it.',
+      );
+    }
+  }
+  return drift;
+}
+
 export function removeMusterdCursorHooks(dir: string = process.cwd()): void {
   const path = projectHooksPath(dir);
   if (!existsSync(path)) return;
-  dropCursorHook(path, 'preToolUse', CURSOR_GATE_HOOK_MARKER);
-  dropCursorHook(path, 'sessionStart', CURSOR_OBSERVE_HOOK_MARKER);
-  dropCursorHook(path, 'postToolUse', CURSOR_OBSERVE_HOOK_MARKER);
-  dropCursorHook(path, 'afterShellExecution', CURSOR_OBSERVE_HOOK_MARKER);
-  dropCursorHook(path, 'afterMCPExecution', CURSOR_OBSERVE_HOOK_MARKER);
-  dropCursorHook(path, 'sessionEnd', CURSOR_END_HOOK_MARKER);
+  for (const spec of CURSOR_HOOK_SPECS) dropCursorHook(path, spec.event, spec.marker);
 }
 
 /** Cursor: configured via .cursor/mcp.json. We write the project-scoped file in cwd. */
@@ -275,6 +350,8 @@ export const cursor: Harness = {
       // outside Claude Code's `claude mcp get` was ever parsed.
       ...registeredFromEnv(entry?.env),
       ...(entry?.args ? { registeredArgs: entry.args } : {}),
+      // ADR 168 for Cursor: the doctor reads the hooks file back and names a missing or STALE hook.
+      hookDrift: inspectCursorHookDrift(process.cwd()),
     };
   },
 
