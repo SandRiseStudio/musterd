@@ -68,8 +68,10 @@ Mint the three one-time credentials, each on its own machine:
 musterd node invite --label "fly seat $SEAT"          # → msinv_…
 # GitHub — a FINE-GRAINED token (github.com → Settings → Developer settings → Fine-grained tokens),
 # resource owner SandRiseStudio, "only select repositories": the work repo AND the roster repo.
-# Permissions — musterd: Contents read/write, Pull requests read/write, Metadata read (implied);
-#               musterd-revive: Contents read (the joiner clones the roster; it never pushes it).
+# One permission set covers every selected repo (GitHub offers no per-repo split on one token), so
+# the token carries the work repo's needs on both: Contents read/write, Pull requests read/write,
+# Metadata read (implied). The roster repo only ever gets cloned by the seat; write on it is the
+# one over-grant this shape leaves, accepted rather than running two tokens through one GH_TOKEN.
 # NOT a `gh auth login` token (gho_…): that is your whole account, every org, every repo.
 # model credential: ANTHROPIC_API_KEY (metered) or `claude setup-token` on a Max account
 ```

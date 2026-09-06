@@ -69,11 +69,14 @@ a check; the replica stays, named, with the increment that would narrow it.**
    `MUSTERD_INVITE` is unset in `seat.sh` after enrollment and before the actuator — so neither is
    in the environment a woken session inherits. The runbook tells the operator to `fly secrets
    unset` both after first boot, with the next redeploy.
-4. **The GitHub token is fine-grained to two repositories.** `SandRiseStudio/musterd` (contents
-   read/write, pull requests read/write) and `SandRiseStudio/musterd-revive` (contents read — the
-   joiner clones the roster and never pushes it). The runbook names the exact scopes and says in
-   words that a `gho_` login token is the wrong shape. This is the operator's to mint; the image
-   cannot check what a token can do without spending it.
+4. **The GitHub token is fine-grained to two repositories.** `SandRiseStudio/musterd` and
+   `SandRiseStudio/musterd-revive`, contents read/write and pull requests read/write on both — a
+   fine-grained token carries one permission set across its selected repos, so the roster repo
+   gets the work repo's write it does not need (the joiner only clones it). That is the one
+   over-grant this shape leaves, accepted over routing two tokens through one `GH_TOKEN`. The
+   runbook names the exact scopes and says in words that a `gho_` login token is the wrong shape.
+   This is the operator's to mint; the image cannot check what a token can do without spending
+   it.
 5. **The tailnet node is tagged and the ACL admits one destination.** The auth key is generated
    with `tag:musterd-seat`, pre-authorized, reusable off, **ephemeral off** (a parked seat would
    lose an ephemeral identity every stop). The policy: `tag:musterd-seat` → `<hub>:4849`, and no
