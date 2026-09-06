@@ -102,6 +102,14 @@ describe('Aperture posture analysis (ADR 385)', () => {
       'aperture-identities',
     ]);
     expect(checks.every((check) => check.state === 'ok')).toBe(true);
+    expect(checks.map((check) => check.detail)).toEqual([
+      'aperture.tailnet.ts.net · hash 8d14c921',
+      'zero; captures and tools purged',
+      'anthropic (2 models)',
+      'exact Member workload identities; no wildcard source',
+      'every model grant has a rejecting, defined bucket',
+      'persistent Member tags are exact and non-admin',
+    ]);
     expect(JSON.stringify(checks)).not.toContain('AABBCCDD');
   });
 

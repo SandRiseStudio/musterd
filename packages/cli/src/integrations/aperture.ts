@@ -119,7 +119,7 @@ export function inspectApertureConfig(observation: ApertureObservation): Integra
   const capabilities = modelCapabilities(config);
   checks.push(
     capabilities.length > 0
-      ? ok('aperture-grants', `${capabilities.length} model capability grant${capabilities.length === 1 ? '' : 's'}`)
+      ? ok('aperture-grants', 'exact Member workload identities; no wildcard source')
       : fail(
           'aperture-grants',
           'no model capability is granted',

@@ -41,6 +41,7 @@ src/
   exit.ts             // exitAfterFlush: exit only once stdout+stderr have drained — a piped render was cut at 64 KB by a bare process.exit()
   integrations/       // optional external integration inspectors (ADR 385)
     aperture.ts        // HuJSON config parsing + secret-safe Aperture retention/provider/grant/quota/identity posture checks
+    report.ts          // stable report composition + exact terminal rendering for independent optional postures
     tailscale.ts       // typed Tailscale status/Serve parsing + bounded Host-gate upgrade probe; no mutation commands
   help/               // the structured command catalog behind `musterd help` (ADR 113)
     catalog.ts        // pure, import-free command catalog (groups + entries) — the single source guidance:check reads
