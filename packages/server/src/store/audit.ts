@@ -75,6 +75,12 @@ export type AuditAction =
   // at whom. The raised→read pair (this row, then the recipient's inbox read of `detail.act`) is the
   // delivery-confirmation signal.
   | 'interrupt.raised'
+  // ADR 391: a live seat's interrupt probe was REFUSED — valid seat credential, missing or dead
+  // session lease — i.e. the seat is deaf and does not know it. target = the seat the credential
+  // proved (never the `x-musterd-seat` header, which proves nothing); detail = `{ lease }`, the
+  // two-word state. Deduped to one row per seat per REFUSAL_WINDOW_MS, because the probe fires at
+  // every tool boundary and a deaf seat would otherwise write a row a second.
+  | 'interrupt.refused'
   // ADR 093: a seat wrote or cleared its private memory blob. `detail` carried sizes only
   // (`size_bytes`, `headline_len`) — never the headline or body text (the no-secrets hard rule 5).
   // SUPERSEDED by the `continuity.*` verbs below (ADR 366, 2026-09-03): no new rows are written
@@ -575,6 +581,35 @@ export function hasInterruptRaised(
             AND json_extract(detail, '$.act') = ? LIMIT 1`,
       )
       .get(teamId, target, actId);
+    return row != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ADR 391 dedupe window for `interrupt.refused`. The probe runs at every tool boundary; a deaf seat
+ * doing ordinary work would hit the route several times a minute, and the row's job is to say WHO
+ * went deaf and roughly when, not to count probes — the request log already counts. Ten minutes
+ * is long enough to collapse a working session's burst and short enough that a seat healed and
+ * re-deafened by the next bounce (they come every merge) reads as two events, which it was.
+ */
+export const REFUSAL_WINDOW_MS = 10 * 60_000;
+
+/** True when `seat` already has an `interrupt.refused` row inside the window ending at `now`. */
+export function hasRecentInterruptRefusal(
+  db: Database,
+  teamId: string,
+  seat: string,
+  now = Date.now(),
+): boolean {
+  try {
+    const row = db
+      .prepare<[string, string, number], { one: number }>(
+        `SELECT 1 AS one FROM audit
+          WHERE team_id = ? AND action = 'interrupt.refused' AND target = ? AND ts > ? LIMIT 1`,
+      )
+      .get(teamId, seat, now - REFUSAL_WINDOW_MS);
     return row != null;
   } catch {
     return false;

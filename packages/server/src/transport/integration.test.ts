@@ -4144,6 +4144,86 @@ describe('v0.3 P2 governance enforcement (ADR 071)', () => {
     ).toHaveLength(1);
   });
 
+  // ADR 391 (lane 01M1T424MN). During the 2026-09-05 bell check 26 of 102 interrupt probes were
+  // refused with 401 and nobody could say WHOSE: `authByAgentSeatCredential` resolves the valid
+  // `msac_` credential to a real Member and then throws a generic error on the dead `msls_` lease,
+  // discarding the proven identity before the interrupt route can name it, and the request log
+  // carries only method/path/status/ms. A deaf seat was identifiable only from its own side.
+  describe('a refused interrupt probe names the seat it already proved (ADR 391)', () => {
+    async function deafAda() {
+      const team = await post('/teams', { slug: 'dawn', creator: { name: 'nick', kind: 'human' } });
+      const nickTok = team.json.human_credential as string;
+      await post('/teams/dawn/members', { name: 'Ada', kind: 'agent' }, nickTok);
+      const ada: Auth = { key: team.json.agent_key, seat: 'Ada' };
+      // Claim the seat for real (the helper swaps in Ada's msac_ credential + msls_ lease)…
+      const live = await get('/teams/dawn/inbox/interrupt-check', ada);
+      expect(live.status).toBe(200);
+      // …then kill the lease the way an autorefresh bounce does: the row stays, revoked.
+      const adaRow = getMemberByName(db, getTeamBySlug(db, 'dawn')!.id, 'Ada')!;
+      db.prepare('UPDATE session_leases SET revoked_at = ? WHERE member_id = ?').run(
+        Date.now(),
+        adaRow.id,
+      );
+      const teamId = getTeamBySlug(db, 'dawn')!.id;
+      const refusals = () =>
+        listAudit(db, teamId)
+          .filter((r) => r.action === 'interrupt.refused')
+          .map((r) => ({
+            ...r,
+            detail: typeof r.detail === 'string' ? (JSON.parse(r.detail) as unknown) : r.detail,
+          }));
+      return { nickTok, ada, teamId, refusals };
+    }
+
+    it('a valid credential with a dead lease is refused AND audited under the seat name', async () => {
+      const { ada, refusals } = await deafAda();
+      const probe = await get('/teams/dawn/inbox/interrupt-check', ada);
+      expect(probe.status).toBe(401);
+      // The caller learns nothing new — the body is the same generic sentence as before.
+      expect(probe.json.error.message).toMatch(/agent session lease/);
+      expect(JSON.stringify(probe.json)).not.toContain('msac_');
+      const rows = refusals();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.target).toBe('Ada');
+      expect(rows[0]!.detail).toMatchObject({ lease: 'dead' });
+      // Never the credential, never the lease token — the row names a seat, not a secret.
+      expect(JSON.stringify(rows[0]!.detail)).not.toMatch(/msac_|msls_/);
+    });
+
+    it('deduped: a deaf seat probing at every tool boundary writes one row, not one per probe', async () => {
+      const { ada, refusals } = await deafAda();
+      for (let i = 0; i < 5; i++) {
+        expect((await get('/teams/dawn/inbox/interrupt-check', ada)).status).toBe(401);
+      }
+      expect(refusals()).toHaveLength(1);
+    });
+
+    it('control: a spoofed x-musterd-seat on an INVALID credential names nobody', async () => {
+      const { refusals } = await deafAda();
+      const forged = { key: 'msac_definitely_not_a_real_credential', seat: 'Ada' };
+      const probe = await get('/teams/dawn/inbox/interrupt-check', forged);
+      expect(probe.status).toBe(401);
+      // The header said Ada. The credential proved nothing. No row may take the header's word.
+      expect(refusals()).toHaveLength(0);
+    });
+
+    it('control: a missing lease is refused with its own reason', async () => {
+      const { ada, refusals } = await deafAda();
+      const noLease = { key: ada.key, seat: ada.seat }; // credential valid, no msls_ header at all
+      const probe = await get('/teams/dawn/inbox/interrupt-check', noLease);
+      expect(probe.status).toBe(401);
+      expect(refusals()).toHaveLength(1);
+      expect(refusals()[0]!.detail).toMatchObject({ lease: 'missing' });
+    });
+
+    it('control: only the interrupt route audits — an ordinary read with a dead lease stays a plain 401', async () => {
+      const { ada, refusals } = await deafAda();
+      const read = await get('/teams/dawn/inbox', ada);
+      expect(read.status).toBe(401);
+      expect(refusals()).toHaveLength(0);
+    });
+  });
+
   // ADR 231. The #653 fix taught the orientation `why` to skip a handoff whose lane had closed —
   // but its test used a SYNTHETIC handoff carrying meta.lane_handoff.lane, and the real instance
   // that motivated it carried none, so the test went green while the bug stayed live. These go

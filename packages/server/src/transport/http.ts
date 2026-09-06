@@ -91,7 +91,7 @@ import { z } from 'zod';
 import { checkUpgrade, isLocalPeer, readLocalIdentity, resolveRosterRoots } from '../config.js';
 import type { Ctx } from '../context.js';
 import { schemaVersion } from '../db/migrations.js';
-import { MusterdError, asMusterdError } from '../errors.js';
+import { MusterdError, SessionLeaseRefused, asMusterdError } from '../errors.js';
 import { reapOrphans } from '../footprint/reap.js';
 import { log } from '../log.js';
 import { saveNodeEnrollment } from '../node/state.js';
@@ -105,6 +105,7 @@ import {
   appendAudit,
   appendLaneEventRequired,
   hasInterruptRaised,
+  hasRecentInterruptRefusal,
   laneOwnerHistory,
   listAudit,
   standingAcceptance,
@@ -5389,7 +5390,37 @@ export async function handleHttp(
       // is the agent's explicit follow-up (`musterd inbox`). The line is **daemon-composed** from the
       // envelope's structured fields (sender, act, count) — never `env.body` (§4 injection surface).
       if (method === 'GET' && rest === '/inbox/interrupt-check') {
-        const { team, member } = authTouch(ctx, slug, req);
+        let auth: { team: TeamRow; member: MemberRow };
+        try {
+          auth = authTouch(ctx, slug, req);
+        } catch (err) {
+          // ADR 391: this is the ONE route where "who was refused" is the finding. A valid seat
+          // credential with a missing or dead lease is a live session whose bell is silently off —
+          // the deaf state the 2026-09-05 bell check measured at 26 of 102 probes and could not
+          // attribute. The seat name here comes from the credential the store already verified,
+          // never from `x-musterd-seat` (a header proves nothing); the row carries a two-word lease
+          // state and no token. Every other route's 401 stays exactly as it was.
+          if (err instanceof SessionLeaseRefused) {
+            const team = getTeamBySlug(ctx.db, slug);
+            log.warn({
+              msg: 'interrupt_probe_refused',
+              seat: err.seat,
+              lease: err.leaseState,
+              ...(team ? { team: team.slug } : {}),
+            });
+            if (team && !hasRecentInterruptRefusal(ctx.db, team.id, err.seat)) {
+              appendAudit(ctx.db, team.id, {
+                actor: err.seat,
+                action: 'interrupt.refused',
+                target: err.seat,
+                result: 'deny',
+                detail: { lease: err.leaseState },
+              });
+            }
+          }
+          throw err;
+        }
+        const { team, member } = auth;
         assertSeatCanRead(member);
         const cursor = getCursor(ctx.db, member.id);
         // Only the shapes the fold can use (see `listInterruptCandidates`): this route runs at every
