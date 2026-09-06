@@ -142,7 +142,7 @@ a check; the replica stays, named, with the increment that would narrow it.**
 ## Observability & Evaluation
 
 - **Traces.** `fly logs` on boot: `dropping root → seat (tailscaled stays root; nothing else does)`
-  and `wake actuator starting for seat <name> (uid 1000, not root)`. On a migrated volume, the
+  and `wake actuator starting for seat <name> (uid 1001, not root)`. On a migrated volume, the
   `chown … (one-time)` lines, once.
 - **Eval.** The claim is "one root process, and it is tailscaled". Dataset: the live machine's
   process table. Baseline 2026-09-05 (before): every process uid 0. Expected after the first boot
