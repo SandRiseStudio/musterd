@@ -331,6 +331,28 @@ what it records. A no-spend apparatus check (2026-08-03) is at
 disk; paid cells not launched). **nick 2026-08-31: hold E** — no launch procedure and no spend
 row in this lane. Resume from the HANDOFF when a later lane is opened for it.
 
+### 2.7 The refresh rung (2026-09-06) — same cells, today's build, held until nick's go
+
+Authorized in manifest §2b; **not launched** at the time of writing. The scripts are the flagship
+set re-pointed, in `~/cookoff-run/refresh/` (`lib.sh`, `provision-musterd-cell.sh`,
+`provision-plain-cell.sh` for A/C2/C3, `run-mcell.sh`, `run-ccell.sh`, `wave-launch.sh`,
+`score-all.sh`, `preflight.sh`). Tags `RA1–3 / RB1–3 / RC2r1–3 / RC3r1–3 / RD1–3`, ports
+4890–4897, artifacts `~/cookoff-run/run-artifacts-refresh/`, musterd `1d7aebc6` via
+`~/cookoff-run/bin-refresh`.
+
+The order, when the go comes:
+
+1. `refresh/preflight.sh` — 14 no-spend checks (build, archaeology, `team policy --enforce-*`,
+   kickoff files, scoring checkout, fixture reachable, ports, swap). 14/14 on 2026-09-06.
+2. Provision the plain arms first (A ×3, C2 ×3, C3 ×3 — no daemon, no MCP), then the musterd arms
+   (D ×3, B ×3). ⚠ Provisioning a musterd cell still runs `claude mcp add -s local`, which writes
+   `~/.claude.json`; the §1.9 clobber trap holds unchanged on today's build. Provision with no
+   harness session live, and re-verify each seat's MCP entry + settings immediately before launch.
+3. Run the plain arms one cell at a time (`run-ccell.sh`; A is a single `launch_seat`), then the
+   musterd arms as `wave-launch.sh` — three waves of one D + one B, which aborts a wave below 500 MB
+   free swap.
+4. `score-all.sh`, then the finding (008) with the July and September tables side by side.
+
 ## Related
 
 [cookoff run manifest](cookoff-run-manifest.md) (the pins this operationalizes),

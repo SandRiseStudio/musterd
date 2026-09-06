@@ -51,10 +51,39 @@ morning; flagship followed the same day after the pilot check-in (finding
 | **Flagship** | A / B / C2 / C3 / D | 3 each   | ✅ 2026-07-20 (after pilot check-in) |
 | **D-res**    | D + residency       | —        | ⏸ defined §3b, not authorized      |
 | **E**        | too-big-for-solo    | —        | ⏸ design in progress, not authorized |
+| **Refresh**  | A / B / C2 / C3 / D | 3 each   | ✅ 2026-09-06 authorized (nick: "full one"); **launch held** on nick's separate go — see below |
 
 The apparatus checks that carry **no model spend** (archaeology recalibration, scoring-harness
 validation — §3) ran ahead of the paid smoke build. D-res and E still have no spend row — do not
 launch them on leftover flagship authorization.
+
+### 2b. The refresh rung (authorized 2026-09-06, lane `01M1VDRC6BAGMF7J0PCM0X3XKR`)
+
+The flagship number the pitch cites (D 1.9% vs C3 72.2%, finding 006) was measured on musterd
+`0ed4fd3` (2026-07-20) — 994 commits behind `main` on the day of authorization, and before the
+two-stage close, eligible sets, huddles, the live board and residency existed. nick authorized a
+**full five-arm re-run** (3 runs per arm, 15 cells) so the receipt carries a September date, and
+then held the launch: "dont actually launch the full cookoff just yet". Authorization and launch
+are two words on purpose; this row records the first. Nothing spends until the second.
+
+What changes against the flagship pins, recorded here so the delta is named before the data:
+
+| pin                    | flagship (2026-07-20)          | refresh                                                 |
+| ---------------------- | ------------------------------ | ------------------------------------------------------- |
+| musterd build (B, D)   | `0ed4fd3` (`~/cookoff-run/bin-flagship`) | `1d7aebc6` = `main` at authorization (`~/cookoff-run/bin-refresh`, detached checkout `~/cookoff-run/musterd-refresh`) |
+| Harness                | Claude Code `2.1.205`          | Claude Code `2.1.263` (what the machine runs; not re-pinnable downward) |
+| Model                  | `claude-sonnet-5`              | unchanged                                               |
+| Fixture / kickoff      | `ea5c6d4`                      | unchanged                                               |
+| Scoring                | `score.ts` + `musterd archaeology` v1 | unchanged predicate set; archaeology from the refresh build |
+| Tags / ports / artifacts | `F*` / 4880–4887 / `run-artifacts-flagship` | `R*` / 4890–4897 / `run-artifacts-refresh`; scripts `~/cookoff-run/refresh/` |
+
+Everything else in §1 holds. The harness version moved because the July pin is not installable
+beside the current one; it is a confound to name, not one to hide. The report will show the July
+and September tables side by side and state that two things moved (musterd, harness), not one.
+
+Pre-registered, at count 0: the sell comparison stays **D vs C3**; the July number is not
+overwritten but superseded with its date; a refresh D worse than July's 1.9% is reported as-is.
+
 
 ## 3. Smoke-rung apparatus de-risking (done 2026-07-10, no model spend)
 
