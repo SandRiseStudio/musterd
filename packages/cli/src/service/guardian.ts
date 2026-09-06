@@ -70,7 +70,9 @@ export async function guardianTick(d: GuardianTickDeps): Promise<number> {
 
   /**
    * ADR 389's Eval dataset, written on EVERY tick that reached the sample — armed or not, promoted
-   * or not. The arming decision is supposed to read 30 days of these rows rather than the ADR, and
+   * or not. The arming decision reads a WEEK of these rows rather than the ADR — 30 days on
+   * 2026-09-04, a week on nick's call the next day, pre-registered as
+   * docs/watches/2026-09-05-adr-389-sampled-read.md with a volume floor — and
    * a row written only when the class was promoted would be a dataset of confirmations: the
    * sample that said "parked, not held", and the sample that could not be taken at all, are
    * exactly the rows that could talk anyone out of arming this.
