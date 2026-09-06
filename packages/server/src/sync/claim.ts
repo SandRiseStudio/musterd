@@ -336,7 +336,21 @@ export function decideLanePatch(
     !LANE_TERMINAL_STATES.has(before.state) &&
     before.owner_seat !== null &&
     member.name !== before.owner_seat;
-  const patch = counterpartTerminal ? { ...body, merged: undefined } : body;
+  // ADR 348 amendment 2 (lane 01M1VF8166, 2026-09-06): a patch that carries no attestation must
+  // not downgrade one that stands. The MCP tool sends `merged: { verification }` on every submit,
+  // and a re-route by name (`lane_submit {id, acceptor}`) carries no SHA, so its verification is
+  // `unattested` — measured on the live daemon: five ancestor-verified lanes lost {pr, sha,
+  // authorized_by} in one lane.updated row each. A re-route is a routing request, not a second
+  // attestation; only a patch that names a SHA (or a PR) may replace the block. Decided here so the
+  // hub's arbitration and the local path agree, exactly as the counterpart-close rule above does.
+  const downgradesAttestation =
+    body.merged !== undefined &&
+    body.merged !== null &&
+    body.merged.sha === undefined &&
+    body.merged.pr === undefined &&
+    before.merged?.sha !== undefined;
+  const patch =
+    counterpartTerminal || downgradesAttestation ? { ...body, merged: undefined } : body;
   const guard =
     body.owner_seat !== undefined || body.state !== undefined
       ? { owner_seat: before.owner_seat, state: before.state }

@@ -162,3 +162,21 @@ run before landing: with the re-route arm removed, the integration test
 - The `named` route is a third value on a field that was two-valued since ADR 169. Readers that
   enumerate routes must handle it; the audit row is the durable source either way.
 - Nothing about the picker changes. A submit that names nobody routes exactly as it did.
+
+### Amendment 2 — a re-route carries no attestation, so it cannot downgrade one (2026-09-06, lane `01M1VF816693H03W0PNTKJGS46`)
+
+Measured on the live daemon at `1d7aebc6`: five ancestor-verified lanes re-routed by name
+(`lane_submit {id, acceptor}`, no `pr`/`sha`) each lost `{pr, sha, authorized_by,
+verification: "ancestor"}` to `{verification: "unattested"}` in one `lane.updated` row, and the
+`lane.review_rerouted` row recorded the downgraded block. Cause: the MCP tool sends
+`merged: { verification }` on every submit, and with no SHA the seat-side verification is
+`unattested`; the server wrote it over the standing block as if it were a new attestation.
+
+Decided: a `merged` patch that names neither a SHA nor a PR does not replace a standing block that
+has a SHA — `decideLanePatch` strips it, on the local path and under hub arbitration alike, the
+same way ADR 305 strips a counterpart's close. A patch that names a SHA still replaces the block:
+re-attesting is allowed; downgrading by omission is not. Falsify: submit with `{pr, sha}`, re-route
+by name with `merged: { verification: "unattested" }`, read `lane.merged.verification` — anything
+but `ancestor` disproves this (`integration.test.ts`, "a re-route that carries no attestation keeps
+the standing merge attestation"; red before the guard, on exactly the live shape).
+
