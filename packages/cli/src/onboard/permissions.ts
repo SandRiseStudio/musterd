@@ -78,6 +78,13 @@ export const STANDARD_FLOOR: PermissionLists = {
     'Bash(ls *)',
     'Bash(rg *)',
     'Bash(cat *)',
+    // The musterd MCP tools — ADR 261 decision 2 names them FIRST in what a working seat needs, and
+    // until 2026-09-06 the list carried only the CLI form below. A reply-only wake was handed the
+    // server on its argv and never noticed; a seat-policy wake (every work_order) is governed by
+    // this list and had team_wake_context / team_inbox_check refused, so it could not occupy the
+    // roster (finding 18, docs/perf/cloud-seat.md). The wake path now hands the server on both
+    // policies; this entry is the floor under it for a session a human opens in the same folder.
+    'mcp__musterd',
     // The musterd CLI — the coordination channel when the MCP bridge is not the one in use.
     'Bash(musterd *)',
   ],

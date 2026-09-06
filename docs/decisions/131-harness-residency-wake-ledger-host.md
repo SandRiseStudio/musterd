@@ -193,6 +193,9 @@ ordering also means resume can never target a live transcript.
   edit. `seat-policy` autonomy means _the workspace's own settings govern_; musterd never widens
   permissions, and **the wake path never passes a skip-permissions flag** (the steward's CI shape
   explicitly does not transfer to a laptop).
+
+  _(Amended 2026-09-06: the musterd MCP tools ride BOTH policies, and a wake that never occupies
+  says why. See the two amendments under Consequences.)_
 - **Visible:** woken occupancies carry provenance **`wake`** (additive `PROVENANCES` entry), so
   the roster, stream, and office can distinguish machine-initiated sessions; every step is
   audited — `residency.enrolled|revoked|wake_leased|woke|wake_failed|wake_exhausted`, with wake
@@ -296,6 +299,31 @@ only if a heartbeat tick observes the interloper while it still looks alive; a s
 ticks is never adopted (fail open). A working session that called a tool within `HEARTBEAT_MS`
 is not released even then (`shouldReleaseOnVerdict`). That residual is ledger noise for an
 active seat, not a second gate.
+
+_Amendment (2026-09-06, finding 18, lane 01M1VDY8PY): **the musterd MCP tools ride BOTH
+policies.** Read literally, "the workspace's own settings govern" had `seat-policy` omit
+`--allowedTools` altogether — and the ADR 261 floor those settings came from allowed
+`Bash(musterd *)` and not `mcp__musterd`, so a `work_order` (always seat-policy) had
+`team_wake_context` and `team_inbox_check` refused, correctly declined to fall back to the CLI,
+and exited in 23.8 s having occupied nothing: the broader policy was strictly narrower for the one
+server every wake needs (delta, 2026-09-06 02:58Z). The musterd tools are how a wake is
+**delivered** — occupy, read the packet, submit, report — not part of the task's permissions, so
+handing them is not widening the task. `argTail` now passes `--allowedTools mcp__musterd` under
+both policies; under seat-policy everything else is still the workspace's list, and the
+skip-permissions invariant is unchanged. Companion: the ADR 261 floor now carries `mcp__musterd`
+as decision 2 always said it should. Falsify: provision a workspace whose `settings.local.json`
+has no `mcp__musterd`, hand its seat a lane, and read `residency.woke` with `derivation:
+work_order`._
+
+_Amendment (2026-09-06, same lane): **a wake that never occupies says why.** The actuator's
+verdicts — "run exited (code N) without occupying the seat", "no roster occupancy within the
+verify window" — were the whole failure record, and on one machine in one day they wore a refused
+MCP server, `billing_error: Credit balance is too low` (four wakes, ~10 s, `$0.0000`) and a
+30-minute watchdog. For a run that exited, the reason now appends the harness's own words — the
+`--output-format json` result's `result` text when `is_error`, else the last non-empty stderr
+line — as `… — harness: <text>`, bounded to the wire's 200 characters, so `host.log` and the
+`residency.wake_failed` row name the cause. Timeouts and live children still carry the verdict
+alone; the host does not invent a cause it did not read._
 
 ## Observability & Evaluation
 

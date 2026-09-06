@@ -149,12 +149,16 @@ describe('buildResumeArgs (the resume argv invariants, inc 4)', () => {
 });
 
 describe('WakeArgOpts (inc 5): tool policy + turn cap ride the argv', () => {
-  it('seat-policy omits --allowedTools (workspace settings govern) — and STILL never a skip flag', () => {
+  it('seat-policy is a SUPERSET of reply-only: the musterd MCP tools ride both policies (finding 18) — and STILL never a skip flag', () => {
+    // 2026-09-06, delta wake 4: a work_order ran under seat-policy, was handed no --allowedTools,
+    // fell back to a workspace list that allowed the CLI and not the MCP server, and exited in
+    // 23.8 s having occupied nothing. The musterd tools are the wake's own control plane, not part
+    // of the task's permissions — a wake that cannot call them cannot occupy, submit, or report.
     for (const args of [
       buildWakeArgs('l', 'i', { toolPolicy: 'seat-policy' }),
       buildResumeArgs('l', 'i', { toolPolicy: 'seat-policy' }),
     ]) {
-      expect(args).not.toContain('--allowedTools');
+      expect(args[args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd');
       expect(args.join(' ')).not.toMatch(/skip-permissions|dangerously/i);
       expect(args).not.toContain('--permission-mode');
     }
@@ -182,7 +186,7 @@ describe('claudeCodeBackend.wake', () => {
     expect(calls).toHaveLength(1); // no resume attempt — the ladder skipped it
     expect(calls[0]!.args).toContain('--session-id');
     expect(calls[0]!.args).not.toContain('--resume');
-    expect(calls[0]!.args).not.toContain('--allowedTools'); // seat-policy
+    expect(calls[0]!.args[calls[0]!.args.indexOf('--allowedTools') + 1]).toBe('mcp__musterd'); // seat-policy too
     expect(calls[0]!.args[calls[0]!.args.indexOf('--max-turns') + 1]).toBe('7');
     expect(actuation.outcome).toEqual({ occupied: true, session: 'fresh' });
     child.exit(0);
@@ -828,6 +832,101 @@ describe('parseRunSummary (completion telemetry, never verification)', () => {
   });
   it('garbage stdout reads as null (a hung headless run must cost nothing here)', () => {
     expect(parseRunSummary('not json at all')).toBeNull();
+  });
+  it("an error result carries the harness's own words (billing_error on delta, 2026-09-06)", () => {
+    const out = JSON.stringify({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      result: 'Credit balance is too low',
+      total_cost_usd: 0,
+      duration_ms: 9_900,
+    });
+    expect(parseRunSummary(out)).toEqual({
+      cost_usd: 0,
+      duration_ms: 9_900,
+      is_error: true,
+      error_text: 'Credit balance is too low',
+    });
+  });
+  it('a clean result carries no error_text, even when `result` is set', () => {
+    const out = JSON.stringify({ type: 'result', is_error: false, result: 'done' });
+    expect(parseRunSummary(out)).toEqual({ is_error: false });
+  });
+});
+
+describe('a wake that cannot run says WHY (finding 18 fix 3)', () => {
+  // 2026-09-06 04:00–05:35Z: four delta wakes exited 1 in ~10 s at $0.0000 because the model
+  // credential returned `billing_error: Credit balance is too low`, and host.log said only
+  // "run exited (code 1) without occupying the seat". The reason is the operator's only line.
+  it("the harness's error text rides the failure reason", async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stdout.emit(
+        'data',
+        Buffer.from(
+          JSON.stringify({
+            type: 'result',
+            subtype: 'error_during_execution',
+            is_error: true,
+            result: 'Credit balance is too low',
+            total_cost_usd: 0,
+          }),
+        ),
+      );
+      child.exit(1);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.occupied).toBe(false);
+    expect(actuation.outcome.reason).toBe(
+      'run exited (code 1) without occupying the seat — harness: Credit balance is too low',
+    );
+  });
+  it("with no JSON summary, the last stderr line is the reason's tail", async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stderr.emit(
+        'data',
+        Buffer.from('warning: something\nError: MCP server "musterd" failed to start\n'),
+      );
+      child.exit(1);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.reason).toBe(
+      'run exited (code 1) without occupying the seat — harness: Error: MCP server "musterd" failed to start',
+    );
+  });
+  it('a clean exit that never occupied still says so, without inventing a cause', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', is_error: false })));
+      child.exit(0);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.reason).toBe('run exited (code 0) without occupying the seat');
+  });
+  it('the reason stays inside the wire bound (200) with a long harness error', async () => {
+    const child = new FakeChild();
+    const { backend } = harness(child);
+    const c = ctx(async () => {
+      child.stdout.emit(
+        'data',
+        Buffer.from(JSON.stringify({ type: 'result', is_error: true, result: 'x'.repeat(500) })),
+      );
+      child.exit(1);
+      return { occupied: false };
+    });
+    const actuation = await backend.wake(spec(), c);
+    expect(actuation.outcome.reason!.length).toBeLessThanOrEqual(200);
+    expect(actuation.outcome.reason).toMatch(
+      /^run exited \(code 1\) without occupying the seat — harness: x+$/,
+    );
   });
 });
 
