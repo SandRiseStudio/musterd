@@ -79,7 +79,7 @@ quiet reversal: the doorbell is a different job, and each finding has to be met 
   `interrupt.refused` per refused one (ADR 391); an OpenCode seat's rows are the evidence its probe
   runs. The doctor line for a missing plugin reads "nothing probes the interrupt line".
 - **Eval (owner: ghost, the OpenCode seat):** after `musterd init --refresh-hooks` in ghost's
-  worktree, one directed interrupt-class act while ghost is mid-turn. Expected: an
+  workspace, one directed interrupt-class act while ghost is mid-turn. Expected: an
   `interrupt.raised` row for ghost, and the `<musterd-interrupt>` fence visible in ghost's
   transcript at the next tool boundary. Then the same act while ghost is idle: one synthetic user
   message and a turn. Record both on the eval page (§7 there).
