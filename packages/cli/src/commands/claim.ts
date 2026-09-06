@@ -400,7 +400,7 @@ async function detachedClaim(input: {
     // without these the server attached `workspace: null` and evicted this folder's own live
     // session on every re-claim.
     workspace: resolveWorkspace(),
-    workspace_key: resolveWorkspaceKey(),
+    workspaceKey: resolveWorkspaceKey(),
     ...(grant !== undefined ? { grant } : {}),
   });
   if (outcome.state === 'refused') {
