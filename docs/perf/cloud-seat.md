@@ -599,12 +599,21 @@ refusal or inventing a value. That is the right shape for a measurement page.
 - **The three wake-path defects have lanes, none fixed**: `01M1T6D80Q` (high — the actuator's
   credential is a field three code paths own), `01M1T6DJ7J` (high — team policy does not replicate
   to a joiner), and finding 18's `seat-policy` narrowing, which belongs with them.
-- **Every disposition here is hand-applied on the VM and will not survive a rebuild**: the
+- ~~**Every disposition here is hand-applied on the VM and will not survive a rebuild**: the
   credential rebind, `loops.dispatch` on the joiner, `flow: auto`, and `mcp__musterd` in the
-  workspace allow list. `seat.sh` should do all four, or the defects should be fixed so it need not.
-- **The doorbell on the VM is deaf** — its `PostToolUse` hook still prints bare stdout, the form
+  workspace allow list. `seat.sh` should do all four, or the defects should be fixed so it need not.~~
+  **2026-09-06 13:20Z: `seat.sh` now does all four at every boot** (`musterd wire` before
+  `residency on`; `team policy --dispatch-loop on` on the joiner; `--flow auto`; `mcp__musterd`
+  merged into the workspace allow list), plus `musterd init --refresh-hooks` for the doorbell seam.
+  Verified by `bash -n` and `shellcheck` only — the falsifier is a redeploy of the image from that
+  commit followed by a handoff that leases `derivation: work_order` and an interrupt line that lands
+  in the woken session's context with no hand step after boot. Unmeasured until nick redeploys. The
+  three defects stay open (`01M1T6D80Q`, `01M1T6DJ7J`, finding 18); the boot script is the floor
+  under them, not the fix — in particular a boot-time rebind cannot outlive the next wake if the
+  claim path still rewrites `binding.agent_key` (finding 14's falsifier, still unrun).
+- ~~**The doorbell on the VM is deaf** — its `PostToolUse` hook still prints bare stdout, the form
   izzo's #1349 identified as never reaching a model. `musterd init --refresh-hooks` on the machine,
-  once #1349's dist is deployed there.
+  once #1349's dist is deployed there.~~ Folded into the `seat.sh` line above (2026-09-06).
 - **The two-machine experiments** (ADR 366 cursor, ADR 371 counts) — lane `01M1T3H3RB`, unblocked
   now that the seat can work.
 - **Cost per day** — lane `01M1T3HA9T`. Today's arc: two clean runs at `$0.2476` and `$0.1073`, four

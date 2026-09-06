@@ -52,6 +52,13 @@ node -e '
   }' TEAM_HOME="$TEAM_HOME"
 kill -HUP "$DAEMON_PID"
 sleep 3
+# Team policy does NOT replicate to a joiner (finding 16, docs/perf/cloud-seat.md): the hub's
+# `loops.dispatch` is on, this daemon's is null, and THIS daemon derives the wake — so without this
+# line every wake a seat here can receive is a reply doorbell under the 5-minute reply budget, and a
+# lane handoff can never arrive as a work order. Arm it locally to agree with the hub. Idempotent;
+# blast radius is the seats enrolled on this daemon. Remove once lane 01M1T6DJ7J replicates policy.
+( cd "$TEAM_HOME" && musterd team policy --dispatch-loop on --as nick >/dev/null ) \
+  || log "team policy --dispatch-loop on refused — handoffs to this seat will run as 5 m doorbells (finding 16)"
 
 # ── 4. enroll at the hub (first boot only; ~/.musterd/node.json is the proof) ─────────────────────
 # After this, the HUB has one step to run (README §First boot): `musterd node trust <node id>` as
@@ -113,12 +120,47 @@ node -e '
 # converter that writes the marker (first boot 2026-09-04 — this is what actually fixed the wake).
 ( cd "$WORKSPACE" && musterd harness configure --select claude-code --yes ) \
   || log "harness configure failed — the wake will spawn a session with no team_* tools and fail verification"
+# Rebind the actuator's credential EVERY boot, not just the first (finding 14). `musterd agent`
+# above and every seat claim write `binding.agent_key`, and the wake-lease endpoint takes only the
+# team agent key or a host-scoped credential — so a binding left holding a claim_seat credential
+# polls into 401 forever, and the roster keeps saying `wakeable`. `wire` resolves the key from this
+# daemon's own `config.agentKeys.<team>` (the one `team agent-key --rotate` minted at first boot);
+# it is not a rotation and invalidates nothing. `residency on` follows to re-land the standing
+# grant `wire` does not carry. A rebind here survives a rebuild; it does not survive the NEXT wake
+# if the claim path rewrites the field again — that is lane 01M1T6D80Q's, and this is the floor.
+( cd "$WORKSPACE" && musterd wire >/dev/null ) \
+  || log "musterd wire refused — the actuator may poll with a credential the wake endpoint rejects (finding 14)"
+# The doorbell seam. Claude Code hands a PostToolUse hook's bare stdout to its debug log, never to
+# the model; only hookSpecificOutput.additionalContext reaches context (#1349, ADR 088 amendment).
+# The hook `musterd agent` wrote is whatever THAT build wrote; refresh it to this build's form so
+# an interrupt raised at a woken session is read by the session and not by nobody. Declines to
+# downgrade a hook a newer musterd wrote, so it is safe every boot.
+( cd "$WORKSPACE" && musterd init --refresh-hooks >/dev/null ) \
+  || log "init --refresh-hooks failed — the doorbell in this workspace may print bare stdout and reach no model (#1349)"
+# A work order runs under `tool_policy: seat-policy`, which hands the session NO --allowedTools and
+# falls back to the workspace's own permission list — and the ADR 261 floor `musterd agent` wrote
+# allows `Bash(musterd *)`, not the MCP tools (finding 18). So the more authority the wake grants,
+# the less it can do: team_wake_context and team_inbox_check are refused, the session cannot occupy
+# the roster, and the actuator reports "exited without occupying". Allow the wake's own control
+# plane. Additive merge; leaves every other entry alone. Remove once seat-policy grants it itself.
+node -e '
+  const fs = require("fs"); const p = process.env.WORKSPACE + "/.claude/settings.local.json";
+  const c = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
+  c.permissions = c.permissions || {}; c.permissions.allow = c.permissions.allow || [];
+  if (!c.permissions.allow.includes("mcp__musterd")) {
+    c.permissions.allow.push("mcp__musterd");
+    fs.mkdirSync(require("path").dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n"); console.log("mcp__musterd allowed for work orders");
+  }' WORKSPACE="$WORKSPACE"
 
 # ── 6. residency (ADR 131): what makes the seat wakeable HERE ─────────────────────────────────────
 # `residency on` lands the standing resume grant in the workspace binding and registers the
 # workspace in this machine's host registry — the list `musterd host` polls. It names the harness
 # explicitly (the wired workspace does not imply it) and `--as nick` authorizes. Idempotent.
-( cd "$WORKSPACE" && musterd residency on --seat "$MUSTERD_SEAT" --harness claude-code --as nick ) \
+# `--flow auto`: with the joiner's dispatch loop armed above, this is the other half of the gate that
+# lets a handoff arrive as a 30-minute work order instead of a 5-minute doorbell (finding 16a — either
+# knob alone is inert; the third wake on 2026-09-06 leased `derivation: work_order` only with both).
+( cd "$WORKSPACE" && musterd residency on --seat "$MUSTERD_SEAT" --harness claude-code --flow auto --as nick ) \
   || log "residency on refused — the seat is not wakeable on this machine until it succeeds"
 
 # ── 7. the wake actuator (ADR 131) — the machine's life is this process ───────────────────────────

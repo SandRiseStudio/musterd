@@ -234,7 +234,9 @@ fly ssh console -a musterd-seat-$SEAT -C \
 ```
 
 `wire` does not carry the standing grant across, which is why `residency on` follows — the same two
-steps `seat.sh` runs at boot. The next actuator poll (≤30 s) leases any wake already due; on delta
+steps `seat.sh` runs at boot. Since 2026-09-06 `seat.sh` runs `wire` on **every** boot, not only the
+first, so a rebuild or restart rebinds by itself; this hand repair is for a seat that broke *between*
+boots (the next wake's claim rewrote the field — lane `01M1T6D80Q`). The next actuator poll (≤30 s) leases any wake already due; on delta
 the repair went from wire to `residency.woke` in under three minutes. **Do not rotate the team agent
 key to fix this** — rotation is the first-boot ceremony, it invalidates the key the machine still
 holds, and it repairs nothing that the rebind does not.
