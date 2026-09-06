@@ -22,6 +22,7 @@ import { humanCommand } from './commands/human.js';
 import { inboxCommand } from './commands/inbox.js';
 import { initCommand } from './commands/init.js';
 import { insightCommand } from './commands/insight.js';
+import { integrationCommand } from './commands/integration.js';
 import { joinCommand } from './commands/join.js';
 import { laneCommand, lanesCommand } from './commands/lane.js';
 import { liveCommand } from './commands/live.js';
@@ -216,6 +217,8 @@ async function dispatch(command: string, rest: ReturnType<typeof parseArgs>): Pr
       return broadcastCommand(rest);
     case 'stream':
       return streamCommand(rest);
+    case 'integration':
+      return integrationCommand(rest);
     case 'team':
       return teamCommand(rest);
     case 'join':

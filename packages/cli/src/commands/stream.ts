@@ -27,17 +27,13 @@ import {
   digestPath,
   findRepoRoot,
   parsePushedDigest,
-  probeUpgradeHost,
-  parseTailscaleSelf,
   readDigest,
-  realExec,
   REGION,
   runChecks,
   occupiedMachines,
   startedMachines,
   VM_SIZE,
   type Check,
-  type Exec,
 } from '../broadcast/hosted.js';
 import {
   FLAP_MAX,
@@ -49,6 +45,8 @@ import {
 import { HttpClient } from '../client.js';
 import { configPath, loadConfig, serverProvenance, type ServerProvenance } from '../config.js';
 import { CliError } from '../errors.js';
+import { probeUpgradeHost, parseTailscaleSelf } from '../integrations/tailscale.js';
+import { realExec, type Exec } from '../process.js';
 import { theme } from '../render/theme.js';
 
 const USAGE =

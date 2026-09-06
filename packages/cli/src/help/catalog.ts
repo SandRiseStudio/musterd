@@ -271,6 +271,26 @@ export const CATALOG: readonly CommandEntry[] = [
     examples: ['musterd stream doctor', 'musterd stream build', 'musterd stream start'],
   },
   {
+    name: 'integration',
+    signature: 'doctor [--tailscale] [--aperture <https-url>] [--json]',
+    summary: 'read-only verification for optional Tailscale transport and Aperture configuration',
+    group: 'setup',
+    primary: false,
+    detail:
+      'Independently inspect either optional integration without changing it. `--tailscale` verifies ' +
+      'the daemon host’s actual loopback → Tailscale Serve → Host gate → HTTP/WebSocket path. ' +
+      '`--aperture` reads one HTTPS /api/config endpoint and checks zero retention, providers, exact ' +
+      'Member workload grants, rejecting quotas, and non-admin identities. A ready Aperture result ' +
+      'is configuration evidence only: this increment does not enforce model routing and does not manage ' +
+      'devices, sandbox Members, or cover unrelated harnesses. With neither flag, both sections are healthy off.',
+    examples: [
+      'musterd integration doctor',
+      'musterd integration doctor --tailscale',
+      'musterd integration doctor --aperture https://aperture.tailnet.ts.net',
+      'musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net',
+    ],
+  },
+  {
     name: 'service',
     signature:
       '<install|uninstall|start|stop|restart|refresh|status|logs> [--live | --wake] [--port <n>] [--host <h>] [--otlp-endpoint <url>] [--interval <s>] [--timeout <s>] [--follow] [--force]',

@@ -97,6 +97,18 @@ the overlay.
 
 ## Verify
 
+If the daemon remains loopback-bound behind **Tailscale Serve**, the optional read-only doctor checks
+the exact MagicDNS and IPv4 Host gates plus the HTTP and WebSocket path in one secret-safe report:
+
+```bash
+musterd integration doctor --tailscale
+```
+
+That command verifies Tailscale Team transport only. It does not configure Tailscale or replace the
+manual checks below for the direct overlay-bind recipe in this guide. Aperture model-configuration
+readiness is independent; see the [approved paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md)
+for `musterd integration doctor --aperture <https-url>` and the combined invocation.
+
 Run this checklist before you trust the team:
 
 1. **Reachability** — from a member's machine, confirm the daemon's `host:port` is reachable over the

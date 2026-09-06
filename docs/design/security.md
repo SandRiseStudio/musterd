@@ -83,6 +83,12 @@ Credentials decide _who_; capabilities decide _what_ and _what's visible_. Both 
 - `init` shows a one-line warning when it writes a secret to a repo-local file, and offers to add it to `.gitignore`.
 - The daemon binds to `127.0.0.1` by default; exposing it beyond localhost is an explicit, guarded step. The daemon **refuses** a non-loopback bind in plaintext (ADR 040): it requires native TLS (`MUSTERD_TLS_CERT` + `MUSTERD_TLS_KEY`, serving `wss://`) **or** `--insecure-trust-proxy` acknowledging a TLS-terminating proxy/overlay in front. The WS upgrade enforces Origin/Host checks (cross-site / DNS-rebinding defense), `serve` logs the effective host + scheme, and the resilience timeouts are env-tunable for WAN teams. The full networking substrate for cross-machine/cross-network teams — daemon reachability, NAT, overlay-vs-hosted-relay topologies, and the secured off-loopback bind these credentials ride on — is designed in `deployment-topology.md` (decided in ADR 039); the secured bind itself is ADR 040. The near-term zero-code path is an overlay (`../guides/cross-network-overlay.md`).
 
+Aperture is optional model governance for supported musterd-launched Surfaces. The read-only doctor in
+[ADR 385](../decisions/385-optional-tailscale-aperture-doctor.md) can verify the reference configuration,
+but readiness does not manage devices, sandbox Members, cover unrelated harnesses, or activate
+enforcement. The [paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md)
+defines the later governed-launch boundary.
+
 ## Out of scope (roadmap, named so we don't design into a corner)
 
 Automatic/scheduled credential rotation; mTLS / authenticated remote transport; encryption-at-rest for the DB; multi-admin policy & delegation; signed audit log; rate-limiting / anomaly detection on claims; secret storage via OS keychain instead of plaintext config files.

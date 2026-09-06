@@ -6,7 +6,7 @@
 
 ---
 
-> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md)). File: [musterd / Terminal UX](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ). The frames mirror the **already-shipped CLI** (reality wins): `cmd/team-add` shows the MCP env block the CLI actually emits (not a generic join token), and `cmd/join` shows the default `cli` surface.
+> **Status: EXECUTED** (2026-06-10, see [ADR 008](../decisions/008-ui-ux-figma-execution.md); integration-doctor frames added 2026-09-06 under [ADR 385](../decisions/385-optional-tailscale-aperture-doctor.md)). File: [musterd / Terminal UX](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ). The frames mirror the **already-shipped CLI** (reality wins): `cmd/team-add` shows the MCP env block the CLI actually emits (not a generic join token), and `cmd/join` shows the default `cli` surface.
 
 ## File
 
@@ -95,6 +95,11 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
     `✓ Seed 01SEED00000000000000000000 — promoted to Lane 01LANE00000000000000000000`, with the
     checkmark green.
 
+### Optional integration doctor (ADR 385)
+
+14. [`cmd/integration-doctor`](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ?node-id=18-2) — the exact no-color combined frame for `musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net`: separate Tailscale `verified` and Aperture `off (configuration ready)` headings, the 13 stable checks in protocol order, and the two `LIMITS` non-claims. The frame is 80-column-safe, JetBrains Mono `14/22`, and matches the renderer snapshot character-for-character.
+15. [`cmd/integration-doctor/blocked`](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ?node-id=18-4) — combined selected failures: red `✗` on the failed check, dim `→` repair and `·` skipped dependent checks, with both section headings `blocked`. Selected failure exits **1**; invalid command/URL usage exits **2**; neither selected renders both sections `off` and exits **0**.
+
 ## Page: States (empty + error)
 
 1. `state/empty-inbox` — `inbox empty — nobody's mustered anything yet` (dim). (Exact string; the CLI uses it verbatim.)
@@ -110,7 +115,7 @@ For every error frame, annotate the **exit code** in a Figma comment/sticky so t
 
 - [ ] `terminal/frame` plus all 7 components exist with the listed variants.
 - [ ] ANSI color styles exist and match `brand.md` §2 exactly.
-- [ ] All 13 `cmd/*` frames exist, 80-col aligned, using the shared components and the canonical sample data.
+- [ ] All 15 `cmd/*` frames exist, 80-col aligned, using the shared components and the canonical sample data.
 - [ ] All 6 `state/*` frames exist; each error frame annotates its exit code and uses the verbatim strings above.
 - [ ] No glyph or color is used that the CLI can't reproduce in a 16-color ANSI terminal.
 - [ ] Every literal string a frame shows is reproducible character-for-character (these are the spec for CLI copy).

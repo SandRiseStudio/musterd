@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseArgs } from '../args.js';
-import type { Exec, ExecResult } from '../broadcast/hosted.js';
 import { readStreamState, writeStreamState } from '../broadcast/streamState.js';
 import { CliError } from '../errors.js';
+import type { Exec, ExecResult } from '../process.js';
 import { streamCommand, type StreamDeps } from './stream.js';
 
 const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });

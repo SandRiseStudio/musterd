@@ -1,17 +1,18 @@
 import { createServer, type Server } from 'node:http';
 import { describe, expect, it } from 'vitest';
 import {
-  parsePushedDigest,
-  parseSecrets,
   parseTailscaleSelf,
   probeUpgradeHost,
-  runChecks,
   serveForwardsPort,
+} from '../integrations/tailscale.js';
+import type { Exec, ExecResult } from '../process.js';
+import {
+  parsePushedDigest,
+  parseSecrets,
+  runChecks,
   occupiedMachines,
   startedMachines,
   type Check,
-  type Exec,
-  type ExecResult,
 } from './hosted.js';
 
 const ok = (stdout = ''): ExecResult => ({ code: 0, stdout, stderr: '' });
