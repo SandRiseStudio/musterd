@@ -62,6 +62,19 @@ Bring the Cursor harness to parity with Claude Code by wiring the PreToolUse wri
 - Cursor harness reaches parity with Claude Code on tool-boundary enforcement and interrupt injection. The only remaining gaps are environment limitations (no persistent TUI statusline slot in Cursor IDE, and no cross-session rename API for peer session discovery).
 - All changes are fail-open and best-effort; unreachable daemons or parsing failures never wedge a tool call.
 
+**2026-09-05 — the probe existed and no workspace ran it; the doctor could not see why (lane
+01M1T42CDP).** The bell check found schmidt's Cursor seat heard nothing at any boundary. His
+`.cursor/hooks.json` carried every musterd marker, and its `postToolUse` command was the build before
+this ADR: `session observe --stdin` with stdout discarded and no `--interrupt`. The adapter writes
+`--interrupt` (this ADR's Decision 2) and `upsertCursorHook` replaces a marker-matched entry in place,
+so `musterd init --refresh-hooks` was the whole repair — but nothing asked for it, because Cursor
+populated no `hookDrift` (driver-support-matrix: "not populated"), and a marker-presence check cannot
+see a stale command (ADR 168). `inspectCursorHookDrift` now compares each marker-owned hook's text
+against what this build writes and names the missing or STALE event with the refresh as the repair;
+`detect()` carries it as `hookDrift`, which the doctor already renders. The six hook specs are one list
+shared by install, remove and inspect, so the three cannot drift from each other. Falsifier: a
+workspace whose `postToolUse` hook lacks `--interrupt` and whose `musterd init --check` says nothing.
+
 ## Observability & Evaluation
 
 - **Traces:** `gate.adjudicate` records shapes-only decision rows for Cursor `preToolUse` calls matching declared enforcement classes; `inbox.interrupt_check` records fast-path interrupt queries from Cursor `postToolUse` hooks.
