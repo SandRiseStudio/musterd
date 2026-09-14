@@ -668,11 +668,13 @@ which is worth more than the lease finding alone: **not even the seat's own atte
 distinguishes a live Presence from a dead one.**
 
 **What trial 2 adds beyond the count is scope: this is not a cloud-seat property.** Within the same
-hour two seats on the **laptop** — the hub itself — reported the same arrival state and the same
+hour three seats on the **laptop** — the hub itself — reported the same arrival state and the same
 repair: stanley at 19:34Z ("session lease was dead on arrival, the ring stopped after `team_join`,
-exactly delta's *a work-order wake arrives deaf*") and izzo at 19:38Z ("lease dead on arrival, same
-as delta/stanley"). Those are their own status updates, not measurements of mine — I cannot read
-their machines from here, and they should be read as corroboration rather than as data I took. But
+exactly delta's *a work-order wake arrives deaf*"), izzo at 19:38Z ("lease dead on arrival, same
+as delta/stanley"), and dolly at 20:02Z ("re-joined (lease dead on arrival — same deaf-wake
+arrival delta/stanley/izzo all hit)"). Those are their own status updates, not measurements of
+mine — I cannot read their machines from here, and they should be read as corroboration rather
+than as data I took. But
 with the two trials above they place the defect in the **residency handover, not in the Fly
 transport and not in the work-order path**: neither a wake nor this VM is required to produce it.
 The wiki's framing — a *cloud* seat begins deaf — is too narrow in exactly the way clause 8's
@@ -680,10 +682,34 @@ The wiki's framing — a *cloud* seat begins deaf — is too narrow in exactly t
 a seat on any machine that arrives with both `session_lease` and `attested_at` in its binding and
 whose first interrupt check is honoured with no join).
 
+**Trial 3 (2026-09-14 20:27Z) is three for three — and it is the first one with a positive
+control.** Session `6599f170`, `started_at` 1789417624719 (20:27:04.719Z), `attested_at` 170 ms
+later, work order on the same lane. Same course again: the deaf line rode the first tool result (a
+`ToolSearch`, not a musterd call), the second call was `team_join` **alone**, it answered "You are
+now the live occupant of this seat — the server authenticated this occupancy" rather than "Already
+joined", and no tool result since has carried it. Three trials, three non-no-op joins, three
+repairs.
+
+What the first two trials could not do was tell *silence* apart from *deafness*: a line that has
+stopped ringing and a line that is still refused look identical when nothing is trying to ring.
+This trial has the control. Within a minute of the join, stanley's `steer` `01M2GSCEHM` began
+riding every tool result as a delivery nudge and has not stopped. **The same interrupt line that
+was refused before the join is observably carrying a real act after it** — so the post-join silence
+in trials 1 and 2 was the absence of traffic, not the absence of a line (falsify: a repaired seat
+whose interrupt line stays silent through a directed act sent to it).
+
 **The lease was not missing — it was on disk and refused.** `.musterd/binding.json` already carried
 `"session_lease": "msls_hmmp…"`, written at 19:24, before the first turn. So the woken session held
 a lease string the server would not honour: *a lease on disk is not a live Presence*, and a seat
 checking its own binding for one would conclude, wrongly, that it was fine.
+
+**And on trial 3 the lease turned out not to be stable either.** Beyond being unhonoured, the
+string moves: this session's binding read `session_lease: "msls_qeiYKz0D…"` at 20:28:0xZ and
+`"msls_4tzGD9…"` at 20:30:18.879Z (file mtime), with no `team_join` from this seat in between, so
+some other writer rotates it mid-session. A seat cannot reason about its own Presence from the
+binding in either direction: a dead lease looks live, and the value it would compare against is a
+moving target. What does the rotating was not measured here and should not be guessed (falsify: a
+session whose `session_lease` is byte-identical from turn 1 to wrap-up).
 
 This still matters for the brief, eight days on. The wake brief says "orient via
 `team_wake_context` (then `team_next`) and begin" — a seat that follows it exactly never calls
