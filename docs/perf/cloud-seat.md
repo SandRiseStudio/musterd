@@ -630,6 +630,68 @@ multi-wake lane into repeated cold starts**: once past 256 KiB every subsequent 
 re-reads the lane, and spends its budget re-orienting — ~$3.80 across four wakes for one docs commit
 that was never made from the VM.
 
+### 18b. `team_join` alone is sufficient when the join is not a no-op (2026-09-14 19:24Z) — an open falsifier, run
+
+**The deaf-on-arrival state itself is not new.** [The cloud seat from inside](../wiki/cloud-seat-from-inside.md)
+recorded on 2026-09-06 that a woken cloud seat begins with a dead session lease and its opening
+probes are 401s. What that page could not settle was **the repair**, and it left a falsifier open:
+"from a deaf seat call `team_join` *alone* and re-run the probe — silence means join is sufficient
+and this paragraph is wrong." This wake ran that experiment, unintentionally and cleanly.
+
+Session `c9f545d5`, started 19:24:36Z (`binding.json:started_at` 1789413876962), uid `1001`, work
+order on this lane. The `SessionStart` hook attached the deaf line to each of the first two tool
+results (a `ToolSearch` and a `Skill`, neither a musterd call). The third call was `team_join`
+**on its own, in its own turn** — not batched with `team_inbox_check` or `team_next`, which is
+exactly what made the 09-06 reading unattributable. The line has not fired on any tool call since,
+across the whole session (2026-09-14 19:26Z onward; falsify: a deaf seat whose solo `team_join`
+leaves the next probe still ringing).
+
+**So join alone is sufficient — and the discriminator is whether the join actually does anything.**
+ryder's counter-case on 09-06 was `team_join` returning "Already joined" as a **no-op** with the
+probe still deaf. This seat's join was not a no-op; it returned "Joined revive as delta
+(claude-code). You are now the live occupant of this seat… The server authenticated this occupancy."
+That reconciles the two results without either being wrong: **a join that mints a fresh Presence
+clears the deafness; a join that finds one already recorded returns early and repairs nothing.**
+The prescription in the hook line is correct but underspecified — it should say what to do when the
+join no-ops, which is the case the page's other counter-example (dolly's, cleared only by an
+`/mcp reload`) sits in.
+
+**The lease was not missing — it was on disk and refused.** `.musterd/binding.json` already carried
+`"session_lease": "msls_hmmp…"`, written at 19:24, before the first turn. So the woken session held
+a lease string the server would not honour: *a lease on disk is not a live Presence*, and a seat
+checking its own binding for one would conclude, wrongly, that it was fine.
+
+This still matters for the brief, eight days on. The wake brief says "orient via
+`team_wake_context` (then `team_next`) and begin" — a seat that follows it exactly never calls
+`team_join`, because it was *just woken* and has every reason to believe it is already on the team.
+Only a hook firing on an unrelated tool call surfaced it. **A woken seat that is deaf cannot
+discover it from the tools the brief names**, and open lane `01M2GP25R3` (clause 8 — the
+`ToolSearch` requirement and reconnect deferral) is the same seam. 18a's finding 1 and this are one
+defect wearing two hats: *the wake hands over a session whose capabilities are not yet real*,
+whether the missing piece is a tool schema or a Presence.
+
+**The budget is written where the seat cannot reach it, and now the mechanism is named.** 18a
+recorded that `team_wake_context` carries no timeout field and that the bound lives daemon-side.
+There is also a seat-side drop point: `.musterd/pending/`. On this wake it was **empty, with an
+mtime of 19:24 — one minute before the session marker** — so the brief passes through the seat's own
+directory and is cleared before turn 1. The seat cannot read its own budget not because nothing was
+ever written down locally, but because the local copy is deleted in the handover (falsify: a wake
+whose `.musterd/pending/` still holds the brief on the first turn).
+
+**Two smaller readings from inside, for the record.**
+
+1. `tool_allowlist` in `.musterd/binding.json` is `[]` on the v12 image, and the `mcp__musterd`
+   tools arrived anyway. 18a confirmed fix 1 *behaviourally* — calls returned, no permission
+   prompt; this is the same fact structurally, in the binding the seat was handed: nothing is
+   narrowing the set (falsify: a v12 binding whose `tool_allowlist` is non-empty).
+2. **18a's own falsifier cannot be run by the seat it describes.** It reads `grep -o allowedTools`
+   on `/app/packages/cli/dist/host/backends/claudeCode.js`; from inside, `/app` is outside the
+   harness working-directory scope and the read is refused. Same boundary that keeps `host.log`
+   unreadable — and `host.log` is not merely out of scope but **absent from this machine entirely**
+   (`find` over the worktree returns nothing; `/data/home/.musterd/host.log` resolves to "File does
+   not exist"). Fix 3 stays attested from the laptop. When this log prints a falsifier, it is worth
+   saying which machine can run it.
+
 ## 2026-09-14 — what the cloud seat costs per day
 
 Lane `01M1T3HA9T` asked for the figure the 09-04 open-items list left as "the Fly dashboard figure
