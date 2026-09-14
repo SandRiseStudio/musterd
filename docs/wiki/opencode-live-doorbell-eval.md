@@ -184,6 +184,96 @@ channel dropped mid-session — see below), plugin marker v1 with no drift per
   child in this eval. TUI render (#8564): human-only, unmeasured.
 
 
+## 9. Clause-8 discovery half + idle-canary code paths, 2026-09-14 on 1.18.31 (lane `01M2GP0QM3`)
+
+Setup: `opencode --version` 1.18.31, daemon 39343985, CLI 4bcea21 (8 behind,
+`team_status` warned stale — read-only eval, no build run here), plugin marker
+v1 with no drift per `init --check`, lease live (`musterd inbox
+--interrupt-check` silent, exit 0 — nothing raised, nothing refused).
+
+### 9a. Discovery: no deferral — granted IS callable (measured live)
+
+OpenCode documents it and this session confirms it: "Once added, MCP tools
+are automatically available to the LLM alongside built-in tools"
+(`docs/mcp-servers`, fetched 2026-09-14). There is no `ToolSearch`
+(Claude Code) or `GetDynamicTools` (Cursor) round-trip: the tools arrive in
+context with their schemas, at the documented cost of context tokens (the
+"MCP servers add to your context" caveat on the same page — the flip side of
+Cursor's dynamic namespaces).
+
+Live half: this seat's first acts of the session were direct `team_*` calls
+(`team_inbox_check`, `lane_board`) with no preceding discovery call of any
+kind. First-call success with no discovery step is clause 8's own falsifier
+(contract §(8): "Falsify: a session whose first `mcp__musterd__*` call
+succeeds with no preceding `ToolSearch`"), met here on the OpenCode naming
+(`musterd_team_*`, no `mcp__` infix — same property). Verdict: **no deferral;
+grant alone satisfies the callable half.** The woken-seat sharp case in
+contract §(8) (actuator spawns with `--allowedTools mcp__musterd`, first
+orientation call one `ToolSearch` away) does not transfer: an OpenCode wake
+child carries the full tool table from its first step.
+
+Falsify: an OpenCode session whose first MCP tool call fails until a
+discovery/allowlist round-trip is spent (e.g. a permission-gated `tools.*`
+glob defaulting closed — the per-agent `my-mcp*` pattern on the same docs
+page is the place such a gate would live).
+
+### 9b. Idle rail: silent path confirmed live, deaf path confirmed by code, raised path still unmeasured
+
+Three probe outcomes, three plugin behaviours (`musterd.js`, `event` handler):
+
+- **Silent (no interrupt, live lease): CONFIRMED LIVE.** The probe above
+  returned `""`, exit 0. The handler's `if (!line) return` fires before any
+  `promptAsync` — an idle with nothing waiting correctly rings nothing. No
+  spurious turn, no budget spent. This is the common path and it is now
+  measured, not assumed.
+- **Deaf (stale lease): CONFIRMED BY CODE, not live.** `inbox.ts`
+  `interruptCheck` emits the "interrupt line is deaf" line on a stale
+  `session_lease`, and the plugin prompts it like a raised line (non-empty is
+  non-empty — no status check between probe and `promptAsync`). So the first
+  `session.idle` on a dead lease rings a deaf notice *as a synthetic turn*,
+  spending a turn to say the bell is broken (2026-09-14, by code reading —
+  falsify: idle with a dead lease and watch for zero prompts; silence would
+  mean the probe path changed). This confirms §8's standing
+  warning as the designed behaviour of the current text, and narrows the
+  canary: idling with a live lease must produce zero prompts; idling with a
+  dead lease is expected to produce one deaf-notice prompt (cap 4), which is
+  the bug to fix, not the bell to trust.
+- **Raised (interrupt waiting): UNMEASURED LIVE.** No idle window occurred
+  and nothing was raised while idle. Both seams the handler leans on are
+  documented, not experimental: `session.idle` and `tool.execute.after` are
+  listed events/hooks on `opencode.ai/docs/plugins` (fetched 2026-09-14), so
+  the version-coupling surface is two documented seams — but the wake half
+  inherits the upstream race: #21524 (reply-mode `prompt_async` returns 204
+  with no turn on idle sessions, intermittent) is the same symptom class §4
+  already records. Falsify: idle with a raised line and watch for one
+  synthetic prompt + one turn; a 204 with no turn reproduces #21524 through
+  the musterd plugin and promotes the idle-delivery row to usually-works.
+
+`session.idle` delivery to the plugin itself (does the event fire at all in
+1.18.31) is unmeasured — no idle occurred. One community source marks
+`session.idle` "deprecated but still emitted", against the official docs
+  which list it without deprecation; if a future OpenCode stops emitting it
+  (2026-09-14 reading of the current plugin text),
+  the detector row fails silently (2026-09-14: the handler just never runs — no error, no
+  log; falsify: idle with a raised line and watch the server log for the probe — a probe with no event
+  means the event stopped, a 204 with no turn means the wake raced). The canary that covers both at once: idle with a raised line. Silence
+after that means either the event stopped or the wake raced; either way the
+rail is down.
+
+Reconnect half (mid-session MCP drop revokes callability or not) is NOT this
+lane — it is lane `01M2GS6Q4`, which depends on this one. Upstream
+archeology held for that lane, not judged here: #17099 (a transient
+`listTools()` failure permanently evicts the client — `delete
+s.clients[clientName]`, no retry, no `onclose` handler) with fix PRs #17651
+(retry + lazy re-creation) and #32084 (`onclose` removes the closed client
+  and marks status failed), against open-as-of-2026-09-14 #38266 (serve: stdio
+  connection reportedly dropped mid-session with tools unavailable until
+  restart) and #25282 (no auto-reconnect or notification reported) — both
+  upstream claims, neither re-measured here; falsify either on 1.18.31 with
+  the live kill-and-call measurement on lane `01M2GS6Q4`. Whether 1.18.31 reconnects or stays mute is
+  a live kill-and-call measurement, not a docs read.
+
+
 ## Related
 
 - ADR 362 (plugin capture deferred; premise corrected) — the *outbound* half; this page
