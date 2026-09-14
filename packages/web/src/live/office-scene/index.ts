@@ -1606,6 +1606,19 @@ export function mountOffice(
       [14, () => actors.gestureBeat(who, GESTURE.scratch)],
       [lounging ? 18 : 14, () => actors.gestureBeat(who, GESTURE.chin)],
       [14, () => actors.gestureBeat(who, lounging ? GESTURE.settle : GESTURE.lean)],
+      /* The 2026-09-14 variation pass (nick). Four more solo beats, weighted BELOW the original five:
+       * the old set carries the room's baseline rhythm and these are the ones you notice, which only
+       * works while they stay the minority. `behindHead` and `pocketPhone` want a backrest and a lap,
+       * so they sit out the deskless leisure spots where the body is already reclined with its hands
+       * down — `shoulders` and `rubEyes` work anywhere a torso does. */
+      [11, () => actors.gestureBeat(who, GESTURE.shoulders)],
+      [10, () => actors.gestureBeat(who, GESTURE.rubEyes)],
+      ...(lounging
+        ? []
+        : ([
+            [10, () => actors.gestureBeat(who, GESTURE.behindHead)],
+            [9, () => actors.gestureBeat(who, GESTURE.pocketPhone)],
+          ] as Array<[number, () => boolean]>)),
       // The errands — real trips with a point to them, so they stay the occasional highlight:
       [15, () => coffeeStroll(who, slot)],
       [9, () => actors.errandPhone(who, slotRng(teamName, slot, 'phone'))], // gets up, takes a call, paces, comes back
