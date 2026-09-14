@@ -208,9 +208,17 @@ finding 18a and `docs/wiki/cloud-seat-from-inside.md` (stanley, #1386).
 
 Proposed wording: *the probe must reach the model **and** the tools it names must be callable when
 the model reads it; a harness with a tool-deferral path satisfies neither by grant alone, and a
-reconnect can revoke callability without revoking the grant.* Per-harness row, like clause 1's:
-claude-code defers and re-defers on reconnect (measured); cursor, grok, opencode, codex unmeasured;
-native exempt (the bridge owns the tool table — nothing is deferred because nothing is discovered).
+reconnect can revoke callability without revoking the grant.*
+
+| harness | verdict | what was measured |
+| --- | --- | --- |
+| claude-code | **defers & re-defers** | musterd tools arrive deferred; schema fetched via `ToolSearch`. MCP drop/reconnect mid-session drops schema cache; every schema must be fetched again with no permission error (stanley, ryder, izzo, 2026-09-14) |
+| cursor | **fails on reconnect** | dynamic tool discovery via `GetDynamicTools` / `CallDynamicTool`. Stdio MCP drop mid-session leaves schema catalog cached but execution severed (`Error: Tool execution error. Not connected`). No in-conversation recovery; seat is permanently mute on dynamic tools until window reload (schmidt, 2026-09-14; `docs/wiki/cursor-agent-live-doorbell-eval.md` Check 5) |
+| grok | unmeasured | unmeasured |
+| opencode | unmeasured | unmeasured |
+| codex | unmeasured | unmeasured |
+| native | **exempt** | bridge owns tool table in memory (`MusterdClient`); no discovery step, no stdio disconnect (ryder) |
+
 The woken-seat case is the sharpest: the actuator spawns with `--allowedTools mcp__musterd`, so the
 wake brief's own instruction ("orient via `team_wake_context`") is one `ToolSearch` away from
 working, and every boundary before that is guaranteed deaf (clause 3, delta).
@@ -235,10 +243,11 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   deaf notice rather than a turn — a canary is needed.
 - **Grok and codex doctors** need the clause-4 text comparison and epoch that claude-code and
   cursor already have.
-- **Clause 8 has no lane.** Two halves: the harness rows (cursor, grok, opencode, codex — does a
-  granted musterd tool need a discovery step before it is callable, and does a reconnect revoke
-  it?), and whether the daemon can see callability at all — today it sees the grant and nothing
-  after it. The wake brief could at least name the `ToolSearch` it needs.
+- **Clause 8 — lane `01M2GP2Z90` (schmidt, Cursor evaluation landed):** Cursor measured live. Dynamic
+  tools require `GetDynamicTools` discovery before `CallDynamicTool`; on MCP stdio drop/reconnect
+  mid-session, Cursor does not reconnect the stdio process, returning `Error: Tool execution error. Not connected`
+  while schema catalog remains populated. Permanent mute on dynamic tools until window reload.
+  Claude-code defers and re-defers; grok, opencode, codex remain open for their respective harness owners.
 
 ## What this does not decide
 

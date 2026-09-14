@@ -21,6 +21,7 @@ The inquiry spans four checks:
 | 2b. afterShellExecution | stdout injection | **no** — stdout discarded (fire-and-forget) | **no** (silent drop) |
 | 3. Stop-hook continuation | `stop` hook `followup_message` | **yes** — continues turn; default `loop_limit: 5` | **yes** (submits next user turn) |
 | 4. Idle at prompt | no active turn, waiting for input | **none in-transcript** (honest boundary) | needs OS notify or human prompt |
+| 5. Clause 8 callability | Dynamic MCP discovery & reconnect | **fails on reconnect** (dynamic discovery via `GetDynamicTools`; stdio drop permanently severs execution) | **no on reconnect** (`Error: Not connected`) |
 
 ---
 
@@ -101,6 +102,38 @@ When an interactive `cursor-agent` session has finished all turns and sits idle 
   3. **Headless / unattended wake:** The host loop waking an unattended seat via session resume / launch (ADR 131).
 
 This matches the honest boundary documented for Grok CLI in ADR 352 / lane `01M1MC0M6M8RWV6RQFRPASNVQD`.
+
+---
+
+## Check 5 — Clause 8: Tool callability & dynamic discovery across reconnects
+
+Evaluated 2026-09-14 in live Cursor session (`schmidt`, lane `01M2GP2Z9044NZH9GS0R14576D`) against the Doorbell Contract's Clause 8: *callable, not merely granted*.
+
+### 5a. Discovery path: dynamic tool namespace discovery
+
+In Cursor Agent, MCP tools configured in `.cursor/mcp.json` are exposed to the model as dynamic tool namespaces (`<namespace name="musterd" ... source="mcp" />`):
+- **Schema discovery step:** Cursor does not inject all dynamic tool schemas into the base system prompt upfront. Instead, the model is provided `GetDynamicTools` and `CallDynamicTool`.
+- **Calling convention:** To invoke a dynamic tool, the model must first fetch the schema via `GetDynamicTools { namespace: "musterd", toolName: "<tool>" }` (or inspect the namespace), then invoke `CallDynamicTool { namespace: "musterd", toolName: "<tool>", arguments: { ... } }`.
+- **Comparison to Claude Code:** In Claude Code, tools arrive deferred behind `ToolSearch`. In Cursor, dynamic tools arrive behind `GetDynamicTools`. Both require an explicit discovery round-trip before first call.
+
+### 5b. Reconnect behavior: transport failure vs schema caching
+
+When the musterd daemon restarts or the MCP stdio server process drops mid-session:
+- **Live measurement:** During a live daemon rebuild/bounce, Cursor's stdio MCP client disconnected. Subsequent calls exhibited split behavior:
+  1. `GetDynamicTools` succeeded immediately, returning the full JSON schema from Cursor's internal in-memory catalog cache.
+  2. Every subsequent `CallDynamicTool` call failed with:
+     ```text
+     Error: Tool execution error. Not connected
+     ```
+- **No in-conversation recovery:** Unlike Claude Code (where a severed MCP connection evicts schemas and can be recovered if `ToolSearch` is executed once the server returns), Cursor's stdio client **does not attempt to restart or reconnect** the dropped process during an active conversation.
+- **Permanent session mute:** Once disconnected, calling `GetDynamicTools` does not re-open the transport, and no model-callable command exists to reconnect. The seat becomes permanently mute on dynamic MCP tools for the rest of that session. Recovery requires an external human action: reloading the window (`Developer: Reload Window`) or launching a new conversation.
+
+### 5c. Daemon visibility and doorbell implications
+
+- **Invisible to the daemon:** The daemon's roster, presence table, and doctor inspect the filesystem (`binding.json`, `.cursor/mcp.json`, `.cursor/hooks.json`) and socket leases. The daemon cannot observe that Cursor's local stdio MCP child process has terminated or that `CallDynamicTool` is returning `Not connected`. The seat appears healthy and granted while being functionally incapable of answering.
+- **Fail-safe fallback:** When Cursor's MCP transport drops, the seat must fall back to the CLI channel (`musterd send`, `musterd inbox`). However, CLI commands run without a long-lived Presence lease (`musterd claim` leases die with the command), which causes subsequent hook-based interrupt checks to fail closed with `the interrupt line is deaf`.
+
+> In Cursor, a dropped MCP connection leaves the schema catalog cached but severs execution (`Error: Tool execution error. Not connected`), causing permanent in-session callability loss until window reload (2026-09-14; falsify: observe a Cursor session whose dropped MCP stdio transport reconnects and executes `CallDynamicTool` without a window reload or session restart).
 
 ## Related
 
