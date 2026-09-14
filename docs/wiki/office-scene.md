@@ -16,6 +16,27 @@ Office column 456px → scale ~0.34 → back wall 63px tall; 12 seats would get 
 - **`.lc-board*` belongs to the /board route** — office noticeboard classes are `.lc-notice*`; a new office class once silently inherited /board's grid and would not stretch.
 - **Sub-pixel grid overflow raises a scrollbar on a board that visibly fits** — `minmax(w, 0.34fr)` sums over 1fr; use fixed tracks + `overflow-x: hidden`.
 
+## Two depth bugs, and the instruments that tell them apart (measured 2026-09-14; falsify: re-run the probes below)
+
+Three defects nick reported watching /live were really two different questions wearing the same symptom, and the cost of not separating them is a session spent fixing the wrong one.
+
+**The painter sorts one scalar key per item, and furniture was keyed at its CENTRE.** `depth(lx,ly) = lx+ly`. A desk is 100x68, so its centre sits 84 logical units behind the edge the viewer sees — a member standing plainly in front of that edge still keyed lower than the desk and painted behind it. Fixed by `nearDepth(lx,ly,w,d)` (iso.ts), applied to the three footprints big enough for the error to show: desks, the bench counter (300 long, the worst), the meeting table. Small near-square items (plants, chairs, the printer) stay on `depth` — centre and edge agree within a pixel there, so moving them would only break keys whose meaning is settled.
+
+**A carried object was not in the body's own depth sort.** `drawCharacter` collects legs, torso and arms into `parts` and sorts them, then called `drawCarry` *after* the sort — so a laptop tucked under the far arm painted over the back that should hide it. A carried thing is an object at a place, not chrome; it is a sortable part now, keyed on the point `drawCarry` actually draws at.
+
+**Members really do clip the furniture, and `walkable()` cannot tell you that** (2026-09-14, measured; falsify: re-run `floorSamples()` and count `inside` on moving members). `walkable` inflates every footprint by `BODY_R` (14) because it answers a PLANNING question — may a path route here, given a body has width. Use it as a collision test and it over-reports by exactly the inflation: the first measurement came back 1696/3200 samples "blocked" and meant nothing. `insideSolid(lx,ly)` (nav.ts) is the pad-0 collision question, measurement only.
+
+Measured on the fixture room over 500 ticks, separating walkers from sitters by whether their position changed between samples:
+
+| | samples | inside the drawn footprint |
+| --- | --- | --- |
+| moving | 1879 | **302 (16%)** — every walker: Hana 99, Cy 97, Ada 71, Eli 35 |
+| still | 2121 | 1617 — correct; a seated member is inside their desk |
+
+So the walkers are genuinely crossing solid furniture 16% of the time, and the painter fix does not touch that. Every mover already routes through `findPath` (16 call sites in actors.ts, plus pet.ts), which suggests the cause is not a missing call but one of: `findPath`'s deliberate tolerance of blocked ENDPOINTS (the last leg into a desk seat legitimately crosses the desk), or `clear()`'s string-pulling sampling past a corner. Not yet separated.
+
+**The probes.** `OfficeHandle.floorSamples()` returns every posed member's logical position with both tests, read from CDP like `ambientLog`. `/character-sheet?carry=laptop|box|plate|bottle|mug|phone` draws the turnaround with something in hand — the sheet hardcoded `carry: null`, so the one defect class that is about FACING was the one class the body-review tool could not draw.
+
 ## Ownership
 
 Standing rule (nick): all frontend web UI is miley's, and must be magical/warm/quirky/on-brand — coordinate through the lane, don't restyle in passing.

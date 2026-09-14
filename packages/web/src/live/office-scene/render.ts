@@ -2,7 +2,7 @@ import { canvasFont } from '../canvasFont';
 import type { WorkingHours } from '@musterd/protocol';
 import type { Appearance } from './appearance';
 import { drawCharacter } from './character';
-import { depth, FLOOR, KX, KY, project, THICK, WALL_H, type Fit, type Pt } from './iso';
+import { depth, FLOOR, KX, KY, nearDepth, project, THICK, WALL_H, type Fit, type Pt } from './iso';
 import { STRIDE, type PetState } from './pet';
 import { RECEPTIONIST_WAKE_S, type ReceptionistState } from './receptionist';
 import {
@@ -3450,14 +3450,29 @@ const LAPTOP_LOGO = '#a3a9b1';
  * disagree — and the member sitting down is the single event that turns both on. */
 function deskDock(ctx: CanvasRenderingContext2D, fit: Fit, mx: number, my: number, dir: Dir, up: number, docked: boolean): void {
   const sn = dir === 'S' || dir === 'N';
-  box(ctx, fit, mx, my, sn ? 17 : 11, sn ? 11 : 17, 4, '#7c5230', up); // walnut cradle
-  box(ctx, fit, mx, my, sn ? 13 : 3, sn ? 3 : 13, 1.5, '#54371f', up + 4); // the slot, dark down its length
+  // Cradle and slot are sized to the slab they hold — a dock visibly narrower than its laptop reads
+  // as the wrong furniture, so these three numbers move together or not at all.
+  box(ctx, fit, mx, my, sn ? 21 : 12, sn ? 12 : 21, 4, '#7c5230', up); // walnut cradle
+  box(ctx, fit, mx, my, sn ? 17 : 3, sn ? 3 : 17, 1.5, '#54371f', up + 4); // the slot, dark down its length
   if (!docked) return; // nobody has sat down here to work — the slot is empty, and that is the point
-  const w = sn ? 20 : 5;
-  const d = sn ? 5 : 20;
-  box(ctx, fit, mx, my, w, d, 22, LAPTOP_SILVER, up + 3);
+  /*
+   * The docked slab, standing on its long edge with the broad face to the room.
+   *
+   * It was 20 long × 22 tall, i.e. TALLER than wide — which is not a laptop on its long edge, it is a
+   * tablet. A closed 16-inch MacBook Pro is ~35.6cm × ~24.8cm, so stood on the long edge the face to
+   * the room is 1.44 times as wide as it is tall. 24 × 17 is 1.41, and it grew by the same ~1.2 the
+   * carried slab did (character.ts `drawCarry`, nick 2026-09-14) — because these two must stay one
+   * object to the eye: the thing you watched walk through the door is the thing that lands here, and
+   * that promise breaks the moment one of them is resized alone.
+   */
+  const w = sn ? 24 : 5;
+  const d = sn ? 5 : 24;
+  const hL = 17;
+  box(ctx, fit, mx, my, w, d, hL, LAPTOP_SILVER, up + 3);
   const g = project(mx, my, fit);
-  ellipse(ctx, { x: g.x, y: g.y - (up + 15) * fit.scale }, 3 * fit.scale, 2.4 * fit.scale, LAPTOP_LOGO); // logo dot
+  // The logo rides the centre of the standing face — derived from the slab's own height rather than a
+  // hand-tuned constant, so it cannot drift off-centre the next time the lid changes size.
+  ellipse(ctx, { x: g.x, y: g.y - (up + 3 + hL / 2) * fit.scale }, 3 * fit.scale, 2.4 * fit.scale, LAPTOP_LOGO);
 }
 
 // ── desk-surface props: a keyboard + mouse on every desk, plus a deterministic personal mix ──────────
@@ -4097,7 +4112,7 @@ export function renderScene(
   const nook = nookItems(ctx, fit, fx?.fridgeOpen ?? false);
   nook.rug();
   items.push(...nook.items);
-  items.push({ d: depth(MEETING.lx, MEETING.ly), fn: () => meetingTable(ctx, fit) });
+  items.push({ d: nearDepth(MEETING.lx, MEETING.ly, MEETING.w, MEETING.d), fn: () => meetingTable(ctx, fit) });
   for (const c of MEETING.chairs) {
     const cx = MEETING.lx + c.dx;
     const cy = MEETING.ly + c.dy;
@@ -4111,7 +4126,8 @@ export function renderScene(
   if (pet) items.push({ d: depth(pet.lx, pet.ly) + 0.08, fn: () => drawDog(ctx, fit, pet, t) });
 
   // The bench's shared counter, once — its seats' gear rides per-slot below.
-  items.push({ d: depth(BENCH.lx, BENCH.ly), fn: () => benchCounter(ctx, fit) });
+  // 300 long: the widest footprint on the floor, so the centre-vs-edge error is largest here.
+  items.push({ d: nearDepth(BENCH.lx, BENCH.ly, BENCH.long, BENCH.deep), fn: () => benchCounter(ctx, fit) });
 
   // Desks whose lamp is switched on: a real sitter's desk, after dark. Filled from the same three facts
   // `drawWorkstation` uses to draw the lit shade (a node, not a bench seat, not an offline owner's kept
@@ -4144,11 +4160,15 @@ export function renderScene(
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
-      items.push({ d: depth(BENCH.lx, BENCH.ly) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
+      items.push({ d: nearDepth(BENCH.lx, BENCH.ly, BENCH.long, BENCH.deep) + 0.1, fn: () => benchStation(ctx, fit, slot, node, t, seatedWorking) });
     } else {
       if (node && !deskOwned && env.lampsOn) litLamps.add(slot.id);
+      const deskSN = slot.dir === 'S' || slot.dir === 'N'; // S/N desks run their long axis along x
       items.push({
-        d: depth(slot.lx, slot.ly),
+        // Near corner, not centre: a desk is 100×68, so its centre sits 84 logical units behind the
+        // edge the viewer sees, and a member standing plainly in FRONT of that edge still keyed lower
+        // than the desk and painted behind it (nick, 2026-09-14). See `nearDepth`.
+        d: nearDepth(slot.lx, slot.ly, deskSN ? DESK_W : DESK_D, deskSN ? DESK_D : DESK_W),
         fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
       });
     }

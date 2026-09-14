@@ -208,9 +208,38 @@ export function drawCharacter(
   const sipMug =
     o.mug !== undefined && o.gesture === GESTURE.sip && (o.gestureT ?? 0) > 0.12 && (o.gestureT ?? 0) < 0.95;
 
+  /**
+   * What is being carried, as a depth-sortable part rather than a final overpaint.
+   *
+   * It used to be `if (o.carry) drawCarry(...)` after the sort, which meant the carried thing ALWAYS
+   * painted last — over the torso, the arms, everything. That is wrong exactly when the object is on
+   * the far side of the body: a member walking away from the camera with their laptop tucked under
+   * the far arm showed the laptop THROUGH their own back (nick, 2026-09-14). A carried object is not
+   * chrome; it is a thing in the room at a place, and it occludes and is occluded like one.
+   *
+   * The key is the depth of the point `drawCarry` actually draws at, which is why the two agree here
+   * rather than each deciding for itself — the laptop rides between the right wrist and the chest,
+   * the plate between both wrists, and everything else at the right wrist.
+   */
+  const carryPart = (): Part | null => {
+    if (!o.carry) return null;
+    const wr = px(k.wrist[1]);
+    const d =
+      o.carry === 'laptop'
+        ? wr.d * 0.6 + px(k.chest).d * 0.4
+        : o.carry === 'plate'
+          ? (wr.d + px(k.wrist[0]).d) / 2
+          : o.carry === 'box'
+            ? px({ x: 0, y: k.chest.y - 1, z: k.chest.z + 13 }).d
+            : wr.d;
+    return { d, fn: () => drawCarry(ctx, px, k, u, o.carry!) };
+  };
+
   if (armsOnly) {
-    for (const p of [arm(0), arm(1)].sort((a, b) => a.d - b.d)) p.fn();
-    if (o.carry) drawCarry(ctx, px, k, u, o.carry);
+    const overlay: Part[] = [arm(0), arm(1)];
+    const c = carryPart();
+    if (c) overlay.push(c);
+    for (const p of overlay.sort((a, b) => a.d - b.d)) p.fn();
     if (sipMug) drawSipMug(ctx, px, k, u, o.mug!);
     ctx.globalAlpha = prev;
     return;
@@ -262,6 +291,8 @@ export function drawCharacter(
   });
 
   parts.push(arm(0), arm(1));
+  const carried = carryPart();
+  if (carried) parts.push(carried);
   parts.sort((a, b) => a.d - b.d);
   for (const p of parts) p.fn();
 
@@ -271,7 +302,6 @@ export function drawCharacter(
   if (sipMug && px(k.wrist[1]).d <= px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
   drawHead(ctx, px, k, node, look, dir, u, acc, o.t, o.seed);
   if (sipMug && px(k.wrist[1]).d > px(k.head).d) drawSipMug(ctx, px, k, u, o.mug!);
-  if (o.carry) drawCarry(ctx, px, k, u, o.carry);
 
   ctx.globalAlpha = prev;
 }
@@ -588,18 +618,30 @@ function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, 
     // The member's own laptop, closed, tucked at the side. It rides a point between the chest and the
     // right wrist, which is the whole trick: standing, those joints put it under the arm; seated, they
     // put it flat in the lap. One drawing, because the skeleton has already done the deciding — nothing
-    // here reads a pose name. Small and shut, so nineteen of them across the floor stay a shape at the
-    // elbow rather than nineteen held-out objects.
+    // here reads a pose name.
+    //
+    // SIZE, and the trade it sits on. This was 15×9u, which is 0.56× `TORSO_W` at a 1.67 aspect, and
+    // it read as a wallet rather than a machine (nick, 2026-09-14). A closed 16-inch MacBook Pro is
+    // ~35.6cm wide and ~24.8cm deep against a ~45cm torso: 0.79× at a 1.44 aspect. 18×12u is 0.67×
+    // at 1.50 — deliberately short of the true proportion, because the size traded against something
+    // real: nineteen of these across the floor should stay a SHAPE at the elbow, not nineteen
+    // held-out objects, and the honest 0.79× starts to read as the latter at floor density. Both
+    // numbers moved, and the aspect moved more than the width, because being too *narrow* for its
+    // height was the part that made it look like the wrong object.
     const wr = px(k.wrist[1]);
     const ch = px(k.chest);
     const c = { x: wr.p.x * 0.6 + ch.p.x * 0.4, y: wr.p.y * 0.6 + ch.p.y * 0.4 };
-    const w = 15 * u;
-    const h = 9 * u;
+    const w = 18 * u;
+    const h = 12 * u;
     ctx.fillStyle = LAPTOP_SILVER;
     ctx.fillRect(c.x - w / 2, c.y - h / 2, w, h);
-    ctx.fillStyle = LAPTOP_SEAM; // the shut lid's dark seam along the bottom edge — it reads as closed
-    ctx.fillRect(c.x - w / 2, c.y + h / 2 - u * 1.4, w, u * 1.4);
-    disc(ctx, { x: c.x, y: c.y - u * 0.4 }, 1.7 * u, 1.7 * u, LAPTOP_LOGO); // the quiet logo dot
+    // The shut lid's dark seam along the bottom edge — it reads as closed. Proportional to the lid
+    // rather than a flat `u` count, so the seam stays a seam if the slab is ever resized again; at a
+    // fixed 1.4u it turned into a hairline the moment the lid grew.
+    const seam = h * 0.15;
+    ctx.fillStyle = LAPTOP_SEAM;
+    ctx.fillRect(c.x - w / 2, c.y + h / 2 - seam, w, seam);
+    disc(ctx, { x: c.x, y: c.y - u * 0.4 }, 2 * u, 2 * u, LAPTOP_LOGO); // the quiet logo dot
     return;
   }
   const wr = px(k.wrist[1]);

@@ -117,6 +117,26 @@ function grid(): Uint8Array {
   return g;
 }
 
+/**
+ * Is this logical point inside a piece of furniture *as drawn* — no body-radius inflation?
+ *
+ * `walkable` below answers a PLANNING question: may a path route through here, given that a body has
+ * width? It inflates every footprint by `BODY_R`, so it says "no" for a point a comfortable stride
+ * clear of any furniture. That makes it the wrong instrument for "is this member standing inside a
+ * desk", and using it for that over-reports by exactly the inflation — which is how a measurement of
+ * whether walkers clip the furniture comes back alarming and means nothing (2026-09-14).
+ *
+ * This is the collision question, at pad 0: the grid as the eye sees it. Measurement only — nothing
+ * in the scene routes on it.
+ */
+export function insideSolid(lx: number, ly: number): boolean {
+  for (const r of solidRects()) {
+    // solidRects() bakes BODY_R in; take it back out to recover the drawn footprint.
+    if (lx >= r.x0 + BODY_R && lx <= r.x1 - BODY_R && ly >= r.y0 + BODY_R && ly <= r.y1 - BODY_R) return true;
+  }
+  return false;
+}
+
 /** Is this logical point walkable (inside the floor, not inside a solid footprint)? */
 export function walkable(lx: number, ly: number): boolean {
   if (lx < 0 || ly < 0 || lx >= FLOOR || ly >= FLOOR) return false;
