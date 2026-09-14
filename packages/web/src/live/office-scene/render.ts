@@ -4254,8 +4254,15 @@ export function renderScene(
     // hands disappear into the desk and the typing is invisible. Skipped while a beat has dropped the
     // hands into the lap — lap arms painted over the slab would float on the desk.
     if (seated && !handsInLap(pose.gesture, pose.gestureT)) {
+      const sSN = slot.dir === 'S' || slot.dir === 'N';
       items.push({
-        d: depth(slot.lx, slot.ly) + 0.05,
+        /* MUST track the desk slab's own key, not `depth(slot)`. When the slab moved to `nearDepth`
+           (#1394) this stayed on the centre key and went 84 units BEHIND its own desk — so the desk
+           painted over the forearms that are supposed to rest on it, and a seated member lost their
+           arms and part of their torso into the slab (nick, watching the broadcast, 2026-09-14). The
+           whole point of this second item is "above the slab": derive it from where the slab sorts,
+           or the two drift apart exactly like this. */
+        d: nearDepth(slot.lx, slot.ly, sSN ? DESK_W : DESK_D, sSN ? DESK_D : DESK_W) + 0.05,
         fn: () => drawActor(ctx, fit, pose, node, t, true, mug),
       });
     }
