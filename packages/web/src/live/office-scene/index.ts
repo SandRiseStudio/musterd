@@ -110,6 +110,31 @@ const AFTERGLOW_MS = 2600;
  * acts keep 60fps because their motion is not `ambientOnly`. */
 const AMBIENT_FRAME_MS = 50;
 
+/**
+ * THE DRIFT TIER (nick, 2026-09-14). A parked room is a still photograph — correct, cheap, and the
+ * reason it never looked alive between beats. This wakes it just enough for the idle sway, at 4fps.
+ *
+ * MEASURED before it was built, on /office-preview (12 desks), headless, 30s windows, main-thread
+ * busy time via CDP Performance.getMetrics, as a delta over a genuinely parked room (4.26/4.47% of
+ * one core):
+ *
+ *   2fps  +1.4   ·   4fps  +2.1..2.6   ·   6fps  +3.2   ·   12fps  +4.4   ·   20fps (ambient) +8.9
+ *
+ * 4 because 2 reads as a slideshow for a sway and 6 buys smoothness nobody can see. The cost lands in
+ * the same order as the "~2% of one core" already recorded in packages/web/AGENTS.md for the ambient
+ * cap, which the team accepted as a product call.
+ *
+ * A TIMER, NOT THE RAF COALESCER, and that is the spike's other finding rather than a style choice.
+ * Every coalesced measurement showed ~1800 ticks in 30s — rAF keeps firing at 60Hz and early-returns,
+ * so about a third of the 4fps cost was wasted wakeups. Fitting the four points: ~0.35pt per draw/s
+ * of real drawing, ~0.8pt of pure loop overhead. A timer skips ~56 pointless wakes a second.
+ *
+ * It does NOT touch the loop's park predicate: the loop still parks exactly when it always did, and
+ * this is a separate, slower heartbeat that only runs WHILE it is parked. The AGENTS.md rule is
+ * "stop when UNSEEN" — a hidden tab, a collapsed panel — and those still park dead, below.
+ */
+const DRIFT_FRAME_MS = 250;
+
 /** How often the office re-reads the PST clock so the lighting tracks the real sun (the sun moves slowly —
  * once a minute is plenty, and a rebake only happens when the veil/lamp state actually crosses a step). */
 const LIGHT_TICK_MS = 60000;
@@ -1369,10 +1394,35 @@ export function mountOffice(
       // with `working: []` as the floor of the park invariant (E2 spec §2): a parked room must not
       // keep typing off its last live snapshot.
       pushOccupancy(now, true);
+      // …and hand the room over to the slow heartbeat, so a quiet office breathes instead of freezing.
+      ensureDrift();
     }
   }
+  /* The drift heartbeat. Armed whenever the rAF loop is NOT running and the room is genuinely on
+     screen; cleared the instant the loop takes over, so the two never draw the same frame twice. */
+  let driftTimer: ReturnType<typeof setInterval> | null = null;
+  function stopDrift() {
+    if (driftTimer) clearInterval(driftTimer);
+    driftTimer = null;
+  }
+  function ensureDrift() {
+    if (driftTimer || raf || reduced || STILL || suspended || disposed || !VISIBLE()) return;
+    driftTimer = setInterval(() => {
+      // Re-check every tick, not just at arm time: a tab can hide, a panel collapse or a real act
+      // wake the loop between two beats of a 250ms timer, and a drift frame drawn over a live rAF
+      // frame is a double paint nobody asked for.
+      if (raf || reduced || STILL || suspended || disposed || !VISIBLE()) {
+        stopDrift();
+        return;
+      }
+      clock += DRIFT_FRAME_MS / 1000;
+      drawDynamic();
+    }, DRIFT_FRAME_MS);
+  }
+
   function ensureLoop() {
     if (!raf && !reduced && !suspended && VISIBLE()) {
+      stopDrift(); // the real loop supersedes the heartbeat
       last = 0;
       acc = 0;
       raf = requestAnimationFrame(tick);
@@ -1880,7 +1930,12 @@ export function mountOffice(
 
   const onVisibility = () => {
     // ensureLoop's own suspended/reduced guards apply — a collapsed office stays parked on tab-focus.
-    if (document.visibilityState === 'visible' && (living() || actors.active() || cues.length)) ensureLoop();
+    if (document.visibilityState !== 'visible') {
+      stopDrift(); // a hidden tab draws nothing at all, heartbeat included
+      return;
+    }
+    if (living() || actors.active() || cues.length) ensureLoop();
+    else ensureDrift(); // back on screen with nothing happening: resume the slow breath
   };
   document.addEventListener('visibilitychange', onVisibility);
 
@@ -1889,6 +1944,7 @@ export function mountOffice(
   bake();
   drawStatic();
   scheduleAmbient(); // start the idle coffee-stroll timer (no-op under reduced-motion)
+  ensureDrift(); // and the slow breath, for the stretches where the loop is parked
 
   // Track the real PST sun: re-read the clock every minute and rebake only when the veil/lamp state moves.
   const lightTimer = setInterval(() => {
@@ -1927,6 +1983,7 @@ export function mountOffice(
         raf = 0;
         last = 0;
         acc = 0;
+        stopDrift(); // no heartbeat behind a collapsed panel either — the rule is "stop when UNSEEN"
       } else {
         // One fresh frame immediately (light + poses may have moved while parked) → instant
         // re-expand; the loop only re-engages if the room is actually alive.
@@ -1975,6 +2032,7 @@ export function mountOffice(
     dispose: () => {
       disposed = true;
       cancelAnimationFrame(raf);
+      stopDrift(); // the heartbeat outlives nothing
       clearInterval(lightTimer); // stop the PST lighting clock
       if (railTimer) clearInterval(railTimer); // stop the caption rail
       options.onCaption?.(null);
