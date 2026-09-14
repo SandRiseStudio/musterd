@@ -189,6 +189,25 @@ export function isSessionLeaseRefusal(error: { code: string; message: string }):
   return error.code === 'unauthorized' && /agent session lease/i.test(error.message);
 }
 
+/**
+ * Is this "the daemon is not there"? Kept beside the two places that CONSTRUCT that error, so the
+ * knowledge of how it is shaped lives with the shaping and a caller never has to match the message.
+ *
+ * It exists because an unreachable daemon and an empty answer are different facts that several
+ * best-effort surfaces had been collapsing into the same silence — `inbox --waiting` reported a
+ * down daemon as nothing-waiting (dolly, 2026-09-14). A caller that swallows failures by design
+ * can use this to swallow everything EXCEPT the one failure that changes what its output means.
+ *
+ * Narrow on purpose: connection-refused only. A refused credential, a wrong seat or a 500 all
+ * still fall through to the caller's own handling — for a best-effort probe that means silence,
+ * correctly, because none of them makes the probe's answer a lie about the queue.
+ */
+export function isDaemonUnreachable(err: unknown): boolean {
+  return (
+    err instanceof CliError && err.exitCode === 7 && /can't reach team server/.test(err.message)
+  );
+}
+
 export class HttpClient {
   constructor(private opts: HttpClientOpts) {}
 
