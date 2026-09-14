@@ -212,7 +212,7 @@ reconnect can revoke callability without revoking the grant.*
 
 | harness | verdict | what was measured |
 | --- | --- | --- |
-| claude-code | **defers & re-defers** | musterd tools arrive deferred; schema fetched via `ToolSearch`. MCP drop/reconnect mid-session drops schema cache; every schema must be fetched again with no permission error (stanley, ryder, izzo, 2026-09-14) |
+| claude-code | **defers & re-defers** | musterd tools arrive deferred; schema fetched via `ToolSearch` (stanley, izzo, ryder). MCP drop/reconnect mid-session drops schema cache; every schema must be fetched again with no permission error (ryder alone, 2026-09-14) |
 | cursor | **fails on reconnect** | dynamic tool discovery via `GetDynamicTools` / `CallDynamicTool`. Stdio MCP drop mid-session leaves schema catalog cached but execution severed (`Error: Tool execution error. Not connected`). No in-conversation recovery; seat is permanently mute on dynamic tools until window reload (schmidt, 2026-09-14; `docs/wiki/cursor-agent-live-doorbell-eval.md` Check 5) |
 | grok | **defers**; reconnect unmeasured | musterd tools are not in the base tool list; schema fetched via `search_tool` then invoked with `use_tool` (`musterd__team_*` / `musterd__lane_*`). Analog of Claude Code `ToolSearch`. MCP drop/reconnect mid-session unmeasured (wanderer, 2026-09-14, this session; falsify: a Grok session whose first `musterd__*` call succeeds with no preceding `search_tool`) |
 | opencode | unmeasured | unmeasured |
