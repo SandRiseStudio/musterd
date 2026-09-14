@@ -3677,6 +3677,69 @@ export function deskPropSort(dir: Dir, along: number, across: number): number {
   return f[0] * along + p[0] * across + (f[1] * along + p[1] * across);
 }
 
+/**
+ * The desk's ROOM-SIDE HALF, redrawn as its own depth item so a member standing in front of a desk
+ * is not painted behind it.
+ *
+ * The problem this solves, and the two failed attempts before it (#1394, #1400). `depth(lx,ly) =
+ * lx + ly` gives one scalar per item, and a desk anchored at its centre sits (w + d) / 2 behind the
+ * edge the viewer sees — 84 units on a 100x68 desk. A member plainly in FRONT of that edge still
+ * keys lower than the desk and paints behind it. Moving the whole desk's key forward fixes that and
+ * breaks the opposite case: a desk facing N or W puts its CHAIR on the near side, so its own sitter
+ * keys higher than the desk centre, and a forward slab buries their head and torso. One key cannot
+ * answer both questions, because the passer-by and the sitter are asking opposite ones.
+ *
+ * So the desk keeps its centre key and everything that depends on it — the whole workstation, every
+ * prop, the seated arms overlay — is untouched, which is what makes this safe. What is ADDED is the
+ * front half of the slab and its two front legs, drawn again at the FRONT EDGE's depth. Same pixels,
+ * same colours: on an empty stretch of floor the second pass is invisible, because it repaints
+ * exactly what the first pass already put there. It only changes anything where a body has landed in
+ * between, and there it is the correct answer — the near lip of the desk is in front of you.
+ *
+ * `render.test.ts` pins the ordering at all four facings, which is the check #1394 did not have.
+ */
+function deskNearHalf(ctx: CanvasRenderingContext2D, fit: Fit, slot: DeskSlot): void {
+  const { lx, ly, dir } = slot;
+  const sn = dir === 'S' || dir === 'N';
+  const wx = sn ? DESK_W : DESK_D;
+  const dy = sn ? DESK_D : DESK_W;
+  // The half NEAREST THE CAMERA, which is +lx / +ly — a property of the projection, not of the facing.
+  // Getting that wrong is what the tests caught on the first cut of this function: on an N or W desk
+  // `FWD` points AWAY from the viewer, so "the side the desk faces" and "the side the viewer sees" are
+  // opposite, and a room-side half is the far half on half the floor.
+  for (const side of [-1, 1] as const) {
+    box(ctx, fit, lx + side * (wx / 2 - 6), ly + (dy / 2 - 6), 8, 8, DESK_LEG_H, dim(PAL.wood, 0.9));
+  }
+  box(ctx, fit, lx, ly + dy / 4, wx, dy / 2, DESK_SLAB, PAL.wood, DESK_LEG_H);
+}
+
+/**
+ * The depth key for that near half — and why it is not a constant.
+ *
+ * The near half wants to key at the desk's NEAR CORNER, so it beats a member standing in front of the
+ * desk. But on an N or W desk the CHAIR is on the near side too, so that desk's own sitter also keys
+ * past the desk centre — and a near-corner key would paint the desk over them, which is exactly the
+ * regression #1394 shipped and #1400 reverted.
+ *
+ * Both cases are satisfiable, just not by one number: key at the near corner, EXCEPT never past the
+ * member seated at this desk. An empty desk has no such constraint and takes the corner.
+ *
+ * That is the piece the first attempt was missing. It went looking for a better ANCHOR, when what the
+ * geometry needs is for the anchor to depend on who is sitting there — which the render loop knows
+ * and `nearDepth` never could.
+ */
+export function deskNearDepth(
+  slot: { lx: number; ly: number; dir: Dir },
+  seatedAt: { lx: number; ly: number } | null,
+): number {
+  const sn = slot.dir === 'S' || slot.dir === 'N';
+  const wx = sn ? DESK_W : DESK_D;
+  const dy = sn ? DESK_D : DESK_W;
+  const corner = depth(slot.lx + wx / 2, slot.ly + dy / 2);
+  if (!seatedAt) return corner;
+  return Math.min(corner, depth(seatedAt.lx, seatedAt.ly) - 0.2);
+}
+
 /** The desk of a workstation: legs + slab + oriented monitor (glowing if its owner works), plus a
  * keyboard + mouse and a deterministic mix of personal props. The task chair and the seated member are
  * NOT drawn here — the chair is its own depth item at its own footprint (see renderScene) and members are
@@ -4168,6 +4231,14 @@ export function renderScene(
     // pieces use two blocks below, so it lands on the frame the body settles into the chair, not the
     // frame the roster changed.
     const seatedWorking = workingAtDesk(node ?? undefined, ownerPose?.sit);
+    /* Where this desk's own sitter sorts, or null for an empty desk — the one input `deskNearDepth`
+       cannot get from geometry. Same `actorSortAnchor` the member's own item uses, so the desk and
+       the body cannot disagree about where the body is. */
+    const seatedHere = (() => {
+      if (!ownerPose) return null;
+      const a = actorSortAnchor(ownerPose, slot, undefined);
+      return a.seatedAtDesk ? { lx: a.lx, ly: a.ly } : null;
+    })();
     if (slot.kind === 'bench') {
       // No per-seat slab — the shared counter is already an item. +0.1 sorts the gear after the
       // counter's long box (same centre-sorted-box problem the couch solves with depthAt).
@@ -4190,6 +4261,12 @@ export function renderScene(
         d: depth(slot.lx, slot.ly),
         fn: () => drawWorkstation(ctx, fit, slot, node, teamName, deskOwned, t, hide, env.lampsOn, seatedWorking),
       });
+      // The room-side half again, at the FRONT EDGE's depth — so a member standing in front of this
+      // desk paints in front of it. Additive by construction: the same pixels in the same colours, so
+      // on empty floor the second pass is invisible. It changes the picture only where a body has
+      // landed between the two keys, and there it is the right answer. See `deskNearHalf` for why
+      // the desk's own key cannot simply move (#1394, #1400).
+      items.push({ d: deskNearDepth(slot, seatedHere), fn: () => deskNearHalf(ctx, fit, slot) });
     }
     // The task chair, in two depth items (see `chairBase`/`chairBack`): the cushion the member sits *on*
     // paints before them, the backrest at its own footprint — so at every facing the sitter lands between
