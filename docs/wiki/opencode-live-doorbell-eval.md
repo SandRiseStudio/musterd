@@ -144,6 +144,45 @@ BUILT 2026-09-06: `musterd init` / `musterd init --refresh-hooks` writes a marke
   idle. Falsify: a raised line during a wake with zero `promptAsync` calls.
 - Whether the TUI renders the synthetic idle prompt (#8564). Human-facing only.
 
+## 8. Measured live 2026-09-14 on 1.18.29 (lane `01M1VHC3DZ`)
+
+Setup: `opencode --version` 1.18.29, daemon c8e89dd (up to date), CLI
+d1191493 (4 behind), adapter d2a0f0f (team_status warned stale before the MCP
+channel dropped mid-session — see below), plugin marker v1 with no drift per
+`init --check` (no refresh needed after the c8e89dd bounce).
+
+- **Native boundary, raised line: CONFIRMED.** A real huddle turn (wanderer,
+  doorbell-contract room `01M2GASFNZSZT0NV0HPV5EJFBA`) arrived fenced inside
+  `<musterd-interrupt>` on a bash tool result mid-turn — answer (a) in the
+  room's own protocol. Deaf-notice fences arrived after every other native
+  call all session. The append-to-output path reaches model context at native
+  boundaries, carrying raised lines and refusal notices alike.
+- **MCP boundary: NO FENCE, confirming the §2 caveat live.** Zero fences
+  across about 15 MCP (`team_*`) calls in the same window — not even the
+  deaf-notice kind, while native calls fenced every time. Indistinguishable
+  from inside whether the hook doesn't fire or the mutation lands where the
+  model never reads; either way nothing model-visible arrives on the exact
+  path musterd's own traffic takes. Endorses the room wording: name the seam,
+  not "tool boundary".
+- **Lease flap, with daemon-log evidence.** `reap_offline ghost`, then 33
+  `interrupt_probe_refused` rows naming ghost / lease dead (ADR 391 working
+  as designed), one unlogged success (the bell above), refused ever since.
+  Re-occupy 09:17 PT rewrote binding.json with a fresh lease; dual
+  `ws_close` 51s later; refused since. #1369 closed the bounce window — the
+  reaper/reconnect path is the open hole (fodder for izzo's lease lanes, not
+  this one).
+- **MCP channel itself dropped mid-session** (`team_inbox_check` →
+  "Not connected", tool surface gone); continued on the CLI fallback per the
+  one-channel rule. A wake that never occupies says why — the session kept
+  working because the plugin shells the CLI, not the adapter.
+- **Idle bell: UNMEASURED.** No idle window occurred, and the lease was dead
+  throughout. Standing warning for the next attempt: a refused probe still
+  prints a non-empty line, so the first `session.idle` may ring a deaf
+  notice rather than a turn — falsify by idling with a live lease and
+  watching for one synthetic prompt + one turn (cap 4).
+- **`opencode run` wake-child `session.idle` delivery: UNMEASURED.** No wake
+  child in this eval. TUI render (#8564): human-only, unmeasured.
+
 
 ## Related
 
