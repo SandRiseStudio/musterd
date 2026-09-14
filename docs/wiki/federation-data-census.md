@@ -141,6 +141,19 @@ ADR 325's prereq-fix lane addresses the first four; strike-and-date here as they
   events; the `residency.*` remainder joins the ledger set. Falsify by pushing a
   `residency.host_suspended` row between two daemons — it lands on the receiver now, and the
   receiver's `hostAsleepMs` ignores it (`store/residency.test.ts`).
+- ~~**An arbitrated close never entered the log** (2026-09-14; falsify: close a lane from a joiner
+  and `SELECT * FROM audit WHERE action = 'lane.closed'` on the hub — a row means this is wrong).~~
+  **FIXED 2026-09-14** by lane 01M2GPX0HP (`sync/claim.test.ts`, "a close on the joiner is decided
+  by the hub"). `updateLane` writes no `lane.state_changed` for a terminal edge — that verb is
+  `lane.closed`, owned by `recordLaneClose` — and only the local PATCH handler called it. So a close
+  the hub arbitrated (ADR 361) moved the hub's row and replicated nothing: the joiner's row stayed
+  `active` through `lane_resolve`'s own echo, `lane_board` and `team_wake_context`, while the hub's
+  CAS refused the next write as "now owned by delta (done)" — delta, measured from the VM on lane
+  01M2GBGA03. The echo was a second fault of the same shape: the joiner served its local row whenever
+  that row named the caller as owner, a test a close passes without having applied. Now the hub
+  records `lane.closed` (with `node`) inside the write's transaction and returns the ADR 283 verdict;
+  the joiner serves the local row only when it agrees with the hub on owner and state.
+
 - **`audit` cannot be a correctness log** (2026-08-25; falsify: read `appendAudit`,
   `store/audit.ts:335` — it try/catches its own INSERT and logs a warning on failure). Contract
   is explicit ("best-effort observability, never a gate"); ADR 131 already ruled on it. This one

@@ -292,6 +292,7 @@ import {
   applyTrust,
   arbitrateClaim,
   arbitrateLanePatch,
+  type ArbitratedLanePatch,
   assertSeatAlreadyResident,
   assertSeatResident,
   ClaimRefusedError,
@@ -1065,6 +1066,15 @@ function authTouch(
 }
 
 /** Order-independent key for a lane warning — the (subject, with, kind) dedup identity (ADR 083 §4). */
+/**
+ * Has this daemon's row caught up with what the hub decided (ADR 361)? Agreement on the two fields
+ * the hub arbitrates — ownership and state — is the whole test; a local row that agrees carries
+ * the fold's stamps and is the better answer, one that lags is replaced by the hub's until it does.
+ */
+function laneAgreesWith(local: Lane | null, decided: Lane): boolean {
+  return local !== null && local.owner_seat === decided.owner_seat && local.state === decided.state;
+}
+
 function laneWarningKey(w: LaneWarning): string {
   return w.kind === 'surface_overlap'
     ? `${w.kind}:${[w.subject, w.with].sort().join(':')}`
@@ -4027,9 +4037,9 @@ export async function handleHttp(
         touchNode(ctx.db, node.id, Date.now());
         const body = parseOrBadRequest(SyncLanePatchRequestSchema, await readJson(req));
         try {
-          const lane = arbitrateLanePatch(ctx, team, node, body);
+          const { lane, closed } = arbitrateLanePatch(ctx, team, node, body);
           await pushTeam(ctx, team).catch(() => undefined);
-          return sendJson(res, 200, { lane });
+          return sendJson(res, 200, { lane, ...(closed ? { closed } : {}) });
         } catch (err) {
           if (err instanceof ClaimRefusedError) {
             return sendJson(res, 409, {
@@ -4678,7 +4688,7 @@ export async function handleHttp(
         const enrollment = isOwnershipOrStatePatch(body)
           ? joinerEnrollment(ctx.db, team.id, team.slug)
           : null;
-        let arbitrated: Lane | undefined;
+        let arbitrated: ArbitratedLanePatch | undefined;
         if (enrollment) {
           try {
             arbitrated = await patchAtHub(enrollment, team.slug, {
@@ -4777,10 +4787,14 @@ export async function handleHttp(
         try {
           lane = arbitrated
             ? // The hub decided; this daemon's row is whatever the fold has applied so far, and the
-              // hub's answer stands in until it has.
-              getLane(ctx.db, team.id, laneId, team.slug)?.owner_seat === member.name
+              // hub's answer stands in until it has. "Has it" is the row agreeing with the answer
+              // on the two fields the hub arbitrates — NOT "the row names me as owner", which was
+              // the test until lane 01M2GPX0HP: a close keeps the owner, so the stale local row
+              // (still `active`) passed it and was echoed back as the resolve's own result, and
+              // every terminal post-effect below keyed off that row and never ran.
+              laneAgreesWith(getLane(ctx.db, team.id, laneId, team.slug), arbitrated.lane)
               ? getLane(ctx.db, team.id, laneId, team.slug)!
-              : arbitrated
+              : arbitrated.lane
             : updateLane(
                 ctx.db,
                 team.id,
@@ -5380,15 +5394,21 @@ export async function handleHttp(
           // The close's whole audit — verified-ness, reason, the ADR 172/173 abstentions, the ADR
           // 188 grade, and the ADR 109 merge join — lives in `recordLaneClose` because an acceptor's
           // `accept` act closes lanes too (ADR 202) and the two paths must derive it identically.
-          closed = recordLaneClose(
-            ctx.db,
-            team.id,
-            member,
-            before,
-            lane,
-            // ADR 305: a counterpart's close carries no merge attestation of its own.
-            decided.patch.merged,
-          );
+          // An arbitrated close was recorded ON THE HUB, in the write's own transaction, and its
+          // verdict rides the answer: this daemon writes no second `lane.closed` (it would fold
+          // back as a duplicate transition) and reports the ledger's own label (ADR 283).
+          closed =
+            arbitrated?.closed ??
+            recordLaneClose(
+              ctx.db,
+              team.id,
+              member,
+              before,
+              lane,
+              // ADR 305: a counterpart's close carries no merge attestation of its own — unless
+              // the lane has none (amendment 1); `decideLanePatch` already stripped it if so.
+              decided.patch.merged,
+            );
           // ADR 271: a resolved incident owes its reporters an answer — they parked work behind it.
           // Best-effort and after the close: the resolve is already durable and a delivery failure
           // must not undo it. No-op for every ordinary lane.

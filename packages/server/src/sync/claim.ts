@@ -15,11 +15,13 @@ import {
   type UpdateLane,
 } from '@musterd/protocol';
 import type { Database } from 'better-sqlite3';
+import { z } from 'zod';
 import type { Ctx } from '../context.js';
 import { MusterdError } from '../errors.js';
 import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
 import { appendAudit } from '../store/audit.js';
+import { type LaneCloseVerdict, recordLaneClose } from '../store/laneClose.js';
 import { getLane, LaneConflictError, type LaneExpectation, updateLane } from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { localNodeForTeam } from '../store/messages.js';
@@ -42,6 +44,9 @@ import { hasLivePresence } from '../store/presence.js';
  */
 
 const CLAIM_TIMEOUT_MS = 10_000;
+
+/** The ADR 283 close verdict as the hub answers it on `/sync/lane`; absent on every non-terminal edge. */
+const LaneCloseVerdictSchema = z.object({ verified: z.boolean(), reason: z.string() });
 
 /** The hub said no, and said why: the lane moved, or the seat/lane is not resolvable there yet. */
 export class ClaimRefusedError extends Error {
@@ -372,6 +377,16 @@ export function isOwnershipOrStatePatch(body: UpdateLane): boolean {
 }
 
 /**
+ * What the hub decided, and — on a terminal edge — what it recorded about the close (ADR 283), so
+ * the joiner can hand its caller the ledger's own verdict without deriving one from a row it does
+ * not own.
+ */
+export interface ArbitratedLanePatch {
+  lane: Lane;
+  closed?: LaneCloseVerdict;
+}
+
+/**
  * Hub side, every ownership/state edge (ADR 361; the claim since ADR 355). Throws
  * `ClaimRefusedError` for every "no" the caller can act on; anything else is a fault. In order:
  *  - the seat is not on this roster yet (git lag) — retry after the roster reconciles;
@@ -381,6 +396,15 @@ export function isOwnershipOrStatePatch(body: UpdateLane): boolean {
  *  - the CAS with the JOINER's expectation: the lane moved since the joiner read it.
  * The hub writes the transition row as the seat, from its own allocator, with `node` naming the
  * joiner; it emits no act — the origin speaks (ADR 361 §2).
+ *
+ * A TERMINAL edge is recorded here too (lane 01M2GPX0HP, 2026-09-14). `updateLane` deliberately
+ * writes no `lane.state_changed` for done/abandoned — that verb is `lane.closed`, owned by
+ * `recordLaneClose` — and the local PATCH handler is the only caller that wrote it. So a close the
+ * hub arbitrated moved the hub's row and put NOTHING in the log: no event ever folded back to the
+ * joiner, whose row stayed `active` through lane_resolve's echo, lane_board and team_wake_context
+ * (delta, measured from the VM on 01M2GBGA03) while the hub's CAS refused the next write as
+ * "now owned by delta (done)". The transition IS the record (lane-replication spec §Hole 3): the
+ * row and its `lane.closed` land in one transaction, as the local path's do.
  */
 export function arbitrateLanePatch(
   ctx: Ctx,
@@ -388,7 +412,7 @@ export function arbitrateLanePatch(
   node: { id: string; label: string },
   req: SyncLanePatchRequest,
   now: number = Date.now(),
-): Lane {
+): ArbitratedLanePatch {
   const seat = getMemberByName(ctx.db, team.id, req.seat);
   if (!seat) {
     throw new ClaimRefusedError(
@@ -432,10 +456,34 @@ export function arbitrateLanePatch(
     throw err;
   }
   try {
-    return updateLane(ctx.db, team.id, req.lane, team.slug, decided.patch, now, req.expect, {
-      actor: req.seat,
-      node: node.id,
-    })!;
+    return ctx.db.transaction((): ArbitratedLanePatch => {
+      const lane = updateLane(
+        ctx.db,
+        team.id,
+        req.lane,
+        team.slug,
+        decided.patch,
+        now,
+        req.expect,
+        {
+          actor: req.seat,
+          node: node.id,
+        },
+      )!;
+      if (LANE_TERMINAL_STATES.has(lane.state) && !LANE_TERMINAL_STATES.has(before.state)) {
+        const closed = recordLaneClose(
+          ctx.db,
+          team.id,
+          seat,
+          before,
+          lane,
+          decided.patch.merged,
+          node.id,
+        );
+        return { lane, closed };
+      }
+      return { lane };
+    })();
   } catch (err) {
     if (err instanceof LaneConflictError) {
       throw new ClaimRefusedError(
@@ -464,11 +512,12 @@ export function arbitrateClaim(
     node,
     { lane: req.lane, seat: req.seat, patch: { owner_seat: req.seat }, expect: req.expect },
     now,
-  );
+  ).lane;
 }
 
 /**
- * Joiner side, every ownership/state edge. Returns the hub's lane on success. Throws
+ * Joiner side, every ownership/state edge. Returns the hub's lane on success — and, on a terminal
+ * edge, the close verdict the hub recorded. Throws
  * `ClaimRefusedError` on a 409 with the hub's holder/state, `SeatBoundElsewhereError` on a 403,
  * `HubUnreachableError` when no answer came, and a plain Error for anything the hub answered that
  * is neither — an upgrade skew, say — so it surfaces as a fault, not a refusal.
@@ -477,7 +526,7 @@ export async function patchAtHub(
   enrollment: { hub_url: string; credential: string },
   slug: string,
   req: SyncLanePatchRequest,
-): Promise<Lane> {
+): Promise<ArbitratedLanePatch> {
   let res: Response;
   try {
     res = await fetch(new URL(`/teams/${slug}/sync/lane`, enrollment.hub_url), {
@@ -514,7 +563,12 @@ export async function patchAtHub(
   if (!res.ok) {
     throw new Error(`the hub answered ${res.status} to the lane patch: ${JSON.stringify(body)}`);
   }
-  return LaneSchema.parse((body as { lane: unknown }).lane);
+  const answer = body as { lane: unknown; closed?: unknown };
+  const closed = LaneCloseVerdictSchema.safeParse(answer.closed);
+  return {
+    lane: LaneSchema.parse(answer.lane),
+    ...(closed.success ? { closed: closed.data } : {}),
+  };
 }
 
 /** The claim, forwarded as the lane patch it is. Kept for callers that speak the claim shape. */
@@ -523,12 +577,13 @@ export async function claimAtHub(
   slug: string,
   req: SyncClaimRequest,
 ): Promise<Lane> {
-  return patchAtHub(enrollment, slug, {
+  const { lane } = await patchAtHub(enrollment, slug, {
     lane: req.lane,
     seat: req.seat,
     patch: { owner_seat: req.seat },
     expect: req.expect,
   });
+  return lane;
 }
 
 /**

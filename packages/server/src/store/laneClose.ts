@@ -61,6 +61,11 @@ export function recordLaneClose(
   before: Lane,
   lane: Lane,
   mergedFromPatch?: MergedAttestation,
+  /**
+   * Federation 3c: the node the closing seat resides on, when the hub recorded this close on a
+   * joiner's behalf (ADR 361) — the same residence trace every other `lane.*` row carries.
+   */
+  node?: string,
 ): LaneCloseVerdict {
   // ADR 169: every terminal edge writes lane.closed, and verified-ness is DERIVED here — never
   // stored on the lane. Verified ⟺ done + the closer is a different seat than the owner at close
@@ -199,6 +204,7 @@ export function recordLaneClose(
     target: lane.id,
     result: 'allow',
     detail: {
+      ...(node !== undefined ? { node } : {}),
       lane: lane.id,
       state: lane.state,
       closed_by: closer.name,
