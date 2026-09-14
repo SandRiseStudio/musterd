@@ -3025,9 +3025,8 @@ const CHAIR_BACK_OFF = 14; // how far behind the seat centre the backrest stands
 // here, a wheeled office chair there, an armed exec seat, the odd high-backed gamer chair. The variation
 // never touches the two load-bearing invariants: the cushion top stays at SEAT_TOP (where `skeleton.ts`
 // lands a seated pelvis) and the backrest keeps its footprint (so a sitter still sorts between the two).
-type ChairKind = 'stool' | 'wheeled' | 'exec' | 'gamer';
+type ChairKind = 'task' | 'wheeled' | 'exec' | 'gamer';
 interface ChairStyle {
-  caster: boolean; // a 5-star wheeled base instead of four splayed legs
   backH: number; // backrest height
   backW: number; // backrest width along the shoulders
   arms: boolean; // a low armrest each side
@@ -3035,33 +3034,41 @@ interface ChairStyle {
   wings: boolean; // racing-style side bolsters on the backrest
 }
 const CHAIR_ARM_SALT = 22;
-const TASK_CHAIR: ChairStyle = { caster: false, backH: 26, backW: 34, arms: false, headrest: false, wings: false };
+/* Every chair in this office rolls (nick, 2026-09-14). It used to be a `caster` flag with the plain
+   task chair — and with it the meeting-room set, which takes this same default — standing on four
+   splayed legs. A room where three desks out of twelve cannot swivel is a room where the ambient
+   chair beats are unevenly distributed for a reason nobody can see, and the four-leg base was the
+   weaker drawing anyway: the star base has arms AND wheels, which is what makes it read as a chair
+   rather than as dots under a cushion. The flag is gone rather than set to true everywhere, so there
+   is no second state to keep working. */
+const TASK_CHAIR: ChairStyle = { backH: 26, backW: 34, arms: false, headrest: false, wings: false };
 
 // The office is a *fixed* set of 12 desks (three pods of four). A probability hash over so few ids doesn't
 // guarantee coverage — it can (and did) bucket all 12 into one variant, so the variety never shows. Instead
 // each desk's chair/monitor is a curated spread: every kind appears, and every pod shows a mix (adjacent
 // desks differ), which is exactly what makes the variety read. Still fully deterministic + stable per frame.
 const CHAIR_KINDS_BY_ID: readonly ChairKind[] = [
-  'gamer', 'wheeled', 'exec', 'stool', // pod 0 (top — two desks face the camera)
-  'exec', 'gamer', 'stool', 'wheeled', // pod 1 (centre)
-  'wheeled', 'exec', 'gamer', 'stool', // pod 2 (left)
+  'gamer', 'wheeled', 'exec', 'task', // pod 0 (top — two desks face the camera)
+  'exec', 'gamer', 'task', 'wheeled', // pod 1 (centre)
+  'wheeled', 'exec', 'gamer', 'task', // pod 2 (left)
 ];
 
-/** Exported for the ambient scheduler: the chair beats (swivel/roll) need casters — a stool can't. */
-export function chairKindFor(id: number): ChairKind {
+/** The ambient scheduler used to import this so it could skip the one kind with no casters. Every kind
+ *  has them now, so its question collapsed to "is there a desk chair" and this went back to private. */
+function chairKindFor(id: number): ChairKind {
   return CHAIR_KINDS_BY_ID[id % CHAIR_KINDS_BY_ID.length]!;
 }
 function chairStyleFor(id: number): ChairStyle {
   const arms = deskRnd(id, CHAIR_ARM_SALT) < 0.5;
   switch (chairKindFor(id)) {
-    case 'stool':
+    case 'task':
       return TASK_CHAIR;
     case 'wheeled':
-      return { caster: true, backH: 27, backW: 34, arms, headrest: false, wings: false };
+      return { backH: 27, backW: 34, arms, headrest: false, wings: false };
     case 'exec':
-      return { caster: true, backH: 35, backW: 36, arms: true, headrest: false, wings: false };
+      return { backH: 35, backW: 36, arms: true, headrest: false, wings: false };
     case 'gamer':
-      return { caster: true, backH: 43, backW: 38, arms: true, headrest: true, wings: true };
+      return { backH: 43, backW: 38, arms: true, headrest: true, wings: true };
   }
 }
 
@@ -3077,7 +3084,7 @@ function chairBase(
 ): void {
   const sn = FWD[dir][1] !== 0;
   const p: [number, number] = [-FWD[dir][1], FWD[dir][0]]; // across-seat unit
-  if (style.caster) {
+  {
     // A 5-star caster base: a central column, five ARMS radiating from it, and a wheel at each tip.
     //
     // The arms are the whole point of this block. Without them the base was five ellipses and a post
@@ -3120,15 +3127,6 @@ function chairBase(
       );
     }
     box(ctx, fit, lx, ly, 6, 6, CHAIR_LIFT, dim(color, 0.55));
-  } else {
-    for (const [sx, sy] of [
-      [-1, -1],
-      [1, -1],
-      [1, 1],
-      [-1, 1],
-    ] as const) {
-      box(ctx, fit, lx + sx * 10, ly + sy * 10, 4, 4, CHAIR_LIFT, dim(color, 0.6));
-    }
   }
   // The cushion top is SEAT_TOP — the exact height `skeleton.ts` puts a seated pelvis at, so a member lands
   // on the chair rather than near it.
