@@ -824,3 +824,21 @@ packages/web/dist/client/assets/*.js` after a build is the check, and it should 
 - Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on the merge commit — total should
   read ≈228.6 KiB against 231.4 KiB (237,000 B), initial ≈132.0 KiB against 133.8 KiB, and the grep
   above should find no chunk.
+
+## 2026-09-14 — totalJsGzipBytes 237000 → 240000 (CI gzip delta, PR #1412)
+
+A CLI-only Grok doctor follow-up (`inspectGrokHookDrift` tombstone, no `packages/web` files) went
+red on `static` because `perf:check` read **231.5 KB / 231.4 KB** total JS gzip on CI. Local on the
+same tree, after `pnpm -r build`, was **236,330 B / 231.1 KB against 237,000 B** — 670 B inside.
+Nothing in the PR can move that number (ADR 183: total is delete-or-drop, and there was nothing to
+delete). This is the 2026-09-01 process finding again: a ceiling that displays as N.4 KB against an
+N.4 KB budget is a coin flip on CI's gzip, and the next PR — even a docs or CLI one — pays.
+
+Re-baseline checked first and unavailable: measured + 15% loosens (ADR 183 may only tighten). Raise
+is CI-measured (~237,056 B) + ~1.2% → **240,000**, same arithmetic as 2026-08-24/25/31 and 09-01/02.
+The Grok doctor change is not the cost; the cost is the #1401 tree sitting on the last 0.1 KB of
+the 2026-09-04 re-baseline's CI slack.
+
+- Falsify: `pnpm --filter @musterd/web build && pnpm perf:check` on this PR — total must read under
+  234.4 KB (240,000 B). A CLI-only checkout that still fails this number means the raise was short
+  of the CI gzip delta, not that the doctor grew the bundle.
