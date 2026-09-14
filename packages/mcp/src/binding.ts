@@ -263,9 +263,14 @@ function readWorkspaceSpec(path: string): WorkspaceSpec | null {
  *
  * The agent-seat credential is server-minted and irreplaceable by a local writer. Omit preserves a
  * valid on-disk value (ADR 340).
+ *
+ * Merge-guard on `host_key` (ADR 395): persistBinding rebuilds from boot-time config and never
+ * carries the actuator credential; omitting it must not disarm the next wake. `residency off` is
+ * CLI-only and passes `{ drop: { host_key: true } }` there; this copy keeps the same drop slot so
+ * the two writers cannot drift.
  */
 /** Capture-writer intent, distinct from omit. persistBinding never passes this (ADR 270). */
-export type SaveBindingOptions = { drop?: { model_observed?: boolean } };
+export type SaveBindingOptions = { drop?: { model_observed?: boolean; host_key?: boolean } };
 
 export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOptions): string {
   const bindingDir = join(dir, BINDING_DIR);
@@ -273,6 +278,7 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
   const p = join(bindingDir, BINDING_FILE);
   const onDisk = readBinding(p);
   const dropObserved = opts?.drop?.model_observed === true;
+  const dropHostKey = opts?.drop?.host_key === true;
   let merged: Binding = {
     ...binding,
     ...(binding.seat_credential === undefined &&
@@ -289,9 +295,18 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
       : binding.model_observed === undefined && onDisk?.model_observed !== undefined
         ? { model_observed: onDisk.model_observed }
         : {}),
+    ...(dropHostKey
+      ? {}
+      : binding.host_key === undefined && onDisk?.host_key !== undefined
+        ? { host_key: onDisk.host_key }
+        : {}),
   };
   if (dropObserved && merged.model_observed !== undefined) {
     const { model_observed: _dropped, ...rest } = merged;
+    merged = rest;
+  }
+  if (dropHostKey && merged.host_key !== undefined) {
+    const { host_key: _dropped, ...rest } = merged;
     merged = rest;
   }
   // A binding the reader could not parse must not replace one it can — ahead of the tmp write, so a

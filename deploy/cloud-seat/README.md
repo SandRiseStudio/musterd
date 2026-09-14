@@ -213,13 +213,15 @@ fly ssh console -a musterd-seat-$SEAT -C "sh -c 'tail -n 5 /data/log/host.log'"
 #   the team agent key (mskey_) for "<team>"
 ```
 
-**Cause (2026-09-06, measured on delta).** The actuator authenticates every lease poll with
+**Cause (2026-09-06, measured on delta).** The actuator authenticated every lease poll with
 `binding.agent_key` from the seat's workspace, and `/residency/wake-leases` accepts only the team
-agent key or a `host`-scoped bootstrap credential. A woken session claims its own seat, and the
-claim path rewrites that field — so the seat wakes **once** and then cannot be woken again. The
-roster keeps saying `wakeable` because the enrollment is still current — the 401 is on the
-actuator, not the roster. Full write-up and
-falsifier: `docs/perf/cloud-seat.md`, finding 14.
+agent key or a `host`-scoped bootstrap credential. That field is also the claim authenticator, so
+a first-boot writer could leave the actuator polling a `claim_seat` key — the seat woke **once**
+and then could not be woken again. The roster kept saying `wakeable` because the enrollment was
+still current — the 401 is on the actuator, not the roster. Full write-up:
+`docs/perf/cloud-seat.md`, finding 14. **Product fix (ADR 395):** `residency on` mints a
+host-scoped credential into `binding.host_key`; the actuator prefers it; claim cannot overwrite
+it. A seat enrolled on a build that includes ADR 395 does not need the hand repair below.
 
 **Repair — a rebind, not a rotation.** The machine still holds the right key in
 `config.agentKeys.<team>`; `musterd wire` resolves it from there. Run both, in this order, as the
@@ -237,7 +239,7 @@ fly ssh console -a musterd-seat-$SEAT -C \
 `wire` does not carry the standing grant across, which is why `residency on` follows — the same two
 steps `seat.sh` runs at boot. Since 2026-09-06 `seat.sh` runs `wire` on **every** boot, not only the
 first, so a rebuild or restart rebinds by itself; this hand repair is for a seat that broke *between*
-boots (the next wake's claim rewrote the field — lane `01M1T6D80Q`). The next actuator poll (≤30 s) leases any wake already due; on delta
+boots on a build from before ADR 395. The next actuator poll (≤30 s) leases any wake already due; on delta
 the repair went from wire to `residency.woke` in under three minutes. **Do not rotate the team agent
 key to fix this** — rotation is the first-boot ceremony, it invalidates the key the machine still
 holds, and it repairs nothing that the rebind does not.

@@ -303,6 +303,8 @@ remaining half — `id -u` from inside the *woken* session — is delta's own to
    host label; it could mint the `host`-scoped bootstrap credential the endpoint already accepts and
    store it under a field no claim path touches, instead of sharing `binding.agent_key` with
    `musterd agent` and every claim.
+   **Done 2026-09-14, ADR 395:** `binding.host_key`, minted at `residency on`, merge-guarded on
+   save, preferred by the actuator. Candidates 2 and 3 are not this change.
 2. **A 401 on the wake lease should reach the hub.** The one surface that showed the truth was on the
    machine nobody was looking at. A seat whose actuator cannot authenticate is not `wakeable`, and
    the roster is where that belongs — this is finding 6 with teeth.
@@ -764,9 +766,9 @@ refusal or inventing a value. That is the right shape for a measurement page.
 
 ### What is still open (supersedes the 2026-09-04 list)
 
-- **Two wake-path defects have lanes, none fixed**: `01M1T6D80Q` (high — the actuator's
-  credential is a field three code paths own) and `01M1T6DJ7J` (high — team policy does not
-  replicate to a joiner). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
+- **Two wake-path defects have lanes**: ~~`01M1T6D80Q` (high — the actuator's credential is a
+  field three code paths own)~~ **FIXED 2026-09-14, ADR 395** (`binding.host_key`) and
+  `01M1T6DJ7J` (high — team policy does not replicate to a joiner). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
   (#1371, confirmed on the VM 2026-09-14; see 18a)**. Two new ones opened in its place, both from
   the confirming run: a granted tool is not yet a callable tool (the musterd tools arrive deferred,
   and ryder reproduced it on the laptop and across an MCP reconnect — not a cloud-seat property);
@@ -797,15 +799,15 @@ refusal or inventing a value. That is the right shape for a measurement page.
   only `run exited (code 1) without occupying the seat` — the reason is visible nowhere but the
   transcript. That is lane `01M1VDY8PY`'s third fix. ~~Unmeasured until the credit is topped up.~~
   **Measured 2026-09-14 16:35Z: the credit was topped up and the line now reads `… — harness: Credit
-  balance is too low` (18a).** Two defects stay open (`01M1T6D80Q`, `01M1T6DJ7J`); finding 18 is
-  closed. The boot script is the floor
-  under them, not the fix — in particular a boot-time rebind cannot outlive the next wake if the
-  claim path still rewrites `binding.agent_key` — **and it does not (2026-09-06 13:15Z)**: after
-  the 01:24Z rebind delta was woken five times, each session claimed, and the actuator's polls
-  stayed 200 throughout (`host.log`'s last 401 is before those leases; `daemon.log` shows
-  `POST /residency/wake-leases 200` every ~31 s at 13:1xZ). Finding 14's "the wake rewrites the
-  credential" is falsified; the 09-04 22:36Z writer ran once, on a first-boot workspace, and is
-  still unnamed — recorded on lane `01M1T6D80Q`. A boot-time rebind is therefore a sufficient floor.
+  balance is too low` (18a).** Finding 18 is closed. `01M1T6DJ7J` (team policy does not replicate)
+  stays open. `01M1T6D80Q` is ADR 395: the actuator now polls with `binding.host_key`, a field no
+  claim path writes. The boot script remains the floor for enrollments that have not yet run
+  `residency on` on a build that mints it. Finding 14's "the wake rewrites the credential" was
+  already falsified (2026-09-06 13:15Z): after the 01:24Z rebind delta was woken five times, each
+  session claimed, and the actuator's polls stayed 200 throughout (`host.log`'s last 401 is before
+  those leases; `daemon.log` shows `POST /residency/wake-leases 200` every ~31 s at 13:1xZ). The
+  09-04 22:36Z writer ran once, on a first-boot workspace, and is still unnamed — splitting the
+  field means it no longer matters.
 - ~~**The doorbell on the VM is deaf** — its `PostToolUse` hook still prints bare stdout, the form
   izzo's #1349 identified as never reaching a model. `musterd init --refresh-hooks` on the machine,
   once #1349's dist is deployed there.~~ Folded into the `seat.sh` line above (2026-09-06).

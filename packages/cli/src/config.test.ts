@@ -323,6 +323,29 @@ describe('saveBinding merge-guard + atomic write (ADR 131 inc 4)', () => {
     expect(onDisk()['model_observed']).toBeUndefined();
   });
 
+  it('a host_key-less write preserves the actuator credential (ADR 395)', () => {
+    // Finding 14: occupy / wire / persistBinding rebuild the binding without host_key. If the
+    // merge-guard does not restore it, the next wake poll 401s with a claim-scoped agent_key.
+    saveBinding(dir, { ...base, host_key: 'mskey_host' });
+    saveBinding(dir, { ...base, agent_key: 'mskey_claim_seat' });
+    expect(onDisk()['host_key']).toBe('mskey_host');
+    expect(onDisk()['agent_key']).toBe('mskey_claim_seat');
+  });
+
+  it('an explicit host_key on the argument wins over the on-disk one', () => {
+    saveBinding(dir, { ...base, host_key: 'mskey_host_old' });
+    saveBinding(dir, { ...base, host_key: 'mskey_host_new' });
+    expect(onDisk()['host_key']).toBe('mskey_host_new');
+  });
+
+  it('an explicit drop clears the on-disk host_key (residency off)', () => {
+    saveBinding(dir, { ...base, host_key: 'mskey_host' });
+    saveBinding(dir, { ...base }, { drop: { host_key: true } });
+    expect(onDisk()['host_key']).toBeUndefined();
+    saveBinding(dir, { ...base });
+    expect(onDisk()['host_key']).toBeUndefined();
+  });
+
   it('leaves no tmp file behind (atomic rename)', () => {
     saveBinding(dir, base);
     const entries = readFileSync(join(dir, '.musterd', 'binding.json'), 'utf8');

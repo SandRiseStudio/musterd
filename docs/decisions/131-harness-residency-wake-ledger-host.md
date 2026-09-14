@@ -315,6 +315,14 @@ as decision 2 always said it should. Falsify: provision a workspace whose `setti
 has no `mcp__musterd`, hand its seat a lane, and read `residency.woke` with `derivation:
 work_order`._
 
+**Follow-up note (2026-09-14, lane 01M1T6D80Q, ADR 395):** the actuator no longer authenticates
+with `binding.agent_key`. That field is shared with ADR 344 `claim_seat` provisioning and every
+seat claim; measured on delta (finding 14), a woken session's claim left the next poll 401 for 51
+hours. `musterd residency on` now mints a host-scoped bootstrap credential into `binding.host_key`,
+a field the claim path never writes (saveBinding merge-guard). The loop prefers it and falls back
+to `agent_key` when the field is absent. Decision §1 and §2 stay frozen (an earlier marker is
+already in that section); the substance is ADR 395.
+
 _Amendment (2026-09-06, same lane): **a wake that never occupies says why.** The actuator's
 verdicts — "run exited (code N) without occupying the seat", "no roster occupancy within the
 verify window" — were the whole failure record, and on one machine in one day they wore a refused

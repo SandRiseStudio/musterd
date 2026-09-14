@@ -19,10 +19,11 @@ import { canonicalServer, loadHostRegistry, type HostRegistryEntry } from './reg
  * (server, team, enrolled-host-label), hands each order to its harness's {@link ActuatorBackend},
  * and reports the outcome inside the lease TTL.
  *
- * Credentials: the loop authenticates with the team agent key read *through each seat's workspace
- * binding* — the host is harness-side infrastructure, not a seat, and holds nothing centrally
- * (ADR 131 §1). The woken session occupies via the standing grant in its own binding; the loop
- * never touches it.
+ * Credentials: the loop authenticates with `binding.host_key` (a host-scoped bootstrap credential
+ * minted at `residency on`, ADR 395), falling back to `agent_key` when the field is absent. The
+ * host is harness-side infrastructure, not a seat, and holds nothing centrally (ADR 131 §1).
+ * Claim paths may rewrite `agent_key`; they cannot rewrite `host_key` (saveBinding merge-guard).
+ * The woken session occupies via the standing grant in its own binding; the loop never touches it.
  *
  * Telemetry carve-out (ADR 131 O&E): narrator lines per *actuation* only — a quiet tick logs
  * nothing, ever.
@@ -66,10 +67,13 @@ export interface HostPollResult {
   settled: Promise<void>[];
 }
 
-const defaultReadAgentKey = (workspace: string): string | undefined =>
+const defaultReadAgentKey = (workspace: string): string | undefined => {
   // Empty env on purpose: a `MUSTERD_BINDING` override in the host's own shell must not shadow
-  // the *target workspace's* binding.
-  findBinding(workspace, {})?.agent_key;
+  // the *target workspace's* binding. Prefer host_key (ADR 395): agent_key is the claim
+  // authenticator and a woken session may rewrite it.
+  const binding = findBinding(workspace, {});
+  return binding?.host_key ?? binding?.agent_key;
+};
 
 const defaultClientFor = (server: string, agentKey: string): WakeClient => {
   const http = new HttpClient({ server, key: agentKey }).presenceNeutral();

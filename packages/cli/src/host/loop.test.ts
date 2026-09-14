@@ -1,5 +1,9 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { MemberSummary, WakeOrder, WakeReportBody } from '@musterd/protocol';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { saveBinding } from '../config.js';
 import type { ActuatorBackend, BackendContext, WakeSpec } from './backend.js';
 import { pollHostOnce, type HostPollDeps, type WakeClient } from './loop.js';
 import type { HostRegistryEntry } from './registry.js';
@@ -1011,5 +1015,44 @@ describe('verifyOccupied — own child that could not attest its lease (ADR 379)
     ] as unknown as MemberSummary[];
     const verified = await probe(both);
     expect(verified).toEqual({ occupied: true, provenance: 'wake', lease_matched: true });
+  });
+});
+
+describe('pollHostOnce — actuator credential (ADR 395)', () => {
+  const prevConfig = process.env['MUSTERD_CONFIG'];
+  afterEach(() => {
+    if (prevConfig === undefined) delete process.env['MUSTERD_CONFIG'];
+    else process.env['MUSTERD_CONFIG'] = prevConfig;
+  });
+
+  it('polls with host_key even when agent_key is a claim-scoped credential', async () => {
+    // Production change that would make this fail: defaultReadAgentKey still reading agent_key.
+    const dir = mkdtempSync(join(tmpdir(), 'musterd-hostkey-'));
+    process.env['MUSTERD_CONFIG'] = join(dir, 'config.json');
+    saveBinding(dir, {
+      version: 2,
+      server: 'http://s1',
+      team: 'dawn',
+      claim: { mode: 'seat', name: 'scout' },
+      agent_key: 'mskey_claim_seat',
+      host_key: 'mskey_host',
+    });
+    const { client, calls } = fakeClient([]);
+    let used: string | undefined;
+    await pollHostOnce({
+      backends: new Map(),
+      bounds: { timeout_ms: 60_000 },
+      log: () => undefined,
+      liveness: () => ({ state: 'none' }),
+      verifyWindowMs: 50,
+      verifyPollMs: 5,
+      loadRegistry: () => ({ entries: [entryOf({ workspace: dir })] }),
+      clientFor: (_server, key) => {
+        used = key;
+        return client;
+      },
+    });
+    expect(used).toBe('mskey_host');
+    expect(calls.leases).toEqual([{ team: 'dawn', host: 'mac.lan' }]);
   });
 });
