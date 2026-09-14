@@ -13,10 +13,10 @@ const apertureConfig = {
   providers: { anthropic: { baseurl: 'https://api.anthropic.com', models: ['claude'] } },
   grants: [
     {
-      src: ['tag:musterd-agent', 'tag:musterd-member-a7f3c2'],
+      src: ['tag:musterd-member-a7f3c2'],
       app: {
         'tailscale.com/cap/aperture': [
-          { role: 'agent', models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] },
+          { role: 'user', models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] },
         ],
       },
     },
