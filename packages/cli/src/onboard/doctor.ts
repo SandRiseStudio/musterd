@@ -10,10 +10,11 @@ import {
   type Binding,
 } from '@musterd/protocol';
 import { resolveWorkspace } from '@musterd/protocol/project';
-import { HttpClient } from '../client.js';
+import { HttpClient, isSessionLeaseRefusal } from '../client.js';
 import { recoverAgentKey } from '../commands/team.js';
 import { harnessWiredFor, wireConfigures } from '../commands/wire.js';
 import { type Config, findBinding, loadBinding, loadConfig, readBindingAt } from '../config.js';
+import { CliError } from '../errors.js';
 import { inspectWakeMusterd } from '../host/pinnedBin.js';
 import { theme } from '../render/theme.js';
 import { packagedInstallNotes } from '../runtime.js';
@@ -248,6 +249,77 @@ async function inspectModelAttestation(binding: Binding | null): Promise<string[
       `diversity conclusions on its chains become unverifiable (ADR 120). Set MUSTERD_MODEL (or ` +
       `let the harness env carry ANTHROPIC_MODEL) and reconnect to attest.`,
   ];
+}
+
+/**
+ * The dead hook lease (lane 01M2H0GHMK): this folder's binding carries a session lease the daemon
+ * refuses, while the seat holds a live adapter Presence here — so the interrupt line is deaf on
+ * every hook probe while status, waiting, reads and the roster all look healthy. Ordinary commands
+ * self-heal through the one-shot reclaim and the probe deliberately does not (anti-storm), which
+ * is why the seat reads fine everywhere except the one surface that cannot heal. The probe is the
+ * only channel that reports it, and it reports it on the channel being refused.
+ *
+ * Best-effort + read-only like the checks above, and a **note**, never drift: silent when the
+ * folder has no seat binding, carries no lease on disk (ambient and CLI-human steady state stay
+ * quiet — their leases die between commands by design), holds no live Presence here (an offline
+ * seat owes no bell), the lease still answers, the server is unreachable, or the refusal is not
+ * a lease refusal (a bad credential or wrong seat is nobody's hook problem).
+ *
+ * The repair it names is the adapter rejoin, never `musterd claim` — a one-shot mint dies with
+ * its command (the deaf line says so, measured). Harness-neutral on purpose: the deferral
+ * round-trip differs per harness and the probe's own line already names it hook-keyed.
+ */
+async function inspectDeadHookLease(binding: Binding | null): Promise<string[]> {
+  if (!binding?.server || !binding.team) return [];
+  const seat = bindingSeat(binding);
+  const credential = binding?.seat_credential ?? binding?.agent_key;
+  if (!seat || !credential || !binding.session_lease) return [];
+  const workspace = resolveWorkspace();
+  let members;
+  try {
+    ({ members } = await new HttpClient({ server: binding.server }).roster(binding.team));
+  } catch {
+    return [];
+  }
+  const liveHere = (members.find((m) => m.name === seat)?.presences ?? []).filter(
+    (p) => p.status !== 'offline' && (p.workspace === workspace || p.workspace == null),
+  );
+  if (liveHere.length === 0) return [];
+  // The seat is live here under a different authority (the adapter socket). Ask whether THIS
+  // folder's lease — the one every hook presents — is still good: one read-only probe call with
+  // the heals off, exactly as the hook runs it.
+  try {
+    await new HttpClient({
+      server: binding.server,
+      team: binding.team,
+      workspace,
+      key: credential,
+      seat,
+      ...(credential === binding.seat_credential && binding.session_lease !== undefined
+        ? { sessionLease: binding.session_lease }
+        : {}),
+      surface: 'cli',
+      claimSeatPerRequest: false,
+    }).interruptCheck(binding.team);
+    return [];
+  } catch (err) {
+    if (
+      !(err instanceof CliError) ||
+      !isSessionLeaseRefusal({
+        code: typeof err.code === 'string' ? err.code : '',
+        message: err.message,
+      })
+    ) {
+      return [];
+    }
+    return [
+      `seat "${seat}" holds a live adapter Presence here but this folder's session lease is dead ` +
+        `— the interrupt line is deaf on every hook probe while status, waiting and reads all ` +
+        `look healthy. Read and re-join from THIS folder's harness adapter (team_join, in the ` +
+        `session that owns this folder) — never from another folder, whose claim would displace ` +
+        `this Presence; \`musterd claim\` mints a lease that dies with the command.`,
+    ];
+  }
 }
 
 /**
@@ -908,6 +980,7 @@ export async function inspectProvisioning(
   drift.push(...guidance.drift);
   const duplicateAdapters = await inspectDuplicateAdapters(binding);
   const modelAttestation = await inspectModelAttestation(binding);
+  const deadHookLease = await inspectDeadHookLease(binding);
   const seatIdentity = await inspectSeatIdentity(binding, cwd);
   // ADR 160/185: label coverage is per-capability (cross_rename / self_rename / none). Say so
   // plainly (a note, never drift — capability gaps are not misconfiguration).
@@ -967,6 +1040,7 @@ export async function inspectProvisioning(
       ...guidance.notes,
       ...duplicateAdapters,
       ...modelAttestation,
+      ...deadHookLease,
       ...seatIdentity.notes,
       ...inspectGitAttribution(binding, cwd),
       ...registryNotes,
