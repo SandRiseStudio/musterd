@@ -954,6 +954,23 @@ export function attachWsServer(ctx: Ctx, server: import('node:http').Server): We
               if (frame.surface) {
                 reattestSurface(ctx.db, conn.presenceId, frame.surface);
               }
+            } else {
+              // The row behind this socket is gone — the reaper removed it while the socket stayed
+              // open — and the session lease that joined on it is dead with it, so every hook probe
+              // this seat runs is refused. Dropping the heartbeat on the floor left the socket a
+              // zombie: subscribed, receiving broadcasts, deaf, and never told. Measured 2026-09-14
+              // (lane 01M2GBPX2S): ghost's socket was reaped at 15:58:37Z and stayed open and deaf
+              // for 19 minutes, 33 refusals, until it happened to drop. Close it: the adapter's
+              // reconnect re-claims, the `occupied` frame mints a new Presence and lease, and #1369
+              // writes that lease where the hook reads it. The row is the tell that separates
+              // "refused because reaped" from "refused because dead".
+              log.warn({
+                msg: 'ws_heartbeat_reaped',
+                member: conn.memberName,
+                conn: conn.connId,
+                presence: conn.presenceId,
+              });
+              ws.close(4410, 'presence reaped — re-claim');
             }
             break;
           }

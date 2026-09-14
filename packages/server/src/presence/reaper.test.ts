@@ -100,6 +100,31 @@ describe('startReaper', () => {
     );
   });
 
+  it('a tick that itself blocks past the timeout reaps nothing — the guard and the cutoff run on the clock the tick started with', () => {
+    const broadcast = vi.spyOn(hub, 'broadcastTeam');
+
+    stop = startReaper(ctx);
+    vi.advanceTimersByTime(config.presenceTimeoutMs + config.reaperIntervalMs);
+    const { presenceId } = seatWithPresence('Di');
+
+    // The next tick starts on time and then blocks inside its own body for longer than the timeout
+    // (a wedged daemon straight after a host resume — measured 2026-09-14 15:57:46Z, one tick of
+    // ~104s that reaped ghost, wanderer and dolly 51s in while their sockets were open). Every
+    // Date.now() after the tick's first read returns a clock past the timeout; the seat's
+    // heartbeat is in the socket buffer, unreadable until the tick returns.
+    const faked = Date.now;
+    let reads = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => {
+      reads += 1;
+      return reads === 1 ? faked() : faked() + config.presenceTimeoutMs + 1;
+    });
+    vi.advanceTimersByTime(config.reaperIntervalMs);
+    vi.restoreAllMocks();
+
+    expect(broadcast).not.toHaveBeenCalled();
+    expect(presenceById(db, presenceId)).toBeDefined();
+  });
+
   it('does not broadcast offline when only a grace-held row expires', () => {
     const { presenceId } = seatWithPresence('Bo');
     // A released (held) presence expiring is not a state change — the member already went offline.

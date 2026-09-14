@@ -524,9 +524,21 @@ export function listReclaimableMemberIds(db: Database, teamId: string, now: numb
  * The default of 0 means "always been watching" — callers with no continuity to declare are
  * unaffected. Measured 2026-09-02: seats saw "invalid, expired, or revoked agent session lease"
  * after daemon bounces, with no `claim.superseded` row anywhere (lane 01M1HNY302).
+ *
+ * `now` is the clock the CALLER's tick started on, and the guard and the cutoff must both run on
+ * it. Reading a fresh `Date.now()` here let one tick defeat the guard by itself: the first tick
+ * after a 3.6-day host suspend reset `watchedSince`, then blocked ~104s on a wedged daemon, and 51s
+ * in this function's own clock said the window had been watched — so the cutoff swept three live
+ * sockets whose heartbeats were sitting unread in the socket buffer until that same tick returned
+ * (2026-09-14 15:57:46Z, lane 01M2GBPX2S). No heartbeat can be heard inside a tick, so no row can
+ * go quiet inside one either.
  */
-export function reapStale(db: Database, timeoutMs: number, watchedSince = 0): PresenceRow[] {
-  const now = Date.now();
+export function reapStale(
+  db: Database,
+  timeoutMs: number,
+  watchedSince = 0,
+  now = Date.now(),
+): PresenceRow[] {
   if (now - watchedSince < timeoutMs) return [];
   const cutoff = now - timeoutMs;
   return db.transaction(() => {
