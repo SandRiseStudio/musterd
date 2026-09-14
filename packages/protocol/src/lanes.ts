@@ -448,6 +448,11 @@ export const UpdateLaneSchema = z.object({
       /** Seat-side verification tier — see the field's doc on {@link LaneSchema}. */
       verification: z.string().optional(),
     })
+    // `null` CLEARS a standing attestation (ADR 305 amendment 2, lane 01M2GR0434). The store always
+    // honoured it; the wire refused it, so a lane that acquired a wrong stamp — delta's, closed
+    // from the VM with stanley's PR — kept it with no remedy. Owner or admin only; the transport
+    // refuses a counterpart's clear, the way ADR 305 refuses a counterpart's replace.
+    .nullable()
     .optional(),
   /**
    * Route this lane's acceptance ask to a NAMED seat instead of the daemon's pick — meaningful only

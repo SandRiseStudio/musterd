@@ -5407,7 +5407,7 @@ export async function handleHttp(
               lane,
               // ADR 305: a counterpart's close carries no merge attestation of its own — unless
               // the lane has none (amendment 1); `decideLanePatch` already stripped it if so.
-              decided.patch.merged,
+              decided.patch.merged ?? undefined,
             );
           // ADR 271: a resolved incident owes its reporters an answer — they parked work behind it.
           // Best-effort and after the close: the resolve is already durable and a delivery failure

@@ -22,11 +22,18 @@ import { log } from '../log.js';
 import { readNodeState } from '../node/state.js';
 import { appendAudit } from '../store/audit.js';
 import { type LaneCloseVerdict, recordLaneClose } from '../store/laneClose.js';
-import { getLane, LaneConflictError, type LaneExpectation, updateLane } from '../store/lanes.js';
+import {
+  getLane,
+  LaneConflictError,
+  type LaneExpectation,
+  lanesAttestedBy,
+  updateLane,
+} from '../store/lanes.js';
 import { getMemberByName } from '../store/members.js';
 import { localNodeForTeam } from '../store/messages.js';
 import { bindSeatToNode, seatBinding, seatBindings, trustNodeForSeat } from '../store/nodes.js';
 import { hasLivePresence } from '../store/presence.js';
+import { resolveCapabilities } from '../store/rows.js';
 
 /**
  * Federation increment 3c: the hub-authoritative claim (ADR 325 §Authority split, residence 1).
@@ -299,6 +306,43 @@ export function decideLanePatch(
   body: UpdateLane,
   presenceTimeoutMs: number,
 ): { patch: UpdateLane; guard: LaneExpectation | undefined } {
+  // ADR 305 amendment 2 (lane 01M2GR0434, 2026-09-14): clearing an attestation is replacing it
+  // with nothing, so it is the OWNER's (or an admin's) — never a counterpart's, for the reason the
+  // strip rule below exists. Decided ahead of everything else so the hub's arbitration and the
+  // local path refuse identically.
+  if (body.merged === null && before.merged !== null) {
+    const row = getMemberByName(db, teamId, member.name);
+    const isAdmin = row !== undefined && resolveCapabilities(row).is_admin;
+    if (member.name !== before.owner_seat && !isAdmin) {
+      throw new MusterdError(
+        'forbidden',
+        `only the owner of lane "${before.id}" (${before.owner_seat ?? 'nobody'}) or an admin ` +
+          `may clear its merge attestation — a counterpart neither replaces nor removes the ` +
+          `worker's stamp (ADR 305)`,
+      );
+    }
+  }
+  // Lane 01M2GR0434: a squash SHA lands one branch. When a DIFFERENT seat's lane already carries
+  // it, this patch is stamping this lane with someone else's merge — delta's 01M2GBGA03 closed
+  // from the VM with stanley's PR 1376 / 23ae48bb, ancestor-verified because the SHA IS on main,
+  // and nothing asked whose it was. Refused, naming the lane that owns it. The same seat's twin
+  // lanes may share one PR: nine of ten shared SHAs on the live db (2026-09-14) were exactly that.
+  if (body.merged?.sha !== undefined) {
+    const owner = body.owner_seat !== undefined ? body.owner_seat : before.owner_seat;
+    const foreign = lanesAttestedBy(db, teamId, before.team, body.merged.sha, before.id).filter(
+      (l) => l.owner_seat !== owner,
+    );
+    if (foreign.length > 0) {
+      const l = foreign[0]!;
+      throw new MusterdError(
+        'conflict',
+        `SHA ${body.merged.sha} already attests lane "${l.id}" (${l.title}), owned by ` +
+          `${l.owner_seat ?? 'nobody'} — a squash SHA lands one branch, so this lane cannot ` +
+          `carry it too. If this lane really landed, name ITS PR and SHA; if it landed as part ` +
+          `of that PR, the owner of that lane closes both.`,
+      );
+    }
+  }
   if (body.owner_seat !== undefined && member.kind === 'service')
     throw new MusterdError(
       'forbidden',
@@ -477,7 +521,7 @@ export function arbitrateLanePatch(
           seat,
           before,
           lane,
-          decided.patch.merged,
+          decided.patch.merged ?? undefined,
           node.id,
         );
         return { lane, closed };

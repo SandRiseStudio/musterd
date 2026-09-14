@@ -24,7 +24,7 @@ const USAGE =
   '  musterd lane claim <id> [--goal <id>]\n' +
   '  musterd lane release <id>\n' +
   '  musterd lane handoff <id> --to <seat> [--branch <ref>] [--note <why>]\n' +
-  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high] [--goal <id>]\n' +
+  '  musterd lane update <id> [--state open|claimed|active|blocked|awaiting_acceptance|done|abandoned] [--title t] [--surface …] [--depends …] [--branch b] [--detail d] [--project p] [--stakes low|normal|high] [--goal <id>] [--clear-merged]\n' +
   '  musterd lane submit <id> [--to <seat>] [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
   '                          [--branch b]\n' +
   '  musterd lane resolve <id> [--pr <n>] [--sha <sha>] [--authorized-by <human>]\n' +
@@ -273,6 +273,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
       ...(flagStr(parsed.flags, 'goal') !== undefined
         ? { goal_id: flagStr(parsed.flags, 'goal')! }
         : {}),
+      // ADR 305 amendment 2 (lane 01M2GR0434): the one verb for NONE — a lane stamped with the
+      // wrong merge had no way back. Owner or admin only; the daemon refuses a counterpart.
+      ...(parsed.flags['clear-merged'] === true ? { merged: null } : {}),
     });
     process.stdout.write(`${theme.ok('✓')} lane updated\n${renderLane(res.lane)}\n`);
     renderWarnings(res.warnings);

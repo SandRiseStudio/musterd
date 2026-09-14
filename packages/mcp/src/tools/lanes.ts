@@ -253,6 +253,15 @@ export function registerLanes(
           .nullable()
           .optional()
           .describe('link (or clear, with null) this lane to a Goal'),
+        // ADR 305 amendment 2 (lane 01M2GR0434): the one verb for NONE. A lane stamped with the
+        // wrong merge — someone else's PR, a SHA that was never this branch — had no way back.
+        merged: z
+          .null()
+          .optional()
+          .describe(
+            'pass null to CLEAR a wrong merge attestation (owner or admin only). To attest a ' +
+              'merge use lane_submit / lane_resolve, which verify the SHA.',
+          ),
       },
     },
     async (args) => {

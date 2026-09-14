@@ -287,6 +287,30 @@ export function openLane(
   return rowToLane(row, teamSlug);
 }
 
+/**
+ * The lanes, other than `exceptId`, whose standing attestation names `sha` (lane 01M2GR0434). A
+ * squash SHA belongs to one branch, so a second lane carrying it is either the same seat closing
+ * twin lanes with one PR — nine of ten cases on the live db, 2026-09-14 — or a seat stamping its
+ * lane with someone else's merge, the tenth. `decideLanePatch` tells them apart by owner.
+ * `json_extract` on `merged_json`, which the store alone writes as JSON, so ADR 173's malformed-detail
+ * hazard does not apply.
+ */
+export function lanesAttestedBy(
+  db: Database,
+  teamId: string,
+  teamSlug: string,
+  sha: string,
+  exceptId: string,
+): Lane[] {
+  return db
+    .prepare<[string, string, string], LaneRow>(
+      `SELECT * FROM lanes WHERE team_id = ? AND id != ? AND merged_json IS NOT NULL
+         AND json_extract(merged_json, '$.sha') = ? ORDER BY created_at`,
+    )
+    .all(teamId, exceptId, sha)
+    .map((r) => rowToLane(r, teamSlug));
+}
+
 export function getLane(db: Database, teamId: string, id: string, teamSlug: string): Lane | null {
   const row = db
     .prepare<[string, string], LaneRow>('SELECT * FROM lanes WHERE team_id = ? AND id = ?')
