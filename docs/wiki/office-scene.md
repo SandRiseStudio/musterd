@@ -33,7 +33,17 @@ Measured on the fixture room over 500 ticks, separating walkers from sitters by 
 | moving | 1879 | **302 (16%)** — every walker: Hana 99, Cy 97, Ada 71, Eli 35 |
 | still | 2121 | 1617 — correct; a seated member is inside their desk |
 
-So the walkers are genuinely crossing solid furniture 16% of the time, and the painter fix does not touch that. Every mover already routes through `findPath` (16 call sites in actors.ts, plus pet.ts), which suggests the cause is not a missing call but one of: `findPath`'s deliberate tolerance of blocked ENDPOINTS (the last leg into a desk seat legitimately crosses the desk), or `clear()`'s string-pulling sampling past a corner. Not yet separated.
+So the walkers are inside solid furniture 16% of the time — and then a second measurement said most of it is not a defect at all.
+
+**Separate the episodes, not the samples.** A contiguous run of "inside a footprint" either ENDS AT REST (the member arrived and sat — `findPath` tolerates blocked endpoints by design, and a chair lives inside its own desk's footprint) or EXITS STILL MOVING (the member passed through — the real thing). Over 900 ticks on the fixture room:
+
+| episodes | ended at rest | exited still moving | exited deep (inset > 20) |
+| --- | --- | --- | --- |
+| 1028 | **986 (96%)** | **42 (4%)** | **8** |
+
+Every clipped footprint was `desk-*` or `chair-*`, i.e. exactly the ones that contain a walk endpoint — nothing else on the floor was ever crossed. So the honest reading is that "members walk through the furniture" was mostly the painter (the desk sorting, since reverted) plus the legitimate last hop into a seat, and the genuine residue is ~4% of episodes.
+
+Tried and measured as NOT the lever: making `nearestFree` prefer an approach cell whose final hop does not cross other furniture moved the sample rate only 17% → 15.4%. Recorded so the next reader does not re-run it. Do not raise `BODY_R` as a first move either — a larger radius can close narrow gaps the room depends on (desk aisles, the doorway) and strand walkers.
 
 **The probes.** `OfficeHandle.floorSamples()` returns every posed member's logical position with both tests, read from CDP like `ambientLog`. `/character-sheet?carry=laptop|box|plate|bottle|mug|phone` draws the turnaround with something in hand — the sheet hardcoded `carry: null`, so the one defect class that is about FACING was the one class the body-review tool could not draw.
 
