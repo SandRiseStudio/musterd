@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { homePoses } from './actors';
 import { memberColor } from '../format';
-import { fitFloor, project } from './iso';
-import { DESK_SLOTS, DESK_W, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
+import { depth, fitFloor, project } from './iso';
+import { CHAIR_OFF, DESK_D, DESK_SLOTS, DESK_W, FWD, LOUNGE, NOOK, WORKING_HOURS_CALENDAR } from './layout';
 import { computeLightEnv } from './lighting';
 import type { PetMode, PetState } from './pet';
 import {
@@ -13,6 +13,7 @@ import {
   CLOCK_NUMERALS,
   coffeeAnchor,
   contactPool,
+  deskNearDepth,
   deskPropSort,
   DOCK_HALF_ACROSS,
   dockAcross,
@@ -888,5 +889,68 @@ describe('the dock never covers a screen (laptop/dock design)', () => {
     const naive = -26;
     const behind = FACINGS.filter((dir) => deskPropSort(dir, 18, naive) < deskPropSort(dir, MONITOR_ALONG, 0));
     expect(behind.length).toBeLessThan(FACINGS.length); // it cannot be behind on all four
+  });
+});
+
+/**
+ * The desk's near half, and the ordering #1394 shipped without a test.
+ *
+ * #1394 moved the whole desk's key to its near corner and buried the sitter at every N/W desk; #1400
+ * reverted it. The lesson is that the passer-by and the sitter ask opposite questions of one scalar,
+ * so the desk keeps its centre key and gains a SECOND item on its camera-near half — keyed at the
+ * near corner, except never past this desk's own sitter.
+ *
+ * These pin every claim at all four facings. The first cut of the implementation defined the extra
+ * half by `FWD` rather than by depth and these caught it immediately on N: on an N or W desk the
+ * facing points AWAY from the viewer, so the room side is the far side.
+ */
+describe('the desk near half (the correct version of the reverted #1394)', () => {
+  const FACINGS = ['N', 'S', 'E', 'W'] as const;
+  const slotAt = (dir: (typeof FACINGS)[number]) => ({ lx: 400, ly: 400, dir });
+  /** Where a sitter at this desk sorts: the chair, opposite the facing (see `actorSortAnchor`). */
+  const seatOf = (dir: (typeof FACINGS)[number]) => {
+    const f = FWD[dir];
+    return { lx: 400 - f[0] * CHAIR_OFF, ly: 400 - f[1] * CHAIR_OFF };
+  };
+
+  it('an EMPTY desk keys its near half past the slab at every facing — that is what catches a passer-by', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      expect(deskNearDepth(slot, null), `near half must key after the slab on a ${dir} desk`).toBeGreaterThan(
+        depth(slot.lx, slot.ly),
+      );
+    }
+  });
+
+  it('a member standing clear in front of an empty desk still paints after it', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const sn = dir === 'S' || dir === 'N';
+      const wx = sn ? DESK_W : DESK_D;
+      const dy = sn ? DESK_D : DESK_W;
+      // A body a stride beyond the desk's near corner — plainly in the room, not at the desk.
+      const outside = depth(slot.lx + wx / 2 + 20, slot.ly + dy / 2 + 20);
+      expect(outside, `a member in front of a ${dir} desk must paint after its near half`).toBeGreaterThan(
+        deskNearDepth(slot, null),
+      );
+    }
+  });
+
+  it('NEVER keys past its own sitter, at any facing — the regression #1400 reverted', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      const seat = seatOf(dir);
+      expect(
+        deskNearDepth(slot, seat),
+        `near half must paint before the sitter on a ${dir} desk`,
+      ).toBeLessThan(depth(seat.lx, seat.ly));
+    }
+  });
+
+  it('an occupied desk is never keyed FURTHER forward than the same desk empty', () => {
+    for (const dir of FACINGS) {
+      const slot = slotAt(dir);
+      expect(deskNearDepth(slot, seatOf(dir))).toBeLessThanOrEqual(deskNearDepth(slot, null));
+    }
   });
 });
