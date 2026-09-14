@@ -248,3 +248,25 @@ that any rows exist: #1308 removed the known SQLite trigger, and the watch carri
 5 rows so that "nothing happened to sample" is never read as "the sample is trustworthy". The 30-day
 figure in the Eval paragraph is unchanged in meaning: it is the *armed* read, which begins only if
 this week's read and a human say so.
+
+- _Dated note (2026-09-14) — the seven-day sampled read voided on volume; a thirty-day successor is
+  open, and every row so far has the disarm shape._
+  [The registered watch](../watches/2026-09-05-adr-389-sampled-read.md) reached its `revisit_by` with
+  ONE `guardian.sampled` row inside 2026-09-05..2026-09-12 against a floor of five. Per the
+  pre-commitment above, no verdict is read from a null below the floor; the class stays at `alert`,
+  nothing is armed, and nothing is disarmed. What the week measured is the stall rate after #1308:
+  from 7–13 clean-exit-unreachable ticks a day on 2026-09-01..04 to one in seven days, so a week
+  could not reach its own floor — nick's cut was right for the rate it was made under and wrong for
+  the rate it met. The successor
+  ([2026-09-14](../watches/2026-09-14-adr-389-sampled-read-successor.md)) keeps the floor and the
+  falsifier and takes thirty days, which ADR 297's rollover check makes readable in the way the
+  original thirty was not. Recorded for that reading, not as a result: the one in-window row and the
+  three written on 2026-09-14 (four of four to date) all read `wedged: true`, `frame: ???`,
+  `entry: null`, share ≥ 0.996 — the main thread was executing JavaScript, V8 JIT code with no
+  symbol, and the loop was not polling, which §1 as restated above calls *held* — and every one was
+  followed by `guardian.stall_recovered` inside four minutes, with no restart. That is the
+  Experiment's disarm shape. Four anecdotes are not the pattern the floor asks for, and the
+  successor reads them at five; the row was written by a checkout carrying the corrected parser
+  (0a636599, bounced 2026-09-05 17:59), so it is not the old verdict the watch warned about.
+  Follows-up: none until the successor is read — a rule for `???` written now would be the
+  `void_if` clause firing on itself (2026-09-14).
