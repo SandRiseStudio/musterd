@@ -759,6 +759,40 @@ describe('team_inbox_check handler', () => {
     expect(text(r)).not.toContain('Call again with limit: 50 to');
   });
 
+  it('a complete fetch past the limit digests the oldest rows and walks the cursor over them', async () => {
+    // Lane 01M2GT874Y: with the cursor held entirely on any elision, a seat past its limit never
+    // advanced. Now the oldest unread render as digest lines and the watermark passes them.
+    const mk = (id: string, ts: number) =>
+      makeEnvelope({
+        id,
+        team: 'dawn',
+        from: 'nick',
+        to: { kind: 'team' },
+        act: 'status_update',
+        body: `body of ${id}`,
+        ts,
+      });
+    const messages = Array.from({ length: 120 }, (_, i) => mk(`n${i}`, 1000 + i));
+    const markRead = vi.fn(async () => undefined);
+    const handler = capture(
+      registerInboxCheck,
+      inboxClient({
+        fetchInbox: (async () => ({ messages, cursor: null })) as any,
+        markRead,
+      }),
+    );
+    const r = await handler({ unread_only: true, limit: 50 });
+    expect(text(r)).toContain('ℹ 70 older unread digested below and marked read');
+    expect(text(r)).not.toContain('older unread not shown');
+    expect(text(r)).toContain('— 70 older unread, now read (oldest first) —');
+    expect(text(r)).toContain('· nick [status_update] → @team: body of n0 (id=n0)');
+    expect(text(r)).not.toContain('Nothing was marked read');
+    // Everything was rendered in one form or the other, so the cursor goes to the newest.
+    expect(markRead).toHaveBeenCalledWith('n119');
+    expect((r as any).structuredContent.digested_unread).toHaveLength(70);
+    expect((r as any).structuredContent.elided_unread).toBe(0);
+  });
+
   it('merges buffered + fetched, dedups by id, sorts by ts, and advances the cursor', async () => {
     const mk = (id: string, ts: number) =>
       makeEnvelope({

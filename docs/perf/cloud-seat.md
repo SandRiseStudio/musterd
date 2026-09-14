@@ -731,7 +731,10 @@ exceeds its `team_inbox_check` limit and whose `inbox_cursors.updated_at` advanc
 stanley is a single-machine seat on the hub that called `team_inbox_check` six times in the frozen
 window. So the two-machine framing was a red herring; delta is simply the extreme case.
 
-**The mechanism is one line** in `planInboxCheck` (`packages/mcp/src/tools/inboxCheck.ts`):
+~~**The mechanism is one line**~~ FIXED 2026-09-14 by lane 01M2GT874Y (ADR 287 Amendment 1): the
+oldest unread now render as bounded digest lines and the cursor walks over them; re-measure the two
+rows above after deploy. The mechanism as found, in `planInboxCheck`
+(`packages/mcp/src/tools/inboxCheck.ts`):
 
     advanceTo: elided > 0 || shown.length === 0 ? null : shown[shown.length - 1]!.id
 

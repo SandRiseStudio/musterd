@@ -75,10 +75,13 @@ board two ADRs before it reached the brief.
    far the cursor may move — so the two can never disagree.
 2. **Newest-first is preserved.** A seat that checks once a turn must not be handed the stalest 50
    and told the urgent ask is behind them. Relevance ordering is not the defect and is not changed.
-3. **When the view cannot be complete, the cursor does not move at all.** The failure mode becomes
-   seeing a message twice, which costs a moment, instead of never seeing it, which costs the work.
-   That is the same trade the CLI made, and the same one ADR 173 makes for abstention: the cheap
-   error is preferred to the expensive one, deliberately and in one direction.
+3. ~~**When the view cannot be complete, the cursor does not move at all.**~~ AMENDED 2026-09-14
+   (lane 01M2GT874Y, see Amendment 1 below): the cursor advances over the **contiguous rendered
+   prefix**, and the oldest unread are rendered as bounded one-line digest entries so that prefix is
+   never empty. The failure mode is still seeing a message twice, which costs a moment, instead of
+   never seeing it, which costs the work. That is the same trade the CLI made, and the same one ADR
+   173 makes for abstention: the cheap error is preferred to the expensive one, deliberately and in
+   one direction.
 4. **The elision is stated, and stated first.** The reply leads with the count of unread it could not
    show, says plainly that nothing was marked read, and names the exact `limit` that would drain the
    backlog in one more call. An elision the reader is not told about is the same defect one layer up
@@ -155,7 +158,38 @@ the reach and this ADR bought less than it claimed; say so rather than assuming 
 
 **Falsifier.** Deterministic and unit-tested in
 `packages/mcp/src/tools/inboxCheck.plan.test.ts`: with 120 unread and a limit of 50, the call shows
-50, reports 70 elided, and advances the cursor nowhere.
+50 in full and ~~reports 70 elided, and advances the cursor nowhere~~ (amended 2026-09-14) renders
+the other 70 as digest lines, and the cursor never passes a row this call rendered in neither form.
+
+## Amendment 1 — the hold was a treadmill (2026-09-14, lane 01M2GT874Y)
+
+Rule 3 as written was self-sustaining. A seat whose unread exceeded `limit` elided on every check,
+so the cursor never moved, so its unread still exceeded `limit` on the next check. Measured
+2026-09-14 20:28Z on the hub db: delta's cursor unmoved for 9.9 days across 22 `team_inbox_check`
+calls on 6 days (1305 behind); stanley's — a single-machine seat on the hub — for 101.7 minutes
+across 6 checks (207 behind). The escape hatch in rule 4 was real and named on every call, and no
+seat took it: `elided_unread` is a number, not an instruction, and nothing in orientation raises
+the limit. Full record in `docs/perf/cloud-seat.md` (ADR 366-b).
+
+**What changes.** `planInboxCheck` now renders the OLDEST unread — contiguous from the cursor and
+not already in the newest-N fill — as one-line digest entries (`from [act] → to: body… (id=…)`),
+capped at `DIGEST_ROWS` (250) per call, and advances the cursor to the end of that contiguous
+rendered prefix. The newest-N full view is unchanged. What the digest cannot reach in one call is
+still elided and still holds the cursor short of it. Only a COMPLETE fetch digests: a bounded
+fetch's slice is the newest tail and is not contiguous with the cursor, so digesting its oldest
+rows would step over what the fetch cut — that case holds entirely, as before.
+
+**What does not change.** The rule in bold above: the cursor never passes a row this call did not
+render. A digest line renders the row — the reader has its id, sender, act and the start of its
+body, and `unread_only: false` fetches the rest. Pinned needs are still shown in full and still
+survive the slice; one inside the digest window is passed once it has been shown, one beyond it is
+pinned again next call.
+
+**Falsifier for the amendment.** A seat 700 behind calls `team_inbox_check` at the default limit;
+its cursor advances on the first call and reaches zero unread within five, with every row rendered
+in one form before it was passed (`inboxCheck.plan.test.ts`, "a seat behind by more than `limit`
+still drains"). Live: re-measure the two rows above after the fix is deployed — both
+`inbox_cursors.updated_at` values must move on the seat's next ordinary check.
 
 **Experiment.** None. This is a correctness fix with a deterministic falsifier; there is no
 preference hypothesis to test.
