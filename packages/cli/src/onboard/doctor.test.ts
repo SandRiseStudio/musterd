@@ -23,6 +23,11 @@ vi.mock('./harnesses/index.js', () => ({
   get HARNESSES() {
     return h.harnesses;
   },
+  // The doctor now READS the reconcile plan instead of inferring it, and `inspectHarnesses` pulls
+  // its own adapter registry from here. These fixtures are detection stubs, not adapters, so the
+  // engine gets an empty registry: every default-path test plans nothing, lands on `'unknown'`, and
+  // keeps asserting the prescription it always did. Tests that exercise a specific plan inject it.
+  harnessAdapters: () => [],
 }));
 vi.mock('./primer.js', () => ({ classifyPrimerTarget: () => h.primer }));
 vi.mock('../config.js', () => ({
@@ -462,6 +467,112 @@ describe('inspectProvisioning', () => {
     // been able to repair a retired marker, and ADR 286 is what made that matter. MUSTERD_MODEL is
     // a key wire genuinely does rewrite, so the ADR 168 point this test exists to make survives
     // intact — it just no longer rides on the one key that is a counter-example to it.
+    // ── the plan, not the inference ──────────────────────────────────────────────────────────────
+    // miley measured this on `agents-miley`, 2026-09-06, against the rule #1368 had just shipped:
+    // Cursor IS in the desired set, so by that rule `harness configure` repairs it. It does not.
+    // Both Cursor fragments reported `✗ drifted — evidence retained`; `harness configure --select
+    // cursor --yes` printed `cursor ✗ conflict` twice and wrote nothing; the doctor's text then
+    // flipped to `musterd wire`, which printed the same two conflicts, wrote nothing, and sent her
+    // back to `harness configure`. Desire is necessary for a reconciler to act and not sufficient —
+    // `classifyFragment` plans `none` for `owned-drifted` and `unmanaged-conflict` alike — so the
+    // doctor now asks the engine what it would DO rather than inferring it from the selection.
+    const folderDesiring = (desired: string[]) => {
+      const dir = mkdtempSync(join(tmpdir(), 'musterd-doctor-plan-'));
+      mkdirSync(join(dir, '.musterd'), { recursive: true });
+      writeFileSync(
+        join(dir, '.musterd', 'provisioned.json'),
+        JSON.stringify({
+          version: 3,
+          toolkit: '',
+          desired,
+          contributions: {},
+          provisionedAt: '2026-08-19T00:00:00.000Z',
+        }),
+      );
+      writeGuidance(dir, [], { team: 'dawn' });
+      return dir;
+    };
+
+    const cursorDrift = async (
+      plan: string | undefined,
+      extra: Parameters<typeof harnessWithEntry>[1] = { registeredAutojoin: '1' },
+    ) => {
+      h.primer = 'managed';
+      h.binding = { claim: { mode: 'seat', name: 'Miley' } };
+      h.harnesses = [harnessWithEntry('Cursor', extra, 'folder', 'cursor')];
+      return inspectProvisioning(
+        folderDesiring(['cursor']),
+        plan === undefined ? undefined : { entryPlans: new Map([['cursor', plan]]) },
+      );
+    };
+
+    it('prescribes a hand edit when the engine plans nothing for a DESIRED harness entry', async () => {
+      const r = await cursorDrift('unreachable-drifted');
+      const line = r.drift.find((d) => d.includes('MUSTERD_AUTOJOIN'))!;
+      expect(line).toMatch(/no reconciler will rewrite this entry/);
+      expect(line).toMatch(/drifted — evidence retained/);
+      // Neither reconciler may be offered as the repair for the entry AS IT STANDS — offering
+      // either is the loop itself. The line says outright that all three plan nothing.
+      expect(line).toMatch(
+        /`musterd harness configure`, `musterd wire` and `musterd init` all plan `none`/,
+      );
+      expect(line).not.toMatch(/Run `musterd wire` here to rewrite the entry/);
+      // ...and the reader is left with the repair that actually works: an absent fragment is the
+      // one state the engine plans for, so the whole entry goes and `wire` recreates it managed.
+      expect(line).toMatch(/delete musterd's WHOLE entry there by hand, then run `musterd wire`/);
+      // The machine-readable half agrees, so --fix cannot route at a command that plans `none`.
+      expect(r.repair).not.toBe('wire');
+    });
+
+    // The unmanaged half of the same axis: present, in no ledger, so musterd will not overwrite what
+    // it does not own. Same two-command dead end, a different sentence for why.
+    it("says an unmanaged entry is not musterd's to overwrite", async () => {
+      const line = (await cursorDrift('unreachable-unmanaged')).drift.find((d) =>
+        d.includes('MUSTERD_AUTOJOIN'),
+      )!;
+      expect(line).toMatch(/not musterd's to overwrite/);
+      expect(line).toMatch(/in no ownership ledger/);
+      expect(line).not.toMatch(/Run `musterd wire` here to rewrite the entry/);
+    });
+
+    // The plan is the authority in BOTH directions: when the engine will write, the cheap repair is
+    // still the right one and must not be talked out of.
+    it('still prescribes wire when the engine plans to write the entry', async () => {
+      const r = await cursorDrift('reconcilable');
+      expect(r.drift.find((d) => d.includes('MUSTERD_AUTOJOIN'))).toMatch(/Run `musterd wire`/);
+      expect(r.repair).toBe('wire');
+    });
+
+    // Symmetric to #1368's unknown-desired-set guard, and the same principle: a plan the doctor
+    // could not read is not evidence that no repair exists. With no plan it degrades to the wording
+    // it has always given rather than asserting a dead end.
+    it('degrades to the reconciler prescription when no plan can be read', async () => {
+      const r = await cursorDrift(undefined);
+      expect(r.drift.find((d) => d.includes('MUSTERD_AUTOJOIN'))).toMatch(/Run `musterd wire`/);
+    });
+
+    // The per-seat-secret lines carry their own bespoke "Run `musterd wire` here: it rewrites the
+    // entry from .musterd/binding.json without secrets" — the most confident sentence in the file,
+    // and a lie in exactly this state. It rides `wireRepairs`, which the plan now gates.
+    it('does not promise the secret-stripping wire run when the engine plans nothing', async () => {
+      const line = (
+        await cursorDrift('unreachable-drifted', { registeredAgentKey: 'mskey_x' })
+      ).drift.find((d) => d.includes('MUSTERD_AGENT_KEY'))!;
+      expect(line).not.toMatch(/Run `musterd wire` here: it rewrites the entry/);
+      expect(line).toMatch(/no reconciler will rewrite this entry/);
+    });
+
+    // A retired marker is the ONE state where a reconciler genuinely writes: the fragment observes
+    // as `legacy-launch-marker` before any fingerprint comparison, and `harness configure` is the
+    // sole caller passing `legacyRepair: true`. That prescription must survive the new branch.
+    it('keeps naming harness configure for a retired marker on a desired harness', async () => {
+      const line = (await cursorDrift('legacy-marker', { registeredSurface: 'cursor' })).drift.find(
+        (d) => d.includes('MUSTERD_SURFACE'),
+      )!;
+      expect(line).toMatch(/Run `musterd harness configure` in this worktree/);
+      expect(line).not.toMatch(/no reconciler will rewrite this entry/);
+    });
+
     it('prescribes wire for the Codex entry in a folder provisioned for Codex', async () => {
       h.primer = 'managed';
       h.binding = { claim: { mode: 'seat', name: 'Miley' } };
