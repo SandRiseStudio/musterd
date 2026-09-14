@@ -332,5 +332,18 @@ of 8 markers in the window rather than reporting a verdict it cannot support. A 
 answer if the marker is used, and an honest "not enough happened" if it is not; ninety days bought
 neither, because nothing was going to read it.
 
+- _Dated note (2026-09-14) — the seven-day watch voided on volume; a sixty-day successor is open._
+  [The registered watch](../watches/2026-09-04-adr-373-follows-up-advances.md) reached its
+  `revisit_by` with ONE `Follows-up: <lane-id>` marker written inside 2026-09-04..2026-09-11
+  (01M1Q9D90XEP9FPCYPQNBFH73Q, ADR 232, e6d52d09) against a floor of eight. The nine markers counted
+  on the day it opened were the 2026-09-03 backfill from this ADR's own PR, not a week's rate. Per the
+  pre-commitment above, no verdict is read from a null below the floor; the falsifier did not fire
+  and the gate stands unchanged. What the week did measure is volume: ordinary work writes about one
+  marker a week, so a seven-day window cannot reach its own floor. The successor
+  ([2026-09-14](../watches/2026-09-14-adr-373-follows-up-advances-successor.md)) keeps the floor and
+  the falsifier and takes sixty days, which ADR 297's rollover check now makes readable in a way the
+  ninety-day window of 2026-09-03 was not. Recorded for that reading, not as a result: the one
+  in-window marker's lane is `done`; base rate in the window, 74 of 82 lanes past `open`.
+
 **Snapshot-debt:** none. Every count above (9 lanes, 46 proposed ADRs, 28 with ≥10 citations, 843
 lanes, 62 pages, 364 ADRs, 86 roadmap items) is exact and dated 2026-09-03, not a rate.

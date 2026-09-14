@@ -12,7 +12,8 @@ cadence:    read once, at revisit_by
 opened:     2026-09-04
 opened_by:  ryder
 revisit_by: 2026-09-11
-status:     open
+status:     void
+resolution: "VOID — below the volume floor, exactly as pre-registered. ONE `Follows-up: <lane-id>` marker was written in the window 2026-09-04..2026-09-11 (01M1Q9D90XEP9FPCYPQNBFH73Q, ADR 232, commit e6d52d09, 2026-09-04); the floor is 8. The other five lane-id markers in the tree (six distinct lanes across 11 lines) were all written 2026-09-03 in ADR 373's own PR (#1251, 5fe92d71), the day BEFORE the window, and the 9 counted at opening were that backfill. NO VERDICT is read from this: the pre-commitment says a null below the floor measures volume, not behaviour. Recorded for the successor, not as a result: the one in-window marker's lane is `done`; of the six marker-named lanes overall 4 are `done`, 1 `claimed` and 1 `open` (both human-gated holds); base rate in the window: 82 lanes opened from any source, 74 past `open` (64 done). `FORWARD_RE`/`STRUCTURAL_RE` unchanged in the window (scripts/intents.ts last touched 2026-09-03). The finding this watch CAN support is about volume: a week of ordinary work produced one marker, so the week-long window ADR 373 chose cannot reach its own floor. Successor: 2026-09-14-adr-373-follows-up-advances-successor.md, a 60-day window with the same floor."
 ---
 
 Opened because the window in ADR 373 was ninety days and nothing was scheduled to read it — which

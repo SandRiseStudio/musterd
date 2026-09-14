@@ -345,6 +345,32 @@ scopes the question around the one known-open cause so a recurrence of the Curso
 wallpaper a novel finding.
 
 
+- _Dated note (2026-09-14) — the second successor watch voided on population, and its one
+  in-population demote is a new shape._
+  [2026-08-21-adr-166-demoted-successor-2](../watches/2026-08-21-adr-166-demoted-successor-2.md)
+  reached `revisit_by` void on its own first `void_if`: five workspaces joined the registry inside
+  the window, so "the nine named" was never the sampled set. Read anyway as the count over those
+  nine (present in all 3,890 samples): ONE demote, agents-dolly, 2026-08-26T05:38:51Z, one sample,
+  self-corrected five minutes later. Inspected per case, it is NOT the Cursor trust gap the watch
+  excluded — no Cursor session existed there until 2026-09-06. It was a Claude Code session, alive
+  (same session id writes at 05:09Z and 15:59Z) and idle at the prompt for 29 minutes, which the slot
+  called `live` and enumeration called `resumable`; at the next sample both said `live` with no
+  transcript write between. Fifteen further demotes (agents-big-body, 2026-08-25T18:37–20:59Z, outside the nine)
+  are a third shape, not the trust gap: a codex workspace (rollouts 17:34–18:26Z, no Claude or
+  Cursor transcript until 08-31) demoted slot `live` / enumeration `none` from eleven minutes after
+  it first entered the sweep. `localSessionLiveness` picks its scanner from the CAPTURED session's
+  harness and falls back to the Claude scanner when there is none, so a new non-Claude seat with no
+  capture yet is enumerated by a scanner that cannot see it — that fits the shape, and so does a
+  slot that simply outlived its codex process. Not settled here, and out of population.
+  Follows-up: deferred — stand up a codex, opencode or grok workspace with no capture and run
+  the sweep once; if it demotes against a live slot, the fallback is a defect and gets its lane
+  (2026-09-14). The demote reached no wake decision: the guard belt
+  defers whenever the slot says live, which is why no successor watch is opened — a five-minute
+  demote of an idle session is now an enumerator question (a verdict flipped with no new evidence),
+  not a wake-safety one. Follows-up: none — the guard belt defers on slotState live, so this demote
+  shape cannot open the wake guard; if a demote is ever observed to reach a wake decision, that is a
+  new lane (2026-09-14).
+
 ## Consequences
 
 - Wake decisions stop being fooled by a foreign capture — the guard sees live sessions, and resume
