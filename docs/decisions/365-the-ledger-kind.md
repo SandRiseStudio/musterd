@@ -93,6 +93,10 @@ messaged) must still keep its own ledger.
 
 ## Consequences
 
+- 2026-09-14: [ADR 393](393-residency-enrollment-projects.md) carves `residency.enrolled` /
+  `residency.revoked` as the named exception to Decision 1 — those two verbs still ship as
+  `kind: 'ledger'` and now also project into the `residency` table so the roster can tell the
+  truth. The six wake verbs, and every deciding reader of them, are unchanged.
 - `musterd report` and the wake-cost ledger count every machine of the team. `unpriced_sessions`,
   `reports_rejected` and the per-seat economics become team-wide with them.
 - Ledger events carry `actor: null` (a machine decision), so ADR 360's residence check binds nothing

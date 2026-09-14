@@ -8,6 +8,11 @@ import type { Database } from 'better-sqlite3';
 import { z } from 'zod';
 import { getMemberByName } from '../store/members.js';
 import { upsertForeignNode } from '../store/nodes.js';
+import {
+  applyFoldedEnrollment,
+  recordSessionAttestation,
+  revokeResidency,
+} from '../store/residency.js';
 import type { MessageRow } from '../store/rows.js';
 import { recordToolCalls } from '../store/toolCalls.js';
 
@@ -49,12 +54,15 @@ export type FoldStop =
   // the same fact arriving after our stale-node sweep.)
   | { kind: 'unknown_presence_event'; action: string; hub_seq: number }
   | { kind: 'presence_unborn'; presence: string; action: string; hub_seq: number }
-  // Ledger events (ADR 365). There is no `unknown_ledger_event` for an unrecognised VERB — a
-  // ledger row projects into nothing, so a verb this build has never heard of is a row it can
-  // still hold honestly, and blocking would wedge the fold on a fact that decides nothing. The one
-  // refusal is a PROJECTED verb wearing the non-projecting tag: a `lane.*`/`presence.*` action
-  // under `kind: 'ledger'` would land in `audit` with its stamp and never reach its projector,
-  // leaving this daemon's `lanes` silently behind the origin's with no gap to find it by.
+  // Ledger events (ADR 365, ADR 393). There is no `unknown_ledger_event` for an unrecognised
+  // VERB — a ledger row the fold has no projector for still lands in `audit`, and blocking would
+  // wedge the fold on a fact that decides nothing. ADR 393 carves `residency.enrolled` /
+  // `residency.revoked` as the exception that DOES project (into the `residency` table, so the
+  // roster can tell the truth); an unknown seat there is git lag and stops as `unresolved_seat`.
+  // The one refusal of the tag itself is a PROJECTED verb wearing the non-projecting tag: a
+  // `lane.*`/`presence.*` action under `kind: 'ledger'` would land in `audit` with its stamp and
+  // never reach its projector, leaving this daemon's `lanes` silently behind the origin's with no
+  // gap to find it by.
   | { kind: 'mistagged_ledger_event'; action: string; hub_seq: number }
   // Policy events (residence-2 census gap 1, 2026-09-03): the fourth kind. Only the first shape —
   // there is no `unborn` for policy, because a team's row always exists here (the fold runs for a
@@ -589,6 +597,66 @@ export function readPullCursor(db: Database, teamId: string): number {
   );
 }
 
+/**
+ * ADR 393: `residency.enrolled` / `residency.revoked` project into the `residency` table so the
+ * roster can tell the truth. The standing grant never crosses. `session_captured` sets the
+ * resumable stamp when a row is already here; missing the row is a no-op, as on the origin.
+ * An unknown seat on enroll/revoke is git lag — stop, don't skip.
+ */
+function projectResidencyLedger(
+  db: Database,
+  teamId: string,
+  e: {
+    action: string;
+    target: string | null;
+    actor: string | null;
+    ts: number;
+    detail: Record<string, unknown> | null;
+  },
+  hubSeq: number,
+): { stop?: FoldStop } {
+  if (
+    e.action !== 'residency.enrolled' &&
+    e.action !== 'residency.revoked' &&
+    e.action !== 'residency.session_captured'
+  ) {
+    return {};
+  }
+  if (e.action === 'residency.session_captured') {
+    const seat = getMemberByName(db, teamId, e.target ?? '');
+    const harness = typeof e.detail?.['harness'] === 'string' ? e.detail['harness'] : '';
+    if (seat && harness) recordSessionAttestation(db, teamId, seat.id, harness, e.ts);
+    return {};
+  }
+  const seatName = e.target ?? '';
+  const member = getMemberByName(db, teamId, seatName);
+  if (!member) {
+    return { stop: { kind: 'unresolved_seat', seat: seatName, hub_seq: hubSeq } };
+  }
+  if (e.action === 'residency.revoked') {
+    revokeResidency(db, teamId, member.id);
+    return {};
+  }
+  const harness = typeof e.detail?.['harness'] === 'string' ? e.detail['harness'] : '';
+  const host = typeof e.detail?.['host'] === 'string' ? e.detail['host'] : '';
+  if (!harness || !host) return {};
+  const authorized =
+    typeof e.detail?.['authorized_by'] === 'string' ? e.detail['authorized_by'] : (e.actor ?? null);
+  const policyRaw = e.detail?.['policy'];
+  const policy =
+    policyRaw && typeof policyRaw === 'object' && !Array.isArray(policyRaw)
+      ? (policyRaw as Record<string, unknown>)
+      : undefined;
+  applyFoldedEnrollment(db, teamId, {
+    member_id: member.id,
+    harness,
+    host,
+    authorized_by: authorized,
+    ...(policy !== undefined ? { policy } : {}),
+  });
+  return {};
+}
+
 function writePullCursor(db: Database, teamId: string, hubSeq: number, now: number): void {
   db.prepare(
     `INSERT INTO sync_pull_cursor (team_id, last_hub_seq, updated_at) VALUES (?, ?, ?)
@@ -710,6 +778,11 @@ export function foldBatch(
         const e = event.event;
         if (e.action.startsWith('lane.') || e.action.startsWith('presence.')) {
           stop = { kind: 'mistagged_ledger_event', action: e.action, hub_seq: event.hub_seq };
+          return finish();
+        }
+        const projected = projectResidencyLedger(db, teamId, e, event.hub_seq);
+        if (projected.stop) {
+          stop = projected.stop;
           return finish();
         }
         db.prepare(
