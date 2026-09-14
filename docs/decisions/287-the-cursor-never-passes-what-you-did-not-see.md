@@ -161,6 +161,9 @@ the reach and this ADR bought less than it claimed; say so rather than assuming 
 50 in full and ~~reports 70 elided, and advances the cursor nowhere~~ (amended 2026-09-14) renders
 the other 70 as digest lines, and the cursor never passes a row this call rendered in neither form.
 
+**Experiment.** None. This is a correctness fix with a deterministic falsifier; there is no
+preference hypothesis to test.
+
 ## Amendment 1 — the hold was a treadmill (2026-09-14, lane 01M2GT874Y)
 
 Rule 3 as written was self-sustaining. A seat whose unread exceeded `limit` elided on every check,
@@ -190,6 +193,3 @@ its cursor advances on the first call and reaches zero unread within five, with 
 in one form before it was passed (`inboxCheck.plan.test.ts`, "a seat behind by more than `limit`
 still drains"). Live: re-measure the two rows above after the fix is deployed — both
 `inbox_cursors.updated_at` values must move on the seat's next ordinary check.
-
-**Experiment.** None. This is a correctness fix with a deterministic falsifier; there is no
-preference hypothesis to test.
