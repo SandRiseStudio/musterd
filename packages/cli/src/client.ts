@@ -532,9 +532,18 @@ export class HttpClient {
   /** On an `ask`, the daemon's ack additionally carries the derived tier contract with the reachability
    *  projection (`unblocker_reachable`, ADR 153); callers fall back to the pure local contract when an
    *  older daemon omits it. */
-  send(slug: string, envelope: Envelope): Promise<{ ask_contract?: AskContract }> {
+  send(
+    slug: string,
+    envelope: Envelope,
+  ): Promise<{
+    ask_contract?: AskContract;
+    /** ADR 202 on the ack (lane 01M2GQFJXG): the lane this accept/decline moved by answering a
+     *  `lane_review` ask. Absent when the act moved nothing, and from an older daemon. */
+    lane_verdict?: { lane: string; state: 'done' | 'active' };
+  }> {
     return this.request('POST', `/teams/${slug}/messages`, { envelope }) as Promise<{
       ask_contract?: AskContract;
+      lane_verdict?: { lane: string; state: 'done' | 'active' };
     }>;
   }
   inbox(

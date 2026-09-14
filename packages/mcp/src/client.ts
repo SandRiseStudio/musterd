@@ -44,6 +44,13 @@ export type HandoffLaneAck =
   | { lane: string; branch: string | null; source: 'derived' }
   | { warning: string };
 
+/** ADR 202 on the ack (lane 01M2GQFJXG): the lane an accept/decline moved by answering a
+ *  `lane_review` ask — `done` on accept, `active` on decline. Absent when the act moved nothing. */
+export interface LaneVerdictAck {
+  lane: string;
+  state: 'done' | 'active';
+}
+
 /** A refuse whose cause is a bad *grant*, not a bad seat — drop the grant and retry bare (ADR 193). */
 function isStaleGrantRefusal(frame: { code: string; message: string }): boolean {
   if (frame.code === 'expired_grant') return true;
@@ -422,11 +429,13 @@ export class MusterdClient {
     ask_contract?: AskContract;
     delivery_hint?: DeliveryHint;
     handoff_lane?: HandoffLaneAck;
+    lane_verdict?: LaneVerdictAck;
   }> {
     return this.request('POST', `/teams/${this.config.team}/messages`, { envelope }) as Promise<{
       ask_contract?: AskContract;
       delivery_hint?: DeliveryHint;
       handoff_lane?: HandoffLaneAck;
+      lane_verdict?: LaneVerdictAck;
     }>;
   }
 

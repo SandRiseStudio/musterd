@@ -6292,6 +6292,10 @@ describe('two-stage close (ADR 169)', () => {
 
       const sent = await verdict(auth, reviewer, askId, 'accept');
       expect(sent.status).toBe(201);
+      // Lane 01M2GQFJXG (stanley, 2026-09-14): the accept's ack said nothing about the lane it had
+      // just closed, so a reviewer who sent `accept` as an ANNOUNCEMENT ("taking this review")
+      // learned only later that the announcement was the verdict. The ack names the move.
+      expect(sent.json.lane_verdict).toEqual({ lane: laneId, state: 'done' });
 
       const lane = await get(`/teams/dawn/lanes`, nickTok);
       const closed = (lane.json.lanes as { id: string; state: string }[]).find(
