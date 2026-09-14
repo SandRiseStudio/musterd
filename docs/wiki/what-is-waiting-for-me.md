@@ -42,9 +42,29 @@ The 2026-09-06 fix below discharged what THIS seat answered. Three shapes discha
 
 The ⚡ line reads only unread interrupt-class rows (`listInterruptCandidates` + `pendingInterrupts`). A watermark cursor (ADR 287) cannot mark the three shown asks without skipping the ~1900 older unread behind them, so those asks stayed unread — and the acceptor's own `accept` is a DM to the asker, dropped by `from_member != me`. The fold never saw the discharge. Fixed by fetching this seat's own `accept`/`decline`/`resolve` into the candidate window (same pattern as huddle "mine" turns) and by not pinning `answered`/`discharged` ids in `team_inbox_check`. The cursor still holds on an incomplete view; the line just stops lying about closed obligations.
 
+## A down daemon rendered as an empty queue, and the seam that separates the two readers (2026-09-14; falsify: with the daemon unreachable, `musterd inbox --waiting` at a terminal must print a line distinguishable from the empty-queue case, and the same command with stdout piped must print nothing)
+
+The same symptom as the stale-lease case below, a different cause, and this one is fixed. Measured on agents-dolly against a dead port:
+
+```
+musterd inbox --waiting  → no output, exit 0
+musterd nudge            → no output, exit 0
+musterd status           → ✗ can't reach team server at … — is the daemon running? (musterd serve)
+```
+
+Same seat, same CLI, same unreachable daemon: two of the three answers to "what is waiting for me" rendered **down** as **nothing-waiting**, and the third named it. On the surface whose entire job is to report what is owed, absence of output was carrying two incompatible meanings — "I asked and the answer was none" and "I could not ask".
+
+**The obvious fix is wrong.** The silence is deliberate and load-bearing: this command rides a `Notification` hook at the approval-prompt moment, where a line on every failure is worse than no line at all — the same reasoning that keeps the interrupt probe silent on everything except a stale lease. Making the probe loud would trade a rare wrong picture for constant noise in the one place a human is already blocked.
+
+**So the seam is who is asking, and the signal is a TTY.** The installed hooks cannot be told apart by their arguments: claude-code and grok both run exactly `musterd inbox --waiting` with stdout captured and no distinguishing flag (2026-09-14; falsify: a provisioned Notification hook whose command carries a flag naming its caller). A human typing it has a terminal and a hook does not. `process.stdout.isTTY === true` is already the idiom this file uses for the bell. A human learns the question could not be asked; every hook stays exactly as silent as before; and every *other* failure stays silent for everyone, because a refused credential or a 500 does not make this command's silence a lie about the queue.
+
+Two controls ship with it, because this is the kind of change that grows: a reachable daemon with an empty queue still prints nothing (terminal or not — otherwise the new line would appear when the answer was a truthful zero, and be worthless), and the waiting output itself is **not** TTY-gated (the hook is the caller that most needs it and has no terminal).
+
+The general shape, and the reason it recurs: **a best-effort surface that swallows failures should swallow everything except the failures that change what its output means.** `status` had it right by accident — it is not best-effort, so it never had the choice.
+
 ## Still open (2026-09-03)
 
-- **`inbox --waiting` (was `nudge`) is silent on a stale session lease.** It resolves with `reclaimAgentLease: false` by design (a hook one-shot must never reclaim the seat), so when the seat's lease has lapsed the inbox read fails and the catch swallows it: zero output while acts wait. Observed on dolly's seat 2026-09-03 after a daemon bounce; `inbox --peek` on the same binding worked. Falsifier: run `musterd nudge` and `musterd inbox --peek --unread` back to back on a seat whose lease is stale — nudge prints nothing, inbox prints the acts. Not fixed here; the fix is a read that survives a lapsed lease without reclaiming it, and belongs with the lease design (ADR 337).
+- **`inbox --waiting` (was `nudge`) is silent on a stale session lease.** (Still open — the unreachable-daemon half above is fixed; this half is a different cause and is not.) It resolves with `reclaimAgentLease: false` by design (a hook one-shot must never reclaim the seat), so when the seat's lease has lapsed the inbox read fails and the catch swallows it: zero output while acts wait. Observed on dolly's seat 2026-09-03 after a daemon bounce; `inbox --peek` on the same binding worked. Falsifier: run `musterd nudge` and `musterd inbox --peek --unread` back to back on a seat whose lease is stale — nudge prints nothing, inbox prints the acts. Not fixed here; the fix is a read that survives a lapsed lease without reclaiming it, and belongs with the lease design (ADR 337).
 - **`ask` counts for everyone.** `isActionNeeded` flags every `ask`, including guardian's `daemon_down` broadcast to the team, so a human's count includes asks nobody routed to them (26 of nick's 120 were guardian). Whether a team-addressed ask should count for every human is an ADR 147 question, not a rendering one.
 
 ## Recommendation (half A of lane 01M1MB7WCW)
