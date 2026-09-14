@@ -212,7 +212,7 @@ reconnect can revoke callability without revoking the grant.*
 
 | harness | verdict | what was measured |
 | --- | --- | --- |
-| claude-code | **defers & re-defers** | musterd tools arrive deferred; schema fetched via `ToolSearch` (stanley, izzo, ryder). MCP drop/reconnect mid-session drops schema cache; every schema must be fetched again with no permission error (ryder alone, 2026-09-14) |
+| claude-code | **defers, re-defers, and can mute outright** | musterd tools arrive deferred; schema fetched via `ToolSearch` (stanley, izzo, ryder). Reconnect has TWO measured outcomes, and the difference is a tax versus an outage. (a) Schema cache dropped, every schema fetched again with no permission error — the seat pays a round-trip and works (ryder, 2026-09-14). (b) A mid-session MCP drop after which every tool reports "no longer available … ToolSearch will return no match" and `/mcp` fails with `CONNECT_TIMEOUT`: **no in-conversation recovery, 65 min observed**, while grant, credentials, presence and daemon all stayed healthy and the CLI channel answered throughout — i.e. the Cursor shape, on claude-code (dolly, session `8a006b8a`, 2026-09-14; `docs/wiki/claude-code-live-doorbell-eval.md`). What decides between (a) and (b) is unmeasured |
 | cursor | **fails on reconnect** | dynamic tool discovery via `GetDynamicTools` / `CallDynamicTool`. Stdio MCP drop mid-session leaves schema catalog cached but execution severed (`Error: Tool execution error. Not connected`). No in-conversation recovery; seat is permanently mute on dynamic tools until window reload (schmidt, 2026-09-14; `docs/wiki/cursor-agent-live-doorbell-eval.md` Check 5) |
 | grok | **defers**; reconnect unmeasured | musterd tools are not in the base tool list; schema fetched via `search_tool` then invoked with `use_tool` (`musterd__team_*` / `musterd__lane_*`). Analog of Claude Code `ToolSearch`. MCP drop/reconnect mid-session unmeasured (wanderer, 2026-09-14, this session; falsify: a Grok session whose first `musterd__*` call succeeds with no preceding `search_tool`) |
 | opencode | **no deferral; fails on reconnect** | granted tools arrive in context with schemas, directly callable — first `musterd_team_*` calls of a 1.18.31 session succeeded with no discovery round-trip (ghost, 2026-09-14; eval §9a). SIGTERM to the stdio MCP child mid-session evicts the tools from the catalog (`unavailable tool`, zero MCP tools listed) with no in-turn or cross-turn recovery; the SAME session recovers after a serve restart (eval §10) |
@@ -251,7 +251,10 @@ working, and every boundary before that is guaranteed deaf (clause 3, delta).
   tools require `GetDynamicTools` discovery before `CallDynamicTool`; on MCP stdio drop/reconnect
   mid-session, Cursor does not reconnect the stdio process, returning `Error: Tool execution error. Not connected`
   while schema catalog remains populated. Permanent mute on dynamic tools until window reload.
-  Claude-code defers and re-defers; grok defers behind `search_tool`/`use_tool` (reconnect unmeasured);
+  Claude-code defers and re-defers **and can also mute outright** — the same permanent-mute shape,
+  measured from inside the failure on a second claude-code seat (dolly, lane `01M2GYJX55`, #1420);
+  what decides between the recoverable and the permanent outcome is still unmeasured.
+  Grok defers behind `search_tool`/`use_tool` (reconnect unmeasured);
   opencode does NOT defer (tools in context, first call direct — ghost, 2026-09-14, eval §9a)
   but FAILS on reconnect (stdio drop evicts the catalog, mute until serve restart, same session
   recovers — eval §10, lane `01M2GS6Q4`); codex remains open for its harness owner.
