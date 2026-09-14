@@ -212,7 +212,9 @@ export function startReaper(ctx: Ctx): () => void {
 
     // Gated the same way the wake ledger is gated above: a row cannot be called silent over a
     // window in which nothing was listening for it.
-    const removed = reapStale(ctx.db, ctx.config.presenceTimeoutMs, presenceWatchedSince);
+    // `now` is this tick's clock, deliberately: a tick that blocks past the timeout inside its own
+    // body must not judge by the time it finishes (see reapStale).
+    const removed = reapStale(ctx.db, ctx.config.presenceTimeoutMs, presenceWatchedSince, now);
     if (removed.length === 0) return;
     const seen = new Set<string>();
     for (const row of removed) {

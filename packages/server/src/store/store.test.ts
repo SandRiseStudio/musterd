@@ -924,6 +924,23 @@ describe('presence', () => {
     ).toBe(false);
   });
 
+  it('reapStale judges by the clock the tick started on — a tick that itself blocked past the timeout cannot reap what it could not have heard', () => {
+    const { db, team } = freshTeam();
+    const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });
+    const a = attach(db, ada.row.id, 'claude-code', 'c1');
+    // Measured 2026-09-14 15:57:46Z (lane 01M2GBPX2S): the first tick after a 3.6-day host suspend
+    // reset the ADR 236 window, then blocked ~104s on a wedged daemon. 51s in, reapStale took its
+    // OWN Date.now(): the guard (tick start) had passed and the cutoff (tick end) covered every row,
+    // including three live sockets whose heartbeats were sitting unread in the socket buffer.
+    const tickNow = Date.now() - 51_000; // the tick began 51s ago by the wall clock
+    const watchedSince = tickNow - 60_000; // and the loop was entitled to judge when it began
+    db.prepare('UPDATE presence SET last_seen_at = ? WHERE id = ?').run(tickNow - 1_000, a.id);
+
+    // By the tick's clock the row spoke one second before the tick began: live.
+    expect(reapStale(db, 45_000, watchedSince, tickNow)).toEqual([]);
+    expect(presenceById(db, a.id)).toBeDefined();
+  });
+
   it('every removal path names its reason; release into grace is not a detach; reap of the grace is', () => {
     const { db, team } = freshTeam();
     const ada = addMember(db, team, { name: 'Ada', kind: 'agent' });

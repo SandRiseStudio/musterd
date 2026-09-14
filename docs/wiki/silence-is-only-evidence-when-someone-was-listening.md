@@ -47,6 +47,29 @@ resets on any tick gap ≥ `presenceTimeoutMs`. Presence gets its own clock rath
 hear a 45 s heartbeat?" — and the reaper shares an event loop with the sockets it judges, so a gap as
 long as the timeout already proves nothing could have been heard.
 
+## Instance 3 — the same clock, defeated from inside one tick (2026-09-14)
+
+The guard above measured from the tick's *start*; the cutoff measured from wherever the tick had got
+to. `reapStale` read its own `Date.now()`. So a tick that itself blocks longer than the timeout —
+which is exactly what a daemon does in the minutes after a 3.6-day host resume, when the guardian
+was sampling it `wedged` — passes the guard on the way out and sweeps every row on the way through,
+including live sockets whose heartbeats are sitting unread in the buffer until that same tick
+returns. Measured 15:57:46Z (lane `01M2GBPX2S`): one tick of ~104 s, `reap_host_suspended` logged
+13 s in, `reap_offline` for ghost, wanderer and dolly 51 s in, the next tick's gap 104 s. The three
+adapters had open sockets the whole time.
+
+Fixed the same day: the reaper passes its tick's `now` into `reapStale(db, timeoutMs, watchedSince,
+now)` so the guard and the cutoff run on one clock — no heartbeat can be heard inside a tick, so no
+row can go quiet inside one. And the zombie the reap leaves behind is now told: a heartbeat whose
+Presence row is gone logs `ws_heartbeat_reaped` and closes the socket with `4410`, so the adapter's
+reconnect re-claims and #1369's `occupied` path writes the fresh lease where the hook reads it. Before
+that, ghost's socket stayed open, subscribed and deaf for 19 minutes — 33 `interrupt_probe_refused`
+rows — until it happened to drop. Falsify: a `reap_offline` row whose member has a `ws_close` *after*
+it with no `ws_heartbeat_reaped` between, on a daemon carrying this fix.
+
+The rule generalises the page's: a loop that refuses to judge until it has listened for a window must
+also refuse to judge *while it is not listening* — and a tick is not listening.
+
 ## The cost you accept
 
 A genuinely dead session survives up to one extra window (45 s by default) after a restart or a
