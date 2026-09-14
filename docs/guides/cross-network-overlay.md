@@ -104,9 +104,14 @@ the exact MagicDNS and IPv4 Host gates plus the HTTP and WebSocket path in one s
 musterd integration doctor --tailscale
 ```
 
-That command verifies Tailscale Team transport only. It does not configure Tailscale or replace the
-manual checks below for the direct overlay-bind recipe in this guide. Aperture model-configuration
-readiness is independent; see the [approved paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md)
+That command verifies Tailscale Team transport only. It tries the device's MagicDNS name first and,
+when name resolution is unavailable, retries the exact Tailscale IPv4 address reported for the local
+device. IPv4 success is reported with the MagicDNS limitation rather than as an unqualified result;
+both addresses must still pass the daemon's Host gate.
+
+It does not configure Tailscale or replace the manual checks below for the direct overlay-bind recipe
+in this guide. Aperture model-configuration readiness is independent; see the
+[approved paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md)
 for `musterd integration doctor --aperture <https-url>` and the combined invocation.
 
 Run this checklist before you trust the team:

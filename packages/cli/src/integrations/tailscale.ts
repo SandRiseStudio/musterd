@@ -232,33 +232,67 @@ export async function inspectTailscaleTransport(
   }
   checks.push(ok('daemon-host-gate', `${self.dnsName} and ${self.ip4} accepted`));
 
-  try {
-    const response = await deps.fetch(`http://${self.dnsName}:${port}/health`, {
+  const probeHealth = async (host: string): Promise<boolean> => {
+    const response = await deps.fetch(`http://${host}:${port}/health`, {
       method: 'GET',
       signal: AbortSignal.timeout(3000),
     });
-    if (!response.ok) throw new Error('non-success response');
+    return response.ok;
+  };
+  let httpHost: 'dns' | 'ip4' | null = null;
+  let magicDnsUnavailable = false;
+  try {
+    if (await probeHealth(self.dnsName)) httpHost = 'dns';
   } catch {
+    magicDnsUnavailable = true;
+    try {
+      if (await probeHealth(self.ip4)) httpHost = 'ip4';
+    } catch {
+      // Both exact addresses are unreachable; the check below reports the bounded failure.
+    }
+  }
+  if (httpHost === null) {
     checks.push(
       fail(
         'daemon-http',
         '/health is unreachable over the tailnet',
-        'Verify the Tailscale Serve route and tailnet policy from this host.',
+        magicDnsUnavailable
+          ? 'Enable MagicDNS or verify the Tailscale IPv4 route and tailnet policy from this host.'
+          : 'Verify the Tailscale Serve route and tailnet policy from this host.',
       ),
       ...skipped(6, 'tailnet HTTP is not reachable'),
     );
     return checks;
   }
-  checks.push(ok('daemon-http', '/health reachable over the tailnet'));
+  checks.push(
+    ok(
+      'daemon-http',
+      httpHost === 'dns'
+        ? '/health reachable over the tailnet'
+        : '/health reachable over Tailscale IPv4; MagicDNS unavailable',
+    ),
+  );
 
-  const websocket = await deps.probeUpgrade({ hostname: self.dnsName, port }, self.dnsName);
+  let websocket = await deps.probeUpgrade({ hostname: self.dnsName, port }, self.dnsName);
+  let websocketHost: 'dns' | 'ip4' = 'dns';
+  if (websocket === 'unreachable') {
+    websocket = await deps.probeUpgrade({ hostname: self.ip4, port }, self.ip4);
+    websocketHost = 'ip4';
+  }
   checks.push(
     websocket === 'allowed'
-      ? ok('daemon-websocket', '/ws upgrade reachable over the tailnet')
+      ? ok(
+          'daemon-websocket',
+          websocketHost === 'dns'
+            ? '/ws upgrade reachable over the tailnet'
+            : '/ws upgrade reachable over Tailscale IPv4; MagicDNS unavailable',
+        )
       : fail(
           'daemon-websocket',
           '/ws upgrade is unreachable over the tailnet',
-          'Verify the Tailscale Serve TCP route and daemon WebSocket upgrade path.',
+          websocketHost === 'ip4'
+            ? 'Enable MagicDNS or verify the Tailscale IPv4 route and daemon WebSocket upgrade path.'
+            : 'Verify the Tailscale Serve TCP route and daemon WebSocket upgrade path.',
         ),
   );
   return checks;
