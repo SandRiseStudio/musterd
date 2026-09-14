@@ -29,15 +29,42 @@ const DESCRIPTION =
  */
 const HUDDLE_WINDOW = 1000;
 
+/**
+ * How many of the oldest unread one call may render as one-line digest entries (lane 01M2GT874Y).
+ *
+ * ADR 287 holds the cursor over anything a call did not render. Held ENTIRELY, that rule was
+ * self-sustaining: a seat past its `limit` elided on every check, advanced never, and so stayed
+ * past its limit — delta's cursor sat unmoved for 9.9 days across 22 checks, stanley's for 101
+ * minutes on the hub alone. The escape hatch (a bigger `limit`) was real and named in the notice,
+ * and no seat ever took it. So the drain is made ordinary instead: the oldest unread, contiguous
+ * from the cursor, are rendered compactly and the watermark walks over them. A row rendered as a
+ * digest line was seen — the reader has its id, sender, act and the start of its body — which is
+ * exactly what ADR 287's rule protects. The cap keeps one reply inside what a harness will actually
+ * hand the model (the tool-result ceiling is ~70k chars; 50 full rows plus this many digest lines
+ * stays well under), and it bounds the drain to a handful of ordinary checks rather than one giant
+ * one: 1300 behind clears in six.
+ */
+const DIGEST_ROWS = 250;
+
 /** What one `team_inbox_check` should display, and how far the read cursor may move (ADR 287). */
 export interface InboxCheckPlan {
   /** The messages to render — pinned waiting acts plus the newest fill, so relevance is unchanged. */
   shown: Envelope[];
-  /** Unread this call could not show. Non-zero means the cursor must not move. */
+  /**
+   * The oldest unread, contiguous from the cursor and not in `shown`, rendered as one line each so
+   * the cursor can walk over them (lane 01M2GT874Y). Empty when nothing was cut, and empty when the
+   * fetch itself was bounded — a tail slice is not contiguous with the cursor, so digesting it would
+   * step over what the fetch never returned.
+   */
+  digested: Envelope[];
+  /** Unread this call rendered in neither form. Non-zero means the cursor stops short of them. */
   elided: number;
-  /** Message id to advance the read cursor to, or `null` to leave the cursor exactly where it is. */
+  /**
+   * Message id to advance the read cursor to, or `null` to leave the cursor exactly where it is.
+   * Always the end of the contiguous rendered prefix: never a row past one this call did not render.
+   */
   advanceTo: string | null;
-  /** `limit` that would show everything this call knows about (shown + elided). */
+  /** `limit` that would show everything this call knows about (shown + digested + elided). */
   drainLimit: number;
 }
 
@@ -102,15 +129,49 @@ export function planInboxCheck(
   const shown = [...byId.values()].sort(
     (a, b) => envelopePosition(a) - envelopePosition(b) || a.id.localeCompare(b.id),
   );
-  const elided = ordered.length - shown.length + unreachable;
+  // The cursor may only walk a CONTIGUOUS prefix of the unread — the watermark is a single
+  // position, so passing row k marks everything before k read whether or not it was rendered. With
+  // a newest-N fill the rendered rows sit at the far end, so the prefix the cursor could walk was
+  // empty and the cursor never moved (the treadmill). Render the prefix instead: the oldest rows not
+  // already shown, in digest form, up to the cap. A row that IS shown (a pinned need) counts as
+  // rendered and the walk continues through it. Only when the fetch was complete: a bounded fetch's
+  // `ordered` begins somewhere after the cursor, not at it.
+  const shownIds = new Set(shown.map((e) => e.id));
+  const digested: Envelope[] = [];
+  let prefixEnd = -1;
+  if (unreachable === 0) {
+    for (let i = 0; i < ordered.length; i++) {
+      const e = ordered[i]!;
+      if (!shownIds.has(e.id)) {
+        if (digested.length >= DIGEST_ROWS) break;
+        digested.push(e);
+      }
+      prefixEnd = i;
+    }
+  }
+  const elided = ordered.length - shown.length - digested.length + unreachable;
   return {
     shown,
+    digested,
     elided,
-    drainLimit: shown.length + elided,
-    // `null` on an elision AND on an empty inbox — there is no id to advance to in either case, and
-    // inventing one is exactly how a watermark passes something nobody read.
-    advanceTo: elided > 0 || shown.length === 0 ? null : shown[shown.length - 1]!.id,
+    drainLimit: ordered.length + unreachable,
+    // `null` on an empty inbox and on a bounded fetch — there is no contiguous rendered prefix to
+    // advance over, and inventing one is exactly how a watermark passes something nobody read.
+    advanceTo: prefixEnd < 0 ? null : ordered[prefixEnd]!.id,
   };
+}
+
+/** One line per digested row: enough to recognise it and to go and fetch it, nothing more. */
+export function formatDigestLine(env: Envelope): string {
+  const to =
+    env.to.kind === 'member'
+      ? `→ ${env.to.name}`
+      : env.to.kind === 'team'
+        ? '→ @team'
+        : '→ @broadcast';
+  const body = env.body.replace(/\s+/g, ' ').trim();
+  const head = body.length > 96 ? `${body.slice(0, 95)}…` : body;
+  return `  · ${env.from} [${env.act}] ${to}: ${head} (id=${env.id})`;
 }
 
 export function registerInboxCheck(server: McpServer, client: MusterdClient): void {
@@ -227,12 +288,28 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         // Say it, and say it FIRST. An elision the reader is not told about is the same defect as
         // the silent cursor advance, one layer up: the view looks complete, so nothing prompts the
         // second call. Leading the output rather than trailing it because a seat that stops reading
-        // after the last message is exactly the seat this line exists for.
+        // after the last message is exactly the seat this line exists for. Since lane 01M2GT874Y
+        // the line also says what the cursor DID pass — the digest below — so the reader knows the
+        // remainder is one more ordinary check away, not a magic number away.
         const notice =
           plan.elided > 0
-            ? `⚠ ${plan.elided} older unread not shown (limit ${args.limit ?? 50}). Nothing was ` +
-              `marked read — they are still waiting. Call again with limit: ${plan.drainLimit} to ` +
-              `see all ${plan.drainLimit}.\n\n`
+            ? `⚠ ${plan.elided} older unread not shown (limit ${args.limit ?? 50}). ` +
+              (plan.digested.length > 0
+                ? `The ${plan.digested.length} oldest are digested below and marked read; the rest ` +
+                  `are still waiting — check again to keep draining, or pass limit: ` +
+                  `${plan.drainLimit} to see all ${plan.drainLimit} now.\n\n`
+                : `Nothing was marked read — they are still waiting. Call again with limit: ` +
+                  `${plan.drainLimit} to see all ${plan.drainLimit}.\n\n`)
+            : plan.digested.length > 0
+              ? `ℹ ${plan.digested.length} older unread digested below and marked read.\n\n`
+              : '';
+        // The digest, after the full rows: the oldest unread this call walked the cursor over, one
+        // line each. It reads as "what you missed while away", oldest first, and every id in it is
+        // fetchable with `unread_only: false` if a line turns out to matter.
+        const digest =
+          plan.digested.length > 0
+            ? `\n\n— ${plan.digested.length} older unread, now read (oldest first) —\n` +
+              plan.digested.map(formatDigestLine).join('\n')
             : '';
         // The rooms, after the messages: the lines above say a turn arrived, these say what room it
         // arrived from and what has been said in it. Bounded by the slice — only rooms this call is
@@ -246,6 +323,7 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
         const text =
           notice +
           messages.map(line).join('\n') +
+          digest +
           rooms +
           (await syncWedgeWarningFor(client)) +
           (await buildSkewWarning(client));
@@ -254,6 +332,10 @@ export function registerInboxCheck(server: McpServer, client: MusterdClient): vo
           structuredContent: {
             // Structured readers get the elision as data, not only as prose in `text`.
             elided_unread: plan.elided,
+            // The rows the cursor walked over in digest form — ids only; the lines are in `text`.
+            ...(plan.digested.length > 0
+              ? { digested_unread: plan.digested.map((m) => m.id) }
+              : {}),
             messages: messages.map((m) => ({
               id: m.id,
               from: m.from,
