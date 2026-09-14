@@ -334,14 +334,47 @@ const sceneRoutes = new Set(['/office-preview']);
  * had, one layer quieter — so it gets the same treatment before it starts costing merges.
  */
 const SCENE_STILL = '&still';
+/*
+ * `&reduced` — SWEEP THE ROOM A REDUCED-MOTION VIEWER ACTUALLY SEES.
+ *
+ * The sweep already emulates `prefers-reduced-motion: reduce` before navigating
+ * (contrast-sweep.mjs, `Emulation.setEmulatedMedia`), so every route here is measured with the
+ * media query ON. But /office-preview mounts the scene with `reduced` read from `?reduced` and
+ * NOT from the media query — deliberately, so a designer who has Reduce Motion set in their OS
+ * still gets an animated design tool (#951, and the comment at office-preview.tsx `?reduced`).
+ *
+ * The two consequences do not cancel. Without this flag the gate measures a HYBRID room that no
+ * user is ever served: CSS keyframes disabled by the emulation, scene motion running anyway
+ * because the route's own flag is false. The real reduced room — rAF never started, walkers
+ * snapped to their desks, ambient life and the pet and the door pulse stood down, bubbles whole
+ * with no typewriter — was drawable from #951 onward and swept by nothing.
+ *
+ * Measured 2026-09-14 on d92bca0a, all four combinations, 49 measured / 0 below AA each, same two
+ * excluded rows (lc-gl-label__service, lc-speech__to) and same two translucent (lc-ov__count-of):
+ * the reduced room is contrast-IDENTICAL to the animated one at rest. That is the result worth
+ * pinning rather than a reason to skip it — the rows agree today, and this is what notices when a
+ * reduced-only branch stops agreeing.
+ *
+ * Positive control, so a later reader does not have to trust that the flag does anything: with
+ * `&still` alone the page logs 522 requestAnimationFrame callbacks in 9s, with `&still&reduced`
+ * it logs 7. The flag reaches the scene; the identical row counts are a finding, not a no-op.
+ *
+ * Both lights, not one. Reduced motion changes the motion and `?light=HH` pins the paint, so a
+ * reduced-only regression at night needs both dimensions to be visible — and this file's whole
+ * argument against unpinned verdicts (see SCENE_LIGHTS) is that "unlikely to differ" is not a
+ * measurement.
+ */
+const SCENE_MOTION = ['', '&reduced'];
 
 for (const route of CONNECTED_ONLY ? [] : ROUTES) {
   if (sceneRoutes.has(route)) {
     for (const light of SCENE_LIGHTS) {
-      report(
-        await sweep(`http://127.0.0.1:${BOUND}${route}?light=${light}${SCENE_STILL}`),
-        `${route} (light=${light})`,
-      );
+      for (const motion of SCENE_MOTION) {
+        report(
+          await sweep(`http://127.0.0.1:${BOUND}${route}?light=${light}${SCENE_STILL}${motion}`),
+          `${route} (light=${light}${motion ? ', reduced' : ''})`,
+        );
+      }
     }
   } else {
     report(await sweep(`http://127.0.0.1:${BOUND}${route}`), route);
