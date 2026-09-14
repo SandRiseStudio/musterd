@@ -27,6 +27,8 @@ import { HARNESSES } from './harnesses/index.js';
 import { loadProvisioning, readProvisionManifest } from './manifest.js';
 import { inspectSeatPermissions } from './permissions.js';
 import { classifyPrimerTarget } from './primer.js';
+import { defaultHarnessContext } from './reconcile/context.js';
+import { inspectHarnesses, type FragmentInspection } from './reconcile/engine.js';
 
 /**
  * `musterd init --check` — provisioning drift detector (ADR 060). A read-only checker, never a
@@ -413,7 +415,87 @@ function harnessLabelWireConfigures(surface: string | undefined): string {
   return harnessWiredFor(surface).label;
 }
 
-export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
+/**
+ * What a reconciler would actually DO to one harness's musterd MCP entry — READ from the engine's
+ * plan (`inspectHarnesses`, the same classification `musterd harness status` prints) rather than
+ * inferred from the desired set.
+ *
+ * The inference is what shipped a two-command loop. #1368 branched on desired-vs-not and called
+ * that the axis; miley measured the third state on `agents-miley` (2026-09-06): Cursor IS desired,
+ * both its fragments report `✗ drifted — evidence retained`, and `harness configure --select cursor
+ * --yes` and `musterd wire` each print `cursor ✗ conflict` twice, write nothing, and leave the
+ * doctor pointing at the other one. Desire is necessary for a reconciler to act and nowhere near
+ * sufficient: `classifyFragment` plans `none` for `unmanaged-conflict` (no ledger evidence — not
+ * musterd's to overwrite) and for `owned-drifted` (evidence retained, never overwritten), and BOTH
+ * reconcilers ride that same matrix. The real axis is whether the fragment is MANAGED.
+ *
+ * `'legacy-marker'` stays its own answer because it is the one state where a reconciler genuinely
+ * does write: `harness configure` is the sole caller passing `legacyRepair: true`, which turns
+ * `repair-needed` into the marker swap.
+ */
+export type EntryPlan =
+  /** No plan could be read here — say nothing a plan would have to back. */
+  | 'unknown'
+  /** A reconciler will write this entry (`create` / `add-owner`). */
+  | 'reconcilable'
+  /** `harness configure` repairs the retired marker; nothing else does (ADR 286). */
+  | 'legacy-marker'
+  /** Present but in no ledger: musterd will not overwrite what it does not own. */
+  | 'unreachable-unmanaged'
+  /** Ledger-owned but hand-edited since: evidence is retained, never overwritten. */
+  | 'unreachable-drifted';
+
+/** Does this plan mean NO reconciler writes, whatever the reader runs? */
+function entryPlanIsUnreachable(plan: EntryPlan): boolean {
+  return plan === 'unreachable-unmanaged' || plan === 'unreachable-drifted';
+}
+
+/** The engine's verdict on one `mcp.musterd` fragment, in the doctor's vocabulary. */
+function entryPlanOf(f: FragmentInspection | undefined): EntryPlan {
+  if (f === undefined) return 'unknown';
+  if (f.planned === 'repair-needed') return 'legacy-marker';
+  if (f.planned === 'conflict')
+    return f.observation === 'owned-drifted' ? 'unreachable-drifted' : 'unreachable-unmanaged';
+  if (f.plan === 'create' || f.plan === 'add-owner') return 'reconcilable';
+  // `unchanged`, `satisfied-unmanaged`, a held lock, a pending journal, an unreadable container:
+  // each has its own line elsewhere, and none is evidence about reachability. Stay quiet.
+  return 'unknown';
+}
+
+/**
+ * Plan every harness's ENTRY fragment for this folder. Read-only (ADR 282: `inspectHarnesses` takes
+ * no mutation lease and saves no files), and it must CLASSIFY rather than throw — a doctor that
+ * crashes on an unreadable container is worse than one that degrades to the old wording, so every
+ * failure lands on `'unknown'`, which asserts nothing.
+ */
+async function planEntries(
+  cwd: string,
+  desired: readonly string[],
+  team: string,
+): Promise<Map<string, EntryPlan>> {
+  const plans = new Map<string, EntryPlan>();
+  if (desired.length === 0) return plans;
+  try {
+    const ctx = defaultHarnessContext(cwd, process.env, { team });
+    for (const h of await inspectHarnesses(ctx, desired)) {
+      plans.set(h.harness, entryPlanOf(h.fragments.find((f) => f.fragmentKey === 'mcp.musterd')));
+    }
+  } catch {
+    return new Map();
+  }
+  return plans;
+}
+
+export async function inspectProvisioning(
+  cwd: string,
+  deps?: {
+    /**
+     * Per-harness ENTRY plans, injected. Tests pin the prescription for a state without having to
+     * build the physical fragment that produces it; production reads the real plan (`planEntries`).
+     */
+    entryPlans?: ReadonlyMap<string, EntryPlan>;
+  },
+): Promise<DoctorReport> {
   const primerManaged = classifyPrimerTarget(cwd) === 'managed';
   const drift: string[] = [];
   // The folder's single source of truth for which seat it claims (ADR 018). Read-only diagnosis
@@ -467,6 +549,11 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       ? provisioning.value.desired
       : ((m) => (m?.harness ? [m.harness] : []))(readProvisionManifest(cwd));
   const harnessIsDesired = (id: string) => desiredHarnesses.includes(id);
+  // What a reconciler would ACTUALLY do to each entry, asked rather than inferred. `wire.ts` has
+  // carried the note that this predicate belongs on `inspectHarnesses` since ADR 281; inferring it
+  // is what let the doctor prescribe a reconciler that plans nothing (see `EntryPlan`).
+  const entryPlans =
+    deps?.entryPlans ?? (await planEntries(cwd, desiredHarnesses, binding?.team ?? ''));
   // Entry drift: the shared harness entry disagrees with this folder's binding.json. Tracked
   // separately from `drift` so `--fix` can route it to `musterd wire` (headless, whole-family)
   // instead of `musterd init` (mints a member, trips the bound guard, steals the shared slot).
@@ -488,8 +575,15 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // lives in a machine-global config `configure` never writes (`registeredElsewhere`). The second
     // is the quieter failure: everything looks repairable, `wire` runs, rewrites the project file,
     // and reports success with the drift untouched.
+    // Three ways a repair fails to reach the drift now, not two. The third outranks both: the
+    // engine may plan NOTHING for this fragment, in which case it does not matter which command
+    // owns which file — no command writes. Folded in here so every `wireRepairs ? … : …` in this
+    // loop inherits it, and so `--fix` never routes at a reconciler that will exit 0 unchanged.
+    const entryPlan = entryPlans.get(h.id) ?? 'unknown';
     const wireRepairs =
-      wireConfigures(h.id, declaredSurface) && d.registeredElsewhere === undefined;
+      wireConfigures(h.id, declaredSurface) &&
+      d.registeredElsewhere === undefined &&
+      !entryPlanIsUnreachable(entryPlan);
     // ORPHAN first: a harness nobody selected here owns no fragment, so every repair that works by
     // reconciling one is a no-op. Ordered ahead of the `registeredElsewhere` and declared-surface
     // branches because it is the more fundamental fact — those two answer "which file / which
@@ -500,25 +594,53 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
     // the reader to delete an entry that may be the only thing wiring them up. Absence of the
     // record is not absence of the desire.
     const orphanEntry = desiredHarnesses.length > 0 && !harnessIsDesired(h.id);
+    // No reconciler will write this entry, so name neither of them as the repair for it AS IT
+    // STANDS. Verified end to end on a throwaway worktree, 2026-09-14: with an unmanaged
+    // `.cursor/mcp.json` entry baking MUSTERD_AUTOJOIN, `harness configure --select cursor --yes`
+    // and `wire` each printed `cursor ✗ conflict` for mcp.musterd and left the file byte-identical
+    // (same md5), and `init` did not rewrite it either. Deleting the WHOLE entry and re-running
+    // `wire` gave `(create) ✓ applied` and `mcp.musterd ✓ in place` — absent is the one observation
+    // that plans `create`, which is why the repair is deletion-then-wire and not an in-place edit. This is the state that sent
+    // miley round a two-command loop: `harness configure` and `wire` both print `✗ conflict` and
+    // change nothing, and the doctor's text pointed at whichever one the reader had not just run.
+    // The hand edit is not a workaround here — it is the repair, and it is what returns the entry
+    // to a shape the reconcilers own again.
+    const unreachableEntry = entryPlanIsUnreachable(entryPlan);
     const repairWith = wireRepairs
       ? 'Run `musterd wire` here to rewrite the entry without it'
-      : orphanEntry
-        ? `${h.label} is NOT in this workspace's desired harness set (check with \`musterd harness ` +
-          `status\`), so nothing here manages that entry: \`musterd harness configure\` and ` +
-          `\`musterd wire\` both skip it, and a repair that reconciles fragments has none to ` +
-          `reconcile. Remove musterd's entry from ${d.registeredElsewhere ?? `the config ${h.label} reads for this workspace (a PROJECT-LOCAL file — not the machine-global one, which may have no musterd server at all)`} ` +
-          `— the whole entry, not one line, since musterd is not meant to launch through ` +
-          `${h.label} here. Or add ${h.label} with \`musterd harness configure\` if it SHOULD launch ` +
-          `this workspace, which converts the entry instead of deleting it`
-        : d.registeredElsewhere !== undefined
-          ? `this entry lives in ${d.registeredElsewhere}, which musterd does not write — it writes ` +
-            `the project file, so no command run in this folder rewrites it. Edit that file directly, ` +
-            `and check what else depends on it first: a machine-global entry is how other seats on ` +
-            `this machine may be launching`
-          : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
-            `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
-            `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
-            `${h.label}'s own entry file by hand`;
+      : unreachableEntry
+        ? `no reconciler will rewrite this entry: \`musterd harness status\` classifies it ` +
+          (entryPlan === 'unreachable-drifted'
+            ? '`✗ drifted — evidence retained` (musterd owns it but it has been edited since, and ' +
+              'the engine never overwrites evidence it did not write)'
+            : "`✗ conflict — not musterd's to overwrite` (it is in no ownership ledger, so the " +
+              'engine leaves it alone)') +
+          `, so \`musterd harness configure\`, \`musterd wire\` and \`musterd init\` all plan ` +
+          `\`none\` for it — each exits having changed nothing, whichever you run, and running one ` +
+          `after the other just alternates the two ✗ lines. Repair it in ` +
+          `${d.registeredElsewhere ?? `${h.label}'s project-local config for this workspace`}: ` +
+          `delete musterd's WHOLE entry there by hand, then run \`musterd wire\` here — an ABSENT ` +
+          `fragment is the one state the engine plans for, so it recreates the entry from ` +
+          `.musterd/binding.json, owned and without the baked key. Deleting just the key this line ` +
+          `names clears this line too, but leaves the entry unmanaged and the next drift in the ` +
+          `same dead end`
+        : orphanEntry
+          ? `${h.label} is NOT in this workspace's desired harness set (check with \`musterd harness ` +
+            `status\`), so nothing here manages that entry: \`musterd harness configure\` and ` +
+            `\`musterd wire\` both skip it, and a repair that reconciles fragments has none to ` +
+            `reconcile. Remove musterd's entry from ${d.registeredElsewhere ?? `the config ${h.label} reads for this workspace (a PROJECT-LOCAL file — not the machine-global one, which may have no musterd server at all)`} ` +
+            `— the whole entry, not one line, since musterd is not meant to launch through ` +
+            `${h.label} here. Or add ${h.label} with \`musterd harness configure\` if it SHOULD launch ` +
+            `this workspace, which converts the entry instead of deleting it`
+          : d.registeredElsewhere !== undefined
+            ? `this entry lives in ${d.registeredElsewhere}, which musterd does not write — it writes ` +
+              `the project file, so no command run in this folder rewrites it. Edit that file directly, ` +
+              `and check what else depends on it first: a machine-global entry is how other seats on ` +
+              `this machine may be launching`
+            : `\`musterd wire\` does not rewrite ${h.label}'s entry here — this folder is provisioned for ` +
+              `${harnessLabelWireConfigures(declaredSurface)}, so that is the entry it rewrites. ` +
+              `Re-provision this folder with \`musterd init\` and pick ${h.label}, or drop the line from ` +
+              `${h.label}'s own entry file by hand`;
     // Record entry drift AND whether `wire` could repair this particular one, so the `repair`
     // classification below never routes `--fix` at a command that cannot touch the drift it found.
     const noteEntryDrift = (text: string) => {
@@ -599,12 +721,19 @@ export async function inspectProvisioning(cwd: string): Promise<DoctorReport> {
       // get right at all and deleting the entry is correct — so the "deleting does NOT fix it"
       // sentence, true in the first case, is actively misleading in the second. #1363 shipped it
       // unconditionally; this is that correction (lane 01M1VFV8EK).
+      //
+      // `unreachableEntry` joins the deferral defensively. A retired marker observes as
+      // `legacy-launch-marker` BEFORE any fingerprint comparison, so the engine plans
+      // `repair-needed` (not `conflict`) and this branch keeps naming configure — which is correct,
+      // and is the one state where a reconciler really does write. But the naming is now conditional
+      // on the plan rather than on an inference about it, so if that observation ever stops holding,
+      // the doctor stops prescribing a command the engine has no plan for.
       noteEntryDriftWireCannotFix(
         `${h.label}'s musterd server bakes the retired MUSTERD_SURFACE=${d.registeredSurface} ` +
           `(pre-ADR-286). The adapter does not read it — it REFUSES to attach Presence while it is ` +
           `there, so a session launched through ${h.label} here has no seat presence at all rather ` +
           `than a wrong one. ` +
-          (orphanEntry
+          (orphanEntry || unreachableEntry
             ? `${repairWith}.`
             : `Run \`musterd harness configure\` in this worktree to convert the registration, then ` +
               `reload the session. Deleting the line by hand does NOT fix it: with no launch marker ` +
