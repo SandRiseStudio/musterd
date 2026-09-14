@@ -584,13 +584,24 @@ wake diagnosis rather than its instrument.
 
 **Two things this run measured that were not the point, and are worth more than the confirmation.**
 
-1. **The musterd tools arrive *deferred*.** Only their names are in the woken session's prompt;
-   schemas must be fetched with `ToolSearch` before any call succeeds. A wake brief that says
-   "orient via `team_wake_context`" is one `ToolSearch` away from working, and a session that does
-   not know that reads its own prompt as evidence the tools are missing. The allow list is necessary
-   and is **not** sufficient — reachability now also depends on the harness's tool-deferral path
-   (2026-09-14 16:35Z; falsify: a woken session whose first `mcp__musterd__*` call succeeds with no
-   preceding `ToolSearch`).
+1. **A granted tool is not yet a callable tool.** The musterd tools arrive *deferred*: only their
+   names are in the woken session's prompt, and schemas must be fetched with `ToolSearch` before any
+   call succeeds. A wake brief that says "orient via `team_wake_context`" is one `ToolSearch` away
+   from working, and a session that does not know that reads its own prompt as evidence the tools
+   are missing. The allow list is necessary and is **not** sufficient (2026-09-14 16:35Z; falsify: a
+   woken session whose first `mcp__musterd__*` call succeeds with no preceding `ToolSearch`).
+
+   **This is not a cloud-seat property, and the first version of this entry said it was.** ryder
+   reproduced it in an ordinary Claude Code session on the laptop while accepting this lane —
+   deferred at session start, and **every schema had to be re-fetched after an MCP server dropped
+   and reconnected mid-session** (2026-09-14 18:43Z, ryder; falsify: a laptop session whose first
+   `mcp__musterd__*` call succeeds with no preceding `ToolSearch`). So the claim's real scope is
+   *any harness with a tool-deferral path*, woken or interactive, and the reconnect case is the
+   worse half: a session that was already calling these tools can silently lose the ability to,
+   with no permission change and nothing in the roster to show for it. The doorbell contract
+   anchored the same day has a clause about a probe reaching the model; this is its unwritten
+   sibling — **granting a tool and making it callable are two different things, and only the first
+   one is visible to musterd.**
 2. **A seat can name the *kind* of its doorbell and not its *budget*.** `team_wake_context` returned
    `wake.kind: "work_order"` and carries no bounds, timeout or deadline field; `wakeContext.ts` on
    `origin/main` emits none, and the bound lives daemon-side in `spec.bounds.timeout_ms`
@@ -674,9 +685,10 @@ refusal or inventing a value. That is the right shape for a measurement page.
   credential is a field three code paths own) and `01M1T6DJ7J` (high — team policy does not
   replicate to a joiner). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
   (#1371, confirmed on the VM 2026-09-14; see 18a)**. Two new ones opened in its place, both from
-  the confirming run: the musterd tools arrive deferred, so the allow list alone does not make them
-  reachable; and a seat can read its doorbell's *kind* but not its *budget*, which is the one
-  observable finding 15 needed.
+  the confirming run: a granted tool is not yet a callable tool (the musterd tools arrive deferred,
+  and ryder reproduced it on the laptop and across an MCP reconnect — not a cloud-seat property);
+  and a seat can read its doorbell's *kind* but not its *budget*, which is the one observable
+  finding 15 needed.
 - ~~**Every disposition here is hand-applied on the VM and will not survive a rebuild**: the
   credential rebind, `loops.dispatch` on the joiner, `flow: auto`, and `mcp__musterd` in the
   workspace allow list. `seat.sh` should do all four, or the defects should be fixed so it need not.~~
