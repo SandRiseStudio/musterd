@@ -12,6 +12,7 @@ import { appendAudit } from '../store/audit.js';
 import { deriveWakeMetrics } from '../store/insights.js';
 import { addMember, getMemberByName } from '../store/members.js';
 import { insertMessage } from '../store/messages.js';
+import { claimWakeLeases, getResidency, listWakeableMemberIds } from '../store/residency.js';
 import { getTeamBySlug } from '../store/teams.js';
 import { Hub } from '../transport/hub.js';
 import { foldBatch } from './fold.js';
@@ -26,7 +27,9 @@ import { pushTeam } from './push.js';
  *  2. the rows land verbatim in `audit` with the ORIGIN's stamp, projected into nothing;
  *  3. the deciding readers ignore a peer's rows — a seat at its hourly cap on the joiner is still
  *     wakeable on the hub (ADR 365 §3, the residence-2 line);
- *  4. a projected verb wearing the ledger tag stops the fold instead of landing unprojected.
+ *  4. a projected verb wearing the ledger tag stops the fold instead of landing unprojected;
+ *  5. a joiner `residency.enrolled` lands on the hub roster as wakeable (ADR 393) — the ledger
+ *     still decides nothing: the hub is not the actuator.
  *
  * Harness copied from presence.test.ts so this file stands alone.
  */
@@ -36,6 +39,7 @@ let joiner: RunningServer;
 let hubBase: string;
 let joinerBase: string;
 let nickOnHub: string;
+let nickOnJoiner: string;
 let dir: string;
 let joinerCtx: Ctx;
 
@@ -107,7 +111,9 @@ beforeEach(async () => {
   nickOnHub = (
     await post(hubBase, '/teams', { slug: 'bravo', creator: { name: 'nick', kind: 'human' } })
   ).json.human_credential;
-  await post(joinerBase, '/teams', { slug: 'bravo', creator: { name: 'nick', kind: 'human' } });
+  nickOnJoiner = (
+    await post(joinerBase, '/teams', { slug: 'bravo', creator: { name: 'nick', kind: 'human' } })
+  ).json.human_credential;
   // Roster identity replicates via git (ADR 058): the same agent seat exists on both.
   addMember(hub.db, hubTeam(), { name: 'ada', kind: 'agent' });
   addMember(joiner.db, joinerTeam(), { name: 'ada', kind: 'agent' });
@@ -243,5 +249,40 @@ describe('the ledger kind — the wake economy crosses, and decides nothing when
     expect(result.stop).toMatchObject({ kind: 'mistagged_ledger_event', action: 'lane.claimed' });
     expect(result.applied).toBe(0);
     expect(auditRows(hub.db, team.id, 'lane.claimed')).toHaveLength(0);
+  });
+
+  it('5. a joiner enrollment lands on the hub roster as wakeable; the hub is not the actuator', async () => {
+    const enroll = await post(
+      joinerBase,
+      '/teams/bravo/residency/enroll',
+      { seat: 'ada', harness: 'claude-code', host: 'joiner-host' },
+      nickOnJoiner,
+    );
+    expect(enroll.status).toBe(201);
+    const adaOnJoiner = getMemberByName(joiner.db, joinerTeam().id, 'ada')!;
+    const adaOnHub = getMemberByName(hub.db, hubTeam().id, 'ada')!;
+    expect(listWakeableMemberIds(joiner.db, joinerTeam().id).has(adaOnJoiner.id)).toBe(true);
+    expect(listWakeableMemberIds(hub.db, hubTeam().id).size).toBe(0);
+
+    await roundTrip();
+
+    expect(listWakeableMemberIds(hub.db, hubTeam().id).has(adaOnHub.id)).toBe(true);
+    const folded = getResidency(hub.db, hubTeam().id, adaOnHub.id);
+    expect(folded?.host).toBe('joiner-host');
+    expect(folded?.harness).toBe('claude-code');
+    expect(folded?.grant_id).toBeNull();
+    expect(getResidency(joiner.db, joinerTeam().id, adaOnJoiner.id)?.grant_id).not.toBeNull();
+    expect(claimWakeLeases(hub.db, hubTeam().id, 'bravo', 'hub-host', 45_000)).toEqual([]);
+
+    const revoked = await post(
+      joinerBase,
+      '/teams/bravo/residency/revoke',
+      { seat: 'ada' },
+      nickOnJoiner,
+    );
+    expect(revoked.status).toBe(200);
+    await roundTrip();
+    expect(listWakeableMemberIds(hub.db, hubTeam().id).size).toBe(0);
+    expect(getResidency(hub.db, hubTeam().id, adaOnHub.id)).toBeNull();
   });
 });

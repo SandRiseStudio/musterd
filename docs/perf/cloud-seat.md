@@ -72,11 +72,11 @@ rows — the first `residency.*` events ever folded from a second machine (ADR 3
    file-backed team hits this.
 5. **`musterd reload` is macOS-only** (drives launchd); a foreground `serve` takes SIGHUP.
    **Disposition:** friction line; the entrypoint uses the signal.
-6. **Residency enrollment does not replicate.** The hub's `residency status` lists the laptop's
-   five seats, not delta; the hub roster shows delta plain `offline` while the VM shows `offline ·
-   wakeable`. The wake decision is the joiner's (its daemon derives due acts from folded messages),
-   so wakes are unaffected. **Disposition:** roster-truth gap, own lane; belongs beside ADR 371 §3's
-   seed-lifecycle residue.
+6. ~~**Residency enrollment does not replicate.**~~ **FIXED 2026-09-14 by [ADR 393](../decisions/393-residency-enrollment-projects.md)** (`sync/ledger.test.ts` case 5). The hub's `residency status` listed the laptop's
+   five seats, not delta; the hub roster showed delta plain `offline` while the VM showed `offline ·
+   wakeable`. The wake decision was the joiner's (its daemon derives due acts from folded messages),
+   so wakes were unaffected. **Disposition:** closed; the fold now projects `residency.enrolled` /
+   `residency.revoked` into the `residency` table. The grant and the actuator stay local.
 7. **Pull timeouts during the first twenty minutes** (`sync_pull_failed … TimeoutError`, 10 s
    budget, five in a row) while the hub answered `GET /sync/pull` in 41–149 ms. Not reproduced
    after the roster reconcile; cause unmeasured (laptop busy? DERP fallback before the direct path
@@ -251,7 +251,7 @@ shape at `:435`. A woken session claims its own seat as its first act, so the wa
 credential the next wake depends on.
 
 **Why nothing said so.** The 401 is a warn line in the VM's own `daemon.log` and a `!` line in
-`host.log`; neither reaches the hub, and residency enrollment does not replicate (finding 6), so the
+`host.log`; neither reached the hub, and residency enrollment did not then replicate (finding 6, closed 2026-09-14), so the
 hub's roster kept rendering `offline · wakeable` — a claim about reachability that had been false
 for two days. The seat looked healthy from every surface a human uses.
 

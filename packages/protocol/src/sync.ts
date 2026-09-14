@@ -83,16 +83,21 @@ export const SyncPresenceEventSchema = SyncLaneEventSchema.extend({ kind: z.lite
 export type SyncPresenceEvent = z.infer<typeof SyncPresenceEventSchema>;
 
 /**
- * One replicated LEDGER event (ADR 365): a best-effort audit verb that crosses the wire verbatim
- * and is projected into nothing — the ledger IS the projection. The lane event's shape under its
- * own tag, drawn from the same allocator, so a node's sequence stays dense across four kinds.
+ * One replicated LEDGER event (ADR 365): a best-effort audit verb that crosses the wire verbatim.
+ * The ledger IS the projection for the wake-economy verbs — they land in `audit` and decide
+ * nothing here. ADR 393 carves `residency.enrolled` / `residency.revoked` as the exception that
+ * also projects into the `residency` table so the roster can tell the truth; the standing grant
+ * still does not cross, and `claimWakeLeases` still filters `host === this host`. The lane
+ * event's shape under its own tag, drawn from the same allocator, so a node's sequence stays
+ * dense across kinds.
  *
  * Why a fourth tag rather than widening the lane filter: a stamped row whose action the fold has
- * never learned to project stops the fold at `unknown_lane_event`, and these verbs are exactly the
- * ones no projector exists for. The tag is the reader's licence to append without projecting.
+ * never learned to project stops the fold at `unknown_lane_event`, and most of these verbs are
+ * exactly the ones no projector exists for. The tag is the reader's licence to append; ADR 393's
+ * two verbs are a named projector under that licence, not a second tag.
  *
- * A ledger event carries no decision. The fold appends it to `audit` and nothing else; every
- * deciding reader of these verbs stays scoped to rows this machine minted (ADR 365 §3).
+ * A ledger event carries no decision. Every deciding reader of the wake verbs stays scoped to
+ * rows this machine minted (ADR 365 §3).
  */
 export const SyncLedgerEventSchema = SyncLaneEventSchema.extend({ kind: z.literal('ledger') });
 export type SyncLedgerEvent = z.infer<typeof SyncLedgerEventSchema>;

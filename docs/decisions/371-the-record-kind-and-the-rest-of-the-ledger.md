@@ -187,6 +187,10 @@ rule in §2 is the whole of its protection.
 
 ## Consequences
 
+- 2026-09-14: [ADR 393](393-residency-enrollment-projects.md) projects the §4 verbs
+  `residency.enrolled` / `residency.revoked` into the `residency` table (the roster's `wakeable`
+  flag). The rest of the remainder still lands in `audit` only; `MINTED_HERE` on the three
+  deciding readers is unchanged.
 - `musterd report` counts every machine's tool calls, bounces and surface weight. The seed thread is
   whole everywhere. An incident opens once, on the hub, when the team — not one machine — reaches the
   threshold, and resolve fan-out reaches reporters on every machine.

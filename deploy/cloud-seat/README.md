@@ -217,7 +217,8 @@ fly ssh console -a musterd-seat-$SEAT -C "sh -c 'tail -n 5 /data/log/host.log'"
 `binding.agent_key` from the seat's workspace, and `/residency/wake-leases` accepts only the team
 agent key or a `host`-scoped bootstrap credential. A woken session claims its own seat, and the
 claim path rewrites that field — so the seat wakes **once** and then cannot be woken again. The
-roster keeps saying `wakeable` because residency enrollment does not replicate. Full write-up and
+roster keeps saying `wakeable` because the enrollment is still current — the 401 is on the
+actuator, not the roster. Full write-up and
 falsifier: `docs/perf/cloud-seat.md`, finding 14.
 
 **Repair — a rebind, not a rotation.** The machine still holds the right key in
@@ -285,7 +286,6 @@ The volume from the root-era image is migrated on that boot (`chown … (one-tim
 then re-tag the node in the Tailscale admin console. What the machine still holds by design — the
 full team replica — is recorded in ADR 390 with the increment that would narrow it.
 
-Still open: residency enrollment does not replicate, so the hub roster shows the seat plain
-`offline` while the joiner shows `offline · wakeable`; the hub's `residency status` lists the
-laptop's five seats and not delta. The wake decision is the joiner's (its daemon derives the due
-acts from folded messages), so this is a roster-truth gap, not a wake gap.
+~~Still open: residency enrollment does not replicate~~ **Closed 2026-09-14 by [ADR 393](../../docs/decisions/393-residency-enrollment-projects.md).**
+The hub roster now shows a joiner-enrolled seat as `wakeable`; the wake decision stays the
+joiner's (`claimWakeLeases` filters `host === this host`). The grant never crosses.

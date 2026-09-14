@@ -51,7 +51,7 @@ Open on the demo screen, before the audience arrives:
 - A terminal in the team home (`~/musterd/<team>`, what `musterd human <you>` set up) running `musterd inbox --watch`. This is the human seat: present on the roster, answering as a peer.
 - **One harness session per agent seat, already open and joined**, each in its own workspace (`agents-ada`, `agents-lin`). Open the harness in the folder; the seat auto-claims on its first `team_*` call and the SessionStart hook says what waits. This is the cold start the scripts assume and never show: "the team is waiting" means the sessions are up and idle, not that no window is open.
 
-Sound check: `musterd status` should show the human present and each agent seat `here` (its session open, nothing working), and `delta` as `wakeable · resumable` — not plain `offline`. If it says `offline`, the roster is lying about a seat that can be reached (open lane `01M1T3GWEA`); demo the wake anyway, but expect the label to lag the fact.
+Sound check: `musterd status` should show the human present and each agent seat `here` (its session open, nothing working), and `delta` as `wakeable · resumable` — not plain `offline`. If it says `offline` after a joiner enroll, the fold missed `residency.enrolled` (ADR 393; falsify `sync/ledger.test.ts` case 5).
 
 ### Seats — how the cast is made
 

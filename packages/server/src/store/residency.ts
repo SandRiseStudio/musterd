@@ -411,6 +411,49 @@ export function revokeResidency(
   return row;
 }
 
+/**
+ * Project a folded `residency.enrolled` (ADR 393). Same upsert as `enrollResidency`, except the
+ * standing grant never crosses — grants are local secrets — so `grant_id` is left as it is on a
+ * re-enroll (a hub that also enrolled this seat keeps its own grant) and null on a first insert.
+ * Wake derivation still filters `host === this host`, so the hub holding the row does not become
+ * the actuator.
+ */
+export function applyFoldedEnrollment(
+  db: Database,
+  teamId: string,
+  input: {
+    member_id: string;
+    harness: string;
+    host: string;
+    authorized_by: string | null;
+    policy?: Record<string, unknown>;
+  },
+  now = Date.now(),
+): void {
+  const previous = getResidency(db, teamId, input.member_id);
+  if (previous) {
+    const policyJson =
+      input.policy === undefined
+        ? previous.policy
+        : Object.keys(input.policy).length === 0
+          ? null
+          : JSON.stringify(input.policy);
+    db.prepare(
+      `UPDATE residency SET harness = ?, host = ?, authorized_by = ?, policy = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(input.harness, input.host, input.authorized_by, policyJson, now, previous.id);
+    return;
+  }
+  enrollResidency(db, teamId, {
+    member_id: input.member_id,
+    harness: input.harness,
+    host: input.host,
+    grant_id: null,
+    authorized_by: input.authorized_by,
+    ...(input.policy !== undefined ? { policy: input.policy } : {}),
+  });
+}
+
 export function getResidency(db: Database, teamId: string, memberId: string): ResidencyRow | null {
   return (
     db
