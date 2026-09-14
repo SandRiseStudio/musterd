@@ -125,6 +125,13 @@ export type ModelObservation = z.infer<typeof ModelObservationSchema>;
 export const BindingSchema = WorkspaceSpecSchema.extend({
   /** Team agent join key (mskey_, ADR 075/076). Optional — absent for chat/human folders; enforced present at claim time for seat/role auto-claim. */
   agent_key: z.string().optional(),
+  /**
+   * Host-scoped bootstrap credential (mskey_, ADR 344 use `host`, ADR 395). The wake actuator
+   * polls `/residency/wake-leases` with this; `agent_key` is the claim authenticator and a claim
+   * path may rewrite it. Minted by `musterd residency on`. Merge-guarded on save (omit = preserve).
+   * Never committed.
+   */
+  host_key: z.string().optional(),
   /** Optional pre-issued grant (msgr_) that skips the pending/admin-approval lane (ADR 075). */
   grant: z.string().optional(),
   /** Per-agent, self-identifying HTTP credential (msac_, ADR 337). Never committed. */

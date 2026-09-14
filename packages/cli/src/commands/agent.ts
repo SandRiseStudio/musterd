@@ -130,6 +130,8 @@ export async function agentCommand(
   // ADR 344: every provisioned workspace receives a credential constrained to this one seat.
   // Mint after declaration because the server validates the target against the live roster. Never
   // fall back to the ambient legacy Team-wide key: that would silently preserve its blast radius.
+  // This field is the *claim* authenticator. The wake actuator authenticates with `binding.host_key`
+  // (ADR 395), minted at `residency on` — a claim-scoped key cannot poll `/residency/wake-leases`.
   const agentKey = (
     await http.mintBootstrapCredential(team, {
       use: 'claim_seat',

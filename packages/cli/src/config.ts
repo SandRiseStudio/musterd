@@ -332,12 +332,15 @@ export function identityFromEnv(
  *   it is refusing to destroy another writer's field.
  * - **Merge-guard on `seat_credential`.** The credential is server-minted, not reconstructed by a
  *   binding writer. Omission preserves the valid on-disk credential (ADR 340).
+ * - **Merge-guard on `host_key`.** The wake actuator's credential (ADR 395). Claim, wire, agent,
+ *   and persistBinding all rebuild the binding without this field; omitting it must not disarm
+ *   the next wake. `residency off` passes `{ drop: { host_key: true } }`.
  * - **Atomic write.** Hook and adapter can write concurrently; tmp-file + rename means a
  *   concurrent reader never sees a torn file (and the 0600 mode exists from the first byte).
  */
 /** Capture-writer intent, distinct from omit. Claim/agent never pass this (ADR 268). */
 export type SaveBindingOptions = {
-  drop?: { model_observed?: boolean };
+  drop?: { model_observed?: boolean; host_key?: boolean };
   /** Injectable only for focused atomic-publication failure tests. */
   rename?: typeof renameSync;
 };
@@ -348,6 +351,7 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
   const p = join(bindingDir, BINDING_FILE);
   const onDisk = classifyBindingFile(p);
   const dropObserved = opts?.drop?.model_observed === true;
+  const dropHostKey = opts?.drop?.host_key === true;
   let merged: Binding = {
     ...binding,
     ...(binding.seat_credential === undefined &&
@@ -364,9 +368,18 @@ export function saveBinding(dir: string, binding: Binding, opts?: SaveBindingOpt
       : binding.model_observed === undefined && onDisk?.model_observed !== undefined
         ? { model_observed: onDisk.model_observed }
         : {}),
+    ...(dropHostKey
+      ? {}
+      : binding.host_key === undefined && onDisk?.host_key !== undefined
+        ? { host_key: onDisk.host_key }
+        : {}),
   };
   if (dropObserved && merged.model_observed !== undefined) {
     const { model_observed: _dropped, ...rest } = merged;
+    merged = rest;
+  }
+  if (dropHostKey && merged.host_key !== undefined) {
+    const { host_key: _dropped, ...rest } = merged;
     merged = rest;
   }
   // Before anything touches the filesystem: a binding the reader could not parse must not replace

@@ -363,6 +363,28 @@ describe('saveBinding merge-guard (ADR 131 inc 4 — the adapter must not clobbe
     }
   });
 
+  it('preserves host_key when a later writer omits it (ADR 395)', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-hostkey-'));
+    try {
+      const boot = {
+        version: 2,
+        server: 'http://s1',
+        team: 'lab',
+        claim: { mode: 'seat' as const, name: 'Ui' },
+        agent_key: 'mskey_1',
+      };
+      saveBinding(ws, { ...boot, host_key: 'mskey_host' });
+      saveBinding(ws, { ...boot, agent_key: 'mskey_claim_seat' });
+      const after = JSON.parse(
+        readFileSync(join(ws, '.musterd', 'binding.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(after['host_key']).toBe('mskey_host');
+      expect(after['agent_key']).toBe('mskey_claim_seat');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   it('does not carry a credential to a different claimed seat', () => {
     const ws = mkdtempSync(join(tmpdir(), 'musterd-mcp-credential-switch-'));
     try {

@@ -70,7 +70,7 @@ src/
   host/               // the `musterd host` wake actuator — harness residency's per-machine hand (ADR 131 inc 3)
     registry.ts       // machine-local seat → workspace/harness registry (~/.musterd/host-registry.json); written by `residency on`, never by the daemon
     backend.ts        // ActuatorBackend seam: spawn-or-invoke + roster-derived verify + WakeOutcome; native row must stay expressible (ADR 131 §7)
-    loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); agent-key auth read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred)
+    loop.ts           // pollHostOnce: lease → actuate → report per (server, team, host label); host_key auth (ADR 395, fallback agent_key) read through workspace bindings; one wake span per actuation; wake-progress after spawn (not on deferred)
     pinnedBin.ts      // every spawned-harness wake exports the actuator's OWN build: shim execing this process's node+entry, PREPENDED to the woken harness's PATH — woken hooks call a bare `musterd`, and the host's PATH resolved a frozen Homebrew tarball; best-effort, degrades to inherited PATH
     wakeLeaseFile.ts  // the wake lease on DISK (ADR 354): written beside binding.json at spawn naming the harness child's pid, cleared at settle — for harnesses that sanitize the MCP env (codex: 12 vars, no MUSTERD_*), where the env channel ADR 241 relies on stops at the child
     engine.ts         // the AgentLoopEngine seam (ADR 251 §3): prompt + tools + bounds → turns/usage/end-reason, provider-neutral; the named insertion point for a second provider (ADR 101/110), with per-turn observation for capture/telemetry
@@ -145,7 +145,7 @@ src/
     agent.ts          // musterd agent <name> [--role <label>] [--profile <profile>] [--harness claude-code|cursor|codex|opencode|grok]: add an agent + isolated worktree + binding + MCP register (any harness) + standing grant + committed workspace.json (ADR 065/080/116); --role = team fact, --profile = local setup (ADR 272)
     audit.ts          // musterd audit: read the admin-only governance audit log (ADR 071/074/127)
     requests.ts       // musterd requests [--pending] / requests decide: admin claim/teammate request lane (ADR 077)
-    residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant + host-registry entry; status cross-checks all three stores (ADR 131)
+    residency.ts      // musterd residency on|off|status: enroll a seat for wake-on-message while offline — standing grant lands in binding.grant, host-scoped wake credential in binding.host_key (ADR 395), host-registry entry; status cross-checks the stores (ADR 131)
     session.ts        // musterd session start|end|observe --stdin (hook-driven capture / Cursor model observe, ADR 198/265/268) | observe --orient (ADR 333: Cursor sessionStart JSON additional_context) | resolve-labels --stdin (sidebar sweep decision engine) | label-nudge (evidence-based due, single CCD scan, ADR 186) | orient-nudge / orient-stamp (per-session orientation ritual, ADR 326: stamp keyed to the captured session id quiets the per-turn nudge) | show (ADR 131 §5 / ADR 160 / ADR 186). `session start` also emits the ADR 326 orientation block after capture (read-only, wake-suppressed, composable-only). Interloper gate: an empty newcomer cannot take a live-looking slot; a named-but-missing occupant transcript is live by construction via started_at for LOCAL_SESSION_LIVE_MS (file appears at first turn, not at start). ADR 268: a new Cursor conversation_id without a model drops leftover model_observed; observe with no session_id still reconciles from enumeration; refresh heals an unended Cursor slot whose live .txt disagrees
     sessionOrientation.ts // ADR 326 orientation-block composer — pure, composable-only (enums/slugs/ULIDs/counts + the seat's own fenced memory headline), 15-line cap; emission/silence policy lives in session.ts
     sessionStatusline.ts // ADR 326 amendment: seat-chip composer for the statusLine — the USER-facing half (SessionStart has no user seam at exit 0; systemMessage is discarded there). Counts + validated slugs only, no free text at all; renders on a quiet seat where the block stays null
@@ -231,7 +231,8 @@ _workspace_, the same way the MCP adapter resolves it, so an agent that shells o
 in its folder acts as _that_ member — not whoever last wrote the global single-slot-per-team
 (the 2026-06-16/17 dogfood collision). `musterd init` writes the binding file (0600, gitignored),
 which under v0.3 (ADR 075) carries the **team agent key** (`agent_key`, `mskey_`) + a `claim` policy
-(+ optional `grant`), not a per-seat token.
+(+ optional `grant`), not a per-seat token. `host_key` (ADR 395) is the wake actuator's host-scoped
+bootstrap credential, minted at `residency on` and merge-guarded so a claim cannot overwrite it.
 
 **Committed launch spec `.musterd/workspace.json` (ADR 080).** Alongside the gitignored `binding.json`,
 `init`/`agent` also write a **secret-free** `.musterd/workspace.json` (`WorkspaceSpecSchema` =

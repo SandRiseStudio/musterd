@@ -50,6 +50,7 @@ describe('WorkspaceSpec / Binding schemas (strict version 2, ADR 281)', () => {
     const parsed = BindingSchema.parse(binding);
     expect(parsed.agent_key).toBe('mskey_x');
     expect(parsed.grant).toBe('msgr_y');
+    expect(parsed.host_key).toBeUndefined();
     expect(parsed.seat_credential).toBe('msac_z');
     expect(parsed.model).toBe('claude-opus-4-8');
     expect(parsed.capabilities?.can_message).toBe('team');
@@ -59,6 +60,12 @@ describe('WorkspaceSpec / Binding schemas (strict version 2, ADR 281)', () => {
     expect(parsed.driver).toBe('nick');
     // A binding with no secrets (e.g. a chat/human folder) is still valid.
     expect(BindingSchema.parse(spec).agent_key).toBeUndefined();
+  });
+
+  it('Binding accepts host_key; WorkspaceSpec still rejects it (ADR 395)', () => {
+    const parsed = BindingSchema.parse({ ...binding, host_key: 'mskey_host' });
+    expect(parsed.host_key).toBe('mskey_host');
+    expect(parsed.agent_key).toBe('mskey_x');
   });
 
   it('rejects the version-1 shape — no version field at all', () => {
@@ -88,6 +95,7 @@ describe('WorkspaceSpec / Binding schemas (strict version 2, ADR 281)', () => {
     // The old strip-to-commit path is gone: a spec built from a Binding must be constructed
     // field-by-field, never by parsing the binding through the spec schema.
     expect(WorkspaceSpecSchema.safeParse({ ...spec, agent_key: 'mskey_leak' }).success).toBe(false);
+    expect(WorkspaceSpecSchema.safeParse({ ...spec, host_key: 'mskey_host' }).success).toBe(false);
     expect(WorkspaceSpecSchema.safeParse({ ...spec, session: binding.session }).success).toBe(
       false,
     );

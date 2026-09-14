@@ -230,7 +230,7 @@ export function repoProject(cwd?): string | null;          // ADR 177 — the pr
 
 // ADR 018/075/080/281 — the workspace binding files (binding.ts). Read by both the CLI and the MCP adapter.
 export const WorkspaceSpec = z.object({ version:2, server:string, team:string, claim?:ClaimPolicy }).strict();  // the committed, secret-free `.musterd/workspace.json`; v2 carries NO surface (runtime Surface is launcher-only, ADR 286)
-export const Binding = WorkspaceSpec.extend({ agent_key?:string, grant?:string, ... }).strict();                // gitignored `.musterd/binding.json` = spec + secrets + per-machine runtime fields; strict — unknown keys reject, never strip
+export const Binding = WorkspaceSpec.extend({ agent_key?:string, host_key?:string, grant?:string, ... }).strict(); // gitignored `.musterd/binding.json` = spec + secrets + per-machine runtime fields; `host_key` is the actuator credential (ADR 395); strict — unknown keys reject, never strip
 
 // ADR 281/282 — strict machine-local provisioning/reconciliation contracts (provisioning.ts). Local-only: never wire types.
 export const HarnessId = z.string(1..64).regex(/^[a-z0-9][a-z0-9._-]{0,63}$/);  // selection vocabulary; unknown ids still parse (registry lives in the CLI)
