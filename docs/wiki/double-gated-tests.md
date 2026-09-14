@@ -2,6 +2,8 @@
 
 A test that needs two independent permissions to run can rot into something that could never pass, while every signal anyone looks at stays green — because "green" for a gated test means *skipped*, and skipped tests are never falsified by the code moving under them.
 
+The page began with gates and has since grown past them: the general fact is that a test is only evidence while it is **falsifiable**, and a gate is merely the most visible way to lose that. The [second instance](#a-second-instance-with-no-gate-at-all-2026-09-14-falsify-delete-the-driftpush-for-the-manifest-line-in-packagesclisrconboarddoctorts) below runs on every CI pass and still could not fail.
+
 ## The shape
 
 A gate on a test (an env flag, an owner opt-in, a spend authorization, a real-binary requirement) removes it from the loop that keeps other tests honest. One gate is survivable: someone eventually flips the flag. Two gates multiply — the test runs only when *both* are open at once, and if nobody is responsible for opening both, the answer is nobody, indefinitely. Meanwhile the codebase keeps moving, and nothing forces the fixture to move with it: CI reports the file as passing (0 tests run), coverage doesn't count it, and refactors that break its assumptions break nothing visible.
@@ -18,8 +20,29 @@ The owner-gated real-Codex acceptance test (`tests/codex-cli.acceptance.test.ts`
 
 That last one is the sharp edge: the test was not broken by later drift, it was born wrong, and review didn't catch it because review reads gated tests instead of running them. First real execution 2026-08-24 (Codex CLI 0.149.1, spend authorized by nick, after the #1038 repairs): 3/3 green in 28s. Evidence and the standing falsifier live in [06-testing.md](../architecture/06-testing.md#codex-harness-evidence-adr-216).
 
+## A second instance, with no gate at all (2026-09-14; falsify: delete the `drift.push` for the manifest line in `packages/cli/src/onboard/doctor.ts` and run `packages/cli/src/onboard/doctor.test.ts`)
+
+A gate is one way a test stops being falsifiable. It is not the only one, and it is not the cheapest. An **assertion that admits its own negative case** does the same work with nothing to opt into: the test runs on every CI pass, is counted in coverage, reads as evidence in review, and still cannot go red.
+
+`doctor.test.ts` carried a test named "degrades to naming the shape when the file carries no readable version", asserting:
+
+```ts
+expect(line === '' || line.includes('pre-v3 shape')).toBe(true);
+```
+
+`line` came from a `.find(...) ?? ''`. So the left disjunct is exactly the case where the line the test exists to check **was not emitted at all** — the assertion's pass condition included the failure it was written to catch. Measured: with the entire manifest-line push deleted, the three sibling tests in the block went red and this one stayed green.
+
+Underneath it was a second, quieter error. The fixture `{...V1, version: 'one'}` was described as "a legacy file with no readable version", but no such file exists: the legacy predicate is `WorktreeProvisioningV2Schema.safeParse(v) || ProvisionManifestSchema.safeParse(v)`, and both pin the version to a numeric literal (`z.literal(2)`, `z.literal(1)`). A mangled version fails both, classifies `invalid`, and takes a different branch emitting a different line. The test exercised a branch it did not name, found no line, and passed on the absence. The `'a pre-v3 shape'` arm it claimed to cover is unreachable by construction — dead code that read as tested for as long as the test stood.
+
+The mechanism worth naming is the **hedge**. The disjunction was not laziness; it was uncertainty, honestly felt — the author did not know which branch the fixture reached and wrote an assertion that would hold either way. That converts an open question into a green tick, which is strictly worse than leaving the question open, because a green tick is answered and a question is not. A hedge in prose invites a reader; a hedge in an assertion silences one.
+
+Found by izzo in acceptance review of #1413, as a non-blocking note on a change that was itself correct — the accepted work and the weak test that accompanied it are independent, and review caught the second precisely because it read the assertion instead of the result.
+
 ## What actually helps
 
 - **A gated test has an owner and a date, or it is decoration.** Record the last real run next to the run instructions (as 06-testing.md now does for this test) — an undated gated test should be read as "never ran", because in this instance that reading would have been correct for three weeks and nobody made it.
 - **First execution is part of landing.** A test that has never run once proves nothing about the code and nothing about itself; #621's fixture shipped with an assertion on a schema field that was already gone. If the gate is spend, the landing PR is the moment the spend is cheapest to justify.
 - **When an identity/schema epoch turns, grep the gated tests too.** ADR 281 and ADR 286 both migrated live fixtures; the skipped fixture was the one that stayed behind, precisely because no run went red.
+- **An assertion that can be satisfied by an absence is not an assertion.** `expect(x === '' || x.includes(...))` over a `?? ''` finder passes when nothing was produced. Assert the presence positively (`toMatch(/…\d/)`), or assert the absence deliberately as its own test — never both in one disjunction.
+- **Delete the thing under test and watch it go red.** One minute of work, and the only check that distinguishes a test from a decoration. Both instances on this page survive every other signal and fail exactly this one.
+- **Write the hedge as a question, not as an `||`.** If you do not know which branch the fixture reaches, find out — `console.log` the classification once, or assert it (`expect(loadProvisioning(dir).kind).toBe('legacy')`) so the fixture's own premise is pinned and a future schema change breaks it loudly.
