@@ -233,37 +233,6 @@ function room(): Uint8Array {
 }
 
 /**
- * Does the straight hop from `a` to `b` cross furniture that `b` is not itself sitting in?
- *
- * The last hop of a route into a seat is special and always has been: a chair lives inside its own
- * desk's footprint, so the hop that seats you necessarily ends inside solid geometry and cannot be
- * judged by `clear()` (which is the inflated planning grid, and refuses every cell near a desk).
- * What it must NOT do is cross a *different* piece of furniture — or cross its own desk's slab to
- * reach a chair on the far side, which is the shape of "members walk through the tables".
- *
- * So: sample the segment at pad 0, and allow only the footprints the destination is already inside.
- * Measured 2026-09-14 — every clipping sample on the floor was `desk-*` or `chair-*`, i.e. exactly
- * the footprints that contain a walk endpoint, and nothing else on the room was ever crossed. That
- * is what says the defect is in this hop and not in `clear()` or `BODY_R`.
- */
-function approachClear(a: P, b: P): boolean {
-  const destTags = new Set<string>();
-  for (const r of solidRects()) {
-    if (b.lx >= r.x0 + BODY_R && b.lx <= r.x1 - BODY_R && b.ly >= r.y0 + BODY_R && b.ly <= r.y1 - BODY_R) {
-      destTags.add(r.tag ?? 'untagged');
-    }
-  }
-  const d = Math.hypot(b.lx - a.lx, b.ly - a.ly);
-  const steps = Math.max(1, Math.ceil(d / (CELL / 8)));
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const hit = solidHit(a.lx + (b.lx - a.lx) * t, a.ly + (b.ly - a.ly) * t);
-    if (hit && !destTags.has(hit.tag)) return false;
-  }
-  return true;
-}
-
-/**
  * Nearest free cell to `p` (spiral out) — start/goal may sit inside furniture (a desk seat).
  *
  * Prefers cells in the room's main region: a sliver of floor sealed behind furniture is free but
@@ -275,15 +244,7 @@ function nearestFree(p: P, blocked: (c: number) => boolean): number {
   const cy = Math.min(N - 1, Math.max(0, Math.floor(p.ly / CELL)));
   const main = room();
   let fallback = -1;
-  /* Nearest that the final hop can actually reach without crossing other furniture. Distance alone
-     picked the cell the spiral happened to reach first, and when a chair's own aisle is swallowed by
-     the BODY_R inflation that cell sits on the FAR side of the desk — so the unchecked last hop walked
-     the member straight over the slab to sit down. Ring-by-ring, an approach-clear cell beats a merely
-     near one; within a ring the first clear cell wins, which keeps the old behaviour wherever the
-     aisle is open (2026-09-14). */
-  let nearestAny = -1;
   for (let r = 0; r < N; r++) {
-    let ringClear = -1;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
@@ -292,20 +253,11 @@ function nearestFree(p: P, blocked: (c: number) => boolean): number {
         if (x < 0 || y < 0 || x >= N || y >= N) continue;
         const c = y * N + x;
         if (blocked(c)) continue;
-        if (main[c] === 1) {
-          if (nearestAny < 0) nearestAny = c;
-          if (ringClear < 0 && approachClear(centre(c), p)) ringClear = c;
-        } else if (fallback < 0) fallback = c;
+        if (main[c] === 1) return c;
+        if (fallback < 0) fallback = c;
       }
     }
-    if (ringClear >= 0) return ringClear;
-    // Nothing in the main region can reach the seat cleanly within a couple of rings of it; take the
-    // nearest cell rather than spiral the whole floor looking for a perfect approach that may not
-    // exist. Two rings is ~2 cells past the first candidate — enough to get round a desk, not enough
-    // to wander.
-    if (nearestAny >= 0 && r >= 2) return nearestAny;
   }
-  if (nearestAny >= 0) return nearestAny;
   return fallback >= 0 ? fallback : cy * N + cx;
 }
 

@@ -43,7 +43,7 @@ So the walkers are inside solid furniture 16% of the time — and then a second 
 
 Every clipped footprint was `desk-*` or `chair-*`, i.e. exactly the ones that contain a walk endpoint — nothing else on the floor was ever crossed. So the honest reading is that "members walk through the furniture" was mostly the painter (the desk sorting, since reverted) plus the legitimate last hop into a seat, and the genuine residue is ~4% of episodes.
 
-Tried and measured as NOT the lever: making `nearestFree` prefer an approach cell whose final hop does not cross other furniture moved the sample rate only 17% → 15.4%. Recorded so the next reader does not re-run it. Do not raise `BODY_R` as a first move either — a larger radius can close narrow gaps the room depends on (desk aisles, the doorway) and strand walkers.
+Tried, measured, and NOT SHIPPED: making `nearestFree` prefer an approach cell whose final hop does not cross other furniture moved the sample rate only 17% → 15.4%, and it cost enough bundle to fail the ADR 151 total-JS budget (231.5 KB against 231.4). A lever that small does not buy its own bytes on a budget with 0.3 KB of headroom. Recorded so the next reader neither re-runs it nor re-ships it. Do not raise `BODY_R` as a first move either — a larger radius can close narrow gaps the room depends on (desk aisles, the doorway) and strand walkers.
 
 **The probes.** `OfficeHandle.floorSamples()` returns every posed member's logical position with both tests, read from CDP like `ambientLog`. `/character-sheet?carry=laptop|box|plate|bottle|mug|phone` draws the turnaround with something in hand — the sheet hardcoded `carry: null`, so the one defect class that is about FACING was the one class the body-review tool could not draw.
 
