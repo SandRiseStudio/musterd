@@ -707,12 +707,15 @@ falsifiers. They were run here against the laptop (hub, node `01M14X9J4Y…`) an
 | 366-b | the inbox cursor never swallows — zero re-read, zero skipped | **FAIL** | delta's cursor frozen at 2026-09-04 22:50:17Z — **9.9 days** — across 22 `team_inbox_check` calls on 6 days. 746 unread on the VM, 1305 behind on the hub |
 | 371-1 | a tool-call batch recorded on the VM is counted by the hub | **PASS** | 75 `record.tool_calls` rows folded from the VM node; 133 calls counted for delta on the hub. ADR 371's census baseline ("a joiner's tool calls read as zero on the hub") no longer holds |
 | 371-2 | a seed thread entry written on the VM appears in the hub's seed | **UNRUN** | zero seed-thread payloads have ever crossed from the VM node. The event has never occurred there |
-| 371-3 | an incident report from the VM contributes to the hub's clustering count | **UNRUN** | zero incident payloads from the VM node. Same reason |
+| 371-3 | an incident report from the VM contributes to the hub's clustering count | ~~**UNRUN**~~ **PASS** (corrected 2026-09-14, izzo's acceptance review of #1402; the merged table contradicted the ledger) | three `status_update` acts carrying `meta.blocked_by.gate = two-machine-probe-01M1T3H3RB`, originated by delta on the VM node and folded to the hub: sent 20:28:20Z → folded 20:30:10Z (110 s), 20:57:41Z → 20:58:16Z (35 s), 21:34:06Z → 21:34:30Z (24 s). Each produced an `incident_reports` row on the hub (created 20:31:22Z, 20:58:24Z, 21:35:15Z; all before the 21:58Z merge of #1402). One reporter does not cluster, so this shows the count is fed, not that a page fires |
 
 The substrate is real: 2220 rows have folded from the VM node, `ledger` 1710, `presence` 386,
-`record` 75, `continuity` 7, `lane` 5. 371-2 and 371-3 are unrun because the *events* have never
-happened on the joiner, not because replication dropped them — they need a write only a seat on that
-machine can originate, and are handed to delta rather than faked from the hub.
+`record` 75, `continuity` 7, `lane` 5. 371-2 is unrun because the *event* has never happened on
+the joiner, not because replication dropped it — it needs a write only a seat on that machine can
+originate, and is handed to delta rather than faked from the hub. ~~371-3 likewise~~ (corrected
+2026-09-14: delta originated three incident reports before this landed, and the merged table said
+UNRUN anyway — the row above now reads from the ledger. Falsify: `incident_reports` on the hub
+holds fewer than three rows for that gate with `seat = 'delta'`).
 
 ### 366-b is not a federation defect, and that is the finding
 
