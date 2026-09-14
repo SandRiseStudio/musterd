@@ -6209,6 +6209,32 @@ describe('two-stage close (ADR 169)', () => {
     });
   });
 
+  it('counterpart close on a never-submitted lane ESTABLISHES the attestation — ADR 305 strips only what stands (amendment 1)', async () => {
+    const { nickTok, ada } = await setup();
+    const lane = await post(
+      '/teams/dawn/lanes',
+      { title: 'never submitted', branch: 'ada/never-submitted', claim: true },
+      ada,
+    );
+    const laneId = lane.json.lane.id as string;
+    // The worker was told to skip lane_submit; the lane landed and the acceptor closes it as a
+    // non-owner with the flags the tool description tells them to pass. Measured 2026-09-06 on
+    // 01M1VEMAKX / #1370: the row closed `done` with `merged` null and git.pr_merged carrying only
+    // the lane id — the only attestation anyone would ever offer, silently discarded.
+    const closed = await patchLane(
+      laneId,
+      { state: 'done', merged: { pr: 1370, sha: 'd2a0f0fe', authorized_by: 'nick' } },
+      nickTok,
+    );
+    expect(closed.status).toBe(200);
+    expect(closed.json.lane.merged).toEqual({ pr: 1370, sha: 'd2a0f0fe', authorized_by: 'nick' });
+
+    const merged = await auditRows(nickTok, 'git.pr_merged');
+    expect(merged[0].detail.pr).toBe(1370);
+    expect(merged[0].detail.sha).toBe('d2a0f0fe');
+    expect(merged[0].detail.authorized_by).toBe('nick');
+  });
+
   /**
    * ADR 202 — the verdict moves the lane it judges. Before this, an `accept` answering an acceptance
    * ask wrote telemetry and left the lane sitting in awaiting_acceptance; the acceptor had to

@@ -426,6 +426,9 @@ export function registerLanes(
         'Mark a lane done — clears its warnings and releases its surface. If its branch landed, ' +
         'attest the merge: pass pr, sha, and authorized_by so the audit log joins your seat to ' +
         'the landed SHA and the authorizing human. Landed without a PR? Omit pr and pass sha alone. ' +
+        "Closing someone else's lane? The worker's own lane_submit stamp stands and your flags are " +
+        'ignored (ADR 305); pass them only when the lane has no attestation yet, which then ' +
+        'records yours. ' +
         'Prefer lane_submit (ADR 192): a self-close records unconfirmed unless acceptance-exempt.',
       inputSchema: {
         id: z.string().describe('lane id'),

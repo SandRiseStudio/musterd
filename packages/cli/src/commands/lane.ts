@@ -143,9 +143,9 @@ export async function laneCommand(parsed: Parsed): Promise<number> {
     if (!id) throw new CliError(USAGE, 2);
     // resolve/submit may attest the landed merge (ADR 109): {pr, sha, authorized_by}. On submit
     // (ADR 192) it is the worker's stage-one claim. On a *self*-resolve it rides the terminal
-    // move into `git.pr_merged`. On a counterpart resolve, omit these flags — the server ignores
-    // merged on a non-owner close so the submit stamp (including ADR 300 verification) is not
-    // replaced by a partial patch (ADR 305).
+    // move into `git.pr_merged`. On a counterpart resolve the server ignores them when the worker's
+    // submit stamp stands (ADR 305), so that stamp — ADR 300 verification included — is never
+    // replaced by a partial patch; on a lane with NO stamp they are recorded (ADR 305 amendment 1).
     const prRaw = flagStr(parsed.flags, 'pr');
     const pr = prRaw !== undefined ? Number(prRaw) : undefined;
     if (pr !== undefined && !Number.isInteger(pr)) throw new CliError(USAGE, 2);
