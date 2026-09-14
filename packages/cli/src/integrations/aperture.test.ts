@@ -6,7 +6,7 @@ import {
   type ApertureObservation,
 } from './aperture.js';
 
-const exactSource = ['tag:musterd-agent', 'tag:musterd-member-a7f3c2'];
+const exactSource = ['tag:musterd-member-a7f3c2'];
 
 function config(overrides: Record<string, unknown> = {}) {
   return {
@@ -22,7 +22,7 @@ function config(overrides: Record<string, unknown> = {}) {
         app: {
           'tailscale.com/cap/aperture': [
             {
-              role: 'agent',
+              role: 'user',
               models: ['claude-sonnet-4-6'],
               quotas: [{ bucket: 'daily:<user>' }],
             },
@@ -55,7 +55,7 @@ describe('Aperture response parsing (ADR 385)', () => {
       config: `{
         // Aperture emits HuJSON/JWCC rather than strict JSON.
         providers: { anthropic: { baseurl: 'https://api.anthropic.com', models: ['claude-sonnet-4-6'], }, },
-        grants: [{ src: ['tag:musterd-agent', 'tag:musterd-member-a7f3c2'], app: {
+        grants: [{ src: ['tag:musterd-member-a7f3c2'], app: {
           'tailscale.com/cap/aperture': [{ models: ['claude-sonnet-4-6'], quotas: [{ bucket: 'daily:<user>' }] }],
         }, }],
         quotas: { 'daily:<user>': { capacity: '$10', rate: '$5/day', on_exceed: 'reject' }, },
@@ -113,7 +113,7 @@ describe('Aperture posture analysis (ADR 385)', () => {
       'anthropic (2 models)',
       'exact Member workload identities; no wildcard source',
       'every model grant has a rejecting, defined bucket',
-      'persistent Member tags are exact and non-admin',
+      'one exact Member tag; standard user role',
     ]);
     expect(JSON.stringify(checks)).not.toContain('AABBCCDD');
   });
@@ -143,30 +143,52 @@ describe('Aperture posture analysis (ADR 385)', () => {
 
   it.each([
     ['wildcard', ['*']],
-    ['wildcard Member tag', ['tag:musterd-agent', 'tag:musterd-member-*']],
-    ['group source', ['group:engineering', ...exactSource]],
-    ['user source', ['user:operator@example.test', ...exactSource]],
-    ['shared tag only', ['tag:musterd-agent']],
+    ['wildcard Member tag', ['tag:musterd-member-*']],
+    ['group source', ['group:engineering']],
+    ['user source', ['user:operator@example.test']],
+    ['shared plus exact', ['tag:musterd-agent', 'tag:musterd-member-a7f3c2']],
+    ['two exact Members', ['tag:musterd-member-a7f3c2', 'tag:musterd-member-b8e4d3']],
+    ['shared only', ['tag:musterd-agent']],
     ['mixed broad and exact', ['*', ...exactSource]],
-    ['unsorted exact tags', [...exactSource].reverse()],
-    ['uppercase Member id', ['tag:musterd-agent', 'tag:musterd-member-A7F3C2']],
+    ['uppercase Member id', ['tag:musterd-member-A7F3C2']],
   ])('rejects %s identity sources', (_name, src) => {
     const grants = [{ ...config().grants[0], src }];
     expect(states(observation(config({ grants })))['aperture-identities']).toBe('fail');
   });
 
-  it('rejects an admin agent identity', () => {
+  it.each([
+    ['missing', undefined],
+    ['legacy agent', 'agent'],
+    ['admin', 'admin'],
+    ['unknown', 'operator'],
+  ])('rejects the %s Aperture role', (_name, role) => {
+    const capability = {
+      models: ['claude'],
+      quotas: [{ bucket: 'daily:<user>' }],
+      ...(role === undefined ? {} : { role }),
+    };
+    const grants = [
+      {
+        src: exactSource,
+        app: { 'tailscale.com/cap/aperture': [capability] },
+      },
+    ];
+    expect(states(observation(config({ grants })))['aperture-identities']).toBe('fail');
+  });
+
+  it('accepts one floating user role plus a separate model quota capability', () => {
     const grants = [
       {
         src: exactSource,
         app: {
           'tailscale.com/cap/aperture': [
-            { role: 'admin', models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] },
+            { role: 'user' },
+            { models: ['claude'], quotas: [{ bucket: 'daily:<user>' }] },
           ],
         },
       },
     ];
-    expect(states(observation(config({ grants })))['aperture-identities']).toBe('fail');
+    expect(states(observation(config({ grants })))['aperture-identities']).toBe('ok');
   });
 
   it('requires at least one model capability but ignores connector-only capabilities', () => {
@@ -174,7 +196,7 @@ describe('Aperture posture analysis (ADR 385)', () => {
       {
         src: exactSource,
         app: {
-          'tailscale.com/cap/aperture': [{ role: 'agent', quotas: [{ bucket: 'daily:<user>' }] }],
+          'tailscale.com/cap/aperture': [{ role: 'user', quotas: [{ bucket: 'daily:<user>' }] }],
         },
       },
     ];
@@ -214,7 +236,7 @@ describe('Aperture posture analysis (ADR 385)', () => {
       {
         src: exactSource,
         app: {
-          'tailscale.com/cap/aperture': [{ role: 'agent', models: ['claude'], ...capability }],
+          'tailscale.com/cap/aperture': [{ role: 'user', models: ['claude'], ...capability }],
         },
       },
     ];

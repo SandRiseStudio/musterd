@@ -97,7 +97,7 @@ Use realistic data: team `dawn`, members `Ada (agent, backend)`, `Lin (agent, fr
 
 ### Optional integration doctor (ADR 385)
 
-14. [`cmd/integration-doctor`](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ?node-id=18-2) — the exact no-color combined frame for `musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net`: separate Tailscale `verified` and Aperture `off (configuration ready)` headings, the 13 stable checks in protocol order, and the two `LIMITS` non-claims. The frame is 80-column-safe, JetBrains Mono `14/22`, and matches the renderer snapshot character-for-character.
+14. [`cmd/integration-doctor`](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ?node-id=18-2) — the exact no-color combined frame for `musterd integration doctor --tailscale --aperture https://aperture.tailnet.ts.net`: separate Tailscale `verified` and Aperture `off (configuration ready)` headings, the 13 stable checks in protocol order, including ADR 394's `one exact Member tag; standard user role` identity line, and the two `LIMITS` non-claims. The frame is 80-column-safe, JetBrains Mono `14/22`, and matches the renderer snapshot character-for-character.
 15. [`cmd/integration-doctor/blocked`](https://figma.com/design/tgJ7dUNgGmlIMYBVVA5qIQ?node-id=18-4) — combined selected failures: red `✗` on the failed check, dim `→` repair and `·` skipped dependent checks, with both section headings `blocked`. Selected failure exits **1**; invalid command/URL usage exits **2**; neither selected renders both sections `off` and exits **0**.
 
 ## Page: States (empty + error)

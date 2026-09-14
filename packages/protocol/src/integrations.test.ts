@@ -13,7 +13,7 @@ const apertureConfig = {
   },
   grants: [
     {
-      src: ['tag:musterd-agent', 'tag:musterd-member-a7f3c2'],
+      src: ['tag:musterd-member-a7f3c2'],
       app: {
         'tailscale.com/cap/aperture': [
           { models: ['claude-sonnet-4-6'], quotas: [{ bucket: 'daily:<user>' }] },

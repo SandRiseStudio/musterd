@@ -312,10 +312,12 @@ Each integration is selected independently. With neither flag, both report healt
 Tailscale path runs the three read-only CLI commands named in ADR 385 and empirically checks the
 loopback daemon, Serve forward, exact Host gate, `/health`, and `/ws`. Aperture makes one bounded GET
 to `/api/config`, parses the vendor HuJSON through protocol-owned schemas, and reports configuration
-readiness with redacted evidence. It never changes Tailscale, Aperture, musterd configuration, or Team
-state. Ready Aperture configuration remains enforcement `off`; the command makes no device-management,
-sandbox, or unrelated-harness claim. A selected failed check exits 1, invalid usage exits 2, and JSON
-stdout parses as `IntegrationDoctorReportSchema`.
+readiness with redacted evidence. Each ready workload grant has exactly one lowercase opaque
+`tag:musterd-member-<id>` source and only the standard `user` role; shared agent tags, multiple
+sources, missing roles, and other roles fail readiness (ADR 394). It never changes Tailscale,
+Aperture, musterd configuration, or Team state. Ready Aperture configuration remains enforcement
+`off`; the command makes no device-management, sandbox, or unrelated-harness claim. A selected failed
+check exits 1, invalid usage exits 2, and JSON stdout parses as `IntegrationDoctorReportSchema`.
 
 ### `musterd team create <slug> [--display <name>] [--as <yourname>] [--role <role>]`
 

@@ -59,11 +59,14 @@ function isPositiveDollars(value: string): boolean {
 }
 
 function hasExactMemberIdentity(src: string[]): boolean {
-  return (
-    src.length === 2 &&
-    src[0] === 'tag:musterd-agent' &&
-    /^tag:musterd-member-[a-z0-9]+$/.test(src[1] ?? '')
+  return src.length === 1 && /^tag:musterd-member-[a-z0-9]+$/.test(src[0] ?? '');
+}
+
+function hasStandardUserRole(capabilities: Array<{ role?: string | undefined }>): boolean {
+  const roles = capabilities.flatMap((capability) =>
+    capability.role === undefined ? [] : [capability.role],
   );
+  return roles.length > 0 && roles.every((role) => role === 'user');
 }
 
 export function inspectApertureConfig(observation: ApertureObservation): IntegrationCheck[] {
@@ -153,20 +156,17 @@ export function inspectApertureConfig(observation: ApertureObservation): Integra
 
   const identitiesReady =
     (config.grants?.length ?? 0) > 0 &&
-    config.grants?.every(
-      (grant) =>
-        hasExactMemberIdentity(grant.src) &&
-        (grant.app['tailscale.com/cap/aperture'] ?? []).every(
-          (capability) => capability.role !== 'admin',
-        ),
-    );
+    config.grants?.every((grant) => {
+      const capabilities = grant.app['tailscale.com/cap/aperture'] ?? [];
+      return hasExactMemberIdentity(grant.src) && hasStandardUserRole(capabilities);
+    });
   checks.push(
     identitiesReady
-      ? ok('aperture-identities', 'persistent Member tags are exact and non-admin')
+      ? ok('aperture-identities', 'one exact Member tag; standard user role')
       : fail(
           'aperture-identities',
-          'grant sources are broad, shared, unordered, or administrative',
-          'Use exactly tag:musterd-agent then one lowercase opaque tag:musterd-member-<id>, with no admin role.',
+          'grant source is broad or its role is not standard user',
+          'Use one lowercase opaque tag:musterd-member-<id> source and role user.',
         ),
   );
 
