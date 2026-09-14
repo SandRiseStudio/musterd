@@ -620,19 +620,21 @@ function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, 
     // put it flat in the lap. One drawing, because the skeleton has already done the deciding — nothing
     // here reads a pose name.
     //
-    // SIZE, and the trade it sits on. This was 15×9u, which is 0.56× `TORSO_W` at a 1.67 aspect, and
-    // it read as a wallet rather than a machine (nick, 2026-09-14). A closed 16-inch MacBook Pro is
-    // ~35.6cm wide and ~24.8cm deep against a ~45cm torso: 0.79× at a 1.44 aspect. 18×12u is 0.67×
-    // at 1.50 — deliberately short of the true proportion, because the size traded against something
-    // real: nineteen of these across the floor should stay a SHAPE at the elbow, not nineteen
-    // held-out objects, and the honest 0.79× starts to read as the latter at floor density. Both
-    // numbers moved, and the aspect moved more than the width, because being too *narrow* for its
-    // height was the part that made it look like the wrong object.
+    // SIZE, in two steps and now at the honest proportion. It was 15×9u — 0.56× `TORSO_W` at a 1.67
+    // aspect — and read as a wallet rather than a machine (nick, 2026-09-14). A closed 16-inch
+    // MacBook Pro is ~35.6cm wide and ~24.8cm deep against a ~45cm torso: 0.79× at 1.44. The first
+    // move went to 18×12u (0.67× at 1.50), deliberately short, hedging against nineteen of these
+    // across the floor reading as nineteen held-out objects rather than a shape at the elbow.
+    //
+    // Looked at on the floor, the hedge was the wrong call: at 0.67× it still read small for the
+    // thing it is, and the feared clutter did not materialise — the slab is tucked at the elbow and
+    // occluded by the body at most facings, so its silhouette cost is far below its area. 21×14.5u
+    // is the true 0.79× at 1.44, and the room is the evidence rather than the arithmetic.
     const wr = px(k.wrist[1]);
     const ch = px(k.chest);
     const c = { x: wr.p.x * 0.6 + ch.p.x * 0.4, y: wr.p.y * 0.6 + ch.p.y * 0.4 };
-    const w = 18 * u;
-    const h = 12 * u;
+    const w = 21 * u;
+    const h = 14.5 * u;
     ctx.fillStyle = LAPTOP_SILVER;
     ctx.fillRect(c.x - w / 2, c.y - h / 2, w, h);
     // The shut lid's dark seam along the bottom edge — it reads as closed. Proportional to the lid
@@ -641,7 +643,7 @@ function drawCarry(ctx: CanvasRenderingContext2D, px: (j: V3) => Proj, k: Skel, 
     const seam = h * 0.15;
     ctx.fillStyle = LAPTOP_SEAM;
     ctx.fillRect(c.x - w / 2, c.y + h / 2 - seam, w, seam);
-    disc(ctx, { x: c.x, y: c.y - u * 0.4 }, 2 * u, 2 * u, LAPTOP_LOGO); // the quiet logo dot
+    disc(ctx, { x: c.x, y: c.y - u * 0.4 }, 2.3 * u, 2.3 * u, LAPTOP_LOGO); // the quiet logo dot
     return;
   }
   const wr = px(k.wrist[1]);
