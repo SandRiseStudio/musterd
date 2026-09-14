@@ -534,8 +534,9 @@ have. **Fixed at the source 2026-09-06 (lane `01M1VDY8PY`):** the wake path hand
 `--allowedTools mcp__musterd` under both policies (ADR 131 §6 amendment), the ADR 261 floor carries
 `mcp__musterd`, a run that exits without occupying appends the harness's own error text to its
 reason (`… — harness: Credit balance is too low`), and the `seat.sh` allow-list merge from #1357 is
-removed. Unmeasured on the VM until the image is rebuilt from that commit — the falsifier is a
-work-order wake on a workspace whose list has no `mcp__musterd` entry reaching `residency.woke`.
+removed. ~~Unmeasured on the VM until the image is rebuilt from that commit~~ — **measured 2026-09-14 on
+the redeploy, see 18a below: fixes 1 and 2 confirmed from inside the woken session, fix 3 confirmed
+from the laptop's `host.log`.**
 
 **Candidate product fixes:**
 
@@ -547,6 +548,74 @@ work-order wake on a workspace whose list has no `mcp__musterd` entry reaching `
 3. **A wake that cannot call the wake's own tools should fail loudly, not quietly.** "exited without
    occupying" and "no roster occupancy within the verify window" are the same defect wearing two
    costumes; neither names the permission refusal that a transcript shows in one line.
+
+### 18a. Confirmed on the VM (2026-09-14 16:35Z) — the fix holds, and the retry cost more than the fix
+
+Finding 18's repair landed as `c8e89dd8` (#1371) on 2026-09-06 at 14:33Z. **The image the VM was
+running had been deployed at 13:23Z — an hour earlier — so for eight days the fix existed only on
+the laptop.** Dolly's acceptance said so explicitly and accepted on the argv contract rather than on
+a cloud-seat run. Redeployed 2026-09-14 16:17Z (`fly` v11 → v12, image
+`deployment-01M2GB6HWK`), built from `c8e89dd8`: the first image that has ever carried this fix.
+
+Verified on the host before waking anything: `/usr/local/bin/musterd` resolves to
+`/app/packages/cli/dist/bin.js`, and `dist/host/backends/claudeCode.js` contains both `allowedTools`
+and `mcp__musterd` (2026-09-14 16:20Z; falsify: `grep -o allowedTools` that file on the machine —
+absent means the image predates #1371).
+
+**Fixes 1 and 2 — confirmed from inside.** delta, woken on v12, called `team_join`,
+`team_wake_context`, `team_inbox_check`, `lane_board`, `team_memory_read` and `lane_update`, all of
+which returned, **with no permission prompt on any of them** — and the same session simultaneously
+held the workspace toolset (`Bash`, `Edit`, `Write`, `Agent`, `Skill`), which a `reply-only` grant
+would not include. Both at once is precisely fix 1: `argTail` passes `--allowedTools mcp__musterd`
+under *both* policies, and the workspace list adds to it rather than replacing it. Pre-#1371 this
+run is finding 18's exact death (2026-09-14 16:35Z; falsify: a work-order wake on v12 whose
+`mcp__musterd__*` call is refused).
+
+**Fix 3 — confirmed, but only from outside.** The failed-wake line now carries the harness's own
+words. Read from `host.log` on the machine:
+
+    ! wake FAILED for delta (batched): run exited (code 1) without occupying the seat — harness: Credit balance is too low
+
+That is the same `$0.0000 / ~10 s` failure the 09-06 entry above could describe only as "the reason
+is visible nowhere but the transcript". It is now in the log. The seat still cannot read that line
+itself — `tail` on `~/.musterd/host.log` is refused by the working-directory scope, re-verified
+unchanged on v12 — so fix 3 is attested from the laptop, and the seat remains the *subject* of a
+wake diagnosis rather than its instrument.
+
+**Two things this run measured that were not the point, and are worth more than the confirmation.**
+
+1. **The musterd tools arrive *deferred*.** Only their names are in the woken session's prompt;
+   schemas must be fetched with `ToolSearch` before any call succeeds. A wake brief that says
+   "orient via `team_wake_context`" is one `ToolSearch` away from working, and a session that does
+   not know that reads its own prompt as evidence the tools are missing. The allow list is necessary
+   and is **not** sufficient — reachability now also depends on the harness's tool-deferral path
+   (2026-09-14 16:35Z; falsify: a woken session whose first `mcp__musterd__*` call succeeds with no
+   preceding `ToolSearch`).
+2. **A seat can name the *kind* of its doorbell and not its *budget*.** `team_wake_context` returned
+   `wake.kind: "work_order"` and carries no bounds, timeout or deadline field; `wakeContext.ts` on
+   `origin/main` emits none, and the bound lives daemon-side in `spec.bounds.timeout_ms`
+   (`claudeCode.ts:607,700`). **Finding 15 was a work order dying at the reply budget — and a seat
+   cannot detect that condition about itself** (2026-09-14 16:35Z; falsify: a `wake.kind` packet
+   carrying a timeout field).
+
+**The retry arc, because the costs are the finding.** Four wakes were needed to get one report:
+
+| wake | act | derivation | outcome |
+|---|---|---|---|
+| 16:18Z | handoff | `work_order`, bounds `1800000ms` | `exit=1` at 10.0 s, `$0.0000` — credit exhausted |
+| 16:26Z | steer | *no bounds line*, killed at 301.7 s | occupied (`spawn→roster 29.8s`), watchdog-killed mid-report |
+| 16:3xZ | handoff | `work_order` | `exit=0`, `$3.0403` — the report above, written into the lane |
+| 16:4xZ | — | `work_order` | `exit=0`, `$0.7519 / 175.1s`, **fresh spawn**: `resume skipped — newest transcript is 1.1 MiB (hygiene bound 256 KiB)` |
+
+Three separate lessons sit in that table. **A `steer` to a seat on a joiner is a reply doorbell**:
+no `wake bounds` line is printed and the run dies at 301.7 s, which is finding 16's conjunction
+holding for `steer` exactly as it holds for `handoff` — so the act you choose to nudge a cloud seat
+decides whether it gets 5 minutes or 30. **A wake that fails for an environmental reason does not
+retry**: the 16:18Z credit failure consumed its lease and the act was not re-leased, so topping up
+the credit did nothing until a human sent a fresh act. And **the transcript-hygiene bound turns a
+multi-wake lane into repeated cold starts**: once past 256 KiB every subsequent wake spawns fresh,
+re-reads the lane, and spends its budget re-orienting — ~$3.80 across four wakes for one docs commit
+that was never made from the VM.
 
 ## 2026-09-06 03:36 UTC — exit criterion 3 met: a lane taken end to end from the VM
 
@@ -601,9 +670,13 @@ refusal or inventing a value. That is the right shape for a measurement page.
 
 ### What is still open (supersedes the 2026-09-04 list)
 
-- **The three wake-path defects have lanes, none fixed**: `01M1T6D80Q` (high — the actuator's
-  credential is a field three code paths own), `01M1T6DJ7J` (high — team policy does not replicate
-  to a joiner), and finding 18's `seat-policy` narrowing, which belongs with them.
+- **Two wake-path defects have lanes, none fixed**: `01M1T6D80Q` (high — the actuator's
+  credential is a field three code paths own) and `01M1T6DJ7J` (high — team policy does not
+  replicate to a joiner). ~~and finding 18's `seat-policy` narrowing~~ — **finding 18 is closed
+  (#1371, confirmed on the VM 2026-09-14; see 18a)**. Two new ones opened in its place, both from
+  the confirming run: the musterd tools arrive deferred, so the allow list alone does not make them
+  reachable; and a seat can read its doorbell's *kind* but not its *budget*, which is the one
+  observable finding 15 needed.
 - ~~**Every disposition here is hand-applied on the VM and will not survive a rebuild**: the
   credential rebind, `loops.dispatch` on the joiner, `flow: auto`, and `mcp__musterd` in the
   workspace allow list. `seat.sh` should do all four, or the defects should be fixed so it need not.~~
@@ -627,8 +700,10 @@ refusal or inventing a value. That is the right shape for a measurement page.
   ~10 s at `$0.0000` because the model credential returns `billing_error: Credit balance is too
   low` (four identical 21,818-byte transcripts, 04:00/04:32/05:04/05:35Z), and `host.log` reports
   only `run exited (code 1) without occupying the seat` — the reason is visible nowhere but the
-  transcript. That is lane `01M1VDY8PY`'s third fix. Unmeasured until the credit is topped up. The
-  three defects stay open (`01M1T6D80Q`, `01M1T6DJ7J`, finding 18); the boot script is the floor
+  transcript. That is lane `01M1VDY8PY`'s third fix. ~~Unmeasured until the credit is topped up.~~
+  **Measured 2026-09-14 16:35Z: the credit was topped up and the line now reads `… — harness: Credit
+  balance is too low` (18a).** Two defects stay open (`01M1T6D80Q`, `01M1T6DJ7J`); finding 18 is
+  closed. The boot script is the floor
   under them, not the fix — in particular a boot-time rebind cannot outlive the next wake if the
   claim path still rewrites `binding.agent_key` — **and it does not (2026-09-06 13:15Z)**: after
   the 01:24Z rebind delta was woken five times, each session claimed, and the actuator's polls
