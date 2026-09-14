@@ -36,7 +36,6 @@ import { captionForPresence, pushCaption, tickCaption, CAPTION_HOLD_MS, type Cap
 import { createWelcome, stepWelcome } from './welcome';
 import {
   animatedDeskAnchors,
-  chairKindFor,
   boardAnchor,
   coffeeAnchor,
   DARK_PALETTE,
@@ -1593,7 +1592,7 @@ export function mountOffice(
   function playAmbientBeat(who: string, slot: number): boolean {
     const pl = placements.get(who);
     const deskSlot = pl?.kind === 'desk' ? pl.slot : null;
-    const casters = deskSlot !== null && chairKindFor(deskSlot) !== 'stool';
+    const casters = deskSlot !== null; // every desk chair rolls now (the `stool` kind is gone)
     const mug = deskSlot !== null && deskHasProp(deskSlot, 'coffee');
     const water = deskSlot !== null && deskHasProp(deskSlot, 'water');
     // A seated LEISURE spot (couch, meeting chair, waiting chair) is a different body: already
