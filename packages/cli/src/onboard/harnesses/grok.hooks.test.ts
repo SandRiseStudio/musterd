@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { declineSurface } from '../declined.js';
 import { buildEntry } from '../mcpEntry.js';
 import {
   GATE_MARKER,
@@ -174,6 +175,35 @@ describe('grok interrupt injection (ADR 370)', () => {
     expect(drift.some((d) => d.includes('this checkout is behind'))).toBe(true);
     expect(drift.some((d) => d.includes('do NOT run'))).toBe(true);
     expect(drift.some((d) => d.includes('present but STALE'))).toBe(false);
+  });
+
+  it('a declined event still reports a STALE hook (ADR 332: tombstone is not a licence to leave a wrong one)', async () => {
+    await grok.configure(buildEntry(binding), binding);
+    const file = readHooks();
+    const groups = file.hooks['PreToolUse'] ?? [];
+    const interrupt = groups.find((g) => g.hooks.some((h) => h.command.includes(INTERRUPT_MARKER)));
+    interrupt!.hooks[0]!.command = `command -v musterd >/dev/null 2>&1 && musterd inbox --interrupt-check >/dev/null 2>&1 || true # ${INTERRUPT_MARKER}`;
+    writeFileSync(hooksPath(), JSON.stringify(file));
+    declineSurface(cwd, 'grok:PreToolUse');
+    const drift = inspectGrokHookDrift(cwd);
+    expect(drift.some((d) => d.includes('STALE') && d.includes(INTERRUPT_MARKER))).toBe(true);
+  });
+
+  it('refresh refuses to downgrade a newer-epoch hook and names the marker', async () => {
+    await grok.configure(buildEntry(binding), binding);
+    const file = readHooks();
+    const groups = file.hooks['PreToolUse'] ?? [];
+    const interrupt = groups.find((g) => g.hooks.some((h) => h.command.includes(INTERRUPT_MARKER)));
+    const future =
+      `command -v musterd >/dev/null 2>&1 && command -v node >/dev/null 2>&1 && ` +
+      `musterd inbox --interrupt-check 2>/dev/null | node -e 'void 0' || true # ${INTERRUPT_MARKER} e999`;
+    interrupt!.hooks[0]!.command = future;
+    writeFileSync(hooksPath(), `${JSON.stringify(file, null, 2)}\n`);
+    const result = grok.refreshHooks!.run(cwd);
+    expect(commandsOn('PreToolUse').find((c) => c.includes(INTERRUPT_MARKER))).toBe(future);
+    expect(result.warnings.some((w) => w.includes('refused') && w.includes(INTERRUPT_MARKER))).toBe(
+      true,
+    );
   });
 });
 
