@@ -24,6 +24,22 @@ Cross-package imports resolve to `dist/`, so a stale build lies two ways, neithe
 
 On a busy machine the CLI suite can emit a spurious `[vitest-worker]: Timeout calling "onTaskUpdate"` — that is vitest's own worker RPC timing out, not a test failure; the verdict lines above it are still authoritative. Related but distinct: ~~`pnpm -r test` intermittently fails 3–13 CLI tests (`service`/`inbox`/`archaeology`) that pass in isolation and under `pnpm coverage` — parallel-run spawn starvation (see #782: a test 10× under its cap failing at load 17.9), to be lived with rather than chased (2026-08-12).~~ **CAUSE FOUND AND FIXED 2026-08-19** — see the section below. `pnpm coverage` is the real CI gate; chasing the `onTaskUpdate` noise as a defect has wasted sessions, but the `pnpm -r test` half was a real, fixable defect that this page spent seven days telling people to ignore.
 
+## The whole-workspace suite on the laptop takes the live daemon down with it (2026-09-14; falsify: sample `curl -m 5 localhost:4849/health` every 5s during a root `pnpm exec vitest run` — if every probe answers under 100ms, this is wrong)
+
+Measured 2026-09-14, 13:00–13:10 local, from seat izzo: the mcp suite, then the whole-workspace
+`vitest run` from the repo root (476 files, `pool: 'forks'`), twice. The 5-minute load average
+reached 23. The live daemon (28c5ea46) stopped answering `/health` at 13:01:29 and stayed
+unreachable until 13:09; launchd reported the job alive throughout; the guardian raised
+`daemon_wedged` twice ("alive and blocked in synchronous work" — a stack sample under that load
+attributes nothing, so it could not tell starved from blocked, and neither can this page). The
+autorefresh held its bounce correctly ("launchctl reports the job running — one source is never
+enough"), then synced the settled tip and bounced the daemon to 0bc82361 at 13:10:16; it answered
+in 2s. Seven live sessions reconnected. Nothing was wrong with the daemon.
+
+The rule: on this laptop, with seat sessions live, run the package suite you touched
+(`cd packages/<pkg> && pnpm exec vitest run`) and leave the whole-workspace run to CI. The
+server suite alone (98 files, ~50s) did not trip it earlier the same afternoon.
+
 ## `pnpm -r test` ran at a different timeout than `pnpm test`, and that WAS the flake (2026-08-19; falsify: `grep -c TEST_TIMEOUT_MS vitest.config.ts packages/*/vitest.config.ts` — any 0 revives it)
 
 A package-local vitest config inherits **nothing** from the root. The root raised `testTimeout` to 30s in #491 with a measured rationale; none of the five package configs ever set it, so `pnpm -r test` — which runs each package's own `vitest run` against its own config, and loads the machine hardest by starting every package's forks at once — ran the whole monorepo at vitest's 5s default.
