@@ -280,7 +280,8 @@ export const CATALOG: readonly CommandEntry[] = [
       'Independently inspect either optional integration without changing it. `--tailscale` verifies ' +
       'the daemon host’s actual loopback → Tailscale Serve → Host gate → HTTP/WebSocket path. ' +
       '`--aperture` reads one HTTPS /api/config endpoint and checks zero retention, providers, exact ' +
-      'Member workload grants, rejecting quotas, and non-admin identities. A ready Aperture result ' +
+      'Member workload grants, rejecting quotas, and one exact Member tag with the standard user role. ' +
+      'A ready Aperture result ' +
       'is configuration evidence only: this increment does not enforce model routing and does not manage ' +
       'devices, sandbox Members, or cover unrelated harnesses. With neither flag, both sections are healthy off.',
     examples: [

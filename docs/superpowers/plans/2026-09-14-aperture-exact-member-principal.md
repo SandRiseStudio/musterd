@@ -193,8 +193,8 @@ Run:
 pnpm --filter @musterd/cli test -- src/integrations/aperture.test.ts src/commands/integration.test.ts
 ```
 
-Expected: PASS. Temporarily change `src.length === 1` to `src.length >= 1`; the shared-plus-exact
-case must fail. Restore it. Temporarily change `roles.every((role) => role === 'user')` to
+Expected: PASS. Temporarily change `src.length === 1` to `src.length >= 1`; the two-exact-Members case
+must fail. Restore it. Temporarily change `roles.every((role) => role === 'user')` to
 `roles.every((role) => role !== 'admin')`; the legacy-agent case must fail. Restore it.
 
 - [ ] **Step 5: Commit the analyzer correction**

@@ -76,7 +76,7 @@ const apertureChecks: IntegrationCheck[] = [
     key: 'aperture-identities',
     label: 'identity prerequisites',
     state: 'ok',
-    detail: 'persistent Member tags are exact and non-admin',
+    detail: 'one exact Member tag; standard user role',
   },
 ];
 
@@ -160,7 +160,7 @@ APERTURE MODEL ENFORCEMENT — off (configuration ready)
 ✓ providers — anthropic (2 models)
 ✓ default grants — exact Member workload identities; no wildcard source
 ✓ quotas — every model grant has a rejecting, defined bucket
-✓ identity prerequisites — persistent Member tags are exact and non-admin
+✓ identity prerequisites — one exact Member tag; standard user role
 
 LIMITS
 · configuration and reachability evidence only; Aperture enforcement remains off

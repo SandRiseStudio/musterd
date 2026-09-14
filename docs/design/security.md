@@ -85,9 +85,11 @@ Credentials decide _who_; capabilities decide _what_ and _what's visible_. Both 
 
 Aperture is optional model governance for supported musterd-launched Surfaces. The read-only doctor in
 [ADR 385](../decisions/385-optional-tailscale-aperture-doctor.md) can verify the reference configuration,
-but readiness does not manage devices, sandbox Members, cover unrelated harnesses, or activate
-enforcement. The [paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md)
-defines the later governed-launch boundary.
+including the ADR 394 requirement that every ready workload grant name one exact lowercase opaque
+Member tag and carry only Aperture's standard `user` role. Readiness does not manage devices, sandbox
+Members, cover unrelated harnesses, or activate enforcement. The
+[paved-road design](../superpowers/specs/2026-09-02-tailscale-aperture-paved-road-design.md) defines the
+later governed-launch boundary.
 
 ## Out of scope (roadmap, named so we don't design into a corner)
 
